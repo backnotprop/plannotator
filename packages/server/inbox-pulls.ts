@@ -41,6 +41,7 @@
 
 import { createHash } from "node:crypto";
 import type { PatchBlobIds } from "@plannotator/core/diff-files";
+import { gitlabCompareEndpoint, gitlabForkProjects, textsFitPatch, type GitlabForkProjects } from "./inbox-gitlab-stack";
 import { forgeRefKey } from "@plannotator/core/forge-ref-card";
 import {
   INBOX_PULLS_MERGED_DAYS,
@@ -771,8 +772,10 @@ export interface InboxPulls {
    * the last list did not name.
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
-  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PatchBlobIds | null, oldPath?: string): Promise<InboxFileContents>;
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string): Promise<InboxFileContents>;
 }
+
+export type PullFileCheck = PatchBlobIds | { patch: string };
 
 /** The most listings All files keeps (one per PR and head). */
 const REPO_LISTINGS_KEPT = 8;
@@ -1728,8 +1731,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       let headRef = compareRef(pull.head);
       if (scope === "stack" && fork) {
         const owner = splitPath(pull.head_repo!)?.owner ?? "";
-        if (pull.platform !== "github" || !FORK_OWNER.test(owner)) {
-          throw new InboxPullsError("pull_diff_fork", `This layer comes from a fork, which ${pull.platform === "gitlab" ? "GitLab" : "the forge"} can't compare with the stack here. Review it layer by layer, or open it on the forge.`);
+        if (pull.platform === "github" ? !FORK_OWNER.test(owner) : !owner) {
+          throw new InboxPullsError("pull_diff_fork", "This layer comes from a fork, which the forge can't compare with the stack here. Review it layer by layer, or open it on the forge.");
         }
         head = `${owner}:${pull.head}`;
         headRef = `${owner}:${compareRef(pull.head)}`;
@@ -1745,34 +1748,35 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
       if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
       const parts = splitPath(pull.repo)!;
+      let forkProjects: GitlabForkProjects | null = null;
       const argsFor = (base: string): string[] => {
         if (pull.platform === "github") {
           const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${headRef}`;
           return ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
         }
-        const project = encodeURIComponent(pull.repo);
-        const endpoint =
-          scope === "layer"
-            ? `projects/${project}/merge_requests/${pull.number}/raw_diffs`
-            : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
+        const endpoint = scope === "layer" ? `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}/raw_diffs` : gitlabCompareEndpoint(pull.repo, base, pull.head, forkProjects);
         return ["api", "--hostname", pull.host, endpoint];
       };
       // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
       // leaves it unknown; a layer posts nothing), and its description.
       // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
-      const pullNow = async (): Promise<{ sha: string | null; description: string | null } | null> => {
+      const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null } | null> => {
         const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
         const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body} | tojson"] : [])]).catch(() => null);
         if (!read || read.exitCode !== 0) return null;
         try {
           const answer = obj(JSON.parse(read.stdout));
           if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body) };
-          return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description) };
+          return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer) };
         } catch {
           return null;
         }
       };
       const before = await pullNow();
+      if (scope === "stack" && fork && pull.platform === "gitlab") {
+        forkProjects = before?.fork ?? null;
+        if (!forkProjects) throw new InboxPullsError("pull_diff_failed", `${cli} could not read where this layer's fork is. Try again, or open it on the forge.`);
+      }
       let base = bases[0]!;
       let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
       if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
@@ -1865,7 +1869,6 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     },
     async fileContents(key, scope, path, roots, ids, oldPath) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
-      // Nothing to check a text against (GitLab's whole-stack patches carry no index line): no arrows, and nothing runs.
       if (!ids) return none;
       // A rename's old path comes from the patch, which a guide's author wrote: it must not walk out of the forge's route.
       if (oldPath !== undefined) {
@@ -1984,12 +1987,14 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       };
       try {
         const newContent = await textAt(head, path);
-        if (newContent === null || !isBlob(newContent, ids.newId)) return none;
+        if (newContent === null || ("newId" in ids && !isBlob(newContent, ids.newId))) return none;
         const base = await mergeBase();
         if (!base) return none;
         const oldContent = await textAt(base, oldPath ?? path);
+        if (oldContent === null) return none;
         // The list can be behind the patch, and a merged PR's base can be its head: only the patch's own blobs open.
-        return oldContent === null || !isBlob(oldContent, ids.oldId) ? none : { oldContent, newContent };
+        const fits = "patch" in ids ? textsFitPatch(ids.patch, oldContent, newContent) : isBlob(oldContent, ids.oldId);
+        return fits ? { oldContent, newContent } : none;
       } catch {
         // A forge that did not answer (rate limited, offline, signed out, not JSON): the next click asks again.
         return { ...none, failed: true };

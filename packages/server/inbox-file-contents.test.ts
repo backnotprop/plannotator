@@ -23,6 +23,8 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxPulls, gitBlobId, INBOX_PULL_FILE_MAX_BYTES, type PullFileGitReader } from "./inbox-pulls";
+import { changedFileOf } from "./inbox-pull-diff-files";
+import { patchBlobIds } from "@plannotator/core/diff-files";
 import type { RefRunner } from "./ref-cards";
 
 const roots: string[] = [];
@@ -249,7 +251,7 @@ describe("a PR's file", () => {
     expect(pulls.readHead(KEY)).toBe("d".repeat(40));
   });
 
-  test("a patch that names no blobs (GitLab's whole stack): no arrows, and nothing runs", async () => {
+  test("nothing to check a text against: no arrows, and nothing runs", async () => {
     const f = scripted();
     const pulls = await listed(f);
     expect(await pulls.fileContents(KEY, "stack", "src/a.ts", ["/clone"], null)).toEqual({ oldContent: null, newContent: null });
@@ -452,6 +454,40 @@ describe("a PR's file", () => {
     // The whole stack has no merge request's refs to read: the project's merge base. (The texts are cached by now.)
     expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "stack", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(reads).toContain(`glab projects/northwind%2Fdata%2Fledger/repository/merge_base?refs%5B%5D=main&refs%5B%5D=${HEAD}`);
+  });
+
+  test("GitLab's whole stack, whose patch names no blobs: texts that fit the patch on screen open, others do not", async () => {
+    const mr = {
+      iid: "7", title: "MR 7", webUrl: "https://gitlab.com/northwind/ledger/-/merge_requests/7", state: "opened", draft: false, updatedAt: "2026-11-03T10:00:00Z", mergedAt: null,
+      sourceBranch: "b7", targetBranch: "main", diffHeadSha: HEAD, approved: false, detailedMergeStatus: "NOT_APPROVED", diffStatsSummary: { additions: 1, deletions: 1, fileCount: 1 },
+      headPipeline: null, project: { fullPath: "northwind/ledger" }, sourceProject: { fullPath: "northwind/ledger" }, author: { username: "jun" }, approvedBy: { nodes: [] }, reviewers: { nodes: [] },
+    };
+    const before = "one\ntwo\nthree\nfour\nfive\nsix\nseven\n";
+    const after = "one\ntwo\nthree\nFOUR\nfive\nsix\nseven\n";
+    const compare = { diffs: [{ old_path: "src/a.ts", new_path: "src/a.ts", diff: "@@ -3,3 +3,3 @@\n three\n-four\n+FOUR\n five\n", new_file: false, renamed_file: false, deleted_file: false }] };
+    const files = new Map([
+      [HEAD, after],
+      [BASE, before],
+    ]);
+    const run: RefRunner = async (cli, args) => {
+      if (args[0] === "auth") return cli === "glab" ? { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 } : { stdout: "", stderr: "not logged in", exitCode: 1 };
+      if (args.includes("graphql")) return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [mr] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
+      const endpoint = args[3]!;
+      if (endpoint === "projects/northwind%2Fledger/merge_requests/7") return { stdout: JSON.stringify({ sha: HEAD }), stderr: "", exitCode: 0 };
+      if (endpoint.startsWith("projects/northwind%2Fledger/repository/compare?")) return { stdout: JSON.stringify(compare), stderr: "", exitCode: 0 };
+      if (endpoint === `projects/northwind%2Fledger/repository/merge_base?refs%5B%5D=main&refs%5B%5D=${HEAD}`) return { stdout: JSON.stringify({ id: BASE }), stderr: "", exitCode: 0 };
+      const text = /^projects\/northwind%2Fledger\/repository\/files\/src%2Fa\.ts\/raw\?ref=([0-9a-f]+)$/.exec(endpoint);
+      if (text && files.has(text[1]!)) return { stdout: files.get(text[1]!)!, stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "404 Not Found", exitCode: 1 };
+    };
+    const key = "gitlab.com/northwind/ledger#7:pull";
+    const pulls = createInboxPulls({ run, gitRead: async () => null });
+    await pulls.list([{ host: "gitlab.com", repo: "northwind/ledger", project_id: "prj_1" }]);
+    const answer = await pulls.diff(key, "stack");
+    const patch = changedFileOf(answer, "src/a.ts")!.patch;
+    expect(patchBlobIds(patch)).toBeNull();
+    expect(await pulls.fileContents(key, "stack", "src/a.ts", [], { patch })).toEqual({ oldContent: before, newContent: after });
+    expect(await pulls.fileContents(key, "stack", "src/a.ts", [], { patch: patch.replace("+FOUR", "+4") })).toEqual({ oldContent: null, newContent: null });
   });
 });
 

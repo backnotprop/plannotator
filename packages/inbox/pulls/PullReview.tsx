@@ -438,15 +438,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const postHead = diff?.head_sha ?? (scope === 'layer' ? null : (layer?.head_sha ?? null));
   const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
   // The expand arrows' whole files, at the commits this diff runs between.
-  // Asked only with the blobs the patch names, so the server can refuse a text that is not this patch's file; a patch
-  // without them (GitLab's whole stack), or a diff whose head moved during its read, opens nothing.
   const headMoved = !!diff && !diff.head_sha;
+  const patchHead = diff?.head_sha ?? null;
   const fileContents = useCallback(
     async (path: string, signal: AbortSignal, patch: string) => {
-      const ids = headMoved ? null : patchBlobIds(patch);
-      return ids ? inboxApi.pullFile(layerKey, scope, path, ids, signal) : { oldContent: null, newContent: null };
+      if (headMoved) return { oldContent: null, newContent: null };
+      const ids = patchBlobIds(patch);
+      if (ids) return inboxApi.pullFile(layerKey, scope, path, ids, signal);
+      return patchHead && !/^index /m.test(patch) ? inboxApi.pullFile(layerKey, scope, path, { head: patchHead }, signal) : { oldContent: null, newContent: null };
     },
-    [layerKey, scope, headMoved],
+    [layerKey, scope, headMoved, patchHead],
   );
   const [picked, pick] = useReviewDestination();
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);

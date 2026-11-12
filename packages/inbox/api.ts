@@ -2071,8 +2071,8 @@ export const inboxApi = {
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
-  pullFile: (key: string, scope: InboxPullDiffScope, path: string, ids: PatchBlobIds, signal?: AbortSignal) =>
-    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&old=${ids.oldId}&new=${ids.newId}`), signal),
+  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal) =>
+    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */

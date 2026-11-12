@@ -5194,9 +5194,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const ids = oldId && newId && /^[0-9a-f]{7,64}$/.test(oldId) && /^[0-9a-f]{7,64}$/.test(newId) ? { oldId, newId } : null;
             // Only a file the diff changes: the route is for that diff's arrows, not for any file whose blob id one knows.
             // Parsed once per diff (`changedFileOf`): the PR page asks for every changed file as it nears the viewport.
-            const changed = ids ? changedFileOf(await pulls.diff(key, scope), filePath) : null;
-            if (ids && !changed) return json({ serverSession, oldContent: null, newContent: null });
-            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, ids ? await pullRoots(key) : [], ids, changed?.oldPath)) });
+            const head = ids ? null : url.searchParams.get("head");
+            const pinned = head && /^[0-9a-f]{40,64}$/.test(head) ? head : null;
+            const answer = ids || pinned ? await pulls.diff(key, scope) : null;
+            const changed = answer ? changedFileOf(answer, filePath) : null;
+            if (answer && (!changed || (pinned && (answer.head_sha !== pinned || (changed.status !== "modified" && changed.status !== "renamed"))))) {
+              return json({ serverSession, oldContent: null, newContent: null });
+            }
+            const check = ids ?? (pinned && changed ? { patch: changed.patch } : null);
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;
