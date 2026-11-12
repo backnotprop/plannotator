@@ -209,7 +209,7 @@ import {
   type InboxInitiative,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
-import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import { InboxError, inboxDir } from "./schema";
 import type { InboxLog, InboxLogFactory, InboxLogState, InboxStoreBackup } from "./store-log/log";
@@ -230,6 +230,11 @@ export interface InboxSendInput {
    * prefix, so a `perm:` author is always the Inbox's own permission card.
    */
   permission?: boolean;
+  /**
+   * Server only (launch's notes): the note a launched session's failed turn leaves (`InboxMessage.turn_error`).
+   * No agent's own call sets it.
+   */
+  turn_error?: boolean;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -746,6 +751,7 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
 const SEND_APPENDED_HEADINGS: ReadonlySet<string> = new Set([
   `## ${INBOX_ACTIONS_HEADING}`,
   `# ${INBOX_MESSAGE_FEEDBACK_TITLE}`,
+  `# ${INBOX_OWN_MESSAGE_FEEDBACK_TITLE}`,
   `# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`,
   `# ${INBOX_GUIDE_FEEDBACK_TITLE}`,
 ]);
@@ -4132,6 +4138,7 @@ export class InboxStore {
         ? { from_project: { name: input.from_project.name, root: input.from_project.root } }
         : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
+      ...(input.turn_error === true ? { turn_error: true as const } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
     };
@@ -5686,8 +5693,9 @@ export class InboxStore {
    * the person selected, or a comment on a rendered diagram part, with
    * `diagramAnchor` and the part's label as `originalText`, or a Delete on
    * selected words (`type` "DELETION", no words of its own needed; approval
-   * "inbox-toolbar-delete"). Only an agent's
-   * message takes one, and only while it can be answered (an archive closes
+   * "inbox-toolbar-delete"). An agent's message takes one, and the person's own
+   * (approval "inbox-annotate-own-and-questions"), never one of the Inbox's own notes (a set-aside or reopened
+   * note, a 👍, a Tidy note); only while it can be answered (an archive closes
    * the messages before its line). The
    * record's key is the message: `path` is its id, `version` "current", and
    * `message` names it. Sent with the reply like an attachment's annotation.
@@ -5695,8 +5703,8 @@ export class InboxStore {
   saveMessageAnnotation(messageId: string, annotation: unknown): InboxAnnotationRecord {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-    if (message.author.kind !== "agent") {
-      throw new InboxError("annotation_not_allowed", "annotation: only an agent's message takes comments; this one is yours.", { field: "message_id" });
+    if (message.author.kind !== "agent" && (message.author.kind !== "person" || isInboxNote(message))) {
+      throw new InboxError("annotation_not_allowed", "annotation: one of the Inbox's own notes takes no comments.", { field: "message_id" });
     }
     if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
       throw new InboxError("validation_error", "annotation: an object.", { field: "annotation" });

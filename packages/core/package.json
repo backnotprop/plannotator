@@ -49,6 +49,7 @@
     "./html-anchor": "./html-anchor.ts",
     "./inbox-types": "./inbox-types.ts",
     "./inbox-cloud": "./inbox-cloud.ts",
+    "./inbox-hermes": "./inbox-hermes.ts",
     "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
     "./inbox-actions": "./inbox-actions.ts",

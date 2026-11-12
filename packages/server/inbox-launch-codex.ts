@@ -351,10 +351,10 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
     });
 
   /** One note from the thread in the launch's thread (a failed turn, a question answered Cancel). */
-  const note = (launchId: string, thread: string, body: string, key: string) => {
+  const note = (launchId: string, thread: string, body: string, key: string, turnError = false) => {
     const root = threads?.rootOf(launchId);
     if (!threads || !root) return;
-    writeLaunchNote(threads, root, { author: { host: INBOX_CODEX_HOST, session: thread, name: INBOX_CODEX_NAME }, body, key }, ctx.log);
+    writeLaunchNote(threads, root, { author: { host: INBOX_CODEX_HOST, session: thread, name: INBOX_CODEX_NAME }, body, key, turnError }, ctx.log);
   };
 
   /** A server request no card can show: Cancel at once, and one note in the thread saying so. */
@@ -403,7 +403,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
           const text = typeof turn.error?.message === "string" ? turn.error.message : (p.turnError ?? "");
           if (existsSync(ctx.launchDir(p.launchId))) ctx.startLog(p.launchId, `codex ${p.thread}: the turn ended with an error: ${text.slice(0, 2000)}`);
           ctx.log(`Inbox launch ${p.launchId}: a Codex turn ended with an error: ${text.slice(0, 200)}`);
-          note(p.launchId, p.thread, codexTurnErrorNote(text), `codex-error-${p.launchId}-${String(turn.id ?? "")}-${++notes}`);
+          note(p.launchId, p.thread, codexTurnErrorNote(text), `codex-error-${p.launchId}-${String(turn.id ?? "")}-${++notes}`, true);
         }
         p.turnError = null;
         threads?.onChange();
