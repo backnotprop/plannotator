@@ -22,6 +22,10 @@
  *     respawns it once, Starting again (12), delivered once → no line (10);
  *     Delete runs stop and rm, removes launch/<id>/, never purge. The login
  *     shell ran for the composer, the start and the respawn.
+ *  2b. A turn that ends in an API error (16, after 9): one note in Claude
+ *     Code's own words, "couldn't answer" with Try again, which sends the
+ *     message to the session again; its good answer clears the line and the
+ *     note stays.
  *  3. Full permissions (Settings → Agents): bypass mode on argv, Claude's env
  *     switch in the file, "Full permissions" in the header.
  *  4. A replayed Send (same key) starts `--bg` once.
@@ -34,10 +38,7 @@
  *     failure, and the same reply does not respawn it again.
  *  9. Delete while `--bg` is still running: the session it makes is stopped
  *     and removed, never left running unseen.
- * 10. A turn that ends in an API error (16): one note in Claude Code's own
- *     words, "couldn't answer" with Try again, which sends the message to the
- *     session again; its good answer clears the line and the note stays.
- * 11. Phone: the To picker (01), the To sentence (02), the working line (06),
+ * 10. Phone: the To picker (01), the To sentence (02), the working line (06),
  *     the permission prompt without Open in Terminal (08), no Delete in ⋯.
  *
  * Pictures: LAUNCH_SHOTS_DIR (default .local/proof/launch-pr1), wide light at
