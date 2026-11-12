@@ -21,10 +21,10 @@ def session_key() -> str:
 
 
 def inbox_session(key: str) -> str:
-    plain = re.sub(r"[^A-Za-z0-9._-]", ".", key).strip(".-")
-    if plain == key and len(key) <= 128:
-        return key
-    return f"{plain[:100]}.{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}".lstrip(".")
+    readable = key.replace(":", ".")
+    if "." not in key and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", readable):
+        return readable
+    return f"hermes-{hashlib.sha256(key.encode('utf-8')).hexdigest()[:32]}"
 
 
 def _ids(raw) -> set:

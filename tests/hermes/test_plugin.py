@@ -72,7 +72,7 @@ class PluginTest(unittest.TestCase):
     def test_only_the_owner_direct_messages_reach_the_inbox(self):
         host.platform("telegram", allow_admin_from=["111"])
         hermes = self.start()
-        self.assertEqual(json.loads(self.call(hermes, "agent:main:telegram:dm:111", "telegram", "dm", "111"))["signed"], "agent.main.telegram.dm.111.9f8e72d7463ec8da")
+        self.assertEqual(json.loads(self.call(hermes, "agent:main:telegram:dm:111", "telegram", "dm", "111"))["signed"], "agent.main.telegram.dm.111")
         for key, chat_type, actor in (
             ("agent:main:telegram:dm:222", "dm", "222"),
             ("agent:main:telegram:group:9", "group", "111"),
