@@ -8,6 +8,7 @@ import type { InboxEvent } from '../../api';
 import { threadOfRecord } from '../../openThreadReads';
 import { threadDrawReady } from '../../threadDrawReady';
 import { changeThread, heldThread, isThreadStale, staleThread, staleThreads } from '../queries/thread';
+import { drawSoon } from './drawGap';
 import { applyRecord } from './record';
 
 /**
@@ -40,7 +41,7 @@ export function applyStreamRecord(client: QueryClient, event: InboxEvent | null)
     if (again.kind === 'applied') changeThread(client, threadId, () => again.model);
     else if (again.kind === 'reread') staleThread(client, threadId);
   };
-  if (ready) void ready.then(write, write);
-  else write();
+  if (ready) void ready.then(() => drawSoon(write), () => drawSoon(write));
+  else drawSoon(write);
   return { threadId, kind: 'applied' };
 }
