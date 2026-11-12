@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type * as TypeScript from 'typescript';
+import { keepReason, loadKeepList, type KeepEntry } from './no-comments/rules';
 
 const ts: typeof TypeScript = createRequire(new URL('../packages/core/package.json', import.meta.url))('typescript');
 
@@ -13,31 +14,6 @@ export interface Verdict {
   commentsOnly: boolean;
   files: number;
   problems: FileProblem[];
-}
-
-const LINE_OR_BLOCK_DIRECTIVE =
-  /^(@ts-(expect-error|ignore|nocheck|check)\b|eslint-(disable|enable)|biome-ignore|oxlint-(disable|enable)|prettier-ignore|deno-(lint|fmt)-ignore|[@#]__(PURE|NO_SIDE_EFFECTS|INLINE|KEY)__|@vite-ignore|webpack[A-Z]\w*\s*:|@jsx(ImportSource|Runtime|Frag)?\b|(istanbul|c8|v8) ignore|@refresh reset|[#@] sourceMappingURL=|@deprecated\b)/;
-
-const BLOCK_ONLY_DIRECTIVE = /^(eslint(-env)?\s|globals?\s|exported\s)/;
-
-const TRIPLE_SLASH_DIRECTIVE = /^\/\/\/\s*<(reference|amd-module|amd-dependency)\b/;
-
-const LICENSE = /@license\b|@preserve\b|copyright|SPDX-License-Identifier/i;
-
-function bodyOf(comment: string): string {
-  const inner = comment.startsWith('//') ? comment.replace(/^\/\/+/, '') : comment.replace(/^\/\*+!?/, '').replace(/\*\/$/, '');
-  return inner.replace(/^[\s*]+/, '');
-}
-
-export function isDirective(comment: string): boolean {
-  if (TRIPLE_SLASH_DIRECTIVE.test(comment)) return true;
-  const body = bodyOf(comment);
-  if (LINE_OR_BLOCK_DIRECTIVE.test(body)) return true;
-  return comment.startsWith('/*') && BLOCK_ONLY_DIRECTIVE.test(body);
-}
-
-export function isLicense(comment: string): boolean {
-  return comment.startsWith('/*!') || LICENSE.test(comment);
 }
 
 const SOURCE_EXTENSION = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
@@ -82,7 +58,7 @@ interface Shape {
   parseErrors: number;
 }
 
-function shapeOf(path: string, text: string): Shape {
+function shapeOf(path: string, text: string, keepList: KeepEntry[]): Shape {
   const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, scriptKindOf(path));
   const tree: string[] = [];
   const tokens: ts.Node[] = [];
@@ -130,9 +106,11 @@ function shapeOf(path: string, text: string): Shape {
 
   const directives: string[] = [];
   tokens.forEach((token, index) => {
-    for (const range of ts.getLeadingCommentRanges(text, token.pos) ?? []) {
+    const sameLine = ts.getTrailingCommentRanges(text, token.pos) ?? [];
+    const laterLines = (ts.getLeadingCommentRanges(text, token.pos) ?? []).filter((range) => !sameLine.some((r) => r.pos === range.pos));
+    for (const range of [...sameLine, ...laterLines]) {
       const comment = text.slice(range.pos, range.end);
-      if (!isDirective(comment) && !isLicense(comment)) continue;
+      if (!keepReason(path, comment, keepList)) continue;
       directives.push(`${comment.trim()} | before token ${index}`);
     }
   });
@@ -141,10 +119,10 @@ function shapeOf(path: string, text: string): Shape {
   return { tree, directives, shebang: ts.getShebang(text), parseErrors };
 }
 
-export function compareSource(path: string, before: string, after: string): string | null {
+export function compareSource(path: string, before: string, after: string, keepList: KeepEntry[] = loadKeepList()): string | null {
   if (!SOURCE_EXTENSION.test(path)) return 'not a JavaScript or TypeScript file';
-  const old = shapeOf(path, before);
-  const next = shapeOf(path, after);
+  const old = shapeOf(path, before, keepList);
+  const next = shapeOf(path, after, keepList);
   if (old.parseErrors || next.parseErrors) return 'does not parse cleanly';
   if (old.shebang !== next.shebang) return 'shebang line changed';
   const length = Math.max(old.tree.length, next.tree.length);
@@ -156,7 +134,7 @@ export function compareSource(path: string, before: string, after: string): stri
   const directiveCount = Math.max(old.directives.length, next.directives.length);
   for (let i = 0; i < directiveCount; i++) {
     if (old.directives[i] !== next.directives[i]) {
-      return `tool directive comment changed: ${describe(old.directives[i])} became ${describe(next.directives[i])}`;
+      return `kept comment changed: ${describe(old.directives[i])} became ${describe(next.directives[i])}`;
     }
   }
   return null;
@@ -241,11 +219,12 @@ export function verifyCommentsOnly(repo: string, base: string, head: string): Ve
     if (problem) problems.push({ path: change.path, reason: problem });
     else comparable.push(change);
   }
+  const keepList = loadKeepList();
   const blobs = comparable.length ? readBlobs(repo, comparable.flatMap((c) => [c.oldBlob, c.newBlob])) : new Map();
   for (const change of comparable) {
     const before = blobs.get(change.oldBlob)!;
     const after = blobs.get(change.newBlob)!;
-    const reason = SHRINK_ONLY_DATA_FILES.has(change.path) ? compareShrinkOnly(before, after) : compareSource(change.path, before, after);
+    const reason = SHRINK_ONLY_DATA_FILES.has(change.path) ? compareShrinkOnly(before, after) : compareSource(change.path, before, after, keepList);
     if (reason) problems.push({ path: change.path, reason });
   }
   return { commentsOnly: changes.length > 0 && problems.length === 0, files: changes.length, problems };
