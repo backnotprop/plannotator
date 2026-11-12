@@ -165,7 +165,10 @@ export class WindowCopy {
 export async function startApplyWorld(): Promise<ApplyWorld> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-apply-diff-')));
   for (const folder of ['web', 'api', 'elsewhere/web']) mkdirSync(join(root, folder), { recursive: true });
-  const server = await startInboxServer({ dataDir: join(root, 'data'), binaryPath: null, setAsideDelayMs: 60_000, threadPullFixture: () => ({}) });
+  const dataDir = join(root, 'data');
+  const previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  const server = await startInboxServer({ dataDir, binaryPath: null, setAsideDelayMs: 60_000, threadPullFixture: () => ({}) });
   const base = `http://127.0.0.1:${server.port}`;
   const projects = ['web', 'api'].map((name) => ({ id: server.store.ensureProject({ name, root: join(root, name) }).id, root: join(root, name) }));
   const window = new WindowCopy();
@@ -180,6 +183,8 @@ export async function startApplyWorld(): Promise<ApplyWorld> {
     stop() {
       stream.stop();
       server.stop();
+      if (previousDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previousDataDir;
       rmSync(root, { recursive: true, force: true });
     },
   };

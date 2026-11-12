@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { inboxApi, type ListModel, type ThreadModel } from '../api';
+import { inboxUrl } from '../inboxUrl';
 import { createInboxQueryClient } from './client';
 import { inboxKeys } from './keys';
 import { heldList } from './queries/list';
@@ -15,7 +16,7 @@ export interface HeldProbe {
   read?: () => Promise<HeldProbeRead | null>;
 }
 
-const WHOLE_LIST = '/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1&since=';
+const WHOLE_LIST = inboxUrl('/threads', 'archived=exclude&snoozed=exclude&machines=1&since=');
 
 async function readHeld(client: QueryClient): Promise<HeldProbeRead | null> {
   try {
