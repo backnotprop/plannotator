@@ -92,7 +92,7 @@ import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
-import { conflictText, DraftHead, DraftFootNote, DraftStamp, unsentWords } from './DraftLabel';
+import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, DraftStamp, unsentWords } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { debugNote } from '../debugLog';
@@ -1944,9 +1944,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft, wanted: readonly string[]) => void>(() => {});
   /** Only another window changed the words: the box takes them (set below, once the tiles exist); what it did. */
   const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook>(() => 'differs');
+  const ownedFor = useRef<string | null>(null);
+  const ownedBox = useRef<(threadId: string) => { text: string; files: ReplyDraftFiles } | null>(() => null);
   const replyDraft = useReplyDraft(thread.thread_id, {
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
+    ownedBox: (threadId) => ownedBox.current(threadId),
   });
   const keptWords = (replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '';
   /** Whether a Send carries words: the box's, or (the box closed) those kept as its draft. */
@@ -2022,6 +2025,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const landLater = (threadId: string, uploads: readonly Promise<InboxUpload | null>[]) => {
     for (const upload of uploads) void landInReplyDraft(threadId, upload);
   };
+  ownedBox.current = (threadId) =>
+    threadId === threadRef.current.thread_id && ownedFor.current === threadId && boxRef.current.open
+      ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) }
+      : null;
   takeTheirWords.current = (threadId, draft, was) => {
     // Closed, or showing another thread: no words here to keep (Edit draft and the thread's next visit read the draft).
     if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return 'hidden';
@@ -2089,6 +2096,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // Cancel and Escape keep the words and files as a draft (saved now; a file still uploading joins it once in);
     // Discard drops them.
     replyDraft.flush();
+    ownedFor.current = null;
     setBox({ open: false, text: '' });
     setTaggedIds([]);
     if (!discarded && !machine) landLater(thread.thread_id, replyFiles.detach());
@@ -3973,6 +3981,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     announce(conflictText(conflictSentElsewhere));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflictShown]);
+  const offerShown = !!replyDraft.offer && replyDraft.conflict === null;
+  useEffect(() => {
+    if (offerShown) announce(DRAFT_OFFER_TEXT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerShown]);
 
   // The thread's draft, once read, goes back in the box (open, without focus), unless the person already wrote there.
   useEffect(() => {
@@ -3980,7 +3993,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     restoredFor.current = thread.thread_id;
     // Words a conflict left unsaved here come back before the draft another window holds.
     const kept = replyDraft.conflict ?? replyDraft.draft?.body ?? null;
-    if (kept === null) return;
+    if (kept === null || replyDraft.offer) return;
     const current = boxRef.current;
     if (current.open && current.text.trim()) return;
     if (!current.open) restoringRef.current = true;
@@ -4744,6 +4757,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const sentFiles = new Set(replyFiles.current().filter((f) => f.upload && carried.has(f.upload.upload_id)).map((f) => f.key));
     const later = replyFiles.current().some((f) => !sentFiles.has(f.key));
     replyFiles.forget(sentFiles);
+    if (!later) ownedFor.current = null;
     setBox({ open: later, text: '' });
     if (carriedWords) replyDraft.sent();
     else replyDraft.release();
@@ -5837,7 +5851,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     openBox();
   };
   /** "Draft  Saved 4:51 PM  Discard" for the open box: above it on a phone; a computer shows only "Not saved …", over the box's row. Nothing until the first save. */
-  const stampSavedAt = replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null;
+  const stampSavedAt = replyDraft.conflict === null && !replyDraft.offer && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null;
   const stampTooLong = replyDraft.conflict === null && replyDraft.tooLong;
   const stampFailed = replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0);
   /** Discard: the Draft line's (a phone, above the box) and the bin's (a computer, the row's far right). */
@@ -5851,6 +5865,22 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** The live-session choice open under the box: it stands in for the box's Send and bin. */
   const routeChoiceOpen = route.open && asking;
+  const restoreDraft = () => {
+    const offered = replyDraft.restoreOffer();
+    if (!offered) return;
+    const { draft } = offered;
+    if (offered.typed) {
+      const typed = replyText.get();
+      const text = draft.body.trim() && typed.trim() ? `${draft.body.trimEnd()}\n\n${typed.trimStart()}` : draft.body.trim() ? draft.body : typed;
+      takeDraftFiles(draftFilesWithMine(draft.files ?? []), text, 'add');
+      changeReply(text, true);
+      focusReplyEnd();
+    } else {
+      setBox({ open: true, text: draft.body });
+      takeDraftFiles(draft.files ?? [], draft.body);
+    }
+    announce('Your saved draft is in the reply.');
+  };
   /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
   const discardMine = () => {
     const draft = replyDraft.takeTheirs();
@@ -7472,6 +7502,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <>
             {/* Above the box (approval "inbox-reply-recipient"): after a conflict its line and choice, and on a phone the
                 Draft line (below). On a computer nothing else. */}
+            {offerShown && <DraftOffer onRestore={restoreDraft} />}
             {replyDraft.conflict !== null && (
               <DraftHead
                 conflict={{
@@ -7502,6 +7533,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {...boxDrop.handlers}
               // A press beside the text (the row of chips under it) puts the caret in the reply.
               onMouseDown={(event) => focusReplyFromBox(event, textRef.current)}
+              onFocus={(event) => {
+                if ((event.target as EventTarget) === textRef.current) ownedFor.current = thread.thread_id;
+              }}
               // A paste that carries files (a screenshot, a copied image) attaches them; text pastes as text.
               onPaste={(event) => {
                 if (replyFiles.paste(event)) setError(null);

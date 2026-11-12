@@ -5976,6 +5976,11 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-draft-head[data-draft-conflict] { flex-wrap: wrap; row-gap: 4px; }
 .ib-draft-head[data-draft-conflict] .ib-draft-saved { flex: 1 1 12em; min-width: 0; white-space: normal; color: var(--foreground); }
 .ib-draft-acts { display: inline-flex; flex: none; align-items: center; gap: 20px; white-space: nowrap; }
+.ib-draft-head[data-draft-offer] { flex-wrap: wrap; row-gap: 4px; }
+.ib-draft-head[data-draft-offer] .ib-draft-saved { flex: 1 1 12em; min-width: 0; white-space: normal; }
+@media (pointer: coarse) {
+  .ib-draft-head[data-draft-offer] .ib-draft-discard::after { inset: -14px -10px; }
+}
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-draft-acts { gap: 24px; }
 }

@@ -568,10 +568,13 @@ test.skipIf(!hasDom)('event: drafts, sent elsewhere while this box has edits: th
   expect(unloadAsks()).toBe(true);
 });
 
-test.skipIf(!hasDom)('event: drafts, the other window typed: a box with no edits takes its words', async () => {
+test.skipIf(!hasDom)('event: drafts, the other window typed: a box this person opened keeps its words, and Restore draft takes theirs', async () => {
   const { el, saved } = await openWithSaved('Mine.');
   await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Theirs.', base: saved.updated_at }));
   await act(async () => emit('drafts', { thread_id: world.waiting }));
+  await until(() => el.querySelector('[data-draft-restore]') !== null, 'the offer');
+  expect(box(el)!.value).toBe('Mine.');
+  act(() => (el.querySelector('[data-draft-restore]') as HTMLButtonElement).click());
   await until(() => box(el)?.value === 'Theirs.', 'their words in the box');
   expect(el.querySelector('[data-draft-conflict]')).toBeNull();
   // Typing on from there saves over it, as an edit of the newest words.
