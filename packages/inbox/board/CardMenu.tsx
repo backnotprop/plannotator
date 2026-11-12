@@ -135,14 +135,14 @@ export function CardMenu(props: CardMenuProps) {
                   <>
                     <Menu.Separator className="ib-pm-sep" />
                     <Menu.SubmenuRoot>
-                      <Menu.SubmenuTrigger className="ib-pmi" label="Initiative" data-card-menu-action="initiative">
+                      <Menu.SubmenuTrigger className="ib-pmi" label="Tag" data-card-menu-action="initiative">
                         <Icon name="hash" size={15} />
-                        <span className="ib-pmi-l">Initiative</span>
+                        <span className="ib-pmi-l">Tag</span>
                         <Icon name="chevR" size={14} className="ib-pmi-check" />
                       </Menu.SubmenuTrigger>
                       <Menu.Portal container={portal ?? undefined}>
                         <Menu.Positioner className="ib-pm-pos" side="right" align="start" sideOffset={2}>
-                          <Menu.Popup className="ib-pm ib-bflt-menu" aria-label="Initiative" data-card-initiative-menu="">
+                          <Menu.Popup className="ib-pm ib-bflt-menu" aria-label="Tag" data-card-initiative-menu="">
                             <CardInitiativeItems initiatives={props.initiatives ?? []} value={card.initiative ?? null} onPick={(next) => {
                               menu.follow(card.id);
                               props.onInitiative?.(card, next);

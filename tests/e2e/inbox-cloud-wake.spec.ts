@@ -1,4 +1,3 @@
-
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -23,6 +22,7 @@ let url = '';
 let agent: SimAgent | null = null;
 let hook: Server | null = null;
 let hookUrl = '';
+let relay: Server | null = null;
 const seen: Seen[] = [];
 
 test.describe.configure({ mode: 'serial' });
@@ -45,7 +45,14 @@ test.beforeAll(async () => {
 
   const root = inboxScratch('plannotator-cloud-wake-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  relay = createServer((_req, res) => {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found', code: 'not_found' }));
+  });
+  await new Promise<void>((done) => relay!.listen(0, '127.0.0.1', done));
+  const relayAddress = relay.address();
+  const relayUrl = `http://127.0.0.1:${typeof relayAddress === 'object' && relayAddress ? relayAddress.port : 0}`;
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_RELAY_URL: relayUrl };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();
@@ -57,6 +64,7 @@ test.afterAll(async () => {
   try {
     await agent?.close().catch(() => {});
     await new Promise((done) => (hook ? hook.close(done) : done(undefined)));
+    await new Promise((done) => (relay ? relay.close(done) : done(undefined)));
   } finally {
     await removeInboxScratch();
   }
@@ -69,13 +77,17 @@ test('pair a routine, send a test, write to it from New message: the thread says
   await section.locator('[data-cloud-pair-start]').click();
   const form = section.locator('[data-cloud-pair-form]');
   await form.locator('[data-cloud-name]').fill('Nightly fixer');
-  await form.locator('[data-cloud-url]').fill(hookUrl);
-  await form.locator('[data-cloud-key]').fill(KEY);
   if (shotsDir) await page.screenshot({ path: join(shotsDir, 'e2e-01-pair-form.png') });
   await form.locator('[data-cloud-pair-submit]').click();
 
-  const paired = section.locator('[data-cloud-paired]');
-  await expect(paired.locator('[data-cloud-block]')).toContainText('When woken:');
+  const paired = section.locator('[data-cloud-agent]');
+  await expect(paired.locator('[data-cloud-setup="no-relay"]')).toBeVisible();
+  await expect(paired.locator('[data-cloud-status]')).toHaveAttribute('data-cloud-status', 'no_relay');
+  await paired.locator('[data-cloud-done]').click();
+  await paired.locator('[data-cloud-wake-open]').click();
+  await paired.locator('[data-cloud-url]').fill(hookUrl);
+  await paired.locator('[data-cloud-key]').fill(KEY);
+  await paired.locator('[data-cloud-wake-save]').click();
   await paired.locator('[data-cloud-test]').click();
   const result = paired.locator('[data-cloud-test-result]');
   await expect(result).toHaveAttribute('data-cloud-test-result', 'started');
@@ -85,7 +97,6 @@ test('pair a routine, send a test, write to it from New message: the thread says
   expect(seen[0]!.authorization).toBe(`Bearer ${KEY}`);
   if (shotsDir) await page.screenshot({ path: join(shotsDir, 'e2e-02-paired.png') });
   expect(await page.content()).not.toContain(KEY);
-  await paired.locator('[data-cloud-done]').click();
   await expect(section.locator('[data-cloud-agent]')).toContainText('Nightly fixer');
 
   await page.goto(url);

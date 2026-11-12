@@ -43,8 +43,15 @@ import {
   INBOX_AGENT_LABELS,
   inboxAgentList,
   inboxElsewhereText,
+  inboxGrantText,
   type InboxAgentId,
   type InboxConnectReport,
+  INBOX_MUSE_BIN,
+  INBOX_MUSE_CONFIG_FOLDER,
+  INBOX_MUSE_SETTINGS_FILE,
+  INBOX_MUSE_SETTINGS_SEED,
+  museMcpEntry,
+  museMcpKey,
 } from "@plannotator/core/inbox-types";
 import {
   configuredInboxTool,
@@ -60,8 +67,8 @@ import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { qwenHome, qwenHomeIsRelative } from "@plannotator/shared/inbox/qwen-sessions";
 import { INBOX_QWEN_TRUST_ON_CONNECT, QWEN_TRUST_REVOKED_REASON, ensureQwenTrust, retryQwenRevoke, setQwenTrust, type QwenTrustOutcome } from "./inbox-qwen-trust";
 import { addJsonMember, removeJsonMember } from "./json-edit";
-import { HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT } from "@plannotator/core/inbox-hermes";
-import { hermesFound, hermesPluginInstalled } from "./inbox-hermes";
+import { HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT, HERMES_WAKE_SETTING, HERMES_WAKE_UNDO_LINE } from "@plannotator/core/inbox-hermes";
+import { hermesFound, hermesPluginInstalled, hermesWakeGranted } from "./inbox-hermes";
 import {
   agentFileContains,
   describeFsError,
@@ -389,6 +396,21 @@ export function piAgentDir(e: AgentEnvironment): string {
 export function xdgConfigHome(e: AgentEnvironment): string {
   return envDir(e, "XDG_CONFIG_HOME") ?? join(e.homeDir, ".config");
 }
+export function museDir(e: AgentEnvironment): string {
+  return join(xdgConfigHome(e), INBOX_MUSE_CONFIG_FOLDER);
+}
+function museSettings(e: AgentEnvironment): string {
+  return join(museDir(e), INBOX_MUSE_SETTINGS_FILE);
+}
+function museKeys(path: string | null): string[] {
+  const read = path ? readAgentFile(path) : null;
+  if (read?.kind !== "file") return [museMcpKey(null)];
+  try {
+    return [museMcpKey(JSON.parse(read.text))];
+  } catch {
+    return [museMcpKey(null)];
+  }
+}
 export function openCodeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "OPENCODE_CONFIG_DIR") ?? join(xdgConfigHome(e), "opencode");
 }
@@ -594,9 +616,9 @@ type ConnectWay =
   /** Run the agent's own `mcp add`; remove with its `mcp remove`. */
   | { kind: "cli"; bin: string; add: (command: readonly string[]) => string[]; remove: string[] }
   /** One key in a JSON file (`json`: how it is edited). */
-  | { kind: "json"; keys: readonly string[]; json?: JsonFileRules }
+  | { kind: "json"; keys: readonly string[]; json?: JsonFileRules; entry?: (command: readonly string[]) => Record<string, unknown> }
   /** `inboxTool` on for Plannotator's own extension/plugin; `then`: the agent's own command that finishes connecting it. */
-  | { kind: "tool"; host: InboxToolHost; then?: { bin: string; args: readonly string[] } }
+  | { kind: "tool"; host: InboxToolHost; then?: ToolConnectStep }
   /** Only a person can connect it; `why` says how. */
   | { kind: "manual"; why: string }
   /** Nothing to do (Claude Code). */
@@ -628,6 +650,7 @@ interface AgentSpec {
 export interface JsonFileRules {
   comments?: boolean;
   keepReadOnly?: boolean;
+  seed?: Readonly<Record<string, unknown>>;
 }
 
 const NAME = INBOX_MCP_SERVER_NAME;
@@ -1152,6 +1175,8 @@ export function agentVersionRun(e: AgentEnvironment, path: string, options: { ti
 /** Qwen Code's settings.json: JSON with comments, edited by Plannotator itself; a read-only one is left alone. */
 const QWEN_SETTINGS_RULES: JsonFileRules = { comments: true, keepReadOnly: true };
 
+const MUSE_SETTINGS_RULES: JsonFileRules = { seed: INBOX_MUSE_SETTINGS_SEED };
+
 /**
  * Qwen Code is connected by editing its user settings.json directly, never
  * with `qwen mcp add` / `remove`: those write back every MCP server with its
@@ -1278,6 +1303,13 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     raw: () => null,
   },
   {
+    id: "muse",
+    detect: (e) => !!e.which(INBOX_MUSE_BIN) || isDir(museDir(e)),
+    way: async (e) => ({ kind: "json", keys: museKeys(museSettings(e)), json: MUSE_SETTINGS_RULES, entry: museMcpEntry }),
+    file: (e) => museSettings(e),
+    raw: (e, read) => rawJsonEntry(museSettings(e), museKeys(museSettings(e)), false, read),
+  },
+  {
     id: "openclaw",
     detect: (e) => openclawPluginInstalled(e) || !!e.which("openclaw") || isDir(openclawStateDir(e)),
     way: async (e) =>
@@ -1292,7 +1324,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => hermesPluginInstalled(e) || hermesFound(e),
     way: async (e) =>
       hermesPluginInstalled(e)
-        ? { kind: "tool", host: "hermes", then: { bin: "hermes", args: HERMES_WAKE_GRANT } }
+        ? { kind: "tool", host: "hermes", then: { bin: "hermes", args: HERMES_WAKE_GRANT, done: hermesWakeGranted, setting: HERMES_WAKE_SETTING, undo: HERMES_WAKE_UNDO_LINE } }
         : { kind: "manual", why: `add Plannotator's Hermes Agent plugin (${HERMES_PLUGIN_INSTALL})` },
     file: () => null,
     raw: () => null,
@@ -1334,11 +1366,12 @@ export interface JsonEntryUndo {
 type WriteOutcome = { ok: true; changed: boolean; undo?: JsonEntryUndo } | { ok: false; reason: string };
 
 /** Delete a file Plannotator created once it holds nothing but the empty containers along `keys`. */
-function deleteIfOnlyOurs(path: string, keys: readonly string[]): void {
+function deleteIfOnlyOurs(path: string, keys: readonly string[], seed: Readonly<Record<string, unknown>> = {}): void {
   const read = readAgentFile(path);
   if (read.kind !== "file") return;
   let skeleton: unknown = {};
   for (const key of [...keys].reverse()) skeleton = { [key]: skeleton };
+  skeleton = { ...seed, ...(skeleton as Record<string, unknown>) };
   try {
     if (read.text.trim() && JSON.stringify(JSON.parse(read.text)) !== JSON.stringify(skeleton)) return;
     rmSync(read.target, { force: true });
@@ -1396,8 +1429,8 @@ function undoJsonEntry(text: string, undo: JsonEntryUndo | undefined, keys: read
 export function writeJsonEntry(
   path: string,
   keys: readonly string[],
-  value: { command: string; args: string[] } | undefined,
-  ours: readonly (readonly string[])[] = value ? [[value.command, ...value.args]] : [],
+  value: Record<string, unknown> | undefined,
+  ours: readonly (readonly string[])[] = value ? [entryArgv(value) ?? []] : [],
   undo?: JsonEntryUndo,
   rules: JsonFileRules = {},
 ): WriteOutcome {
@@ -1406,6 +1439,7 @@ export function writeJsonEntry(
   if (read.kind === "refused") return { ok: false, reason: `${path} can't be edited (${read.reason})` };
   if (read.kind === "missing" && value === undefined) return { ok: true, changed: false };
   const original = read.kind === "file" ? read.text : "";
+  const start = !original.trim() && value !== undefined && rules.seed ? `${JSON.stringify(rules.seed, null, 2)}\n` : original;
   if (original.trim()) {
     let parsed: unknown;
     try {
@@ -1426,7 +1460,7 @@ export function writeJsonEntry(
       ? { ok: true as const, changed: true, text: undone }
       : value === undefined
         ? removeJsonMember(original, keys, NAME, { comments })
-        : addJsonMember(original, keys, NAME, value, { comments });
+        : addJsonMember(start, keys, NAME, value, { comments });
   if (!edit.ok) return { ok: false, reason: `${path} can't be edited without reshaping it (${edit.reason}), so Plannotator left it as it was` };
   if (!edit.changed) return { ok: true, changed: false };
   if (rules.keepReadOnly && read.kind === "file" && !writableFile(read.target, read.mode)) {
@@ -1539,9 +1573,19 @@ export function formatSeconds(ms: number): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
 }
 
+interface ToolConnectStep {
+  bin: string;
+  args: readonly string[];
+  done: (e: AgentEnvironment) => boolean;
+  setting: string;
+  undo: string;
+}
+
+type ToolGrant = { setting: string; undo: string };
+
 type AgentOutcome =
-  | { kind: "added"; record: InboxAgentRecord }
-  | { kind: "already"; record: InboxAgentRecord | null }
+  | { kind: "added"; record: InboxAgentRecord; granted?: ToolGrant }
+  | { kind: "already"; record: InboxAgentRecord | null; granted?: ToolGrant }
   | { kind: "foreign"; record: InboxAgentRecord; path: string | null }
   | { kind: "failed"; reason: string; path: string | null }
   | { kind: "manual"; why: string }
@@ -1581,9 +1625,11 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
         return { kind: "failed", reason: "Plannotator's config.json can't be written", path: null };
       }
     }
-    const unfinished = way.then ? await finishToolConnect(e, way.then, timeoutMs) : null;
+    const step = way.then && !way.then.done(e) ? way.then : null;
+    const unfinished = step ? await finishToolConnect(e, step, timeoutMs) : null;
     if (unfinished) return { kind: "failed", reason: unfinished, path: null };
-    return configured === true ? { kind: "already", record: { state: "found", reach: "tool", path: null, at } } : { kind: "added", record: { state: "added", reach: "tool", path: null, at } };
+    const granted = step ? { granted: { setting: step.setting, undo: step.undo } } : {};
+    return configured === true ? { kind: "already", record: { state: "found", reach: "tool", path: null, at }, ...granted } : { kind: "added", record: { state: "added", reach: "tool", path: null, at }, ...granted };
   }
   const before = classify(spec.raw(e) ?? { kind: "absent" }, ourCommands(options), true);
   if (before.kind === "unreadable") {
@@ -1594,7 +1640,7 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
   if (way.kind === "json") {
     const [cmd, ...args] = command;
     const created = readAgentFile(file!).kind === "missing";
-    const result = writeJsonEntry(file!, way.keys, { command: cmd!, args }, undefined, undefined, way.json);
+    const result = writeJsonEntry(file!, way.keys, way.entry ? way.entry(command) : { command: cmd!, args }, [command], undefined, way.json);
     if (!result.ok) return { kind: "failed", reason: result.reason.split(e.homeDir).join("~"), path: file };
     return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at, ...(result.undo ? { undo: result.undo } : {}), ...(created ? { created: true } : {}) } };
   }
@@ -1613,7 +1659,7 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
   return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at } };
 }
 
-async function finishToolConnect(e: AgentEnvironment, then: { bin: string; args: readonly string[] }, timeoutMs: number): Promise<string | null> {
+async function finishToolConnect(e: AgentEnvironment, then: ToolConnectStep, timeoutMs: number): Promise<string | null> {
   const line = [then.bin, ...then.args].join(" ");
   const bin = e.which(then.bin);
   if (!bin) return `${then.bin} is not on PATH, so run ${line} yourself`;
@@ -1733,10 +1779,12 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
       case "added":
         report.added.push(spec.id);
         file.agents[spec.id] = outcome.record;
+        if (outcome.granted) (report.granted ??= []).push({ agent: spec.id, ...outcome.granted });
         break;
       case "already":
         report.already.push(spec.id);
         if (outcome.record) file.agents[spec.id] = outcome.record;
+        if (outcome.granted) (report.granted ??= []).push({ agent: spec.id, ...outcome.granted });
         break;
       case "foreign":
         report.foreign.push({ agent: spec.id, path: displayPath(outcome.path, e) });
@@ -1796,6 +1844,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
     report.foreign.length > 0 ||
     (report.elsewhere?.length ?? 0) > 0 ||
     (report.trusted?.length ?? 0) > 0 ||
+    (report.granted?.length ?? 0) > 0 ||
     (report.trust_failed?.length ?? 0) > 0;
   file.last_report = news ? { ...report, seen: false } : file.last_report;
   try {
@@ -1827,6 +1876,7 @@ export function formatConnectReport(report: InboxConnectReport): string[] {
       `Plannotator can now send your replies straight into any running ${inboxAgentList(report.trusted)} session, without it asking you first (Plannotator is its trusted sender). Turning it off in Settings → Agents, or plannotator uninstall, removes that.`,
     );
   }
+  for (const grant of report.granted ?? []) lines.push(inboxGrantText(grant));
   for (const failure of report.trust_failed ?? []) {
     lines.push(`${INBOX_AGENT_LABELS[failure.agent]} won't get your replies by itself: ${failure.reason}. Plannotator tries again at the next plannotator inbox.`);
   }
@@ -1903,7 +1953,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
       // Checked as the agent's own entry is: one gone is nothing to do, one the person replaced is theirs (named
       // once, then no longer recorded); one that can't be read is tried, so the reason is said.
       const strayOurs = stray.command ? [stray.command] : record?.command ? [record.command] : [];
-      const strayRead = classify(rawJsonEntry(stray.path, strayJson!.keys, strayJson!.rules.comments === true), strayOurs, false);
+      const strayFile = jsonFileFor(spec.id, stray.path)!;
+      const strayRead = classify(rawJsonEntry(stray.path, strayFile.keys, strayFile.rules.comments === true), strayOurs, false);
       if (strayRead.kind === "absent") continue;
       if (strayRead.kind === "other") {
         skipped.push(`${label}'s "${NAME}" in ${displayPath(stray.path, e)} now runs something else (changed by hand), so it is yours`);
@@ -1914,8 +1965,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
         stray: stray.path,
         describe: `MCP server ${NAME} from ${label} (${displayPath(stray.path, e)}, that entry only)`,
         apply: async () => {
-          const result = writeJsonEntry(stray.path, strayJson!.keys, undefined, strayOurs, stray.undo, strayJson!.rules);
-          if (result.ok && stray.created) deleteIfOnlyOurs(stray.path, strayJson!.keys);
+          const result = writeJsonEntry(stray.path, strayFile.keys, undefined, strayOurs, stray.undo, strayFile.rules);
+          if (result.ok && stray.created) deleteIfOnlyOurs(stray.path, strayFile.keys, strayFile.rules.seed);
           return result.ok ? null : result.reason;
         },
       });
@@ -1943,14 +1994,14 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
     if (read && read.kind !== "ours") continue;
     const path = recordedFile(spec, e, record) ?? record.path ?? null;
     const shown = displayPath(path, e);
-    const json = jsonFileFor(spec.id);
+    const json = jsonFileFor(spec.id, path);
     if (json && path) {
       items.push({
         agent: spec.id,
         describe: `MCP server ${NAME} from ${label} (${shown}, that entry only)`,
         apply: async () => {
           const result = writeJsonEntry(path, json.keys, undefined, ours, record.undo, json.rules);
-          if (result.ok && record.created) deleteIfOnlyOurs(path, json.keys);
+          if (result.ok && record.created) deleteIfOnlyOurs(path, json.keys, json.rules.seed);
           return result.ok ? null : result.reason;
         },
       });
@@ -1979,8 +2030,9 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
 }
 
 /** The agents whose JSON file Plannotator edits itself: where their entry is and how the file is edited. */
-function jsonFileFor(id: InboxAgentId): { keys: readonly string[]; rules: JsonFileRules } | null {
+function jsonFileFor(id: InboxAgentId, path: string | null = null): { keys: readonly string[]; rules: JsonFileRules } | null {
   if (id === "qwen") return { keys: ["mcpServers"], rules: QWEN_SETTINGS_RULES };
+  if (id === "muse") return { keys: museKeys(path), rules: MUSE_SETTINGS_RULES };
   return id === "cursor" || id === "kiro" || id === "claude-app" ? { keys: ["mcpServers"], rules: {} } : null;
 }
 
@@ -1998,7 +2050,7 @@ function recordedFile(spec: AgentSpec, e: AgentEnvironment, record: InboxAgentRe
 /** The recorded entry's raw value (`recordedFile`), read only. */
 function recordedRaw(spec: AgentSpec, e: AgentEnvironment, record: InboxAgentRecord | undefined): RawEntry | null {
   const path = recordedFile(spec, e, record);
-  const json = jsonFileFor(spec.id);
+  const json = jsonFileFor(spec.id, path);
   if (!json || !path || path === spec.file(e)) return spec.raw(e);
   return rawJsonEntry(path, json.keys, json.rules.comments === true);
 }
@@ -2222,12 +2274,12 @@ export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options:
       const moved = await moveRecordedEntry(spec, options, previous!);
       if (moved) {
         // The old one cannot go: the new one is taken back out, so only the recorded entry is ever left.
-        const json = jsonFileFor(id);
         const added = outcome.kind === "added" ? outcome.record : null;
+        const json = jsonFileFor(id, added?.path ?? null);
         if (json && added?.path) {
           beforeMoveRollback?.();
           const undone = writeJsonEntry(added.path, json.keys, undefined, added.command ? [added.command] : [], added.undo, json.rules);
-          if (undone.ok && added.created) deleteIfOnlyOurs(added.path, json.keys);
+          if (undone.ok && added.created) deleteIfOnlyOurs(added.path, json.keys, json.rules.seed);
           if (!undone.ok) {
             // Both stay: the new one is recorded too, so uninstall removes it.
             file.agents[id] = { ...previous!, strays: [...(previous!.strays ?? []), { path: added.path, ...(added.command ? { command: added.command } : {}), ...(added.undo ? { undo: added.undo } : {}), ...(added.created ? { created: true } : {}) }] };

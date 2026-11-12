@@ -1,18 +1,24 @@
-
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   INBOX_CLOUD_PRESET_NAMES,
   inboxCloudAnswer,
+  inboxCloudPresetWakes,
+  inboxCloudRelayHost,
+  inboxCloudSetup,
   inboxCloudStatusWords,
   inboxCloudTestBody,
   isInboxCloudPreset,
   isInboxCloudSession,
   type InboxCloudAgentView,
+  type InboxCloudLink,
   type InboxCloudPreset,
+  type InboxCloudSetup,
 } from "@plannotator/core/inbox-cloud";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { encodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
+import type { InboxDevice } from "@plannotator/shared/inbox/devices";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { writeAgentFileAtomic } from "./agent-files";
 import { postCloudWebhook } from "./inbox-cloud-post";
@@ -23,12 +29,22 @@ export interface InboxCloudAgent {
   session: string;
   name: string;
   preset: InboxCloudPreset;
-  url: string;
-  key: string;
+  url: string | null;
+  key: string | null;
   project_id: string | null;
   created_at: string;
-  key_set_at: string;
+  key_set_at: string | null;
   key_rejected_at: string | null;
+  /** Its device (inbox/devices.jsonl, platform `agent`): the agent door's token hash and secret live there. */
+  device_id?: string;
+  relay?: boolean;
+  connected_at?: string | null;
+}
+
+export type InboxCloudWakeAgent = InboxCloudAgent & { url: string; key: string };
+
+export function hasCloudWake(agent: InboxCloudAgent): agent is InboxCloudWakeAgent {
+  return typeof agent.url === "string" && agent.url !== "" && typeof agent.key === "string" && agent.key !== "";
 }
 
 interface CloudAgentsFile {
@@ -44,7 +60,7 @@ export function readCloudAgents(dataDir: string): InboxCloudAgent[] {
   try {
     const file = JSON.parse(readFileSync(path, "utf8")) as Partial<CloudAgentsFile>;
     return (Array.isArray(file.agents) ? file.agents : []).filter(
-      (agent): agent is InboxCloudAgent => !!agent && isInboxCloudSession(agent.session) && isInboxCloudPreset(agent.preset) && typeof agent.url === "string" && typeof agent.key === "string",
+      (agent): agent is InboxCloudAgent => !!agent && isInboxCloudSession(agent.session) && isInboxCloudPreset(agent.preset) && (agent.url === null || typeof agent.url === "string") && (agent.key === null || typeof agent.key === "string"),
     );
   } catch {
     return [];
@@ -92,6 +108,14 @@ export function createInboxCloudAgents(options: {
   onChange?: (agents: InboxCloudAgent[]) => void;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** The device door's agent devices (inbox-devices.ts), bound once the door exists. */
+  devices?: () => {
+    mint: (name: string) => { device: InboxDevice; token: string; secret: string };
+    relay: (device: InboxDevice) => Promise<{ url: string; mailbox_id: string } | null>;
+    revoke: (id: string) => void;
+    seenAt?: (id: string) => string | null;
+  } | null;
+  relayUp?: () => boolean | null;
 }) {
   const { store, dataDir } = options;
   const now = options.now ?? (() => new Date());
@@ -108,14 +132,25 @@ export function createInboxCloudAgents(options: {
     return project ? { id: project.id, name: project.display_name ?? project.name } : null;
   };
 
+  const link = (agent: InboxCloudAgent): InboxCloudLink => {
+    const connected = agent.connected_at ?? null;
+    const seen = agent.device_id ? (options.devices?.()?.seenAt?.(agent.device_id) ?? null) : null;
+    const lastSeen = connected && seen && seen > connected ? seen : connected;
+    if (agent.relay && options.relayUp?.() === false) return { state: "relay_down", last_seen_at: lastSeen };
+    if (connected) return { state: "connected", last_seen_at: lastSeen };
+    if (!agent.relay) return { state: "no_relay", last_seen_at: null };
+    return { state: "waiting", last_seen_at: null };
+  };
+
   const view = (agent: InboxCloudAgent): InboxCloudAgentView => ({
     session: agent.session,
     name: agent.name,
     preset: agent.preset,
     project: projectName(agent.project_id),
     created_at: agent.created_at,
-    key_set: true,
+    wake: hasCloudWake(agent),
     key_rejected_at: agent.key_rejected_at,
+    link: link(agent),
   });
 
   const projects = () =>
@@ -131,30 +166,81 @@ export function createInboxCloudAgents(options: {
     return agent;
   };
 
-  const pair = (body: Record<string, unknown>): InboxCloudAgent => {
-    const name = typeof body.name === "string" ? body.name.replace(/\s+/g, " ").trim() : "";
-    if (!name || name.length > 60) throw new CloudAgentError("validation_error", "Give it a name (up to 60 characters).", "name");
-    if (!isInboxCloudPreset(body.preset)) throw new CloudAgentError("validation_error", "Pick what kind of agent it is.", "preset");
+  const refuseWake = (preset: InboxCloudPreset): never => {
+    throw new CloudAgentError("no_wake", `${INBOX_CLOUD_PRESET_NAMES[preset]} has no wake address: it checks for your messages itself.`, "url");
+  };
+
+  const webhookOf = (body: Record<string, unknown>, required: boolean): { url: string; key: string } | null => {
+    const given = (typeof body.url === "string" && body.url.trim() !== "") || (typeof body.key === "string" && body.key.trim() !== "");
+    if (!given && !required) return null;
     const url = cloudWebhookUrl(body.url);
     if (!url) throw new CloudAgentError("validation_error", "Paste the routine's webhook address (it starts with https://).", "url");
     const key = cloudKey(body.key);
     if (!key) throw new CloudAgentError("validation_error", "Paste the routine's key.", "key");
+    return { url: url.href, key };
+  };
+
+  const mintPairing = async (name: string, preset: InboxCloudPreset): Promise<{ device_id?: string; relay: boolean; setup: InboxCloudSetup | null; pairing: string | null }> => {
+    const devices = options.devices?.() ?? null;
+    const minted = devices?.mint(name) ?? null;
+    if (!minted || !devices) return { relay: false, setup: null, pairing: null };
+    const relay = await devices.relay(minted.device).catch(() => null);
+    const pairing = encodeInboxAgentPairing({ device_id: minted.device.id, token: minted.token, secret: minted.secret, ...(relay ? { relay } : {}) });
+    return { device_id: minted.device.id, relay: relay !== null, setup: relay ? inboxCloudSetup(preset, pairing, inboxCloudRelayHost(relay.url)) : null, pairing };
+  };
+
+  const pair = async (body: Record<string, unknown>): Promise<{ agent: InboxCloudAgent; pairing: string | null; setup: InboxCloudSetup | null }> => {
+    const name = typeof body.name === "string" ? body.name.replace(/\s+/g, " ").trim() : "";
+    if (!name || name.length > 60) throw new CloudAgentError("validation_error", "Give it a name (up to 60 characters).", "name");
+    if (!isInboxCloudPreset(body.preset)) throw new CloudAgentError("validation_error", "Pick what kind of agent it is.", "preset");
+    const preset = body.preset;
+    if (!inboxCloudPresetWakes(preset) && (body.url != null || body.key != null)) refuseWake(preset);
+    const webhook = webhookOf(body, false);
     const listed = projects();
     const projectId = typeof body.project_id === "string" && listed.some((p) => p.id === body.project_id) ? body.project_id : (listed[0]?.id ?? null);
     const at = now().toISOString();
+    const minted = await mintPairing(name, preset);
     const agent: InboxCloudAgent = {
       session: `cloud.${randomBytes(6).toString("hex")}`,
       name,
-      preset: body.preset,
-      url: url.href,
-      key,
+      preset,
+      url: webhook?.url ?? null,
+      key: webhook?.key ?? null,
       project_id: projectId,
       created_at: at,
-      key_set_at: at,
+      key_set_at: webhook ? at : null,
       key_rejected_at: null,
+      ...(minted.device_id ? { device_id: minted.device_id } : {}),
+      relay: minted.relay,
+      connected_at: null,
     };
     save([...agents, agent]);
-    return agent;
+    return { agent, pairing: minted.pairing, setup: minted.setup };
+  };
+
+  const repair = async (session: string): Promise<{ agent: InboxCloudAgent; pairing: string | null; setup: InboxCloudSetup | null }> => {
+    const agent = find(session);
+    if (agent.device_id) options.devices?.()?.revoke(agent.device_id);
+    const minted = await mintPairing(agent.name, agent.preset);
+    const { device_id: _old, ...rest } = agent;
+    const next: InboxCloudAgent = { ...rest, ...(minted.device_id ? { device_id: minted.device_id } : {}), relay: minted.relay, connected_at: null };
+    save(agents.map((candidate) => (candidate.session === session ? next : candidate)));
+    return { agent: next, pairing: minted.pairing, setup: minted.setup };
+  };
+
+  const setWake = (session: string, body: Record<string, unknown>): InboxCloudAgent => {
+    const agent = find(session);
+    if (!inboxCloudPresetWakes(agent.preset)) refuseWake(agent.preset);
+    const webhook = webhookOf(body, true)!;
+    const next = { ...agent, url: webhook.url, key: webhook.key, key_set_at: now().toISOString(), key_rejected_at: null };
+    save(agents.map((candidate) => (candidate.session === session ? next : candidate)));
+    return next;
+  };
+
+  const seen = (deviceId: string) => {
+    const agent = agents.find((candidate) => candidate.device_id === deviceId);
+    if (!agent || agent.connected_at) return;
+    save(agents.map((candidate) => (candidate === agent ? { ...candidate, connected_at: now().toISOString() } : candidate)));
   };
 
   const rekey = (session: string, body: Record<string, unknown>): InboxCloudAgent => {
@@ -167,8 +253,10 @@ export function createInboxCloudAgents(options: {
   };
 
   const remove = (session: string): boolean => {
-    if (!agents.some((agent) => agent.session === session)) return false;
-    save(agents.filter((agent) => agent.session !== session));
+    const agent = agents.find((candidate) => candidate.session === session);
+    if (!agent) return false;
+    if (agent.device_id) options.devices?.()?.revoke(agent.device_id);
+    save(agents.filter((candidate) => candidate.session !== session));
     return true;
   };
 
@@ -180,6 +268,7 @@ export function createInboxCloudAgents(options: {
 
   const test = async (session: string): Promise<{ started: boolean; run_url?: string; words: string }> => {
     const agent = find(session);
+    if (!hasCloudWake(agent)) return { started: false, words: "Add its wake address first." };
     const sent = await postCloudWebhook(agent, inboxCloudTestBody(agent.preset, agent.name), { fetch: options.fetch, timeoutMs: options.timeoutMs });
     if (sent.kind === "timeout") return { started: false, words: "No answer in time. A run may have started; check the routine." };
     if (sent.kind === "unreachable") return { started: false, words: "Could not reach that address. Check it, and that this computer is online." };
@@ -205,9 +294,13 @@ export function createInboxCloudAgents(options: {
   return {
     list: () => agents,
     agent: (session: string) => agents.find((agent) => agent.session === session) ?? null,
+    byDevice: (deviceId: string) => agents.find((agent) => agent.device_id === deviceId) ?? null,
     view,
     projects,
     pair,
+    repair,
+    setWake,
+    seen,
     rekey,
     remove,
     test,

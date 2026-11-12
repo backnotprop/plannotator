@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
-import { defaultStartProject, launchGroups, launchHistory, type LaunchMachine, type MachineLaunchRead } from './compose/model';
+import { defaultStartProject, launchGroups, launchHistory, projectWithAgent, type LaunchMachine, type MachineLaunchRead } from './compose/model';
 
 const SELF = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const MINI = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAW';
@@ -168,4 +168,19 @@ describe('launchHistory: from the merged list', () => {
 test('the default start: the project the person is looking at by its id, before another machine\'s folder at the same path', () => {
   const merged = { agents: AGENTS, projects: [{ ...mini.projects[1]!, machine: MINI }, ...here.projects] };
   expect(defaultStartProject(merged, { id: 'prj_bill_a', root: '/Users/me/code/billing-svc' })?.id).toBe('prj_bill_a');
+});
+
+test("an agent only another machine has, picked for this computer's project: it starts on a machine that has it, the same folder or name first, an awake machine's before an asleep one's", () => {
+  const PI: InboxComposeLaunch['agents'] = [{ agent: 'pi', name: 'Pi' }];
+  const studio: InboxComposeLaunch = { agents: PI, projects: [{ id: 'prj_site', name: 'site', root: '/Users/studio/code/site', exists: true }] };
+  const elsewhere: InboxComposeLaunch = { agents: PI, projects: [{ id: 'prj_bill_s', name: 'billing-svc', root: '/Users/mini/code/billing-svc', exists: true }, { id: 'prj_infra', name: 'infra', root: '/Users/me/code/infra', exists: true }] };
+  const groupsFor = (asleep: boolean) =>
+    launchGroups({ agent: 'pi', self, machines: [SELF_VIEW, machine(STUDIO, 'Studio'), machine(MINI, 'Mac mini', asleep ? { state: 'offline' } : {})], reads: reads([[STUDIO, studio], [MINI, elsewhere]]) }).groups;
+  // This computer has no Pi: its projects are not among them.
+  expect(projectWithAgent(groupsFor(false), { root: '/Users/me/code/web-app', name: 'web-app' })).toMatchObject({ id: 'prj_site', machine: STUDIO });
+  expect(projectWithAgent(groupsFor(false), { root: '/Users/me/code/billing-svc', name: 'billing-svc' })).toMatchObject({ id: 'prj_bill_s', machine: MINI });
+  expect(projectWithAgent(groupsFor(false), { root: '/Users/me/code/infra', name: 'infra-old' })).toMatchObject({ id: 'prj_infra', machine: MINI });
+  // Mac mini asleep: Studio's project.
+  expect(projectWithAgent(groupsFor(true), { root: '/Users/me/code/web-app', name: 'web-app' })).toMatchObject({ id: 'prj_site', machine: STUDIO });
+  expect(projectWithAgent([], { root: '/Users/me/code/web-app', name: 'web-app' })).toBeNull();
 });
