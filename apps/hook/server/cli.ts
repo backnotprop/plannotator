@@ -220,6 +220,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator inbox status [--json] | stop | restart",
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "  plannotator inbox connection --host <host> [--plugin-version <v>] [--no-wake]",
     "  plannotator t3 login | logout --url <T3 MCP URL>",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
@@ -879,7 +880,7 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
   // `inbox projects --help` is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "icon")) return null;
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "icon" || args[1] === "connection")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

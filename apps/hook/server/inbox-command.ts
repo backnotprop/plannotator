@@ -72,10 +72,11 @@ import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } fro
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
-import { getCliVersion } from "./cli";
+import { getCliVersion, hasHelpFlag } from "./cli";
 import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
+import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from "./inbox-connection-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
@@ -703,6 +704,15 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       t3EntryIdle: inboxT3EntryIdle(args.includes("--t3"), process.env),
     });
     process.exit(0);
+  }
+
+  if (args[0] === "connection") {
+    if (hasHelpFlag([...args.slice(1)])) {
+      await writeWholeToStdout(`${INBOX_CONNECTION_USAGE}\n`);
+      process.exit(0);
+    }
+    assertTestHome();
+    process.exit(await runInboxConnectionCommand(args.slice(1), { dataDir, env: process.env, lines: stdinLines(), write: (line) => void process.stdout.write(line) }));
   }
 
   if (args[0] === "status") {
