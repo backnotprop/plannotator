@@ -39,12 +39,22 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose, showP
   // `selected`: a pick shows that icon's own page (SelectedIcon.tsx); opened from the agent's mark, the dialog starts there.
   const pickedFace = isOwnFace(face) || isSetFace(face);
   const [view, setView] = useState<'grid' | 'selected'>(flow === 'selected' && showPicked && pickedFace ? 'selected' : 'grid');
+  // An icon picked in a grid, shown on its page and not kept until "Use this icon" or "Animate it".
+  const [preview, setPreview] = useState<AgentFace | null>(null);
+  const toGrid = () => {
+    setPreview(null);
+    setView('grid');
+  };
+  const onPick =
+    flow === 'selected'
+      ? (next: AgentFace) => {
+          setOn(isOwnFace(next) ? 'own' : 'sets');
+          setPreview(next);
+          setView('selected');
+        }
+      : undefined;
   const before = face;
   const picked = () => {
-    if (flow === 'selected') {
-      setView('selected');
-      return;
-    }
     if (flow === 'stay' || flow === 'beside') return;
     onClose();
     if (flow !== 'toast') return;
@@ -79,7 +89,7 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose, showP
           {places.map((p) => (
             <button key={p.id} type="button" role="tab" className="ib-seg-o" data-on={on === p.id ? '' : undefined} aria-selected={on === p.id} data-agi-place={p.id} onClick={() => {
                 setOn(p.id);
-                setView('grid');
+                toGrid();
               }}>
               {p.label}
             </button>
@@ -91,12 +101,12 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose, showP
       </div>
       {!(flow === 'beside' && on === 'sets') && flow !== 'selected' && <AnimateIt agent={agent} face={face} onDone={onClose} onBack={keepOpen ? () => {} : onClose} />}
       <div className="ib-agi-body" role="tabpanel" tabIndex={-1}>
-        {view === 'selected' && pickedFace ? (
-          <SelectedIcon agent={agent} host={host} name={name} face={face} onBack={() => setView('grid')} onDone={onClose} />
+        {view === 'selected' && (preview || pickedFace) ? (
+          <SelectedIcon agent={agent} host={host} name={name} face={preview ?? face} previewing={!!preview} onBack={toGrid} onDone={onClose} />
         ) : on === 'own' ? (
-          <OwnIconsBody agent={agent} face={face} onDone={picked} />
+          <OwnIconsBody agent={agent} face={face} onDone={picked} onPick={onPick} />
         ) : (
-          <SetsBody agent={agent} face={face} onDone={picked} pin={flow === 'beside' ? <AnimateIt agent={agent} face={face} onDone={onClose} bare /> : undefined} />
+          <SetsBody agent={agent} face={face} onDone={picked} onPick={onPick} pin={flow === 'beside' ? <AnimateIt agent={agent} face={face} onDone={onClose} bare /> : undefined} />
         )}
       </div>
     </Modal>

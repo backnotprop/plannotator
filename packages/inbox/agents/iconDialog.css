@@ -125,3 +125,9 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .ib-agi-sel-at[data-size="24"] .ib-mk.ib-big > svg { width: 16px; height: 16px; }
 .ib-agi-sel-at[data-size="16"] { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-agi-sel-anim { width: min(560px, 100%); margin-top: 22px; }
+/* The preview's one primary action (the app's primary button, larger), "Animate it" quieter under it. */
+.ib-agi-sel .ib-agi-use { margin-top: 18px; height: 40px; min-width: 240px; justify-content: center; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-agi-sel[data-previewing] .ib-agi-sel-anim { margin-top: 14px; }
+@media (max-width: 560px) {
+  .ib-agi-sel .ib-agi-use { align-self: stretch; height: 44px; }
+}

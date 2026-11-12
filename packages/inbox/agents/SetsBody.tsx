@@ -49,7 +49,7 @@ const licenceLabel = (spdx: string | undefined) => (spdx ? spdx.replace(/-(\d+\.
  * Its keys are the dialog's own (the arrows move in the grid, Enter in the search picks the first found): it adds no
  * shortcut. Choosing an icon closes the dialog (`onDone`). The one credit a set's licence asks for (game-icons.net's) is a muted line under its grid.
  */
-export function SetsBody({ agent, face, onDone, pin }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; pin?: ReactNode }) {
+export function SetsBody({ agent, face, onDone, pin, onPick }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; pin?: ReactNode; onPick?: (face: AgentFace) => void }) {
   const sets = useIconSets();
   // The pointer of fetchable sets is read only here, when the person opens Sets.
   useEffect(() => {
@@ -130,6 +130,7 @@ export function SetsBody({ agent, face, onDone, pin }: { agent: AgentFaceRef; fa
   const choose = (icon: InboxIconSetIcon) => {
     if (!set) return;
     keepLastSet(set.id);
+    if (onPick) return onPick(`set:${set.id}/${icon.id}`);
     keepAgentFace(agent, `set:${set.id}/${icon.id}`);
     onDone();
   };

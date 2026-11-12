@@ -12,7 +12,7 @@ import { ownIconSrc, useOwnIcons } from './ownIcons';
  * × takes a picture away, with no question: the agents that showed it go back to their own mark. The refusals are Set
  * picture…'s own words. Each picture is drawn as its still, as uploaded, scaled to fit its tile.
  */
-export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
+export function OwnIconsBody({ agent, face, onDone, onPick }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; onPick?: (face: AgentFace) => void }) {
   const icons = useOwnIcons() ?? [];
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,10 +24,10 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
     setRefused(null);
     // A still photo over the limit (a phone's) is shrunk here first (fitPicture.ts); the upload checks what comes out.
     const fitted = await fitPicture(file);
-    const refusal = 'refused' in fitted ? fitted.refused : await keepOwnPicture(agent, fitted.file);
+    const refusal = 'refused' in fitted ? fitted.refused : await keepOwnPicture(agent, fitted.file, onPick);
     setBusy(false);
     if (refusal) setRefused(refusal);
-    else onDone();
+    else if (!onPick) onDone();
   };
   const pick = () => {
     const input = document.createElement('input');
@@ -92,6 +92,7 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
                 className="am-own-i"
                 data-own-icon={icon.id}
                 onClick={() => {
+                  if (onPick) return onPick(`own:${icon.id}`);
                   keepAgentFace(agent, `own:${icon.id}`);
                   onDone();
                 }}

@@ -186,7 +186,7 @@ export function keepAgentFace(agent: AgentFaceRef, face: AgentFace): void {
  * "Your own…": keep a picked, dropped or pasted picture with the Inbox, then show it on this agent at once. Answers
  * null, or the words a refusal shows (the same as Set picture…'s: too big, not one of the five types).
  */
-export async function keepOwnPicture(agent: AgentFaceRef, file: Blob): Promise<string | null> {
+export async function keepOwnPicture(agent: AgentFaceRef, file: Blob, onKept?: (face: AgentFace) => void): Promise<string | null> {
   boot();
   try {
     const read = await pictureFromFile(file);
@@ -195,7 +195,9 @@ export async function keepOwnPicture(agent: AgentFaceRef, file: Blob): Promise<s
     const id = (answer.icon as { id?: unknown } | undefined)?.id;
     hear(answer, false);
     if (typeof id !== 'string') return 'The picture did not change.';
-    keepAgentFace(agent, `own:${id}`);
+    // Exploration (`onKept`, agents/iconFlowDev.ts "selected"): kept, but shown on the agent only once the person says so.
+    if (onKept) onKept(`own:${id}`);
+    else keepAgentFace(agent, `own:${id}`);
     return null;
   } catch (cause) {
     return errorText(cause, 'The picture did not change.');

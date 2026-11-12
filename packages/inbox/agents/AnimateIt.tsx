@@ -110,7 +110,7 @@ const isOurs = (face: AgentFace) => !isOwnFace(face) && !isSetFace(face) && face
  * it. The agent's hand-back changes this icon in every window by itself; a picture an agent handed back offers "Use the
  * original" in its place.
  */
-export function AnimateIt({ agent, face, onDone, onBack = onDone, bare = false }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; onBack?: () => void; bare?: boolean }) {
+export function AnimateIt({ agent, face, onDone, onBack = onDone, bare = false, beforeStart }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; onBack?: () => void; bare?: boolean; beforeStart?: () => void }) {
   const originals = useAnimatedOriginals();
   const ours = useAgentFaceSources(isOurs(face));
   const [busy, setBusy] = useState(false);
@@ -125,6 +125,7 @@ export function AnimateIt({ agent, face, onDone, onBack = onDone, bare = false }
     if (busy || !source) return;
     setBusy(true);
     setFailed(false);
+    beforeStart?.();
     if (await startAnimate(agent, source, onDone)) return;
     setFailed(true);
     setBusy(false);
