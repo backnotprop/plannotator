@@ -223,7 +223,7 @@ test.if(hasDom)('after a hand-back for a set icon, "Use the original" puts that 
   act(() => faces.keepAgentFace('ses_a', `own:${answer.icon}`));
   await settle();
 
-  // The handed-back picture is an uploaded one now: "Your own…" opens on its page.
+  // The handed-back picture is an uploaded one: "Your own…" opens on its page.
   const again = await openDialog(host, 'own');
   await settle();
   const strip = again.querySelector('[data-animate-it]')!;

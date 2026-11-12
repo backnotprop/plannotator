@@ -5,11 +5,12 @@
  * (tests/helpers/fake-icon-set.ts, generated pictures on 127.0.0.1).
  *
  * What this catches: the fan without its "Sets" place, or that place not opening the sets; a picked icon kept before
- * "Use this icon", or kept by the back control or Close; a used icon not kept as `set:<set>/<icon>`, or not shown on the sidebar, the row, the author, the header or the reply pill; a pixel set drawn
- * without its native size (so not at whole multiples) or a one-colour set drawn as an `<img>` (which cannot take the
- * text colour) or as inlined markup; an icon that does not load drawn as a broken picture instead of the agent's own
- * mark; a search by name or number that finds the wrong icons; the pointer read before the person opens Sets; "Get"
- * not filling the grid in; the window's built-in looks drifting from the sets' manifests.
+ * "Use this icon", or kept by the back control or Close; a used icon not kept as `set:<set>/<icon>`, or not shown on
+ * the sidebar, the row, the author, the header or the reply pill; a pixel set drawn without its native size (so not at
+ * whole multiples) or a one-colour set drawn as an `<img>` (which cannot take the text colour) or as inlined markup; an
+ * icon that does not load drawn as a broken picture instead of the agent's own mark; a search by name or number that
+ * finds the wrong icons; the pointer read before the person opens Sets; "Get" not filling the grid in; the window's
+ * built-in looks drifting from the sets' manifests.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -356,7 +357,7 @@ test.if(hasDom)('a fetchable set: "Get" downloads it in one click and its grid f
   for (const s of OUTSIDE) expect(drawn(at(host, s))).toBe('/api/inbox/icon-sets/blobs/2 px 16px');
 });
 
-// The owner, 2026-11-12: a click opens the picker; it no longer drops a set icon for Transparent.
+// The owner, 2026-11-12: a click on the mark opens the picker and changes no face.
 test.if(hasDom)('a click on a mark showing a set icon opens the picker and keeps the set icon; the picker\'s Sets shows it and opens on its page, the grid behind it with it marked', async () => {
   inbox();
   const host = mount(<Surfaces />);

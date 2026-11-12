@@ -44,7 +44,7 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
   .ib-agi .am-own-x::before { content: ""; position: absolute; inset: 3px; z-index: -1; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 1.5px var(--background); }
 }
 
-/* "Animate it" (AnimateIt.tsx): under the head, for the icon the head shows: one line, one button. */
+/* "Animate it" (AnimateIt.tsx), on an icon's page: one line, one button. */
 .ib-agi-anim { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in oklch, var(--foreground) 3%, transparent); }
 .ib-agi-anim-t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ib-agi-anim-l { font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); text-wrap: pretty; }

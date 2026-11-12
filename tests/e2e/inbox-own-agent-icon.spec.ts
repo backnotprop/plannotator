@@ -3,8 +3,8 @@
  * binary (temp data dir and HOME, sandboxed agent PATH, no browser opened, nothing real asked).
  *
  *  1. The face picker's fourth inner place, "Your own…", opens the pictures; "+" takes a file, a drop and a paste
- *     take one too. A new picture shows on its agent at once: the sidebar, the list row, the message author, the
- *     thread's participants, the reply box's "to" pill and the Board card.
+ *     take one too. A new picture shows its page, and "Use this icon" shows it on its agent at once: the sidebar, the
+ *     list row, the message author, the thread's participants, the reply box's "to" pill and the Board card.
  *  2. No row changes size: every list row's height and every mark's tile box are the same before and after.
  *  3. A picture is shown as uploaded, scaled to fit the tile (its own aspect ratio, nothing cropped, no tile colour).
  *  4. A GIF and a CSS + SMIL SVG move in the sidebar only (the marks' own motion paused, the picture's pixels
@@ -109,7 +109,10 @@ async function agentIds(page: Page): Promise<string[]> {
   });
 }
 
-/** Open the fan on an agent's sidebar mark (a key: the pointer's rest is timing) and choose "Your own…". */
+/**
+ * Open the fan on an agent's sidebar mark (a key: the pointer's rest is timing) and choose "Your own…": the pictures
+ * (an agent showing one opens on its page first; the back control leads to them).
+ */
 async function openOwn(page: Page, agentId: string): Promise<Locator> {
   await sidebarMark(page, agentId).focus();
   await page.keyboard.press('Enter');
@@ -119,7 +122,16 @@ async function openOwn(page: Page, agentId: string): Promise<Locator> {
   await place.click();
   const panel = page.locator('dialog[data-dialog="agent-icon"][open]');
   await expect(panel).toBeVisible();
+  if (await panel.locator('[data-selected-icon]').count()) await panel.locator('.ib-agi-back').click();
+  await expect(panel.locator('.am-own-up')).toBeVisible();
   return panel;
+}
+
+/** "Use this icon" on the page a new or picked picture shows. */
+async function useIt(page: Page, timeout = 5_000): Promise<void> {
+  const panel = page.locator('dialog[data-dialog="agent-icon"][open]');
+  await panel.locator('[data-use-icon]').click({ timeout });
+  await expect(panel).toHaveCount(0);
 }
 
 async function upload(page: Page, agentId: string, file: string): Promise<void> {
@@ -127,7 +139,7 @@ async function upload(page: Page, agentId: string, file: string): Promise<void> 
   const chooser = page.waitForEvent('filechooser');
   await panel.locator('.am-own-up').click();
   await (await chooser).setFiles(file);
-  await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0);
+  await useIt(page);
   await expect(sidebarMark(page, agentId).locator('[data-agent-mark]')).toHaveAttribute('data-face', /^own:[0-9a-f]{64}$/);
   // The sidebar's picture takes the mark's box exactly, whatever its own size (a wide one once spilled over the rows
   // below and opened their pickers).
@@ -247,6 +259,7 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
     el.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }));
     el.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }));
   }, gifBytes);
+  await useIt(page);
   await expect(sidebarMark(page, byKey.gif!).locator('[data-agent-mark]')).toHaveAttribute('data-face', /^own:/);
 
   // A paste while the panel is open.
@@ -256,6 +269,7 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
     data.items.add(new File([text], 'hostile.svg', { type: 'image/svg+xml' }));
     document.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
   }, PICTURES.hostile);
+  await useIt(page);
   await expect(sidebarMark(page, byKey.hostile!).locator('[data-agent-mark]')).toHaveAttribute('data-face', /^own:/);
 
   // Every place shows the picture; the sidebar plays it, the row tile asks for the still.
@@ -339,7 +353,7 @@ test('a phone photo over 512 KB is shrunk in the window, its proportions kept, a
     await panel.locator('.am-own-up').click();
     const started = Date.now();
     await (await chooser).setFiles(photo);
-    await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0, { timeout: 20_000 });
+    await useIt(page, 20_000);
     expect(Date.now() - started).toBeLessThan(20_000);
     await expect(sidebarMark(page, id).locator('[data-agent-mark]')).not.toHaveAttribute('data-face', before ?? '');
     const face = (await sidebarMark(page, id).locator('[data-agent-mark]').getAttribute('data-face'))!;

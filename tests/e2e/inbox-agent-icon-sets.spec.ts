@@ -1,10 +1,11 @@
 /**
  * Agent icons from sets, the one critical flow in a real browser against the compiled binary (temp data dir and HOME,
  * sandboxed agent PATH, no browser opened): the face picker's "Sets" opens the agent icon dialog in the middle of the
- * window; an icon picked there applies at once, closes the dialog and gives focus back to the agent's face, and shows
- * on the row with no row changing size (pixel art at whole multiples, one-colour icons in the text colour); "Get" on a
- * fetchable set (a made-up one of generated pictures, tests/helpers/fake-icon-set.ts) fills its grid and finishes; the
- * window never reaches outside its Inbox. Everything else is guarded by the unit and DOM tests.
+ * window; an icon picked there shows its page, and "Use this icon" applies it, closes the dialog and gives focus back
+ * to the agent's face, and it shows on the row with no row changing size (pixel art at whole multiples, one-colour
+ * icons in the text colour); "Get" on a fetchable set (a made-up one of generated pictures,
+ * tests/helpers/fake-icon-set.ts) fills its grid and finishes; the window never reaches outside its Inbox. Everything
+ * else is guarded by the unit and DOM tests.
  *
  * PNGs land in PLANNOTATOR_ICON_SETS_SHOTS when set. Build the binary first (see inbox.spec.ts).
  */
@@ -192,7 +193,7 @@ test.afterAll(async () => {
   }
 });
 
-test('Sets: the dialog applies an icon everywhere at once, closes and gives focus back; Get fills a fetchable set', async () => {
+test('Sets: a picked icon is previewed; Use this icon applies it everywhere at once, closes and gives focus back; Get fills a fetchable set', async () => {
   const { page, fake } = world;
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto(world.url);
@@ -204,7 +205,7 @@ test('Sets: the dialog applies an icon everywhere at once, closes and gives focu
   // Nothing asked of the pointer until Sets opens.
   expect(fake.total()).toBe(0);
 
-  // Three built-in icons, each picked in the dialog: it is centred, applies at once, closes, gives focus back.
+  // Three built-in icons, each picked in the dialog (centred), then "Use this icon": applied at once, closed, focus back.
   const dialog = page.locator('dialog[data-dialog="agent-icon"][open]');
   for (const [key, set, query] of [['tiny', 'tiny-creatures', 'zombie'], ['game', 'game-icons', 'wyvern'], ['dcss', 'dcss', 'orc wizard']] as const) {
     await openSets(page, ids[key]!);
@@ -228,6 +229,9 @@ test('Sets: the dialog applies an icon everywhere at once, closes and gives focu
     await dialog.locator('.am-sets-q').fill(query);
     if (key === 'tiny') await both(page, 'dialog-sets');
     await dialog.locator('.am-sets-i').first().click();
+    await expect(dialog.locator('[data-selected-icon][data-previewing]')).toBeVisible();
+    await expect(sidebarMark(page, ids[key]!).locator('[data-agent-mark]')).toHaveAttribute('data-face', 'agent');
+    await dialog.locator('[data-use-icon]').click();
     await expect(dialog).toHaveCount(0);
     await expect(sidebarMark(page, ids[key]!)).toBeFocused();
     await expect(sidebarMark(page, ids[key]!).locator('[data-agent-mark]')).toHaveAttribute('data-face', AGENTS.find((a) => a.key === key)!.face);
@@ -257,6 +261,7 @@ test('Sets: the dialog applies an icon everywhere at once, closes and gives focu
   await expect(dialog.locator('.am-sets-get')).toHaveCount(0, { timeout: 30_000 });
   await expect(dialog.locator('.am-sets-i:not(:disabled)')).toHaveCount(64);
   await dialog.locator('.am-sets-i').nth(1).click();
+  await dialog.locator('[data-use-icon]').click();
   await expect(sidebarMark(page, ids.blobs!).locator('[data-agent-mark]')).toHaveAttribute('data-face', 'set:blobs/2');
   for (let n = 1; n <= 64; n++) expect(fake.hits.get(`/icons/${n}.png`)).toBe(1);
   expect(world.outside).toEqual([]);
