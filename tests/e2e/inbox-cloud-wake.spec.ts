@@ -82,8 +82,8 @@ test('pair a routine, send a test, write to it from New message: the thread says
 
   const paired = section.locator('[data-cloud-agent]');
   await expect(paired.locator('[data-cloud-setup="no-relay"]')).toBeVisible();
-  await expect(paired.locator('[data-cloud-status]')).toHaveAttribute('data-cloud-status', 'no_relay');
   await paired.locator('[data-cloud-done]').click();
+  await expect(paired.locator('[data-cloud-status]')).toHaveAttribute('data-cloud-status', 'no_relay');
   await paired.locator('[data-cloud-wake-open]').click();
   await paired.locator('[data-cloud-url]').fill(hookUrl);
   await paired.locator('[data-cloud-key]').fill(KEY);
