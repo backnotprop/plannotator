@@ -184,6 +184,8 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
         onContextMenu={(event) => {
           if (pressed.current || press.current) event.preventDefault();
         }}
+        // A long press here opens the face picker, never the row's menu (its ContextMenu hears touches on the row).
+        onTouchStart={(event) => event.stopPropagation()}
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
       >
