@@ -42,6 +42,7 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'opencode', name: 'OpenCode' },
   { host: 'dsh', name: 'DeepSeek Harness' },
   { host: 'cline', name: 'Cline' },
+  { host: 'openclaw', name: 'OpenClaw' },
 ];
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
@@ -844,7 +845,7 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness and Cline send every tool&apos;s definition with each request, so they start
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness, Cline and OpenClaw send every tool&apos;s definition with each request, so they start
           off.
         </p>
         {env !== null && (
@@ -872,7 +873,7 @@ function AgentsSection({
         {env === null && (
           <div className="ib-note">
             <Icon name="info" />
-            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts. Sessions already running keep what they started with.
+            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts, and for OpenClaw from its next message. Sessions already running keep what they started with.
           </div>
         )}
       </section>
