@@ -1,11 +1,5 @@
 import { defineShortcutScope } from '@plannotator/ui/shortcuts';
 
-/**
- * The thread's keys. Mark read and Undo (App.tsx) also act on the list's
- * focused row; the rest act on the open thread (Thread.tsx). Every single key
- * stands down while typing, while an input method composes, under a dialog or
- * menu, and when single-key shortcuts are off (guards.ts `bareKeyAllowed`).
- */
 export const inboxThreadShortcuts = defineShortcutScope({
   id: 'inbox-thread',
   title: 'Thread',
@@ -27,10 +21,7 @@ export const inboxThreadShortcuts = defineShortcutScope({
       preventDefault: true,
       displayOrder: 6,
     },
-    // Shift+E and H (approval "inbox-keyboard-keys-2026-11-07", items 2 and 3). Snooze is H, not Gmail's B: B is the
-    // second key of G B (Go to the Board), so a G that lapsed would turn into a snooze; H is the approval's fallback.
     archive: {
-      // App.tsx, beside E: the row the keyboard is on, else the open thread; Z undoes, as the toast's Undo.
       description: 'Archive',
       bindings: ['Shift+E'],
       section: 'List',
@@ -39,7 +30,6 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 5.1,
     },
     snooze: {
-      // InboxList.tsx (a row the keyboard is on: its menu at the times) and Thread.tsx (the header ⋯ menu at the times).
       description: 'Snooze…',
       bindings: ['H'],
       section: 'List',
@@ -56,9 +46,6 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 0,
     },
     send: {
-      // The reply box's and compose's own keydown (Thread.tsx, ComposeDialog.tsx) match this binding, and so does
-      // Thread.tsx's handler for the closed foot's Send (from any focus in the thread), the full-screen composer's card,
-      // and the Reviews stack view's Reply box (pulls/PullsPage.tsx).
       description: 'Send',
       bindings: ['Mod+Enter'],
       section: 'Thread',
@@ -66,11 +53,7 @@ export const inboxThreadShortcuts = defineShortcutScope({
       preventDefault: true,
       displayOrder: 1,
     },
-    // J / K are threads, Shift+J / Shift+K messages (approval "inbox-keyboard-shortcuts", J/K swap addendum
-    // 2026-10-27: the owner moves between threads far more often than between messages; Gmail and Superhuman agree).
     nextThread: {
-      // App.tsx: the list's order as shown, folded Quiet left out; no wrap; replaces the thread in history. With no
-      // thread open, J / K move along the list's rows as ↓ ↑ do (nothing opens).
       description: 'Next thread',
       bindings: ['J'],
       section: 'Thread',
@@ -116,7 +99,6 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 5,
     },
     artifacts: {
-      // Thread.tsx: the header's Artifacts button (approval "inbox-keyboard-keys-2026-11-07", item 1). O's sibling.
       description: 'Artifacts: every file in the thread',
       bindings: ['Shift+O'],
       section: 'Files',
@@ -125,8 +107,6 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 5.1,
     },
     openItems: {
-      // Thread.tsx: the same list the "N open questions" button opens, with focus on its first row. Only where that
-      // button shows; with the list open, Q is the menu's type-ahead (guards.ts: a key from inside a menu is its own).
       description: 'Open questions and action items',
       bindings: ['Q'],
       section: 'Thread',
@@ -135,7 +115,6 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 5.5,
     },
     fullScreen: {
-      // Thread.tsx: never saved as the view files open in (only the Full screen button is a choice).
       description: 'Full screen',
       bindings: ['F'],
       section: 'Thread',
@@ -144,14 +123,12 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 6,
     },
     messageMenu: {
-      // CopyMenus.tsx MessageMenu: a message's ⋯ menu from its head (the context-menu key too), as rows and cards.
       description: 'Message menu',
       bindings: ['Shift+F10'],
       section: 'Thread',
       displayOrder: 8,
     },
     close: {
-      // App.tsx: a guided review, then the Artifacts view, then full screen, then the thread.
       description: 'Close, one layer at a time',
       bindings: ['Escape'],
       section: 'Everywhere',

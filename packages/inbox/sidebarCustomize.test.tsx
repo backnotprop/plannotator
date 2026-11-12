@@ -1,15 +1,3 @@
-/**
- * Customizing the sidebar (approval "inbox-sidebar-customize"), on the window's own Sidebar and Customize panel:
- * the right-click menu's checkboxes (only items that hide and that this Inbox draws; a tick hides the row at once,
- * keeps the menu open and saves; Reset to default only once changed; nothing that moves), the keyboard's way in
- * (Shift+F10 / the menu key on a focused control) and no menu on a touch; the panel's switches, locks, grip menu,
- * presets, Reset and Escape; an item a capability turns off keeping its place; another window's save arriving; the
- * tour's sidebar ignoring the saved layout; and the Agents section as an item that hides (listed in the menu and the
- * panel only while the sidebar draws it, the whole section gone when hidden, on a phone too, kept across a reload,
- * and shown by a layout saved before it was an item). The model itself is packages/core/inbox-sidebar.test.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -42,7 +30,6 @@ beforeEach(() => {
     setItem: (key, value) => void stored.set(key, value),
     removeItem: (key) => void stored.delete(key),
   });
-  // The settings write: answered with what it saved.
   globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
     const sidebar = (JSON.parse(init?.body ?? '{}') as { sidebar: unknown }).sidebar;
     saves.push(sidebar);
@@ -123,7 +110,6 @@ test.skipIf(!hasDom)('the right-click menu: a checkbox per item that hides and i
   draw();
   await rightClick(document.querySelector('[data-board-nav]')!);
   expect(menu()).not.toBeNull();
-  // No Inbox or Settings (they never hide), no Reviews, Shape or Usage (not drawn here).
   expect(toggles()).toEqual(['logo', 'search', 'new-message', 'board', 'drafts', 'copy-prompt', 'feedback', 'shortcuts', 'theme']);
   const boxes = [...document.querySelectorAll('[data-sidebar-toggle]')];
   expect(boxes.every((box) => box.getAttribute('role') === 'menuitemcheckbox' && box.getAttribute('aria-checked') === 'true')).toBe(true);
@@ -141,9 +127,7 @@ test.skipIf(!hasDom)('a tick hides the row at once, leaves the menu open, saves 
   expect(menu()).not.toBeNull();
   expect(document.querySelector('[data-sidebar-toggle="feedback"]')!.getAttribute('aria-checked')).toBe('false');
   expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['feedback'] });
-  // This browser remembers it for the next paint.
   expect(stored.get(SIDEBAR_LAYOUT_COOKIE)).toBe(`${INBOX_SIDEBAR_DEFAULT.top.join(',')};${INBOX_SIDEBAR_DEFAULT.bottom.join(',')};feedback`);
-  // The logo and the Settings row's buttons hide too.
   await click(document.querySelector('[data-sidebar-toggle="logo"]'));
   await click(document.querySelector('[data-sidebar-toggle="theme"]'));
   expect(document.querySelector('.ib-brand')).toBeNull();
@@ -160,7 +144,6 @@ test.skipIf(!hasDom)('Shift+F10 or the menu key on a focused control opens the s
   draw();
   const board = document.querySelector<HTMLElement>('[data-board-nav]')!;
   board.focus();
-  // The keyboard's contextmenu has no pointer position.
   const keyed = await rightClick(board, { clientX: 0, clientY: 0 });
   expect(keyed.defaultPrevented).toBe(true);
   expect(menu()).not.toBeNull();
@@ -190,7 +173,6 @@ test.skipIf(!hasDom)('the panel: Top and Bottom in the sidebar\'s order, a switc
   const rows = (stack: string) => [...panel()!.querySelectorAll(`[data-sbc-zone="${stack}"] [data-sbc-row]`)].map((el) => el.getAttribute('data-sbc-row'));
   expect(rows('top')).toEqual(['search', 'new-message', 'inbox', 'board', 'artifacts', 'drafts']);
   expect(rows('bottom')).toEqual(['copy-prompt', 'feedback', 'settings']);
-  // The logo heads Top; the Settings row's buttons sit under Settings: they hide, they have no grip.
   expect(panel()!.querySelector('[data-sbc-fixed="logo"] .ib-sbc-grip')).toBeNull();
   expect(panel()!.querySelector('[data-sbc-fixed="shortcuts"]')).not.toBeNull();
   for (const locked of ['inbox', 'settings']) {
@@ -199,7 +181,6 @@ test.skipIf(!hasDom)('the panel: Top and Bottom in the sidebar\'s order, a switc
   }
   const feedback = panel()!.querySelector<HTMLElement>('[data-sidebar-switch="feedback"]')!;
   expect(feedback.getAttribute('aria-checked')).toBe('true');
-  // Its name is the row's words.
   expect(document.getElementById(feedback.getAttribute('aria-labelledby')!)!.textContent).toBe('Feedback');
   await click(feedback);
   expect(feedback.getAttribute('aria-checked')).toBe('false');
@@ -218,7 +199,6 @@ test.skipIf(!hasDom)('the grip\'s menu moves an item: Move to bottom, Move up, a
   expect([...moveMenu.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)).toEqual(['Move up', 'Move down', 'Move to bottom']);
   await click(moveMenu.querySelector('[data-sbc-move="bottom"]'));
   expect(stackOf('board')).toBe('bottom');
-  // At the start of the bottom stack, next to the lists.
   expect(document.querySelector('.ib-side-foot [data-sidebar-item]')!.getAttribute('data-sidebar-item')).toBe('board');
   await click(panel()!.querySelector('[data-sidebar-grip="search"]'));
   expect(document.querySelector('[data-sbc-move-menu="search"] [data-sbc-move="up"]')!.hasAttribute('data-disabled')).toBe(true);
@@ -246,7 +226,6 @@ test.skipIf(!hasDom)('Start from: a preset applies, says it is pressed, and a ch
   expect(preset('default').getAttribute('aria-pressed')).toBe('true');
   await act(async () => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   expect(panel()).toBeNull();
-  // The Board row was drawn again by the moves: focus goes to the same row's control now.
   expect(document.activeElement?.hasAttribute('data-board-nav')).toBe(true);
 });
 
@@ -255,13 +234,11 @@ test.skipIf(!hasDom)('an item a capability turns off is in neither the menu nor 
   await act(async () => openSidebarCustomizer(null));
   await click(panel()!.querySelector('[data-sidebar-grip="board"]'));
   await click(document.querySelector('[data-sbc-move-menu="board"] [data-sbc-move="bottom"]'));
-  // The Board is switched off.
   draw({ onBoard: undefined });
   expect(panel()!.querySelector('[data-sbc-row="board"]')).toBeNull();
   expect(item('board')).toBeNull();
   await rightClick(document.querySelector('[data-inbox-nav]')!);
   expect(toggles()).not.toContain('board');
-  // And on again: where it was put.
   draw({ onBoard: noop });
   expect(stackOf('board')).toBe('bottom');
 });
@@ -287,11 +264,8 @@ test.skipIf(!hasDom)('the tour\'s sidebar draws the default whatever is saved, a
   expect(menu()).toBeNull();
 });
 
-/* ---------- Agents: a section that hides (the owner, 2026-11-09) ---------- */
-
 const agentsSection = () => document.querySelector('.ib-side [data-agents-surface]');
 const agentsHeading = () => document.querySelector('.ib-side [data-sidebar-section="agents"]');
-/** A reload: the page forgets what it heard and paints from this browser's cookie. */
 function reload(over: Partial<SidebarProps> = {}) {
   act(() => root?.unmount());
   host?.remove();
@@ -302,18 +276,15 @@ function reload(over: Partial<SidebarProps> = {}) {
 }
 
 test.skipIf(!hasDom)('Agents is listed in the menu and the panel only while the sidebar draws the section', async () => {
-  // An Inbox whose list names no agents, no machine linked: no section, so nothing to hide.
   draw();
   expect(agentsSection()).toBeNull();
   await act(async () => openSidebarCustomizer(null));
   expect(panel()!.querySelector('[data-sbc-fixed="agents"]')).toBeNull();
-  // The list names agents (none running now): the section, and its row between Top and Bottom.
   await act(async () => setInboxAgents([]));
   expect(agentsSection()).not.toBeNull();
   const row = panel()!.querySelector('[data-sbc-fixed="agents"]')!;
   expect(row.textContent).toBe('Agents');
   expect(row.closest('[data-sbc-zone]')).toBeNull();
-  // It hides; it does not move.
   expect(row.querySelector('.ib-sbc-grip')).toBeNull();
   expect(row.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true');
   expect(panel()!.querySelector('[data-sbc-zone="top"]')!.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -333,10 +304,8 @@ test.skipIf(!hasDom)('hiding Agents takes the whole section away, saves it, and 
   expect(agentsHeading()).toBeNull();
   expect(document.querySelector('[data-agents-add]')).toBeNull();
   expect(document.querySelector('.ib-side')!.textContent).not.toContain('Agents');
-  // Projects and the rest are untouched.
   expect(document.querySelector('.ib-side [data-sidebar-section="projects"]')).not.toBeNull();
   expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['agents'] });
-  // The panel still lists it, switched off: the way back.
   expect(panel()!.querySelector('[data-sidebar-switch="agents"]')!.getAttribute('aria-checked')).toBe('false');
 
   reload();

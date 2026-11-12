@@ -1,13 +1,3 @@
-/**
- * New message with a thread name another open thread has: the notice stays, and under it the thread is shown as a
- * pill (its agent's mark, its name) with an offer to send to that thread instead. The real ComposeDialog over a mocked fetch.
- *
- * The failures this catches: the offer missing (the person can only rename), the message going to a new thread or to
- * the wrong message of the thread, a second thread started, compose closing or losing the words when the send fails,
- * the offer left standing for another name, and an offer made when the Inbox did not say which thread has the name.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -21,7 +11,6 @@ const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger
 const ROOT_ID = 'msg_01M4XXVG0ZCPSD10B1KPG7DPMB';
 const ANSWER_ID = 'msg_01M4XXVG0ZCPSD10B1KPG7DPMC';
 
-/** The open thread that has the name: the person started it with Codex, and Codex answered. */
 function holder(): InboxThread {
   const base = { project_id: PROJECT.id, thread_id: ROOT_ID, subject_question: null, resolved_at: null };
   const first = { ...base, id: ROOT_ID, reply_to: null, author: { kind: 'person' }, subject: 'Launch notes', body: 'Start the launch notes.', created_at: '2026-10-14T15:04:00.000Z', idempotency_key: 'c1', to: { host: 'codex', session: 'ses_codex' }, started_by_person: true, thread_name: 'Launch notes' } as InboxMessageWire;
@@ -36,11 +25,9 @@ let posts: { path: string; body: Record<string, unknown> }[] = [];
 let sent: ComposeSent[] = [];
 let joined: ComposeJoined[] = [];
 let closed = 0;
-/** What the 409 says besides its code: the thread that has the name, or nothing. */
 let names: Record<string, unknown> = {};
 let thread: InboxThread | null = null;
 let replyFails = false;
-/** The thread's list row, as the thread read carries it (its state); null: none. */
 let row: Record<string, unknown> | null = null;
 
 beforeEach(() => {
@@ -115,7 +102,6 @@ function type(input: HTMLInputElement | HTMLTextAreaElement, text: string) {
   });
 }
 
-/** New message to the live Claude Code session, the words and the name typed, Send pressed: the name is refused. */
 async function refused(name = 'launch notes') {
   host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -148,25 +134,20 @@ async function refused(name = 'launch notes') {
 
 test.skipIf(!hasDom)('a taken name keeps its notice and offers the thread that has it; the offer sends the message there, to the message a reply in that thread answers', async () => {
   await refused();
-  // The notice is its one sentence; the thread is shown under it as a pill: its own name (not the typed one), and
-  // the agent that has it (Codex, not To's Claude Code), by its mark and in the pill's name.
   expect(notice()!.textContent).toBe('Another open thread in this project has this name.');
   expect(pill()!.querySelector('.ib-tpill-n')!.textContent).toBe('Launch notes');
   expect(pill()!.getAttribute('aria-label')).toBe('Launch notes, with Codex');
   expect(pill()!.getAttribute('role')).toBe('img');
   expect(pill()!.querySelector('.ib-mk')).not.toBeNull();
-  // A picture, not a way out of compose: nothing in it can be pressed or focused.
   expect(pill()!.matches('button, a, [tabindex]')).toBe(false);
   expect(pill()!.querySelector('button, a, [tabindex]')).toBeNull();
   act(() => pill()!.click());
   expect(closed).toBe(0);
   expect(posts.filter((p) => p.path.endsWith('/reply'))).toHaveLength(0);
-  // An offer, not a failure: said politely, and neither the chip nor the field is marked as an error.
   expect(notice()!.getAttribute('role')).toBe('status');
   expect(inDialog('[data-compose-thread-name]')!.hasAttribute('data-invalid')).toBe(false);
   expect(inDialog('[data-compose-thread-name]')!.hasAttribute('data-offer')).toBe(true);
   expect(nameField().hasAttribute('aria-invalid')).toBe(false);
-  // A real button after the notice's words, with its full name; the field is still described by the notice alone.
   expect(offer()!.tagName).toBe('BUTTON');
   expect(offer()!.hasAttribute('tabindex')).toBe(false);
   expect(notice()!.contains(offer())).toBe(false);
@@ -177,7 +158,6 @@ test.skipIf(!hasDom)('a taken name keeps its notice and offers the thread that h
 
   act(() => offer()!.click());
   await until(() => joined.length === 1, 'the send');
-  // One reply, on the agent's latest message in that thread; no thread started, nobody else addressed.
   expect(replies()).toHaveLength(1);
   expect(replies()[0]!.path).toBe(`/api/inbox/messages/${ANSWER_ID}/reply`);
   expect(replies()[0]!.body).toMatchObject({ words: 'Add the pricing change to the notes.', questions: [] });
@@ -199,7 +179,6 @@ test.skipIf(!hasDom)('the send to that thread fails: compose stays open with the
   expect(words().value).toBe('Add the pricing change to the notes.');
   expect(nameField().value).toBe('launch notes');
   expect(offer()!.disabled).toBe(false);
-  // The second press is the same send (one key), so a lost answer is never two messages.
   replyFails = false;
   act(() => offer()!.click());
   await until(() => joined.length === 1, 'the retry');
@@ -224,7 +203,6 @@ test.skipIf(!hasDom)('no offer without one thread to send to: the Inbox named no
   expect(notice()!.textContent).toBe('Another open thread in this project has this name.');
   expect(offer()).toBeNull();
   expect(pill()).toBeNull();
-  // The plain refusal is still an error.
   expect(notice()!.getAttribute('role')).toBe('alert');
   expect(inDialog('[data-compose-thread-name]')!.hasAttribute('data-invalid')).toBe(true);
   expect(nameField().getAttribute('aria-invalid')).toBe('true');

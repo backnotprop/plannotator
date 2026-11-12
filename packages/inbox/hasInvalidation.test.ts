@@ -1,22 +1,7 @@
-/**
- * No `:has()` rule in the Inbox's sheet may end, after a combinator, in a part
- * with nothing to key on (`X:has(…) > *`, `X:has(…) > :not(.a)`).
- *
- * Chromium keeps one invalidation set for what follows every `:has()` in the
- * page. One such part makes it "every descendant", and then any DOM change
- * under an element a `:has()` rule is anchored on (html, body, .pn-inbox and
- * the thread's foot all are) restyles the whole page. React gives the reply
- * box's textarea a new text node on every key, so each key restyled ~3,500
- * elements on a long thread: 34 ms a key at 4x CPU slowdown, the larger half
- * of the typing lag on a phone (2026-11-02, the reply box perf fix). Write
- * such a rule with the `:has()` on the element it styles instead
- * (`X > :not(.a):has(~ .b)`), or key it on a class.
- */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Every selector in a stylesheet (comments and declarations dropped, at-rule preludes skipped). */
 export function selectorsOf(css: string): string[] {
   const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const out: string[] = [];
@@ -37,7 +22,6 @@ export function selectorsOf(css: string): string[] {
   return out.map((s) => s.trim()).filter(Boolean);
 }
 
-/** Split on `sep` outside parentheses and brackets. */
 function splitTop(text: string, sep: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -54,7 +38,6 @@ function splitTop(text: string, sep: string): string[] {
   return parts;
 }
 
-/** A selector's compounds, left to right (combinators outside parentheses split them). */
 function compoundsOf(selector: string): string[] {
   const out: string[] = [];
   let depth = 0;
@@ -71,7 +54,6 @@ function compoundsOf(selector: string): string[] {
   return out;
 }
 
-/** Drop each `:name(…)` group, nested parentheses included. */
 function dropPseudo(compound: string, name: string): string {
   let out = compound;
   for (let at = out.indexOf(`:${name}(`); at >= 0; at = out.indexOf(`:${name}(`)) {
@@ -86,13 +68,11 @@ function dropPseudo(compound: string, name: string): string {
   return out;
 }
 
-/** Whether Chromium can key an invalidation on the compound: a class, id, attribute or type, outside :not() and :has(). */
 function hasFeature(compound: string): boolean {
   const rest = dropPseudo(dropPseudo(compound, 'not'), 'has');
   return /[.#[]/.test(rest) || /(^|[(,]\s*)[a-z]/i.test(rest);
 }
 
-/** The selectors whose part after a `:has()` (past a combinator) has nothing to key on. */
 export function subtreeHasSelectors(css: string): string[] {
   return selectorsOf(css).filter((selector) => {
     const compounds = compoundsOf(selector);

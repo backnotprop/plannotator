@@ -1,15 +1,3 @@
-/**
- * Sent questions are read-only one by one, as the window draws them over a
- * REAL Inbox server in a temp data dir (its own process,
- * tests/helpers/inbox-dom-server.ts with its `sent-multi` seed): one message
- * holds a pick-any question the person already sent (`Toasts`, not the
- * recommendation) and a pick-one question still open.
- * The failure this catches: the sent card offering "Accept recommended" or
- * live boxes (the server answers "already sent"), or the lock spilling over
- * onto the open question in the same message.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -21,7 +9,6 @@ import { join, resolve } from 'node:path';
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 
-/** The real Inbox, in its own process: happy-dom's Response cannot be served from this one. */
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
 type World = { project: string; sentMulti: string };
@@ -36,7 +23,6 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 
-/** One request to the real Inbox over loopback (happy-dom's own fetch would resolve against its page). */
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
     const req = request({ host: '127.0.0.1', port, path, method, headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` } }, (res) => {
@@ -55,7 +41,6 @@ const TESTS = 2;
 beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-sent-q-dom-')));
-  // Never the real tailscale, never the real data dir.
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
@@ -120,7 +105,6 @@ async function settle(ms = 40) {
   }
 }
 
-/** Act until `check` holds (the window's reads go to another process), or fail after 5 s. */
 async function until(check: () => boolean, what: string) {
   for (let i = 0; i < 100; i++) {
     if (check()) return;
@@ -145,7 +129,6 @@ async function renderApp(hash: string) {
 
 const cardsOf = (el: ParentNode, messageId: string) =>
   [...el.querySelectorAll<HTMLFieldSetElement>(`[data-message-id="${messageId}"] fieldset[data-question-key]`)];
-/** Open the thread and unfold the asking message (the person's reply after it is the last message, so it opens folded). */
 async function openThread() {
   const el = await renderApp(`#thread=${ids.sentMulti}`);
   const article = () => el.querySelector<HTMLElement>(`[data-message-article="${ids.sentMulti}"]`);
@@ -163,7 +146,6 @@ test.skipIf(!hasDom)('a sent pick-any card is read-only; the open question besid
   const el = await openThread();
   const [sent, open] = cardsOf(el, ids.sentMulti);
 
-  // The sent card: its answer drawn, nothing to press.
   const boxes = [...sent.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
   expect(boxes).toHaveLength(3);
   expect(boxes.every((b) => b.disabled)).toBe(true);
@@ -172,7 +154,6 @@ test.skipIf(!hasDom)('a sent pick-any card is read-only; the open question besid
   expect(buttonIn(sent, 'Skip')).toBeUndefined();
   expect(buttonIn(sent, 'Add note')).toBeUndefined();
 
-  // The open card in the same message keeps every control, and a pick saves.
   const radios = [...open.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
   expect(radios.every((r) => !r.disabled)).toBe(true);
   expect(buttonIn(open, 'Accept recommended')).toBeDefined();

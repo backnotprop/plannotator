@@ -1,9 +1,3 @@
-/**
- * The `#` list on a plain field (New card's title and notes; approval
- * "board-hashtags"): the skill list's own menu, hung off the field's line
- * (a textarea: the caret's line; an input: the field). Its wrapper is the
- * field's `position: relative` box (`.ib-hashwrap`).
- */
 import { useLayoutEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { SkillReferenceMenu } from '@plannotator/ui/components/SkillReferenceMenu';

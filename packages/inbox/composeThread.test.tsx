@@ -1,13 +1,3 @@
-/**
- * A thread the person started (compose), as the thread draws it: "You
- * started this thread · to <agent>", the queued and delivered lines, and Not
- * delivered with "Send to another session" when the session it was
- * addressed to stopped before it took the message. The failure this
- * catches: a message stuck on a session that is gone with nothing saying
- * so, or moved somewhere the person did not pick.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -132,7 +122,6 @@ test.skipIf(!hasDom)('the session stopped before it took it: Not delivered, and 
   const open = el.querySelector('[data-readdress-open]') as HTMLButtonElement;
   act(() => open.click());
   await settle();
-  // The ended-session reply's radio rows: the first live session is selected, focus on it.
   const pick = el.querySelector('[data-readdress-session="ses_pi"]') as HTMLLabelElement;
   expect(pick.textContent).toContain('Pi · started');
   const radio = pick.querySelector('input[type=radio]') as HTMLInputElement;
@@ -143,7 +132,6 @@ test.skipIf(!hasDom)('the session stopped before it took it: Not delivered, and 
   await settle();
   expect(posted).toEqual([{ path: `/api/inbox/messages/${ROOT_ID}/to`, body: { to: { host: 'pi', session: 'ses_pi' } } }]);
   expect(changed).toBe(1);
-  // The choice is gone with the move: focus lands on the message's delivery line, never the page.
   for (let i = 0; i < 20 && document.activeElement === document.body; i++) await settle();
   expect(el.querySelector('[data-readdress-choice]')).toBeNull();
   expect(document.activeElement).toBe(el.querySelector(`[data-message-article="${ROOT_ID}"] [data-delivery]`));
@@ -154,7 +142,6 @@ test.skipIf(!hasDom)('delivered: the line says so, and nothing offers to move it
   const el = await render(started({ delivery: { state: 'delivered', host: 'claude-code', session: 'ses_gone', at: '2026-10-14T15:05:00.000Z' } }));
   expect(el.querySelector('[data-delivery]')?.textContent).toMatch(/^Delivered to Claude Code, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   expect(el.querySelector('[data-readdress]')).toBeNull();
-  // Nothing waits, so the window does not ask about the session.
   expect(posted).toEqual([]);
 });
 
@@ -184,13 +171,11 @@ test.skipIf(!hasDom)('the To picker keeps its highlight on the same session when
     act(() => {
       el.querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
     });
-  // Nobody in To: no row highlighted until an arrow key (then the first row).
   expect(highlighted()).toBe('');
   arrow();
   expect(highlighted()).toContain('Claude Code');
   arrow();
   expect(highlighted()).toContain('Pi');
-  // The re-read puts Pi first: the highlight stays on Pi, not on row 2.
   draw([b, a]);
   expect(highlighted()).toContain('Pi');
   act(() => picker.unmount());

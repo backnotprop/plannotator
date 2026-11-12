@@ -20,7 +20,6 @@ import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } f
 import { useRowDraft } from '../fileCommentDrafts';
 import { markImageComposer } from '../pageMarks';
 
-/** A fresh annotation id. */
 function newId(): string {
   return typeof crypto.randomUUID === 'function' ? `ann-img-${crypto.randomUUID()}` : `ann-img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -29,59 +28,15 @@ function stem(name: string): string {
   return name.replace(/\.[^.]+$/, '') || name;
 }
 
-/**
- * What a phone's swipe over the image asks it (the pane's `useFileSwipe`,
- * approval "inbox-image-swipe"): whether the image can still pan the way a
- * swipe goes (zoomed, or a panorama: it pans to its edge first, then the
- * next swipe that way steps), and whether a drag down may close it (at Fit,
- * at its top).
- */
 export interface ImageSwipeEdges {
-  /** 1: the finger moves left (the next file); -1: right. True while the image has more to show that way. */
   keeps(dir: 1 | -1): boolean;
   canDismiss(): boolean;
 }
 
-/** The scale beside Fit / Actual size: "37%", "250%". */
 export function zoomPercent(scale: number): string {
   return `${Math.round(scale * 100)}%`;
 }
 
-/**
- * An image attachment in the pane: the image on a quiet stage, and a comment
- * box under it. The stage is ui's `ImageZoomStage`, the lightbox's: Ctrl/⌘ +
- * wheel and a trackpad pinch zoom about the pointer, a plain wheel scrolls an
- * image larger than the stage (and zooms one that fits), a drag or one finger
- * pans, two fingers pinch, a double click toggles Fit and 2×, Fit to 800%.
- * The size bar shows the scale beside Fit / Actual size, which reset it.
- * Transforms only, so a gesture never lays anything out. "Mark up" opens
- * Plannotator's image annotator (pen, arrow, circle) over the whole window;
- * its ✓ (or Enter) adds the drawing to the reply at once, as its own comment
- * (approval "inbox-markup-flow"): the drawing stays laid over the image, the
- * window's toast says so with Undo, and the comment box keeps its picture
- * (click: draw again; ×: take it out) beside "Note (optional)", whose words go
- * onto that same comment. Escape cancels a drawing. Selecting a comment with a
- * drawing lays the drawing over the image in the image's own transform, so it
- * stays aligned at any zoom. The image is drawn only by `<img src>` from the
- * attachment's route.
- *
- * The comment box is one floating row on the stage (in its own grid row, so
- * it never covers the image): the words, Mark up, Comment.
- *
- * The pane keys it by attachment, so the comment box is never carried to the
- * next file and every file opens at Fit, except one the reader set to Actual
- * size (the pane remembers that per file: `initialFit`, `onFitChange`; a
- * gesture's zoom is not remembered). A tall screenshot fits its width (read
- * from the top) and a panorama its height (read from the left); pinch out
- * shows the whole image. ← → and ] [ always step files, zoomed or not: the
- * focused stage takes only ↑ ↓, Page Up / Down, Home / End and Space to pan.
- * A horizontal swipe on the image shown at Fit steps (`onSwipe`), nowhere else;
- * on a phone in full screen the pane's follow swipe does instead, asking the
- * image whether it pans first (`edgesRef`) and hearing when it is shown
- * (`onShown`). On a phone standing up, Fit and the pan's limits work between
- * the floating bars and the option card (`useClearRows`), so the image is never
- * left under them; zoomed in it still slides under them.
- */
 export function ImageAttachmentView({
   attachment,
   version,
@@ -108,32 +63,21 @@ export function ImageAttachmentView({
   readOnly: boolean;
   onSave: (annotation: Annotation) => Promise<boolean>;
   onError: (message: string) => void;
-  /** Fit or Actual size when it opens (the pane's memory of this file). */
   initialFit?: 'fit' | 'actual';
   onFitChange?: (fit: 'fit' | 'actual') => void;
-  /** A swipe across the fitted image: 1 next file, -1 previous (where the pane's follow swipe is off: not a phone in full screen). */
   onSwipe?: (dir: 1 | -1) => void;
-  /** Filled with what the pane's follow swipe asks the image (`ImageSwipeEdges`); emptied when it goes. */
   edgesRef?: MutableRefObject<ImageSwipeEdges | null>;
-  /** The image is on screen (loaded and laid out once), or could not be shown: a swipe's picture of it can go. */
   onShown?: () => void;
-  /** The pane's "⌘ + scroll to zoom" gate, so the hint shows once per viewer open, not once per file (#2127). */
   wheelHint?: WheelHintGate;
-  /** A suggested comment the box opens with (the tour's): kept with one press, or written over. */
   suggestion?: string;
-  /** Select a comment (a drawing just added is selected, so it stays on the image). */
   onSelect?: (id: string | null) => void;
-  /** Take a comment out of the reply (the drawing's × and the toast's Undo). */
   onRemove?: (id: string) => Promise<void> | void;
-  /** The window's toast ("Markup added to your reply · Undo"). */
   onNotice?: Notice;
 }) {
-  /** Full screen's composer (the pane gives it there): the comment row goes inside it. */
   const composer = useContext(FullScreenComposerContext);
   const [mode, setMode] = useState<ZoomMode>(initialFit ?? 'fit');
   const [scale, setScale] = useState<number | null>(null);
   const enterSavesComment = useConfigValue('enterSavesComment');
-  // The pane remembers Fit / Actual size per file: told after each change, never from inside a state update. A gesture's zoom counts as Fit.
   const fit: 'fit' | 'actual' = mode === 'actual' ? 'actual' : 'fit';
   const reportedFit = useRef(fit);
   const onFitChangeRef = useRef(onFitChange);
@@ -145,11 +89,9 @@ export function ImageAttachmentView({
   }, [fit]);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
-  // Words (and a drawing) the box held when this file last closed: back in it, and read again as it closes.
   const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup }));
   const [text, setText] = useState(waiting?.text ?? suggestion ?? '');
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
-  /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const sendRow = async (annotation: Annotation) => {
     sentWords.current = text;
@@ -157,11 +99,7 @@ export function ImageAttachmentView({
     if (!ok) sentWords.current = null;
     return ok;
   };
-  // The drawing the ✓ just added to the reply: its comment's id, for a note, a redraw or ×.
   const [kept, setKept] = useState<{ id: string; image: ImageAttachment } | null>(null);
-  // One drawing per opening of the drawing screen: set as it opens, taken by the first ✓ or Enter. ui calls
-  // onAccept once per press, each after its own encode, so a later press (even one landing after the first
-  // drawing is in the reply) adds nothing.
   const acceptable = useRef(false);
   const [annotating, setAnnotating] = useState(false);
   useEffect(() => {
@@ -173,7 +111,6 @@ export function ImageAttachmentView({
   const source = useInboxFileSource();
   const src = source.imageUrl(attachment, version);
 
-  // Another version of the same file: fitted again.
   const shownVersion = useRef(version);
   useEffect(() => {
     if (shownVersion.current === version) return;
@@ -184,7 +121,6 @@ export function ImageAttachmentView({
     setFailed(false);
   }, [version]);
 
-  // The pane's follow swipe asks the image whether it pans first, and whether a drag down closes.
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const naturalRef = useRef(natural);
@@ -195,7 +131,6 @@ export function ImageAttachmentView({
       keeps: (dir) => canPanToward(zoomRef.current?.visibleBox() ?? null, naturalRef.current?.width ?? 0, dir),
       canDismiss: () => {
         if (modeRef.current !== 'fit') return false;
-        // A tall screenshot fitted to its width reads from the top: a drag down further down it is a pan back up.
         const box = zoomRef.current?.visibleBox() ?? null;
         return box === null || box.y <= 1;
       },
@@ -208,21 +143,17 @@ export function ImageAttachmentView({
   onShownRef.current = onShown;
   useEffect(() => {
     if (!natural && !failed) return;
-    // A frame after the image is laid out at its Fit, so nothing shows between a swipe's picture and the image.
     const frame = requestAnimationFrame(() => onShownRef.current?.());
     return () => cancelAnimationFrame(frame);
   }, [natural, failed]);
 
-  // A panorama fitted to the pane would be a sliver: Fit keeps a readable height (read from the left); a tall screenshot fits its width (read from the top).
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
   const tall = natural !== null && natural.height > natural.width * 2;
   const fitAxis: FitAxis = wide ? 'height' : tall ? 'width' : 'contain';
 
-  // The stage's own padding (28 px, 12 on a phone) is what Fit leaves around the image.
   const stageRef = useRef<HTMLDivElement>(null);
   const [pad, setPad] = useState<number | null>(null);
   const { probe: clearProbe, clear } = useClearRows();
-  // Read again when the phone breakpoint is crossed (the padding changes with it).
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -237,8 +168,6 @@ export function ImageAttachmentView({
     return () => query.removeEventListener?.('change', read);
   }, []);
 
-  // Ctrl + wheel (a pinch) and Safari's gesture events over the size bar or the
-  // chip must not zoom the page; the stage zooms the image from its own listeners.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -254,14 +183,11 @@ export function ImageAttachmentView({
     };
   }, []);
 
-  // A horizontal swipe on the image at Fit: more than 60 px across, less than 40 px up or down (a panorama pans instead).
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
   const swipes = onSwipe !== undefined && mode === 'fit' && !wide;
 
-  // A selected comment that carries a drawing shows the drawing over the image.
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
   const selectedMarkup = selected?.images?.[0] ?? null;
-  // The kept drawing's comment as it reads now; gone once removed (the panel, Undo) or sent, and the box lets it go.
   const keptNow = kept ? annotations.find((a) => a.id === kept.id) ?? null : null;
   useEffect(() => {
     if (kept && !keptNow) setKept(null);
@@ -274,9 +200,7 @@ export function ImageAttachmentView({
   const submit = async () => {
     const words = text.trim();
     if (saving) return;
-    // A note: onto the drawing the ✓ added, the same comment.
     if (kept && keptNow) {
-      // (A redraw whose save failed waits as `markup`: it goes with the note.)
       if (!words && !markup) return;
       setSaving(true);
       const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, words), ...(markup ? { images: [markup] } : {}) });
@@ -305,21 +229,14 @@ export function ImageAttachmentView({
     }
   };
 
-  /** Take the added drawing out of the reply (its × or the toast's Undo). */
   const removeKept = (id: string) => {
     setKept((current) => (current?.id === id ? null : current));
     onSelect?.(null);
     void onRemove?.(id);
   };
 
-  /**
-   * The ✓: the drawing goes into the reply now, as its own comment (a redraw
-   * replaces the picture of the comment already added). Words already typed go
-   * with it; with none, the box offers a note for the same comment.
-   */
   const addDrawing = async (image: ImageAttachment) => {
     const words = text.trim();
-    // A redraw: the comment as it reads now, its picture replaced (and any words typed, as a note).
     const redraw = kept && keptNow ? keptNow : null;
     const id = redraw?.id ?? newId();
     const ok = await sendRow(
@@ -328,7 +245,6 @@ export function ImageAttachmentView({
         : imageCommentAnnotation({ id, name: attachment.name, text: markupWords(words, true), markup: image }),
     );
     if (!ok) {
-      // Not saved (the error shows): the drawing waits in the box for Comment, as before.
       setMarkup(image);
       return;
     }
@@ -336,11 +252,9 @@ export function ImageAttachmentView({
     setText('');
     setKept(words ? null : { id, image });
     onSelect?.(id);
-    // A new comment says so, with Undo; a redraw only replaced the picture (Undo would take the whole comment).
     if (!redraw) onNotice?.(markupAddedToast(() => removeKept(id)));
   };
 
-  // The comment row: at the image's foot beside the thread, inside the full-screen composer's Comment tab in full screen.
   const commentCard = (
     <div className="ib-ccard">
       {kept && <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} />}
@@ -369,9 +283,6 @@ export function ImageAttachmentView({
             void submit();
             return;
           }
-          // Escape leaves the field first (approval "inbox-keyboard-shortcuts": one layer per Escape): focus goes
-          // to the file's pane, the words stay; the next Escape is the pane's. Full screen's Escape ladder has
-          // this rung already (AttachmentPane, "Left the comment box."); beside the thread it is this one.
           if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
             const paneEl = event.currentTarget.closest<HTMLElement>('[data-attachment-pane]');
             if (!paneEl || paneEl.closest('[data-full-view]')) return;
@@ -412,7 +323,6 @@ export function ImageAttachmentView({
         data-wide={wide ? 'true' : undefined}
         data-src={markupSrc ?? src}
         onKeyDown={(event) => {
-          // The focused stage pans with the browser's scroll keys; ← → stay stepping.
           const zoom = zoomRef.current;
           if (!zoom?.element || event.target !== zoom.element) return;
           if (event.metaKey || event.ctrlKey || event.altKey || event.nativeEvent.isComposing) return;
@@ -429,7 +339,6 @@ export function ImageAttachmentView({
         onTouchMove={
           swipes
             ? (event) => {
-                // A second finger is a pinch, never a swipe.
                 if (event.touches.length > 1) swipeStart.current = null;
               }
             : undefined
@@ -532,7 +441,6 @@ export function ImageAttachmentView({
             requestAnimationFrame(() => textRef.current?.focus());
           }}
           onAccept={async (blob, hasDrawings) => {
-            // Nothing drawn: nothing to keep; the comment box stays as it was.
             if (!hasDrawings || !acceptable.current) return;
             acceptable.current = false;
             try {

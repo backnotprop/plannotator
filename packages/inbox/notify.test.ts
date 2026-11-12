@@ -1,10 +1,3 @@
-/**
- * The one-time notifications line: "moved" only when the Inbox changed port
- * under the same name. The tailnet address (another device, another name)
- * is another permission, so it gets the plain ask. And which threads notify
- * (approval "inbox-notify-every-thread"): every new thread (its root's first line), a question
- * unless its thread is on screen, bursts by where the person is.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessage } from '@plannotator/core/inbox-types';
 import {
@@ -23,7 +16,6 @@ import {
 
 const saved = (allowed_origin: string | null) => ({ enabled: true, dismissed: false, allowed_origin });
 
-// Snooze (approval "inbox-snooze"): a question asked during a snooze waits; the return asks it, once per return.
 describe('a return from a snooze', () => {
   test('a returned thread with a question open notifies once, keyed by that return; without one, or not seen snoozed, it does not', () => {
     const row = (id: string, open: number, back: string | null) => ({ thread_id: id, author: { name: 'Codex' }, questions: { open }, snooze_back: back }) as unknown as Parameters<typeof returnedItems>[0][number];
@@ -68,8 +60,6 @@ describe('askKind', () => {
 });
 
 describe('inboxNotificationOptions', () => {
-  // A new notice replaces the last (one tag) and still alerts (renotify): without
-  // renotify Chrome replaces a notice that carries the tag silently.
   test('every notice carries the one tag and renotify', () => {
     const options = inboxNotificationOptions({ body: 'Pick a retry policy' });
     expect(options.tag).toBe(NOTIFICATION_TAG);
@@ -111,9 +101,7 @@ describe('which threads notify', () => {
   });
 
   test("only the root's first line is a new thread: an Unarchive's line looks like a fresh root but is not first", () => {
-    // An archived-before-load thread unarchived: resolved_at null, never looked at, unknown to the page.
     expect(isNewAgentThread(root(), false, new Set())).toBe(false);
-    // An Inbox without the field notifies no new thread.
     expect(isNewAgentThread(root(), undefined, new Set())).toBe(false);
   });
 
@@ -133,7 +121,6 @@ describe('which threads notify', () => {
     expect(startsNewBurst({ front: false, at: 0 }, false, FRONT_BURST_MS * 10)).toBe(false);
     expect(startsNewBurst({ front: true, at: 0 }, true, FRONT_BURST_MS)).toBe(false);
     expect(startsNewBurst({ front: true, at: 0 }, true, FRONT_BURST_MS + 1)).toBe(true);
-    // The person's place changed: a notice raised in front never joins the away burst, nor the other way.
     expect(startsNewBurst({ front: true, at: 0 }, false, 1)).toBe(true);
     expect(startsNewBurst({ front: false, at: 0 }, true, 1)).toBe(true);
   });
@@ -145,7 +132,6 @@ describe('which threads notify', () => {
     expect(news.title.startsWith('billing-svc: Claude Code')).toBe(true);
     expect(news.title).not.toBe(asking.title);
     expect(news.body).toBe('Deploy notes');
-    // A Stopped thread reads as stopped whatever brought the notice.
     expect(threadNotificationText({ ...base, section: 'stopped', asks: false }).title).toBe(
       threadNotificationText({ ...base, section: 'stopped' }).title,
     );

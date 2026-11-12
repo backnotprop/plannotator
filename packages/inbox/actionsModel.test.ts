@@ -1,9 +1,3 @@
-/**
- * Action items in the window's pure models (approval "inbox-next-actions"):
- * failures to catch: a folded action item-only message with an empty snippet; two
- * chips with one React key (a message holding an open question and an action item);
- * an action item's report counted as the person's look.
- */
 import { expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { foldSnippet, holdingsOf, isPersonLook, isPersonReply, lookBoundary } from './folding';

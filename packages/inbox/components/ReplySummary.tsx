@@ -1,17 +1,3 @@
-/**
- * What goes with this Send, said in one quiet line: "4 questions open · 3 comments ⌃" (approval
- * "inbox-reply-foot-phone", variant B "Summary", 2026-11-02). Where the line is too narrow for that (a 320 px phone, a
- * larger text size), "4 open · 3 comments ⌃".
- *
- * - A press on the line opens a small sheet: the questions with "Skip them" (or "Keep open" once skipped), the
- *   picks on a replaced question that won't be sent, and the comments with "Review", which opens their list.
- * - With comments only, the line opens the comments list itself: one press.
- * - Every action is two presses away at most, every target at least 44 px.
- *
- * Where it sits (approval "inbox-reply-box", T6): on a phone, on its own line over the box's row; on a computer, in
- * the row's middle cell in place of the chips when they don't fit (inbox.css, a container query). The answers chip
- * ("2 picks") is not drawn here: the answers list in the box says the same.
- */
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { plural, formatCount } from '../format';
 import { Icon } from '../icons';
@@ -19,7 +5,6 @@ import { useInboxTextSize } from '../textSize';
 import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
 
 export interface FootSkip {
-  /** The unanswered questions (kept open) or the ones this Send skips. 0: none unanswered. */
   count: number;
   keepOpen: boolean;
   onToggle: () => void;
@@ -36,7 +21,6 @@ const skipWords = (skip: FootSkip) =>
 
 const droppedWords = (dropped: number) => `${dropped} ${dropped === 1 ? 'pick' : 'picks'} on a replaced question won’t be sent`;
 
-/** A small bottom sheet: the scrim, Escape and × close it. Focus goes in, and back to `back` when it closes. */
 function FootSheet({ title, onClose, back, children }: { title: string; onClose: () => void; back: () => HTMLElement | null; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -53,7 +37,6 @@ function FootSheet({ title, onClose, back, children }: { title: string; onClose:
       closeRef.current();
       backRef.current()?.focus({ preventScroll: true });
     };
-    // Focus leaving for anything outside (Tab past the last button, a press elsewhere) closes it, as the comments list does.
     const onFocus = (event: FocusEvent) => {
       if (event.target instanceof Node && !panel.current?.contains(event.target)) closeRef.current();
     };
@@ -73,10 +56,7 @@ function FootSheet({ title, onClose, back, children }: { title: string; onClose:
       <div
         className="ib-fsheet-scrim"
         aria-hidden="true"
-        // The press must not reach the page under the scrim (the reply box would take focus and raise the keyboard).
         onPointerDown={(event) => event.preventDefault()}
-        // Closed on the click, not the press: gone at the press, the tap's click would land on what is under the
-        // finger (a question's option, a link, Back).
         onClick={closeBack}
       />
       <div className="ib-fsheet" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={panel}>
@@ -92,10 +72,6 @@ function FootSheet({ title, onClose, back, children }: { title: string; onClose:
   );
 }
 
-/**
- * Stays mounted while the box is open, drawing nothing when nothing goes with the Send: when the questions go while
- * its sheet has focus, it puts focus on the box's paperclip.
- */
 export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; dropped: number; comments: FootComments | null }) {
   const [sheetOpen, setSheet] = useState(false);
   const rowRef = useRef<HTMLSpanElement>(null);
@@ -105,18 +81,13 @@ export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; drop
   const count = comments?.props.records.length ?? 0;
   const commentsOpen = !!comments?.list && !comments.list.card;
   const questions = skip.count > 0 || dropped > 0;
-  // With comments only, the line is the comments' own way in: one press to the list.
   const direct = !questions;
-  // The sheet is for the questions. When they go while it is open (answered in another window, withdrawn), it closes
-  // for good: a later question must not open it again by itself (it would take focus from the field mid-sentence).
   const [refocus, setRefocus] = useState(false);
   if (sheetOpen && direct) {
     setSheet(false);
     setRefocus(true);
   }
   const sheet = sheetOpen && !direct;
-  // Focus was in the sheet that went: back on the line, or with no line left, the box's paperclip (not the field,
-  // which would raise a phone's keyboard nobody asked for).
   useLayoutEffect(() => {
     if (!refocus) return;
     setRefocus(false);
@@ -125,8 +96,6 @@ export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; drop
     (lineRef.current ?? rowRef.current?.closest('.ib-rbox')?.querySelector<HTMLElement>('input[type="file"]'))?.focus({ preventScroll: true });
   }, [refocus]);
 
-  // Short of room, "4 open" for "4 questions open": tried long first, again on every change of the words, the row's
-  // width, the Inbox text size, or the fonts (a web font that lands after the first measure).
   const textSize = useInboxTextSize();
   const [rowWidth, setRowWidth] = useState(0);
   const [fonts, setFonts] = useState(0);
@@ -168,8 +137,6 @@ export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; drop
   if (count > 0) parts.push(<span key="c">{plural(count, 'comment')}</span>);
   if (dropped > 0 && skip.count === 0) parts.push(<span key="d">{dropped} not sent</span>);
   const shown = parts.length > 0 || commentsOpen;
-  // The line's name is its own words ("4 open · 3 comments": what a voice-control user says); the full sentence is its
-  // description.
   const longWords = [skip.count > 0 ? skipWords(skip) : null, count > 0 ? plural(count, 'comment') : null, dropped > 0 ? droppedWords(dropped) : null]
     .filter(Boolean)
     .join(', ');
@@ -182,7 +149,6 @@ export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; drop
             type="button"
             className={`ib-fsum${sheet || commentsOpen ? ' ib-on' : ''}${skip.keepOpen ? '' : ' ib-skipping'}`}
             data-foot-summary={direct ? 'comments' : 'sheet'}
-            // A press on it while the list is open is the line's own (it closes the list), not a press outside.
             {...(direct ? { 'data-comments-link': '' } : {})}
             aria-describedby={descId}
             aria-haspopup="dialog"
@@ -203,14 +169,10 @@ export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; drop
               {...comments.props}
               at={comments.list!.at}
               press={comments.list!.press}
-              // On a computer the line sits in the row's middle cell (approval "inbox-reply-box", D4), often right of
-              // the middle: kept in the window as the chip's list is. A phone's sheet is fixed, so nothing moves there.
               fit
               onClose={(back) => {
                 comments.onList(null);
                 if (!back) return;
-                // The last comment removed (and no question): the line goes with the list, so focus goes to the
-                // box's field, as the desktop chip does.
                 const line = lineRef.current;
                 const target = count === 0 && !questions ? line?.closest('.ib-rbox')?.querySelector('textarea') : line;
                 target?.focus({ preventScroll: true });

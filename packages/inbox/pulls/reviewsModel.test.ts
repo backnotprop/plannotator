@@ -106,12 +106,10 @@ test('a row names people as people, not baked into the words: each one can have 
   const waiting = reviewRowLine(row({ move: 'waiting', reason: 'forge_review', stacks: inboxPullStacks([pull(865, { reviewers: ['lena-v', 'kai'] })]) } as never));
   expect(waiting.status).toBe('Waiting on lena-v’s review');
   expect(waiting.parts).toEqual(['Waiting on ', { person: 'lena-v', tail: '’s' }, ' review']);
-  // A listed PR: its author is a person; the person's own is "yours", and a deleted account is words, with no face.
   const listed = (fields: Partial<InboxPull>) => reviewRowLine(row({ reviewed: false, move: 'not_reviewed', reason: 'not_reviewed', review: null, stacks: inboxPullStacks([pull(7, fields)]) } as never)).parts;
   expect(listed({ mine: false, author: 'tomas', state: 'draft' })).toEqual([{ person: 'tomas' }, ' · draft']);
   expect(listed({ mine: true })).toEqual(['yours', ' · checks passed']);
   expect(listed({ mine: false, author: null })).toEqual(['a deleted account', ' · checks passed']);
-  // No author: no person.
   expect(reviewRowLine(row({ reason: 'requested', review: null, stacks: inboxPullStacks([pull(881, { mine: false, requested: true, author: null })]) } as never)).parts).toEqual(['Review requested']);
 });
 
@@ -199,7 +197,6 @@ describe('how a thread opens from Reviews', () => {
     expect(plan.left).toEqual(['a', 'b', 'c']);
     expect(hiddenOf(plan)).not.toContain('r');
     expect(plan.folded.has('r')).toBe(false);
-    // "N earlier messages" says what a click shows: every id in a run is a message still to draw.
     for (const id of hiddenOf(plan)) expect(plan.left).not.toContain(id);
   });
 
@@ -264,7 +261,6 @@ test("a link's row and header speak only for its own PR's landing, not for a mer
   expect(reviewRowLine(row(own)).lead).toBe('#231 merged');
   expect(view(own).pullUrl).toBe('https://github.com/o/app/pull/231');
 
-  // A thread no link started still shows what landed.
   const plain = { landed: [landing('github.com/o/app#999', 999)] } as unknown as Partial<InboxReviewRow>;
   expect(reviewRowLine(row(plain)).lead).toBe('#999 merged');
   expect(view(plain).pullUrl).toBe('https://github.com/o/app/pull/999');
@@ -277,32 +273,25 @@ test('a walkthrough says Walkthrough, not a branch, from its start (Writing…) 
   expect(reviewRowLine(curating).lead).toBe('Walkthrough');
   expect(reviewContextLine(curating, 'charges')).toBe('charges · Walkthrough');
   expect(reviewViewOf(curating, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} }).asked).toBe('New review · Walkthrough');
-  // While the agent writes it: the row and the thread say Writing, not Curating (there is nothing to curate).
   expect(reviewRowLine(curating).status).toBe('Writing…');
   expect(reviewViewOf(curating, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} }).curating).toBe('Writing the walkthrough…');
-  // A local review started the same way still curates.
   const curatingReview = row({ reviewed: false, reason: 'curating', review: null, started: { ...started, kind: 'local' } } as unknown as Partial<InboxReviewRow>);
   expect(reviewRowLine(curatingReview).status).toBe('Curating…');
   expect(reviewViewOf(curatingReview, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} }).curating).toBe('Curating the review…');
-  // Its review in: the source names a branch, but the row still says what it is; there is no verdict to wait on.
   const ready = row({ started, review: review({ walkthrough: true }) } as unknown as Partial<InboxReviewRow>);
   expect(reviewRowLine(ready)).toMatchObject({ lead: 'Walkthrough', status: 'Ready' });
   expect(reviewViewOf(ready, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} }).curating).toBeNull();
   expect(reviewContextLine(ready, 'charges')).toBe('charges · Walkthrough');
-  // A walkthrough an agent sent unasked (no New review start) reads the same.
   expect(reviewRowLine(row({ review: review({ walkthrough: true }) })).lead).toBe('Walkthrough');
 });
 
 test("the bar's name in Reviews is the row's title: the review's once it landed, none for a PR row or before a review", () => {
   const view = (r: InboxReviewRow) => reviewViewOf(r, { messages: [], subject: 'q', thread_name: 'Webhook delivery' }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} });
   const started = { kind: 'local', changes: null, branch: 'retry-jitter', base: 'main', ask: 'guide', host: 'claude-code', project_id: 'p', at: '', name: 'Webhook delivery' };
-  // A guided review and a walkthrough, both started in New review: the row and the bar say the guide's title.
   for (const r of [row({ started } as unknown as Partial<InboxReviewRow>), row({ started: { ...started, kind: 'walkthrough' }, review: review({ walkthrough: true }) } as unknown as Partial<InboxReviewRow>)]) {
     expect(view(r).name).toBe(reviewRowTitle(r, () => 'PR title'));
     expect(view(r).name).toBe('Retry failed charges');
   }
-  // Curating: no name of its own, so the bar keeps the thread's, which is the row's.
   expect(view(row({ review: null, reason: 'curating', started } as unknown as Partial<InboxReviewRow>)).name).toBeNull();
-  // A PR row's title is the PR's: the bar keeps its thread name.
   expect(view(row({ stacks: [inboxPullStacks([pull(869)])[0]!] })).name).toBeNull();
 });

@@ -1,23 +1,6 @@
-// Copied from the Workspaces app's motion-style div component for the Inbox
-// sidebar (the owner, 2026-10-09: the same component and motion). Port:
-// imports from `motion/react` (the same framer-motion 12.43.0).
-
 import * as React from "react";
 import { cancelFrame, frame, type MotionValue } from "motion/react";
 
-/**
- * The shell's MotionValue-to-style binder: a plain `div` whose `width`,
- * `left`, `opacity` and `x` follow MotionValues, written on the frame loop's
- * render step exactly as framer's DOM renderer writes them (px for lengths,
- * `translateX(Npx)` for x and `none` at 0, opacity as a bare number).
- *
- * Why not `m.div` under `LazyMotion features={domMin}`: that renderer is
- * framer's whole visual element (variants, animation state, projection
- * geometry, the SVG arm), about 20 KB gz on the boot path, to write four
- * numbers the shell's open/close spring and resize drag move. The shell
- * never animates through props, gestures or layout; the routes that do
- * (the document rail, the board) keep `motion.*`.
- */
 export interface MotionStyleValues {
 	width?: MotionValue<number>;
 	left?: MotionValue<number>;
@@ -29,7 +12,6 @@ type MotionStyleKey = keyof MotionStyleValues;
 
 const KEYS: readonly MotionStyleKey[] = ["width", "left", "opacity", "x"];
 
-/** The CSS property and value framer's renderer writes for one key. */
 function cssFor(
 	key: MotionStyleKey,
 	value: number,
@@ -70,7 +52,6 @@ export function MotionStyleDiv({
 	const { width, left, opacity, x } = motionStyle;
 	React.useLayoutEffect(() => {
 		const values: MotionStyleValues = { width, left, opacity, x };
-		// One write per frame, on the render step, whichever inputs moved.
 		const render = () => {
 			const node = element.current;
 			if (node === null) return;

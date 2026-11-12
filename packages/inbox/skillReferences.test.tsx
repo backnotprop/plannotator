@@ -1,28 +1,3 @@
-/**
- * Skill references in the Inbox's composers (approval "inbox-skill-references",
- * Option B as amended, the Quiet look), as the window draws them: the whole
- * window (InboxApp) over a REAL Inbox server in a temp data dir (its own
- * process, tests/helpers/inbox-dom-server.ts), with two global skills written
- * under the test's own HOME. What is proved:
- *
- * - the reply box: `/` opens Plannotator's picker, a query filters it, an
- *   arrowed row inserts on Enter, Escape closes the menu before the box, a
- *   human-only skill is underlined and says its instructions go with the
- *   reply; the Send pastes its SKILL.md and names its folder at the end of
- *   the stored reply, and the thread folds that block into one quiet line (the box icon and the
- *   names as a comma list), kept after the agent answers;
- * - a comment on an attached file: its reference rides the same one block
- *   (the per-comment list is off in the Inbox);
- * - New message: a clicked row inserts, and the session's wake carries the
- *   block ("this message");
- * - compose (a message the person starts): the picker at the caret, portaled
- *   into the dialog out of the scrolling body, Escape (even on a bare `/`)
- *   closing the picker before the dialog, the block on the Send, and the new
- *   thread folding it behind "Skills:";
- * - an agent's message is never folded, whatever it says.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -66,7 +41,6 @@ type Message = { id: string; body: string; author: { kind: string } };
 const threadOf = async (id: string) =>
   JSON.parse((await loopback(`/api/inbox/threads/${id}`)).text) as { thread: { project: { root: string }; messages: Message[] } };
 
-/** The person's reply once the server has stored it: the box closes before the Send lands, so wait on the server. */
 async function personReply(id: string): Promise<Message> {
   for (let i = 0; i < 300; i++) {
     const found = (await threadOf(id)).thread.messages.find((m) => m.author.kind === 'person');
@@ -76,7 +50,6 @@ async function personReply(id: string): Promise<Message> {
   throw new Error('the reply never reached the server');
 }
 
-/** A Claude Code session's bridge poll: live in the project now, and what it would be woken with. */
 async function poll(session: string, projectPath: string): Promise<{ commands: { body: string; type?: string }[] }> {
   const { token } = JSON.parse(readFileSync(join(dir!, 'data', 'inbox', 'inbox.json'), 'utf8')) as { token: string };
   const answer = await loopback(
@@ -99,7 +72,6 @@ async function readLine(): Promise<string> {
 }
 
 const TESTS = 7;
-/** One test's budget: a slow runner must not time a test out, because Bun then kills the shared Inbox process and every later test cascades. */
 const SLOW = 30_000;
 
 beforeAll(async () => {
@@ -108,7 +80,6 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
-  // Two global skills under this test's HOME: one an agent invokes itself, one only a person can.
   const skills = join(dir, '.claude', 'skills');
   mkdirSync(join(skills, 'write-better'), { recursive: true });
   writeFileSync(join(skills, 'write-better', 'SKILL.md'), '---\nname: write-better\ndescription: Improve prose.\n---\n\n# Write better\n');
@@ -191,7 +162,6 @@ function button(el: ParentNode, text: string): HTMLButtonElement {
 
 const textarea = (el: ParentNode) => el.querySelector('textarea.ib-rtext') as HTMLTextAreaElement;
 
-/** Type as a person does: the value, the caret at its end, then the keyup React's select plugin reads. */
 async function type(el: HTMLTextAreaElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   await act(async () => {
@@ -210,7 +180,6 @@ async function press(el: EventTarget, key: string, init: KeyboardEventInit = {})
   return event;
 }
 
-/** The quiet skills line (approval "inbox-skills-line", option B): the names as a comma list, nothing to open, no size. */
 function expectQuietSkillsLine(line: HTMLElement, names: string[]) {
   expect(line.tagName).not.toBe('DETAILS');
   expect(line.querySelector('summary, [data-skills-block]')).toBeNull();
@@ -228,23 +197,19 @@ test.skipIf(!hasDom)('the reply box: the picker, the underline and its line, Esc
   await until(() => textarea(el) !== null, 'the reply box');
   const box = textarea(el);
 
-  // A bare `/` at the start of a word opens the whole catalog, nothing active.
   await type(box, '/');
   await until(() => menu() !== null, 'the picker');
   expect(rows()).toEqual(['readback', 'write-better']);
   expect(document.querySelector('[data-skill-item-active]')).toBeNull();
-  // Not at the start of a word: no menu (`and/or`).
   await type(box, 'and/');
   expect(menu()).toBeNull();
 
-  // A query filters; Escape after typing it closes the menu, not the box.
   await type(box, 'Please /re');
   await until(() => rows().join() === 'readback', 'the filtered picker');
   await press(box, 'Escape');
   expect(menu()).toBeNull();
   expect(textarea(el)).not.toBeNull();
 
-  // Arrowed onto, Enter inserts it.
   await type(box, 'Please run /rea');
   await until(() => menu() !== null, 'the picker again');
   await press(box, 'ArrowDown');
@@ -254,7 +219,6 @@ test.skipIf(!hasDom)('the reply box: the picker, the underline and its line, Esc
   expect(textarea(el).value).toBe('Please run /readback ');
   expect(menu()).toBeNull();
 
-  // The reference is painted and underlined as human-only; the quiet line says where its instructions go.
   await type(textarea(el), 'Please run /readback first, then tighten with $write-better.');
   await until(() => el.querySelector('[data-skill-ref-token="readback"]') !== null, 'the painted token');
   expect(el.querySelector('[data-skill-ref-token="readback"]')?.getAttribute('data-skill-ref-human-only')).toBe('true');
@@ -266,7 +230,6 @@ test.skipIf(!hasDom)('the reply box: the picker, the underline and its line, Esc
   act(() => button(el, 'Send').click());
   await until(() => textarea(el) === null, 'the Send');
 
-  // What the agent reads: the words, the still-open line, then the block with the SKILL.md and its folder.
   const reply = await personReply(world.waiting);
   const skillDir = join(dir!, '.claude', 'skills', 'readback');
   expect(reply.body.startsWith('Please run /readback first, then tighten with $write-better.\n\n')).toBe(true);
@@ -283,7 +246,6 @@ test.skipIf(!hasDom)('the reply box: the picker, the underline and its line, Esc
   expect(reply.body).toContain('State what I am asking for, in clear words, so I can confirm.');
   expect(reply.body.endsWith('--- END SKILL INSTRUCTIONS: readback ---')).toBe(true);
 
-  // The window: the words read whole, the block folded behind one quiet line.
   await until(() => el.querySelector(`[data-message-id="${reply.id}"] [data-skills-line]`) !== null, 'the Skills line');
   const message = el.querySelector(`[data-message-id="${reply.id}"]`)!;
   const line = message.querySelector('[data-skills-line]') as HTMLElement;
@@ -292,7 +254,6 @@ test.skipIf(!hasDom)('the reply box: the picker, the underline and its line, Esc
   expect(viewerText).toContain('Please run /readback first');
   expect(viewerText).not.toContain('State what I am asking for');
   expect(viewerText).not.toContain('Skills referenced');
-  // The sent words paint the references the block names, as the composer did (never inside the folded block).
   const { skillReferenceRanges } = await import('./skillHighlight');
   const { splitInboxSkillsBlock } = await import('@plannotator/core/skill-reference-block');
   const ranges = skillReferenceRanges(message, splitInboxSkillsBlock(reply.body)!.skills);
@@ -311,12 +272,10 @@ test.skipIf(!hasDom)('Mod+Enter still sends with the picker open; a bare trigger
   await press(textarea(el), 'Enter', { metaKey: true });
   await until(() => textarea(el) === null, 'the Send');
   const reply = await personReply(world.waiting);
-  // No skill referenced: no block.
   expect(reply.body).not.toContain('Skills referenced');
   expect(el.querySelector('[data-skills-line]')).toBeNull();
 }, SLOW);
 
-// Moved from the in-thread New message box (off since approval "inbox-acknowledge") to compose, which shares the field.
 test.skipIf(!hasDom)('compose: a clicked $ row inserts; the session is woken with the block, "this message"', async () => {
   const projectRoot = (await threadOf(world.stopped)).thread.project.root;
   await poll('ses_live', projectRoot);
@@ -377,10 +336,8 @@ test.skipIf(!hasDom)('a comment on an attached file: its skill rides the one blo
   );
   expect(saved.status).toBe(200);
   const el = await renderApp(`#thread=${world.filed}`);
-  // The window's own catalog is this computer's skills (the comment composers' picker reads it too).
   const { fetchSkillCatalog } = await import('@plannotator/ui/utils/skillCatalog');
   expect((await fetchSkillCatalog()).map((s) => s.name)).toEqual(['readback', 'write-better']);
-  // The comment waits to be sent: the foot offers "Edit draft".
   await until(() => [...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Edit draft'), 'the waiting comment');
   act(() => button(el, 'Edit draft').click());
   await until(() => textarea(el) !== null, 'the reply box');
@@ -392,7 +349,6 @@ test.skipIf(!hasDom)('a comment on an attached file: its skill rides the one blo
   expect(reply.body.match(/\*\*Skills referenced\*\*/g)).toHaveLength(1);
   expect(reply.body.indexOf('Feedback on the attached files')).toBeLessThan(reply.body.indexOf('**Skills referenced**'));
   expect(reply.body).toContain('State what I am asking for, in clear words, so I can confirm.');
-  // Only the person's own words are painted: the `$readback` quoted in the attached-file feedback is not.
   await until(() => el.querySelector(`[data-message-id="${reply.id}"] [data-skills-line]`) !== null, 'the Skills line');
   const { skillReferenceRanges } = await import('./skillHighlight');
   const { splitInboxSkillsBlock } = await import('@plannotator/core/skill-reference-block');
@@ -412,8 +368,6 @@ test.skipIf(!hasDom)('compose (a message you start): the field takes a skill, th
   act(() => (dialog()!.querySelector('[data-compose-session="ses_compose"]') as HTMLElement).click());
   const field = dialog()!.querySelector('[data-compose-text] textarea.ib-rtext') as HTMLTextAreaElement;
   expect(field.getAttribute('aria-label')).toBe('Message');
-  // A bare `/` opens the picker at the caret: portaled into the dialog (a modal dialog is the top layer,
-  // so never the body), outside the message's scrolling body, which used to clip it under the footer.
   await type(field, 'Plan the retry budget. /');
   await until(() => menu() !== null, 'the skill picker on a bare /');
   const anchor = menu()!.parentElement!;
@@ -422,15 +376,12 @@ test.skipIf(!hasDom)('compose (a message you start): the field takes a skill, th
   expect(menu()!.closest('.ib-cp-body')).toBeNull();
   expect(menu()!.getAttribute('data-skill-menu-placement')).toBe('below');
   expect(field.getAttribute('aria-controls')).toBe(menu()!.id);
-  // Escape on the bare trigger closes the picker, not the dialog (and keeps no draft: the dialog stays open).
   await press(field, 'Escape');
   expect(menu()).toBeNull();
   expect(dialog()).not.toBeNull();
-  // The dismissed trigger stays closed until the caret leaves it.
   await type(field, 'Plan the retry budget.');
   await type(field, 'Plan the retry budget. /rea');
   await until(() => rows().join() === 'readback', 'the skill picker');
-  // Escape closes the picker only, never the dialog.
   await press(field, 'Escape');
   expect(menu()).toBeNull();
   expect(dialog()).not.toBeNull();
@@ -446,7 +397,6 @@ test.skipIf(!hasDom)('compose (a message you start): the field takes a skill, th
   expect(command.body.startsWith('Plan the retry budget. /readback it first.\n\n**Skills referenced**')).toBe(true);
   expect(command.body).toContain('State what I am asking for, in clear words, so I can confirm.');
 
-  // The thread the person started folds the block behind one quiet line.
   await act(async () => {
     window.location.hash = `#thread=${command.thread_id}`;
     window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -471,7 +421,6 @@ test.skipIf(!hasDom)('after the agent answers, the same quiet line stays under t
   expectQuietSkillsLine(line, ['readback', 'write-better']);
   const delivered = el.querySelector('.ib-delivered');
   if (delivered) expect(line.compareDocumentPosition(delivered) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // The agent answers. The window's live feed is stubbed here, so open the thread again to read it with the answer in.
   (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_agent', body: 'Done, tightened.', reply_to: world.waiting } })}\n`);
   (child!.stdin as import('bun').FileSink).flush();
   const answer = (JSON.parse(await readLine()) as { sent: string }).sent;

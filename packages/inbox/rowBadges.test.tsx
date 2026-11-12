@@ -1,30 +1,3 @@
-/**
- * What waits on the person at a list row's end, and the hover card of a
- * blocked row (approvals "inbox-row-badges", 2026-10-25, card A; and
- * "inbox-question-mark", 2026-11-08, Take 3 "Fill steps"):
- *
- *  - One question mark, `?N` (open questions), and the action box (open
- *    action items), each in one of three fill steps in today's theme colours:
- *    open (unfilled `?N`, the neutral action pill), holding up work (the amber
- *    tint pill, `.ib-b-hold`), stopped on you (the red tint pill,
- *    `.ib-b-stop`). No triangle badge.
- *  - Each mark's words: "3 questions", "Holding up work: 5 questions",
- *    "Stopped on you: 1 action item"; the face draws 99+, the words keep the
- *    exact count.
- *  - Card A opens on a filled mark after the tooltip delay and while the row
- *    has keyboard focus: a header (the bubble, or the box when only an action
- *    item blocks), one row per item, Q labels only when the items come from
- *    more than one question, a footer with the agent and the time.
- *  - The row's name stays short; the card's words ride aria-describedby.
- *  - Beside a thread and on a phone the marks end line 3, after the preview;
- *    the agents' marks are on line 1. A phone draws the marks alone: no card.
- *
- * happy-dom matches `:focus-visible` for every focus, so a keyboard focus is
- * a plain `focus()` here; a click's focus is proved in Chromium
- * (tests/e2e/inbox-row-badges.spec.ts).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -78,14 +51,12 @@ const HOLD = row('msg_hold', 'holding', {
   waits: [wait('q-33333333', 0, null, ['the install page', 'the agent table', 'the screenshots'], 'msg_hold')],
 });
 const WAIT = row('msg_wait', 'waiting');
-/** Two agents in one thread: their pair of marks. */
 const PAIR = row('msg_pair', 'waiting', {
   participants: [
     { host: 'claude-code', session: 'ses_a' },
     { host: 'codex', session: 'ses_c' },
   ],
 });
-/** No badge, no thread name, no count: a phone's line under the subject holds the mark alone. */
 const NEWS = row('msg_news', 'new', { questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null } });
 const SECTIONS: InboxListSection[] = [
   { id: 'stopped', label: 'Stopped on you', threads: [STOP] },
@@ -94,26 +65,21 @@ const SECTIONS: InboxListSection[] = [
   { id: 'new', label: 'New since you looked', threads: [NEWS] },
 ];
 
-/** Only an action item stops the agent: the action box carries it, there is no question mark. */
 const ACT_STOP = row('msg_actstop', 'stopped', {
   thread_name: 'key-rotation',
   questions: { open: 1, picked: 0, stopped: true, holds_up: [], prompt: null, actions: 1 },
   waits: [wait('a-11111111', 0, 'the key rotation cannot run without a session', [], 'msg_actstop')],
 });
-/** An action item holds up work, the question does not: the box fills, the question mark stays open. */
 const ACT_HOLD = row('msg_acthold', 'holding', {
   questions: { open: 3, picked: 0, stopped: false, holds_up: ['status-page'], prompt: null, actions: 2 },
   waits: [wait('a-22222222', 0, null, ['status-page'], 'msg_acthold')],
 });
-/** Two action items and a question, nothing held up. */
 const ACT_OPEN = row('msg_actopen', 'waiting', { questions: { open: 3, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 2 } });
-/** 104 questions, three hold up work: the face draws 99+. */
 const MANY = row('msg_many', 'holding', {
   questions: { open: 104, picked: 0, stopped: false, holds_up: ['r1', 'r2', 'r3'], prompt: null },
   waits: [wait('q-1', 0, null, ['r1'], 'msg_many'), wait('q-2', 1, null, ['r2'], 'msg_many'), wait('q-3', 2, null, ['r3'], 'msg_many')],
 });
 const MANY_OPEN = row('msg_manyopen', 'waiting', { questions: { open: 104, picked: 0, stopped: false, holds_up: [], prompt: null } });
-/** A blocked row with words in place of its counts ("Answered"): it keeps its filled mark. */
 const ANSWERED = row('msg_answered', 'holding', {
   answered_not_sent: true,
   questions: { open: 2, picked: 0, stopped: false, holds_up: ['deploy'], prompt: null, actions: 1 },
@@ -137,7 +103,6 @@ describe('each mark\'s fill step', () => {
   test("the row's state always shows on a mark: an older Inbox (no waits), and a Done still in the reply draft", () => {
     expect(rowMarks({ ...STOP, waits: undefined }).question).toBe('stop');
     expect(rowMarks({ ...ACT_STOP, waits: undefined })).toEqual({ questions: 0, question: 'open', actions: 1, action: 'stop' });
-    // Nothing open: the staged action item keeps the agent stopped, so the box carries it.
     const staged = row('msg_staged', 'stopped', { questions: { open: 0, picked: 0, stopped: true, holds_up: [], prompt: null, staged: 1 }, waits: [] });
     expect(rowMarks(staged)).toEqual({ questions: 0, question: 'open', actions: 1, action: 'stop' });
   });
@@ -171,7 +136,6 @@ describe('the card model', () => {
   });
 
   test('a name two questions hold up is one row, naming both, so the card agrees with the badge count', () => {
-    // The server's summary counts names once across questions (summarizeInboxQuestions).
     const shared = row('msg_shared', 'holding', {
       questions: { open: 2, picked: 0, stopped: false, holds_up: ['deploy', 'docs'], prompt: null },
       waits: [wait('q-1', 0, null, ['deploy']), wait('q-2', 1, null, ['deploy', 'docs'])],
@@ -184,13 +148,11 @@ describe('the card model', () => {
     ]);
     expect(m.lead).toHaveLength(shared.questions.holds_up.length);
     expect(badgeDescription(shared)).toBe('Holds up: Deploy; Docs.');
-    // One question holding up "deploy" twice (the summary drops the repeat too): one row, no label.
     const twice = row('msg_twice', 'holding', {
       questions: { open: 1, picked: 0, stopped: false, holds_up: ['deploy'], prompt: null },
       waits: [wait('q-1', 0, null, ['deploy', 'deploy'])],
     });
     expect(waitCardModel(twice)!.lead).toEqual([{ label: null, text: 'Deploy' }]);
-    // A Stopped card's "Also holds up N" counts what the badge's summary counts.
     const stop = row('msg_stop2', 'stopped', {
       questions: { open: 2, picked: 0, stopped: true, holds_up: ['deploy'], prompt: null },
       waits: [wait('q-1', 0, 'the deploy', ['deploy']), wait('q-2', 1, null, ['deploy'])],
@@ -256,14 +218,12 @@ function mount(opts: { narrow?: boolean; phone?: boolean; sections?: InboxListSe
   return host;
 }
 
-/** The open card, or null (a closing one, its popup marked data-closed, does not count: happy-dom runs no exit animation). */
 const card = () =>
   [...document.querySelectorAll<HTMLElement>('[data-wait-card]')].find((c) => {
     const pop = c.closest('[data-pn-tooltip]');
     return !pop?.hasAttribute('data-closed') && !pop?.hasAttribute('data-ending-style');
   }) ?? null;
 
-/** A row's question mark and action box, by row id; `scope` picks the row's shape. */
 const qmark = (el: HTMLElement, id: string, scope = '.ib-row') => el.querySelector<HTMLElement>(`${scope}[data-thread-id="${id}"] .ib-qn`);
 const abox = (el: HTMLElement, id: string, scope = '.ib-row') => el.querySelector<HTMLElement>(`${scope}[data-thread-id="${id}"] [data-action-count]`);
 const said = (mark: HTMLElement | null) => mark?.querySelector('.ib-sr')!.textContent!.trim();
@@ -288,7 +248,6 @@ describe.if(hasDom)('the marks in the list', () => {
       expect(stop.dataset.waitStep).toBe('stop');
       expect(stop.classList.contains('ib-b-stop')).toBe(true);
       expect(said(stop)).toBe('Stopped on you: 2 questions');
-      // One mark per row: no triangle badge, no second count.
       expect(el.querySelector('[data-row-badge], svg.ib-tri')).toBeNull();
       for (const id of ['msg_wait', 'msg_hold', 'msg_stop']) expect(el.querySelectorAll(`${scope}[data-thread-id="${id}"] .ib-qn`)).toHaveLength(1);
       act(() => root!.unmount());
@@ -310,7 +269,6 @@ describe.if(hasDom)('the marks in the list', () => {
       expect(hold.classList.contains('ib-b-hold')).toBe(true);
       expect(hold.classList.contains('ib-b-act')).toBe(false);
       expect(said(hold)).toBe('Holding up work: 2 action items');
-      // Its question holds nothing up: it stays open beside the filled box.
       expect(qmark(el, 'msg_acthold', scope)!.dataset.waitStep).toBe('open');
       const stop = abox(el, 'msg_actstop', scope)!;
       expect(stop.dataset.waitStep).toBe('stop');
@@ -332,7 +290,6 @@ describe.if(hasDom)('the marks in the list', () => {
     const open = qmark(el, 'msg_manyopen')!;
     expect(face(open)).toBe('99+');
     expect(said(open)).toBe('104 questions');
-    // An open mark's tooltip is its words.
     await tooltipOf(qmark(el, 'msg_manyopen')!, 0);
     unhover(qmark(el, 'msg_manyopen')!);
     expect(await tooltipOf(qmark(el, 'msg_manyopen')!)).toBe('104 questions');
@@ -345,7 +302,6 @@ describe.if(hasDom)('the marks in the list', () => {
       const r = el.querySelector<HTMLElement>(`${scope}[data-thread-id="msg_answered"]`)!;
       expect(r.querySelector('[data-count-words]')!.getAttribute('data-count-words')).toBe('Answered, not sent');
       expect(said(qmark(el, 'msg_answered', scope))).toBe('Holding up work: 1 question');
-      // The open action box gives way to the words, as the counts did before.
       expect(abox(el, 'msg_answered', scope)).toBeNull();
       act(() => root!.unmount());
       host!.remove();
@@ -364,10 +320,8 @@ describe.if(hasDom)('the marks in the list', () => {
     }
     expect(stop!.textContent).toBe('Stopped');
     expect(hold!.textContent).toBe('Holds up 3');
-    // Seen only: the mark's words and the row's description say it to a screen reader.
     expect(stop!.getAttribute('aria-hidden')).toBe('true');
     expect(el.querySelector('.ib-row[data-thread-id="msg_wait"] [data-wait-words]')).toBeNull();
-    // Beside a thread and on a phone, no words: the marks alone.
     mountAgain({ narrow: true });
     expect(document.querySelector('[data-wait-words]')).toBeNull();
   });
@@ -380,7 +334,6 @@ describe.if(hasDom)('the marks in the list', () => {
     const words = document.getElementById(id)!;
     expect(words.hidden).toBe(true);
     expect(words.textContent).toBe(badgeDescription(STOP));
-    // The words sit beside the row, not in it: its name reads as before.
     expect(r.contains(words)).toBe(false);
     expect(r.textContent).not.toContain('cannot ship');
     expect(el.querySelector('[data-thread-id="msg_wait"]')!.hasAttribute('aria-describedby')).toBe(false);
@@ -404,7 +357,6 @@ describe.if(hasDom)('the marks in the list', () => {
     await settle();
     expect(card() === null).toBe(true);
 
-    // The held-up count lives in the card now.
     await tooltipOf(qmark(el, 'msg_hold')!);
     expect(card()!.querySelector('.ib-wc-h')!.textContent).toBe('Holds up 3');
     expect(card()!.querySelector('.ib-wc-q')).toBeNull();
@@ -427,14 +379,11 @@ describe.if(hasDom)('the marks in the list', () => {
       act(() => r.focus());
       await settle(50);
       expect(card()!.dataset.waitCard).toBe('hold');
-      // One card, not one per trigger (the wide row's words and its mark).
       expect([...document.querySelectorAll('[data-wait-card]')].filter((c) => !c.closest('[data-pn-tooltip]')?.hasAttribute('data-closed'))).toHaveLength(1);
-      // Inside the window's root, where the Soft tokens reach it.
       expect(el.contains(card())).toBe(true);
       act(() => r.blur());
       await settle();
       expect(card() === null).toBe(true);
-      // A row with nothing blocked opens nothing.
       act(() => el.querySelector<HTMLElement>('[data-thread-id="msg_wait"]')!.focus());
       await settle(50);
       expect(card() === null).toBe(true);
@@ -460,9 +409,7 @@ describe.if(hasDom)('the marks in the list', () => {
       await settle();
       expect(card() === null).toBe(true);
       expect(document.activeElement).toBe(r);
-      // The window's Escape (closing a thread) skips an Escape that is already used.
       expect(seen).toEqual([true]);
-      // With the card closed, Escape is the window's again.
       act(() => {
         r.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
       });
@@ -470,7 +417,6 @@ describe.if(hasDom)('the marks in the list', () => {
     } finally {
       window.removeEventListener('keydown', onWindow);
     }
-    // The card comes back with the next keyboard focus.
     act(() => r.blur());
     act(() => r.focus());
     await settle(50);
@@ -483,10 +429,8 @@ describe.if(hasDom)('the marks in the list', () => {
       [...el.querySelector(`.ib-nrow[data-thread-id="${id}"] .ib-l3`)!.children].map((c) =>
         c.classList.contains('ib-qn') ? `?${face(c as HTMLElement)}:${(c as HTMLElement).dataset.waitStep}` : c.className.split(' ')[0],
       );
-    // The preview first (a named thread's subject), then the mark last.
     expect(parts('msg_stop')).toEqual(['ib-pv', '?2:stop']);
     expect(parts('msg_hold')).toEqual(['ib-pv', '?1:hold']);
-    // An unnamed thread's subject is its title: no preview, the mark alone; nothing to count: no line 3 at all.
     expect(parts('msg_wait')).toEqual(['?2:open']);
     expect(parts('msg_news')).toEqual([]);
     for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_pair', 'msg_news']) {
@@ -509,7 +453,6 @@ describe.if(hasDom)('the marks in the list', () => {
   });
 });
 
-/** Mount again in place of the list on screen. */
 function mountAgain(opts: { narrow?: boolean; phone?: boolean; sections?: InboxListSection[] }) {
   act(() => root?.unmount());
   host?.remove();

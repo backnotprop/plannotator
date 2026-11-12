@@ -1,16 +1,3 @@
-/**
- * New message in the list header while the main sidebar is closed (the
- * owner: "If I had the sidebar closed, I need to be able to write a new
- * message. It should appear in the far right of inbox, but only when the main
- * sidebar is closed."). The whole window (InboxApp) over a REAL Inbox server
- * in a temp data dir (tests/helpers/inbox-dom-server.ts). What this catches:
- * the header button showing beside an open sidebar (two New messages), going
- * missing when the sidebar is closed (no way to write a message, with or
- * without a thread open), not following the sidebar toggle, not opening
- * compose, and focus not coming back to it when compose closes.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -52,7 +39,6 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
 
 beforeAll(async () => {
   if (!hasDom) return;
-  // Cookies (the sidebar's open state) need a real origin.
   (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-list-compose-dom-')));
   mkdirSync(join(dir, 'bin'));
@@ -149,7 +135,6 @@ test.skipIf(!hasDom)('the sidebar open: no New message in the list header (the s
   act(() => (el.querySelector('.ib-lhead [data-sidebar="trigger"]') as HTMLButtonElement).click());
   await until(() => sidebarState(el) === 'collapsed', 'the sidebar closed');
   expect(headerCompose(el)).not.toBeNull();
-  // The header's right end: New message, then Tidy's ⋮ (the approved Tidy frames).
   expect(headerCompose(el)!.nextElementSibling).toBe(el.querySelector('.ib-lhead [data-tidy-menu]'));
   expect(el.querySelector('.ib-lhead')!.lastElementChild).toBe(el.querySelector('.ib-lhead [data-tidy-menu]'));
 
@@ -166,13 +151,11 @@ test.skipIf(!hasDom)('the sidebar closed, no thread open: the header New message
   expect(button).not.toBeNull();
   expect(button.getAttribute('aria-label')).toBe('New message');
   expect(button.getAttribute('aria-haspopup')).toBe('dialog');
-  // The component tooltip, never the browser's native one.
   expect(button.hasAttribute('title')).toBe(false);
 
   act(() => button.focus());
   act(() => button.click());
   await until(() => !!dialog()?.querySelector('[data-compose-to]'), 'compose');
-  // Empty, so Escape closes it at once; focus goes back to what opened it.
   act(() => {
     (dialog()!.querySelector('textarea') ?? dialog()!).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   });
@@ -204,9 +187,7 @@ test.skipIf(!hasDom)('Search in the list header: only while the sidebar is close
   expect(search.getAttribute('aria-label')).toBe('Search');
   expect(search.getAttribute('aria-haspopup')).toBe('dialog');
   expect(search.hasAttribute('title')).toBe(false);
-  // The sidebar's Search names the same shortcut.
   expect(search.getAttribute('aria-keyshortcuts')).toBe(el.querySelector('.ib-side [data-open-search]')!.getAttribute('aria-keyshortcuts'));
-  // Search, then New message, then Tidy's menu (the phone header's order).
   expect(search.nextElementSibling).toBe(headerCompose(el));
   expect(headerCompose(el)!.nextElementSibling).toBe(el.querySelector('.ib-lhead [data-tidy-menu]'));
 

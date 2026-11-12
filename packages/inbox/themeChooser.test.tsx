@@ -1,21 +1,3 @@
-/**
- * The one-time "themes" dialog in a DOM (approval "inbox-theme-chooser", 2026-11-10): the page's moment
- * (themeChooser.ts `useThemeChooser`, on the line's `useLineReveal`) driving the dialog (components/ThemeChooser.tsx)
- * and the real theme (ThemeProvider, theme.ts `useInboxThemePick`, the config store's write to
- * `POST /api/inbox/settings`), as App wires them.
- *
- * What regresses: the dialog opening without the line (`reveal.next` not `theme_chooser`), for someone on another
- * theme, before the page is 15 s old, or going around the line's claim; the dialog waiting for a thread read and left,
- * for the line's 60 s or for a page left still (what kept it from the owner, 2026-11-10: a pointer that never rests
- * must not postpone it); its pictures loading before it is due;
- * a pick not applying at once, or not going to config.json through Settings' own write; a pick without a shuffle
- * fixing the mode, or one after a shuffle still following the system; "Keep Original" writing anything; the close
- * button, Escape or "Open Settings" saving anything or sending a Not now; the dialog showing again on the same load;
- * the corner not reachable by Tab, or Enter on it not shuffling; the arrow keys not moving the fan; motion under
- * reduced motion; a shuffle that cannot be turned round mid-move.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -45,10 +27,8 @@ let savedAnimate: unknown;
 let savedWidth = 0;
 let posts: { path: string; body: Record<string, unknown> }[] = [];
 let stamped = false;
-/** What the stubbed `matchMedia` answers. */
 let os: { dark: boolean; reduced: boolean } = { dark: false, reduced: false };
 let artLoads: boolean[] = [];
-/** Each running fake animation: the test ends it. */
 let animations: { reversed: number; cancelled: boolean; playbackRate: number; finish: () => void }[] = [];
 
 const loadArt = (deck: boolean) => {
@@ -56,7 +36,6 @@ const loadArt = (deck: boolean) => {
   return Promise.resolve(ART);
 };
 
-/** `Element.animate` as the dialog uses it: nothing moves; the test says when it ends, and sees a turn. */
 function fakeAnimate() {
   let done: () => void = () => {};
   const anim = {
@@ -81,11 +60,8 @@ function fakeAnimate() {
 
 beforeEach(() => {
   if (!hasDom) return;
-  // A page on localhost, as the Inbox is served: about:blank keeps no readable cookies.
   (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
   savedTimes = { ...reveal.REVEAL_TIMES };
-  // The dialog's own page age is `soonPageAgeMs` (15 s in the product, shrunk here); the line's 60 s is set out of reach,
-  // so a dialog that still waited for it would never open in these tests.
   Object.assign(reveal.REVEAL_TIMES, TIMES, { soonPageAgeMs: TIMES.pageAgeMs, pageAgeMs: 600_000 });
   savedFetch = globalThis.fetch;
   savedMatchMedia = window.matchMedia;
@@ -129,7 +105,6 @@ afterEach(async () => {
   root = null;
   host = null;
   document.body.innerHTML = '';
-  // A theme write still queued (the store's 300 ms) goes while this test's fetch is in place.
   await new Promise((resolve) => setTimeout(resolve, 340));
   configStore.resetServerSync();
   themes.resetInboxThemeForTests();
@@ -167,7 +142,6 @@ interface State {
   due: boolean;
   thread: string | null;
 }
-/** The line has it next; the person is reading a thread. */
 const READING: State = { due: true, thread: 'thr_a' };
 
 function Harness({ state }: { state: State }) {
@@ -234,7 +208,6 @@ function mount(state: State, pair: { mode: 'light' | 'dark' | 'system'; light: s
   };
 }
 
-/** The page 15 s old (shrunk), a thread open: the dialog opens by itself. */
 async function opened(pair?: Parameters<typeof mount>[1]) {
   const set = mount(READING, pair);
   await until(() => dialog() !== null);
@@ -245,14 +218,12 @@ async function opened(pair?: Parameters<typeof mount>[1]) {
 describe.skipIf(!hasDom)('the "themes" dialog', () => {
   test('15 s into the page with the pointer never at rest and a thread open: it opens, through the line, and no picture is asked for before', async () => {
     mount(READING);
-    // A person looking around: the pointer moves and the page scrolls, the whole time. No thread is left.
     const moving = setInterval(() => {
       window.dispatchEvent(new Event('pointermove'));
       window.dispatchEvent(new Event('scroll'));
     }, 15);
     try {
       await wait(TIMES.pageAgeMs / 2);
-      // Too young: nothing yet, and nothing of the pictures.
       expect(dialog() === null).toBe(true);
       expect(claims()).toEqual([]);
       expect(artLoads).toEqual([]);
@@ -263,7 +234,6 @@ describe.skipIf(!hasDom)('the "themes" dialog', () => {
       clearInterval(moving);
     }
     expect(claims().map((c) => c.body)).toEqual([{ id: 'theme_chooser', key: expect.any(String) }]);
-    // The fan's pictures, once, for this layout.
     expect(artLoads).toEqual([false]);
     expect(dialog()!.querySelectorAll('img').length).toBe(7);
   });
@@ -277,7 +247,6 @@ describe.skipIf(!hasDom)('the "themes" dialog', () => {
     expect(claims()).toEqual([]);
     act(() => root!.unmount());
     host!.remove();
-    // The Inbox still names it (its look is a moment old), but this page shows another dark palette.
     const other = mount(READING, { mode: 'system', light: 'plannotator', dark: 'tokyo-night' });
     await wait(TIMES.pageAgeMs + 20);
     other({ thread: null });
@@ -295,7 +264,6 @@ describe.skipIf(!hasDom)('the "themes" dialog', () => {
     expect(sheetInFront('plannotator')).toBe('dark');
     expect(sheetInFront('plannotator-modern')).toBe('dark');
     expect(document.getElementById(dialog()!.getAttribute('aria-labelledby')!)!.querySelector('.ib-sr')!.textContent).toBe('Themes');
-    // In use and following the system already: nothing to change.
     expect(pickButton('plannotator').textContent).toBe('Keep Original');
     expect(pickButton('plannotator-modern').textContent).toBe('Use Modern, dark');
     expect(document.activeElement).toBe(pickButton('plannotator'));
@@ -304,35 +272,29 @@ describe.skipIf(!hasDom)('the "themes" dialog', () => {
   test('picking without a shuffle keeps following the system: the theme on both halves, applied at once, saved as Settings saves it', async () => {
     await opened();
     expect(line('plannotator-modern')).toContain('follows your system');
-    // Its button takes the focus (Tab, or a first click): the card comes forward, then the button acts.
     act(() => pickButton('plannotator-modern').focus());
     expect(stage().dataset.themeFront).toBe('plannotator-modern');
     await press(pickButton('plannotator-modern'));
     expect(dialog() === null).toBe(true);
-    // On screen at once, no reload: the page's root is Modern, light (the system's).
     expect(rootTheme()).toEqual(['light', 'theme-plannotator-modern']);
     expect(configStore.get('themePair')).toEqual({ mode: 'system', light: 'plannotator-modern', dark: 'plannotator-modern' });
     await until(() => saves().length > 0);
-    // config.json `theme` through the Inbox's settings route: only what changed (the mode was Match system already).
     expect(saves().map((s) => s.body)).toEqual([{ theme: { light: 'plannotator-modern', dark: 'plannotator-modern' } }]);
     expect(claims().length).toBe(1);
   });
 
   test('picking after a shuffle fixes the mode: Tab reaches the corner, Enter on it brings the other sheet forward', async () => {
     await opened();
-    // The corner of the sheet behind is the one button in Tab's path; the front sheet's is out of it.
     expect(corner('plannotator', 'dark').tabIndex).toBe(0);
     expect(corner('plannotator', 'dark').getAttribute('aria-label')).toBe('Show Plannotator Original in dark');
     expect(corner('plannotator', 'light').tabIndex).toBe(-1);
     act(() => corner('plannotator', 'dark').focus());
     await press(corner('plannotator', 'dark'));
-    // The button and the line follow at once; the sheets trade places when the motion ends.
     expect(pickButton('plannotator').textContent).toBe('Use Original, dark');
     expect(line('plannotator')).toContain('always dark');
     expect(sheetInFront('plannotator')).toBe('light');
     await finishMotion();
     expect(sheetInFront('plannotator')).toBe('dark');
-    // Focus stays on the corner, which now names the other mode.
     expect(document.activeElement).toBe(corner('plannotator', 'light'));
     expect(corner('plannotator', 'light').tabIndex).toBe(0);
     await press(pickButton('plannotator'));
@@ -347,7 +309,6 @@ describe.skipIf(!hasDom)('the "themes" dialog', () => {
     const running = animations.length;
     expect(running).toBeGreaterThan(0);
     await press(corner('plannotator', 'light'));
-    // The same animations, reversed: none started over.
     expect(animations.length).toBe(running);
     expect(animations.every((anim) => anim.reversed === 1)).toBe(true);
     expect(pickButton('plannotator').textContent).toBe('Keep Original');
@@ -370,7 +331,6 @@ describe.skipIf(!hasDom)('the "themes" dialog', () => {
     const set = await opened();
     await press(dialog()!.querySelector<HTMLButtonElement>('[data-theme-close]')!);
     expect(dialog() === null).toBe(true);
-    // Shown: no second claim on this load, however often the moment comes again.
     set({ thread: 'thr_b' });
     await wait(60);
     set({ thread: null });
@@ -395,7 +355,6 @@ describe.skipIf(!hasDom)('the "themes" dialog', () => {
     await key(pickButton('plannotator'), 'ArrowRight');
     expect(document.activeElement).toBe(pickButton('plannotator-modern'));
     expect(stage().dataset.themeFront).toBe('plannotator-modern');
-    // The card coming forward takes 600 ms; the others go back a beat later each.
     expect(card('plannotator-modern').style.getPropertyValue('--thc-d')).toBe('600ms');
     expect(card('plannotator-modern').style.getPropertyValue('--thc-dl')).toBe('0ms');
     expect(card('plannotator').style.getPropertyValue('--thc-d')).toBe('516ms');
@@ -441,7 +400,6 @@ describe.skipIf(!hasDom)('the "themes" dialog', () => {
       });
     await swipe(300, 120);
     expect(stage().dataset.themeFront).toBe('plannotator-modern');
-    // Too short to be a swipe.
     await swipe(200, 185);
     expect(stage().dataset.themeFront).toBe('plannotator-modern');
     await swipe(120, 300);
@@ -470,13 +428,10 @@ describe.skipIf(!hasDom)('what a pick saves', () => {
   test('the pointer means a card by where the cards are going: the front card first, a side card where it shows', () => {
     const g = chooser.themeChooserGeometry(1440);
     const h = 560;
-    // The stage's centre: the front card, whichever it is.
     expect(chooser.themeChooserCardAt(0, 200, 0, 3, h, g)).toBe(0);
     expect(chooser.themeChooserCardAt(0, 200, 1, 3, h, g)).toBe(1);
-    // Original in front: right of it, Modern's visible part, then Choose your own's.
     expect(chooser.themeChooserCardAt(450, 300, 0, 3, h, g)).toBe(2);
     expect(chooser.themeChooserCardAt(250, 300, 0, 3, h, g)).toBe(1);
-    // Outside every card.
     expect(chooser.themeChooserCardAt(900, 300, 0, 3, h, g)).toBe(-1);
   });
 });

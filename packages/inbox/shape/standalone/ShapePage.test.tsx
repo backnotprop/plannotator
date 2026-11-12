@@ -1,18 +1,3 @@
-/**
- * The standalone Shape page (ShapePage.tsx): the grid under a small
- * Plannotator header, then a board; Esc or Back returns to the grid.
- *
- * What regresses:
- *  - the grid shows finished boards, or Find stops filtering;
- *  - opening a card does not put the board in the address (Back would not
- *    return), or Esc leaves the board open, or the grid stays reachable under
- *    the open board (it must be inert);
- *  - with Shape off the page shows a grid (or Find) at all;
- *  - with no boards the page is blank instead of saying what a board is;
- *  - the page's board takes the Inbox's crosshair (and a Show me, which only the Inbox's boards have) in place of Annotate.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,8 +9,6 @@ import type { ShapePageApi, ShapeSummaryWire } from './api';
 import { ShapeApiError } from './api';
 
 const hasDom = typeof document !== 'undefined';
-// The board itself (ShapeSurface and its Code view's guide chain) has its own tests; here it is a stand-in that
-// shows which board is open and calls onClose when clicked.
 if (hasDom) mock.module('#shape-board', () => ({
   default: ({ id, onClose, crosshair, onAddToReply }: { id: string; onClose: () => void; crosshair?: boolean; onAddToReply?: unknown }) => (
     <button type="button" data-stub-board={id} data-crosshair={String(!!crosshair || !!onAddToReply)} onClick={onClose}>
@@ -46,7 +29,6 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** Boards as the store keeps them, behind a stand-in for the page's requests. */
 function fakeApi(options: { on?: boolean; boards?: string[] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'shape-page-'));
   dirs.push(dir);
@@ -106,7 +88,6 @@ describe.skipIf(!hasDom)('the standalone Shape page', () => {
     await settle(() => el.querySelectorAll('[data-shape-card]').length === 2);
     expect(el.querySelector('h1')?.textContent).toBe('Shape');
     expect(el.querySelector('.shp-page-brand')?.textContent).toBe('Plannotator');
-    // The count is the active boards' (the finished one is not counted), not its wording.
     expect(el.querySelector('.shp-page-sum')?.textContent?.match(/\d+/)?.[0]).toBe('2');
     expect([...el.querySelectorAll('[data-shape-card]')].map((c) => c.getAttribute('data-shape-card')).sort()).toEqual([ids[0], ids[1]].sort());
     const find = el.querySelector<HTMLInputElement>('.shp-page-find input')!;
@@ -143,7 +124,6 @@ describe.skipIf(!hasDom)('the standalone Shape page', () => {
     const el = await mount(api);
     await settle(() => !!el.querySelector('[data-shape-layer]'));
     expect(el.querySelector('[data-shape-layer]')?.getAttribute('data-shape-layer')).toBe(ids[0]);
-    // The page keeps Annotate: the crosshair and Add to reply are the Inbox's.
     expect(el.querySelector('[data-stub-board]')?.getAttribute('data-crosshair')).toBe('false');
     act(() => {
       window.history.pushState(null, '', '#');
@@ -167,12 +147,10 @@ describe.skipIf(!hasDom)('the standalone Shape page', () => {
     const el = await mount(api);
     await settle(() => !!el.querySelector('[data-shape-page-empty]'));
     const empty = el.querySelector('[data-shape-page-empty]')!;
-    // A living Pebble, a heading and a line that says what a board is: something to read, not a blank grid.
     expect(empty.querySelector('.shp-pebble[data-on]')).not.toBeNull();
     expect(empty.querySelector('h2')?.textContent?.trim()).toBeTruthy();
     expect(empty.querySelector('p')?.textContent?.trim()).toBeTruthy();
     expect(el.querySelector('[data-shape-card]')).toBeNull();
-    // Nothing to count or find yet.
     expect(el.querySelector('.shp-page-find')).toBeNull();
     expect(el.querySelector('.shp-page-sum')).toBeNull();
   });

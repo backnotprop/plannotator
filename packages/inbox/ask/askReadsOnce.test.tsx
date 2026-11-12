@@ -1,12 +1,3 @@
-/**
- * One event, one read of a thread's Ask, however many parts of the window follow it. The Ask window
- * (useInboxAsk), Show me (useShowMe) and a Change it waiting for a busy session (inboxShapeHost) all read
- * `GET …/threads/:id/ask` on each `onAskChange`; read on their own, one event was three GETs of one answer
- * (tests/e2e/inbox-show-me.spec.ts counts them while a Change it waits). What regresses: an event that reads
- * the thread more than once, or a reader that no longer reads at all (it would miss the change).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -35,7 +26,6 @@ const settle = async () => {
   for (let i = 0; i < 6; i++) await act(() => new Promise((r) => setTimeout(r, 5)));
 };
 
-/** Every GET of this thread's Ask; a Change it's POST is refused: another thread's turn holds the session. */
 function inbox() {
   const reads: string[] = [];
   const reply = (body: unknown, status = 200) => Response.json(body, { status });
@@ -81,26 +71,21 @@ test.skipIf(!hasDom)('the Ask window, Show me and a waiting Change it read the t
     root.render(<Window />);
   });
   await settle();
-  // The window opens: the Ask window and Show me want the same answer.
   expect(reads.length).toBe(1);
 
-  // A Change it while another thread's turn holds the session: refused, it waits for news (one read before its POST).
   const host = createInboxShapeHost({ subscribe: noBoards, wakeOnChange: () => true, busyRetryMs: 60_000 });
   await host.note(SHAPE, { kind: 'change', v: 1, text: 'Say it.' } as never);
   await settle();
   const counted = reads.length;
 
-  // The live sessions moved (`deliveries`, a reconnect, a catch-up): all three read this thread, once.
   act(() => emitAskChange(null));
   await settle();
   expect(reads.length - counted).toBe(1);
 
-  // This thread's chat changed: the same.
   act(() => emitAskChange(THREAD));
   await settle();
   expect(reads.length - counted).toBe(2);
 
-  // Another thread's chat changed: only the waiting Change it looks, once.
   act(() => emitAskChange(OTHER));
   await settle();
   expect(reads.length - counted).toBe(3);

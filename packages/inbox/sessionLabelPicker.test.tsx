@@ -1,16 +1,3 @@
-/**
- * The To picker's session labels (approval "inbox-session-label"), as the
- * picker draws them. The failures this catches: a label that does not replace
- * the project on its row, a row without a label that loses its words, the
- * phone's second line without its project, the filter not finding a label, and
- * a " · " inside a label being split like a project's parents (the To line would
- * then cut the label's own words first).
- *
- * The geometry (one line, cut with an ellipsis, columns that line up) needs a
- * real layout: tests/e2e/inbox-session-label.spec.ts, on the compiled binary.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -84,7 +71,6 @@ test.skipIf(!hasDom)('the accessible name says the label and still names the pro
   picker();
   const name = row('ses_named')!.getAttribute('aria-label')!;
   for (const part of ['Claude Code', 'Fix login redirect', 'in ai-collab', '~/src/ai-collab']) expect(name).toContain(part);
-  // Pinned on purpose: a row without a label reads exactly as before this feature.
   expect(row('ses_plain')!.getAttribute('aria-label')!.startsWith('Claude Code in ai-collab, ~/src/ai-collab')).toBe(true);
 });
 
@@ -112,7 +98,6 @@ test.skipIf(!hasDom)('the filter finds a label, any word of it, in any case and 
   expect(rows()).toEqual(['ses_named']);
   type('圆桌');
   expect(rows()).toEqual(['ses_cjk']);
-  // The project still matches every row, labelled or not.
   type('ai-collab');
   expect(rows()).toEqual(['ses_named', 'ses_cjk', 'ses_plain']);
 });
@@ -128,7 +113,6 @@ test.skipIf(!hasDom)('To reads the label then the project, and a " · " in the l
   render(<SessionDetail name="main · workspaces/worktrees" root="/w/main" label="冲突筛查圆桌 · kelu" />);
   const detail = host!.querySelector('[data-compose-detail]')!;
   expect(detail.textContent).toBe('· 冲突筛查圆桌 · kelu · main · workspaces/worktrees');
-  // The label is the part that stays whole; the project gives way first, as a parent folder does.
   expect(detail.querySelector('.ib-cp-tdf')!.textContent).toBe('冲突筛查圆桌 · kelu');
   expect(detail.querySelector('.ib-cp-tdp bdi')!.textContent).toBe('main · workspaces/worktrees');
 });

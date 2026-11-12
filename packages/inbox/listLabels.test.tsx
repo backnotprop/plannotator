@@ -1,18 +1,3 @@
-/**
- * A row's title and preview (approval "list-rows-mail-icons", 2026-10-30): a
- * named thread's name is its title and its subject the grey preview, even when
- * the subject starts with the name (the approved "Okta SSO" row); an unnamed
- * thread's subject is its title, with no preview. A preview cut with "…"
- * shows ui's tooltip with the whole text on hover, only while it is cut (no
- * native title as well; design record "inbox-polish", item 3). happy-dom has
- * no layout, so a test gives an element the widths that make it cut.
- * The latest message (approval "inbox-row-latest-preview"): a row the server
- * gives `latest_preview` shows it as the grey line in every shape (beside a
- * thread, compact, full width, phone), under an unnamed thread too; a named
- * Sent row keeps its own words; a line that repeats the title is not drawn.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -95,7 +80,6 @@ async function wait(ms: number) {
   });
 }
 
-/** The pointer comes to rest on `target`, the way a mouse does. */
 function hover(target: HTMLElement) {
   act(() => {
     for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']) {
@@ -105,7 +89,6 @@ function hover(target: HTMLElement) {
   });
 }
 
-/** A popup outside the row holding `text`: the tooltip, portaled to the body. */
 const tooltipWith = (el: HTMLElement, text: string) => [...document.body.querySelectorAll('*')].some((n) => !el.contains(n) && n.children.length === 0 && n.textContent === text);
 
 function sized(node: HTMLElement, scroll: number, client: number) {
@@ -123,12 +106,9 @@ test.skipIf(!hasDom)('the name is the title and the subject the preview; an unna
   for (const phone of [false, true]) {
     const el = render(phone, [OTHER, PREFIX, COLON, UNNAMED, SAME]);
     expect(lines(rowEl(el, OTHER.thread_id))).toEqual({ title: 'Inbox: project menu', preview: OTHER.subject });
-    // The subject starts with the name: both still show, as the approved pictures draw "Okta SSO".
     expect(lines(rowEl(el, COLON.thread_id))).toEqual({ title: 'search', preview: COLON.subject });
     expect(lines(rowEl(el, UNNAMED.thread_id))).toEqual({ title: UNNAMED.subject!, preview: null });
-    // A subject that only repeats the name is not drawn twice.
     expect(lines(rowEl(el, SAME.thread_id))).toEqual({ title: 'Release notes', preview: null });
-    // No row draws the old thread pill.
     expect(el.querySelector('.ib-lbody .ib-key')).toBeNull();
     act(() => root?.unmount());
     host?.remove();
@@ -142,7 +122,6 @@ test.skipIf(!hasDom)('a cut preview shows the whole text in a tooltip on hover; 
   for (const node of [preview, fits]) {
     expect(node.hasAttribute('title')).toBe(false);
     expect(node.hasAttribute('data-clip')).toBe(false);
-    // Never a focus stop of its own: the row's button is.
     expect(node.tabIndex).toBe(-1);
   }
   sized(preview, 400, 180);
@@ -157,7 +136,6 @@ test.skipIf(!hasDom)('a cut preview shows the whole text in a tooltip on hover; 
   expect(tooltipWith(el, OTHER.subject!)).toBe(true);
   expect(preview.hasAttribute('title')).toBe(false);
 
-  // Beside a thread the title wraps, whole: it is plain text, never a cut line with a tooltip.
   const title = rowEl(el, OTHER.thread_id).querySelector<HTMLElement>('.ib-l2 > .ib-title')!;
   expect(title.textContent).toBe('Inbox: project menu');
   sized(title, 400, 180);
@@ -172,7 +150,6 @@ test.skipIf(!hasDom)('the grey line is the latest message in every row shape, an
   const REPLIED = { ...row('msg_replied', 'Migration plan for the billing tables', null), message_count: 2, latest_preview: 'You: Go with option B.' };
   const FIRST = { ...row('msg_first', 'Can I delete the old fixtures folder?', null), latest_preview: null };
   const ECHO = { ...row('msg_echo', 'Release notes', 'release'), latest_preview: 'release' };
-  // A named Sent row keeps the words that say who has the reply (approval "inbox-tag-agents").
   const SENT: InboxListRow = {
     ...row('msg_sent', 'Rotate the staging password', 'staging'),
     section: 'sent',
@@ -196,7 +173,6 @@ test.skipIf(!hasDom)('the grey line is the latest message in every row shape, an
     expect([shape.name, preview(el, 'msg_first')]).toEqual([shape.name, null]);
     expect([shape.name, preview(el, 'msg_echo')]).toEqual([shape.name, null]);
     expect([shape.name, preview(el, 'msg_sent')?.startsWith('0 of 1 delivered')]).toEqual([shape.name, true]);
-    // Compact puts the title on line 1 and the line under it.
     if (shape.name === 'compact') expect(rowEl(el, 'msg_replied').querySelector('.ib-l2')).toBeNull();
     act(() => root?.unmount());
     host?.remove();

@@ -1,10 +1,3 @@
-/**
- * The Inbox's moment for the "Star the repo" ask (approval "star-ask"; reveal.ts `useStarReveal`): the line decides who
- * and when it is next (packages/shared/inbox/reveals.ts), the page decides the calm moment. What regresses: the ask
- * opening on a glance at a thread (under 5 s), before the page has been open 60 s, on the first-run screen, before the
- * list loaded, or on a load the tour, an update or another one-time dialog took; the page arming it only when it is
- * `next` (it stands aside from the line: settings `reveal.aside`).
- */
 import { describe, expect, test } from 'bun:test';
 import { REVEAL_TIMES, revealArmed, starRevealLeaveCounts, starRevealMayClaim } from './reveal';
 

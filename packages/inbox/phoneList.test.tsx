@@ -1,14 +1,3 @@
-/**
- * The list on a phone: every row is a mail app's row, whatever the list's
- * width and whichever list it is. The report this guards: on an iPhone the
- * list drew the desktop's wide row (one project's list keeps it at any width,
- * and a row only went two-line once measured narrower than 900 px), whose
- * fixed count and time columns left the subject no room, so the agent's mark
- * sat under the count and the time. Pixel geometry is proved in WebKit and
- * Chromium by tests/e2e/inbox-mobile.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -88,12 +77,6 @@ function render(filtered: boolean, narrow = false): HTMLElement {
   return host;
 }
 
-/**
- * A phone row's three lines (approval "inbox-list-row-v2"): line 1 in reading order (the project's text, the
- * agents' tiles by their name as `agents:<name>`, which CSS draws before the project, the time as `time`), the
- * title, and line 3 (the preview by its text, the open count
- * as `?N`, `?N:stop` or `?N:hold` when filled, anything else by its text), or `null` when the row has no line 3.
- */
 function lines(el: HTMLElement, id: string): { l1: string[]; title: string; l3: string[] | null } {
   const r = el.querySelector<HTMLElement>(`.ib-mrow[data-thread-id="${id}"]`);
   expect(r).not.toBeNull();
@@ -122,20 +105,17 @@ describe.if(hasDom)('the list on a phone', () => {
 
   test('three lines: the agents, the project and when; the title; then the preview and the question mark at its end', () => {
     const el = render(false);
-    // An unnamed thread: its subject is the title, and line 3 holds ?N alone, filled as the row is stopped.
     expect(lines(el, 'msg_stop')).toEqual({
       l1: ['payments-reconciliation-service-v2', 'agents:Claude Code', 'time'],
       title: 'Subject msg_stop',
       l3: ['?2:stop'],
     });
-    // A named thread: the name is the title, whole however long; the subject is the preview, then the guided review book.
     expect(lines(el, 'msg_wait')).toEqual({
       l1: ['payments-reconciliation-service-v2', 'agents:Claude Code', 'time'],
       title: 'refund-webhooks-and-the-long-running-reconciliation-job',
       l3: ['Subject msg_wait', '', '?2'],
     });
     expect(el.querySelector('.ib-mrow[data-thread-id="msg_wait"] .ib-m3 > [data-guide-mark]')!.getAttribute('aria-label')).toBe('Guided review');
-    // A Sent row says where the reply is, as its title; nothing else waits, so no line 3.
     expect(lines(el, 'msg_sent')).toEqual({
       l1: ['payments-reconciliation-service-v2', 'agents:Pi', 'time'],
       title: 'Saved for Pi. It sees it when it next reads this thread.',

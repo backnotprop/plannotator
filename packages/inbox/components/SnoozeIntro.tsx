@@ -1,16 +1,3 @@
-/**
- * The one-time Snooze announcement (approval "inbox-snooze-announce", direction B "The real menu"; when it shows:
- * snoozeIntro.ts). A third user of the one-time dialog shell (`.ib-lo`, after the list options and voice intros).
- *
- * The picture is static and in the person's own mode (no light frame): two of the person's real rows (the thread they
- * just left is the one the menu is aimed at), the real "Snooze until" menu with a pointer on Tomorrow, and the real
- * "Snoozed · <time> · Undo" toast. Its times are today's, from core's inbox-snooze.ts. On a phone it is the ⋯ sheet's
- * times. No motion: the dialog has no entrance of its own (Modal), and the picture never moves, so reduced motion
- * changes nothing.
- *
- * Try it (first focus) opens the real Snooze menu (snoozeIntroTry.ts) and never snoozes anything by itself. Got it,
- * Escape and a click outside close it. Every way out is final: the Inbox stamped it when this page claimed it.
- */
 import { useMemo, type ReactNode } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxSnoozeChoices, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
@@ -22,7 +9,6 @@ import { Modal } from './Updates';
 
 const noop = () => {};
 
-/** The menu's times as the real menu draws them; `lit`: the choice under the pointer (or a phone's first). */
 function Times({ now, lit, pointer }: { now: Date; lit: string; pointer: boolean }) {
   const choices = inboxSnoozeChoices(now);
   return (
@@ -44,7 +30,6 @@ function Times({ now, lit, pointer }: { now: Date; lit: string; pointer: boolean
   );
 }
 
-/** A mouse pointer, resting on the choice. */
 function Pointer() {
   return (
     <svg className="ib-zx-pointer" width="16" height="22" viewBox="0 0 16 22" aria-hidden="true">
@@ -53,7 +38,6 @@ function Pointer() {
   );
 }
 
-/** The real toast's look, at rest under the menu. */
 function Toast({ when }: { when: string }) {
   return (
     <div className="ib-toast ib-toast-closable ib-zx-toast">
@@ -99,13 +83,10 @@ function Row({ row, project, menu }: { row: InboxListRow; project: string; menu:
 }
 
 export interface SnoozeIntroProps {
-  /** The rows to draw: the thread just left last (the menu's target), one more above it when there is one. */
   rows: readonly InboxListRow[];
   projectNames?: ReadonlyMap<string, string>;
   phone: boolean;
-  /** Open the real Snooze menu (the dialog closes first). */
   onTry: () => void;
-  /** Got it, Escape, a click outside. */
   onClose: () => void;
 }
 

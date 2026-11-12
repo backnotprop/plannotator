@@ -20,7 +20,6 @@ function Choices<T extends string>({ label, value, options, onChange, name }: { 
   );
 }
 
-/** No visible label: each control says what it asks. */
 const Row = ({ children }: { children: ReactNode }) => <div className="ib-cp-to ib-cp-rvrow">{children}</div>;
 
 function SummaryLine({ summary }: { summary: ReviewSummary }) {
@@ -34,10 +33,8 @@ function SummaryLine({ summary }: { summary: ReviewSummary }) {
   );
 }
 
-/** Text that means a link, whatever it turns out to be: the search reads it instead of filtering the list. */
 const isLinkText = (text: string) => inboxReviewLinkOf(text) !== null || /^\s*https?:\/\//i.test(text);
 
-/** What a pull request's link was read as. */
 function LinkReadLine({ read, inReview }: { read: InboxReviewLinkAnswer; inReview: boolean }) {
   return (
     <p className={read.ok ? 'ib-cp-rvreadok' : undefined} role="status" data-review-link-read={read.ok ? 'ok' : read.reason}>
@@ -50,10 +47,6 @@ function LinkReadLine({ read, inReview }: { read: InboxReviewLinkAnswer; inRevie
 
 const linkStateWord = (read: Extract<InboxReviewLinkAnswer, { ok: true }>) => (read.pull.state === 'merged' || read.pull.state === 'closed' ? read.pull.state : null);
 
-/**
- * The picker over what Reviews lists: FolderMenu's look and keys. Not reviewed comes first; a PR in review opens its
- * thread. Its search also takes a pasted link, for a PR that isn't listed, or to go straight to one that is.
- */
 function PullMenu({ pulls, read, link, linkRead, linkInReview, onLink, onUseLink, selected, phone, onPick, onClose }: { pulls: readonly ReviewBoxPull[]; read: ReviewPullsRead; link: string; linkRead: InboxReviewLinkAnswer | null; linkInReview: boolean; onLink: (text: string) => void; onUseLink: () => void; selected: string | null; phone: boolean; onPick: (pull: ReviewBoxPull) => void; onClose: () => void }) {
   const [query, setQuery] = useState(link);
   const asLink = isLinkText(query);
@@ -75,7 +68,6 @@ function PullMenu({ pulls, read, link, linkRead, linkInReview, onLink, onUseLink
     } else if (event.key === 'Enter' && asLink) {
       event.preventDefault();
       event.stopPropagation();
-      // Before its read lands too: the row then says what it finds. A link that failed says so right here.
       if (!linkRead || linkRead.ok) onUseLink();
     } else if (event.key === 'Enter' && options[at]) {
       event.preventDefault();
@@ -178,7 +170,6 @@ function PullMenu({ pulls, read, link, linkRead, linkInReview, onLink, onUseLink
   );
 }
 
-/** New review's rows above To: what is reviewed. */
 export function ReviewRows(props: {
   kind: ReviewKind;
   onKind: (kind: ReviewKind) => void;
@@ -193,12 +184,9 @@ export function ReviewRows(props: {
   menu: boolean;
   onMenu: (open: boolean) => void;
   link: string;
-  /** The search holds a link, or stopped holding one (''). */
   onLink: (text: string) => void;
   linkRead: InboxReviewLinkAnswer | null;
-  /** The link's PR already has a review thread. */
   linkInReview: boolean;
-  /** The link was chosen from the search: it's what is reviewed. */
   linkChosen: boolean;
   onUseLink: () => void;
 }) {

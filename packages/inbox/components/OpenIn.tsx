@@ -24,24 +24,12 @@ import { useContextMenuTrigger } from './useContextMenuTrigger';
 import { copyImageToClipboard } from '../copyImage';
 import { useMessageArm } from '../messageArming';
 
-/**
- * "Open in" for an attachment (design record "inbox-open-in", approved
- * 2026-10-14; the look is mock-v2): a compact split button in the pane's
- * header (the app's icon and "Open", and a caret for the list), a ⋯ menu on
- * each tile with the same list, and over the tailnet or on a phone a single
- * "Open in new tab" icon for HTML and images. No keyboard shortcut.
- *
- * Where the window is: `apps` on this computer, `tab` through the tailnet
- * or on a phone (launching an app is loopback-only on the server too).
- */
 export type OpenInSurface = 'apps' | 'tab';
 
-/** The Inbox's own, local-only app list (GET; 403 through the tailnet). */
 export const INBOX_OPEN_IN_APPS_URL = inboxUrl('/open-in/apps');
 
 const ERROR_MS = 4000;
 
-/** Picking from a menu: the launch, what it says while it runs, and Copy path. */
 function useOpenInActions(path: string | null, open: (id: string) => Promise<{ ok: boolean; error?: string }>, remember: (id: string) => void) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
@@ -79,9 +67,7 @@ function useOpenInActions(path: string | null, open: (id: string) => Promise<{ o
   return { busy, status, launch, copyPath, flash };
 }
 
-/** Everything an attachment's control needs: the menu, and picking from it. `enabled: false` (off this computer): no list is read, no menu. */
 function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent', enabled = true) {
-  // A read that did not answer (a restarting Inbox) is asked again for the next file.
   const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, enabled, attachment.id);
   const [remembered, remember] = useRememberedOpenInApp();
   const menu: OpenInMenu | null = answer?.available ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version) : null;
@@ -99,7 +85,6 @@ function missingLabel(attachment: InboxAttachmentState): string {
   return attachment.unavailable?.code === 'attachment_missing' ? 'Missing' : 'Changed';
 }
 
-/** The list both menus show: the apps, then Copy path. */
 function OpenInMenuItems({ kind, missingWord, menu, onLaunch, onCopyPath }: { kind: unknown; missingWord: string; menu: OpenInMenu; onLaunch: (item: OpenInItem) => void; onCopyPath: () => void }) {
   return (
     <>
@@ -125,7 +110,6 @@ function OpenInMenuItems({ kind, missingWord, menu, onLaunch, onCopyPath }: { ki
           >
             <ItemIcon item={item} kind={kind} />
             <span className="flex-1 truncate">{item.label}</span>
-            {/* The file is gone or changed type: the apps are disabled and say so. */}
             {menu.missing && <span className="ib-openin-miss">{missingWord}</span>}
             {item === menu.primary && <Icon name="check" size={14} className="ib-openin-check" />}
           </DropdownMenuItem>
@@ -148,11 +132,6 @@ function Status({ status }: { status: { text: string; error: boolean } | null })
   );
 }
 
-/**
- * The pane header's control. On this computer: the split button (or, while
- * the apps are unknown to this server, the new-tab icon). Over the tailnet
- * and on a phone: the new-tab icon for HTML and images, nothing otherwise.
- */
 export function OpenInControl({
   attachment,
   version,
@@ -163,9 +142,7 @@ export function OpenInControl({
   attachment: InboxAttachmentState;
   version: 'current' | 'sent';
   surface: OpenInSurface;
-  /** Show "Open" beside the icon (a pane wide enough for it). */
   label: boolean;
-  /** A phone's 44 px icon. */
   big?: boolean;
 }) {
   if (surface === 'tab') return <NewTabButton attachment={attachment} version={version} big={big} />;
@@ -187,12 +164,10 @@ function NewTabButton({ attachment, version, big }: { attachment: InboxAttachmen
 function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; label: boolean }) {
   const { answer, menu, busy, status, launch, copyPath } = useOpenIn(attachment, version);
   if (!answer) return null;
-  // A server without the local app list (an older Inbox): a new tab is all there is.
   if (!menu) return <NewTabButton attachment={attachment} version={version} big={false} />;
   return <SplitButton id={attachment.id} kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
 }
 
-/** The split button: the app's icon (and "Open"), and a caret for the list. */
 function SplitButton({
   id,
   kind,
@@ -216,7 +191,6 @@ function SplitButton({
   launch: (item: OpenInItem) => Promise<void>;
   copyPath: () => Promise<void>;
   onOpenChange?: (open: boolean) => void;
-  /** Added to the button's hover words. */
   note?: string;
 }) {
   const [open, setOpenState] = useState(false);
@@ -272,15 +246,8 @@ function SplitButton({
   );
 }
 
-/** The last answer for each referenced file: a header drawn again (a diff scrolled back) shows its control at once while it asks again. */
 const knownFiles = new Map<string, { path: string; kind: string } | null>();
 
-/**
- * "Open in" for a file something references, by its project-relative path (Shape's references and Code view, a review's
- * diff headers). The split button, without "Open". Nothing at all when the file is not on this computer, through the
- * tailnet (the apps route refuses it) or on a phone, as for an attachment there is no app to launch. `line` goes along
- * when the app's launcher takes one. `label`: the word "Open" on the button (the code window's header). `note`: added to the button's hover words.
- */
 export function OpenInFile({ scope, path, line, label = false, onListOpenChange, note }: { scope: OpenInFileScope; path: string; line?: number; label?: boolean; onListOpenChange?: (open: boolean) => void; note?: string }) {
   const phone = usePhone();
   const { writes } = useInboxFileSource();
@@ -288,7 +255,6 @@ export function OpenInFile({ scope, path, line, label = false, onListOpenChange,
   return <OpenInFileSplit scope={scope} path={path} line={line} label={label} onListOpenChange={onListOpenChange} note={note} />;
 }
 
-/** Whether a referenced file is here and what kind, remembered for the next control drawn for it. */
 async function checkOpenInFile(scope: OpenInFileScope, path: string): Promise<{ path: string; kind: string } | null> {
   const key = JSON.stringify([scope, path]);
   try {
@@ -318,8 +284,6 @@ function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: {
     return () => {
       live = false;
     };
-    // `key` names the scope and the path.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, available]);
   const { busy, status, launch, copyPath } = useOpenInActions(file?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
   if (!answer?.available || !file) return null;
@@ -327,45 +291,24 @@ function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: {
   return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} onOpenChange={onListOpenChange} note={note} />;
 }
 
-/**
- * A code span that names a file (`src/retry.ts:12`) in a message: it looks as it does without this, and resting on it
- * shows the code (`OpenInCodeHover`).
- */
 export function OpenInCodeSpan({ scope, text, children }: { scope: OpenInFileScope; text: string; children: ReactNode }) {
   const named = projectFileOfLink(text);
   if (!named) return <>{children}</>;
   return <OpenInCodeHover scope={scope} path={named.path} line={named.line} lineEnd={named.lineEnd}>{children}</OpenInCodeHover>;
 }
 
-/**
- * Code spans in what `children` draws (a message, a board, and a guide through its reader): each that names a file
- * shows its code. `on` is Code review.
- */
 export function OpenInCodeSpans({ scope, on, children }: { scope: OpenInFileScope; on: boolean; children: ReactNode }) {
   const key = JSON.stringify(scope);
   const render = useMemo(
     () => (on ? (text: string, code: ReactNode) => <OpenInCodeSpan scope={scope} text={text}>{code}</OpenInCodeSpan> : null),
-    // `key` names the scope.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [key, on],
   );
   return <CodeSpanContext.Provider value={render}>{children}</CodeSpanContext.Provider>;
 }
 
-/** A file named with no line shows this much of its top. */
 const FILE_TOP_LINES = 40;
-/** Lines kept around a named line or range. */
 const CONTEXT_LINES = 6;
 
-/**
- * Words that name a file, in a line of text: they stay as they are, and hovering them shows the code in ui's code
- * window (the one plan review's and annotate's code links use), with Open and its editor list in the window's header.
- * Nothing is asked until the pointer rests. A name that is no file here or in the PR shows nothing, then `title` if given.
- *
- * With no hover (a touch screen), a tap shows the same window as a sheet from the bottom edge. A phone has no editor
- * to open, so its sheet has the code, and the forge's link for a PR's file. By keyboard, focus shows the window, Tab or
- * Enter goes into it and Escape closes it.
- */
 export function OpenInCodeHover({ scope, path, line, lineEnd, title, children }: { scope: OpenInFileScope; path: string; line?: number; lineEnd?: number; title?: string; children: ReactNode }) {
   const { writes } = useInboxFileSource();
   if (!writes) return <>{title ? <HostTitle title={title}>{children as ReactElement}</HostTitle> : children}</>;
@@ -379,23 +322,19 @@ interface CodeHoverWords {
   lineEnd?: number;
 }
 
-/** What words that name a file do, wherever they are drawn: the file's read, the window, and how it stays and closes. */
 function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = false) {
   const phone = usePhone();
   const touch = useTouchScreen();
   const [missing, setMissing] = useState(false);
   const [told, setTold] = useState(false);
   const hover = useHoverPreview<Extract<OpenInFileCode, { found: true }>>(async () => {
-    // Open's own answer comes with the code, so the window opens whole.
     const [answer] = await Promise.all([inboxApi.openInFileCode(scope, path).catch(() => null), phone ? null : checkOpenInFile(scope, path)]);
     setMissing(!answer?.found);
-    // Still resting on the words: they say so now, with no second rest.
     if (!answer?.found && (pointerIn.current || document.activeElement === hover.anchorRef.current)) setTold(true);
     return answer?.found ? answer : null;
   });
   const { preview, anchorRef, dismiss: close } = hover;
   const windowEl = useRef<HTMLDivElement | null>(null);
-  // The editor list portals away from the window: while it is open, leaving the window closes nothing.
   const listOpen = useRef(false);
   const pointerIn = useRef(false);
   const dismiss = useCallback(() => {
@@ -403,7 +342,6 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = f
   }, [close]);
   const enter = (event?: { buttons: number }) => {
     pointerIn.current = true;
-    // Not during a drag: the person is selecting words.
     if (!event?.buttons) hover.onEnter();
   };
   const leave = () => {
@@ -413,7 +351,6 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = f
   };
   const controls = () => Array.from(windowEl.current?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)') ?? []);
 
-  // While open, Escape closes it, focus back on the words when it was inside. Used: the window's own Escape skips it.
   const open = !!preview;
   useEffect(() => {
     if (!open) return;
@@ -429,8 +366,6 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = f
   }, [open, close, anchorRef]);
 
   const element = (
-    // Always drawn: a comment's marks move the text beside the words, so nothing may be inserted among them later.
-    // A portal's events still reach the page's own handlers through React: not a click in here.
     <span
       style={{ display: 'contents' }}
       onClick={(event) => event.stopPropagation()}
@@ -444,7 +379,6 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = f
         const list = controls();
         const atEdge = document.activeElement === (event.shiftKey ? list[0] : list.at(-1));
         if (!atEdge) return;
-        // Back to the words: from there, Tab goes on through the page.
         if (event.shiftKey) event.preventDefault();
         anchorRef.current?.focus();
       }}
@@ -483,7 +417,6 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = f
                 note={preview.pull ? "opens this computer's copy" : undefined}
                 onListOpenChange={(next) => {
                   listOpen.current = next;
-                  // Closed with the pointer gone: the window goes too.
                   if (!next && !pointerIn.current && !touch) hover.onLeave();
                 }}
               />
@@ -549,7 +482,6 @@ function CodeHoverWindow({ title, children, ...words }: CodeHoverWords & { title
 
   return (
     <>
-      {/* Always this tooltip, closed until the file is known to be missing: redrawing the words would lose a comment's highlight on them. */}
       {title ? (
         <Tooltip
           content={title}
@@ -569,18 +501,12 @@ function CodeHoverWindow({ title, children, ...words }: CodeHoverWords & { title
   );
 }
 
-/**
- * The same window for code spans a host draws as HTML, which has no spans to wrap (Ask AI's answers, `ChatMarkdown`):
- * handlers for the host's own element, so nothing is added around what it draws, and the window to draw beside it. One
- * window at a time. `on` is Code review: off, there are no handlers and no window.
- */
 export function useOpenInCodeRegion(scope: OpenInFileScope, on: boolean): { handlers?: Pick<HTMLAttributes<HTMLElement>, 'onMouseOver' | 'onClick'>; window: ReactNode } {
   const touch = useTouchScreen();
   const { writes } = useInboxFileSource();
   const [at, setAt] = useState<{ el: HTMLElement; turn: number; path: string; line?: number; lineEnd?: number } | null>(null);
   const turns = useRef(0);
   if (!on || !writes) return { window: null };
-  /** The file a code span or a link with no scheme names. */
   const namedBy = (target: EventTarget) => {
     const el = target instanceof Element ? target.closest<HTMLElement>('code, a') : null;
     if (!el || el.closest('pre, [data-code-snippet-preview]')) return null;
@@ -590,11 +516,9 @@ export function useOpenInCodeRegion(scope: OpenInFileScope, on: boolean): { hand
     return named && { el, ...named };
   };
   const show = (event: ReactMouseEvent<HTMLElement>) => {
-    // Not during a drag: the person is selecting words.
     if (event.buttons) return;
     const named = namedBy(event.target);
     if (!named) return;
-    // A tap on a link stays here: its address means nothing to a browser.
     if (touch && named.el.tagName === 'A') event.preventDefault();
     if (named.el === at?.el) return;
     if (touch && window.getSelection()?.isCollapsed === false) return;
@@ -613,12 +537,10 @@ export function useOpenInCodeRegion(scope: OpenInFileScope, on: boolean): { hand
 }
 
 function CodeRegionWindow({ anchor, ...words }: CodeHoverWords & { anchor: HTMLElement }) {
-  // Over a floating window (Ask AI's), so drawn above it.
   const { hover, touch, enter, leave, element } = useCodeHover(words, true);
   useEffect(() => {
     hover.anchorRef.current = anchor;
     const open = touch ? () => hover.onEnter() : enter;
-    // It came on the pointer's arrival or the tap, which started this.
     open();
     const type = touch ? 'click' : 'mouseenter';
     anchor.addEventListener(type, open);
@@ -627,20 +549,16 @@ function CodeRegionWindow({ anchor, ...words }: CodeHoverWords & { anchor: HTMLE
       anchor.removeEventListener(type, open);
       anchor.removeEventListener('mouseleave', leave);
     };
-    // One span for this window's life (`key` in OpenInCodeRegion); its handlers read only refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor]);
   return <>{element}</>;
 }
 
-/** A file's address on its forge, at the lines the words name. */
 function withLines(pull: { platform: 'github' | 'gitlab'; url: string }, line?: number, lineEnd?: number): string {
   if (!line) return pull.url;
   if (!lineEnd || lineEnd === line) return `${pull.url}#L${line}`;
   return `${pull.url}#L${line}-${pull.platform === 'gitlab' ? '' : 'L'}${lineEnd}`;
 }
 
-/** The lines the code window shows for the words: around what they name, or the file's top when they name no line (or one past its end). */
 function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
   contents: string;
   path: string;
@@ -655,7 +573,6 @@ function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
   onMouseLeave: () => void;
   actions: ReactNode;
 }) {
-  // A file's last newline ends its last line: no empty row after it.
   const text = useMemo(() => contents.replace(/\r?\n$/, ''), [contents]);
   const count = useMemo(() => text.split('\n').length, [text]);
   const named = line && line <= count ? line : null;
@@ -673,7 +590,6 @@ function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
   );
 }
 
-/** The list a tile's ⋯ and its right-click menu show: Open side by side / full screen, Download, then the apps and Copy path. */
 function TileMenuItems({
   attachment,
   version,
@@ -688,7 +604,6 @@ function TileMenuItems({
   version: 'current' | 'sent';
   onOpenAs?: (view: 'full' | 'side') => void;
   download: string | null;
-  /** An image: Copy image, what the browser's own Copy Image leaves (copyImage.ts). */
   onCopyImage: (() => void) | null;
   menu: OpenInMenu | null;
   onLaunch: (item: OpenInItem) => void;
@@ -698,7 +613,6 @@ function TileMenuItems({
     <>
       {onOpenAs && (
         <>
-          {/* This file in that view; the remembered choice is unchanged (fileView.ts). */}
           <DropdownMenuItem className="text-xs" onClick={() => onOpenAs('side')} data-open-as="side">
             <Icon name="sideBySide" size={15} className="ib-appi ib-glyph" />
             <span className="flex-1">Open side by side</span>
@@ -712,7 +626,6 @@ function TileMenuItems({
       )}
       {download && (
         <>
-          {/* The version the tile opens, under the file's own name: an HTML page or a Markdown file is saved, never opened. */}
           <DropdownMenuItem className="text-xs" render={<a href={download} download={attachment.name} />} data-tile-download={attachment.id}>
             <Icon name="download" size={15} className="ib-appi ib-glyph" />
             <span className="flex-1">{version === 'sent' ? 'Download the sent version' : 'Download'}</span>
@@ -731,33 +644,11 @@ function TileMenuItems({
   );
 }
 
-/** The ⋯ menu's look (ui's DropdownMenuContent), for the right-click one: Base UI's context menu has its own positioner, at the pointer. */
 const TILE_CONTEXT_POPUP =
   'z-50 min-w-[12rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md origin-[var(--transform-origin)] transition-[opacity,scale] duration-150 data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95';
-/** The tile's own control inside what `render` draws: a tile's button or download link, an Artifacts card, a gallery picture. */
 const TILE_CONTROL = '[data-attachment-id], [data-artifact-tile], [data-gallery-image]';
 const NO_SLOT = { order: [], fallback: () => null };
 
-/**
- * A file's menu on a tile and on an Artifacts card (the owner, 2026-11-08: "a
- * simpler, faster way to download attachments ... the context menu should
- * also have Download"). On this computer a ⋯ sits beside the tile (a sibling
- * of its button, never inside it; shown on hover, keyboard focus or open,
- * always on a touch screen). A right-click anywhere on the tile opens the same
- * list at the pointer, here and through the tailnet alike: Open side by side /
- * Open full screen, Download (the version the tile opens, as the file's own
- * name), then the apps and Copy path on this computer. The trigger's rules are
- * `useContextMenuTrigger`'s (rows, cards): a touch never opens it (no long
- * press), and with nothing to list (the tour writes nothing) the browser's
- * own menu shows. No key of its own: the hook's Shift+F10 is left off.
- *
- * An image also gets Copy image: what the browser's own Copy Image leaves, so a
- * paste into a reply is still the same file (reusePaste.ts).
- *
- * `render` draws the tile (or its wrapper) with `more`, the ⋯ (null off this
- * computer), and `status`, the line that says why a launch or a copy failed,
- * placed inside it where it has a wrapper.
- */
 export function TileMenu({
   attachment,
   surface,
@@ -775,22 +666,18 @@ export function TileMenu({
   const { menu, status, launch, copyPath, flash } = useOpenIn(attachment, version, apps);
   const arm = useMessageArm();
   const [open, setOpen] = useState(false);
-  // A source that writes nothing (the tour): no Download, as the viewer's.
   const download = source.writes ? source.downloadUrl(attachment, version) : null;
-  // Nothing leaves the window in the tour: no Copy image either.
   const copyImage =
     source.writes && readInboxAttachmentKind(attachment.kind) === 'image'
       ? () => void copyImageToClipboard(source.imageUrl(attachment, version), attachment.name).then((ok) => flash(ok ? 'Image copied' : 'Could not copy the image', !ok))
       : null;
   const empty = !onOpenAs && !download && !menu;
-  // The wrapper `render` draws, or the tile's own button or link when it draws no wrapper (typed as Base UI's div).
   const trigger = useRef<HTMLDivElement>(null);
   const control = (): HTMLElement | null => {
     const el = trigger.current;
     return el ? (el.matches(TILE_CONTROL) ? el : el.querySelector<HTMLElement>(TILE_CONTROL)) : null;
   };
   const context = useContextMenuTrigger({
-    // Anywhere on the tile (its ⋯ and add-to-reply too); never the ⋯'s own popup, which React bubbles here.
     itemOf: (target) => (target instanceof Node && trigger.current?.contains(target) ? control() : null),
     idOf: () => attachment.id,
     has: () => !empty,
@@ -800,14 +687,10 @@ export function TileMenu({
     disabled: empty,
     onTarget: () => {},
   });
-  // Shift+F10 stays the rows', cards' and messages' (no new shortcut): the platform's own context-menu key still sends `contextmenu`.
   const { onKeyDown: _key, ...triggerProps } = context.trigger;
   const items = (
     <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
   );
-  // Far from the view (messageArming.tsx): the same ⋯, with no menu behind it yet; a press arms its message and opens
-  // the menu. Only the ⋯ changes: the tile (and its right-click menu) stays the same element, so arming never remounts
-  // a tile or its picture (a phone's thread would lose its place).
   const plain =
     apps && !empty ? (
       <button
@@ -853,7 +736,6 @@ export function TileMenu({
   );
 }
 
-/** The other version of the file, offered in full screen's ⋯ (the changed chip offers it too). */
 export interface FullScreenVersionAction {
   label: string;
   onSelect: () => void;
@@ -862,24 +744,14 @@ export interface FullScreenVersionAction {
 interface FullScreenMoreProps {
   attachment: InboxAttachmentState;
   version: 'current' | 'sent';
-  /** Where the window is (as the header's control); absent: no Open in. */
   surface?: OpenInSurface;
   phone: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   versionAction: FullScreenVersionAction | null;
-  /**
-   * Pin / Unpin as the menu's first item (a phone's HTML page: its toolbar has no room for the pin button). Absent
-   * or null: the toolbar draws the pin, or there is none (the tour).
-   */
   pin?: { threadId: string; key: string; name: string } | null;
 }
 
-/**
- * Full screen's ⋯ (approval "inbox-one-fullscreen"): with no header left,
- * Open in, Download and the other version live here. On this computer the
- * Open in list is the header's; through the tailnet or on a phone, a new tab.
- */
 export function FullScreenMore(props: FullScreenMoreProps) {
   return props.surface === 'apps' ? <FullScreenMoreApps {...props} /> : <FullScreenMoreMenu {...props} openIn={null} />;
 }
@@ -906,9 +778,7 @@ function FullScreenMoreApps(props: FullScreenMoreProps) {
 
 function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNode }) {
   const { attachment, version } = props;
-  // A source that writes nothing (the tour): no Open in, no Download; the menu says so.
   const { writes } = useInboxFileSource();
-  // Through the tailnet or on a phone (or a server without the app list): a new tab, for HTML and images.
   const tab = writes && props.openIn === null && props.surface !== undefined ? newTabUrl(attachment, version) : null;
   const named = [props.openIn || tab ? 'open in' : null, writes ? 'download' : null, props.versionAction ? 'versions' : null].filter(Boolean).join(', ') || 'not in the tour';
   return (

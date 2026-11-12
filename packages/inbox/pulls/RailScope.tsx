@@ -1,9 +1,3 @@
-/**
- * The PR page rail's Changes | All files (the owner's take A on #2639): the review app's switch over its file tree
- * (review-editor's `ScopeSwitch`, its classes and words), at the head of the rail. Changes is the PR's own files
- * (`RailTree`); All files the repository at the head the patch on screen was read at, from the Inbox's
- * `/api/inbox/pulls/repo-files`, drawn by the review app's own tree (`guide/PullRepoParts.tsx`).
- */
 import type { TreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { inboxUrl } from '../inboxUrl';
 
@@ -15,7 +9,6 @@ const pill = (active: boolean) =>
     active ? 'bg-[var(--sidebar-fill-strong)] text-foreground' : 'text-muted-foreground hover:bg-[var(--sidebar-fill)] hover:text-foreground'
   }`;
 
-/** The review app's Changes | All files pills: Changes with its count, All files without. */
 export function RailScopeSwitch({ scope, changed, onSelect }: { scope: TreeScope; changed: number; onSelect: (scope: TreeScope) => void }) {
   return (
     <div className="flex min-w-0 items-center ib-prp-scope" role="group" aria-label="Files shown in the tree" data-tree-scope-switch="">
@@ -44,10 +37,6 @@ export function RailScopeSwitch({ scope, changed, onSelect }: { scope: TreeScope
   );
 }
 
-/**
- * The review app's reads (`/api/repo-files?…`, `/api/repo-file?…`, as its `useRepoFiles` and `useRepoFileText` ask)
- * sent to the Inbox's routes for one PR, the rest of the query as it was. Anything else is refused, never fetched.
- */
 export function pullRepoFetch(key: string): typeof fetch {
   return ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;

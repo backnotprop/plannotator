@@ -1,17 +1,3 @@
-/**
- * "These might help" under the Feedback box: a plain word search over
- * feedbackSearch.data.json, in the window. What is typed goes nowhere.
- *
- * Only meaningful words count: four letters or more, and not filler ("with",
- * "please", "really", "inbox"; FILLER below). A title is similar when it shares
- * at least two of them with what is typed, and most of the shorter side's
- * (approval "inbox-feedback-faq", 2026-11-09: "Pin threads" no longer answers
- * "threads reorder"). A hand-written feature also shows for its one-word name
- * or for another name ("done button") when all its words are typed. A closed
- * issue carries the release that fixed it, so its line says "Fixed in 0.28.52".
- * Only the first 4,000 characters are searched, the send limit: a long paste
- * stays quick.
- */
 /// <reference path="./assets.d.ts" />
 import { FEEDBACK_MESSAGE_MAX } from '@plannotator/core/product-feedback';
 
@@ -24,7 +10,6 @@ export interface SearchFeature {
 export interface SearchLink {
   title: string;
   path: string;
-  /** A closed issue: the release that fixed it, without its "v" ("0.28.52"). */
   fixed?: string;
 }
 export interface SearchData {
@@ -35,25 +20,16 @@ export interface SearchHit {
   title: string;
   definition?: string;
   href: string;
-  /** "Fixed in {fixed}". */
   fixed?: string;
 }
 
 const REPO_URL = 'https://github.com/backnotprop/plannotator/';
 const MAX_SHOWN = 5;
-/** The share of the shorter side's meaningful words in common. */
 const SIMILAR = 0.6;
-/** And never fewer than this many in common, for anything but a feature's own one-word name. */
 const AT_LEAST = 2;
-/** A word in this share of the titles or more is common, and never in fewer than COMMON_FLOOR titles. */
 const COMMON_SHARE = 1 / 50;
 const COMMON_FLOOR = 20;
 
-/**
- * Words that say nothing about what is meant: filler, and the product's own names (in the Inbox's own form, every
- * title is about the Inbox). Four letters or more only: shorter words never count. Contractions split at the
- * apostrophe ("doesn't" is "doesn").
- */
 const FILLER = new Set(
   (
     'about above actually after again against almost also always another anyone anything anyway around away back because been before being below ' +
@@ -72,7 +48,6 @@ function wordsOf(text: string, shortest = 4): string[] {
   return [...new Set(folded.match(/[\p{L}\p{N}]+/gu) ?? [])].filter((word) => word.length >= shortest && (shortest < 4 || !FILLER.has(word)));
 }
 
-/** The same word, give or take an ending of up to 3 letters or one slipped letter: "links" and "link", "archve" and "archive". */
 function sameWord(a: string, b: string): boolean {
   if (a === b) return true;
   if (a.length < 4 || b.length < 4) return false;
@@ -83,7 +58,6 @@ function sameWord(a: string, b: string): boolean {
   return a.slice(at + 1) === b.slice(at + 1) || a.slice(at + 1) === b.slice(at) || a.slice(at) === b.slice(at + 1);
 }
 
-/** Each title is split once. */
 const split = new Map<string, string[]>();
 const wordsOfEntry = (entry: string) => split.get(entry) ?? split.set(entry, wordsOf(entry)).get(entry)!;
 
@@ -92,14 +66,11 @@ export function searchFeedback(data: SearchData, text: string): SearchHit[] {
   const typed = wordsOf(searched);
   if (!typed.length) return [];
   const typedAll = wordsOf(searched, 1);
-  /** The typed words each title or definition has, worked out once per search. */
   const sharedBy = new Map<string, string[]>();
   const shared = (entry: string) => sharedBy.get(entry) ?? sharedBy.set(entry, typed.filter((word) => wordsOfEntry(entry).some((other) => sameWord(other, word)))).get(entry)!;
-  // A typed word in one title out of 50 or more ("list", "agent", "review" in 3,000 titles) is too common to make two titles alike: at least one word in common must be rarer.
   const titlesWith = new Map(typed.map((word) => [word, 0]));
   for (const { title } of data.links) for (const word of shared(title)) titlesWith.set(word, titlesWith.get(word)! + 1);
   const rare = (word: string) => titlesWith.get(word)! < Math.max(COMMON_FLOOR, data.links.length * COMMON_SHARE);
-  /** Words in common over the entry's length, so of two titles sharing as much, the shorter is closer. `least`: the fewest in common that count. */
   const closeness = (entry: string, least = AT_LEAST) => {
     const words = wordsOfEntry(entry);
     const common = shared(entry);
@@ -123,7 +94,6 @@ export function searchFeedback(data: SearchData, text: string): SearchHit[] {
     .map(({ score: _score, ...hit }) => hit);
 }
 
-/** Loaded and parsed at the first search, so a window that never opens the form holds none of it. A failed load shows no lines. */
 let shipped: Promise<SearchData> | null = null;
 export async function searchShipped(text: string): Promise<SearchHit[]> {
   if (!text.trim()) return [];

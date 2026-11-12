@@ -1,20 +1,3 @@
-/**
- * A Send with words and no pick, in a thread where ONE session asked twice
- * (two agent messages, each holding one open question): the shape of the
- * owner's thread on 0.28.20 that came back as two skip-only replies.
- * Approval "inbox-words-only-reply" (#1903): a Send that carries no pick
- * keeps every question open, sends the words once, to the latest agent
- * message, with the still-open line, and posts nothing to the older one.
- *
- * Every way into that Send is tried: the foot's Reply then the Send button,
- * Mod+Enter in the box, a pick made and then taken back before typing, a
- * thread whose first message is folded, and the box cancelled and opened
- * again. The window over a REAL Inbox (tests/helpers/inbox-dom-server.ts),
- * its fetches carried over loopback, the second question written by the
- * agent through the server's stdin.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,11 +43,9 @@ type ThreadModel = {
 };
 const readThread = async (id: string) => JSON.parse((await loopback(`/api/inbox/threads/${id}`)).text) as ThreadModel;
 
-/** The agent's second message: the same session, a reply in the thread, one open question of its own. */
 const SECOND = ['The long cut is ready too.', '', ':::question', 'Is this the film you upload?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
 
 async function askAgain(w: World): Promise<string> {
-  // The waiting thread's author is `ses_b<i>`: read it back rather than guess the index.
   const first = (await readThread(w.waiting)).thread.messages[0]! as unknown as { author: { session: string } };
   const stdin = child!.stdin as import('bun').FileSink;
   const before = lines.length;
@@ -202,7 +183,6 @@ function type(el: HTMLElement, words: string) {
 
 const replies = () => posted.filter((p) => p.path.endsWith('/reply'));
 
-/** Base UI opens a menu (and presses its items) on the pointer's press, as a person's click does. */
 async function press(target: HTMLElement) {
   await act(async () => {
     target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -213,7 +193,6 @@ async function press(target: HTMLElement) {
   });
 }
 
-/** What every words-only Send in this thread must come to, on the wire and on the server. */
 async function expectWordsOnly(firstId: string, secondId: string, words: string) {
   expect(replies().map((p) => p.path)).toEqual([`/api/inbox/messages/${secondId}/reply`]);
   expect(replies()[0]!.body).toMatchObject({ words, questions: [] });
@@ -224,7 +203,6 @@ async function expectWordsOnly(firstId: string, secondId: string, words: string)
     ['open', null],
   ]);
   const mine = model.thread.messages.filter((m) => m.author.kind === 'person');
-  // Pinned word for word on purpose: the still-open line is the approved agent wording (approval "inbox-words-only-reply").
   expect(mine.map((m) => [m.reply_to, m.body])).toEqual([
     [secondId, `${words}\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox.`],
   ]);
@@ -265,7 +243,6 @@ test.skipIf(!hasDom)('one session asked twice: a pick made and taken back before
   const card = el.querySelector('fieldset[data-question-key]') as HTMLElement;
   act(() => (card.querySelector('[data-question-option] input') as HTMLInputElement).click());
   await until(async () => (await readThread(world.waiting)).thread.messages[0]!.questions![0]!.state === 'picked', 'the pick saved');
-  // Skip on the card, then Unskip: the card holds no answer again.
   act(() => button(card, 'Skip').click());
   await settle();
   act(() => button(el.querySelector('fieldset[data-question-key]')!, 'Unskip').click());
@@ -281,7 +258,6 @@ test.skipIf(!hasDom)('one session asked twice: a pick made and taken back before
 });
 
 test.skipIf(!hasDom)('one session asked twice, the first message folded: the Send is still words-only', async () => {
-  // The person looked at the first message before the second came: it folds when the thread opens again.
   const before = await readThread(world.waiting);
   await loopback(`/api/inbox/threads/${world.waiting}/seen`, 'POST', JSON.stringify({ through_seq: before.thread.messages[0]!.seq }));
   const second = await askAgain(world);
@@ -305,7 +281,6 @@ test.skipIf(!hasDom)('one session asked twice: the box closed and opened again k
   type(el, 'A first try.');
   act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await settle();
-  // Closing the box keeps the words as a draft (approval "inbox-reply-drafts"): Edit draft brings them back.
   act(() => button(el, 'Edit draft').click());
   await settle();
   expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('A first try.');
@@ -339,9 +314,6 @@ test.skipIf(!hasDom)('one session asked twice: a second words-only Send after th
   const model = await readThread(world.waiting);
   expect(model.thread.messages.flatMap((m) => m.questions ?? []).map((q) => q.state)).toEqual(['open', 'open']);
 });
-
-// Approval "inbox-explicit-skip" (2026-10-21): one Send to one session is ONE reply, even with answers on
-// both of its messages, and a Send skips only what the person chose with "Skip them".
 
 test.skipIf(!hasDom)('one session asked twice, a pick on each card: ONE reply to the latest message, carrying both answers', async () => {
   const second = await askAgain(world);
@@ -379,8 +351,6 @@ test.skipIf(!hasDom)('one session asked twice: a pick on the second, the first s
   act(() => (card.querySelector('[data-question-option] input') as HTMLInputElement).click());
   await until(async () => (await readThread(world.waiting)).thread.messages.flatMap((m) => m.questions ?? []).some((q) => q.state === 'picked'), 'the pick saved');
   await settle();
-  // The default: the other question stays open. The skip for this Send is the open questions list's first row
-  // (approval "reply-bar-pairs").
   const skipRow = () => document.querySelector<HTMLElement>('[data-open-questions-list] [data-open-questions-skip-row]');
   await until(() => !!el.querySelector('.ib-pfoot [data-open-questions]'), 'the open questions button');
   await press(el.querySelector('.ib-pfoot [data-open-questions]') as HTMLElement);

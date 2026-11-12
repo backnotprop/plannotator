@@ -1,11 +1,3 @@
-/**
- * The window's first list read, tried again while it fails (firstListRead.ts).
- * Before it, one failed first read left the page without its live stream until
- * a reload. Failures to catch: giving up after a failed read; reading again
- * after the page left or after the Inbox refused the page; reading once more
- * when another read already brought the list; a refusal read as a failure
- * worth retrying, or a dropped connection read as a refusal.
- */
 import { expect, test } from 'bun:test';
 import { FIRST_LIST_RETRY_MS, listReadRefused, readFirstList } from './firstListRead';
 
@@ -42,7 +34,6 @@ test('a first read that fails is read again until it lands, on the waits, the la
   expect(state.reads).toBe(fails + 1);
   const last = FIRST_LIST_RETRY_MS[FIRST_LIST_RETRY_MS.length - 1]!;
   expect(waits).toEqual([...FIRST_LIST_RETRY_MS, last, last]);
-  // What failed with the first read (the settings) is read again, once.
   expect(state.late).toBe(1);
 });
 
@@ -81,7 +72,6 @@ test('another read brought the list meanwhile: it is taken, and the list is not 
 test('only the Inbox\'s own refusal stops the retries', () => {
   expect(listReadRefused({ status: 403 })).toBe(true);
   expect(listReadRefused({ status: 404 })).toBe(true);
-  // A dropped connection, a server error, "too many", and a timeout are tried again.
   expect(listReadRefused(new TypeError('Failed to fetch'))).toBe(false);
   expect(listReadRefused({ status: 500 })).toBe(false);
   expect(listReadRefused({ status: 503 })).toBe(false);

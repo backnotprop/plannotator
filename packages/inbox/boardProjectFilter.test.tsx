@@ -1,21 +1,3 @@
-/**
- * The Board's one filter (approval "board-initiatives", take C; the project
- * part from the owner's pick 2026-10-28): the filter icon in the Board's
- * header, its menu holding Initiative and Project, the picks as tokens, as
- * the window draws it over a scripted fetch. What regresses: a Board of one
- * project offering a Project choice it does not need; another project's (or
- * initiative's) card on the lanes, in the counts, on the Done or Cancelled
- * page or in the drops; the menu offering a project with no card, or wrong
- * counts per initiative and for No initiative; × or Show all not clearing; a
- * card opened from another project closing under the filter; New card not
- * starting in the filtered initiative; the opened card's Initiative not
- * writing; New initiative… not making one; the phone's tokens squeezed into
- * the header instead of their own row, or its menu not a bottom sheet; a card
- * not naming its project while the Board spans projects, or still naming it
- * once one project is picked or every card is in one project.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -96,7 +78,6 @@ afterEach(() => {
   while (restorers.length > 0) restorers.pop()!();
 });
 
-/** What the window asked the server to write: each POST's path and body. */
 const posts: { path: string; body: Record<string, unknown> }[] = [];
 
 function scriptFetch() {
@@ -131,7 +112,6 @@ function scriptFetch() {
   });
 }
 
-/** The Board with its filter held the way App holds it (the address): each pick is drawn again. */
 function draw(over: Partial<BoardPageProps> = {}, cards: InboxCardWire[] = CARDS) {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -192,7 +172,6 @@ async function settle() {
   });
 }
 
-/** Base UI opens on the pointer's press, as a person's click does. */
 async function press(el: HTMLElement) {
   await act(async () => {
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -215,9 +194,7 @@ const $ = (selector: string) => document.querySelector<HTMLElement>(selector);
 const $$ = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)];
 const laneIds = (column: string) => $$(`.ib-blanes [data-lane="${column}"] .ib-bcard`).map((el) => el.getAttribute('data-card-id'));
 const shownCards = () => $$('.ib-bcard').map((el) => el.getAttribute('data-card-id')).sort();
-/** A token's words: the picked project's or initiative's name, or null when nothing of that kind is picked. */
 const token = (kind: 'project' | 'initiative') => $(`[data-board-filter-token="${kind}"] .ib-bflt-tok-l`)?.textContent ?? null;
-/** The open menu's rows of one kind: their words (the count apart) and whether each is checked. */
 const rows = (attr: 'data-board-project-option' | 'data-board-initiative-option') =>
   $$(`[data-board-filter-menu] [${attr}]`).map((o) => ({
     name: o.querySelector('.ib-pmi-l')?.textContent?.trim() ?? '',
@@ -245,21 +222,17 @@ test.if(hasDom)('cards name their project while the Board spans projects, on a r
   await settle();
   const projectOf = (id: string) => $(`.ib-bcard[data-card-id="${id}"] [data-card-project]`)?.textContent ?? null;
   const cardButton = (id: string) => $(`.ib-bcard[data-card-id="${id}"] .ib-bc-main`)!;
-  // The sidebar's names; the marks and the age leave the title's button for the project's row.
   expect(projectOf('web_design')).toBe('web');
   expect(projectOf('api_build')).toBe('api');
   expect($('.ib-bcard[data-card-id="api_build"] .ib-bc-head .ib-bc-meta')).not.toBeNull();
   expect(cardButton('api_build').querySelector('.ib-bc-meta')).toBeNull();
-  // The title stays first in the card's name (it is the button's visible words), the project right after it.
   expect(cardButton('api_build').getAttribute('aria-label')).toStartWith('api_build. api. In progress');
 
-  // Done lists every project too: its cards name theirs.
   drawn.rerender({ view: 'done' });
   await settle();
   expect(projectOf('api_done')).toBe('api');
   expect(projectOf('web_done')).toBe('web');
 
-  // One project picked: no names, and the card is the title row it always was.
   drawn.rerender({ view: 'lanes', project: API });
   await settle();
   expect($$('[data-card-project]')).toEqual([]);
@@ -271,7 +244,6 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   scriptFetch();
   const drawn = draw();
   await settle();
-  // Unfiltered: today's Board, no token, the icon alone.
   expect($('[data-board-filter-token]')).toBeNull();
   expect($('[data-board-filter-button]')!.getAttribute('aria-label')).toBe('Filter');
   expect(shownCards()).toEqual(['api_build', 'api_review', 'web_backlog', 'web_design', 'web_look']);
@@ -282,7 +254,6 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   await press($('[data-board-filter-button]')!);
   const menu = $('[data-board-filter-menu]')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  // Only projects with a card (quiet has none), in the sidebar's order; the docs card's project is not one the Inbox knows.
   expect(rows('data-board-project-option')).toEqual([
     { name: 'All projects', count: null, checked: 'true' },
     { name: 'web', count: null, checked: 'false' },
@@ -296,15 +267,12 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   expect(laneIds('in_progress')).toEqual(['api_build']);
   expect(laneIds('todo')).toEqual([]);
   expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 0');
-  // web's drop is not api's news.
   expect($('[data-dropped-notice]')).toBeNull();
-  // The project's name alone as the token, and a way to clear it.
   expect(token('project')).toBe('api');
   expect($('[data-board-filter]')!.hasAttribute('data-set')).toBe(true);
   const said = $('[data-board-live]')!.textContent ?? '';
   expect(said).toContain('api');
 
-  // × shows every project again.
   await act(async () => $('[data-board-filter-clear="project"]')!.click());
   await settle();
   expect(drawn.picks).toEqual([API, null]);
@@ -321,14 +289,12 @@ test.if(hasDom)('an initiative: its count and No initiative\'s in the menu, the 
   const drawn = draw({ project: WEB });
   await settle();
   await press($('[data-board-filter-button]')!);
-  // Counted on the lanes of the picked project: web has two Shape cards and one in none (its done card is past the week).
   expect(rows('data-board-initiative-option')).toEqual([
     { name: 'All initiatives', count: null, checked: 'true' },
     { name: 'Shape', count: '2', checked: 'false' },
     { name: 'Memory', count: '0', checked: 'false' },
     { name: 'No initiative', count: '1', checked: 'false' },
   ]);
-  // A deleted one is never offered.
   expect($('[data-board-initiative-option="ini_01JX0000000000000000000003"]')).toBeNull();
   await act(async () => $(`[data-board-initiative-option="${SHAPE}"]`)!.click());
   await settle();
@@ -338,13 +304,11 @@ test.if(hasDom)('an initiative: its count and No initiative\'s in the menu, the 
   expect(token('project')).toBe('web');
   expect($('[data-board-filter-button]')!.getAttribute('aria-label')).toBe('Filter: Shape, web');
 
-  // No initiative: the cards in none.
   drawn.rerender({ project: null, initiative: 'none' });
   await settle();
   expect(shownCards()).toEqual(['api_review', 'web_look']);
   expect(token('initiative')).toBe('No initiative');
 
-  // Its × clears only the initiative.
   drawn.rerender({ project: WEB, initiative: SHAPE });
   await settle();
   await act(async () => $('[data-board-filter-clear="initiative"]')!.click());
@@ -366,7 +330,6 @@ test.if(hasDom)('New card on a Board filtered to an initiative starts in it, and
   await settle();
   expect(posts.find((p) => p.path === '/api/inbox/cards')!.body).toMatchObject({ title: 'Tokens pass', initiative: SHAPE });
 
-  // Made again with the initiative taken out: none.
   posts.length = 0;
   act(() => $('[data-board-new]')!.click());
   await settle();
@@ -410,7 +373,6 @@ test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiati
   expect(posts.at(-1)).toMatchObject({ path: '/api/inbox/initiatives', body: { name: 'Release' } });
   expect(refreshed).toBe(1);
 
-  // Rename in place: Enter saves.
   const name = dialog.querySelector<HTMLInputElement>(`[data-initiative-row="${SHAPE}"] [data-initiative-name]`)!;
   await type(name, 'Shape v2');
   await act(async () => name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
@@ -419,9 +381,6 @@ test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiati
 
 });
 
-// The owner, 2026-11-04: "delete initiatives very simply without friction". The failures guarded: a question coming
-// back; an Undo drawn under the modal (the page behind it is inert, so it could not be pressed) or lost on Done; a
-// double click deleting the row that moved up under the pointer.
 test.if(hasDom)('Delete is one click with no question; the toast inside the dialog undoes it, and Done hands the Undo to the window', async () => {
   scriptFetch();
   const toasts: ({ lead: string; detail?: string; onUndo?: () => void } | null)[] = [];
@@ -441,7 +400,6 @@ test.if(hasDom)('Delete is one click with no question; the toast inside the dial
   const inside = dialog.querySelector<HTMLElement>('.ib-toast')!;
   expect(inside.textContent).toContain('Deleted');
   expect(inside.textContent).toContain('“Shape”');
-  // Undo by its button: the dialog's fields take a Z.
   expect(inside.querySelector('[data-toast-undo]')!.getAttribute('aria-keyshortcuts')).toBeNull();
   await act(async () => inside.querySelector<HTMLElement>('[data-toast-undo]')!.click());
   await settle();
@@ -449,13 +407,11 @@ test.if(hasDom)('Delete is one click with no question; the toast inside the dial
   expect(dialog.querySelector('.ib-toast')).toBeNull();
   expect(row(SHAPE)).not.toBeNull();
 
-  // The second click of a double click writes nothing.
   const before = posts.length;
   await act(async () => del(SHAPE).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
   await settle();
   expect(posts.length).toBe(before);
 
-  // Two deletes in one toast, undone together, by the window's toast once the dialog closed.
   await act(async () => del(SHAPE).click());
   await settle();
   await act(async () => del(MEMORY).click());
@@ -508,7 +464,6 @@ test.if(hasDom)("the Initiatives dialog never shows a browser's raw error: a fai
   expect(await tryAdd('shape')).toBe('There is already an initiative named Shape.');
 });
 
-// Restores answered per initiative: what the two Undos must survive.
 function scriptRestores(answers: Record<string, 'taken' | 'offline' | undefined>) {
   scriptFetch();
   const scripted = globalThis.fetch;
@@ -549,7 +504,6 @@ async function openInitiatives() {
   };
 }
 
-// The review's picture: the line said the name was taken while the toast still offered the Undo that had just failed.
 test.if(hasDom)('the dialog: a refused Undo stops offering it, the others still come back, and focus stays in the dialog; a failed save can be tried again', async () => {
   const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'offline' };
   scriptRestores(answers);
@@ -562,7 +516,6 @@ test.if(hasDom)('the dialog: a refused Undo stops offering it, the others still 
   expect(error()).toBe('That did not save. Try again.');
   expect(dialog.querySelector('.ib-toast [data-toast-undo]')).not.toBeNull();
 
-  // Refused alone: the line, no toast, a read (who took the name shows), focus on the name field and not the page.
   answers[MEMORY] = 'taken';
   const before = changed;
   await undo();
@@ -571,7 +524,6 @@ test.if(hasDom)('the dialog: a refused Undo stops offering it, the others still 
   expect(changed).toBeGreaterThan(before);
   expect(document.activeElement).toBe(dialog.querySelector('[data-initiative-new-name]'));
 
-  // Refused first, with another waiting behind it: that one is still restored.
   await del(MEMORY);
   await del(SHAPE);
   expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
@@ -582,7 +534,6 @@ test.if(hasDom)('the dialog: a refused Undo stops offering it, the others still 
   expect(dialog.querySelector('.ib-toast')).toBeNull();
 });
 
-// The review's order: Alpha refused with two waiting, the second click of a double click took one of their Undos.
 test.if(hasDom)('the dialog: a double click on Undo restores once and keeps what is left', async () => {
   const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'offline', [SHAPE]: 'offline' };
   scriptRestores(answers);
@@ -602,7 +553,6 @@ test.if(hasDom)('the dialog: a double click on Undo restores once and keeps what
   expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
 });
 
-// Done pressed while the restore is on its way: the window's toast offered Undo for what was already back.
 test.if(hasDom)("Done during the dialog's Undo hands the window's toast only what the restore leaves out", async () => {
   const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'offline' };
   scriptRestores(answers);
@@ -631,7 +581,6 @@ test.if(hasDom)("Done during the dialog's Undo hands the window's toast only wha
   expect(handed.onUndo).toBeDefined();
 });
 
-// Seven seconds from the delete would take the Undo away just after the line said to try again.
 test.if(hasDom)("a failed save in the dialog gives its Undo the toast's full time again", async () => {
   scriptRestores({ [MEMORY]: 'offline' });
   draw();
@@ -652,7 +601,6 @@ test.if(hasDom)("a failed save in the dialog gives its Undo the toast's full tim
   expect(armed).toContain(7000);
 });
 
-// The review's blocker: after Done, one refused name lost every other initiative in the toast, and a failed save left nothing to press.
 test.if(hasDom)("the window's Undo after Done: every restore is tried; a failed save offers Undo again, for what is still out", async () => {
   const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'taken' };
   scriptRestores(answers);
@@ -668,7 +616,6 @@ test.if(hasDom)("the window's Undo after Done: every restore is tried; a failed 
   await done();
   posts.length = 0;
 
-  // A name taken, with another behind it: the other comes back, the line says why, and no Undo is left to fail again.
   await act(async () => toasts.at(-1)!.onUndo!());
   await settle();
   expect(restores()).toEqual([MEMORY, SHAPE]);
@@ -713,7 +660,6 @@ test.if(hasDom)('Done and Cancelled list only the filtered project', async () =>
   await settle();
   expect(shownCards()).toEqual([]);
   expect($$('[data-dropped-row]')).toEqual([]);
-  // The empty line is the filtered one: it names the project.
   expect($('.ib-blist .ib-lane-empty')!.textContent).toContain('api');
 });
 
@@ -723,7 +669,6 @@ test.if(hasDom)('a project with nothing in flight says so, and Show all projects
   await settle();
   const empty = $('[data-board-empty="project"]')!;
   expect(empty.querySelector('b')!.textContent).toBe('quiet');
-  // Not the empty Board's line: the Board has cards, this project has none.
   expect($('[data-board-empty=""]')).toBeNull();
   await act(async () => $('[data-board-show-all]')!.click());
   await settle();
@@ -742,7 +687,6 @@ test.if(hasDom)('a card opened from another project stays open while the Board i
 
 test.if(hasDom)('a card made in another project while filtered: the announcement names that project, the filter stays', async () => {
   scriptFetch();
-  // Filtered to api, with New card on web (as when the person picks another project in the dialog).
   const drawn = draw({ project: API, defaultProject: WEB });
   await settle();
   act(() => $('[data-board-new]')!.click());
@@ -762,7 +706,6 @@ test.if(hasDom)('a phone: the filter icon in the header, its picks on their own 
   expect($('.ib-bhead [data-board-filter-button]')).not.toBeNull();
   expect($('.ib-bhead [data-board-filter-token]')).toBeNull();
   expect($$('.ib-bfbar [data-board-filter-token]').map((el) => el.getAttribute('data-board-filter-token'))).toEqual(['initiative', 'project']);
-  // The stacked list holds only web's Shape cards.
   expect($$('[data-board-view="phone"] .ib-bcard').map((el) => el.getAttribute('data-card-id')).sort()).toEqual(['web_backlog', 'web_design']);
   await press($('[data-board-filter-button]')!);
   expect($('.ib-pm-pos[data-phone] [data-board-filter-menu]')).not.toBeNull();

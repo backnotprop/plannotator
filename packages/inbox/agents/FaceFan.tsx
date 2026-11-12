@@ -9,48 +9,24 @@ import { isSetFace, setArtStyle, setFaceDrawing } from './iconSets';
 import { FAN_OPTIONS, fanLayout, type FanOptions, type FanSpot } from './fanLayout';
 import { focusBackTo } from './focusBack';
 
-/**
- * The face picker: a half-circle fan of an agent mark's faces round the mark, like a sundial's upper half laid on its
- * side (it opens toward the content; the mark sits at the sidebar's left edge). The inner arc holds the kinds (the
- * agent's own mark, Transparent, Face), the outer one the Glass colours; near the window's edges it turns away and,
- * short of room, the colours split over two short arcs. An overlay (Base UI's Popover, portaled), so the list never
- * moves.
- *
- * Opens: the pointer resting on the mark for FAN_DWELL_MS (a pointer passing over opens nothing), Enter or Space on
- * the focused mark, or a long press on a touch screen. Closes: the pointer leaving the mark and the fan (a short grace,
- * and the room between them counts as the fan's), Escape, a press outside, a scroll or resize, or a choice.
- * Keyboard inside: the arrows move along the arcs, Home and End to the ends, Enter or Space chooses. A labelled radio
- * group for screen readers. No global shortcut.
- */
-
-/** How long the pointer rests on a mark before the fan opens. */
 export const FAN_DWELL_MS = 350;
 
-/** How long a touch is held before the fan opens. */
 export const FAN_PRESS_MS = 450;
-/** How long the pointer may be outside the mark and the fan before it closes. */
 export const FAN_GRACE_MS = 140;
 
 export type FanOpenedBy = 'hover' | 'keyboard' | 'touch';
 
-/** A finger's fan: 40 px targets, 44 px apart (a pointer's are 28 and 32). */
 export const FAN_TOUCH: Partial<FanOptions> = { pitch: 44, item: 40, inner: 64, between: 52 };
 
-/** "Your own…": the inner arc's last place, which opens the uploaded pictures (OwnIconsBody.tsx, AgentIconDialog.tsx). */
 export const OWN_CHOICE = 'own';
-/** "Sets": the inner arc's place after it, which opens the icon sets (SetsBody.tsx, AgentIconDialog.tsx). */
 export const SETS_CHOICE = 'sets';
-/** A place in the fan: a face, "Your own…" or "Sets". */
 export type FanChoice = Exclude<AgentFace, `own:${string}` | `set:${string}`> | typeof OWN_CHOICE | typeof SETS_CHOICE;
 export const OWN_LABEL = 'Your own…';
 export const SETS_LABEL = 'Sets';
 
-/** The fan's arcs: the kinds inside, the Glass colours outside (one arc, or two short ones when room is short). */
 export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false): { faces: FanChoice[][]; spots: FanSpot[][] } {
   const kinds: FanChoice[] = ['agent', 'transparent', 'totman', OWN_CHOICE, SETS_CHOICE];
   const base = { ...FAN_OPTIONS, ...(touch ? FAN_TOUCH : {}) };
-  // Near a window's edge the inner arc's five kinds would crowd: it moves out (and the colours with it) until they
-  // keep their pitch, a few steps at most.
   let best: { faces: FanChoice[][]; spots: FanSpot[][] } | null = null;
   for (let extra = 0; extra <= 48; extra += 8) {
     const options = { ...(touch ? FAN_TOUCH : {}), inner: base.inner + extra };
@@ -67,7 +43,6 @@ export function fanArcs(cx: number, cy: number, w: number, h: number, touch = fa
   return best!;
 }
 
-/** The pictures of our faces (faceArt.ts), once loaded. */
 export type FaceSources = Readonly<Record<OurFace, string | { light: string; dark: string }>>;
 
 export interface FaceFanProps {
@@ -75,14 +50,11 @@ export interface FaceFanProps {
   open: boolean;
   openedBy: FanOpenedBy;
   host: string | null;
-  /** The agent's name, for the group's label. */
   name: string;
   face: AgentFace;
   sources: FaceSources | null;
   onChoose: (face: AgentFace) => void;
-  /** "Your own…" was chosen: the uploaded pictures open. */
   onOwn: () => void;
-  /** "Sets" was chosen: the icon sets open. */
   onSets: () => void;
   onClose: () => void;
 }
@@ -91,7 +63,6 @@ const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(pref
 
 export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onChoose, onOwn, onSets, onClose }: FaceFanProps) {
   const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : face;
-  // Measured once as it opens: the mark's box and the window (nothing is read while the pointer moves).
   const [place, setPlace] = useState<{ rect: DOMRect; w: number; h: number } | null>(null);
   useLayoutEffect(() => {
     if (open) setPlace({ rect: anchor.getBoundingClientRect(), w: window.innerWidth, h: window.innerHeight });
@@ -99,7 +70,6 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
   const touch = openedBy === 'touch';
   const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch) : null), [place, touch]);
   const order = useMemo<FanChoice[]>(() => arcs?.faces.flat() ?? [], [arcs]);
-  // The dial's plate: a half disc out past the farthest choice, turned the way the fan opens.
   const dial = useMemo(() => {
     const spots = arcs?.spots.flat() ?? [];
     const reach = Math.max(0, ...spots.map((s) => Math.hypot(s.x, s.y))) + (touch ? 26 : 20);
@@ -107,7 +77,6 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
     return { reach, aim };
   }, [arcs, touch]);
   const [active, setActive] = useState(0);
-  // The first moments of an opening, while the choices travel out.
   const [opening, setOpening] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -118,11 +87,8 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
   const items = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => {
     if (open) setActive(Math.max(0, order.indexOf(chosen)));
-    // Only as it opens: a choice made while it is open moves nothing.
-  }, [open, order]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, order]);
 
-  // The pointer leaving the mark and the fan closes it, after a short grace. The fan's zone is the disc round the
-  // mark out to the farthest choice, on the side the fan opens (so the way from the mark to a choice is inside).
   const closeNow = useRef(onClose);
   closeNow.current = onClose;
   useEffect(() => {
@@ -154,13 +120,10 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
       }
     };
     const onGone = () => closeNow.current();
-    // A scroll that moves the mark (the sidebar's, the page's) closes it; a scroll elsewhere (the list) does not.
     const onScroll = (event: Event) => {
       const moved = event.target;
       if (moved === document || (moved instanceof Node && moved.contains(anchor))) closeNow.current();
     };
-    // Escape closes it wherever focus is (a fan opened by the pointer has none), and only it: the window's own Escape
-    // (closing a thread) skips a used key.
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -257,7 +220,6 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
                       data-face-choice={f}
                       style={style}
                       onFocus={() => setActive(at)}
-                      // A pointer's press keeps focus where it is. Never a finger's: Safari (iPhone, iPad) then sends no click.
                       onPointerDown={(event: ReactPointerEvent) => {
                         if (event.pointerType !== 'touch') event.preventDefault();
                       }}
@@ -267,14 +229,12 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
                         {f === 'agent' ? (
                           <HostMark host={host} />
                         ) : f === OWN_CHOICE ? (
-                          // The agent's own picture when it shows one (a still), else a dashed "+".
                           isOwnFace(face) ? (
                             <img className="am-own-art" src={ownIconSrc(face, true)} alt="" draggable={false} />
                           ) : (
                             <span className="am-own-add" />
                           )
                         ) : f === SETS_CHOICE ? (
-                          // The agent's set icon when it shows one, else a little grid of four.
                           isSetFace(face) ? (
                             <SetArt face={face} />
                           ) : (
@@ -306,7 +266,6 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
   );
 }
 
-/** A set icon drawn in a small box (the fan's place, the panel's grid): an image, or a mask in the text colour. */
 export function SetArt({ face }: { face: string }) {
   const drawing = setFaceDrawing(face);
   if (!drawing) return null;

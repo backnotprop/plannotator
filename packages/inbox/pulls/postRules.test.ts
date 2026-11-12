@@ -36,7 +36,6 @@ describe("a guided review's comment goes inline only if its lines are the PR's",
     const guide = parseDiffToFiles(patchOf([' a', ' b', '+c', ' d', ' e']));
     const range = comment({ lineStart: 1, lineEnd: 5 });
     expect(onPullDiff([range], guide, guide)[0]!.onPullDiff).toBe(true);
-    // Line 5 is past the first line's context: only reading the whole range sees it differ.
     expect(onPullDiff([range], guide, parseDiffToFiles(patchOf([' a', ' b', '+c', ' d', ' E'])))[0]!.onPullDiff).toBeUndefined();
   });
 });

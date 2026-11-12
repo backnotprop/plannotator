@@ -1,8 +1,3 @@
-/**
- * The Inbox's ref transport (refTransport.ts). What this catches: a window the
- * route refuses (a phone through the device door) sending one request per
- * visible PR or issue row, every time the Links side opens.
- */
 import { expect, test } from 'bun:test';
 import type { ForgeRef } from '@plannotator/core/forge-ref-card';
 import { inboxRefTransport } from './refTransport';

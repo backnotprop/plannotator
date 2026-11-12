@@ -1,4 +1,3 @@
-/** Settings → Agents' Codex account line (codexAccount.ts): what the row says for each account the Inbox reads. */
 import { expect, test } from 'bun:test';
 import { codexAccountLine } from './codexAccount';
 

@@ -1,17 +1,3 @@
-/**
- * A Quiet row's title with Soft's quiet-text switch off (light mode, the
- * owner's pick): in the narrow list beside an open thread a Quiet title is
- * quiet text (`.ib-nrow[data-section="quiet"] .ib-title`), and in the wide
- * list a Quiet row's title takes its row's colour. The failure this catches:
- * the Soft rule for Quiet titles (`var(--ib-quiet-dim, <today's>)`) falling
- * back to the row's text colour on the narrow row, so the narrow Quiet titles
- * turned dark in light mode.
- *
- * The real list is rendered; the colour is worked out from inbox.css by
- * cssCascade.testing.ts (happy-dom does not apply the Soft switches).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -71,7 +57,6 @@ afterEach(() => {
   document.documentElement.className = savedClass;
 });
 
-/** The list in the window's own wrapper, Quiet unfolded. */
 function render(narrow: boolean, mode: 'light' | 'dark'): HTMLElement {
   document.documentElement.className = mode === 'light' ? 'light' : '';
   host = document.createElement('div');
@@ -85,7 +70,6 @@ function render(narrow: boolean, mode: 'light' | 'dark'): HTMLElement {
       </SidebarProvider>,
     );
   });
-  // Quiet starts closed; once opened it stays open for the page (listGroups.ts), so only a closed one is clicked.
   const band = host.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band');
   expect(band).not.toBeNull();
   if (band!.getAttribute('aria-expanded') === 'false') act(() => band!.click());

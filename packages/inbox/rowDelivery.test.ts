@@ -1,9 +1,3 @@
-/**
- * The row's delivery glyph and the thread's delivery line are one rule
- * (`inboxDeliveryState`): for every combination of what the Inbox knows,
- * the state the server puts on the row is the line's state, and the row's
- * tooltip is the line word for word.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,7 +19,6 @@ const connections: (RecipientConnection | null | undefined)[] = [
   { busy: true, idle_since: null, send_now: false },
   { busy: false, idle_since: AT, send_now: false },
   { busy: null, idle_since: null, send_now: false },
-  // Claude Code holds the session's replies until the person types there (approval "inbox-stopped-reply").
   { busy: false, idle_since: AT, send_now: true, held: true },
 ];
 
@@ -49,7 +42,6 @@ function* inputs(): Generator<DeliveryLineInput> {
             }
 }
 
-/** What the server puts on the row for the same facts. */
 function rowFor(input: DeliveryLineInput): InboxRowDelivery {
   const decision = inboxDeliveryState({
     delivered: !!input.deliveredAt,
@@ -100,13 +92,11 @@ describe('the row words', () => {
     expect(rowDeliverySpoken({ ...base, kind: 'ack', state: 'queued' })).toBe('Looks good, queued for Claude Code');
   });
 
-  // Approval "inbox-stopped-reply": the accessible name says what the tooltip and the thread say, never "Queued".
   test('held by a stopped Claude Code session: the accessible name says Stopped, as the tooltip does', () => {
     const stopped: InboxRowDelivery = { ...base, reason: 'stopped', send_now: false };
     expect(rowDeliverySpoken(stopped)).toBe('Stopped: goes in when you type in that session');
     expect(rowDeliveryLine(stopped, time)).toBe('Stopped: goes in when you type in that session');
     expect(rowDeliverySpoken({ ...stopped, kind: 'ack' })).toBe('Looks good, stopped: goes in when you type in that session');
-    // Once it went in: Delivered.
     expect(rowDeliverySpoken({ ...stopped, state: 'delivered', reason: 'delivered', at: AT })).toBe('Delivered to Claude Code');
   });
 
@@ -130,7 +120,6 @@ describe('the row words', () => {
     expect(hasMovingDelivery(section([null, undefined]))).toBe(false);
     expect(hasMovingDelivery(section([{ ...base, state: 'delivered' }]))).toBe(false);
     for (const state of ['queued', 'sending', 'undelivered'] as const) expect(hasMovingDelivery(section([{ ...base, state }]))).toBe(true);
-    // Saved because the session that asked ended: its coming back moves it. Saved for an agent that reads: only its read does.
     expect(hasMovingDelivery(section([{ ...base, state: 'saved', reason: 'ended' }]))).toBe(true);
     expect(hasMovingDelivery(section([{ ...base, state: 'saved', reason: 'reads' }]))).toBe(false);
   });
@@ -160,24 +149,16 @@ afterEach(() => {
 });
 
 describe('a thread with two sessions: the row and the thread line agree on who asked', () => {
-  /**
-   * The thread's own gathering for a reply without `to` (Thread.tsx): the
-   * shared asking rule over the wire with the default skip, the reply's
-   * session's connection, and the asker grace; then `deliveryLine`.
-   */
   function threadLine(thread: { messages: InboxMessageWire[]; resolved_at: string | null }, sentCheckedAt: string | null, live: { connection: (s: string) => RecipientConnection | null; askerLive: (s: string) => boolean }) {
     const root = thread.messages[0]!;
     const last = thread.messages.at(-1)!;
     const repliedTo = thread.messages.find((m) => m.id === last.reply_to)!;
     const replySession = repliedTo.author.kind === 'agent' ? repliedTo.author.session : null;
     const connection = replySession && !last.delivery && !sentCheckedAt ? live.connection(replySession) : undefined;
-    // The thread's default skip with nothing being saved (`sendAnswersAny`), and its asking rule: both the shared ones.
     const statesOf = (m: InboxMessageWire) => (m.questions ?? []).map((q) => q.state);
     const asking = inboxAskingMessage(thread.messages, statesOf, inboxDefaultSkip(thread.messages.filter((m) => m.author.kind === 'agent'), statesOf));
     const askingSession = asking?.author.kind === 'agent' ? asking.author.session : null;
     const askerEnded = thread.resolved_at === null && asking?.wakes === true && !!askingSession && !live.askerLive(askingSession);
-    // Named for the session the reply goes to (`recipientName`): the agent it answers when that is another
-    // session than the thread's first agent, else the thread's agent.
     const first = root.author.kind === 'agent' ? root.author : null;
     const toAnother =
       repliedTo.author.kind === 'agent' &&
@@ -201,7 +182,6 @@ describe('a thread with two sessions: the row and the thread line agree on who a
       roots.push(dir);
       const store = InboxStore.open(dir);
       const project = store.ensureProject({ name: 'ledger', root: '/work/ledger' });
-      // The server's clocks for the items waiting on ses_b, as the sessions route and the rows read them.
       const waits: Record<string, { since: string; auto_since: string | null }> = {};
       const connections = new Map<string, RecipientConnection | null>([['ses_b', { busy: true, idle_since: null, send_now: true, waits }]]);
       const live = {
@@ -227,7 +207,6 @@ describe('a thread with two sessions: the row and the thread line agree on who a
       expect(rowDeliveryLine(row.delivery!, time)).toBe(line.text);
       expect(line.state).toBe(picked ? 'saved' : 'queued');
       if (picked) expect(line.text).toStartWith('Saved for Pi. That session has ended');
-      // The words answer Claude Code's message (ses_b), so they go to it, not to Pi, who started the thread.
       else expect(line.text).toContain('Claude Code is working');
     });
   }

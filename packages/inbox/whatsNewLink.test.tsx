@@ -1,14 +1,3 @@
-/**
- * The sidebar's "What's new in X" link after an update installed outside the
- * Inbox (the install script run by hand, so no notes were saved): the whole
- * window (InboxApp) over a REAL Inbox server in a temp data dir (its own
- * process, tests/helpers/inbox-dom-server.ts in `whats-new` mode: this Inbox
- * is 0.28.19, the one before it 0.28.18, the release API a fake on loopback).
- * What is proved: the link shows and opens the notes the server fetched by the
- * release's tag; with update checks off and no notes saved there is no link.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -43,7 +32,6 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-/** One Inbox per test: the env decides whether update checks are on. */
 async function startInbox(env: Record<string, string> = {}) {
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-whatsnew-dom-')));
   child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '1', 'whats-new'], {
@@ -129,7 +117,6 @@ test.skipIf(!hasDom)("the link shows after an update installed by hand, and open
   act(() => link.click());
   await until(() => el.querySelector('[data-whats-new-page="0.28.19"]')?.textContent?.includes('What 0.28.19 brings to the Inbox.') ?? false, 'the notes');
   expect(el.querySelector('.ib-error')).toBeNull();
-  // Opened from the Inbox, "‹ Inbox" is the browser's Back: it adds no history entry.
   const entries = window.history.length;
   act(() => (el.querySelector('[data-whats-new-back]') as HTMLButtonElement).click());
   await until(() => !el.querySelector('[data-whats-new-page]'), 'the Inbox again');
@@ -143,6 +130,5 @@ test.skipIf(!hasDom)('update checks off and no notes saved: no link', async () =
   await until(() => !!el.querySelector('.ib-listcol, [data-section-id], .pn-inbox'), 'the window');
   await settle();
   expect(el.querySelector('[data-whats-new-link]')).toBeNull();
-  // The route has nothing to show either, and asked nobody.
   expect((await loopback('/api/inbox/whats-new?version=0.28.19')).status).toBe(404);
 });

@@ -1,12 +1,3 @@
-/**
- * A thread on its line in the PR page. What regresses: a resolved or bots-only thread folded without saying why, or a
- * human thread folded at all; a long thread cut with no way to the rest; a comment the forge hides shown open; a
- * thread with no link to the forge (the page never replies or resolves); a thread the person opened folding again when
- * the diff draws its line again; an outdated thread's place unsaid; a thread on a whole file not in its band, not
- * folded to one line that names it, or not opening in place.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -55,7 +46,6 @@ test.if(hasDom)("a person's open thread is open on its line, with every comment 
   const link = host.querySelector('a[aria-label="Open this thread on GitHub"]')!;
   expect(link.getAttribute('href')).toBe('https://github.com/acme/web/pull/7#discussion_c1');
   expect(link.getAttribute('target')).toBe('_blank');
-  // Read-only: nothing to reply, resolve or edit with.
   expect(host.querySelector('textarea, input')).toBeNull();
 });
 
@@ -96,7 +86,6 @@ test.if(hasDom)('an outdated thread stays open and says a push moved its lines',
   expect(box().hasAttribute('data-open')).toBe(true);
   expect(box().getAttribute('data-pull-thread-where')).toBe('outdated');
   expect(box().querySelector('.ib-lt-top')!.textContent).toBeTruthy();
-  // On its line, with nothing to say: no line above the comments.
   draw(at(thread({ id: 'T4' })));
   expect(box().querySelector('.ib-lt-top')).toBeNull();
 });
@@ -145,7 +134,6 @@ test.if(hasDom)("a thread on a whole file: folded, one line that says so, even u
   expect(band.querySelector('.ib-lt-at')).not.toBeNull();
   expect(comments()).toEqual([]);
   act(() => band.click());
-  // The host moves it: the band only records the choice.
   expect(fileThreadOpen(memory, 'W1')).toBe(true);
   drawFile(true);
   expect(box().hasAttribute('data-open')).toBe(true);

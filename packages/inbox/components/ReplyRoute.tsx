@@ -7,33 +7,15 @@ import { hostName, sessionWords } from './NewMessage';
 import { ShortcutHint, useShortcutHintShown } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 
-/**
- * Replying when the session that asked has ended (design record "replying
- * when the asking agent's session has ended", not in this repo; owner
- * approval 2026-10-11, "build it as mocked").
- *
- * Every agent message records the session that sent it, and the person's
- * reply wakes only that session. When that session is no longer there, the
- * thread says so before the person replies (a quiet note in the foot and
- * "session ended" on the asking message), and at Send the person chooses
- * where the reply goes: a live session of the project, or "Leave it for the
- * next agent" (what a reply always did). The choice is always manual. With no
- * live session there is only one outcome, so Send sends at once.
- */
-
-/** The session that asked: the agent message the reply's words answer. */
 export interface AskingSession {
   message: InboxMessageWire;
   session: string;
   host: string;
-  /** "Claude Code": the agent as the thread names it. */
   name: string;
 }
 
-/** The value of the "Leave it for the next agent" option. */
 export const LEAVE = 'leave';
 
-/** One row of the choice: a live session, the asking session back again, or one that ended while the choice was open. */
 export interface RouteRow {
   live: LiveSession;
   ended: boolean;
@@ -42,45 +24,26 @@ export interface RouteRow {
 
 export interface RouteState {
   open: boolean;
-  /** The selected row's session id, or LEAVE. Kept with the draft when the choice closes. */
   selected: string | null;
   rows: RouteRow[];
   error: string | null;
-  /** Bumped to move focus to the selected radio. */
   focus: number;
   showAll: boolean;
 }
 
 export const CLOSED_ROUTE: RouteState = { open: false, selected: null, rows: [], error: null, focus: 0, showAll: false };
 
-/** How many rows show before "Show N more". */
 const FIRST_ROWS = 5;
 
-/**
- * Whether the asking message is evidence that its session can end: it came
- * through a connection that wakes its session (`wakes`, the Claude Code mod,
- * Pi, OpenCode 2). An MCP-only agent or OpenCode 1 never polls, and may read
- * the thread at any time, so it is never called ended.
- */
 export const askerCanEnd = (asking: AskingSession | null): boolean => asking?.message.wakes === true;
 
-/**
- * Whether the session that asked has ended, as the window can know it: its
- * message came through a waking connection, and the Inbox has not heard from
- * it since (no poll, no MCP call; with the server's 60 s grace).
- */
 export function askerHasEnded(asking: AskingSession | null, live: LiveSessionsModel | null): boolean {
   if (!asking || !askerCanEnd(asking) || !live?.asker || live.asker.session !== asking.session) return false;
   return !live.asker.live;
 }
 
-/** How long a read of one session's state may take: a Send waits on it, so a read that hangs must not hold it. */
 export const SESSION_ENDED_READ_MS = 5_000;
 
-/**
- * Whether one session has ended, as `askerHasEnded` reads it (the sessions route's `asker`). A read that fails or
- * takes over SESSION_ENDED_READ_MS: not ended.
- */
 async function sessionEnded(threadId: string, session: string): Promise<boolean> {
   try {
     const model = await inboxApi.sessions(threadId, session, [], SESSION_ENDED_READ_MS);
@@ -90,7 +53,6 @@ async function sessionEnded(threadId: string, session: string): Promise<boolean>
   }
 }
 
-/** Each session's last known state in one thread: true ended, false not; a session not read yet is absent. */
 type KnownEnded = { threadId: string; ended: ReadonlyMap<string, boolean> };
 
 function withRead(was: KnownEnded, threadId: string, read: readonly (readonly [string, boolean])[]): KnownEnded {
@@ -102,23 +64,11 @@ function withRead(was: KnownEnded, threadId: string, read: readonly (readonly [s
 }
 
 export interface EndedSessions {
-  /** The sessions of the list that have ended, as last read. */
   ended: ReadonlySet<string>;
-  /** Some session of the list has not been read yet: "not read" is not "not ended". */
   unchecked: boolean;
-  /** Reads the sessions of the list not read yet, and returns the ended ones of the whole list. */
   check: () => Promise<ReadonlySet<string>>;
 }
 
-/**
- * Which of `sessions` have ended, as `askerHasEnded` reads one (the sessions route's `asker`, with its grace),
- * read when the list changes and every 10 s: the other sessions one Send reaches (a pick on an ended session's
- * question while the words go to a live one). A read that fails says nothing ended.
- *
- * Each session keeps its last known state while the list changes (a pick changes it), and a session not read
- * yet is `unchecked`, never "not ended": a Send pressed before its read lands waits for `check`, so it cannot
- * go to an ended session without the route choice. An empty list (a thread with one agent) reads nothing.
- */
 export function useEndedSessions(threadId: string, sessions: readonly string[]): EndedSessions {
   const key = sessions.join('\u0000');
   const [known, setKnown] = useState<KnownEnded>({ threadId, ended: new Map() });
@@ -155,17 +105,9 @@ export function useEndedSessions(threadId: string, sessions: readonly string[]):
   return { ended, unchecked, check };
 }
 
-/** The project's live sessions other than the one that asked. */
 export const othersLive = (asking: AskingSession, live: LiveSessionsModel | null): LiveSession[] =>
   (live?.sessions ?? []).filter((s) => s.session !== asking.session);
 
-/**
- * The rows as the live list reads now, merged with the rows on screen: a row
- * whose session left stays, greyed ("Ended just now."); a new live session is
- * added; the asking session, back again, goes to the top. Then the selection:
- * the asking session when it came back, else the one kept, else the first
- * live row, else Leave.
- */
 export function mergeRouteRows(current: RouteState, asking: AskingSession, live: LiveSessionsModel | null): RouteState {
   const sessions = live?.sessions ?? [];
   const byId = new Map(sessions.map((s) => [s.session, s]));
@@ -192,7 +134,6 @@ export function mergeRouteRows(current: RouteState, asking: AskingSession, live:
   return { ...current, rows, selected };
 }
 
-/** The asking message's sender row: "to you · session ended". */
 export function SessionEndedMark() {
   return (
     <>
@@ -204,7 +145,6 @@ export function SessionEndedMark() {
   );
 }
 
-/** The note at the top of the foot, before the person replies (two variants); the host's always-mounted status region holds it. */
 export function AskerEndedNote({ asking, project, anyLive }: { asking: AskingSession; project: string; anyLive: boolean }) {
   return (
     <p className="ib-sessnote" data-asker-ended={anyLive ? 'live' : 'none-live'}>
@@ -222,11 +162,6 @@ export function AskerEndedNote({ asking, project, anyLive }: { asking: AskingSes
   );
 }
 
-/**
- * The choice at Send, in place of the actions row: one radio group of the
- * project's live sessions (New message's rows) and "Leave it for the next
- * agent". The primary button names the result.
- */
 export function RouteChoice({
   kind = 'reply',
   reaskCount = 0,
@@ -240,11 +175,8 @@ export function RouteChoice({
   onBack,
   onShowAll,
 }: {
-  /** What the choice is for: a reply, or a Re-ask (approval "inbox-reask"), which asks who should ask again. */
   kind?: 'reply' | 'reask';
-  /** The open questions a Re-ask asks for again. */
   reaskCount?: number;
-  /** The radio group's name, unique per thread. */
   name: string;
   asking: AskingSession;
   project: string;
@@ -256,14 +188,11 @@ export function RouteChoice({
   onShowAll: () => void;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
-  // Send (or Cmd/Ctrl+Enter) puts focus on the selected radio; so does the race.
   useEffect(() => {
     if (!state.open) return;
     formRef.current?.querySelector<HTMLInputElement>('input[type=radio]:checked')?.focus();
   }, [state.open, state.focus]);
 
-  // The first five rows, or up to the selected one when it is further down,
-  // so it stays in view and in its place when "Show N more" opens the rest.
   const selectedIndex = state.rows.findIndex((row) => row.live.session === state.selected);
   const visible = state.showAll ? state.rows : state.rows.slice(0, Math.max(FIRST_ROWS, selectedIndex + 1));
   const selectedRow = selectedIndex >= 0 ? state.rows[selectedIndex] : undefined;
@@ -286,9 +215,6 @@ export function RouteChoice({
       className="ib-routeform"
       ref={formRef}
       data-route-choice=""
-      // Esc goes back to the reply, from any control in the choice. The
-      // Escape is marked used, so the window's own Esc (close the thread)
-      // leaves it alone.
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return;
         event.preventDefault();
@@ -369,12 +295,6 @@ export function RouteChoice({
   );
 }
 
-/**
- * The race: the chosen session ended before the reply went. The row greys,
- * the next live row is selected, and the error says so. A Send that answers
- * several agent sessions posts one reply to each; when some went before the
- * refusal, the error says how many, never "Nothing was sent".
- */
 export function routeRace(state: RouteState, ended: string, sent: { went: number; total: number } = { went: 0, total: 1 }): RouteState {
   const rows = state.rows.map((row) => (row.live.session === ended ? { ...row, ended: true } : row));
   const gone = state.rows.find((row) => row.live.session === ended);
@@ -383,20 +303,13 @@ export function routeRace(state: RouteState, ended: string, sent: { went: number
   return { ...state, rows, selected: next?.live.session ?? LEAVE, error, focus: state.focus + 1 };
 }
 
-/** The race's first words: the session ended before the reply (or all of it) went, and what went. */
 export function raceWhat(host: string | null, sent: { went: number; total: number }): string {
-  // "That Codex session"; with no host known, "That session".
   const name = host ? `${hostName(host)} ` : '';
   return sent.went > 0
     ? `That ${name}session ended before all of your reply went. ${sent.went} of ${sent.total} agents got their reply; the rest did not.`
     : `That ${name}session ended before your reply went. Nothing was sent.`;
 }
 
-/**
- * "Claude Code (another session)": the host of the session that took a reply
- * the person sent elsewhere, marked when it is the asker's own host, because
- * only then can the person confuse the two.
- */
 export function redirectedName(to: { host: string; session: string }, asked: InboxMessageWire | undefined): string {
   const name = hostName(to.host);
   if (!asked || asked.author.kind !== 'agent') return name;
@@ -404,11 +317,8 @@ export function redirectedName(to: { host: string; session: string }, asked: Inb
   return sameHost && asked.author.session !== to.session ? `${name} (another session)` : name;
 }
 
-/** Whether the person's reply went to another session than the one that asked. */
 export const isRedirected = (message: InboxMessageWire): boolean => message.author.kind === 'person' && !!message.to && !!message.reply_to;
 
-
-/** "Esc goes back": the keycap from the registry, the note gone with it when hints are off. */
 function EscNote() {
   if (!useShortcutHintShown({ scope: inboxAppShortcuts, action: 'leavePage' })) return null;
   return (

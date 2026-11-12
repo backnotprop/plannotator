@@ -6,16 +6,8 @@ import type { AttachmentStep } from '../stepping';
 import { peekTile } from './AttachmentStepper';
 import { FileName } from './FileName';
 
-/**
- * The file a phone's swipe is bringing in (fileSwipe.ts): "Next · name" (or
- * "Previous · name") with its thumbnail or type tile, at the edge it comes
- * from, fading in with the finger's travel. Only while a swipe is under way;
- * hidden from screen readers (the step is said in the pane's live region).
- * Only a card on screen redraws as the finger moves.
- */
 export function FileSwipeCard({ swipe, steps, index, skip }: { swipe: FileSwipe; steps: readonly AttachmentStep[]; index: number; skip?: (dir: 1 | -1) => boolean }) {
   const phase = useSwipePhase(swipe);
-  // An image coming in beside an image is drawn whole (ImageSwipePeek): no card.
   if (!phase || phase.phase !== 'drag' || skip?.(phase.dir)) return null;
   const step = steps[index + phase.dir];
   if (!step) return null;

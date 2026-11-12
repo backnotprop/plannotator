@@ -1,14 +1,3 @@
-/**
- * Settings → Rows' ask box (components/RowsAsk.tsx) and the "<agent> changed" line (components/RowsSettings.tsx),
- * with the Inbox's routes stubbed (approval "inbox-rows-settings-page").
- * What this catches: the box loud at rest (the picker or Send showing before it has focus), or example chips back;
- * Send starting a thread without `rows_ask` (the agent would get no instructions) or to no one; Send taking the
- * person off the page; the agent's line never appearing; a retry making a second thread; no agent running and no way
- * to keep the words (Copy), or a Send with no one to send to; an agent's save not said on the page, said without its
- * name, or its Undo not putting back the look from before in one save; the person's own save read as an agent's.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -112,7 +101,6 @@ describe.if(hasDom)("Settings → Rows' ask box", () => {
     await press(el, '[data-rows-ask-send]');
     expect(sends().map((call) => [call.body!.to, call.body!.body, call.body!.rows_ask])).toEqual([[{ host: 'claude-code', session: 'ses_a' }, 'Make my rows tighter', true]]);
     expect([window.location.hash, el.querySelector('[data-rows-ask-sent]')!.textContent, el.querySelector('[data-rows-ask-thread]')!.getAttribute('href'), box(el).value]).toEqual([before, 'Sent to Claude Code. Open thread', '#thread=msg_ask', '']);
-    // The agent's own line shows once it has replied, and follows its newest.
     expect(el.querySelector('[data-rows-ask-reply]')).toBeNull();
     agentSays = 'On it.\n\nmore below';
     await settle(80);

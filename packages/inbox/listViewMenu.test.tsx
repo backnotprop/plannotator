@@ -1,16 +1,3 @@
-/**
- * The List view in the list (approval "inbox-list-view", 2026-11-05): its ⋮ menu choice, what List draws, "N new ·
- * Show" in its place above the rows in both views, and a row archived in place (R7) faded, left out of its count.
- *
- * What this catches: a menu choice a screen reader does not hear as one of two with its state; List hiding a thread
- * the grouped view shows (folded Quiet, Sent) or drawing section bands; a choice forgotten on the next load; the tour
- * following this browser's choice; List losing "N new · Show" or moving it; a row archived in place that reads as live
- * (not faded, counted in its group) or an Archive all that never shows the project's empty state.
- * Rows not moving in a real browser (their tops measured before and after news), keyboard steps through List and the
- * phone are proved against the compiled binary by tests/e2e/inbox-list-view.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -146,7 +133,6 @@ describe.skipIf(!hasDom)('the ⋮ menu choice', () => {
     const radios = [...popup.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
     expect(radios.map((radio) => radio.textContent)).toEqual(['Smart groups', 'Simple list']);
     expect(radios.map((radio) => radio.getAttribute('aria-checked'))).toEqual(['true', 'false']);
-    // Under its own label, before the rows' options, as the menu's other groups are.
     const group = radios[0]!.closest('[role="group"]')!;
     expect(document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent).toBe('View');
     expect(popup.textContent!.indexOf('View')).toBeLessThan(popup.textContent!.indexOf('Rows'));
@@ -154,17 +140,14 @@ describe.skipIf(!hasDom)('the ⋮ menu choice', () => {
 
   test('List draws one run of rows, newest first, no bands but the Snoozed one; every thread the groups show is in it', async () => {
     const el = render();
-    // Grouped: Quiet starts folded; open it to count every thread the groups show.
     const grouped = new Set(LIST.filter((s) => s.id !== 'snoozed').flatMap((s) => s.threads.map((r) => r.thread_id)));
     const popup = await openMenu(el);
     await pick(popup, 'list');
     expect(rowIds(el)).toEqual(['wait', 'new2', 'sent', 'q2', 'new1', 'q1']);
     expect(new Set(rowIds(el))).toEqual(grouped);
     expect(bands(el)).toEqual(['snoozed']);
-    // The snoozed thread keeps the grouped view's rule: folded in its band.
     expect(el.querySelector('[data-thread-id="zz"]')).toBeNull();
     expect([...popup.querySelectorAll('[role="menuitemradio"]')].map((radio) => radio.getAttribute('aria-checked'))).toEqual(['false', 'true']);
-    // The menu stays open, as a tick leaves it.
     expect(document.querySelector('[data-tidy-menu-popup]')).not.toBeNull();
   });
 
@@ -197,7 +180,6 @@ describe.skipIf(!hasDom)('"N new · Show" in List', () => {
       const notice = el.querySelector<HTMLButtonElement>('.ib-lbody [data-inbox-notice]')!;
       expect(notice.classList.contains('ib-notice')).toBe(true);
       expect(el.querySelector('.ib-lhead [data-inbox-notice]')).toBeNull();
-      // Before every row: the rows come after it in the body.
       const firstRow = el.querySelector('.ib-lbody [data-thread-id]')!;
       expect(notice.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(notice.textContent).toBe('2 new in docs-siteShow');
@@ -224,7 +206,6 @@ describe.skipIf(!hasDom)('a row archived in place, waiting for the list to settl
     const all = LIST.map((s) => (s.id === 'snoozed' ? s : { ...s, threads: s.threads.map(archived) }));
     const el = renderSections(all, <p data-empty-state="">Everything is archived.</p>);
     expect(el.querySelector('[data-empty-state]')).not.toBeNull();
-    // One live row left: no empty state.
     unmount();
     const one = all.map((s) => (s.id === 'new' ? { ...s, threads: [LIST.find((x) => x.id === 'new')!.threads[0]!, ...s.threads.slice(1)] } : s));
     expect(renderSections(one, <p data-empty-state="">Everything is archived.</p>).querySelector('[data-empty-state]')).toBeNull();

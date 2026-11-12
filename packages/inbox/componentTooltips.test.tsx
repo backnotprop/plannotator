@@ -1,16 +1,3 @@
-/**
- * The Inbox's hover text is ui's Tooltip component, never the browser's
- * native `title` (the owner, 2026-10-17: "I want an actual component
- * tooltip"). A cut project label in a wide list row, a sidebar project and a
- * row's cut preview open the component tooltip quickly on hover; a label that
- * fits opens nothing; and none of them carries a native title. Text cut by a
- * fraction of a pixel (its ellipsis painted while scrollWidth equals
- * clientWidth, seen on a two-line row at a device scale of 2) counts as cut.
- * happy-dom has no layout, so each test gives an element the sizes a real
- * browser measured.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -79,11 +66,8 @@ const list = (narrow: boolean) =>
 
 const label = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[data-thread-id="${id}"] .ib-p`)!;
 
-/** Every element under `el` with a native title. */
 const nativeTitles = (el: HTMLElement) => [...el.querySelectorAll('[title]')].map((node) => node.getAttribute('title'));
 
-// The owner, after #2911: hovering the word "Inbox" (where most people point, the ↻ is hidden until then) shows
-// "Refresh" with Shift+R's keys, as the ↻ does; a name the header cuts still shows the whole name.
 test.skipIf(!hasDom)('the list title’s name opens Refresh with ⇧ R, as its ↻ does; a cut name opens the whole name', async () => {
   const el = mount(
     <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={false} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={false} onRefresh={() => {}} />,
@@ -113,14 +97,11 @@ test.skipIf(!hasDom)('a cut project label in a wide row opens the component tool
   sized(cut, 260, 120);
   expect(await tooltipOf(cut)).toBe(LONG_PROJECT);
   expect(cut.hasAttribute('title')).toBe(false);
-  // The label is no focus stop of its own: the row's button is.
   expect(cut.tabIndex).toBe(-1);
   unhover(cut);
   act(() => root?.unmount());
   host?.remove();
 
-  // Beside a thread the project never wraps (approval "inbox-list-row-v2"): cut, it opens the tooltip with the whole
-  // name; one that fits opens none.
   const narrow = list(true);
   const short = await armTip(() => label(narrow, SHORT.thread_id));
   sized(short, 30, 30);
@@ -132,7 +113,6 @@ test.skipIf(!hasDom)('a cut project label in a wide row opens the component tool
   expect(await tooltipOf(long)).toBe(LONG_PROJECT);
   expect(long.hasAttribute('title')).toBe(false);
   unhover(long);
-  // The agents' tiles before it say who in the tooltip.
   const tiles = narrow.querySelector<HTMLElement>(`[data-thread-id="${LONG.thread_id}"] .ib-atiles`)!;
   expect(await tooltipOf(tiles)).toBe('Claude Code');
   unhover(tiles);
@@ -142,8 +122,6 @@ test.skipIf(!hasDom)('a preview cut by a fraction of a pixel counts as cut: thre
   const el = list(true);
   const chip = await armTip(() => el.querySelector<HTMLElement>(`[data-thread-id="${LONG.thread_id}"] .ib-pv`)!);
   expect(chip.textContent).toBe(LONG.subject!);
-  // What Chromium measured at a device scale of 2 beside an open thread: the box 97.546875 px, the text 97.61 px,
-  // and both integer widths 98.
   sized(chip, 98, 98);
   const realRect = chip.getBoundingClientRect.bind(chip);
   chip.getBoundingClientRect = () => ({ ...realRect().toJSON(), width: 97.546875 }) as DOMRect;
@@ -160,7 +138,6 @@ test.skipIf(!hasDom)('a preview cut by a fraction of a pixel counts as cut: thre
   } finally {
     document.createRange = realRange;
   }
-  // A chip whose text fits its box exactly is not cut.
   const fitting = document.createElement('span');
   document.body.append(fitting);
   sized(fitting, 98, 98);
@@ -194,12 +171,10 @@ for (const withMenu of [true, false]) {
     expect(nativeTitles(el)).toEqual([]);
     const project = el.querySelector<HTMLElement>('.ib-proj')!;
     expect(project.querySelector('.ib-name')!.textContent).toBe(LONG_PROJECT);
-    // The folder is never on the row, so the tooltip opens whether or not the name is cut.
     const tip = await tooltipOf(project);
     expect(tip).toContain(LONG_PROJECT);
     expect(tip).toContain(`/Users/ramos/src/${LONG_PROJECT}`);
     expect(openTooltips().length).toBe(1);
-    // The row's accessible name is its own text, never the tooltip; a screen reader hears the folder as its description.
     expect(project.textContent).toBe(`${LONG_PROJECT}1`);
     const described = document.getElementById(project.getAttribute('aria-describedby') ?? '');
     expect(described?.textContent).toBe(`/Users/ramos/src/${LONG_PROJECT}`);

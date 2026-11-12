@@ -1,18 +1,3 @@
-/**
- * The Pull requests board inside Reviews (approval "inbox-pr-dashboard", the owner's pick "in Reviews", take C) and the
- * tile popover's Merge. What regresses:
- *  - the board missing from Reviews' right pane while nothing is open there, or drawn over an open stack;
- *  - a phone without its "Pull requests" row (it has no right pane), or the row not opening the board;
- *  - Merge's second click moving the button: Confirm merge must be the same button in the same slot, the slot as wide
- *    as its widest word, and the confirm hint where it can't push the buttons (under them on a desktop, above them on a
- *    phone's bottom sheet);
- *  - "Merged" closing before it can be read (about 1.5 s), or the pointer leaving closing it early;
- *  - the merged PR still listed as open after the popover closes, while the list on screen still says open;
- *  - a person's name without their face in the popover, or a Reviews row showing the same face twice (the owner,
- *    q-331c0466: "Everywhere, but not twice in a row").
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -147,7 +132,6 @@ function drawSheet(over: Partial<SheetPageProps> = {}) {
   return { merged };
 }
 
-/** A keyboard Enter's click on a tile: the popover opens pinned. */
 async function pinOpen(key: string) {
   await act(async () => {
     $(`[data-pr-tile="${key}"]`)!.click();
@@ -155,7 +139,6 @@ async function pinOpen(key: string) {
   await settle();
 }
 
-/** The mouse resting on a tile: the popover opens unpinned (it closes when the pointer leaves). */
 async function hoverOpen(key: string) {
   await act(async () => {
     $(`[data-pr-tile="${key}"]`)!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }));
@@ -177,7 +160,6 @@ test('Confirm merge is the same button in the same slot, as wide as its widest w
   const acts = $('[data-pr-pop] .ib-prpop-acts')!;
   const slot = $('[data-pr-pop-mslot]')!;
   const at = [...acts.children].indexOf(slot);
-  // Every word the slot can say sizes it, so none of them is wider than the slot.
   expect($$('[data-pr-pop-mslot] .ib-prpop-msize').map((s) => s.textContent)).toEqual(['Merge', 'Confirm merge', 'Merging…', 'Merged']);
   const button = $('[data-pr-pop-merge]')!;
   expect(button.textContent).toBe('Merge');
@@ -213,10 +195,8 @@ test('Merged stays readable for about 1.5 s, whatever the pointer does; then the
   await press($('[data-pr-pop-merge]')!);
   expect(merges).toEqual([expect.objectContaining({ key: KEY, head_sha: 'a'.repeat(40), confirmed: true })]);
   expect($('[data-pr-pop-merged]')?.textContent).toContain('Merged');
-  // The status sits in the Merge button's slot.
   expect($('[data-pr-pop-merged]')!.parentElement).toBe($('[data-pr-pop-mslot]'));
 
-  // The pointer leaves the popover, and passes over another tile: it stays, still saying Merged.
   await act(async () => {
     $('[data-pr-pop]')!.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }));
     $(`[data-pr-tile="github.com/${REPO}#3"]`)!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }));
@@ -229,7 +209,6 @@ test('Merged stays readable for about 1.5 s, whatever the pointer does; then the
   await wait(700);
   expect($('[data-pr-pop]')).toBeNull();
   expect(merged).toHaveLength(1);
-  // The list on screen still says open (the next read hasn't come): the PR has left Open all the same.
   expect(MODEL.pulls.find((p) => p.key === KEY)!.state).toBe('open');
   expect($(`[data-pr-tile="${KEY}"]`)).toBeNull();
   expect($(`[data-pr-tile="github.com/${REPO}#3"]`)).not.toBeNull();
@@ -271,7 +250,6 @@ test('Reviews: the board fills the right pane while nothing is open there; an op
   expect($('[data-pulls-list]')).not.toBeNull();
   expect($('[data-test-board]')).not.toBeNull();
   expect($('[data-pulls-pane-empty]')).toBeNull();
-  // A desktop has the pane: no row for the board in the list.
   expect($('[data-prs-entry]')).toBeNull();
 
   act(() => root?.unmount());
@@ -291,7 +269,6 @@ test('Reviews on a phone: no pane, a "Pull requests" row with its counts at the 
   expect(row.textContent).toContain('Pull requests');
   expect(row.textContent).toContain('3 open');
   expect(row.textContent).toContain('1 need you');
-  // It comes before the reviews.
   expect(row.compareDocumentPosition($('[data-pulls-row]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   await press(row);
   expect(opened).toEqual(['prs']);
@@ -312,7 +289,6 @@ test('a face by every name: the popover pictures the author and who it waits on;
   host?.remove();
   drawReviews();
   await settle();
-  // #2 asks for the person's review: tomas is pictured at the row's left, so his name in the words has no second face.
   const row = $(`[data-pulls-row="github.com/${REPO}#2"]`)!;
   expect(row.querySelector('.ib-lead [data-pulls-author="tomas"]')).not.toBeNull();
   const words = row.querySelector<HTMLElement>('[data-reviews-status]')!;

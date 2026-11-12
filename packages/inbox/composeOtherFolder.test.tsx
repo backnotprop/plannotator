@@ -1,16 +1,3 @@
-/**
- * "Another folder on <machine>…" in compose's folder menu (remote launch, approval addendum "existing folders"): the
- * quiet last row of each machine's group ("Another folder…" with only this computer) opens a folder browser for that
- * machine. Typing reads the typed path's parent through that machine's own route (this computer's
- * `/api/inbox/launch/folders`, a linked one's `/api/inbox/m/<id>/launch/folders`), picking a folder goes into it,
- * "Start in <name>" puts it in To, and Send names the folder (`to.launch.folder`) on that machine's route.
- *
- * The failures this catches: a folder read or a Send that goes to the wrong machine, a Send that names a project or
- * nothing instead of the folder, an asleep machine read anyway (or offering a folder nobody checked), a missing path
- * left silent, and a stale answer drawn under a newer path.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -46,7 +33,6 @@ const MINI_BLOCK: InboxComposeLaunch = {
   scratch: { root: '/Users/mini/scratch' },
 };
 
-/** Each machine's folders under its home, by `~/…` path. */
 const TREES: Record<string, Record<string, string[]>> = {
   self: {
     '~': ['code', 'Documents', 'notes'],
@@ -66,17 +52,12 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let requests: { method: string; path: string; body: Record<string, unknown> | null }[] = [];
 let machines: MachineView[] = [SELF_VIEW];
-/** Folders a folder can't be made in (A10), by `~/…` path. */
 const UNWRITABLE = new Set(['~/Documents/Archive']);
-/** Holds a folder read until released (a slow machine). */
 let slow: { path: string; release: Promise<void> } | null = null;
 let sent: ComposeSent[] = [];
-/** This computer's launch block as the sessions read answers it. */
 let here: InboxComposeLaunch = HERE;
-/** Paths whose drive doesn't answer (the server's `504 folder_slow`). */
 let slowDrive: string | null = null;
 
-/** A folder read: the machine (`self` or its id) and the path asked for, or null for any other request. */
 function folderRead(path: string): { machine: string; at: string } | null {
   const m = /^\/api\/inbox\/(?:m\/(ibx_[0-9A-Z]{26})\/)?launch\/folders\?(.*)$/.exec(path);
   return m ? { machine: m[1] ?? 'self', at: new URLSearchParams(m[2]).get('path') ?? '' } : null;
@@ -116,7 +97,6 @@ beforeEach(() => {
       const tree = TREES[read.machine] ?? {};
       const folders = tree[read.at];
       if (folders) return Response.json({ path: read.at, exists: true, state: 'folder', folders, writable: !UNWRITABLE.has(read.at) });
-      // As the server: the nearest folder above a path that isn't there, and its folders.
       let up = read.at;
       while (up !== '~' && up !== '/' && !tree[up]) up = up.slice(0, up.lastIndexOf('/')) || (up.startsWith('/') ? '/' : '~');
       return Response.json({ path: read.at, exists: false, folders: [], ...(tree[up] ? { nearest: { path: up, folders: tree[up] } } : {}) });
@@ -185,9 +165,7 @@ function type(input: HTMLInputElement | HTMLTextAreaElement, words: string) {
 const pathField = () => inDialog('[data-home-folders-path]') as HTMLInputElement;
 const folderReads = () => requests.flatMap((r) => (r.method === 'GET' && folderRead(r.path) ? [folderRead(r.path)!] : []));
 const shownFolders = () => all('[data-home-folder-option]').map((r) => r.getAttribute('data-home-folder-option'));
-/** The browser's line (a refusal, a missing folder, a file): its words, or null. */
 const line = () => inDialog('[data-home-folders-note="line"]')?.textContent ?? null;
-/** The folder rows drawn after Create's quiet line, in order: "Or pick one that's there". */
 const belowCreate = () => {
   const after = inDialog('[data-home-folders-after]');
   return after ? all('[data-home-folder-option]').filter((r) => after.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING).map((r) => r.getAttribute('data-home-folder-option')) : [];
@@ -206,7 +184,6 @@ async function twoMachinesMenu() {
 test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, reads here, offers Create for a missing name, and Send names the folder here', async () => {
   await open();
   await startAndOpenMenu();
-  // The menu as it was, then the one new row, with no machine words.
   expect(all('[data-compose-folder-option]').map((r) => r.getAttribute('data-compose-folder-option'))).toEqual(['prj_web', INBOX_SCRATCH_PICK]);
   const row = inDialog('[data-compose-folder-other="self"]')!;
   expect(row.textContent).toBe('Another folder…');
@@ -218,7 +195,6 @@ test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, rea
   await until(() => shownFolders().length === 3, "home's folders");
   expect(shownFolders()).toEqual(['code', 'Documents', 'notes']);
 
-  // A4: a name that isn't there leads as Create, the folders that are there under its quiet line, closest first.
   type(pathField(), '~/code/nope');
   await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
   expect(inDialog('[data-home-folder-create]')!.textContent).toBe('Create nope and start~/code/nope');
@@ -226,13 +202,11 @@ test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, rea
   expect(all('[data-home-folder-start]')).toHaveLength(0);
   expect(inDialog('[data-home-folders-after]')!.textContent).toBe("A new, empty folder. Or pick one that's there:");
   expect(belowCreate()).toEqual(['notes-local', 'web-app']);
-  // A5: a typo one level up: "Go to ~/code/notes", one Enter.
   type(pathField(), '~/cod/notes');
   await until(() => line() === "There's no ~/cod.", 'the typo line');
   expect(inDialog('[data-home-folder-row="fix"]')!.textContent).toBe('Go to ~/code/notes');
   key(pathField(), 'Enter');
   expect(pathField().value).toBe('~/code/notes');
-  // There, "notes" still starts notes-local: the match first, Create last and quiet (A3).
   await until(() => inDialog('[data-home-folder-create]') !== null, 'the quiet Create row');
   expect(all('[data-home-folder-row]').map((r) => r.getAttribute('data-home-folder-row'))).toEqual(['folder', 'create']);
   expect(inDialog('[data-home-folder-create]')!.className).toContain('ib-hfb-quiet');
@@ -246,7 +220,6 @@ test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, rea
   expect(pathField().value).toBe('~/code/notes-local/');
   await until(() => inDialog('[data-home-folder-start]') !== null, 'the Start row');
   expect(inDialog('[data-home-folder-start]')!.getAttribute('data-home-folder-start')).toBe('~/code/notes-local');
-  // Every read was this computer's own route.
   expect(folderReads().every((r) => r.machine === 'self')).toBe(true);
   expect(folderReads().map((r) => r.at)).toContain('~/code/notes-local');
 
@@ -265,7 +238,6 @@ test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, rea
 test.skipIf(!hasDom)("two machines: each group ends with its own row; Mac mini's folders are read and started through Mac mini's route", async () => {
   await twoMachinesMenu();
   expect(all('[data-compose-folder-other]').map((r) => `${r.getAttribute('data-compose-folder-other')}=${r.textContent}`)).toEqual(['self=Another folder on MacBook…', `${MINI}=Another folder on Mac mini…`]);
-  // Each row is its group's last.
   const options = all('[data-compose-folder-option], [data-compose-folder-other]');
   expect(options[options.length - 1]!.getAttribute('data-compose-folder-other')).toBe(MINI);
   expect(options[2]!.getAttribute('data-compose-folder-other')).toBe('self');
@@ -280,10 +252,8 @@ test.skipIf(!hasDom)("two machines: each group ends with its own row; Mac mini's
 
   type(pathField(), '~/code/biling-svc');
   await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
-  // Under Create, Mac mini's folders in ~/code, the one closest to what was typed first; the name was read on Mac mini.
   expect(belowCreate()).toEqual(['billing-svc', 'billing-api', 'billing-reports', 'infra']);
   expect(folderReads().filter((r) => r.at === '~/code/biling-svc')).toEqual([{ machine: MINI, at: '~/code/biling-svc' }]);
-  // An empty folder has nothing else to pick: Create alone, with no line pointing below.
   type(pathField(), '~/code/billing-api/x');
   await until(() => inDialog('[data-home-folder-create="~/code/billing-api/x"]') !== null, 'Create in an empty folder');
   expect(all('[data-home-folders-after]')).toHaveLength(0);
@@ -296,7 +266,6 @@ test.skipIf(!hasDom)("two machines: each group ends with its own row; Mac mini's
   await until(() => inDialog('[data-home-folder-start]') !== null, 'the Start row');
   expect(inDialog('[data-home-folder-start]')!.getAttribute('aria-selected')).toBe('true');
   key(pathField(), 'Enter');
-  // To reads like a project's: "in billing-api · Mac mini".
   expect(inDialog('[data-compose-folder] bdi')!.textContent).toBe('billing-api');
   expect(inDialog(`[data-compose-folder] [data-compose-machine="${MINI}"]`)!.textContent).toBe('· Mac mini');
   type(inDialog('textarea') as HTMLTextAreaElement, 'Retry the 409 with the same key.');
@@ -338,7 +307,6 @@ test.skipIf(!hasDom)('↓ and Enter open the row; Escape goes back to the list w
   expect(all('[data-home-folders]')).toHaveLength(0);
   expect(inDialog('[data-compose-folder-other="self"]')!.getAttribute('aria-selected')).toBe('true');
   expect(document.querySelector('dialog[data-compose]')).not.toBeNull();
-  // The back arrow too.
   key(inDialog('[data-compose-folders] input')!, 'Enter');
   act(() => inDialog('[data-home-folders-back]')!.click());
   expect(inDialog('[data-compose-folder-other="self"]')).not.toBeNull();
@@ -348,7 +316,6 @@ test.skipIf(!hasDom)('asleep: no "Another folder on Mac mini…" row; a browser 
   await twoMachinesMenu();
   act(() => inDialog(`[data-compose-folder-other="${MINI}"]`)!.click());
   await until(() => shownFolders().join() === 'code', "Mac mini's home");
-  // Mac mini falls asleep with its folder browser open: the browser follows the machine as it is now.
   machines = [SELF_VIEW, view(MINI, 'Mac mini', { state: 'offline' })];
   await act(async () => {
     document.dispatchEvent(new Event('visibilitychange'));
@@ -362,10 +329,8 @@ test.skipIf(!hasDom)('asleep: no "Another folder on Mac mini…" row; a browser 
     await new Promise((r) => setTimeout(r, 300));
   });
   expect(folderReads()).toHaveLength(before);
-  // Absence by count: after this test's many renders, Bun's toBeNull() was seen passing on an element.
   expect(all('[data-home-folder-start]')).toHaveLength(0);
   expect(shownFolders()).toEqual([]);
-  // Back in the list: Mac mini's group says it is asleep, and offers no folder browser; this computer's still does.
   act(() => inDialog('[data-home-folders-back]')!.click());
   await until(() => all('[data-compose-folder-group]').some((g) => g.textContent === 'Mac mini · asleep'), 'the asleep caption');
   expect(all('[data-compose-folder-other]').map((r) => r.getAttribute('data-compose-folder-other'))).toEqual(['self']);
@@ -387,7 +352,6 @@ test.skipIf(!hasDom)('a slow answer for a path no longer typed is dropped; a hid
   });
   expect(shownFolders()).toEqual(['notes']);
 
-  // A11: a hidden folder is said in one line, and never read.
   await act(async () => {
     await new Promise((r) => setTimeout(r, 200));
   });
@@ -400,7 +364,6 @@ test.skipIf(!hasDom)('a slow answer for a path no longer typed is dropped; a hid
   expect(folderReads()).toHaveLength(reads);
 });
 
-/** "Another folder…" open on this computer, the path typed, and the rows read. */
 async function browseHere(path: string) {
   await open();
   await startAndOpenMenu();
@@ -478,7 +441,6 @@ test.skipIf(!hasDom)('D8, D9: a kept draft keeps the Create pick; reopened, it c
   await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
   key(pathField(), 'Enter');
   type(inDialog('textarea') as HTMLTextAreaElement, 'Add a pricing page.');
-  // One Escape keeps it (approval "inbox-compose-escape-keeps"): no question.
   key(inDialog('textarea')!, 'Escape');
   await until(() => saved.length === 1, 'the draft saved');
   const start = saved[0]!.body.start;
@@ -489,7 +451,6 @@ test.skipIf(!hasDom)('D8, D9: a kept draft keeps the Create pick; reopened, it c
   await open({ draft });
   await until(() => inDialog('[data-compose-folder]') !== null, 'the folder button');
   expect(inDialog('[data-compose-folder]')!.hasAttribute('data-compose-folder-new')).toBe(true);
-  // Made meanwhile: checked again, it is a folder that is there.
   act(() => root?.unmount());
   host?.remove();
   TREES.self!['~/code/pricing-page'] = [];
@@ -514,7 +475,6 @@ test.skipIf(!hasDom)('G3 (q-5e334740): Tab on a highlighted folder fills it in a
     });
     return event;
   };
-  // "no" suggests notes-local, highlighted: Tab fills it in, ready for the next name, and the field keeps the caret.
   type(pathField(), '~/code/no');
   await until(() => shownFolders().join() === 'notes-local', 'the suggestion');
   expect(tab(true).defaultPrevented).toBe(false);
@@ -522,14 +482,12 @@ test.skipIf(!hasDom)('G3 (q-5e334740): Tab on a highlighted folder fills it in a
   expect(tab().defaultPrevented).toBe(true);
   expect(pathField().value).toBe('~/code/notes-local/');
   await until(() => inDialog('[data-home-folder-start]') !== null, 'the folder filled in');
-  // No folder suggested (Create leads): Tab is the browser's, so focus moves on, and the field is as typed.
   type(pathField(), '~/code/nope');
   await until(() => inDialog('[data-home-folder-create]')?.getAttribute('aria-selected') === 'true', 'the Create row');
   expect(tab().defaultPrevented).toBe(false);
   expect(pathField().value).toBe('~/code/nope');
 });
 
-// Any folder but a system or hidden one (approval "inbox-launch-any-folder"): the drives this computer has mounted.
 test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the browser at the drive; an unplugged project says so; a slow drive says it and offers Try again', async () => {
   here = {
     ...HERE,
@@ -547,19 +505,15 @@ test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the 
   slowDrive = '/Volumes/Backup';
   await open();
   await startAndOpenMenu();
-  // The unplugged drive's project: struck through, with its drive's name.
   const old = inDialog('[data-compose-folder-option="prj_old"]')!;
   expect(old.textContent).toContain("old-site · Archive isn't connected");
   expect(old.textContent).toContain('Connect it to start here');
-  // It explains itself and can't be picked: a click, or Enter on the keys, leaves the menu as it is.
   expect(old.getAttribute('aria-disabled')).toBe('true');
   act(() => old.click());
   expect(inDialog('[data-compose-folder-option="prj_old"]')).not.toBeNull();
   expect(inDialog('[data-compose-note="folder-missing"]')).toBeNull();
-  // A folder on a drive reads by the drive's name, not a cut path.
   expect(inDialog('[data-compose-folder-option="prj_tools"] [data-folder-drive-path]')!.textContent!.replace(/\u00a0/g, ' ')).toBe('Studio SSD › clients › footage-tools');
   expect(all('[data-compose-folder-drive]').map((r) => r.textContent)).toEqual(['Backup… · network drive/Volumes/Backup', 'Studio SSD…/Volumes/Studio SSD']);
-  // Not this computer's own window (no `localWindow`): no Finder.
   act(() => inDialog('[data-compose-folder-drive="/Volumes/Studio SSD"]')!.click());
   expect(pathField().value).toBe('/Volumes/Studio SSD/');
   await until(() => inDialog('[data-home-folder-start]') !== null, "the drive's Start row");
@@ -568,11 +522,9 @@ test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the 
   expect(all('[data-home-folders-place]').map((b) => `${b.textContent}${b.getAttribute('aria-checked') === 'true' ? ' (on)' : ''}`)).toEqual(['Home', 'Backup', 'Studio SSD (on)']);
   expect(inDialog('[data-home-folders-finder]')).toBeNull();
 
-  // The network drive doesn't answer: one calm line and Try again, which asks the drive again at once.
   act(() => inDialog('[data-home-folders-place="/Volumes/Backup"]')!.click());
   await until(() => inDialog('[data-home-folders-note="slow"]') !== null, 'the slow line');
   expect(inDialog('[data-home-folders-note="slow"]')!.textContent).toBe("Backup isn't responding. Try again");
-  // The places row says so, and going back there says it at once, without asking the drive again.
   await until(() => inDialog('[data-home-folders-place="/Volumes/Backup"]')!.hasAttribute('data-quiet'), 'Backup marked');
   expect(inDialog('[data-home-folders-place="/Volumes/Backup"]')!.textContent).toBe("Backup · isn't responding");
   act(() => inDialog('[data-home-folders-place="/Volumes/Studio SSD"]')!.click());
@@ -589,7 +541,6 @@ test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the 
   expect(requests.some((r) => r.path.includes('fresh=1'))).toBe(true);
   expect(inDialog('[data-home-folders-place="/Volumes/Backup"]')!.hasAttribute('data-quiet')).toBe(false);
 
-  // Back on the drive, into a folder and Send: the folder is named by its full path.
   act(() => inDialog('[data-home-folders-place="/Volumes/Studio SSD"]')!.click());
   await until(() => shownFolders().includes('footage'), "the drive's folders");
   act(() => inDialog('[data-home-folder-option="footage"]')!.click());

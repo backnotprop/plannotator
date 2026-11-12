@@ -1,13 +1,3 @@
-/**
- * The list's filter rule (listFilter.ts): which rows the list keeps for a set of picks, the badge's count, what a
- * project's page keeps, the menu's counts and the remembered cookie.
- *
- * What this catches: a group that ORs where it should AND (or the reverse inside a group); a day span off by one at
- * midnight, at the 7th or 30th day back, or at a range's last day; an agent missed when the thread has several or was
- * started by the person; a project's page that still applies the Project picks; Smart groups reordered or renamed by
- * the filter; a menu count that applies its own group; a cookie that keeps junk or breaks the list; a Pull request
- * pick that reads the wrong state, treats a removed PR as one, or puts a PR not read yet under a state (or under No PR).
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxThreadPullsSummary, type InboxListRow, type InboxListSection, type InboxThreadPull, type InboxThreadPullState } from '@plannotator/core/inbox-types';
 import {
@@ -27,9 +17,8 @@ import {
 } from './listFilter';
 import { setStorageBackend, resetStorageBackend, getItem } from '@plannotator/ui/utils/storage';
 
-/** Local times, so the spans read the window's own days. */
 const at = (month: number, day: number, hour: number, minute = 0) => new Date(2026, month - 1, day, hour, minute).toISOString();
-const NOW = new Date(2026, 10, 8, 12, 0).getTime(); // Nov 8, noon
+const NOW = new Date(2026, 10, 8, 12, 0).getTime();
 
 type PullState = 'open' | 'draft' | 'merged' | 'closed' | 'unknown';
 function row(id: string, extra: { project?: string; last_at?: string; host?: string; hosts?: string[]; addressee?: string; person?: boolean; pull?: PullState; pulls?: number } = {}): InboxListRow {
@@ -41,7 +30,6 @@ function row(id: string, extra: { project?: string; last_at?: string; host?: str
     author: extra.person ? { kind: 'user' } : { kind: 'agent', host: extra.host ?? 'claude-code', session: `s_${id}`, name: null },
     participants: extra.hosts?.map((host, i) => ({ host, session: `s_${id}_${i}` })),
     addressee: extra.addressee ? { host: extra.addressee, session: 's_to', name: null } : null,
-    // PR linking's row shape (InboxThreadPullsSummary): how many, and the PR its mark shows.
     pulls: extra.pull ? { count: extra.pulls ?? 1, headline: { key: `github.com/o/r#${id}`, state: extra.pull } } : undefined,
   } as unknown as InboxListRow;
 }
@@ -161,10 +149,8 @@ test('Smart groups keep their order and names and count only the matches; nothin
 
 test('a menu row counts with the other groups\' picks, not its own group\'s', () => {
   const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [] };
-  // docs is not picked, but its row says what ticking it would add: docs rows in the last 7 days.
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_docs')).toBe(0);
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_billing')).toBe(1);
-  // Last 30 days, with web picked: web rows in 30 days.
   expect(countWhere(ALL, { ...filter, updated: 'today' }, NOW, 'updated', (r) => Date.parse(r.last_at) >= new Date(2026, 9, 10).getTime())).toBe(3);
 });
 

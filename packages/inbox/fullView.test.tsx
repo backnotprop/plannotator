@@ -1,25 +1,3 @@
-/**
- * Full screen for files (approval "inbox-one-fullscreen", Drawer): one mode.
- * The pane's Full screen button takes the file to the whole window with one
- * floating toolbar (pen on HTML, the comment count, `N/M ⌄`, ⋯, Side by
- * side, × Exit full screen, » Hide tools); the header, the changed line and
- * the bar under the file are gone, and there is no eye. Hide gathers the tools into one corner
- * control and one press brings them back. The count opens the comments
- * panel floating over the page, never opened by itself; it gathers with the
- * tools and closes when the person leaves the file.
- *
- * What is proved here, on the pane as the thread drives it: the single mode
- * and focus both ways; the gather and its way back, with focus never lost; no
- * hover reveal; the floating panel gathering with the tools and closing on
- * leaving the file (full screen ends, a step, a new mount); a new comment only
- * bumping the count; the toolbar always starting out; ⌘⇧X on HTML only; the
- * ⋯ menu; the peek and a step keeping full screen with its chip; Escape's
- * ladder (one thing per press, full screen last; nothing asks about typed words); the changed chip and dot; a phone and a stacked window. The
- * thread's wiring is fullScreenThread.test.tsx; the browser proof is
- * tests/e2e/inbox-full-view.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -36,11 +14,9 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
 
-/** The cookie that once remembered the comments drawer open: a browser may still hold it. */
 const OLD_DRAWER_COOKIE = 'plannotator-inbox-file-comments';
 
 beforeAll(() => {
-  // A page on localhost, as the Inbox is served: about:blank keeps no readable cookies (the drawer's choice is one).
   if (hasDom) (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
 });
 
@@ -99,10 +75,8 @@ function record(id: string, att = notes): InboxAnnotationRecord {
     annotation: { id, blockId: 'block-0', startOffset: 0, endOffset: 4, type: 'COMMENT', text: 'Say why.', originalText: 'Plan', createdA: 1 },
   } as unknown as InboxAnnotationRecord;
 }
-/** One saved comment on notes.md, so the count reads 1. */
 const RECORD = record('ann_1');
 
-/** The view route: markdown text, or the HTML page. */
 function stubViews() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -122,12 +96,10 @@ interface Harness {
   reply: number;
   closed: number;
   toggles: number;
-  /** Each toggle's `pick`: true for a button (remembered), false for Escape's last rung. */
   picks: boolean[];
   setRecords?: (records: InboxAnnotationRecord[]) => void;
 }
 
-/** The pane as the thread drives it: `full` lives in the thread, a step opens the next file in place. */
 function Pane({
   start,
   harness,
@@ -147,7 +119,6 @@ function Pane({
   records?: InboxAnnotationRecord[];
   steps?: AttachmentStep[];
   version?: 'current' | 'sent';
-  /** Write the reply leaves full screen, as the thread does. */
   replyLeaves?: boolean;
 }) {
   const [open, setOpen] = useState(start);
@@ -237,16 +208,13 @@ const click = async (el: HTMLElement | null) => {
   await act(async () => el!.click());
   await settle();
 };
-/** A keyboard press on a button: a click whose `detail` is 0. */
 const press = async (el: HTMLElement) => {
   await act(async () => {
     el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
   });
   await settle();
 };
-/** The platform's own ⌘⇧X. */
 const chord = () => (getShortcutPlatform() === 'mac' ? { key: 'X', code: 'KeyX', metaKey: true, shiftKey: true } : { key: 'X', code: 'KeyX', ctrlKey: true, shiftKey: true });
-/** The toolbar's controls in order, by their data attribute. */
 const controls = () =>
   [...bar()!.querySelectorAll('button')].map((b) =>
     b.hasAttribute('data-full-view-exit') ? `leave:${b.getAttribute('data-full-view-exit')}` : b.hasAttribute('data-full-view-pen') ? 'pen' : b.hasAttribute('data-full-view-comments') ? 'count' : b.hasAttribute('data-full-view-position') ? 'position' : b.hasAttribute('data-full-view-more') ? 'more' : b.hasAttribute('data-full-view-hide') ? `hide:${b.getAttribute('data-full-view-hide')}` : b.hasAttribute('data-full-view-close') ? 'close' : '?',
@@ -256,8 +224,6 @@ test.skipIf(!hasDom)('Full screen is one mode: the header, the changed line and 
   stubViews();
   const harness = harnessOf();
   await render(<Pane start={notes} harness={harness} startFull={false} />);
-  // Beside the thread: the header's Full screen, the stepper under the file, no eye anywhere.
-  // The header's view switch: Side by side pressed, Full screen not.
   const fullButton = host!.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!;
   const sideButton = host!.querySelector<HTMLButtonElement>('.ib-vhead [data-view-side]')!;
   expect(fullButton.textContent).toBe('Full screen');
@@ -276,23 +242,19 @@ test.skipIf(!hasDom)('Full screen is one mode: the header, the changed line and 
   expect(host!.querySelector('.ib-vhead')).toBeNull();
   expect(host!.querySelector('[data-view-foot]')).toBeNull();
   expect(host!.querySelector('[data-changed-line]')).toBeNull();
-  // The toolbar: a named toolbar, showing, first in the pane; focus on its first button (the header that held Full screen is gone).
   expect(bar()!.getAttribute('role')).toBe('toolbar');
   expect(pane().firstElementChild).toBe(dock());
   expect(barState()).toBe('pinned');
   expect(controls()).toEqual(['count', 'position', 'more', 'leave:exit', 'close', 'hide:hide']);
   expect(document.activeElement).toBe(bar()!.querySelector('button'));
   expect(live()).toBe('Full screen. Side by side is in the toolbar.');
-  // The way back is named for where it goes.
   const exit = host!.querySelector<HTMLButtonElement>('[data-full-view-exit="exit"]')!;
   expect(exit.getAttribute('aria-label')).toBe('Side by side');
   expect(exit.textContent).toBe('Side by side');
-  // The drawer starts closed (never opened by itself).
   expect(pane().classList.contains('ib-drawer')).toBe(false);
 
   await click(host!.querySelector('[data-full-view-exit="exit"]'));
   expect(harness.toggles).toBe(2);
-  // Both are picks with a button: the host remembers them.
   expect(harness.picks).toEqual([true, true]);
   expect(bar()).toBeNull();
   expect(host!.querySelector('.ib-vhead')).not.toBeNull();
@@ -322,12 +284,10 @@ test.skipIf(!hasDom)('Hide gathers the tools into the corner control (inert, foc
   expect(document.activeElement).toBe(handle());
   expect(live()).toBe('Tools hidden. They are in the bottom right corner.');
 
-  // A pointer resting on the dock no longer brings anything out: only a press does.
   await act(async () => dock()!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })));
   await settle(300);
   expect(barState()).toBe('tucked');
 
-  // One press: everything back at once (no half state), focus on » where the person pressed it.
   await press(handle());
   expect(barState()).toBe('pinned');
   expect(bar()!.inert).toBe(false);
@@ -337,7 +297,6 @@ test.skipIf(!hasDom)('Hide gathers the tools into the corner control (inert, foc
   expect(hideButton().getAttribute('data-full-view-hide')).toBe('hide');
   expect(live()).toBe('Tools shown.');
 
-  // A mouse press on the corner control: back as well, and focus is never left on the inert control.
   await click(hideButton());
   await click(handle());
   expect(barState()).toBe('pinned');
@@ -350,7 +309,6 @@ test.skipIf(!hasDom)('every opening of full screen starts with the toolbar showi
   await click(host!.querySelector('[data-full-screen-toggle]'));
   await click(hideButton());
   expect(barState()).toBe('tucked');
-  // Leave with the tools gathered (Exit is in the toolbar, so bring them back first).
   await press(handle());
   await click(host!.querySelector('[data-full-view-exit]'));
   expect(bar()).toBeNull();
@@ -367,11 +325,9 @@ test.skipIf(!hasDom)('back into full screen after leaving it tucked (Hide, the d
   hideButton().focus();
   await click(hideButton());
   expect(barState()).toBe('tucked');
-  // The drawer from the tucked toolbar: the handle brings it out, the count opens the drawer.
   await press(handle());
   await click(host!.querySelector('[data-full-view-comments]'));
   expect(pane().classList.contains('ib-drawer')).toBe(true);
-  // Write the reply: a press on the drawer's foot (outside the toolbar, so it tucks) leaves full screen.
   const write = [...host!.querySelectorAll<HTMLButtonElement>('[data-full-view-foot] button')].find((b) => b.textContent === 'Write the reply')!;
   await act(async () => {
     write.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
@@ -380,7 +336,6 @@ test.skipIf(!hasDom)('back into full screen after leaving it tucked (Hide, the d
   expect(harness.reply).toBe(1);
   expect(bar()).toBeNull();
 
-  // Every change to the toolbar's state or inertness from here on is recorded: none may say tucked.
   const seen: string[] = [];
   const observer = new MutationObserver((records) => {
     for (const r of records) {
@@ -435,14 +390,12 @@ test.skipIf(!hasDom)('a new comment never opens the floating panel and only bump
   const harness = harnessOf();
   await render(<Pane start={notes} harness={harness} />);
   expect(pane().classList.contains('ib-drawer')).toBe(false);
-  // A comment saved with the panel closed: the count bumps, the panel stays shut.
   await act(async () => harness.setRecords!([RECORD, record('ann_9')]));
   await settle();
   expect(pane().classList.contains('ib-drawer')).toBe(false);
   const count = host!.querySelector<HTMLButtonElement>('[data-full-view-comments]')!;
   expect(count.getAttribute('aria-label')).toBe('Comments, 2');
   expect(count.querySelector('.ib-bump')).not.toBeNull();
-  // The handle carries the count too.
   await click(hideButton());
   expect(handle().getAttribute('aria-label')).toBe('Show tools, 2 comments');
 });
@@ -454,18 +407,15 @@ test.skipIf(!hasDom)('the floating panel goes with the tools when they gather an
   await click(host!.querySelector('[data-full-view-comments]'));
   expect(pane().classList.contains('ib-drawer')).toBe(true);
   expect(panel().inert).toBe(false);
-  // Focus inside the panel when » gathers: it goes to the corner control, never left on something inert.
   panel().querySelector<HTMLButtonElement>('.ib-sheet-h button')!.focus();
   await click(hideButton());
   expect(pane().getAttribute('data-tools')).toBe('tucked');
   expect(panel().inert).toBe(true);
   expect(document.activeElement).toBe(handle());
-  // Gathered, not closed: one press on the corner control brings it back open with the toolbar.
   await press(handle());
   expect(pane().getAttribute('data-tools')).toBe('pinned');
   expect(pane().classList.contains('ib-drawer')).toBe(true);
   expect(panel().inert).toBe(false);
-  // Gathered again, Escape skips the panel it cannot see: the next rung (here, leaving full screen) is taken.
   await click(hideButton());
   await key(document.body, { key: 'Escape' });
   expect(pane().hasAttribute('data-full-view')).toBe(false);
@@ -496,20 +446,17 @@ test.skipIf(!hasDom)('the floating panel closes when the person leaves the file:
     await click(host!.querySelector('[data-full-view-comments]'));
     expect(isOpen()).toBe(true);
   };
-  // Full screen ends (Side by side), and comes back: closed.
   await openPanel();
   await click(host!.querySelector('[data-full-view-exit="exit"]'));
   await click(host!.querySelector('.ib-vhead [data-full-screen-toggle]'));
   expect(bar()).not.toBeNull();
   expect(isOpen()).toBe(false);
-  // A step to the next file keeps full screen; the panel closes.
   await openPanel();
   await key(pane(), { key: ']' });
   await settle();
   expect(pane().getAttribute('data-attachment-pane')).toBe(page.id);
   expect(bar()).not.toBeNull();
   expect(isOpen()).toBe(false);
-  // The file closed and opened again (a new pane): closed.
   await openPanel();
   await rerender(<Pane start={notes} harness={harnessOf()} />);
   expect(isOpen()).toBe(false);
@@ -525,10 +472,8 @@ test.skipIf(!hasDom)('⌘⇧X on an HTML file tucks and shows the toolbar; on ma
   expect(live()).toBe('Tools hidden. They are in the bottom right corner.');
   await key(document.body, chord());
   expect(barState()).toBe('pinned');
-  // The tooltip names the chord on HTML only.
   expect(hideButton().getAttribute('aria-description')).toMatch(/^Shortcut: .+X$/);
 
-  // Typing in a field: the chord is not the toolbar's.
   const field = document.createElement('textarea');
   field.setAttribute('data-test-stray', '');
   document.body.appendChild(field);
@@ -550,7 +495,6 @@ test.skipIf(!hasDom)('⌘⇧X on an HTML file tucks and shows the toolbar; on ma
 
 test.skipIf(!hasDom)('⋯ holds Download and the other version (the changed chip offers it too); the tucked handle carries an amber dot', async () => {
   stubViews();
-  // Its own id: the stubbed view route answers the unchanged notes.md, whose record would win.
   const changed = { ...notes, id: 'att_01K7ZZZZZZZZZZZZZZZZZZZZZZ', changed_since_sent: true };
   const harness = harnessOf();
   await render(<Pane start={changed} harness={harness} steps={attachmentSequence([message(M1, '2026-10-10T10:42:00.000Z')], [changed])} />);
@@ -568,17 +512,14 @@ test.skipIf(!hasDom)('⋯ holds Download and the other version (the changed chip
   await click(menu.querySelector<HTMLElement>('[data-full-view-version]'));
   expect(harness.versions).toEqual(['sent']);
 
-  // The changed chip is a fact about the file: it stays when the toolbar tucks, and the handle says so.
   await click(hideButton());
   expect(host!.querySelector('[data-full-view-changed]')).not.toBeNull();
   expect(handle().querySelector('.ib-fvhandle-dot')).not.toBeNull();
   expect(handle().getAttribute('aria-label')).toBe('Show tools, 1 comment, file changed since sent');
 
-  // Beside the thread the changed line, not the chip.
   await rerender(<Pane start={changed} harness={harnessOf()} startFull={false} />);
   expect(host!.querySelector('[data-full-view-changed]')).toBeNull();
   expect(host!.querySelector('[data-changed-line]')).not.toBeNull();
-  // The header's Download is an icon: no word, named by its aria-label, which says which version it gives.
   const headerDownload = host!.querySelector<HTMLAnchorElement>('.ib-vhead [data-attachment-download]')!;
   expect(headerDownload.textContent).toBe('');
   expect(headerDownload.getAttribute('aria-label')).toBe(`Download ${changed.name}`);
@@ -621,14 +562,12 @@ test.skipIf(!hasDom)('a step keeps full screen and the toolbar as it was: the ch
   expect(chip().getAttribute('data-full-view-chip')).toBe('hidden');
 });
 
-/** Type into a React-controlled field the way the browser does (the value setter, then an input event). */
 async function typeInto(area: HTMLTextAreaElement, text: string) {
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, text);
     area.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
-/** A stand-in comment popover (Plannotator's draws in a portal on the page), counting the Escapes that reach it. */
 function strayComposer(text: string) {
   const box = document.createElement('div');
   box.setAttribute('data-comment-popover', 'true');
@@ -649,7 +588,6 @@ const escapeOn = async (target: EventTarget) => {
   return event;
 };
 
-/** Where leaving full screen left things: the pane, focus, what was said, and whether it was a pick. */
 const afterLeaving = (harness: Harness) => ({
   full: bar() !== null,
   toggles: harness.toggles,
@@ -661,33 +599,27 @@ const afterLeaving = (harness: Harness) => ({
 for (const [kind, start] of [['markdown', notes], ['HTML', page], ['image', shot]] as const) {
   test.skipIf(!hasDom)(`${kind}: × Exit full screen, just before », leaves full screen as Escape's last step does (not a pick; focus back on the view switch)`, async () => {
     stubViews();
-    // Escape's last step, from the pane with nothing else open.
     const byEscape = harnessOf();
     await render(<Pane start={start} harness={byEscape} />);
     pane().focus();
     await escapeOn(pane());
-    // HTML starts in Annotate: Escape's first press takes it to Interact.
     if (byEscape.toggles === 0) await escapeOn(pane());
     const escaped = afterLeaving(byEscape);
     expect(escaped).toEqual({ full: false, toggles: 1, picks: [false], focusOnSwitch: true, said: 'Side by side: the file is beside the thread.' });
 
-    // The button, entered the way a person does: the header's Full screen.
     const byButton = harnessOf();
     await rerender(<Pane start={start} harness={byButton} startFull={false} />);
     await click(host!.querySelector('.ib-vhead [data-full-screen-toggle]'));
-    // » keeps the corner; × sits just before it.
     expect(controls().slice(-2)).toEqual(['close', 'hide:hide']);
     const close = host!.querySelector<HTMLButtonElement>('[data-full-view-close]')!;
     expect(close.getAttribute('aria-label')).toBe('Exit full screen');
     expect(close.getAttribute('aria-keyshortcuts')).toBe('Escape');
-    // An icon button: no words beside the ×; the component tooltip names it and shows Esc as a keycap.
     expect(close.textContent).toBe('');
     expect(close.hasAttribute('title')).toBe(false);
     expect(await tooltipOf(close)).toBe('Exit full screenEsc');
     expect([...document.querySelectorAll('kbd')].map((k) => k.textContent)).toContain('Esc');
 
     await click(close);
-    // The entry was a pick (the header's Full screen); the way out is not, as with Escape.
     expect({ ...afterLeaving(byButton), picks: byButton.picks.slice(1), toggles: byButton.toggles - 1 }).toEqual(escaped);
     expect(host!.querySelector('[data-full-view-close]')).toBeNull();
   });
@@ -699,7 +631,6 @@ test.skipIf(!hasDom)('one Escape with focus on × leaves full screen: its toolti
   await render(<Pane start={notes} harness={harness} />);
   const close = host!.querySelector<HTMLButtonElement>('[data-full-view-close]')!;
   await act(async () => close.focus());
-  // Its tooltip is open, as a pointer resting there leaves it.
   expect(await tooltipOf(close)).toBe('Exit full screenEsc');
   await escapeOn(close);
   expect(harness.toggles).toBe(1);
@@ -711,19 +642,16 @@ test.skipIf(!hasDom)('Escape closes one thing per press, innermost first, then l
   stubViews();
   const harness = harnessOf();
   await render(<Pane start={notes} harness={harness} />);
-  // The file list: Escape inside it closes it and focus goes back to N/M (its own key); full screen stays.
   const pos = host!.querySelector<HTMLButtonElement>('[data-full-view-position]')!;
   await click(pos);
   await escapeOn(document.activeElement ?? pos);
   expect(pos.getAttribute('aria-expanded')).toBe('false');
   expect(harness.toggles).toBe(0);
-  // Open again, focus elsewhere: the ladder closes it first.
   await click(pos);
   pane().focus();
   await escapeOn(pane());
   expect(pos.getAttribute('aria-expanded')).toBe('false');
   expect(harness.toggles).toBe(0);
-  // The drawer: closes, focus on the count, said.
   await click(host!.querySelector('[data-full-view-comments]'));
   expect(pane().classList.contains('ib-drawer')).toBe(true);
   pane().focus();
@@ -732,17 +660,13 @@ test.skipIf(!hasDom)('Escape closes one thing per press, innermost first, then l
   expect(document.activeElement).toBe(host!.querySelector('[data-full-view-comments]'));
   expect(live()).toBe('Comments closed.');
   expect(harness.toggles).toBe(0);
-  // Nothing left: full screen ends, the file is beside the thread, focus on the switch's Side by side.
   await escapeOn(document.activeElement!);
-  // The count's tooltip, opened by that focus, takes a press of its own first (it is the innermost thing open).
   if (harness.toggles === 0) await escapeOn(document.activeElement!);
   expect(harness.toggles).toBe(1);
   expect(bar()).toBeNull();
-  // Escape's last rung is not a pick: nothing is remembered.
   expect(harness.picks).toEqual([false]);
   expect(document.activeElement === host!.querySelector('.ib-vhead [data-view-side]')).toBe(true);
   expect(live()).toBe('Side by side: the file is beside the thread.');
-  // Beside the thread there is no ladder.
   await escapeOn(pane());
   expect(harness.toggles).toBe(1);
 });
@@ -753,7 +677,6 @@ test.skipIf(!hasDom)('HTML: Escape takes the drawer, then Annotate to Interact, 
   await render(<Pane start={page} harness={harness} />);
   const pen = () => host!.querySelector<HTMLButtonElement>('[data-full-view-pen]')!;
   expect(pen().getAttribute('aria-pressed')).toBe('true');
-  // From the window.
   await click(host!.querySelector('[data-full-view-comments]'));
   pane().focus();
   await escapeOn(pane());
@@ -761,14 +684,12 @@ test.skipIf(!hasDom)('HTML: Escape takes the drawer, then Annotate to Interact, 
   expect(pen().getAttribute('aria-pressed')).toBe('true');
   pane().focus();
   const toInteract = await escapeOn(pane());
-  // Used: the HTML viewer's own Annotate rung (a window listener) does not take a second step.
   expect(toInteract.defaultPrevented).toBe(true);
   expect(pen().getAttribute('aria-pressed')).toBe('false');
   expect(live()).toBe('Interact: clicks reach the page.');
   expect(harness.toggles).toBe(0);
   await click(pen());
 
-  // From inside the page: the bridge's messages.
   const iframe = host!.querySelector<HTMLIFrameElement>('iframe')!;
   const post = async (type: string) => {
     await act(async () => {
@@ -795,13 +716,10 @@ test.skipIf(!hasDom)('Escape typed in a comment being written is the comment\'s 
   const { box, area, reached } = strayComposer('Say why the flag stays.');
   area.focus();
   const own = await escapeOn(area);
-  // The composer had the key itself (its own close); no question row, full screen stays.
   expect(reached.escapes).toBe(1);
   expect(own.defaultPrevented).toBe(false);
   expect(host!.querySelector('[data-step-guard]')).toBeNull();
   expect(harness.toggles).toBe(0);
-  // With focus elsewhere: the ladder closes the composer (this stand-in gives its words up to no save, so it gets
-  // its own Escape), nothing more.
   pane().focus();
   await escapeOn(pane());
   expect(reached.escapes).toBe(2);
@@ -829,7 +747,6 @@ test.skipIf(!hasDom)('an image: Escape leaves its comment row with the words kep
   expect(harness.toggles).toBe(1);
   expect(row().value).toBe('Crop the header.');
 
-  // A stacked window: the last rung goes back to the thread on that press (the words wait as the file's draft).
   const locked = harnessOf();
   await rerender(<Pane start={shot} harness={locked} locked />);
   await typeInto(row(), 'Crop the header.');
@@ -900,7 +817,6 @@ test.skipIf(!hasDom)('a phone: the same mode; ‹ Back to the thread leads (44 p
   await render(<Pane start={page} harness={harness} phone />);
   expect(dock()!.classList.contains('ib-fvdock-phone')).toBe(true);
   expect(controls()).toEqual(['leave:back', 'pen', 'count', 'position', 'more', 'hide:hide']);
-  // No corner on a phone: the handle is tapped.
   expect(host!.querySelector('.ib-fvzone')).toBeNull();
   await click(host!.querySelector('[data-full-view-comments]'));
   expect(pane().classList.contains('ib-panel-open')).toBe(true);
@@ -908,18 +824,15 @@ test.skipIf(!hasDom)('a phone: the same mode; ‹ Back to the thread leads (44 p
   const pos = host!.querySelector<HTMLButtonElement>('[data-full-view-foot] [data-full-view-position]')!;
   expect(pos.textContent).toContain('2 of 3');
   await click(pos);
-  // The peek is the phone's bottom sheet, drawn in the Inbox's root.
   expect(document.querySelector('.pn-inbox-peek [role="grid"]')).not.toBeNull();
   await act(async () => document.querySelector<HTMLElement>('.pn-inbox-peek [role="grid"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   await settle();
 
-  // ⋯ on a phone holds Open in, Download and the versions only: the files are the pill's (phoneStepping.test.tsx).
   await click(host!.querySelector('[data-full-view-more]'));
   expect(document.querySelector('[data-full-view-menu-position]')).toBeNull();
   await act(async () => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   await settle();
 
-  // ‹ goes back to the thread.
   await click(host!.querySelector('[data-full-view-exit="back"]'));
   expect(harness.closed).toBe(1);
 });

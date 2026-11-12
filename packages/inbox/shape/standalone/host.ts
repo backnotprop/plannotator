@@ -1,18 +1,3 @@
-/**
- * The standalone Shape page's ShapeHost (packages/ui/components/shape/types.ts):
- * the board reads and writes the Shapes server's Shape routes, the same ones
- * the Inbox mounts.
- *
- * - Change it and Ask: stored. Both wait for the agent: it picks them up with
- *   `plannotator shape read --notes` and answers an Ask with `plannotator
- *   shape answer`. There is no thread, so no session is asked here and no Ask
- *   AI answers. The server knows no sessions, so the board shows no session
- *   line (`sessionless`) rather than "Session ended" while the agent is live.
- * - The event feed (`/api/shapes/events`, the page's one stream) tells an open
- *   board what changed: a version, "drawing", a delivery, an answer.
- * - Files and hover: the shape's project folder, through code-nav.
- * - Copy prompt: the command any session runs to pick up what waits.
- */
 import type { ShapeNote, ShapeVersion } from '@plannotator/core/shape';
 import type { ShapeHost, ShapeLoaded } from '@plannotator/ui/components/shape';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -21,9 +6,7 @@ import type { ShapeLoadedWire, ShapePageApi } from './api';
 
 export interface StandaloneShapeHostOptions {
   api: ShapePageApi;
-  /** Every change the event feed names (an empty list: read everything again). Returns the unsubscribe. */
   subscribe: (listener: (ids: string[]) => void) => () => void;
-  /** The `plannotator` command (Copy prompt). */
   command?: string;
   copy?: (text: string) => Promise<void> | void;
 }
@@ -54,7 +37,6 @@ export function createStandaloneShapeHost(options: StandaloneShapeHostOptions): 
       return (await api.note(id, { ...input })).note;
     },
     async ask(id, input) {
-      // Stored; the agent answers it with `plannotator shape answer`, and the event feed brings the answer here.
       const question = (await api.note(id, { ...input, kind: 'ask' })).note;
       return { question, answer: null };
     },
@@ -97,7 +79,6 @@ export function createStandaloneShapeHost(options: StandaloneShapeHostOptions): 
       await (options.copy ?? copyTextToClipboard)(text);
     },
     askWaitsWhenEnded: true,
-    // No thread, so no session: the Shapes server cannot tell a live agent from a gone one. Say nothing about it.
     sessionless: true,
   };
 }

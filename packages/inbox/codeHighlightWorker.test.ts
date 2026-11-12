@@ -1,10 +1,3 @@
-/**
- * The Inbox's highlight worker must draw a fence with the page's own characters: a fence highlighted in the
- * worker (off screen, in idle time) and one highlighted on the page (near the view) sit in the same thread,
- * and the annotation layer addresses both by text offset. These run the real @pierre/diffs highlighter on
- * the page side and the real worker (codeHighlight.worker.ts in a Bun Worker, its own realm, through
- * codeHighlightWorker.ts's protocol) on the other, and want the same markup byte for byte.
- */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { dirname } from 'node:path';
 
@@ -17,7 +10,6 @@ afterAll(() => {
   for (const worker of started) worker.terminate();
 });
 
-/** codeHighlight.worker.ts, as the Inbox starts it; every request it is sent lands in `seen`. */
 function realWorker(seen: FenceMarkupRequest[]): Worker {
   const worker = new Worker(new URL('./codeHighlight.worker.ts', import.meta.url).href);
   started.push(worker);
@@ -36,7 +28,6 @@ const FENCES: Array<[lang: string, code: string]> = [
   ['rust', 'fn main() {\n    let v: Vec<u8> = vec![1, 2, 3];\n    println!("{:?}", v.iter().map(|x| x * 2).collect::<Vec<_>>());\n}'],
   ['json', '{\n  "name": "heavyshop",\n  "private": true,\n  "deps": { "react": "^19.0.0" }\n}'],
   ['bash', 'set -euo pipefail\nfor f in "$@"; do\n  echo "${f%.ts}" | tr a-z A-Z > /dev/null\ndone'],
-  // Grammars that embed others: the worker must have been sent those too.
   ['html', '<!doctype html>\n<style>body { color: red; }</style>\n<script>const n = 1 < 2;</script>\n<p class="x">a &amp; b</p>'],
   ['markdown', '# Title\n\nSome *words* and `code`.\n\n```typescript\nconst x: number = 1;\n```\n'],
 ];
@@ -57,15 +48,12 @@ describe('Inbox highlight worker', () => {
     for (const theme of THEMES) {
       for (const [lang, code] of FENCES) {
         expect(await ensureHighlight(lang, theme)).toBe(true);
-        // JavaScriptCore (Bun here, Safari) colours a grammar's first fence in a realm unlike every later one
-        // (fenceMarkup.ts); a page that has drawn fences before is the one to match.
         highlightToHtml(code, lang, theme);
         const page = highlightToHtml(code, lang, theme);
         expect(page, `${lang} in ${theme} on the page`).not.toBeNull();
         expect(await worker.html(code, lang, theme), `${lang} in ${theme}`).toBe(page);
       }
     }
-    // Each grammar and theme goes over once, not with every fence.
     const sentLangs = seen.flatMap((request) => (request.langs ?? []).map((lang) => lang.name));
     expect(new Set(sentLangs).size).toBe(sentLangs.length);
     const sentThemes = seen.flatMap((request) => (request.themes ?? []).map((theme) => theme.name));
@@ -73,8 +61,6 @@ describe('Inbox highlight worker', () => {
   });
 
   test('a fence whose grammar embeds one the page attached for other fences gets it in the worker too', async () => {
-    // TypeScript is attached on the page (for other fences) but this worker is never asked for a TypeScript
-    // fence: the Markdown fence's own ```typescript block still needs it there.
     const code = 'Notes:\n\n```typescript\nexport const answer: number = 42; // the one\n```\n';
     expect(await ensureHighlight('typescript', 'pierre-dark')).toBe(true);
     expect(await ensureHighlight('markdown', 'pierre-dark')).toBe(true);

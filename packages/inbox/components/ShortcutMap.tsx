@@ -1,15 +1,3 @@
-/**
- * The shortcut map (approval "inbox-keyboard-shortcuts"): every Inbox key in
- * one dialog, opened with `?` or the keyboard button beside light and dark.
- * Its rows are read from the registry (shortcuts/), so a key that changes
- * there changes here; MAP_COLUMNS (shortcuts/map.ts) only says which actions
- * share a row and in what order. A test (shortcutMap.test.ts) fails when a
- * registry action is in no row, so a new key cannot be left off the map.
- *
- * A native modal (Updates.tsx `Modal`): focus stays inside, Escape or `?`
- * closes it, focus goes back to what opened it. On the phone layout there is
- * no button: `?` opens it (a narrow desktop window, a phone's hardware keyboard).
- */
 import { Icon } from '../icons';
 import { mapColumns, present, type MapRow } from '../shortcuts/map';
 import { isEditableTarget } from '../shortcuts/guards';
@@ -18,7 +6,6 @@ import { useTouchPhone } from '../phone';
 import { setKeyHints, shortcutPrefs, useShortcutPrefs } from '../shortcuts/prefs';
 import { Modal } from './Updates';
 
-/** A row's keys; on a touch phone only the ones that act there (`?` and the chords, Esc, Enter, the arrows). */
 function rowBindings(row: MapRow, touchPhone: boolean): string[] {
   return row.keys.filter(present).flatMap((ref) => {
     const all = ref.scope.shortcuts[ref.action]!.bindings;
@@ -27,7 +14,6 @@ function rowBindings(row: MapRow, touchPhone: boolean): string[] {
   });
 }
 
-/** Where focus goes when the map closes and nothing focusable opened it (a cold page, `?` from nowhere): what is on screen. */
 function mapFallback(): HTMLElement | null {
   for (const selector of ['[data-attachment-pane]', '.ib-main .ib-lbody [aria-current="true"][data-thread-id], .ib-main .ib-lbody [data-thread-id].ib-sel', 'section.ib-pane h2.ib-subject', '.ib-main .ib-lbody [data-thread-id]', '.ib-main h1', '.ib-main h2']) {
     const el = [...document.querySelectorAll<HTMLElement>(selector)].find((candidate) => candidate.getClientRects().length > 0);
@@ -38,8 +24,6 @@ function mapFallback(): HTMLElement | null {
 
 export function ShortcutMap({ onClose, onSettings }: { onClose: () => void; onSettings: () => void }) {
   const prefs = useShortcutPrefs();
-  // A touch phone (a hardware keyboard opened it with `?`): only the keys that act there, and no way to the
-  // Keyboard settings, which a touch phone does not show.
   const touchPhone = useTouchPhone();
   const columns = mapColumns()
     .map((groups) => groups.map((group) => ({ ...group, rows: group.rows.filter((row) => rowBindings(row, touchPhone).length > 0) })).filter((group) => group.rows.length > 0))
@@ -48,7 +32,6 @@ export function ShortcutMap({ onClose, onSettings }: { onClose: () => void; onSe
     <Modal labelledBy="ib-map-title" describedBy="ib-map-sub" onClose={onClose} testId="shortcut-map" ownKeys className="ib-map" fallbackFocus={mapFallback}>
       <div
         onKeyDown={(event) => {
-          // `?` again closes it, as it opened it: a single key, so not with Single-key shortcuts off.
           if (event.key === '?' && shortcutPrefs().singleKeys && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableTarget(event.target as Element)) {
             event.preventDefault();
             event.stopPropagation();

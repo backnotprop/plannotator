@@ -1,11 +1,3 @@
-/**
- * The opened card's words (You, notes, what was said) link issue and PR refs
- * as a thread message does: a bare `#123` into the card's own project's repo,
- * `owner/repo#123` and full URLs as written. What regresses: the panel drawing
- * them as plain text again, or linking `#123` into another project's repo.
- * And a linked Jira issue (link only): drawn as its key linking the full
- * URL, never with a forge's state icon.
- */
 import { describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -75,7 +67,6 @@ const hrefs = (html: string) => [...html.matchAll(/href="([^"]+)"/g)].map((m) =>
 describe('opened card refs', () => {
   test("links the card's words: bare #N into the card's project, owner/repo#N and URLs as written", () => {
     const links = hrefs(render({ display: 'acme/herdr', host: 'github.com' }));
-    // The You band, the notes and the history quote.
     expect(links.filter((h) => h === 'https://github.com/backnotprop/plannotator-tui/issues/104')).toHaveLength(3);
     expect(links).toContain('https://github.com/acme/herdr/issues/7');
     expect(links).toContain('https://github.com/acme/widgets/pull/3');
@@ -99,14 +90,11 @@ describe('opened card links: a Jira issue (user feedback #9)', () => {
       card: { ...card, refs: [jira] } as InboxCardWire,
       refs: [{ ref: jira, result: { ok: false, error: 'unsupported', fetchedAt: 0 } }],
     });
-    // The Links row, as the window draws it (static markup: runs without a DOM).
     const row = /<li class="ib-crdp-ref"[^>]*data-card-ref="DEMO-123".*?<\/li>/.exec(html)?.[0] ?? '';
     expect(row).toContain('data-ref-source="jira"');
     expect(row).toMatch(/<a href="https:\/\/example\.atlassian\.net\/browse\/DEMO-123"[^>]*aria-label="Jira issue DEMO-123"[^>]*>DEMO-123<\/a>/);
-    // Jira's own mark, one colour like the forge marks, hidden from screen readers (the link's name says Jira).
     expect(row).toMatch(/<svg class="ib-refmark ib-crdp-rjira" data-ref-mark="jira"[^>]*aria-hidden="true"/);
     expect(row).not.toContain('data-icon="link"');
-    // No forge state icon: a Jira issue has no state to show.
     expect(row).not.toContain('data-ref-kind');
     expect(row).toContain('<span class="ib-crdp-rref">example.atlassian.net</span>');
   });

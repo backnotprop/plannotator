@@ -1,28 +1,7 @@
-/**
- * The connect prompt: what the sidebar's "Copy connect prompt" puts on the
- * clipboard (owner approval, 2026-10-13; design record
- * `inbox-sidebar-connect-prompt`, not in this repo). The person pastes it into
- * any agent on this computer; the agent reads the Inbox's guide
- * (`plannotator inbox --help`), connects itself and sends a first message that
- * offers to send real recent work.
- *
- * The one place the text lives. It names this computer's absolute
- * `plannotator`, read from `GET /api/inbox/settings` `mcp_command` (the
- * server's `selfCommand()` plus `inbox mcp`), so it works when pasted into an
- * agent on this computer, whatever that agent's PATH. Before the settings
- * load it names bare `plannotator` and says where the binary usually is.
- */
-
 import { shellLine } from './harnesses';
 
-/** The idempotency key prefix the first message uses; the agent appends its host. */
 export const CONNECT_IDEMPOTENCY_PREFIX = 'plannotator-inbox-connect-v1-';
 
-/**
- * This computer's `plannotator` as a shell line: `mcp_command` without its
- * trailing `inbox mcp`. Null when the settings have not loaded, or the
- * command does not have that shape.
- */
 export function connectCommand(mcpCommand: readonly string[] | null | undefined): string | null {
   if (!Array.isArray(mcpCommand) || mcpCommand.length < 3) return null;
   if (mcpCommand[mcpCommand.length - 2] !== 'inbox' || mcpCommand[mcpCommand.length - 1] !== 'mcp') return null;
@@ -31,7 +10,6 @@ export function connectCommand(mcpCommand: readonly string[] | null | undefined)
   return shellLine(self);
 }
 
-/** The prompt, composed for this computer (`mcpCommand` from the settings, or null before they load). */
 export function connectPrompt(mcpCommand: readonly string[] | null | undefined): string {
   const known = connectCommand(mcpCommand);
   const p = known ?? 'plannotator';

@@ -2,11 +2,6 @@ import { useEffect, useRef } from 'react';
 import { Icon } from '../icons';
 import { Modal } from './Updates';
 
-/**
- * What the notification line says: nothing when notifications are on (or the
- * browser has none), else what needs fixing. Derived the way Settings reads
- * them: the browser's answer first, then the Inbox's switch.
- */
 export type NotificationLine = 'on' | 'not-allowed' | 'off' | 'blocked';
 
 export function notificationLine(enabled: boolean, permission: NotificationPermission | 'unsupported'): NotificationLine {
@@ -20,23 +15,14 @@ export interface SoundIntroDialogProps {
   line: NotificationLine;
   playing: boolean;
   onPlay: () => void;
-  /** Allow (not allowed) or Turn on (off): the browser's own prompt when it has not decided. */
   onTurnOnNotifications: () => void;
   onKeep: () => void;
   onTurnOff: () => void;
 }
 
-/**
- * The one-time dialog after the update that brings the sound (design of
- * record: .product/approved/inbox-sound/, kept privately). A title with Play,
- * one sentence, a notification line only when something needs fixing, and
- * Turn it off · Keep it on. Keep it on has the first focus, Escape and the
- * backdrop keep it on, and Tab stays inside. No entrance motion.
- */
 export function SoundIntroDialog({ line, playing, onPlay, onTurnOnNotifications, onKeep, onTurnOff }: SoundIntroDialogProps) {
   const wrap = useRef<HTMLDivElement>(null);
   const shownLine = useRef(line);
-  // The line changed under the person (Allow, Block, a change in another tab): focus follows it.
   useEffect(() => {
     if (shownLine.current === line) return;
     shownLine.current = line;
@@ -102,7 +88,6 @@ export function SoundIntroDialog({ line, playing, onPlay, onTurnOnNotifications,
   );
 }
 
-/** Focus after the dialog when nothing focusable opened it: the page's heading. */
 function pageHeading(): HTMLElement | null {
   const heading = document.querySelector<HTMLElement>('.ib-main h1');
   if (heading && !heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');

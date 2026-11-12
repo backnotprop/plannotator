@@ -1,8 +1,3 @@
-/**
- * The first-draw prompt Copy prompt copies (system/firstDraw.ts). What regresses: a prompt that sends the agent to
- * write the drawing in the person's repo (`.plannotator/system`) instead of Plannotator's own folder,
- * `<data dir>/system/<project key>/drawing` (owner ruling: System never writes to the repo).
- */
 import { expect, test } from 'bun:test';
 import { systemFirstDrawPrompt } from './firstDraw';
 

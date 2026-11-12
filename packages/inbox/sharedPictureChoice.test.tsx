@@ -1,16 +1,3 @@
-/**
- * One picture shown for two choices (an agent's "Strip left" and "Strip right"
- * both pointing at the same screenshot). The message captures that picture
- * once, so the thread holds one file for both choices. What regresses here:
- * the second choice's zoom opening as the first ("A · Strip left") and the
- * viewer's set skipping it, so it can never be looked at as itself.
- *
- * Proved on the thread's own parts: MessageBody hands the thread the zoomed
- * choice's place, and the pane over the question's choices captions and steps
- * through each choice, the shared picture once per choice.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -28,8 +15,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
 
-// happy-dom fires `error` for an <img> it cannot reach, and a tile whose picture failed draws no zoom: a loopback
-// server answers every image path with a 1x1 GIF.
 const GIF = Uint8Array.from(atob('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=='), (c) => c.charCodeAt(0));
 let images: ReturnType<typeof Bun.serve> | null = null;
 let savedUrl = '';
@@ -46,7 +31,6 @@ afterAll(() => {
 });
 
 afterEach(() => {
-  // The set's test runs without happy-dom too (the unit lanes): nothing was drawn.
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
@@ -108,7 +92,6 @@ const MESSAGE = {
   questions: [QUESTION],
 } as unknown as InboxMessageWire;
 
-/** The captured pictures as the thread's files (a thread's steps are built from these). */
 const FILES = [STRIP, BAR].map((image) => ({ ...image, message_id: ID, changed_since_sent: false, unavailable: null, current: { sha256: 'a'.repeat(64), size: 10, mtime: image.sent_mtime } }) as unknown as InboxAttachmentState);
 const STEPS: AttachmentStep[] = attachmentSequence([MESSAGE], FILES).map((s) => ({ ...s, inline: true }));
 
@@ -116,14 +99,11 @@ test('the set has a step for each choice, the shared picture twice, and the addr
   const set = optionSetOf([MESSAGE], STEPS, optionSetId(ID, KEY))!;
   expect(set.steps.map((s) => s.attachment.id)).toEqual([STRIP.id, STRIP.id, BAR.id]);
   expect(set.choices.map((c) => c.letter)).toEqual(['A', 'B', 'C']);
-  // The address the zoom on B writes opens B, though B's file is A's.
   const address = optionSetAddress(set, 1);
   expect(parseOptionSetId(address)).toEqual({ messageId: ID, questionKey: KEY, choice: 1 });
   expect(optionSetOf([MESSAGE], STEPS, address)?.id).toBe(set.id);
   expect(optionOf(set, STRIP.id, parseOptionSetId(address)!.choice)?.choice.letter).toBe('B');
-  // A link from before (no choice) still opens: on the first choice that shows the file.
   expect(optionOf(set, STRIP.id, parseOptionSetId(optionSetId(ID, KEY))!.choice)?.choice.letter).toBe('A');
-  // A choice that does not show this file is not taken at its word.
   expect(optionOf(set, BAR.id, 0)?.choice.letter).toBe('C');
 });
 
@@ -156,11 +136,9 @@ test.skipIf(!hasDom)('the zoom on each tile hands the thread that choice, the se
     { image: STRIP.id, choice: 0 },
     { image: BAR.id, choice: 2 },
   ]);
-  // All three are the one question's.
   expect(new Set(opened.map((o) => o.key)).size).toBe(1);
 });
 
-/** The pane over the question's choices as the thread drives it: the step's place rides along with its file. */
 function Pane({ startAt, steps }: { startAt: number; steps: { id: string; at: number | null }[] }) {
   const set = optionSetOf([MESSAGE], STEPS, optionSetId(ID, KEY))!;
   const [at, setAt] = useState(startAt);
@@ -209,11 +187,9 @@ test.skipIf(!hasDom)('the viewer opens the second of two choices sharing a pictu
   });
   const caption = () => host!.querySelector<HTMLElement>('[data-option-caption]')!.getAttribute('data-option-caption');
   const arrow = (dir: 'prev' | 'next') => host!.querySelector<HTMLButtonElement>(`[data-option-step="${dir}"]`)!;
-  // Opened on B: B's caption, though the file on screen is A's too.
   expect(caption()).toBe('B');
   await act(async () => arrow('prev').click());
   expect(caption()).toBe('A');
-  // The step onto the same file is still a step: A → B, then on to C.
   await act(async () => arrow('next').click());
   expect(caption()).toBe('B');
   await act(async () => arrow('next').click());

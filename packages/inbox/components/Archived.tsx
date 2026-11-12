@@ -5,21 +5,11 @@ import { agentName, dayWords, formatCount, plural } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { Tip } from './Tip';
 
-/** Rows the block reads at a time ("Show more" reads the next ones). The server allows up to 200 per read. */
 export const ARCHIVED_PAGE = 50;
 const READ_MAX = 200;
 
 export interface ArchivedBlockProps {
-  /**
-   * The store's cursor as the window last read it: when it moves (an agent
-   * wrote, the person archived from a thread), the block reads again.
-   */
   refreshKey: number | null;
-  /**
-   * Unarchive: the thread goes back to the list, in whatever section its
-   * state puts it, and the window opens it there. Resolves false when the
-   * Inbox refused (the window has already said why), so the row stays.
-   */
   onUnarchive: (row: InboxListRow) => Promise<boolean>;
 }
 
@@ -29,7 +19,6 @@ interface Loaded {
   rows: InboxListRow[];
 }
 
-/** Read the first `count` archived rows, as many reads as the server's page limit needs. */
 async function readArchived(count: number): Promise<Loaded> {
   const rows: InboxListRow[] = [];
   let model: ArchivedModel | null = null;
@@ -40,7 +29,6 @@ async function readArchived(count: number): Promise<Loaded> {
   return { projects: model.projects, total: model.total, rows };
 }
 
-/** One archived thread: no project label, since a header names it when several projects have some. */
 function ArchivedRow({ row, busy, onUnarchive }: { row: InboxListRow; busy: boolean; onUnarchive: () => void }) {
   const subject = row.subject ?? '(no subject)';
   return (
@@ -79,7 +67,6 @@ function ArchivedRow({ row, busy, onUnarchive }: { row: InboxListRow; busy: bool
   );
 }
 
-/** The loaded rows grouped by project, a group per project in the order its newest archived row appears. */
 function groupByProject(rows: readonly InboxListRow[]): { id: string; name: string; rows: InboxListRow[] }[] {
   const groups = new Map<string, { id: string; name: string; rows: InboxListRow[] }>();
   for (const row of rows) {
@@ -90,21 +77,11 @@ function groupByProject(rows: readonly InboxListRow[]): { id: string; name: stri
   return [...groups.values()];
 }
 
-/**
- * Settings → Archived (owner ruling 2026-10-12; drawn as the Archived
- * section of the design of record `.product/approved/inbox-settings-tabs/`,
- * whose heading and lede the section supplies): archived threads leave
- * the list altogether and are listed here, newest archived first. When
- * several projects have some, the rows sit under a small header per project
- * with its count ("billing · 2"). Unarchive puts the thread back in the list
- * and opens it there.
- */
 export function ArchivedBlock({ refreshKey, onUnarchive }: ArchivedBlockProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [more, setMore] = useState(false);
-  // How many rows the person has asked to see: a refresh reads that many again.
   const want = useRef(ARCHIVED_PAGE);
   const generation = useRef(0);
 
@@ -145,7 +122,6 @@ export function ArchivedBlock({ refreshKey, onUnarchive }: ArchivedBlockProps) {
     const done = await onUnarchive(row);
     setBusy(null);
     if (!done) return;
-    // The window has usually moved to the thread by now; if not, the row leaves here.
     setLoaded((current) =>
       current
         ? {

@@ -1,22 +1,3 @@
-/**
- * The wide list's open counts column with the pin's column (`fitCountsColumn`, InboxList.tsx): as wide as the widest
- * counts drawn, so no count runs under a pin. It used to read every row's counts cell after every render, and each
- * read laid out that row (`content-visibility: auto`): about 25 ms at 700 rows when a thread opened, and again on the
- * way back to the list. Now it reads one cell for each different counts, only when what it depends on changes, and
- * never on the commit that opens a thread.
- *
- * happy-dom has no layout, so the boxes come from a model of the cell (the counts at its right edge, 8px apart, their
- * width from their digits, fractional on purpose). Under that model:
- *  - the width is the one the per-row measure gives (`perRowWidth`, the code before this change), for every set of
- *    counts below, so it can't drift;
- *  - a long list with few different counts reads a few cells, never one per row;
- *  - a list read with the same counts, a new selection, and the open of a thread read nothing;
- *  - it is fitted again when the text size changes, when the Snoozed band opens on the widest counts, and when the
- *    widest rows leave (back to 84px).
- * tests/e2e/inbox-fit-counts.spec.ts compares the two widths in a real Chromium, with palettes whose fonts differ.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -27,7 +8,6 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { adoptSavedTextSize, resetInboxTextSizeForTests } = (hasDom ? await import('./textSize') : {}) as typeof import('./textSize');
 
-/** A waiting row with `actions` open action items among `open` open questions. */
 function row(n: number, open: number, actions = 0): InboxListRow {
   return {
     thread_id: `msg_${n}`,
@@ -53,23 +33,16 @@ function row(n: number, open: number, actions = 0): InboxListRow {
   } as InboxListRow;
 }
 
-/** A list read of rows with these [open, actions] counts: new objects every time. */
 function read(counts: [number, number][]): InboxListSection[] {
   const rows = counts.map(([open, actions], i) => row(i, open, actions));
   return [{ id: 'waiting', label: 'Waiting on you', threads: JSON.parse(JSON.stringify(rows)) }];
 }
 
-// ───────── the box model ─────────
-
-/** A cell's right edge, fractional so the column's width rounds up. */
 const CELL_RIGHT = 1000.37;
 const GAP = 8;
-/** Rows whose counts draw nothing (as a row hidden from layout would). */
 const undrawn = new Set<string>();
-/** The list itself is not drawn (no box at all). */
 let listUndrawn = false;
 
-/** A part's width, scaled with the text size on the document (textSize.ts, 14px when unset). */
 function partWidth(part: Element): number {
   const digits = (part.querySelector('[aria-hidden="true"]:not(svg)')?.textContent ?? '').length;
   const scale = (Number(document.documentElement.style.getPropertyValue('--inbox-text-size')) || 14) / 14;
@@ -82,7 +55,6 @@ function rect(left: number, width: number): DOMRect {
   return { left, right: left + width, width, x: left, y: 0, top: 0, bottom: width ? 20 : 0, height: width ? 20 : 0, toJSON: () => ({}) } as DOMRect;
 }
 
-/** The boxes: a counts cell and its parts as the model draws them, every other element without a box. */
 function box(el: Element): DOMRect {
   const cell = el.classList.contains('ib-cq') ? el : el.parentElement?.classList.contains('ib-cq') ? el.parentElement : null;
   const rowId = cell?.parentElement?.getAttribute('data-thread-id') ?? '';
@@ -98,7 +70,6 @@ function box(el: Element): DOMRect {
   return rect(0, 0);
 }
 
-/** The width the per-row measure gave (InboxList's fitCountsColumn before this change), under the same boxes. */
 function perRowWidth(list: HTMLElement, pinColumn: boolean): string {
   let widest = 0;
   if (pinColumn) {
@@ -110,11 +81,8 @@ function perRowWidth(list: HTMLElement, pinColumn: boolean): string {
   return widest > 84 ? `${Math.ceil(widest)}px` : '';
 }
 
-// ───────── the list ─────────
-
 let root: Root | null = null;
 let host: HTMLElement | null = null;
-/** The counts cells whose box (or a part's) was read since the last `reads.clear()`. */
 const reads = new Set<Element>();
 let boxSpy: ReturnType<typeof spyOn> | null = null;
 let rectsSpy: ReturnType<typeof spyOn> | null = null;
@@ -175,7 +143,6 @@ function draw(sections: InboxListSection[], opts: { pinned?: string[]; narrow?: 
 
 const list = () => host!.querySelector<HTMLElement>('section.ib-listcol')!;
 const column = () => list().style.getPropertyValue('--ib-cq-w');
-/** The per-row width of the list as drawn now, without counting its reads. */
 function expected(pinColumn = true): string {
   const before = new Set(reads);
   const width = perRowWidth(list(), pinColumn);
@@ -184,7 +151,6 @@ function expected(pinColumn = true): string {
   return width;
 }
 
-/** Sets of [open questions, open action items], one per row: no counts, counts that fit, and counts past 84px. */
 const DATA: [string, [number, number][]][] = [
   ['no counts', [[0, 0], [0, 0], [0, 0]]],
   ['one question', [[1, 0], [0, 0]]],
@@ -198,7 +164,6 @@ const DATA: [string, [number, number][]][] = [
   ['99+ questions only', [[100, 0], [3, 3]]],
   ['99+ action items only', [[100, 100], [9, 9]]],
   ['many alike, one wide', [...Array.from({ length: 40 }, (): [number, number] => [2, 1]), [130, 101], ...Array.from({ length: 40 }, (): [number, number] => [3, 0])]],
-  // The wider counts later, sharing one of its two numbers with a narrower row before it.
   ['the same action items, more questions later', [[13, 12], [24, 12]]],
   ['the same questions, action items later', [[12, 0], [24, 12]]],
   ['the wide counts last', [[1, 0], [2, 1], [5, 0], [7, 2], [250, 120]]],
@@ -213,7 +178,6 @@ test.skipIf(!hasDom)('the column is as wide as the per-row measure gives, for ev
     expect({ name, width: column() }).toEqual({ name, width: want });
     seen.add(want);
   }
-  // The data reaches both sides of the 84px column: kept, and widened to more than one width.
   expect(seen.has('')).toBe(true);
   expect([...seen].filter(Boolean).length).toBeGreaterThan(2);
 });
@@ -240,7 +204,6 @@ test.skipIf(!hasDom)('a row whose counts are not drawn: the next alike row is re
   listUndrawn = true;
   draw(read([[250, 120], [1, 0]]));
   expect(column()).toBe('');
-  // Fitted again on the next render once the list is drawn.
   listUndrawn = false;
   draw(read([[250, 120], [1, 0]]), { selected: 'msg_1' });
   expect(column()).toBe(expected());
@@ -254,7 +217,6 @@ test.skipIf(!hasDom)('a long list reads one cell for each different counts, neve
   draw(read(counts));
   expect(list().querySelectorAll('.ib-row > .ib-cq').length).toBe(300);
   expect(column()).toBe(expected());
-  // Three different counts drawn (the rows with none draw nothing): three cells read.
   expect(reads.size).toBe(3);
 });
 
@@ -265,20 +227,15 @@ test.skipIf(!hasDom)('the same counts read again, a new selection and the open o
   const fitted = column();
   expect(fitted).toBe(expected());
   reads.clear();
-  // A list read: new objects, the same counts.
   draw(read(counts));
-  // A row selected.
   draw(read(counts), { selected: 'msg_3' });
   expect(reads.size).toBe(0);
-  // A thread opens: the column narrows (three-line rows, no pin's column).
   draw(read(counts), { narrow: true, selected: 'msg_3' });
   expect(reads.size).toBe(0);
   expect(column()).toBe('');
-  // Back to the list: fitted once more, to the same width.
   draw(read(counts));
   expect(column()).toBe(fitted);
   expect(reads.size).toBeLessThanOrEqual(new Set(counts.map(([o, a]) => `${o}/${a}`)).size);
-  // A count changes: fitted again, to the new widest.
   reads.clear();
   const wider = counts.map((c, i): [number, number] => (i === 9 ? [250, 120] : c));
   draw(read(wider));
@@ -294,7 +251,6 @@ test.skipIf(!hasDom)('a new text size fits the column again, to the new widest',
   const at14 = column();
   expect(at14).toBe(expected());
   expect(at14).not.toBe('');
-  // Settings → Text size: on the document at once, with no new list read.
   act(() => adoptSavedTextSize(15));
   expect(document.documentElement.style.getPropertyValue('--inbox-text-size')).toBe('15');
   expect(column()).toBe(expected());
@@ -313,7 +269,6 @@ test.skipIf(!hasDom)('opening the Snoozed band on the widest counts widens the c
       ]),
     );
   draw(sections());
-  // Folded: its rows are not drawn, and the column fits the rows that are.
   expect(list().querySelector('[data-thread-id="msg_2"]')).toBeNull();
   expect(column()).toBe(expected());
   expect(column()).toBe('');

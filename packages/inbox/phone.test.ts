@@ -1,9 +1,3 @@
-/**
- * The phone's keyboard rule (phone.ts keyboardLayout) and the one phone
- * query. The failures these catch: a pinch-zoom read as a keyboard (the
- * window shrinks to the zoomed viewport and jumps back to the corner on every
- * pan), and inbox.css's phone block drifting from PHONE_QUERY.
- */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,9 +10,7 @@ describe('the keyboard on a phone', () => {
   });
 
   test('pinch-zoomed to 2x: never read as a keyboard, and never scrolled back', () => {
-    // At scale 2 the visual viewport is half the window, panned anywhere.
     expect(keyboardLayout({ height: 329.5, offsetTop: 200, scale: 2 }, 659, 0, true)).toEqual({ height: null, resetScroll: false });
-    // Zoomed with the keyboard up too: left alone until the zoom is undone.
     expect(keyboardLayout({ height: 200, offsetTop: 120, scale: 2 }, 659, 40, true)).toEqual({ height: null, resetScroll: false });
   });
 
@@ -41,9 +33,7 @@ describe('the keyboard on a phone', () => {
   });
 
   test('what the keyboard covers, for a sheet that pads its own bottom: the layout height less what shows; nothing for a pinch or a desktop window', () => {
-    // The owner's iPhone: 660 of layout, 257 left above the keyboard.
     expect(keyboardInset({ height: 257, scale: 1 }, 660, true)).toBe(403);
-    // A hardware keyboard's bar counts too: Send must end above it.
     expect(keyboardInset({ height: 581.6, scale: 1 }, 660, true)).toBe(78);
     expect(keyboardInset({ height: 660, scale: 1 }, 660, true)).toBe(0);
     expect(keyboardInset({ height: 330, scale: 2 }, 660, true)).toBe(0);
@@ -54,7 +44,6 @@ describe('the keyboard on a phone', () => {
 test("inbox.css spells PHONE_QUERY in its phone block, and no other phone break", () => {
   const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
   expect(css).toContain(`@media ${PHONE_QUERY} {`);
-  // A phone rule elsewhere must use the same query, not a width of its own.
   expect(css).not.toMatch(/@media \(max-width: 767px\) \{/);
 });
 
@@ -64,13 +53,6 @@ test("the standalone Shape page's sheet spells PHONE_QUERY too", () => {
   expect(css).not.toMatch(/@media \(max-width: 767px\) \{/);
 });
 
-/**
- * trackKeyboard against a fake window, as the owner's iPhone (iOS 26) read it with the keyboard up: clientHeight 660,
- * innerHeight and the visual viewport 257, the page panned by Safari. The failures these catch: the keyboard read
- * against innerHeight (seen as none, so the page pans freely), a pan left in place, the pin and its drag guard put on
- * Android, and a pin that outlives the keyboard. A headless browser cannot pan its page, so this is where the reset
- * is proved. Every global is replaced inside the test and restored after it.
- */
 type Listener = (event?: unknown) => void;
 function events() {
   const map = new Map<string, Set<Listener>>();
@@ -92,7 +74,6 @@ function events() {
 function fakeWindow(userAgent: string) {
   const vv = { height: 660, offsetTop: 0, scale: 1, ...events() };
   const scrolls: [number, number][] = [];
-  // trackKeyboard's late re-read (RECHECK_MS): held here and run by `later`, so no real timer outlives the test.
   const timers = new Map<number, () => void>();
   let timerId = 0;
   const win = {
@@ -111,7 +92,6 @@ function fakeWindow(userAgent: string) {
     clearTimeout: (id: number) => {
       timers.delete(id);
     },
-    // A phone in portrait: PHONE_QUERY matches.
     matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }),
     ...events(),
   };
@@ -130,7 +110,6 @@ function fakeWindow(userAgent: string) {
     requestAnimationFrame: (fn: () => void) => frames.push(fn),
     cancelAnimationFrame: () => {},
   };
-  /** Safari with the keyboard up and the page panned to the field (probe readings 10 to 32). */
   const keyboardUp = () => {
     vv.height = 257;
     win.innerHeight = 257;
@@ -146,7 +125,6 @@ function fakeWindow(userAgent: string) {
     frames = [];
     for (const fn of run) fn();
   };
-  /** The re-read's time comes: its timers run, then the frame they asked for. */
   const later = () => {
     const run = [...timers.values()];
     timers.clear();
@@ -184,21 +162,18 @@ describe('trackKeyboard', () => {
       w.vv.fire('resize');
       w.flush();
       expect(w.style.get('--ib-vvh')).toBe('257px');
-      // New message's sheet runs under the keyboard and pads its bottom by what the keyboard covers.
       expect(w.style.get('--ib-kbd-inset')).toBe('403px');
       expect(w.root.dataset.ibKeyboard).toBe('');
       expect(w.root.dataset.ibKeyboardPin).toBe('tight');
       expect(w.scrolls.at(-1)).toEqual([0, 0]);
       expect(w.doc.has('touchmove')).toBe(true);
 
-      // A later pan, reported only as the window's scroll (iOS 26): undone on the next frame.
       w.win.scrollY = 120;
       w.scrolls.length = 0;
       w.win.fire('scroll');
       w.flush();
       expect(w.scrolls).toEqual([[0, 0]]);
 
-      // The keyboard closes while the tab is away, with no visual viewport event: the return to the tab unpins.
       w.keyboardDown();
       w.doc.fire('visibilitychange');
       w.flush();
@@ -230,7 +205,6 @@ describe('trackKeyboard', () => {
       w.keyboardUp();
       w.vv.fire('resize');
       w.flush();
-      // On its side: 390 tall, ~140 above the keyboard.
       w.root.clientHeight = 390;
       w.vv.height = 140;
       w.win.fire('orientationchange');
@@ -246,12 +220,10 @@ describe('trackKeyboard', () => {
   test('a rotation whose layout height WebKit reports late: the pin read from the stale height clears on the re-read', () => {
     withFakeWindow(IPHONE, (w) => {
       const stop = trackKeyboard();
-      // On its side with no keyboard: the visual viewport is 390 at once, clientHeight still the portrait 660.
       w.vv.height = 390;
       w.win.fire('orientationchange');
       w.flush();
       expect(w.root.dataset.ibKeyboardPin).toBe('tight');
-      // clientHeight catches up with no event of its own.
       w.root.clientHeight = 390;
       w.later();
       expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
@@ -269,13 +241,11 @@ describe('trackKeyboard', () => {
       w.win.fire('orientationchange');
       w.flush();
       w.root.clientHeight = 390;
-      // The re-read lost (say the page was busy): a tap on a question's radio moves focus, and that reads again.
       w.timers.clear();
       w.doc.fire('focusin');
       w.flush();
       expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
 
-      // The same stale reading again, cleared this time by focus leaving the field.
       w.root.clientHeight = 660;
       w.win.fire('orientationchange');
       w.flush();
@@ -286,7 +256,6 @@ describe('trackKeyboard', () => {
       w.flush();
       expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
 
-      // A real keyboard: the event's read and the re-read agree, and the pin holds.
       w.root.clientHeight = 660;
       w.keyboardUp();
       w.vv.fire('resize');
@@ -296,7 +265,6 @@ describe('trackKeyboard', () => {
       expect(w.root.dataset.ibKeyboardPin).toBe('tight');
       expect(w.style.get('--ib-vvh')).toBe('257px');
 
-      // Two events in a row leave one re-read pending, and the cleanup cancels it: nothing reads after it.
       w.vv.fire('resize');
       w.flush();
       w.vv.fire('resize');

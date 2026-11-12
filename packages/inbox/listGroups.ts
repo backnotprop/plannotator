@@ -1,14 +1,3 @@
-/**
- * Every group in the list closes and opens by a click on its header (approval
- * "inbox-list-groups-close"). Which groups are closed is this browser's own
- * choice, kept as the sidebar's sections are (sidebarSections.ts): a cookie
- * through `storage`, never a setting, never synced. No entry for a group: its
- * default, Quiet and the Snoozed band closed, every other group open.
- *
- * A closed group keeps the time it was closed, so the list can tell when
- * something new came into it since (its count goes bold). Quiet and Snoozed,
- * closed by default, count from when this page loaded.
- */
 import { useState, useSyncExternalStore } from 'react';
 import type { InboxListGroupId } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -19,11 +8,9 @@ const GROUPS: readonly InboxListGroupId[] = ['stopped', 'holding', 'waiting', 'n
 const CLOSED_BY_DEFAULT: ReadonlySet<InboxListGroupId> = new Set(['quiet', 'snoozed']);
 const PAGE_LOADED = Date.now();
 
-/** A group's state: open, or closed since a time (ms). */
 export type GroupState = { open: true } | { open: false; since: number };
 type Choices = ReadonlyMap<InboxListGroupId, GroupState>;
 
-/** The cookie's value ("waiting:1762400000000,quiet:open") as the person's choices; anything else is ignored. */
 export function parseListGroups(raw: string | null): Choices {
   const out = new Map<InboxListGroupId, GroupState>();
   for (const token of (raw ?? '').split(',')) {
@@ -42,13 +29,11 @@ function formatListGroups(choices: Choices): string {
   }).join(',');
 }
 
-/** A group's state from the person's choices, or its default. */
 export function groupState(choices: Choices, id: InboxListGroupId): GroupState {
   return choices.get(id) ?? (CLOSED_BY_DEFAULT.has(id) ? { open: false, since: PAGE_LOADED } : { open: true });
 }
 
 const listeners = new Set<() => void>();
-// The last value written, only while storage did not keep it (cookies blocked): the toggle still works until a reload.
 let written: string | null = null;
 const read = () => storage.getItem(LIST_GROUPS_COOKIE) ?? written ?? '';
 const subscribe = (listener: () => void) => {
@@ -64,7 +49,6 @@ function write(next: Choices): void {
   for (const listener of [...listeners]) listener();
 }
 
-/** The change one toggle makes. Closing keeps the time; a default-open group opened again loses its entry. */
 function toggled(choices: Choices, id: InboxListGroupId, now: number): Map<InboxListGroupId, GroupState> {
   const next = new Map(choices);
   if (groupState(choices, id).open) next.set(id, { open: false, since: now });
@@ -73,16 +57,10 @@ function toggled(choices: Choices, id: InboxListGroupId, now: number): Map<Inbox
   return next;
 }
 
-/**
- * The list's groups for one list. `remember: false` (the onboarding tour)
- * ignores the cookie: every group at its default, a toggle there not kept.
- */
 export function useListGroups(remember = true): {
   state: (id: InboxListGroupId) => GroupState;
   toggle: (id: InboxListGroupId) => void;
-  /** Back to its default (closed), as the Snoozed band comes back folded each time it shows. */
   reset: (id: InboxListGroupId) => void;
-  /** Open each of these groups that is closed, as a click on its header does (Show opens the groups its rows land in). */
   open: (ids: readonly InboxListGroupId[]) => void;
 } {
   const raw = useSyncExternalStore(subscribe, read, () => '');
@@ -121,14 +99,12 @@ export function useListGroups(remember = true): {
   };
 }
 
-/** The choices with each of `ids` open: the toggle's change for each one closed; the same choices when none is. */
 function opened(choices: Choices, ids: readonly InboxListGroupId[]): Choices {
   let next = choices;
   for (const id of ids) if (!groupState(next, id).open) next = toggled(next, id, Date.now());
   return next;
 }
 
-/** Tests only: forget every choice (the cookie and the page's own copy), so each test starts at the defaults. */
 export function resetListGroupsForTests(): void {
   storage.removeItem(LIST_GROUPS_COOKIE);
   written = null;

@@ -1,9 +1,3 @@
-/**
- * A session's steps as rows (approval "inbox-thread-steps", A1): the shape, the step, and its right side (a done
- * step's time, a note, or "Waiting on you ›"). One text weight, no fills but hover; drawn the same in the foot's
- * popover, the phone's sheet and the Board's opened card. Read only: nothing here changes a step.
- */
-
 import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { STEP_STATUS_WORDS, presenceClass, stepMeta, stepsAsOf, stepsCount, stepsListLabels, stepsName } from './model';
@@ -19,7 +13,6 @@ export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWa
             <span className="ib-st-gl">
               <StepGlyph status={step.status} />
             </span>
-            {/* An agent's words, in whatever script: the browser finds their direction. */}
             <span className="ib-st-t" dir="auto">
               {step.step}
             </span>
@@ -49,10 +42,6 @@ export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWa
   );
 }
 
-/**
- * A list's head: "Checklist ◑ 3/6", "· as of 2:40 PM" once its session ended, and what the caller adds at the right
- * (the Board icon, a phone's close). With more than one session's list, each head names its agent instead.
- */
 export function StepsHead({
   list,
   label,
@@ -64,12 +53,10 @@ export function StepsHead({
 }: {
   list: InboxStepsWire;
   label: string;
-  /** The label is an agent's name (more than one list), which can be cut. */
   named?: boolean;
   children?: React.ReactNode;
   now?: Date;
   headingId?: string;
-  /** The label is a section heading (the opened card's, beside Threads and Links), not plain words. */
   heading?: boolean;
 }) {
   const { done, total, text } = stepsCount(list);
@@ -77,7 +64,6 @@ export function StepsHead({
   const Label = heading ? 'h3' : 'span';
   return (
     <div className="ib-st-head" data-steps-head="">
-      {/* An agent's name (`named`) can be cut: its title has it whole. "Checklist" never is, so it has none. */}
       <Label className="ib-st-lbl" id={headingId} title={named ? label : undefined} dir="auto">
         {label}
       </Label>
@@ -98,7 +84,6 @@ export function StepsHead({
   );
 }
 
-/** Every shown list: one head and its rows each, in the server's order; one list reads "Checklist". */
 export function StepsLists({
   lists,
   onWaiting,
@@ -107,15 +92,11 @@ export function StepsLists({
   heading = false,
 }: {
   lists: readonly InboxStepsWire[];
-  /** "Waiting on you ›" for a list, or null where there is nowhere to go. */
   onWaiting?: (list: InboxStepsWire) => (() => void) | null;
-  /** What sits at the right of the first head (the Board icon, a phone's close). */
   headExtra?: React.ReactNode;
   now?: Date;
-  /** Each head's label is a section heading (the opened card). */
   heading?: boolean;
 }) {
-  // Two sessions of one agent each get a number, so the person can tell the lists apart.
   const labels = stepsListLabels(lists);
   return (
     <>

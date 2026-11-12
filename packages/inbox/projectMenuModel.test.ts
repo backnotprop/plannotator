@@ -1,10 +1,3 @@
-/**
- * The project menu's pure rules (projectMenu.ts): which projects the sidebar
- * draws (automatic hiding, the project on screen held), where Mark all as
- * read has work to do, and what the batch's toast reports. The toast's
- * numbers and warnings are the facts asserted; its sentence shape is the
- * approved one-line toast style's and is pinned only where it carries them.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { ProjectFolder } from './api';
@@ -79,12 +72,10 @@ describe('projectBatchToast', () => {
     const rows = [row({ section: 'waiting', questions: asks({ open: 2 }) }), row({ questions: asks({ open: 0, picked: 1 }), answered_not_sent: true })];
     const copy = projectBatchToast('read', 'pando', rows.length, rows);
     expect(copy.lead).toContain('2 threads');
-    // The questions closed are the whole detail; the project goes to the screen reader.
     expect(copy.detail).toBe('Closed 3 questions');
     expect(copy.speech).toContain('pando');
     expect(copy.icon).toBe('check');
     expect(copy.phoneLead).toContain('2 threads');
-    // The phone's word for Mark read is "read", never "Marked".
     expect(copy.phoneLead).not.toContain('Marked');
   });
 
@@ -93,7 +84,6 @@ describe('projectBatchToast', () => {
     expect(stopped.icon).toBe('warn');
     expect(stopped.detail).toBe('Claude Code was stopped');
     expect(stopped.speech).toBe('Marked 2 threads read in pando. Claude Code was stopped.');
-    // A phone: what happened first, so the line's "…" only ever cuts the name; other warnings name no agent.
     expect(stopped.phoneDetail).toBe('Stopped · Claude Code');
     const two = projectBatchToast('archive', 'pando', 2, [row({ section: 'stopped', questions: asks({ stopped: true }) }), row({ section: 'stopped', questions: asks({ stopped: true }) })]);
     expect(two.detail).toContain('2 agents were stopped');
@@ -112,7 +102,6 @@ describe('projectBatchToast', () => {
     const read = projectBatchToast('read', 'ux-meeting', 2, [row({ section: 'new' }), row({ section: 'new' })]);
     expect(read.detail).toBe('ux-meeting');
     expect(read.speech).toBe('Marked 2 threads read in ux-meeting. Back when an agent writes.');
-    // A warning is the whole detail, so a long project name never pushes it to a second line.
     const warned = projectBatchToast('archive', 'a-very-long-project-name', 1, [row({ section: 'stopped', questions: asks({ stopped: true }) })]);
     expect(warned.detail).toBe('Claude Code was stopped');
   });

@@ -1,13 +1,3 @@
-/**
- * The reaction tray's emoji picker (approval "inbox-reaction-tray"): behind a + (an emoji to save) and behind
- * … (an emoji to react with once). A Base UI Popover anchored where the tray was, so it reads as the tray
- * opening up: it unclips from the tray's own rectangle at the bottom left (clip-path) while the tray fades.
- *
- * Keyboard (standard combobox and listbox behaviour, no new Inbox shortcut): focus lands in Search; typing
- * filters; Down moves into the grid, then the arrow keys move the highlighted emoji; Enter picks it; Escape
- * closes and gives focus back. Tab reaches the category buttons. A touch phone gets a bottom sheet and no
- * keyboard popping up until Search is tapped.
- */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { EMOJI, type EmojiRow } from './emojiData';
@@ -18,12 +8,10 @@ const COLS = 8;
 
 const byEmoji = new Map<string, EmojiRow>();
 for (const cat of EMOJI) for (const row of cat.emoji) if (!byEmoji.has(row[0])) byEmoji.set(row[0], row);
-/** An emoji's row (its Unicode name); one the list does not have is named "emoji". */
 export function emojiRow(emoji: string): EmojiRow {
   return byEmoji.get(emoji) ?? [emoji, 'emoji', ''];
 }
 
-/** How well a row matches the typed words: 0 its name starts with them, 1 a word of its name does, 2 an extra word does; -1 no match. */
 function score(row: EmojiRow, words: string[]): number {
   const name = row[1].split(/[\s-]+/);
   const extra = row[2].split(/[\s-]+/);
@@ -42,15 +30,11 @@ export interface EmojiPickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   anchor: RefObject<HTMLElement | null>;
-  /** Drawn inside this element (the window's root), so its styles reach it. */
   container?: HTMLElement | null;
-  /** Where focus goes when it closes; a function decides at close (false: nowhere, as the name field takes it). */
   returnTo?: RefObject<HTMLElement | null> | (() => HTMLElement | boolean | null);
   onPick: (row: EmojiRow) => void;
   phone: boolean;
-  /** The footer's second line for the highlighted emoji ("Save 🚀 to your tray"). */
   says: (row: EmojiRow) => ReactNode;
-  /** The footer's words while nothing is highlighted. */
   idle: string;
   label: string;
 }
@@ -97,7 +81,6 @@ function PickerBody({ onPick, phone, says, idle, onClose }: { onPick: (row: Emoj
     return [...(recent.length ? [{ id: 'recent', label: 'Recent', rows: recent }] : []), ...EMOJI.map((c) => ({ id: c.id, label: c.label, rows: c.emoji }))];
   }, [query, recent]);
   const flat = useMemo(() => sections.flatMap((s) => s.rows), [sections]);
-  // Each section's first index in the flat list, so Up and Down step by the grid's visual rows.
   const starts = useMemo(() => {
     const out: number[] = [];
     let n = 0;
@@ -114,7 +97,6 @@ function PickerBody({ onPick, phone, says, idle, onClose }: { onPick: (row: Emoj
     setGrid(false);
     body.current?.scrollTo?.({ top: 0 });
   }, [query]);
-  // Only the keys scroll the grid to the highlighted emoji; a pointer resting on one never moves the grid under it.
   const byKeys = useRef(false);
   useEffect(() => {
     if (active < 0 || !byKeys.current) return;
@@ -127,7 +109,6 @@ function PickerBody({ onPick, phone, says, idle, onClose }: { onPick: (row: Emoj
     if (active < 0) return setActive(0);
     if (dir === 'left') return setActive(Math.max(0, active - 1));
     if (dir === 'right') return setActive(Math.min(flat.length - 1, active + 1));
-    // Up and Down: the same column in the row above or below, across section breaks.
     let si = 0;
     while (si + 1 < starts.length && starts[si + 1]! <= active) si++;
     const col = (active - starts[si]!) % COLS;

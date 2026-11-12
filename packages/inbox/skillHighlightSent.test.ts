@@ -1,15 +1,3 @@
-/**
- * The skill references painted in a sent reply stop where the person's own
- * words end. A reply drawn in the person's words (sentReply.ts) no longer
- * shows the "## Answers to your questions" heading that used to end them, so
- * the answers list (the agent's prompts and choices) and the rest of the body
- * (the feedback, which quotes agent text) end them instead; and the feedback
- * on the agent's messages ("# Feedback on your messages") ends them like the
- * other feedback headings. The failure this catches: a `$name` an agent wrote
- * in a prompt, a choice or a quoted message painted as if the person typed it.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { expect, test } from 'bun:test';
 import type { InboxSkillReference } from '@plannotator/core/skill-reference-block';
 import { skillReferenceRanges } from './skillHighlight';

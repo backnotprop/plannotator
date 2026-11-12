@@ -1,15 +1,3 @@
-/**
- * The page's idle clock (idleClock.ts), the calm moment for the one-time dialogs whose own moment is "back on the
- * list", which a person who keeps a thread open beside the list never reaches (the owner, 2026-11-08).
- *
- * What regresses: idle coming without the full quiet length, or input (a pointer move, a key, a scroll, a touch) not
- * starting the count again; idle while the tab is hidden or the window blurred, or the count carrying over a hidden
- * spell; idle while a field has focus, a dialog (modal or not), menu, popover, the Ask AI window, a Shape board or the
- * annotation toolbar is open, or the page says it is busy; an open disclosure (a Smart group's band, a sidebar section:
- * `aria-expanded` with no popup) keeping idle away (review of #2916, finding 1); a clock that is off still counting.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -67,7 +55,6 @@ function mount(enabled = true) {
   });
 }
 
-/** A menu button with its popover open: `aria-haspopup` and `aria-expanded`. */
 function popoverTrigger(): HTMLElement {
   const el = element('button', 'aria-haspopup', 'menu');
   el.setAttribute('aria-expanded', 'true');
@@ -87,7 +74,6 @@ describe.skipIf(!hasDom)('the idle clock', () => {
     mount();
     await wait(IDLE_MS * 0.6);
     expect(idle).toBe(false);
-    // Input just before the length: the count starts again from it.
     fire('pointermove');
     await wait(IDLE_MS * 0.6);
     expect(idle).toBe(false);
@@ -99,7 +85,6 @@ describe.skipIf(!hasDom)('the idle clock', () => {
       await wait(IDLE_MS + 60);
       expect(idle).toBe(true);
     }
-    // A scroll inside the page (it does not bubble): heard all the same.
     const pane = document.createElement('div');
     document.body.appendChild(pane);
     act(() => void pane.dispatchEvent(new Event('scroll')));
@@ -115,11 +100,9 @@ describe.skipIf(!hasDom)('the idle clock', () => {
     visibility = 'visible';
     fire('visibilitychange', document);
     await wait(IDLE_MS * 0.6);
-    // The hidden spell is no quiet: the full length again from the return.
     expect(idle).toBe(false);
     await wait(IDLE_MS * 0.6);
     expect(idle).toBe(true);
-    // Blurred: idle ends at once and no count runs.
     focused = false;
     fire('blur');
     expect(idle).toBe(false);
@@ -168,7 +151,6 @@ describe.skipIf(!hasDom)('the idle clock', () => {
   }
 
   test('an open disclosure is no overlay: an open Smart group band and a sidebar section still let idle come', async () => {
-    // The real list's band (InboxList.tsx `.ib-band`, open by default) and a sidebar section toggle: aria-expanded, no popup.
     const band = Object.assign(document.createElement('button'), { className: 'ib-band' });
     band.setAttribute('aria-expanded', 'true');
     const section = document.createElement('button');

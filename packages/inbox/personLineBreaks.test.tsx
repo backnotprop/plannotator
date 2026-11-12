@@ -1,12 +1,3 @@
-/**
- * What the person typed is what they read back: in their own message a single
- * newline is a line break and a run of blank lines keeps that many empty
- * lines (Slack, iMessage, GitHub comments). An agent's message keeps the
- * Markdown soft break. Rendering only: the stored body is untouched. Code
- * fences, lists, tables and quotes keep their structure.
- *
- * DOM-gated (DOM_TESTS=1), listed in tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -49,7 +40,6 @@ async function render(body: string, author: InboxMessageWire['author']) {
   return host;
 }
 
-// The owner's case: single newlines, a blank line, then six blank lines in a row.
 const OWNER = 'this\nis\na\ntest\n\n\n\n\n\n\na lot test';
 
 test.skipIf(!hasDom)("a person's single newlines are line breaks and their run of blank lines is kept", async () => {
@@ -58,8 +48,6 @@ test.skipIf(!hasDom)("a person's single newlines are line breaks and their run o
   expect(paragraphs).toHaveLength(2);
   expect(paragraphs[0]!.querySelectorAll('br')).toHaveLength(3);
   expect(paragraphs[0]!.getAttribute('data-blank-lines')).toBeNull();
-  // Six blank lines recorded on the second paragraph; the measured gap is in tests/e2e/inbox-person-line-breaks.spec.ts
-  // (happy-dom has no layout).
   expect(paragraphs[1]!.getAttribute('data-blank-lines')).toBe('6');
 });
 
@@ -84,10 +72,8 @@ test.skipIf(!hasDom)("a person's fenced code, list, table and quote keep their s
   expect(code?.querySelectorAll('br')).toHaveLength(0);
   expect(person.querySelectorAll('table')).toHaveLength(1);
   expect(person.querySelectorAll('td')).toHaveLength(2);
-  // The list is two bullet items, each its own element.
   const items = (el: HTMLElement) => [...el.querySelectorAll('[data-rich-list-kind="ul"]')].map((li) => li.lastElementChild?.textContent);
   expect(items(person)).toEqual(['one', 'two']);
-  // One quote with one paragraph: the person's two lines are one break apart.
   expect(person.querySelectorAll('blockquote')).toHaveLength(1);
   expect(person.querySelectorAll('blockquote p')).toHaveLength(1);
   expect(person.querySelectorAll('blockquote p br')).toHaveLength(1);

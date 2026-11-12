@@ -1,21 +1,3 @@
-/**
- * The list's filter in its header (the owner, 2026-11-08: "it needs to be the classic filter icon and nothing else in
- * the header under any state. A number badge can show and the filter icon can change color. That's all I want."; the
- * rule is listFilter.ts).
- *
- * - The header holds the filter icon (three lines narrowing) alone, at every width. With picks it takes the accent
- *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
- * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Updated (Today,
- *   Last 7 days, Last 30 days, Custom range…), Agent (several; only with two agents or more), Pull request (Open,
- *   Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), then Project last, since the
- *   sidebar already narrows by project (each project, several; only on the Inbox page and with two projects or
- *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
- *   sheet titled "Filter".
- * - Custom range… opens a small panel by the funnel: From, To, Apply.
- * - Nothing matches: `ListFilterEmpty` in the list's body, "No threads match" and Clear filters.
- *
- * No shortcut of its own.
- */
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
@@ -44,7 +26,6 @@ import {
   type UpdatedPick,
 } from '../listFilter';
 
-/** The header's icon: three lines narrowing (Lucide's `list-filter`, ISC; the owner's pick on #2921, 2026-11-08). */
 function FilterGlyph({ size }: { size: number }) {
   return (
     <svg className="ib-ic" viewBox="0 0 24 24" style={{ width: size, height: size }} aria-hidden="true" focusable="false">
@@ -54,11 +35,8 @@ function FilterGlyph({ size }: { size: number }) {
 }
 
 export interface ListFilterSource {
-  /** The rows the list holds before the filter (its project, machine and away cuts applied): the menu's counts. */
   rows: readonly InboxListRow[];
-  /** A project's page (the sidebar's project): no Project group, and its picks step aside. */
   scoped: boolean;
-  /** The window's project names by id. */
   names: ReadonlyMap<string, string>;
   filter: ListFilter;
   onChange: (next: ListFilter) => void;
@@ -86,7 +64,6 @@ function CheckRow({ label, on, count, onToggle, mark, data }: { label: string; o
 }
 
 const DAY_WORDS = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
-/** A range in words: "Oct 20 – Nov 1". */
 export function rangeWords(range: { from: string; to: string }): string {
   const [a, b] = range.from <= range.to ? [range.from, range.to] : [range.to, range.from];
   const at = (day: string) => {
@@ -106,7 +83,6 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   const now = Date.now();
   const count = pickCount(filter);
 
-  // The projects offered: those in the list, then any picked one it no longer holds (so it can be unticked).
   const projects = useMemo(() => {
     const seen = new Map<string, string>();
     for (const row of rows) if (!seen.has(row.project.id)) seen.set(row.project.id, names.get(row.project.id) ?? row.project.name);
@@ -126,7 +102,6 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   const custom = filter.updated !== null && typeof filter.updated !== 'string' ? filter.updated : null;
   const name = count > 0 ? `Filter, ${count} active` : 'Filter';
 
-  // Offered once a thread here has a PR, and while a pick of it is remembered (so it can be unticked).
   const pulls = source.filter.pulls.length > 0 || rows.some((row) => rowPullStates(row).length > 0);
   const projectGroup = showProjects && (
     <Menu.Group>
@@ -159,7 +134,6 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
         <Menu.Portal container={portal ?? undefined}>
           {phone && <Menu.Backdrop className="ib-pm-scrim" />}
           <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined}>
-            {/* The order (the owner, 2026-11-08): what the sidebar cannot do first, Project last (the sidebar has its own). */}
             <Menu.Popup className="ib-pm ib-pc-menu ib-lflt-menu" aria-label="Filter" data-list-filter-menu="">
               <div className="ib-pm-title" aria-hidden="true">
                 Filter
@@ -267,10 +241,6 @@ const inSpan = (pick: UpdatedPick, now: number) => {
   };
 };
 
-/**
- * Clear filters: every pick that applies here. On a project's page that is all but the Project picks, which
- * stepped aside there and come back on Inbox.
- */
 export function clearedFrom(filter: ListFilter, scoped: boolean): ListFilter {
   return scoped ? { ...NO_LIST_FILTER, projects: filter.projects } : NO_LIST_FILTER;
 }
@@ -337,7 +307,6 @@ function RangePanel({
   );
 }
 
-/** Nothing the filter keeps: in the list's body, never the header. Clear filters puts focus back on the funnel. */
 export function ListFilterEmpty({ onClear }: { onClear: () => void }) {
   return (
     <div className="ib-empty-list ib-lflt-empty" data-list-filter-empty="">

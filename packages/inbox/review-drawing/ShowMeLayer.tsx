@@ -1,17 +1,3 @@
-/**
- * Show me's floating parts over the review:
- *
- * - the box (bottom right, the size of Ask's): what the board is of, the
- *   person's optional words and Show me; then "Claude Code is drawing it." and
- *   Stop while the agent draws;
- * - the corner card: a click on a part of the board lands on its line and the
- *   board shrinks to it (a link on the board too, with no part named); a click
- *   on the card grows it back.
- *
- * Each wears `data-popover-layer` and `data-chat-window`, like Ask's window,
- * so the Inbox's keys (Mod+Enter, the Escape ladder) never act from inside
- * them. No new keys.
- */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { inboxReviewLines } from '@plannotator/core/inbox-review';
 import type { ShapeDrawnView } from '@plannotator/core/shape';
@@ -25,7 +11,6 @@ import type { ShowMePlace, ShowMeState } from './useShowMe';
 
 const LAYER = { 'data-popover-layer': '', 'data-chat-window': '' } as const;
 const EMPTY = new Set<string>();
-/** The width the corner card draws a picture at before it scales it down: about the board's. */
 const CORNER_DRAWN_WIDTH = 960;
 
 const linesWord = (lines: readonly [number, number]) => `${lines[0] === lines[1] ? 'line' : 'lines'} ${inboxReviewLines(lines)}`;
@@ -57,11 +42,9 @@ export function ShowMeBox({
   onClose,
 }: {
   state: ShowMeState;
-  /** Null until the thread's read names the agent: the box waits for the name. */
   agent: string | null;
   onWords: (words: string) => void;
   onSend: () => void;
-  /** The agent was busy: ask when it finishes, or interrupt it. */
   onBusy?: (policy: SessionAskAction) => void;
   onStop: () => void;
   onClose: () => void;
@@ -70,7 +53,7 @@ export function ShowMeBox({
   const field = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (box && !box.turn) field.current?.focus({ preventScroll: true });
-  }, [box?.place.file, box?.place.lines?.[0], box?.place.lines?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [box?.place.file, box?.place.lines?.[0], box?.place.lines?.[1]]);
   if (!box || agent === null) return null;
   return (
     <section className="ib-sm-box" aria-label="Show me" data-over-board={box.place.part ? '' : undefined} data-show-me-box={box.turn ? (state.drawing ? 'drawing' : state.busy ? 'busy' : 'done') : 'compose'} {...LAYER}>
@@ -165,19 +148,14 @@ export function ShowMeCorner({
 }: {
   shape: string;
   title: string;
-  /** The board's Picture, drawn small. */
   picture: ShapeDrawnView | null;
-  /** `lines` null: the code this part was drawn from changed, and the review shows its file. Null: no part (a link). */
   part: { name: string; mark: string | null; file: string; lines: [number, number] | null } | null;
-  /** Where the board's own pictures (its `files/`) are served from. */
   resolveSrc: (src: string) => string;
   onGrow: () => void;
   onClose: () => void;
-  /** Show me again, when the agent can take one. */
   onAgain?: () => void;
 }) {
   const marks: MarkState = { fresh: EMPTY, erasing: EMPTY, noted: part?.mark ? new Set([part.mark]) : EMPTY };
-  // The whole picture, small: drawn at about the board's width, then scaled to fit the card.
   const box = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.3);
@@ -215,7 +193,6 @@ export function ShowMeCorner({
           </button>
         </Tip>
       </div>
-      {/* The picture itself grows it too (the Grow button is the keyboard's way). */}
       <div className="ib-sm-pip-b" ref={box} onClick={onGrow} aria-hidden="true" data-show-me-grow="">
         {picture && (
           <div className="ib-sm-pip-in" ref={inner} style={{ width: CORNER_DRAWN_WIDTH, transform: `scale(${scale})` }}>

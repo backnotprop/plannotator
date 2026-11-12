@@ -50,7 +50,6 @@ describe('the window recorder', () => {
     stalled.save();
     expect(stalled.openRequests()).toBe(1);
 
-    // The refresh: a new page, the same buffer, and the Inbox reachable again.
     const posted: Rec[][] = [];
     const next = createDebugRecorder({
       storage,
@@ -359,7 +358,6 @@ describe('the crash breadcrumb', () => {
     dying.mark(openRoute(`#thread=${MSG}`), { heap: 300, imgs: 17 });
     now = 5000;
     dying.mark(openRoute(`#thread=${MSG}&file=${FILE}&view=full`), { heap: 912, imgs: 190 });
-    // No pagehide: the renderer died. The tab's next page (its Reload) finds the mark.
     now = 9000;
     const next = createAliveMarker({ storage, page: 'p9000-2', now: () => now });
     expect(next.previous()).toEqual({ last_page: 'p1000-1', ms: 4000, thread: MSG, file: FILE, view: 'full', heap: 912, imgs: 190, discarded: false });

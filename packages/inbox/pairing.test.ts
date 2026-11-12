@@ -1,8 +1,3 @@
-/**
- * Pair a phone's words and gate (pairing.ts), and Settings' addresses
- * (settingsRoute.ts). The gate is the owner's no-loop rule: a way switched
- * on shows the code, whatever the checks say.
- */
 import { describe, expect, test } from 'bun:test';
 import type { LanState, PairingChecks, TailnetState } from './api';
 import { attemptNotes, canShowCode, hasFailure, pairedVia, tailscaleCheckLines, troubleshooting, wifiCheckLines } from './pairing';
@@ -38,7 +33,6 @@ describe('the checks', () => {
   test('an unknown firewall (not a Mac) adds no line; a certificate already made stands in for openssl', () => {
     const lines = wifiCheckLines({ address: '10.0.0.2', network: null, openssl: false, certificate: true, bonjour: true, firewall: 'unknown' });
     expect(lines.map((l) => l.status)).toEqual(['ok', 'ok', 'ok']);
-    // A missing `tailscale` command and a slow one are not "Tailscale is not installed".
     expect(tailscaleCheckLines({ ...failingTailscale, state: 'cli_missing' }).map((l) => l.status)).toEqual(['fail']);
     expect(tailscaleCheckLines({ ...failingTailscale, state: 'no_answer' }).map((l) => l.status)).toEqual(['warn']);
   });
@@ -72,9 +66,7 @@ describe("Settings' addresses", () => {
     expect(parseSettingsHash('settings/devices/pair')).toEqual({ section: 'devices', pair: true });
     expect(parseSettingsHash('settings/general/pair')).toEqual({ section: 'general', pair: false });
     expect(parseSettingsHash('settings/nope')).toEqual({ section: null, pair: false });
-    // Experimental's old page is Capabilities now, landing on its Experimental group.
     expect(parseSettingsHash('settings/experimental')).toEqual({ section: 'capabilities', pair: false, experimental: true });
-    // Decision data's old page is Activity now, and its address is rewritten to Activity's.
     expect(parseSettingsHash('settings/decision-data')).toEqual({ section: 'activity', pair: false });
     expect(movedSettingsHash('settings/decision-data')).toBe('settings/activity');
     expect(movedSettingsHash('settings/activity')).toBeNull();

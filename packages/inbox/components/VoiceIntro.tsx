@@ -1,9 +1,3 @@
-/**
- * The one-time voice announcement, shaped like the list options intro (ListLookIntro.tsx): a picture in the
- * always-light frame, a title, a line, then the choice. Turn on voice only sets the switch: the browser's microphone
- * prompt comes at the first press of the mic. Not now and Escape change nothing, and the Inbox has already retired it:
- * voice is an update-day dialog, so its Not now keeps the line's usual day (only an offer's Not now waits three).
- */
 import { useId, useState } from 'react';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { Icon } from '../icons';
@@ -12,7 +6,6 @@ import { Modal } from './Updates';
 
 const BARS = [0.3, 0.55, 0.8, 0.45, 0.62, 0.9, 0.5, 0.12, 0.1, 0.34, 0.7, 0.95, 0.6, 0.76, 0.4, 0.84, 0.58, 0.3, 0.42, 0.66, 0.88, 0.52];
 
-/** The picture: a reply box mid-sentence. Not interactive. */
 function Picture() {
   return (
     <div className="ib-vo-picture" aria-hidden="true">

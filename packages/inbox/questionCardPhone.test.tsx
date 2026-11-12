@@ -1,18 +1,3 @@
-/**
- * The question card's phone fix lives in inbox.css and leans on the DOM ui's
- * QuestionBlock draws: the footer row (`fieldset.question-block > div.border-t`),
- * the right-aligned box holding Accept recommended and the host's status
- * (`> div.ml-auto > [data-question-host-footer]`), and the choice controls
- * (`input[data-question-control]`). If ui reshapes that DOM, the rules stop
- * matching and the owner's phone shows "Acce pt reco mme nded" and solid black
- * radios again, with nothing failing but a screenshot. This renders the card
- * as the Inbox does (a host status in the footer, a note picked, Accept
- * recommended offered) and checks every selector of those rules still finds
- * its element. The layout itself is proved in a real browser
- * (tests/e2e/inbox-mobile-fixes.spec.ts).
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -53,7 +38,6 @@ afterEach(async () => {
   host = null;
 });
 
-/** A selector list split at its own commas, not those inside :is() or :not(). */
 function topLevel(list: string): string[] {
   const out: string[] = [];
   let depth = 0;
@@ -70,7 +54,6 @@ function topLevel(list: string): string[] {
   return out;
 }
 
-/** The selectors of inbox.css's footer and control rules, without the `.pn-inbox` scope or pseudo parts. */
 function cardSelectors(): string[] {
   const css = readFileSync(resolve(import.meta.dir, 'inbox.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const out = new Set<string>();
@@ -118,13 +101,11 @@ test.skipIf(!hasDom)('every selector of the card footer and control rules finds 
       </div>,
     ),
   );
-  // The state the owner saw: Accept recommended offered beside the host's status.
   expect([...host.querySelectorAll('button')].some((b) => b.textContent === 'Accept recommended')).toBe(true);
   const selectors = cardSelectors();
   expect(selectors.length).toBeGreaterThan(8);
   const missing = selectors.filter((selector) => host!.querySelector(selector) === null);
   expect(missing).toEqual([]);
-  // Radios and checkboxes both carry the control mark the drawn controls key on.
   expect(host.querySelectorAll('input[type="radio"][data-question-control]').length).toBe(2);
   expect(host.querySelectorAll('input[type="checkbox"][data-question-control]').length).toBe(2);
 });
@@ -138,12 +119,6 @@ test('the drawn controls are the same for a touch screen and for iOS and iPadOS 
   expect(ios).toBe(coarse);
 });
 
-/**
- * With the page pinned for a keyboard (phone.ts trackKeyboard), a focused field in the thread hides the reply foot.
- * A radio or a checkbox opens no keyboard: picking a question's option must never hide Reply. The rule's field list
- * is read from inbox.css and checked against the controls ui draws (happy-dom misreads a descendant combinator inside
- * :has(), so the list is matched against the focused element itself).
- */
 test.skipIf(!hasDom)("picking a question's option never hides the reply foot; a field that takes the keyboard does", async () => {
   const css = readFileSync(resolve(import.meta.dir, 'inbox.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const rule = /:root\[data-ib-keyboard-pin\] \.ib-pane:has\(\.ib-pbody (:is\((?:[^()]|\([^()]*\))*\)):focus\) \.ib-pfoot\s*\{\s*display:\s*none;/.exec(css);

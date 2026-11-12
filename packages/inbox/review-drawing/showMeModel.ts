@@ -1,40 +1,18 @@
-/**
- * Show me in the Inbox's code review (Show me makes a Shape: approval
- * "code-review-launch-build", item 1): the pure parts. Which chapter a board's
- * part opens, the part's name for the corner card, and which parts of a redrawn
- * Overview changed.
- */
 import { shapeHtmlMarks, type ShapeCodeTarget } from '@plannotator/core/shape';
 import { guideDiagramIsDrawn } from '@plannotator/core/guide-format';
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 
-/** A path's last part: "retry-worker.ts". */
 export function baseName(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
 
-/**
- * The Overview's diagram as the review pane draws it, a Shape picture: only a
- * drawn one (snapshot version 3, checked by the Inbox when it came). Null for
- * anything else, a version-2 html diagram included, which keeps the guide
- * viewer's own rendering (its note), exactly as before Show me.
- */
 export function overviewPicture(diagram: GuideOverviewDiagram | undefined): GuideOverviewDiagram | null {
   return diagram?.kind === 'html' && guideDiagramIsDrawn(diagram) ? diagram : null;
 }
 
 type Place = { file: string | null; lines: readonly [number, number] | null };
 
-/**
- * Whether a Show me asked on `asked` (this round's, or an earlier round's) is
- * the one the person means by `place`, so it opens again rather than asking
- * anew: the whole review both;
- * or the same file with the selection inside the asked lines, or sharing at
- * least half of the lines the two cover together. Lines 1–200 are not a
- * picture of 16–18; 15–18 is.
- */
 export function showMeSamePlace(asked: Place & { part?: unknown }, place: Place): boolean {
-  // A Show me from a board always makes a new board: it never stands for lines, or for the whole review.
   if (asked.part) return false;
   if (place.file === null || place.lines === null) return asked.file === null && asked.lines === null;
   if (asked.file !== place.file || !asked.lines) return false;
@@ -46,7 +24,6 @@ export function showMeSamePlace(asked: Place & { part?: unknown }, place: Place)
   return shared > 0 && shared * 2 >= together;
 }
 
-/** A Show me turn as the window reads it (packages/inbox/api.ts `InboxAskTurnWire`). */
 interface ShowMeTurn {
   id: string;
   kind?: 'show_me';
@@ -57,13 +34,6 @@ interface ShowMeTurn {
   failure?: string;
 }
 
-/**
- * This review's Show me for `place` that the agent is drawing now: no board
- * and no answer yet, and actually running (the Inbox's running turn, or this
- * window's live stream). A turn the Inbox kept but nobody answers (no
- * connection when asked, or the session gone before a word) is not waiting:
- * Show me on its lines asks anew.
- */
 export function waitingShowMe<T extends ShowMeTurn>(turns: readonly T[], reviewId: string, place: Place, running: string | null, live: string | null): T | undefined {
   return turns
     .filter((turn) => turn.kind === 'show_me' && turn.show_me?.review === reviewId && showMeSamePlace(turn.show_me, place))
@@ -72,32 +42,21 @@ export function waitingShowMe<T extends ShowMeTurn>(turns: readonly T[], reviewI
     .at(-1);
 }
 
-/**
- * Where a part's code is: the walkthrough's chapter that holds the file, or
- * null when no chapter does (it opens in All files).
- */
 export function chapterOf(chapters: readonly { diffs: readonly { file: string }[] }[], path: string): number | null {
   const at = chapters.findIndex((chapter) => chapter.diffs.some((ref) => ref.file === path));
   return at < 0 ? null : at;
 }
 
-/** The lines a part opens, as a pair. */
 export function targetLines(target: ShapeCodeTarget): [number, number] {
   return [target.line, target.lineEnd ?? target.line];
 }
 
 export { partName } from '@plannotator/ui/components/shape/partName';
 
-/** The `data-mark` of the part a click landed in, if it has one. */
 export function markOf(el: Element): string | null {
   return el.closest('[data-mark]')?.getAttribute('data-mark') ?? null;
 }
 
-/**
- * The parts of a redrawn picture that changed: a `data-mark` whose words
- * differ from the earlier drawing's, or that is new. Parts that kept their
- * id and words are not changed.
- */
 export function changedMarks(before: readonly string[], after: readonly string[]): Set<string> {
   const was = new Map<string, string>();
   for (const html of before) for (const mark of shapeHtmlMarks(html)) if (!was.has(mark.id)) was.set(mark.id, mark.text);
@@ -113,7 +72,6 @@ export function changedMarks(before: readonly string[], after: readonly string[]
   return out;
 }
 
-/** A file's new-side lines the patch shows (its hunks' context and additions), by line number. */
 export function newSideLines(patch: string): Map<number, string> {
   const out = new Map<number, string>();
   let line = 0;
@@ -136,21 +94,11 @@ export function newSideLines(patch: string): Map<number, string> {
   return out;
 }
 
-/** What one earlier part opens now: its lines in this round, and whether they changed since it was drawn. */
 export interface PartAnchor {
   now: ShapeCodeTarget;
   changed: boolean;
 }
 
-/**
- * A board drawn on an earlier review: each part that opens code is anchored
- * again on this review's diff. Its lines, as the earlier
- * round's diff showed them, are looked for in this round's: at the same
- * place, else the nearest place in the file (the part follows them there).
- * Lines no longer found changed since the picture was asked; the part keeps
- * opening the same line numbers. Lines the earlier diff did not show are
- * taken as they are.
- */
 export function anchorPart(target: ShapeCodeTarget, before: ReadonlyMap<number, string> | undefined, after: ReadonlyMap<number, string> | undefined): PartAnchor {
   const [start, end] = targetLines(target);
   const block: string[] = [];
@@ -166,11 +114,6 @@ export function anchorPart(target: ShapeCodeTarget, before: ReadonlyMap<number, 
   return { now: target, changed: true };
 }
 
-/**
- * Lines an earlier round asked about, where they are in this round: the same
- * text found at the same place or the nearest one (`anchorPart`). Null when
- * the earlier diff did not show them all, or they changed since.
- */
 export function anchorLines(
   lines: readonly [number, number],
   before: ReadonlyMap<number, string> | undefined,
@@ -181,16 +124,6 @@ export function anchorLines(
   return anchor.changed ? null : targetLines(anchor.now);
 }
 
-/**
- * Lines an earlier round asked about whose text changed since, where they
- * are in this round. Guides are lines both rounds' diffs show once, kept in
- * the same order on both sides. Each end of the block is found by its own
- * line when that is a guide, else by the nearest guide past it with the lines
- * between unchanged. A guide is needed above and below the block. The block
- * may change in size only when both its ends are guides: else lines were added
- * or removed beside it, and it is not known where. Null whenever it is not
- * known: a fresh Show me is always safe, an old picture on other code is not.
- */
 export function shiftLines(
   lines: readonly [number, number],
   before: ReadonlyMap<number, string> | undefined,
@@ -223,7 +156,6 @@ export function shiftLines(
   return [start, end];
 }
 
-/** Lines both diffs show once (not blank), as [earlier, now] pairs kept in the same order on both sides (the longest such run). */
 function guideLines(before: ReadonlyMap<number, string>, after: ReadonlyMap<number, string>): [number, number][] {
   const once = (side: ReadonlyMap<number, string>) => {
     const seen = new Map<string, number | null>();
@@ -237,7 +169,6 @@ function guideLines(before: ReadonlyMap<number, string>, after: ReadonlyMap<numb
     if (n !== null && m !== undefined && m !== null) pairs.push([n, m]);
   }
   pairs.sort((a, b) => a[0] - b[0]);
-  // A line that moved past others is no guide.
   const tails: number[] = [];
   const prev: number[] = [];
   for (let i = 0; i < pairs.length; i++) {
@@ -256,12 +187,6 @@ function guideLines(before: ReadonlyMap<number, string>, after: ReadonlyMap<numb
   return kept;
 }
 
-/**
- * Where an earlier round's lines are in this round: the same text followed
- * (`anchorLines`), else, changed since, shifted with the code around them
- * (`shiftLines`). Null when neither can say: such a picture is not opened by
- * its old numbers.
- */
 export function earlierLinesNow(
   lines: readonly [number, number],
   before: ReadonlyMap<number, string> | undefined,
@@ -270,22 +195,12 @@ export function earlierLinesNow(
   return anchorLines(lines, before, after) ?? shiftLines(lines, before, after);
 }
 
-/** A review's new-side lines by file (`newSideLines`). */
 export type ReviewLines = ReadonlyMap<string, ReadonlyMap<number, string>>;
 
-/** A review's files as `ReviewLines`. One with no hunks (a pure rename, a binary) shows no lines and hides none: absent. */
 export function reviewLines(files: readonly { path: string; patch: string }[]): ReviewLines {
   return new Map(files.filter((file) => file.patch.includes('@@')).map((file) => [file.path, newSideLines(file.patch)] as const));
 }
 
-/**
- * The review a board's version counts its lines in: the newest review at or
- * before the message it was stored through (agents pass the latest id they read,
- * often a reply). Stored through nothing, or through something before any review:
- * the review the Show me that made the board names (`askedOn`), else the newest
- * review the thread had when the version was stored (`at`). Null with none of
- * those: its numbers mean nothing in any review here.
- */
 export function reviewDrawnOn(
   through: string | null | undefined,
   messages: readonly { id: string; created_at?: string; guide?: { review?: unknown } | null }[],
@@ -301,15 +216,6 @@ export function reviewDrawnOn(
   return before.at(-1)?.id ?? null;
 }
 
-/**
- * Where a click on a board's part lands in this review's diff: the lines; null
- * when the diff does not show them (the board's own viewer opens the code);
- * 'changed' when these lines can't be found here (never old numbers: they hold
- * other code now), or the file is gone from the new side. `earlier`: the review
- * it was drawn on, when not this one, with `lines` undefined until it is read;
- * null when it was drawn on none of this thread's reviews (the board's own viewer
- * reads the file as it is on disk).
- */
 export function partLanding(target: ShapeCodeTarget, now: ReviewLines, earlier?: { lines: ReviewLines | undefined } | null): [number, number] | 'changed' | null {
   const after = now.get(target.path);
   if (!after) return null;
@@ -324,20 +230,10 @@ export function partLanding(target: ShapeCodeTarget, now: ReviewLines, earlier?:
   return earlierLinesNow(asked, before, after) ?? 'changed';
 }
 
-/**
- * A Show me that ended with no board and no answer: nothing is running or
- * waiting on a choice, and the person did not stop it. The box goes back to its words.
- */
 export function showMeEnded(turn: { answer?: string; stopped?: boolean; shape?: string } | undefined, now: { running: boolean; busy: boolean }): boolean {
   return !now.running && !now.busy && !turn?.shape && !turn?.stopped && turn?.answer === undefined;
 }
 
-/**
- * Which board each board was made from: a Show me on a part of a board names both (`show_me.part.board`, and `shape`,
- * the board it made). Read from the turns, so nothing is kept twice and a reload keeps it. The first link a board has
- * wins (Show me again keeps the same one); a turn the agent answered by moving the board it was on, or that would
- * close a loop, links nothing.
- */
 export function boardParents(turns: readonly { shape?: string; show_me?: { part?: { board: string } } }[]): Map<string, string> {
   const parents = new Map<string, string>();
   for (const turn of turns) {
@@ -355,12 +251,10 @@ export function boardParents(turns: readonly { shape?: string; show_me?: { part?
 export interface BoardRow {
   id: string;
   title: string;
-  /** How many Show mes it is from a board nobody made one from. No limit. */
   depth: number;
   parent: string | null;
 }
 
-/** A thread's boards as a list to go down: each after the board it came from, oldest first at each level (ids sort by time). */
 export function boardRows(boards: readonly { id: string; title: string }[], parents: ReadonlyMap<string, string>): BoardRow[] {
   const ids = new Set(boards.map((board) => board.id));
   const order = [...boards].sort((a, b) => a.id.localeCompare(b.id));
@@ -381,10 +275,6 @@ export function boardRows(boards: readonly { id: string; title: string }[], pare
   return rows;
 }
 
-/**
- * A Show me pressed on a board: what it does with the box under the review. A box the person is writing in keeps its
- * words and a box already sent keeps its wait, so the press waits its turn; an empty box gives way to it.
- */
 export function boardPressWaits(box: { words: string; turn: string | null } | null, posting: boolean): 'wait' | 'go' {
   if (box?.turn || posting) return 'wait';
   return box && box.words.trim() ? 'wait' : 'go';

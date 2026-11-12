@@ -1,10 +1,3 @@
-/**
- * Full screen with the tools hidden (DOM_TESTS=1): a comment not sent waits in the file, so the corner control (the
- * handle's ⌃⌃) carries a dot on its arrows, and its name says so (approval "inbox-comment-box", visible drafts).
- *
- * Failures to catch: the words left in a hidden comment have no sign at all; the dot shows with nothing waiting; a
- * screen reader hears nothing about it, or hears the dot itself instead of the handle's name.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,7 +53,6 @@ describe.if(hasDom)('the corner control with a comment not sent', () => {
     const dot = handle.querySelector<HTMLElement>('[data-full-view-comment-dot]');
     expect(dot).not.toBeNull();
     expect(dot!.getAttribute('aria-hidden')).toBe('true');
-    // On the arrows: inside the box that holds the ⌃⌃ icon.
     expect(dot!.parentElement!.querySelector('svg')).not.toBeNull();
     expect(handle.getAttribute('aria-label')).toBe('Show tools, comment not sent, 2 comments');
   });

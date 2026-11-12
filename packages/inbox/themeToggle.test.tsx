@@ -1,23 +1,3 @@
-/**
- * Light and dark in the Inbox (owner's request, 2026-10-12): a toggle at the
- * far right of the sidebar's Settings row flips what is shown, the rest of the
- * row still opens Settings, and Settings' Theme row goes back to matching the
- * system. The whole window (InboxApp) over a REAL Inbox server in a temp data
- * dir (tests/helpers/inbox-dom-server.ts), so the choice is proved where it is
- * kept: the `plannotator-theme` cookie and config.json `theme`, the value plan
- * review reads.
- *
- * Every test sets its own start: the cookie and the store (configStore.init,
- * which never writes to the server), config.json on disk (the server reads it
- * on every request), the OS preference, and the Inbox's once-per-page
- * adoption of config.json (resetInboxThemeForTests). No test depends on
- * another's end state.
- *
- * The root's mode is the `light` class on <html> (ThemeProvider's
- * applyThemeClasses); dark is its absence.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -44,9 +24,7 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let savedMatchMedia: typeof window.matchMedia;
-/** What this computer prefers, as the stubbed `matchMedia` answers it. */
 let osLight = false;
-/** While set, the window's settings read waits for it (a page whose first read has not answered yet). */
 let settingsGate: Promise<void> | null = null;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
@@ -64,13 +42,11 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
 
 const configPath = () => join(dir!, 'data', 'config.json');
 
-/** config.json `theme` on disk, the value plan review reads. */
 function themeOnDisk(): Theme | undefined {
   if (!existsSync(configPath())) return undefined;
   return (JSON.parse(readFileSync(configPath(), 'utf8')) as { theme?: Theme }).theme;
 }
 
-/** Put config.json `theme` on disk as another Plannotator window would, keeping the file's other keys. */
 function writeThemeOnDisk(theme: Theme | undefined) {
   const current = existsSync(configPath()) ? (JSON.parse(readFileSync(configPath(), 'utf8')) as Record<string, unknown>) : {};
   if (theme) current.theme = theme;
@@ -78,11 +54,6 @@ function writeThemeOnDisk(theme: Theme | undefined) {
   writeFileSync(configPath(), JSON.stringify(current, null, 2));
 }
 
-/**
- * The page's own start: the cookie and the store say `mode` with the default
- * palettes (written through init, which never posts to the server), and the
- * Inbox has not read its settings yet.
- */
 function startPage(mode: 'light' | 'dark' | 'system') {
   resetInboxThemeForTests();
   configStore.init({ theme: { mode, light: 'plannotator', dark: 'plannotator' } });
@@ -90,7 +61,6 @@ function startPage(mode: 'light' | 'dark' | 'system') {
 
 beforeAll(async () => {
   if (!hasDom) return;
-  // A page on localhost, as the Inbox is served: about:blank keeps no readable cookies.
   (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-theme-dom-')));
   mkdirSync(join(dir, 'bin'));
@@ -129,7 +99,6 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? 'GET';
-    // The route without its query: the window reads `/api/inbox/settings?store=0`.
     if (path.split('?')[0] === '/api/inbox/settings' && method === 'GET' && settingsGate) await settingsGate;
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
@@ -194,7 +163,6 @@ async function renderApp(hash = '') {
   return host;
 }
 
-/** A reload: the window torn down and drawn again from what was kept. */
 async function reload(hash = '') {
   act(() => root?.unmount());
   host?.remove();
@@ -202,7 +170,6 @@ async function reload(hash = '') {
 }
 
 const shownLight = () => document.documentElement.classList.contains('light');
-/** ThemeProvider's instant-switch hold (theme.css sets every transition to 0 s under it). */
 const landingInstantly = () => document.documentElement.classList.contains('pn-theme-switching');
 const toggle = (el: ParentNode) => el.querySelector('.ib-setrow .ib-theme-tg') as HTMLButtonElement;
 const settingsRow = (el: ParentNode) => el.querySelector('.ib-setrow .ib-nav') as HTMLButtonElement;
@@ -224,13 +191,11 @@ test.skipIf(!hasDom)('the toggle flips light and dark, keeps the choice across a
 
   act(() => toggle(el).click());
   expect(shownLight()).toBe(true);
-  // The switch lands in one frame, with no colour fade, motion preference or not; the hold then goes, so hovers fade again.
   expect(landingInstantly()).toBe(true);
   await until(() => !landingInstantly(), 'the instant-switch hold to go');
   expect(toggle(el).getAttribute('aria-label')).toBe('Switch to dark mode');
   expect(window.location.hash).toBe('');
   expect(el.querySelector('[aria-label="Settings"]')).toBeNull();
-  // Kept where plan review reads it: the cookie at once, config.json after the store's write-back.
   expect(readThemePairCookies()?.mode).toBe('light');
   await until(() => themeOnDisk()?.mode === 'light', 'config.json to say light');
 
@@ -256,7 +221,6 @@ test.skipIf(!hasDom)("Settings' Match system goes back to following this compute
 
   const system = [...el.querySelectorAll<HTMLInputElement>('[data-settings-theme] input[type="radio"]')].find((r) => r.value === 'system')!;
   act(() => system.click());
-  // This computer prefers light, so light it is, and the choice is "system", not light.
   expect(shownLight()).toBe(true);
   expect(landingInstantly()).toBe(true);
   expect(el.querySelector('[data-settings-theme]')?.getAttribute('data-settings-theme')).toBe('system');
@@ -270,7 +234,6 @@ test.skipIf(!hasDom)('a tab opened before a palette changed in plan review flips
   const el = await renderApp();
   await settle();
   expect(shownLight()).toBe(false);
-  // Meanwhile, in plan review, the person picks palettes; this tab still holds the old pair.
   writeThemeOnDisk({ mode: 'dark', light: 'adwaita', dark: 'tokyo-night' });
 
   act(() => toggle(el).click());
@@ -289,12 +252,10 @@ test.skipIf(!hasDom)('a click before the first settings read wins over config.js
 
   act(() => toggle(el).click());
   expect(shownLight()).toBe(false);
-  // The settings read answers only now, still saying light: the click stands.
   release();
   await settle();
   expect(shownLight()).toBe(false);
   await until(() => themeOnDisk()?.mode === 'dark', 'config.json to say dark');
-  // The page had no palettes of its own to speak of (cookie defaults), and wrote none.
   expect(themeOnDisk()).toEqual({ mode: 'dark', light: 'adwaita', dark: 'tokyo-night' });
   expect(shownLight()).toBe(false);
 });

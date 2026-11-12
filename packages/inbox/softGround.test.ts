@@ -1,25 +1,12 @@
-/**
- * The ground the Soft panes float on (inbox.css, owner 2026-10-17): with the
- * ground switch off it is today's ground, the palette's --background, and the
- * panes are its --card. In a palette whose background IS its card's colour the
- * panes would float on nothing, so inbox.css lists those palettes and gives
- * them --muted mixed into --background instead (--ib-ground-panes).
- *
- * What this catches: a palette added (or edited) so that its background and
- * card meet, with no entry in that list, and an entry left behind for a
- * palette that no longer needs one. The list is read from inbox.css itself.
- */
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const THEMES = join(import.meta.dir, '../ui/themes');
-/** Under this contrast between --background and --card the panes have no ground of their own. */
 const MIN_SEPARATION = 1.035;
 
 type Rgb = [number, number, number];
 
-/** A theme colour as linear sRGB (0..1, clamped): hex, rgb() or oklch(), the forms the themes use. */
 function linear(value: string): Rgb | null {
   const v = value.trim().toLowerCase();
   const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
@@ -62,7 +49,6 @@ function contrast(x: Rgb, y: Rgb): number {
   return (hi! + 0.05) / (lo! + 0.05);
 }
 
-/** Each palette's tokens per mode: the `.theme-x` block, and in light `.theme-x.light` over it. */
 function palettes(): { name: string; mode: 'light' | 'dark'; tokens: Record<string, string> }[] {
   const out: { name: string; mode: 'light' | 'dark'; tokens: Record<string, string> }[] = [];
   for (const file of readdirSync(THEMES).filter((f) => f.endsWith('.css'))) {
@@ -83,7 +69,6 @@ function palettes(): { name: string; mode: 'light' | 'dark'; tokens: Record<stri
   return out;
 }
 
-/** The palettes inbox.css gives a ground of their own under the panes, as `name/mode`. */
 function listedInCss(): Set<string> {
   const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const rule = /([^{}]+)\{\s*--ib-ground-panes:\s*color-mix\(in oklch, var\(--muted\) 55%, var\(--background\)\);\s*\}/.exec(css);

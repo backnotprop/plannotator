@@ -1,12 +1,3 @@
-/**
- * The list reads message text with its own small scanner (threadLinks.ts); the
- * message draws it with `ui`'s renderer. This holds the two together: for a
- * body with every shape of link and non-link, the web links the real Viewer
- * draws are exactly the links the list finds. What this catches: the renderer
- * learning a new link form (or dropping one) with the list left behind.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -98,12 +89,10 @@ test.skipIf(!hasDom)('the list finds exactly the web links the message draws', a
       />,
     );
   });
-  // Drawn as links and left out on purpose: a person's @name, and a number no issue can have (#0012).
   const leftOut = ['https://github.com/someone', 'https://github.com/acme/web/issues/0012'];
   const drawn = web([...host.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')!)).filter((h) => !leftOut.includes(h));
   await act(async () => root.unmount());
   host.remove();
-  // Not vacuous: the renderer really drew them.
   expect(drawn.length).toBeGreaterThan(20);
   expect(web(linksOfBody(BODY, repo).map((l) => l.href))).toEqual(drawn);
 });

@@ -1,19 +1,9 @@
-/**
- * Relative links in an attached Markdown file (#2230) must not cost the
- * document its state: the pane's link resolver is stable across renders, so
- * ui's HtmlBlock does not redraw a raw HTML block on every pane render (its
- * nodes, and any state the person gave them, would be replaced). Checked for
- * the attached file and for a linked document drawn over it.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-// The pane pulls in the Viewer, which reads `window` at module-eval time.
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
 
 let root: Root | null = null;
@@ -53,7 +43,6 @@ const attachment: InboxAttachmentState = {
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-/** Draw the pane (`linked`: the linked document the route names), or draw it again with fresh props. */
 async function renderPane(linked: string | null, round: number): Promise<void> {
   const noop = () => {};
   await act(async () => {
@@ -77,7 +66,6 @@ async function renderPane(linked: string | null, round: number): Promise<void> {
         onClose={noop}
         linked={linked}
         onLinked={noop}
-        // A new object each render, as the thread passes it.
         strip={{ picks: round, annotations: 0, onWriteReply: noop }}
       />,
     );
@@ -112,7 +100,6 @@ for (const where of ['attached', 'linked'] as const) {
   test.skipIf(!hasDom)(`a raw HTML block in the ${where} document keeps its nodes when the pane renders again`, async () => {
     await mount(where === 'linked' ? 'peer.md' : null);
     const scope = where === 'linked' ? '.ib-linkeddoc' : '.ib-docscroll:not(.ib-linkeddoc)';
-    // A node of the raw HTML block, marked: a redraw replaces it (and with it any state the person gave it).
     const node = (await waitFor(() => host!.querySelector(`${scope} [data-block-type="html"] summary`))) as HTMLElement;
     expect(node.textContent).toBe(where === 'linked' ? 'Linked details' : 'Attached details');
     node.dataset.marked = 'yes';

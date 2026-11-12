@@ -1,16 +1,3 @@
-/**
- * The sidebar's "Copy connect prompt" pill: a click puts the prompt naming
- * this computer's plannotator on the clipboard, the pill reads "Copied" and
- * goes back after 2 s, focus stays on it, and a polite live region says so.
- * A failed copy is never silent: the row reads "Couldn't copy" and the live
- * region says that too. What regresses: copying before the settings arrive
- * and never picking up the path, a "Copied" that sticks, a failure that looks
- * like nothing happened, an announcement a screen reader never hears, a
- * name that stops saying what the pill is for, or the agents' marks being
- * read aloud or dropped while it says "Copied".
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -21,7 +8,6 @@ const { PHONE_QUERY } = (hasDom ? await import('./phone') : {}) as typeof import
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 
 const BIN = '/Users/ada/.local/bin/plannotator';
-/** The idle accessible name (visible "Copy prompt" plus screen-reader words): pinned on purpose, it is the button's purpose. */
 const IDLE_NAME = 'Copy prompt to connect an agent';
 
 let root: Root | null = null;
@@ -86,7 +72,6 @@ async function click(button: HTMLButtonElement) {
   });
 }
 
-/** The foot's rows in order: a sidebar item's wrapper (`.ib-side-item`, `display: contents`) is not a row of its own. */
 function footRows(foot: Element): Element[] {
   return [...foot.children].flatMap((el) => (el.classList.contains('ib-side-item') ? [...el.children] : [el]));
 }
@@ -97,12 +82,10 @@ test.skipIf(!hasDom)('a click copies the prompt naming this binary, says Copied,
   jest.useFakeTimers();
   const { host, row, live } = render([BIN, 'inbox', 'mcp']);
 
-  // The pill sits above Settings, in the foot (nothing between them without an update).
   const foot = host.querySelector('.ib-side-foot')!;
   const rows = footRows(foot);
   expect(rows.includes(row())).toBe(true);
   expect(rows[rows.indexOf(row()) + 2]?.querySelector('.ib-nav')?.textContent).toBe('Settings');
-  // Its name starts with the visible words and says what they are for; the marks are not read.
   expect(row().textContent).toBe(IDLE_NAME);
   const marks = () => row().querySelector('[aria-hidden="true"]')!.children;
   expect(marks()).toHaveLength(4);
@@ -124,7 +107,6 @@ test.skipIf(!hasDom)('a click copies the prompt naming this binary, says Copied,
   expect(row().textContent).toBe(IDLE_NAME);
   expect(document.activeElement).toBe(row());
 
-  // A second copy is announced again: the live region's text changes.
   await click(row());
   expect(written).toHaveLength(2);
   expect(live().textContent?.trim()).toBe('Connect prompt copied.');

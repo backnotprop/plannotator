@@ -1,10 +1,3 @@
-/**
- * Compose's rules alone (compose/model.ts). What can regress: To filled by
- * itself on a plain New message (the wrong agent gets the message), a draft
- * or "Message <host>" losing its session, the current project not
- * leading the picker, the palette offering an action no words asked for,
- * closing an empty compose asking a question (or a changed one not asking).
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxComposeProject } from '@plannotator/core/inbox-types';
 import { derivePersonThreadSubject } from '@plannotator/core/inbox-questions';
@@ -56,7 +49,6 @@ describe('To', () => {
     expect(composeOpening({ session: 'ses-pi2' })).toEqual({ chosen: 'ses-pi2', focus: 'message' });
     const to = { host: 'pi', session: 'ses-gone', project_root: '/src/billing', project_name: 'billing', started_at: '2026-10-14T09:12:00.000Z' };
     expect(composeOpening({ draft: { to } })).toEqual({ chosen: 'ses-gone', focus: 'message' });
-    // A draft saved with nobody in To stays that way: it is not filled from a live session either.
     expect(composeOpening({ draft: { to: null } })).toEqual({ chosen: null, focus: 'to' });
   });
 
@@ -64,7 +56,6 @@ describe('To', () => {
     const current = { id: 'prj_p', root: '/src/plannotator' };
     const sessions = (groups: ReturnType<typeof composeGroups>) => groups.flatMap((g) => g.sessions.map((s) => s.session));
     expect(sessions(composeGroups(PROJECTS, current, 'ses-pi2'))).toEqual(['ses-pi2', 'ses-cc1', 'ses-pi', 'ses-oc']);
-    // Within its project, the last session leads.
     expect(sessions(composeGroups(PROJECTS, current, 'ses-pi'))).toEqual(['ses-pi', 'ses-cc1', 'ses-oc', 'ses-pi2']);
     expect(composeGroups(PROJECTS, current, 'ses-pi')[0]!.current).toBe(true);
     expect(sessions(composeGroups(PROJECTS, current, 'ses-gone'))).toEqual(sessions(composeGroups(PROJECTS, current)));
@@ -102,7 +93,6 @@ describe('To', () => {
     const rows = pickerRows(groups);
     expect(rows.map((r) => r.target.session)).toEqual(['ses-pi2', 'ses-oc', 'ses-cc1', 'ses-pi']);
     expect(rows.map((r) => r.started !== null)).toEqual([false, false, true, true]);
-    // Filtered down to one plannotator session, it still names its start: the other one is live.
     const filtered = pickerRows(filterGroups(groups, 'pi plan'), groups);
     expect(filtered.map((r) => [r.target.session, r.started !== null])).toEqual([['ses-pi', true]]);
   });
@@ -199,7 +189,6 @@ describe('the subject preview and the thread name', () => {
     expect(shownThreadName(fresh, 'Paste bug')).toBe('Paste bug');
     const typed = typeThreadName('Board ideas');
     expect(typed).toEqual({ typed: 'Board ideas', edited: true });
-    // The suggestion moves on; the typed name does not.
     expect(shownThreadName(typed, 'Kanban board')).toBe('Board ideas');
     expect(typeThreadName('   ')).toEqual({ typed: '', edited: false });
     expect(typeThreadName('')).toEqual({ typed: '', edited: false });

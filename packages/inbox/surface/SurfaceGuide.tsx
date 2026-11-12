@@ -1,17 +1,8 @@
-/**
- * A guided review in the surface (6.1, 6.2): the sections with their
- * reviewed ticks and Continue, then one section per screen with Previous,
- * Reviewed and Next. The reader (the guide chain over review-editor's diff
- * renderer) mounts through a dynamic import, as the Inbox window's does.
- * Ticks go to the shell, which saves them through the door.
- */
-
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import type { SurfaceOpenGuide } from '@plannotator/core/inbox-types';
 import { postToShell } from './bridge';
 
-// `#surface-guide-reader` is packages/inbox/guide/SurfaceGuideReader.tsx (package.json `imports`).
 const SurfaceGuideReader = lazy(() => import('#surface-guide-reader'));
 
 interface Props {

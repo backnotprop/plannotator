@@ -1,15 +1,3 @@
-/**
- * A context note's row (approval "inbox-context-notes", take Line). What
- * regresses: a row that is not a button a keyboard reaches (no aria-expanded,
- * nothing it controls), a note that grows a reply, edit or Post, a stale answer
- * without its words or its Ask again, a picture's note that can't open its board.
- *
- * In the thread, an agent's `:::note` block is a chip naming its file and lines (removed lines said so) with its
- * words, never its raw anchor line; "Open in the review" opens those lines on their side, and a note the thread has
- * no review for yet is a chip with no way in.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -75,13 +63,10 @@ test.skipIf(!hasDom)('the thread agent’s note is labelled with its name, as th
   };
   const named = head(answer);
   expect(named.label).toBe('Claude Code');
-  // The button's accessible name (its text) starts with the agent, never "Answer".
   expect(named.name.startsWith('Claude Code')).toBe(true);
   expect(named.name).not.toContain('Answer');
   expect(head({ ...answer, agent: 'Codex' }).label).toBe('Codex');
-  // No name known: the thread's own word for an agent (format's agentName).
   expect(head({ ...answer, agent: undefined }).label).toBe('An agent');
-  // The other writers keep their words.
   expect(head({ ...answer, writer: 'guide' }).label).toBe('Review note');
 });
 
@@ -109,7 +94,6 @@ test.skipIf(!hasDom)('a risk shows High and the person’s rule; a picture opens
   const [riskRow, pictureRow] = Array.from(el.querySelectorAll<HTMLButtonElement>('button.ib-ctxn-row'));
   expect(riskRow!.textContent).toContain('Risk');
   expect(riskRow!.textContent).toContain('High');
-  // Only a Picture carries Show me's mark (it comes from a board); Risk has its own gauge (q-9ad31b4e and the owner's pick).
   expect(riskRow!.querySelector('.ib-ctxn-peb')).toBeNull();
   expect(riskRow!.querySelector('.ib-ctxn-risk-mark')).not.toBeNull();
   expect(pictureRow!.querySelector('.ib-ctxn-peb')).not.toBeNull();
@@ -127,11 +111,9 @@ test.skipIf(!hasDom)('a risk place with no rule of the person’s, and an answer
   const timed: ContextNote = { ...answer, id: 't3', asked: undefined, at: new Date().toISOString() };
   const el = mount([risk, unasked, timed], {});
   for (const row of el.querySelectorAll<HTMLButtonElement>('button.ib-ctxn-row')) act(() => row.click());
-  // No line saying who wrote it or why: the writer's word and the note's own words only.
   expect(el.querySelector('[data-context-note-row="r-0"] .ib-ctxn-by')).toBeNull();
   expect(el.querySelector('[data-context-note-row="t2"] .ib-ctxn-by')).toBeNull();
   expect(el.querySelector('[data-context-note-row="r-0"] .ib-ctxn-t')!.textContent).toBe('Charges retry.');
-  // An answer still says when it came, and nothing else.
   const by = el.querySelector('[data-context-note-row="t3"] .ib-ctxn-by')!.textContent!;
   expect(by.startsWith('\u00a0· ')).toBe(true);
   expect(by).not.toContain('Claude');
@@ -144,19 +126,15 @@ test.skipIf(!hasDom)('an open note says who and when on the writer’s line, and
   const button = el.querySelector<HTMLButtonElement>('button.ib-ctxn-row')!;
   act(() => button.click());
   const head = button.querySelector('.ib-ctxn-h')!;
-  // On the name's line, in the row: "Claude Code · you asked “Why retry?” · <time>".
   const by = head.querySelector('.ib-ctxn-by')!;
   expect(head.querySelector('b')!.textContent).toBe('Claude Code');
   expect(by.textContent).toContain('you asked “Why retry?”');
-  // Each "·" is held to the words before it by a no-break space: no ordinary space before a "·".
   expect(by.textContent!.match(/·/g)!.length).toBe(2);
   expect(/[^\u00a0]·/.test(head.textContent!)).toBe(false);
-  // Read once by a screen reader: hidden on the line, said in the open note before its words.
   expect(by.getAttribute('aria-hidden')).toBe('true');
   const body = el.querySelector(`#${CSS.escape(button.getAttribute('aria-controls')!)}`)!;
   expect(body.querySelector('.sr-only')!.textContent).toContain('you asked “Why retry?”');
   expect(body.querySelector('.ib-ctxn-by')).toBeNull();
-  // Closed again: the first words, and no who-and-when on the line.
   act(() => button.click());
   expect(button.querySelector('.ib-ctxn-by')).toBeNull();
   expect(button.querySelector('.ib-ctxn-first')!.textContent).toBe('The retry lives here.');
@@ -192,7 +170,6 @@ test.skipIf(!hasDom)('a `:::note` block is a chip with its words, never its anch
   expect(el.textContent).not.toContain(':::');
   expect(el.textContent).toContain('Here is why.');
   expect(el.textContent).toContain('The rest stays.');
-  // The note's words keep their Markdown, as the message's do.
   expect(block.querySelector('strong')?.textContent).toBe('row');
   const chip = block.querySelector<HTMLElement>('[data-context-note-chip]')!;
   expect(chip.tagName).toBe('BUTTON');

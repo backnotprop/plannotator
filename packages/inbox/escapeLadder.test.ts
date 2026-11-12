@@ -1,9 +1,3 @@
-/**
- * The Escape ladder of a full-screen file (escapeLadder.ts): one thing per
- * press, innermost first, full screen last. What would regress: a press that
- * leaves full screen while a menu, a composer or the drawer is still open,
- * Annotate skipped on HTML, or a kind of file whose walk never ends.
- */
 import { describe, expect, test } from 'bun:test';
 import { ESCAPE_LADDER, IDLE_LADDER, escapeRung, everythingOpen, rungsFor, walkLadder, type LadderFileKind } from './escapeLadder';
 
@@ -20,7 +14,6 @@ describe('the Escape ladder', () => {
       const walk = walkLadder(everythingOpen(kind));
       expect(walk).toEqual([...rungsFor(kind)]);
       expect(walk.at(-1)).toBe('leave');
-      // Always in the ladder's own order.
       const order = walk.map((rung) => ESCAPE_LADDER.indexOf(rung));
       expect(order).toEqual([...order].sort((a, b) => a - b));
     });

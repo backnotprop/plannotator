@@ -1,9 +1,3 @@
-/**
- * A project's list header shows its name alone; the folder is in the title's
- * tooltip (owner, 2026-10-29: the path beside the name was noise and cut off its end).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

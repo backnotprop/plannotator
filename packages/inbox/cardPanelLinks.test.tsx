@@ -1,13 +1,3 @@
-/**
- * The opened card's Links rows for YouTrack issues and any other web link
- * (user feedback #10), as the window draws them. What regresses: a YouTrack
- * issue drawn without its mark and key, a web link drawn without its short
- * label or opening in this tab, a favicon asked for a link an agent added, a
- * remote favicon address (the window's CSP blocks it), or a failed, blank or
- * still-loading favicon showing a broken image instead of the link icon.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -17,7 +7,6 @@ import type { CardPanelProps } from './board/CardPanel';
 const hasDom = typeof document !== 'undefined';
 const { CardPanel, LinkFavicon } = (hasDom ? await import('./board/CardPanel') : {}) as typeof import('./board/CardPanel');
 const { splitRefs } = (hasDom ? await import('./board/NewCardDialog') : {}) as typeof import('./board/NewCardDialog');
-// The window's own origin, so the favicon route's relative address parses (happy-dom loads no image from it).
 if (hasDom) (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_claude', name: 'Claude Code' };
@@ -131,7 +120,6 @@ describe('opened card links: YouTrack and any web link (user feedback #10)', () 
     expect(link.getAttribute('rel')).toContain('noopener');
     expect(li.getAttribute('data-ref-source')).toBe('web');
     expect(li.querySelector('[data-ref-kind]') === null).toBe(true);
-    // A long URL: cut in the middle, the full URL still the link.
     const long = row(host, LONG.url).link;
     expect(long.textContent!.length).toBeLessThanOrEqual(44);
     expect(long.textContent).toStartWith('figma.com/design/');
@@ -147,13 +135,11 @@ describe('opened card links: YouTrack and any web link (user feedback #10)', () 
     expect(mine!.getAttribute('src')).toBe(`/api/inbox/cards/crd_1/favicon?url=${encodeURIComponent(MINE.url)}`);
     expect(mine!.getAttribute('referrerpolicy')).toBe('no-referrer');
     expect(mine!.getAttribute('loading')).toBe('lazy');
-    // While it loads, the link icon is what shows.
     expect(row(host, MINE.url).row.querySelector('[data-icon="link"]') !== null).toBe(true);
     for (const url of [AGENTS.url, LOCAL.url]) {
       expect(img(url) === null).toBe(true);
       expect(row(host, url).row.querySelector('[data-icon="link"]') !== null).toBe(true);
     }
-    // Never a remote address: the window's CSP would block it.
     for (const each of host.querySelectorAll('img')) expect(each.getAttribute('src')).toStartWith('/api/inbox/');
   });
 });
@@ -178,7 +164,6 @@ describe('LinkFavicon', () => {
     expect(box.querySelector('img') === null).toBe(true);
     expect(box.querySelector('[data-icon="link"]') !== null).toBe(true);
     act(() => root!.unmount());
-    // Drawn again (the card reopened), the same address is not asked a second time.
     const again = mount(createElement(LinkFavicon, { src }));
     expect(again.querySelector('img') === null).toBe(true);
     expect(again.querySelector('[data-icon="link"]') !== null).toBe(true);
@@ -208,7 +193,6 @@ describe("New card's links field", () => {
       'https://www.google.com/maps/@37.77,-122.41,14z',
       'https://www.notion.so/acme/Roadmap',
     ]);
-    // Two URLs with only a comma between them (a spreadsheet cell) are two links, not one.
     expect(splitRefs('https://a.example/x,https://b.example/y,HTTP://c.example/z')).toEqual(['https://a.example/x', 'https://b.example/y', 'HTTP://c.example/z']);
   });
 });

@@ -1,19 +1,3 @@
-/**
- * The tabs' shared event stream (sharedEvents.ts) over fakes that behave like
- * the browser's pieces: a Web Locks manager (exclusive locks, a FIFO queue
- * per name, abort while queued, every lock of a tab freed when the tab dies),
- * BroadcastChannel (every other channel of the name gets each message, in
- * order, a task later; never the sender) and the server's event stream (hello,
- * a replay after the cursor, then each line live). Each "tab" is one
- * subscription with its own handlers; a crash drops the tab without running
- * its unsubscribe or its pagehide.
- *
- * What is proved: one stream per origin whatever the tabs do; every tab
- * handles every record after its cursor exactly once and in order, through
- * closes, crashes, freezes and the back/forward cache, with records written
- * during each handover; the leader tells the server a follower is gone when
- * that tab's lock is freed; followers name their leader (`served_by`).
- */
 import { afterEach, expect, jest, test } from 'bun:test';
 import type { InboxEventFrame, InboxEventHandlers, InboxEventWindow } from './api';
 import { dispatchInboxFrame } from './api';
@@ -29,8 +13,6 @@ import {
   WINDOW_LOCK_PREFIX,
   type SharedEventsEnv,
 } from './sharedEvents';
-
-// ── Fakes ──
 
 const tick = () => new Promise<void>((done) => setTimeout(done, 0));
 async function settle(rounds = 8): Promise<void> {
@@ -49,11 +31,9 @@ class FakeLocks {
   held = new Map<string, { tab: number; release: () => void; steal: () => void }>();
   queues = new Map<string, Waiter[]>();
   dead = new Set<number>();
-  /** A paused tab's main thread runs nothing: what the locks tell it waits (`resume`). */
   paused = new Map<number, (() => void)[]>();
   steals = 0;
 
-  /** Run `fn` in `tab`'s main thread: at once, or when it resumes. */
   run(tab: number, fn: () => void): void {
     const waiting = this.paused.get(tab);
     if (waiting) waiting.push(fn);
@@ -68,7 +48,6 @@ class FakeLocks {
           if (options.signal?.aborted) return reject(new DOMException('aborted', 'AbortError'));
           const waiter: Waiter = { tab, callback, resolve, reject, signal: options.signal };
           if (options.steal) {
-            // Take the lock now: the holder's request rejects (AbortError) and the lock is free for this one, first in line.
             this.steals += 1;
             this.held.get(name)?.steal();
             const queue = this.queues.get(name) ?? [];
@@ -114,7 +93,6 @@ class FakeLocks {
       this.run(next.tab, () => next.reject(new DOMException('stolen', 'AbortError')));
     };
     this.held.set(name, { tab: next.tab, release, steal });
-    // Granted a task later, as the browser does.
     setTimeout(() => {
       this.run(next.tab, () => {
         if (this.dead.has(next.tab) || stolen) return release();
@@ -141,7 +119,6 @@ class FakeLocks {
     }, 0);
   }
 
-  /** The tab is gone: every lock it holds is freed, its queued requests dropped. */
   kill(tab: number): void {
     this.dead.add(tab);
     for (const [name, queue] of this.queues) this.queues.set(name, queue.filter((w) => w.tab !== tab));
@@ -190,27 +167,20 @@ class FakeChannel {
   }
 }
 
-/** The server: a store of lines with one seq counter, and the streams open on it. */
 class FakeServer {
   constructor(readonly locks: FakeLocks) {}
   seq = 0;
   lines: { seq: number; kind: string }[] = [];
   streams = new Set<{ tab: number; stalled: boolean; push: (frame: InboxEventFrame) => void }>();
   opened: { tab: number; cursor: number }[] = [];
-  /** Tabs whose new streams are born silent (a broken connection on that tab, or a proxy holding every stream back). */
   stalledTabs = new Set<number>();
   stallEverything = false;
 
-  /**
-   * The tab's open streams go silent and stay open: a dead connection nothing closed. `andNew`: its next streams too,
-   * until `heal`. A silent stream passes on nothing, not even the heartbeat.
-   */
   stall(tab: number | 'all', options: { andNew?: boolean } = {}): void {
     for (const stream of this.streams) if (tab === 'all' || stream.tab === tab) stream.stalled = true;
     if (options.andNew && tab === 'all') this.stallEverything = true;
     else if (options.andNew) this.stalledTabs.add(tab as number);
   }
-  /** New streams work again (the silent ones stay silent, as dead sockets do). */
   heal(): void {
     this.stalledTabs.clear();
     this.stallEverything = false;
@@ -238,7 +208,6 @@ class FakeServer {
     const stream = {
       tab,
       stalled: this.stallEverything || this.stalledTabs.has(tab),
-      // Frames arrive a task later, in order, like a socket.
       push: (frame: InboxEventFrame) => {
         if (stream.stalled) return;
         setTimeout(() => this.locks.run(tab, () => open && !stream.stalled && onFrame(frame)), 0);
@@ -267,9 +236,7 @@ interface Tab {
   deliveries: number;
   drafts: (string | null)[];
   gone: { window: string; unloading: boolean }[];
-  /** The page read its list and open thread again (`onCatchUp`). */
   listCatchUps: number;
-  /** What `onLive` said, in order (`false`: "Reconnecting…" shows). */
   live: boolean[];
   visible: boolean;
   doc: EventTarget;
@@ -281,9 +248,7 @@ class World {
   locks = new FakeLocks();
   hub = new FakeHub(this.locks);
   server = new FakeServer(this.locks);
-  /** Catch-ups fail while this is set (the Inbox restarting). */
   catchUpFails = false;
-  /** Timings every tab gets (the leader check, the catch-up retry). */
   timing: SharedEventsEnv['timing'] = { pingEveryMs: 40, hiddenPingEveryMs: 150, pongTimeoutMs: 30, retryMs: 20, retryMaxMs: 80 };
   tabs = new Map<number, Tab>();
   gone: { by: number; window: string; unloading: boolean }[] = [];
@@ -337,7 +302,6 @@ class World {
       channel: () => this.hub.open(id),
       open: (c, onFrame) => this.server.open(id, c, onFrame),
       catchUp: async (c) => {
-        // The server answers with the lines as they are when the request reaches it; the answer can then be slow.
         await tick();
         if (this.catchUpFails && this.catchUpDelayMs === 0) {
           this.catchUps.push({ tab: id, cursor: c });
@@ -346,7 +310,6 @@ class World {
         this.catchUps.push({ tab: id, cursor: c });
         const frames = this.server.lines.filter((line) => line.seq > c).map((line) => this.server.frameOf(line));
         if (this.catchUpDelayMs > 0) await new Promise((done) => setTimeout(done, this.catchUpDelayMs));
-        // A slow answer fails at its end (the Inbox went away meanwhile).
         if (this.catchUpFails) {
           this.catchUps.push({ tab: id, cursor: c });
           throw new Error('down');
@@ -368,7 +331,6 @@ class World {
     return tab;
   }
 
-  /** The tab closes normally: pagehide, then the page goes (its locks freed). */
   close(tab: Tab): void {
     const event = new Event('pagehide') as Event & { persisted: boolean };
     Object.defineProperty(event, 'persisted', { value: false });
@@ -377,7 +339,6 @@ class World {
     this.kill(tab);
   }
 
-  /** The tab crashes: nothing of it runs again. */
   kill(tab: Tab): void {
     this.locks.kill(tab.id);
     this.hub.kill(tab.id);
@@ -389,7 +350,6 @@ class World {
     return this.locks.holder(EVENTS_LOCK);
   }
 
-  /** The tab's main thread stops (a debugger, a long script): nothing of it runs until `resume`. No freeze event. */
   pause(tab: Tab): void {
     if (!this.locks.paused.has(tab.id)) this.locks.paused.set(tab.id, []);
   }
@@ -411,13 +371,10 @@ function world(): World {
   return w;
 }
 
-/** Every record after `from` up to the server's seq, once and in order. */
 function expectAll(tab: Tab, from: number, to: number): void {
   const want = Array.from({ length: to - from }, (_, i) => from + i + 1);
   expect(tab.records).toEqual(want);
 }
-
-// ── Tests ──
 
 test('one tab leads: one stream, every record once', async () => {
   const w = world();
@@ -458,7 +415,6 @@ test('records at or before a tab\'s cursor are skipped (its list read had them);
   await settle();
   w.server.write(5);
   await settle();
-  // B read the list at seq 5, but the leader's frames for 3..5 can still be in flight to it.
   const b = w.open(3);
   w.server.write(2);
   await settle();
@@ -474,14 +430,12 @@ test('followers name the leader; they report again when it changes; hello reache
   await settle();
   const b = w.open();
   await settle();
-  // B learned A is its leader (one report for that), and A's hello was before B: B's own report comes from the leader answer.
   expect(b.connects).toBeGreaterThanOrEqual(1);
   expect(inboxEventsServedBy()).toBe(a.win.id);
   const before = b.connects;
   w.close(a);
   await settle(12);
   expect(w.leader()).toBe(b.id);
-  // B now leads: its own stream's hello (served_by null).
   expect(b.connects).toBeGreaterThan(before);
   expect(inboxEventsServedBy()).toBeNull();
 });
@@ -509,7 +463,6 @@ test('the leader closes while an agent writes: the next tab leads at once, nothi
   await settle();
   const leader = tabs.find((t) => t.id === w.leader())!;
   w.server.write(5);
-  // Writes on both sides of the handover, some while the old leader's frames are still in flight.
   setTimeout(() => w.server.write(3), 0);
   w.close(leader);
   w.server.write(2);
@@ -519,7 +472,6 @@ test('the leader closes while an agent writes: the next tab leads at once, nothi
   expect(w.server.streams.size).toBe(1);
   expect(w.leader()).not.toBe(leader.id);
   for (const tab of tabs) if (tab !== leader) expectAll(tab, 0, w.server.seq);
-  // The leader's pagehide said it was gone.
   expect(w.gone).toContainEqual({ by: leader.id, window: leader.win.id, unloading: true });
 });
 
@@ -531,7 +483,7 @@ test('the leader crashes (no pagehide, no unsubscribe): the next tab leads from 
   await settle();
   const leader = tabs.find((t) => t.id === w.leader())!;
   w.kill(leader);
-  w.server.write(3); // written with no stream open: the next leader's replay brings them
+  w.server.write(3);
   await settle(16);
   w.server.write(2);
   await settle(8);
@@ -553,16 +505,12 @@ test('the leader tells the server when a follower is gone: a crash (its lock fre
   expect(w.gone).toContainEqual({ by: a.id, window: b.win.id, unloading: false });
   w.close(c);
   await settle(6);
-  // C said it itself at pagehide; the leader also saw its lock go.
   expect(w.gone).toContainEqual({ by: c.id, window: c.win.id, unloading: true });
   expect(w.gone.filter((g) => g.window === c.win.id && g.by === a.id)).toHaveLength(1);
-  // The leader never reports itself.
   expect(w.gone.some((g) => g.by === a.id && g.window === a.win.id)).toBe(false);
 });
 
 test('a leader still running after its pagehide reports nothing more: the next leader\'s announcement and hello do not count it again', async () => {
-  // The page is not gone the moment pagehide fires: its scripts can still hear the next leader. A report
-  // then (served_by the next leader) could reach the server after every `gone` and count a closed tab.
   const w = world();
   const a = w.open();
   await settle();
@@ -600,7 +548,6 @@ test('a frozen leader steps down so another leads; it queues again when it resum
   expect(w.server.streams.size).toBe(1);
   expectAll(a, 0, 5);
   expectAll(b, 0, 5);
-  // A is next in line again: B closes, A leads.
   w.close(b);
   w.server.write(1);
   await settle(12);
@@ -640,7 +587,6 @@ test('the back/forward cache: pagehide (persisted) steps down and says gone; pag
   await settle(10);
   expect(w.leader()).toBe(b.id);
   expect(w.gone).toContainEqual({ by: a.id, window: a.win.id, unloading: true });
-  // Going into the cache, it heard B lead but did not report: it counts again only at pageshow.
   expect(a.connects).toBe(hidden);
   const connects = a.connects;
   const show = new Event('pageshow');
@@ -651,7 +597,6 @@ test('the back/forward cache: pagehide (persisted) steps down and says gone; pag
   expect(a.connects).toBeGreaterThan(connects);
   expectAll(a, 0, 2);
   expect(w.server.streams.size).toBe(1);
-  // Back from the cache it is live: its later reports (a leader change, a hello) go out again.
   const restored = a.connects;
   w.kill(b);
   await settle(16);
@@ -667,7 +612,6 @@ test('a sleeping follower behind a new leader that started past it fetches the l
   await settle(8);
   f.doc.dispatchEvent(new Event('freeze'));
   w.kill(a);
-  // Written with no stream open; then a new tab reads the list past them and leads from there.
   w.server.write(3);
   const n = w.open(w.server.seq);
   await settle(10);
@@ -689,7 +633,6 @@ test('a follower that subscribed with a cursor behind the leader\'s start catche
   w.server.write(4);
   const n = w.open(4);
   await settle(8);
-  // A tab whose list read was before those lines, subscribing only now.
   const late = w.open(1);
   w.server.write(1);
   await settle(12);
@@ -706,7 +649,6 @@ test('a catch-up that fails (the Inbox restarting) is tried again at the next he
   let failing = true;
   const tabCatchUp = w.catchUps;
   void tabCatchUp;
-  // The server goes away for F's catch-up only.
   const realLines = w.server.lines;
   f.doc.dispatchEvent(new Event('freeze'));
   w.server.write(2);
@@ -718,10 +660,8 @@ test('a catch-up that fails (the Inbox restarting) is tried again at the next he
   f.doc.dispatchEvent(new Event('resume'));
   await settle(10);
   failing = false;
-  // The leader's stream reconnects: its hello is passed on, and F tries again.
   w.server.closeTab(a.id);
   w.server.open(a.id, w.server.seq, (frame) => {
-    // Stand-in for the leader's EventSource reconnecting: pass the hello on as the leader would.
     w.hub.channels.forEach((c) => {
       if (c.tab === a.id) c.postMessage({ v: 1, type: 'frame', leader: a.win.id, frame });
     });
@@ -736,14 +676,11 @@ test('a new leader while a catch-up is in flight: the tab fetches again before i
   await settle();
   w.server.write(2);
   await settle();
-  // N is next in line for the stream.
   const n = w.open(w.server.seq);
   await settle(6);
-  // F subscribes behind (its list read was older); its catch-ups are slow.
   w.catchUpDelayMs = 60;
   const f = w.open(0);
   await settle(4);
-  // The leader dies while F's catch-up is in flight: N leads, and F hears of it mid catch-up.
   w.kill(a);
   w.server.write(3);
   await settle(6);
@@ -767,7 +704,6 @@ test('a leader whose main thread stops (no freeze) loses the stream to a visible
   expect(w.leader()).toBe(a.id);
   w.server.write(2);
   await settle(8);
-  // A stops: it keeps its lock and its stream, and passes nothing on.
   w.pause(a);
   w.server.write(3);
   let peak = 0;
@@ -776,17 +712,14 @@ test('a leader whose main thread stops (no freeze) loses the stream to a visible
     peak = Math.max(peak, w.server.streams.size);
     await new Promise((done) => setTimeout(done, 5));
   }
-  // B checked, heard nothing, took the lock and leads; C follows it.
   expect(w.locks.steals).toBe(1);
   expect(w.leader()).toBe(b.id);
   expectAll(b, 0, 5);
   expectAll(c, 0, 5);
-  // Two streams at most while A is stopped (its own is still open on the server).
   expect(peak).toBeLessThanOrEqual(2);
   w.server.write(2);
   await settle(8);
   expectAll(c, 0, 7);
-  // A runs again: its lock was taken, so it closes its stream and follows B; nothing lost or twice.
   w.resume(a);
   await settle(20);
   expect(w.server.streams.size).toBe(1);
@@ -796,7 +729,6 @@ test('a leader whose main thread stops (no freeze) loses the stream to a visible
   expectAll(a, 0, 8);
   expectAll(b, 0, 8);
   expectAll(c, 0, 8);
-  // It is in line again: B closes, A or C leads.
   w.close(b);
   w.server.write(1);
   await settle(16);
@@ -814,7 +746,6 @@ test('a leader that answers is never taken over, however often visible followers
     w.server.write(1);
     await new Promise((done) => setTimeout(done, 25));
   }
-  // Each follower checked several times; the leader answered each.
   expect(w.locks.steals).toBe(0);
   expect(w.leader()).toBe(a.id);
   for (const f of followers) expectAll(f, 0, 10);
@@ -830,10 +761,8 @@ test('hidden followers check on a stopped leader less often; one that becomes vi
   w.pause(a);
   w.server.write(2);
   await new Promise((done) => setTimeout(done, 200));
-  // Hidden, and its next check a minute away: nothing taken yet.
   expect(w.locks.steals).toBe(0);
   expect(b.records).toEqual([]);
-  // B becomes visible: it checks at once, hears nothing, and leads.
   b.visible = true;
   b.doc.dispatchEvent(new Event('visibilitychange'));
   const deadline = Date.now() + 1000;
@@ -860,7 +789,6 @@ test('with every tab hidden, a stopped leader is still taken over (at the hidden
   const tookMs = Date.now() - pausedAt;
   expectAll(b, 0, 2);
   expectAll(c, 0, 2);
-  // At the hidden pace (150 ms here), not the visible one; one or two steals (two hidden tabs may both time out).
   expect(tookMs).toBeGreaterThanOrEqual(100);
   expect(w.locks.steals).toBeGreaterThanOrEqual(1);
   w.resume(a);
@@ -878,7 +806,6 @@ test('a catch-up that fails keeps the gap: the frames that came meanwhile wait, 
   const f = w.open();
   await settle(8);
   f.doc.dispatchEvent(new Event('freeze'));
-  // F sleeps through 1 and 2 (what the leader passed on while it was frozen never reaches it).
   w.pause(f);
   w.server.write(2);
   await settle(6);
@@ -886,12 +813,10 @@ test('a catch-up that fails keeps the gap: the frames that came meanwhile wait, 
   w.catchUpFails = true;
   f.doc.dispatchEvent(new Event('resume'));
   await settle(6);
-  // 3 and 4 arrive from the leader while F cannot fetch 1 and 2: they wait.
   w.server.write(2);
   await settle(6);
   expect(f.records).toEqual([]);
   w.catchUpFails = false;
-  // The retry timer (no hello needed) fetches from 0.
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline && f.records.length < 4) await new Promise((done) => setTimeout(done, 5));
   expectAll(f, 0, 4);
@@ -905,25 +830,21 @@ test('a tab that comes to lead while its catch-up runs, and the catch-up then fa
   await settle();
   const f = w.open();
   await settle(8);
-  // F sleeps; when it wakes its catch-up is slow and will fail.
   f.doc.dispatchEvent(new Event('freeze'));
   w.server.write(2);
   w.catchUpDelayMs = 60;
   w.catchUpFails = true;
   f.doc.dispatchEvent(new Event('resume'));
   await settle(4);
-  // The leader goes while F's catch-up is in flight: F leads.
   w.kill(a);
   await settle(10);
   expect(w.leader()).toBe(f.id);
-  // The catch-up fails; F's own stream replays from its last seq.
   await new Promise((done) => setTimeout(done, 120));
   w.catchUpDelayMs = 0;
   w.server.write(5);
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline && f.records.length < 7) await new Promise((done) => setTimeout(done, 5));
   expectAll(f, 0, 7);
-  // It keeps going: a later record reaches it too, and nobody else leads.
   w.server.write(1);
   await settle(8);
   expectAll(f, 0, 8);
@@ -949,7 +870,6 @@ test('discardPreparedInboxEvents closes the early channel when no subscription f
     prepareInboxEvents();
     discardPreparedInboxEvents();
     expect(closed).toEqual([EVENTS_CHANNEL]);
-    // Twice is nothing.
     discardPreparedInboxEvents();
     expect(closed).toHaveLength(1);
   } finally {
@@ -960,12 +880,6 @@ test('discardPreparedInboxEvents closes the early channel when no subscription f
 });
 
 test('a frame that reached the early channel before the subscription: the report it starts names the leader', async () => {
-  // A new tab listens on the channel before its first list read (prepareInboxEvents); a
-  // `reach` frame the leader passes on meanwhile (another tab just got counted) waits in
-  // the backlog. Handling it on subscribe tells this tab its leader and reports
-  // (`onConnect`). That report must carry `served_by`, or the server never counts the
-  // tab: the leader's answer to its join names the same leader and reports nothing new.
-  // (The browser proof saw "Expected: 8, Received: 7" in notify_reach.)
   const w = world();
   const a = w.open();
   await settle();
@@ -988,7 +902,6 @@ test('a frame that reached the early channel before the subscription: the report
     await settle();
     const win: InboxEventWindow = { id: 'w-tab-early-0099', permission: 'granted', origin: 'http://localhost:1' };
     const env: SharedEventsEnv = {
-      // The page's own env, so the early channel and its backlog are the ones used.
       ...browserSharedEventsEnv({ open: (c, onFrame) => w.server.open(tabId, c, onFrame), dispatch: dispatchInboxFrame }),
       catchUp: async (c) => w.server.lines.filter((line) => line.seq > c).map((line) => w.server.frameOf(line)),
       sendGone: () => {},
@@ -1043,7 +956,6 @@ test('unsubscribe frees everything: the stream, the leader lock, the window lock
 });
 
 test('a random life of tabs (opens, closes, crashes, freezes) with an agent writing throughout: one stream, every record once per tab', async () => {
-  // A seeded generator, so a failure replays.
   let seed = 20261021;
   const random = () => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
@@ -1078,7 +990,6 @@ test('a random life of tabs (opens, closes, crashes, freezes) with an agent writ
     await settle(30);
     expect(w.server.streams.size).toBe(1);
     for (const one of live) {
-      // Every record after the tab's cursor, once, in order.
       const want = Array.from({ length: w.server.seq - one.from }, (_, i) => one.from + i + 1);
       expect(one.tab.records).toEqual(want);
     }
@@ -1106,7 +1017,6 @@ test('a random life with leaders stopping (no freeze) and tabs shown and hidden:
         const at = Math.floor(random() * live.length);
         if (live[at]!.tab !== paused) w.close(live.splice(at, 1)[0]!.tab);
       } else if (roll < 0.62) {
-        // The leader stops (one at a time), or the stopped one runs again.
         if (paused) {
           w.resume(paused);
           paused = null;
@@ -1122,7 +1032,6 @@ test('a random life with leaders stopping (no freeze) and tabs shown and hidden:
         one.tab.visible = !one.tab.visible;
         one.tab.doc.dispatchEvent(new Event('visibilitychange'));
       } else if (roll < 0.86) {
-        // The Inbox goes away and comes back: catch-ups fail (some at the end of a slow answer), then work again.
         w.catchUpFails = !w.catchUpFails;
         w.catchUpDelayMs = random() < 0.5 ? 0 : 30;
       } else if (roll < 0.92) {
@@ -1140,7 +1049,6 @@ test('a random life with leaders stopping (no freeze) and tabs shown and hidden:
     w.catchUpDelayMs = 0;
     for (const one of live) if (one.frozen) one.tab.doc.dispatchEvent(new Event('resume'));
     w.server.write(2);
-    // Retries back off to 80 ms here.
     await new Promise((done) => setTimeout(done, 300));
     await settle(30);
     steals += w.locks.steals;
@@ -1150,25 +1058,12 @@ test('a random life with leaders stopping (no freeze) and tabs shown and hidden:
       expect(one.tab.records).toEqual(want);
     }
   }
-  // The rounds did take streams over (the property is not vacuous).
   expect(steals).toBeGreaterThan(5);
 }, 120_000);
-
-// ── A stream that dies without closing (liveStream.ts), on fake timers ──
-//
-// Real windows: the server beats every 10 s, the page's window is 25 s (a
-// follower's 30 s), the note waits 3 s for the reconnect; the leader check
-// keeps its own defaults. Fake time passes in 50 ms steps, each running the
-// tasks then due and the promises they settle.
 
 const STEP_MS = 50;
 const BEAT_MS = 10_000;
 
-/** A world on fake timers with the real windows, and a clock whose server beats while `beating`. */
-/**
- * Bun's fake timers drive the runtime's timers, not happy-dom's (the DOM lanes swap those in), so these run without
- * the DOM, as CI runs this file (it is not in tests/dom-test-list.txt).
- */
 const fakeTimerTest = test.skipIf(typeof document !== 'undefined');
 
 function silenceWorld() {
@@ -1176,7 +1071,6 @@ function silenceWorld() {
   const w = world();
   w.timing = undefined;
   let clock = 0;
-  /** The server beats (off: the whole computer asleep, the Inbox too). */
   const beat = { on: true };
   const pass = async (ms: number) => {
     for (let t = 0; t < ms; t += STEP_MS) {
@@ -1193,7 +1087,6 @@ function silenceWorld() {
   return { w, pass, done, beat };
 }
 
-/** A tab's watch timers that wait while `asleep` and run when the tab's `wake` comes (the computer slept). */
 function sleepyTimers() {
   let asleep = false;
   let waiting: (() => void)[] = [];
@@ -1246,7 +1139,6 @@ fakeTimerTest('healthy: five minutes of heartbeats with a leader and two followe
       expect(tab.live).toEqual([]);
       expectAll(tab, 0, 5);
     }
-    // Showing a tab after a short hide asks for nothing either.
     b.visible = false;
     b.doc.dispatchEvent(new Event('visibilitychange'));
     await pass(BEAT_MS);
@@ -1269,12 +1161,10 @@ fakeTimerTest('the leader\'s stream dies silently while it runs: it opens the st
     w.server.write(2);
     await pass(1_000);
     w.server.stall(a.id);
-    // Written while the stream is dead: neither tab hears it.
     w.server.write(3);
     await pass(5_000);
     expect(a.records).toEqual([1, 2]);
     expect(b.records).toEqual([1, 2]);
-    // The leader's window (25 s from the last beat it heard) passes: it opens its stream again from its last seq.
     await pass(30_000);
     expect(w.server.opened.map((o) => o.cursor)).toEqual([0, 2]);
     expect(w.server.opened.every((o) => o.tab === a.id)).toBe(true);
@@ -1282,10 +1172,8 @@ fakeTimerTest('the leader\'s stream dies silently while it runs: it opens the st
     expect(w.locks.steals).toBe(0);
     expectAll(a, 0, 5);
     expectAll(b, 0, 5);
-    // The leader read its list and thread once; the follower heard the replay in time and asked nothing.
     expect(a.listCatchUps).toBe(1);
     expect(b.listCatchUps).toBe(0);
-    // The reconnect answered at once: no "Reconnecting…" anywhere.
     expect(a.live).toEqual([]);
     expect(b.live).toEqual([]);
     await pass(2 * 60_000);
@@ -1296,10 +1184,6 @@ fakeTimerTest('the leader\'s stream dies silently while it runs: it opens the st
   }
 });
 
-/**
- * A hidden tab's timers as Chrome's intensive throttling runs them: each fires at the next whole minute (from
- * `base`), never before. Its main thread still runs: it answers pings and handles messages at once.
- */
 function throttledTimers(base: number): NonNullable<SharedEventsEnv['liveTimers']> {
   return {
     setTimeout: (fn, ms) => {
@@ -1320,11 +1204,9 @@ fakeTimerTest('the leader dies without noticing (hidden, its timers held back a 
     await pass(1_000);
     w.server.write(1);
     await pass(1_000);
-    // The leader's stream goes silent; the leader would see it only at the next whole minute.
     w.server.stall(a.id);
     w.server.write(2);
     await pass(40_000);
-    // The follower waited its longer window, then took the stream and opened its own, from its last seq.
     expect(w.leader()).toBe(b.id);
     expect(w.locks.steals).toBe(1);
     expect(w.server.opened.filter((o) => o.tab === b.id)).toEqual([{ tab: b.id, cursor: 1 }]);
@@ -1332,11 +1214,9 @@ fakeTimerTest('the leader dies without noticing (hidden, its timers held back a 
     await pass(1_000);
     expectAll(a, 0, 5);
     expectAll(b, 0, 5);
-    // The new stream answered at once: no "Reconnecting…"; the follower read its list once.
     expect(a.live).toEqual([]);
     expect(b.live).toEqual([]);
     expect(b.listCatchUps).toBe(1);
-    // The old leader follows now, and stays a follower: no taking back, no loop.
     await pass(3 * 60_000);
     expect(w.leader()).toBe(b.id);
     expect(w.locks.steals).toBe(1);
@@ -1356,12 +1236,10 @@ fakeTimerTest('the computer sleeps and wakes: the leader reopens at once, the fo
     const b = w.open(w.server.seq, { visible: true, liveTimers: clocks[1]!.timers });
     const c = w.open(w.server.seq, { liveTimers: clocks[2]!.timers });
     await pass(30_000);
-    // Ten minutes asleep: no timer runs, the Inbox beats nothing.
     beat.on = false;
     for (const clock of clocks) clock.sleep();
     await pass(10 * 60_000);
     beat.on = true;
-    // Awake: the followers' overdue checks happen to run first, before any frame has come.
     clocks[1]!.wake();
     clocks[2]!.wake();
     clocks[0]!.wake();
@@ -1390,15 +1268,12 @@ fakeTimerTest('every stream held back (a proxy), five tabs: no follower takes th
     w.server.stall('all', { andNew: true });
     w.server.write(2);
     await pass(2 * 60_000);
-    // The leader reopens once a window and says so; the followers leave the stream to it (each would otherwise
-    // take it from the one before, every window, for as long as the outage lasts).
     expect(w.locks.steals).toBe(0);
     expect(w.leader()).toBe(a.id);
     expect(w.server.opened.every((o) => o.tab === a.id)).toBe(true);
     expect(w.server.opened.length).toBeLessThanOrEqual(6);
     for (const tab of tabs) {
       expect(tab.live).toEqual([false]);
-      // One read per window at most while it stays dead (two minutes: three to five windows).
       expect(tab.listCatchUps).toBeGreaterThanOrEqual(3);
       expect(tab.listCatchUps).toBeLessThanOrEqual(5);
     }
@@ -1408,7 +1283,6 @@ fakeTimerTest('every stream held back (a proxy), five tabs: no follower takes th
       expect(tab.live).toEqual([false, true]);
       expectAll(tab, 0, 2);
     }
-    // Live again: nothing more is read.
     const reads = tabs.map((tab) => tab.listCatchUps);
     const opened = w.server.opened.length;
     await pass(2 * 60_000);
@@ -1456,7 +1330,6 @@ test('a window with its own stream (no Web Locks): the same watch reopens it fro
     }
     expect(opened).toEqual([0]);
     expect(events.catchUps).toBe(0);
-    // Silent from here (the record 2 never arrives on it).
     jest.advanceTimersByTime(25_000);
     expect(opened).toEqual([0, 1]);
     expect(events.catchUps).toBe(1);
@@ -1474,8 +1347,6 @@ test('a window with its own stream (no Web Locks): the same watch reopens it fro
   }
 });
 
-// Review of #2565, finding 6: a linked machine's threads show no steps here, so its steps line must not reach the
-// window (onMachine rings a live record and re-reads the open thread when it is that machine's).
 test("a linked machine's steps line never reaches the window; its other records still do", () => {
   const got: unknown[] = [];
   const handlers: InboxEventHandlers = { onRecord: () => {}, onStatus: () => {}, onMachine: (frame) => void got.push(frame.record) };

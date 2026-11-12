@@ -1,20 +1,3 @@
-/**
- * Moving full screen's composer card out of the way (composerDrag.ts, FullScreenComposer.tsx).
- *
- * Proves: a drag by the tray moves the card (a press that hardly moves does not); the card stays inside its view with
- * a margin, also when the view gets smaller or the card grows, and goes back to where it was put when there is room
- * again; a press on a tab still picks the tab and never moves the card; where it was put holds through a tab switch,
- * typing, the tools gathered and brought back, and the card folded to its pill and opened again; another file puts it
- * home; a double click on the tray puts it home; a press on the tray leaves focus where it was; a phone's card does
- * not move. Resizing: a card at home has no corners, a moved one has four; a corner moves and the opposite one
- * stays; never under the card's own size, never past the view's margin; the size holds through a tab switch and the
- * tools gathered; another file and the double click give the card's own size back; a smaller window limits it; it
- * goes narrower than it starts, down to a floor, where the tabs take short names; every corner reaches the margin.
- *
- * happy-dom lays nothing out, so the card's and its view's boxes are given here (`layout`).
- *
- * The pure clamp runs everywhere; the rest is DOM-gated: under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -31,11 +14,9 @@ test('the clamp keeps the whole card a margin inside its view, and leaves a card
   expect(clampOffset({ x: -100, y: -200 }, home, view)).toEqual({ x: -100, y: -200 });
   expect(clampOffset({ x: 5000, y: -5000 }, home, view)).toEqual({ x: 300 - DRAG_MARGIN, y: DRAG_MARGIN - 630 });
   expect(clampOffset({ x: -5000, y: 5000 }, home, view)).toEqual({ x: DRAG_MARGIN - 300, y: 20 - DRAG_MARGIN });
-  // Wider than the view allows: no sideways move at all.
   expect(clampOffset({ x: 40, y: -10 }, { ...home, left: 4, width: 600 }, { width: 608, height: 800 })).toEqual({ x: 0, y: -10 });
 });
 
-/** The view's size and the card's height, as a browser would lay them out: 600 px wide, centred, 20 px above the foot. */
 const layout = { width: 1200, height: 800, card: 150 };
 const noop = () => {};
 let root: Root | null = null;
@@ -51,17 +32,14 @@ function fakeLayout(): void {
   const isCard = (el: HTMLElement) => el.hasAttribute('data-fcomp');
   const proto = HTMLElement.prototype;
   define(proto, 'offsetParent', function () { return isCard(this) ? host : null; });
-  // The size the person gave the card wins over its own, as inbox.css draws it (`data-fcomp-sized`).
   const given = (el: HTMLElement, name: string) => (el.hasAttribute('data-fcomp-sized') ? parseFloat(el.style.getPropertyValue(name)) : NaN);
   const cardHeight = (el: HTMLElement) => given(el, '--ib-fcomp-rh') || layout.card;
   define(proto, 'offsetWidth', function () { return isCard(this) ? given(this, '--ib-fcomp-rw') || Math.min(600, layout.width - 32) : 0; });
-  // The field takes what the tray and the row of buttons (114 px) leave.
   define(proto, 'offsetHeight', function () {
     if (isCard(this)) return cardHeight(this);
     const within = this.tagName === 'TEXTAREA' ? this.closest<HTMLElement>('[data-fcomp]') : null;
     return within ? cardHeight(within) - 114 : 0;
   });
-  // `left: 50%`: the card's layout box starts at the view's middle (its transform centres it).
   define(proto, 'offsetLeft', function () { return isCard(this) ? layout.width / 2 : 0; });
   define(proto, 'offsetTop', function () { return isCard(this) ? layout.height - 20 - cardHeight(this) : 0; });
   define(proto, 'clientWidth', function () { return this === host ? layout.width : 0; });
@@ -105,7 +83,6 @@ function valueOf(patch: Partial<FullScreenComposerValue> = {}, words = ''): Full
 
 let setValue: (patch: Partial<FullScreenComposerValue>) => void = noop;
 
-/** The card over a page, with the page's comment row standing in as one field. The reply's words are held here. */
 function Harness({ first }: { first: Partial<FullScreenComposerValue> }) {
   const [patch, setPatch] = useState(first);
   const [words, setWords] = useState('');
@@ -132,7 +109,6 @@ async function draw(first: Partial<FullScreenComposerValue> = {}): Promise<void>
 const card = () => host!.querySelector<HTMLElement>('[data-fcomp]')!;
 const tray = () => host!.querySelector<HTMLElement>('.ib-fcomp-top')!;
 const tab = (which: 'comment' | 'reply') => host!.querySelector<HTMLElement>(`[data-fcomp-mode="${which}"]`)!;
-/** Where the card is drawn, from its home. */
 const at = () => ({ x: parseFloat(card().style.getPropertyValue('--ib-fcomp-dx') || '0'), y: parseFloat(card().style.getPropertyValue('--ib-fcomp-dy') || '0') });
 
 function pointer(el: HTMLElement, type: string, x: number, y: number): void {
@@ -141,7 +117,6 @@ function pointer(el: HTMLElement, type: string, x: number, y: number): void {
   });
 }
 
-/** A press on `el` at (600, 640), moved by (dx, dy) in two steps, and let go. */
 function dragBy(el: HTMLElement, dx: number, dy: number): void {
   pointer(el, 'pointerdown', 600, 640);
   pointer(el, 'pointermove', 600 + dx / 2, 640 + dy / 2);
@@ -178,10 +153,8 @@ test.skipIf(!hasDom)('a drag by the tray moves the card; a press that hardly mov
   expect(at()).toEqual({ x: 0, y: 0 });
   dragBy(tray(), -180, -300);
   expect(at()).toEqual({ x: -180, y: -300 });
-  // A second drag starts from where the card is.
   dragBy(tray(), 100, 50);
   expect(at()).toEqual({ x: -80, y: -250 });
-  // Nothing is left marking a drag once the pointer is up.
   expect(card().hasAttribute('data-fcomp-dragging')).toBe(false);
 });
 
@@ -194,19 +167,16 @@ test.skipIf(!hasDom)('the card is marked as dragged only while it moves, so no t
   expect(at()).toEqual({ x: 40, y: -40 });
   pointer(tray(), 'pointercancel', 640, 600);
   expect(card().hasAttribute('data-fcomp-dragging')).toBe(false);
-  // The cancelled pointer's later moves are nobody's.
   pointer(tray(), 'pointermove', 700, 500);
   expect(at()).toEqual({ x: 40, y: -40 });
 });
 
 test.skipIf(!hasDom)('the card stays inside its view: at the edges, when the view gets smaller, and when the card grows', async () => {
   await draw();
-  // Home: 300..900 across, 630..780 down, in a 1200 by 800 view.
   dragBy(tray(), 5000, -5000);
   expect(at()).toEqual({ x: 300 - DRAG_MARGIN, y: DRAG_MARGIN - 630 });
   dragBy(tray(), -9000, 9000);
   expect(at()).toEqual({ x: DRAG_MARGIN - 300, y: 20 - DRAG_MARGIN });
-  // Put near the top right, then the window gets narrower: pushed back in.
   dragBy(tray(), 580, -500);
   expect(at()).toEqual({ x: 288, y: -488 });
   layout.width = 1000;
@@ -214,13 +184,11 @@ test.skipIf(!hasDom)('the card stays inside its view: at the edges, when the vie
     window.dispatchEvent(new Event('resize'));
   });
   expect(at()).toEqual({ x: 200 - DRAG_MARGIN, y: -488 });
-  // Room again: back where the person put it.
   layout.width = 1200;
   act(() => {
     window.dispatchEvent(new Event('resize'));
   });
   expect(at()).toEqual({ x: 288, y: -488 });
-  // Put at the very top, then the card grows as words are typed (it grows upward from its foot): still whole.
   dragBy(tray(), 0, -5000);
   expect(at().y).toBe(DRAG_MARGIN - 630);
   layout.card = 300;
@@ -243,7 +211,6 @@ test.skipIf(!hasDom)('a press on a tab picks the tab and never moves the card, e
   await settle();
   expect(card().getAttribute('data-fcomp-mode-on')).toBe('reply');
   expect(at()).toEqual({ x: 0, y: 0 });
-  // A press that starts on a tab and moves is still the tab's.
   dragBy(tab('comment'), -200, -200);
   expect(at()).toEqual({ x: 0, y: 0 });
   dragBy(host!.querySelector<HTMLElement>('[data-fcomp-minimize]')!, -200, -200);
@@ -269,7 +236,6 @@ test.skipIf(!hasDom)('where the card was put holds through a tab switch, typing,
   act(() => tab('comment').click());
   await settle();
   expect(at()).toEqual(put);
-  // The chevron gathers the tools (the pane's `tucked`), and the corner control brings them back.
   act(() => setValue({ tucked: true }));
   await settle();
   expect(at()).toEqual(put);
@@ -279,7 +245,6 @@ test.skipIf(!hasDom)('where the card was put holds through a tab switch, typing,
 });
 
 test.skipIf(!hasDom)('a card folded to its pill opens again where it was put', async () => {
-  // A host with no gather: the chevron folds the card to its pill, and the card's element goes.
   await draw({ onGather: undefined });
   dragBy(tray(), -120, -260);
   act(() => host!.querySelector<HTMLElement>('[data-fcomp-minimize]')!.click());
@@ -300,7 +265,6 @@ test.skipIf(!hasDom)('another file shows the card at its home again; the same fi
   await settle();
   expect(at()).toEqual({ x: 0, y: 0 });
   expect(card().hasAttribute('data-fcomp-moved')).toBe(false);
-  // Back on the first file: home too. Nothing is remembered for a file that was left.
   act(() => setValue({ fileKey: 'att_a:current' }));
   await settle();
   expect(at()).toEqual({ x: 0, y: 0 });
@@ -317,9 +281,7 @@ test.skipIf(!hasDom)('a double click on the tray puts the card home; one on a ta
     tray().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
   });
   expect(at()).toEqual({ x: 0, y: 0 });
-  // The way home is the one move that eases.
   expect(card().hasAttribute('data-fcomp-homing')).toBe(true);
-  // A drag started on the way home is direct again.
   dragBy(tray(), 40, -40);
   expect(card().hasAttribute('data-fcomp-homing')).toBe(false);
   expect(at()).toEqual({ x: 40, y: -40 });
@@ -336,7 +298,6 @@ test.skipIf(!hasDom)('a press on the tray leaves focus in the field; a press on 
     });
     return event.defaultPrevented;
   };
-  // Prevented: the browser neither moves focus to the card nor starts selecting text.
   expect(down(tray())).toBe(true);
   dragBy(tray(), 90, -90);
   expect(document.activeElement).toBe(field);
@@ -350,27 +311,21 @@ test.skipIf(!hasDom)('a phone’s card is docked: no handle, and a drag on its t
   expect(at()).toEqual({ x: 0, y: 0 });
 });
 
-// ── Resizing by the corners ──────────────────────────────────────────────────────────────────────────────────────────
-
 test('a corner moves and the opposite one stays, never under the least size, never past the margin', () => {
   const from = { left: 100, top: 200, right: 700, bottom: 320 };
   const min = { w: 600, h: 120 };
   const view = { width: 1200, height: 800 };
   expect(resizeBox(from, 'se', 100, 80, min, view)).toEqual({ left: 100, top: 200, right: 800, bottom: 400 });
   expect(resizeBox(from, 'nw', -60, -100, min, view)).toEqual({ left: 40, top: 100, right: 700, bottom: 320 });
-  // Smaller than the card is by itself: held at its least, the opposite corner still where it was.
   expect(resizeBox(from, 'se', -300, -300, min, view)).toEqual(from);
   expect(resizeBox(from, 'nw', 300, 300, min, view)).toEqual(from);
-  // Past the view: held a margin in.
   expect(resizeBox(from, 'se', 5000, 5000, min, view)).toEqual({ left: 100, top: 200, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
   expect(resizeBox(from, 'nw', -5000, -5000, min, view)).toEqual({ left: DRAG_MARGIN, top: DRAG_MARGIN, right: 700, bottom: 320 });
-  // An odd width is made even on the moving edge, so the centre is on a whole pixel.
   expect(resizeBox(from, 'ne', 51, 0, min, view).right).toBe(750);
 });
 
 const corners = () => [...host!.querySelectorAll<HTMLElement>('[data-fcomp-resize]')];
 const cornerAt = (which: string) => host!.querySelector<HTMLElement>(`[data-fcomp-resize="${which}"]`)!;
-/** The card's box in its view, as drawn: its layout box (centred on `left`, on its foot) moved by its transform. */
 const boxNow = () => {
   const el = card();
   const left = el.offsetLeft - el.offsetWidth / 2 + at().x;
@@ -397,7 +352,6 @@ test.skipIf(!hasDom)('a corner resizes the card and the opposite corner stays wh
   await draw();
   dragBy(tray(), 100, -300);
   await settle();
-  // 400..1000 across, 330..480 down.
   expect(boxNow()).toEqual({ left: 400, top: 330, right: 1000, bottom: 480 });
   dragBy(cornerAt('se'), 100, 120);
   expect(sizeNow()).toEqual({ w: 700, h: 270 });
@@ -416,7 +370,6 @@ test.skipIf(!hasDom)('never smaller than the card is by itself, never past the v
   await draw();
   dragBy(tray(), 100, -300);
   await settle();
-  // Narrower than it starts (600), down to the floor; no lower than its tray, one line and its buttons (150 here).
   dragBy(cornerAt('se'), -180, -400);
   expect(sizeNow()).toEqual({ w: 420, h: 150 });
   dragBy(cornerAt('se'), -400, -400);
@@ -426,11 +379,9 @@ test.skipIf(!hasDom)('never smaller than the card is by itself, never past the v
   expect(boxNow()).toEqual({ left: 400, top: 330, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
   dragBy(cornerAt('nw'), -5000, -5000);
   expect(boxNow()).toEqual({ left: DRAG_MARGIN, top: DRAG_MARGIN, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
-  // Back down from the largest: the floor again, not less, the bottom right corner still at the margin.
   dragBy(cornerAt('nw'), 5000, 5000);
   expect(sizeNow()).toEqual({ w: MIN_WIDTH, h: 150 });
   expect(boxNow()).toEqual({ left: 1200 - DRAG_MARGIN - MIN_WIDTH, top: 800 - DRAG_MARGIN - 150, right: 1200 - DRAG_MARGIN, bottom: 800 - DRAG_MARGIN });
-  // A smaller window limits the size as it limits the place.
   dragBy(cornerAt('nw'), -5000, -5000);
   layout.width = 900;
   layout.height = 600;
@@ -478,7 +429,6 @@ test.skipIf(!hasDom)('another file gives the card its own size and home back; so
   dragBy(tray(), 100, -300);
   await settle();
   dragBy(cornerAt('nw'), -100, -120);
-  // A double click on a corner is the corner's, not the tray's under it.
   act(() => {
     cornerAt('nw').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
   });
@@ -494,7 +444,6 @@ test.skipIf(!hasDom)('another file gives the card its own size and home back; so
 
 test.skipIf(!hasDom)('every corner grows the card to the view’s margin on its two sides, wherever the card sits', async () => {
   const far: Record<string, [number, number]> = { nw: [-5000, -5000], ne: [5000, -5000], sw: [-5000, 5000], se: [5000, 5000] };
-  // Near the left edge, near the right edge, and in the middle: the keep-inside rule never stops a corner early.
   for (const [dx, dy] of [[-5000, -300], [5000, -300], [0, -300]] as const) {
     await draw();
     dragBy(tray(), dx, dy);
@@ -527,18 +476,15 @@ test.skipIf(!hasDom)('made narrow, the tabs take their short names and keep thei
   await settle();
   expect(sizeNow().w).toBe(MIN_WIDTH);
   expect(card().hasAttribute('data-fcomp-narrow')).toBe(true);
-  // What the tab draws, and what it is still called.
   expect(label('comment').getAttribute('data-short')).toBe('Comment');
   expect(label('reply').getAttribute('data-short')).toBe('Reply');
   expect(label('comment').textContent).toBe('Comment on this page');
   expect(tab('reply').getAttribute('title')).toBe('Reply to Claude Code');
   expect(host!.querySelector('[data-fcomp-minimize]')).not.toBeNull();
-  // The tab still switches, and the reply's row is all there.
   act(() => tab('reply').click());
   await settle();
   expect(card().getAttribute('data-fcomp-mode-on')).toBe('reply');
   for (const part of ['[data-fcomp-send]', '[data-fcomp-attach]', '[data-fcomp-open-thread]', '[data-fcomp-bin]']) expect(card().querySelector(part)).not.toBeNull();
-  // Wide again: the whole names are drawn, with no tooltip.
   dragBy(cornerAt('se'), 400, 0);
   await settle();
   expect(card().hasAttribute('data-fcomp-narrow')).toBe(false);
@@ -549,7 +495,6 @@ test.skipIf(!hasDom)('a row of buttons that needs more than the floor sets the l
   await draw();
   dragBy(tray(), 100, -300);
   await settle();
-  // The reply's row runs 46 px out of the card at the floor (its chips): the least width is that much more.
   const body = card().querySelector<HTMLElement>('[data-fcomp-body]')!;
   Object.defineProperty(body, 'scrollWidth', { configurable: true, get: () => (card().style.getPropertyValue('--ib-fcomp-rw') === `${MIN_WIDTH}px` ? 46 : 0) });
   dragBy(cornerAt('se'), -5000, 0);
@@ -562,13 +507,11 @@ test.skipIf(!hasDom)('a tab whose row needs more than the card’s width widens 
   await settle();
   dragBy(cornerAt('se'), -5000, 0);
   expect(sizeNow().w).toBe(MIN_WIDTH);
-  // The Reply tab's row runs 46 px out of a card this narrow.
   const body = card().querySelector<HTMLElement>('[data-fcomp-body]')!;
   Object.defineProperty(body, 'scrollWidth', { configurable: true, get: () => (card().getAttribute('data-fcomp-mode-on') === 'reply' && card().style.getPropertyValue('--ib-fcomp-rw') === `${MIN_WIDTH}px` ? 46 : 0) });
   act(() => tab('reply').click());
   await settle();
   expect(sizeNow().w).toBe(MIN_WIDTH + 46);
-  // Back on Comment, the width the person set is the card's again.
   act(() => tab('comment').click());
   await settle();
   expect(sizeNow().w).toBe(MIN_WIDTH);

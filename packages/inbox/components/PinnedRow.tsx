@@ -8,37 +8,19 @@ import { pinnedLabel, pinnedRowName, pinnedState } from '../pins';
 import { rowAgent } from './InboxList';
 import { Tip } from './Tip';
 
-/** What a pinned row's menu does. */
 export type PinnedAction = 'unpin' | 'up' | 'down' | 'copy-link';
 
 export interface PinnedRowProps {
   row: InboxListRow;
-  /** The project as the sidebar names it (shortProjectNames). Absent: the server's name. */
   project?: string;
-  /** The thread on screen: the list's selection pill and `aria-current`. */
   on: boolean;
-  /** First or last pin: Move up or Move down is disabled. */
   first: boolean;
   last: boolean;
-  /** A phone: ⋯ always shown, the menu a sheet from the bottom edge titled by the row's label, no right-click. */
   phone: boolean;
   onOpen: () => void;
   onAction: (action: PinnedAction) => void;
 }
 
-/**
- * One pinned thread in the sidebar (approval "inbox-pinned-threads", variant
- * Count): the agent's mark, the thread's name or else the subject (cut with
- * "…"; the whole label, the subject if it differs, and its project in a component tooltip), then the state, the way a project row
- * shows its count: a Stopped or Holds N pill in the badges' tints, the open
- * questions, a dot for news, or nothing when nothing waits on the person (the
- * row steps back); an archived thread shows the archive glyph. Bold when the
- * list row would be. ⋯ beside it (the project row's pattern: two buttons side
- * by side) opens Unpin, Move up, Move down and Copy link; a right-click on the
- * row opens the same menu. On a phone ⋯ is always shown, 44 px, and the menu
- * is a bottom sheet titled by the row's label, and the row has two lines: the
- * name in full (up to two lines), then its project and its state in words.
- */
 export function PinnedRow(props: PinnedRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -82,13 +64,11 @@ export function PinnedRow(props: PinnedRowProps) {
         <Icon name="archive" size={13} />
       </span>
     ) : null;
-  // On a phone the state is said in words after the project: the pills as they are, a count as its words, news as "New".
   const phoneState =
     state.kind === 'stop' || state.kind === 'hold' ? (
       tail
     ) : state.kind === 'wait' || state.kind === 'new' || state.kind === 'archived' ? (
       <span className="ib-pin-st" data-k={state.kind}>
-        {/* One open question has no words of its own in the list (`questionCount`); here it is said. */}
         {state.words || '1 question'}
       </span>
     ) : null;
@@ -111,7 +91,6 @@ export function PinnedRow(props: PinnedRowProps) {
         >
           <AuthorMark author={rowAgent(row)} />
           {props.phone ? (
-            // A phone's sheet (approval "inbox-phone-sidebar-sheet"): the name in full on up to two lines, then its project and state.
             <span className="ib-pin-t">
               <span className="ib-name" dir="auto">
                 {label}
@@ -153,7 +132,6 @@ export function PinnedRow(props: PinnedRowProps) {
       <ContextMenu.Trigger render={row_(content)} />
       <ContextMenu.Portal container={portal ?? undefined}>
         <ContextMenu.Positioner className="ib-pm-pos">
-          {/* Focus goes back to the row's ⋯, never the page. */}
           <ContextMenu.Popup className="ib-pm" aria-label={label} data-pin-menu={row.thread_id} finalFocus={more}>
             {items}
           </ContextMenu.Popup>
@@ -166,7 +144,6 @@ export function PinnedRow(props: PinnedRowProps) {
 function PinnedMenuItems({ subject, first, last, onAction }: { subject: string; first: boolean; last: boolean; onAction: (action: PinnedAction) => void }) {
   return (
     <>
-      {/* The popup is named by the label already (aria-label): the title is for the eye only (a phone's sheet). */}
       <div className="ib-pm-title" dir="auto" aria-hidden="true">
         {subject}
       </div>
@@ -191,7 +168,6 @@ function PinnedMenuItems({ subject, first, last, onAction }: { subject: string; 
   );
 }
 
-/** A pinned row's tooltip: the whole label (the row may cut it), the subject when it differs, then project and state. */
 function PinnedTipText({ label, subject, project, state }: { label: string; subject: string; project: string; state: string }) {
   return (
     <span className="ib-tip-proj" data-pin-tip="">

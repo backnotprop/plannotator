@@ -1,14 +1,3 @@
-/**
- * What the Ask AI window draws, worked out from what it read. Pure.
- *
- * The chat list (approval "inbox-ask-ai-flow", Header 2026-11-02): the top
- * group is the current chat, anything answering or with a new answer, and chats
- * from the last 24 hours. Older chats go under "Recent", at most 20.
- *
- * The transcript: the saved file wins, and the stream only fills in the turn
- * still being answered, so a window that slept or lost its stream shows what
- * the Inbox kept.
- */
 import type { ChatMessage, ChatTextPart } from '@plannotator/ui/components/chat';
 import { inboxReviewLines } from '@plannotator/core/inbox-review';
 import type { InboxAskChat, InboxAskConversationWire, InboxAskTurnWire } from '../api';
@@ -21,7 +10,6 @@ export interface AskChatGroups {
   recent: InboxAskChat[];
 }
 
-/** The rows of the dropdown. `current` is drawn first even with no question yet: it is the chat on screen. */
 export function askChatGroups(chats: readonly InboxAskChat[], current: InboxAskChat, now: number): AskChatGroups {
   const others = chats.filter((chat) => chat.thread_id !== current.thread_id).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const inTop = (chat: InboxAskChat) => chat.answering || chat.unread || now - Date.parse(chat.at) < ASK_TOP_MS;
@@ -31,13 +19,11 @@ export function askChatGroups(chats: readonly InboxAskChat[], current: InboxAskC
   };
 }
 
-/** A row's one mark: the check on the chat on screen, else a spinner while it answers, else a dot for a new answer. */
 export function askRowState(chat: InboxAskChat, currentId: string): 'current' | 'answering' | 'unread' | null {
   if (chat.thread_id === currentId) return 'current';
   return chat.answering ? 'answering' : chat.unread ? 'unread' : null;
 }
 
-/** A chat's time in a row: "4 min ago", "1 h ago", "2 days ago", "last week". */
 export function askChatTime(iso: string, now: number): string {
   const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
   if (!Number.isFinite(minutes)) return '';
@@ -54,18 +40,12 @@ export function askChatTime(iso: string, now: number): string {
 
 export const askChatName = (subject: string | null): string => subject ?? '(no subject)';
 
-/** The turn still arriving in this window, with what its stream brought so far. */
 export interface AskLiveText {
   turnId: string;
   text: string;
   streaming: boolean;
 }
 
-/**
- * A turn's question as the person reads it. A Show me (code review) sent the
- * agent its request for a Shape; the person sees what they asked: "Show me on
- * retry-worker.ts lines 16–18", and their words.
- */
 export function askShownQuestion(turn: Pick<InboxAskTurnWire, 'question' | 'kind' | 'show_me'>): string {
   if (turn.kind !== 'show_me' || !turn.show_me) return turn.question;
   const { file, lines, words, part } = turn.show_me;
@@ -77,7 +57,6 @@ export function askShownQuestion(turn: Pick<InboxAskTurnWire, 'question' | 'kind
 export const askUserId = (turnId: string): string => `q-${turnId}`;
 export const askAnswerId = (turnId: string): string => `a-${turnId}`;
 
-/** The conversation as transcript messages. A turn with no words has no answer row: the transcript's pending line or a note stands there. */
 export function askMessages(conversation: InboxAskConversationWire | null, live: AskLiveText | null): ChatMessage<ChatTextPart>[] {
   const messages: ChatMessage<ChatTextPart>[] = [];
   for (const turn of conversation?.turns ?? []) {
@@ -89,12 +68,10 @@ export function askMessages(conversation: InboxAskConversationWire | null, live:
   return messages;
 }
 
-/** The ids the transcript labels Stopped. */
 export function askStopped(conversation: InboxAskConversationWire | null): ReadonlySet<string> {
   return new Set((conversation?.turns ?? []).filter((turn) => turn.stopped && turn.answer).map((turn) => askAnswerId(turn.id)));
 }
 
-/** The note under a turn the file says did not end well, or null. */
 export function askTurnNote(turn: InboxAskTurnWire, agent: string): string | null {
   if (turn.failure === 'gone') return `${agent} went away before it finished.`;
   if (turn.failure === 'taken_over') return 'Another message took over the session, so this answer stops here.';
@@ -102,12 +79,10 @@ export function askTurnNote(turn: InboxAskTurnWire, agent: string): string | nul
   return null;
 }
 
-/** The turn asked with no answer and nothing running: what the person can do about it. */
 export function askUnanswered(turn: InboxAskTurnWire, running: string | null): boolean {
   return turn.answer === undefined && !turn.stopped && turn.id !== running;
 }
 
-/** The newest answer's time, what `seen` reports. */
 export function askNewestAnswer(conversation: InboxAskConversationWire | null): string | null {
   let newest: string | null = null;
   for (const turn of conversation?.turns ?? []) {
@@ -116,7 +91,6 @@ export function askNewestAnswer(conversation: InboxAskConversationWire | null): 
   return newest;
 }
 
-/** Whether the window has answers its `seen_at` does not cover. */
 export function askUnseen(conversation: InboxAskConversationWire | null): string | null {
   const newest = askNewestAnswer(conversation);
   if (!newest) return null;

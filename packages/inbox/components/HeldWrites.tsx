@@ -2,13 +2,6 @@ import type { MachineView, OutboxView } from '../api';
 import { Icon } from '../icons';
 import { outboxLine } from '../machines';
 
-/**
- * Linked machines: what the person sent to another machine's thread that its Inbox has not taken yet, drawn as
- * their own reply is, with the outbox's state in place of the delivery line: "Sending…" until the other machine's
- * Inbox answers, never "Delivered" before (rule 12). Delivered, it is the thread's own and is not drawn here.
- * Shown in the thread, and in its place while the thread cannot open (that machine asleep), so a held answer is
- * never out of sight.
- */
 export function HeldWrites({ entries, machine, onDismiss }: { entries: readonly OutboxView[]; machine: Pick<MachineView, 'name' | 'state'> | null; onDismiss?: (key: string) => void }) {
   return (
     <>

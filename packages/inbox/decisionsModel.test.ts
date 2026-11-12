@@ -1,8 +1,3 @@
-/**
- * Decision mode's queue, pure (packages/inbox/decisions/model.ts): the
- * projection folded in without reordering or undoing a saved pick, Later,
- * Previous, when a session's reply may go, and which replies a Send makes.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxDecision, InboxListRow, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import {
@@ -91,7 +86,6 @@ describe('the queue', () => {
     q = mergeDecisions(q, [B1, A2]);
     expect(q.order).toEqual([A1.id, A2.id, B1.id]);
     expect(q.gone.get(A1.id)).toBe('closed');
-    // A decision a reply of this sitting carried reads as sent; one that left otherwise reads as closed.
     const sent = mergeDecisions(mergeDecisions(emptyQueue(), [A1, A2, B1]), [B1], new Set([A1.id]));
     expect(sent.gone.get(A1.id)).toBe('sent');
     expect(sent.gone.get(A2.id)).toBe('closed');
@@ -103,7 +97,6 @@ describe('the queue', () => {
     q = mergeDecisions(q, [picked]);
     q = mergeDecisions(q, [A1]);
     expect(q.cache.get(A1.id)!.question.state).toBe('picked');
-    // Optimistic (revision 0 still) but the pick is on its way.
     const optimistic = mergeDecisions(emptyQueue(), [{ ...A1, question: { ...A1.question, state: 'picked' } }]);
     expect(mergeDecisions(optimistic, [A1], new Set(), new Set([A1.id])).cache.get(A1.id)!.question.state).toBe('picked');
     expect(mergeDecisions(optimistic, [A1]).cache.get(A1.id)!.question.state).toBe('open');
@@ -117,7 +110,6 @@ describe('the queue', () => {
     const handled = (d: InboxDecision) => ({ ...d, question: { ...d.question, state: 'picked' as const, revision: 1 } });
     q = mergeDecisions(q, [A1, handled(A2), handled(B1)]);
     expect(nextId(q, B1.id)).toBe(A1.id);
-    // A put off and still open keeps its session's reply back.
     expect(groupReady(q, groupKeyOf(A1))).toBe(false);
     expect(groupHalfAnswered(q, groupKeyOf(A1))).toBe(true);
     expect(groupReady(q, groupKeyOf(B1))).toBe(true);
@@ -129,7 +121,6 @@ describe('the queue', () => {
     const C1 = decision('msg_c/q-4', 'ses_c');
     const q = mergeDecisions(emptyQueue(), [A1, B1, C1]);
     expect(sessionChips(q).map((c) => c.name)).toEqual(['Claude Code', 'Claude Code (another session)', 'Claude Code (another session 3)']);
-    // One session of each agent: the names as they are.
     expect(sessionChips(mergeDecisions(emptyQueue(), [A1, A2])).map((c) => c.name)).toEqual(['Claude Code']);
   });
 
@@ -146,7 +137,6 @@ describe("a group's send state", () => {
   test('a group the person answered in this sitting starts a 5 s Hold; its first value is 5', () => {
     const next = nextGroupSend({ kind: 'waiting' }, facts());
     expect(next).toEqual({ kind: 'hold', until: 1000 + DECISION_HOLD_MS, paused: null });
-    // Whatever clock the first render read (an old one, before the Hold began), it shows 5, never more.
     expect(holdSeconds(next as Extract<GroupSend, { kind: 'hold' }>, 1000)).toBe(5);
     expect(holdSeconds(next as Extract<GroupSend, { kind: 'hold' }>, 1000 - 5000)).toBe(5);
     expect(holdSeconds(next as Extract<GroupSend, { kind: 'hold' }>, 1000 + 4200)).toBe(1);
@@ -154,17 +144,14 @@ describe("a group's send state", () => {
 
   test('a group ready before this sitting (Keep as a draft) never sends by itself: Held · Send', () => {
     expect(nextGroupSend({ kind: 'waiting' }, facts({ touched: false }))).toEqual({ kind: 'held', by: 'untouched' });
-    // Touched later, it starts its Hold; held by the person, it stays held.
     expect(nextGroupSend({ kind: 'held', by: 'untouched' }, facts()).kind).toBe('hold');
     expect(nextGroupSend({ kind: 'held', by: 'person' }, facts())).toEqual({ kind: 'held', by: 'person' });
-    // Undo took back the only answer given in this sitting: the Hold gives way to Held · Send.
     expect(nextGroupSend({ kind: 'hold', until: 9, paused: null }, facts({ touched: false }))).toEqual({ kind: 'held', by: 'untouched' });
   });
 
   test('a thread with a reply draft never sends from here, touched or not', () => {
     expect(nextGroupSend({ kind: 'waiting' }, facts({ draft: true }))).toEqual({ kind: 'draft', held: false });
     expect(nextGroupSend({ kind: 'hold', until: 9, paused: null }, facts({ draft: true }))).toEqual({ kind: 'draft', held: false });
-    // The draft goes: a Hold the person pressed before it is kept; otherwise a touched group starts its Hold.
     const held = nextGroupSend({ kind: 'held', by: 'person' }, facts({ draft: true }));
     expect(held).toEqual({ kind: 'draft', held: true });
     expect(nextGroupSend(held, facts())).toEqual({ kind: 'held', by: 'person' });
@@ -180,7 +167,6 @@ describe("a group's send state", () => {
     const sent: GroupSend = { kind: 'sent', at: '2026-10-24T10:00:00.000Z' };
     expect(nextGroupSend(sent, facts({ ready: false }))).toBe(sent);
     expect(nextGroupSend(sent, facts()).kind).toBe('hold');
-    // A failed send waits for Try again.
     expect(nextGroupSend({ kind: 'failed', error: 'x' }, facts()).kind).toBe('failed');
   });
 
@@ -188,10 +174,8 @@ describe("a group's send state", () => {
     const hold = startHold(1000, true);
     const paused = pauseHold(hold, false, 3000);
     expect(paused).toEqual({ kind: 'hold', until: hold.kind === 'hold' ? hold.until : 0, paused: 3000 });
-    // Tucked for a minute: still 3 s left once back.
     expect(pauseHold(paused, true, 63_000)).toEqual({ kind: 'hold', until: 66_000, paused: null });
     expect(restartHold(hold, 4000, true)).toEqual({ kind: 'hold', until: 9000, paused: null });
-    // A Hold that starts while tucked starts paused.
     expect(startHold(1000, false)).toEqual({ kind: 'hold', until: 6000, paused: 5000 });
   });
 
@@ -234,8 +218,6 @@ describe('the Send', () => {
     expect(afterSendOf(row({ last_author: 'agent', last_agent_at: '2026-10-24T10:06:00.000Z' }), at, true)).toBe('replied');
   });
 
-  // Approval "inbox-stopped-reply": a reply Claude Code holds until the person types in that session reads Stopped,
-  // in its words, where it would read Queued; once it went in, Delivered.
   test('held by a stopped Claude Code session: Stopped, then Delivered once it went in', () => {
     const row = (delivery: Partial<NonNullable<InboxListRow['delivery']>>) =>
       ({ last_author: 'person', last_agent_at: '2026-10-24T10:00:00.000Z', sent: null, delivery }) as unknown as InboxListRow;
@@ -299,15 +281,12 @@ describe('the contract lines (approval "inbox-decision-mode", agent contract lin
   });
 
   test('on a one-way question every answer asks once more, whichever choice the agent recommends; a Skip never does', () => {
-    // The safe choice recommended: both choices confirm.
     const safe = oneWay();
     expect(answerNeedsConfirm(safe, choiceAnswer(safe, ['Delete now'], ''))).toBe(true);
     expect(answerNeedsConfirm(safe, choiceAnswer(safe, ['Wait for month-end close'], ''))).toBe(true);
-    // The destructive choice recommended (the grammar does not say which one is one-way): it still confirms.
     const risky = oneWay({ choices: safe.choices.map((c) => ({ ...c, recommended: c.label === 'Delete now' })), recommendation: 'Delete now' });
     expect(answerNeedsConfirm(risky, choiceAnswer(risky, ['Delete now'], ''))).toBe(true);
     expect(answerNeedsConfirm(risky, choiceAnswer(risky, ['Wait for month-end close'], ''))).toBe(true);
-    // Other and text confirm; a Skip and a note alone do not; a reversible question never does.
     expect(answerNeedsConfirm(safe, { ...choiceAnswer(safe, [], ''), other: 'Delete only the oldest one' })).toBe(true);
     const text = oneWay({ kind: 'text', choices: [], recommendation: null, suggested_text: 'Drop the table' });
     expect(answerNeedsConfirm(text, { ...choiceAnswer(text, [], ''), kind: 'text', text: 'Drop the table' })).toBe(true);

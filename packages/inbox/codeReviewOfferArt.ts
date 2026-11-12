@@ -1,26 +1,13 @@
-/**
- * The picture at the top of Code review's offer (approval "code-review-offer-card", 2026-11-06: the brand kit's
- * "Static Storm", minted 2026-11-04). The palette and the sign and dither recipe are the brand kit's own; nothing here
- * picks a new colour. Violet is the agents' noise, green + and red - are the change, bone is the person's mark. The
- * storm cracks open around one sorted column of + rows over - rows.
- *
- * Motion is the kit's "click": three stepped hops 125 ms apart, never a fade. Under reduced motion only the sorted
- * frame is drawn. Decoration only (the canvas is aria-hidden); the same in light and dark.
- */
-
 const UV = { void: '#0F0D16', indigo: '#2A2262', violet: '#5038B0', lilac: '#A79AEC', bone: '#ECE7DC' };
 const DX = { plus: '#2FD872', plusDeep: '#0E6E3B', minus: '#F2443B', minusDeep: '#8A1A26' };
 
-/** The art's options: `unit`, the smallest cell (px); `seed`, which storm; `cx`, where the column stands (0..1). */
 export interface CodeReviewArtOptions {
   unit: number;
   seed: number;
   cx: number;
 }
 
-/** The hops, as how far the sort has gone (0..1); reduced motion draws only the last. */
 export const CODE_REVIEW_ART_STEPS = [0, 0.34, 0.67, 1] as const;
-/** The beat between hops, ms. */
 export const CODE_REVIEW_ART_BEAT_MS = 125;
 
 function hash(...k: number[]): number {
@@ -59,7 +46,6 @@ function signGrid(ctx: CanvasRenderingContext2D, x: number, y: number, s: number
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) sign(ctx, x + i * c, y + j * c, c, kind, color);
 }
 
-/** One storm cell (a quadtree leaf); `quiet`: the chance it stays empty. */
 function stormCell(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, seed: number, quiet: number): void {
   if (quiet && hash(seed + 13, x, y, s) < quiet) {
     ctx.fillStyle = UV.void;
@@ -100,7 +86,6 @@ function stormCell(ctx: CanvasRenderingContext2D, x: number, y: number, s: numbe
   }
 }
 
-/** Walk a quadtree over (x, y, w, h) in blocks of `block`, down to `unit`; `leaf` gets each cell. */
 function quad(x: number, y: number, w: number, h: number, block: number, unit: number, seed: number, leaf: (x: number, y: number, s: number) => void): void {
   const rec = (cx: number, cy: number, s: number) => {
     if (s > unit && hash(seed + 11, cx, cy, s) < 0.58) {
@@ -114,7 +99,6 @@ function quad(x: number, y: number, w: number, h: number, block: number, unit: n
   for (let yy = y; yy < y + h; yy += block) for (let xx = x; xx < x + w; xx += block) rec(xx, yy, block);
 }
 
-/** Size the canvas to its box (at most 2x) and give back its context, or null where a canvas cannot draw. */
 function setup(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
@@ -129,7 +113,6 @@ function setup(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: n
   return { ctx, w, h };
 }
 
-/** The storm cracked open around one sorted column; `f`: how far the sort has gone (0..1). */
 export function drawCodeReviewArt(canvas: HTMLCanvasElement, f: number, o: CodeReviewArtOptions): void {
   const drawn = setup(canvas);
   if (!drawn) return;
@@ -148,10 +131,8 @@ export function drawCodeReviewArt(canvas: HTMLCanvasElement, f: number, o: CodeR
     const jag = hash(seed + 3, x, y) * block * 0.9;
     const d = Math.abs(mid - (cx + cw / 2)) - (hole / 2 + jag * (1 - f) - jag * 0.2);
     if (d < 0) return;
-    // The storm thins toward the crack: fewer cells near the sorted column.
     stormCell(ctx, x, y, s, seed, Math.max(0, 0.55 - d / (block * 4)));
   });
-  // The sorted column: + rows over - rows, filling as the sort goes.
   const rows = Math.ceil(h / sq) + 1;
   const plusRows = Math.round(rows * 0.66);
   const filled = Math.round(rows * (0.35 + 0.65 * f));
@@ -166,23 +147,17 @@ export function drawCodeReviewArt(canvas: HTMLCanvasElement, f: number, o: CodeR
       sign(ctx, px, py, sq - gap, plus ? '+' : '-', UV.void, 0.5, 0.16);
     }
   }
-  // The bone caret beside it: the person's mark.
   if (f >= 0.66) {
     ctx.fillStyle = UV.bone;
     ctx.fillRect(cx + cw + Math.round(unit * 0.8), Math.round(h * 0.5 - unit), Math.round(unit * 0.9), Math.round(unit * 1.6));
   }
 }
 
-/**
- * Play the art into `canvas`: the hops on the beat, then hold; a resize redraws the last frame. `still` (reduced
- * motion): the last frame only. Gives back the stop.
- */
 export function playCodeReviewArt(canvas: HTMLCanvasElement, o: CodeReviewArtOptions, still: boolean): () => void {
   const steps = still ? [1] : CODE_REVIEW_ART_STEPS;
   const timers: ReturnType<typeof setTimeout>[] = [];
   steps.forEach((f, i) => timers.push(setTimeout(() => drawCodeReviewArt(canvas, f, o), i * CODE_REVIEW_ART_BEAT_MS)));
   let resize: ReturnType<typeof setTimeout> | undefined;
-  // The first notice is the observing itself, not a resize: the hops play out.
   let first = true;
   const observer =
     typeof ResizeObserver === 'function'

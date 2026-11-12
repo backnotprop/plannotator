@@ -1,12 +1,3 @@
-/**
- * The connect line above the list (components/ConnectLine.tsx; approval
- * "inbox-agent-note-auto": the note is written by itself, so the old dialog's
- * band moved to one quiet line): what the last run connected, the notes
- * written by themselves with each file in a tooltip, failures and entries
- * left alone, Got it, and the way to Settings → Agents.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,11 +51,9 @@ const button = (el: Element, name: string) => [...el.querySelectorAll('button')]
 
 test.skipIf(!hasDom)('one note written by itself: one quiet line naming the agent, the file in its tooltip and for a screen reader', async () => {
   const { el } = mount(null, [CLAUDE_NOTE]);
-  // What a screen reader reads: the file before the full stop.
   expect(lines(el)).toEqual(["Added the Inbox note to Claude Code's instructions (~/.claude/rules/plannotator-inbox.md)."]);
   expect(el.querySelector('[data-connect-notes] .ib-sr')?.textContent).toBe(' (~/.claude/rules/plannotator-inbox.md)');
   expect(await tooltipOf(el.querySelector('[data-note-agent="claude-code"]')!)).toBe('~/.claude/rules/plannotator-inbox.md');
-  // A line, never a dialog, and nothing to confirm.
   expect(el.querySelector('dialog')).toBeNull();
   expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Got it']);
 });

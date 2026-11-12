@@ -1,14 +1,3 @@
-/**
- * "Animate it": the words of the message the person sends an agent (AnimateIt.tsx), the one place they live so they
- * can be tuned. The picture travels as the message's attachment; the request id ties the hand-back
- * (`plannotator inbox icon set`, apps/hook/server/inbox-icon-command.ts) to this one icon.
- *
- * Tested clean room: a fresh agent given only this text and the picture, in a scratch folder, against a sandboxed
- * Inbox (briefs, not this repo). Smooth pictures are never redrawn: an agent that traced a smooth fox lost its look,
- * and one that kept the picture and moved cut-outs of it kept it.
- */
-
-/** The new thread's name. */
 export const ANIMATE_THREAD_NAME = 'Animate an agent icon';
 
 export function animatePrompt(requestId: string): string {

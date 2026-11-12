@@ -19,16 +19,12 @@ describe('next and previous thread (J / K)', () => {
   });
 
   test('an open thread that left the rows on screen steps from the slot it had', () => {
-    // E on an open update moved it to folded Quiet: it is not drawn, its neighbours are.
     const before = ['a', 'b', 'c', 'd'];
     expect(threadStep(['a', 'c', 'd'], 'b', 1, before)).toEqual({ to: 'c' });
     expect(threadStep(['a', 'c', 'd'], 'b', -1, before)).toEqual({ to: 'a' });
-    // A neighbour gone too: the nearest one that way still on screen.
     expect(threadStep(['a', 'd'], 'b', 1, before)).toEqual({ to: 'd' });
-    // Nothing left that way: the end, as from a drawn row.
     expect(threadStep(['c', 'd'], 'b', -1, before)).toEqual({ end: 'first' });
     expect(threadStep(['a'], 'b', 1, before)).toEqual({ end: 'last' });
-    // A slot from another thread does not count.
     expect(threadStep(['a', 'c'], 'x', 1, before)).toBeNull();
   });
 

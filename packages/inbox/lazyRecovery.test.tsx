@@ -1,21 +1,3 @@
-/**
- * The post dialog and the search palette are chunks the Inbox serves on first
- * use (lazyParts.tsx, #2593). When one cannot arrive (the Inbox stopped for a
- * moment), the window must stay usable and ask again once the Inbox is back.
- * What regresses:
- *
- *  - PostEnding: Post and "Comment…" left disabled until a reload, with no
- *    word, because the dialog's open state was never cleared;
- *  - ⌘K: the palette's boundary stays failed and React.lazy keeps its
- *    rejection, so ⌘K never opens search again; and the window's search state
- *    stays open, which keeps the list intro off;
- *  - Shape: React.lazy keeps the board's rejection, so every later open shows
- *    the notice until Reload.
- *
- * The chunk fails as a missing one does; it is then served again by mocking
- * the module once more.
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -51,7 +33,6 @@ afterEach(() => {
 });
 
 function mount(node: React.ReactNode) {
-  // React and the boundary log the failed chunk; the test reads the screen instead.
   silence = console.error;
   console.error = () => {};
   host = document.createElement('div');
@@ -99,12 +80,10 @@ test.skipIf(!hasDom)('a post dialog whose chunk cannot arrive says so beside Pos
   expect(primary() !== null).toBe(true);
   await act(async () => primary().click());
   await settle();
-  // ui's notice (with Reload) beside the control, and the control not stuck disabled.
   const notice = host!.querySelector('[data-review-posts] [data-lazy-load-failed]');
   expect(notice !== null).toBe(true);
   expect(notice!.querySelector('button') !== null).toBe(true);
   expect(primary().disabled).toBe(false);
-  // The Inbox is back: the next Post opens the dialog, and the notice goes.
   mock.module('#platform-post', () => ({ default: ({ open }: { open: unknown }) => (open ? <div data-post-dialog="" /> : null) }));
   await act(async () => primary().click());
   await settle();
@@ -115,7 +94,6 @@ test.skipIf(!hasDom)('a post dialog whose chunk cannot arrive says so beside Pos
 test.skipIf(!hasDom)('a palette whose chunk cannot arrive closes the search state, and the next open loads it', async () => {
   const closes: string[] = [];
   let openSearch: () => void = () => {};
-  /** The window's search state, as App keeps it (searchMounted, searchOpen, closeSearch). */
   function Window() {
     const [mounted, setMounted] = useState(false);
     const [open, setOpen] = useState(false);
@@ -146,7 +124,6 @@ test.skipIf(!hasDom)('a palette whose chunk cannot arrive closes the search stat
   await settle();
   expect(closes).toEqual(['dismissed']);
   expect(host!.querySelector('[data-search-open]')!.getAttribute('data-search-open')).toBe('no');
-  // The Inbox is back: ⌘K opens the palette.
   mock.module('#search-palette', () => ({ default: ({ open }: { open: boolean }) => (open ? <div data-palette="" /> : null) }));
   await act(async () => openSearch());
   await settle();
@@ -157,7 +134,6 @@ test.skipIf(!hasDom)('a palette whose chunk cannot arrive closes the search stat
 
 test.skipIf(!hasDom)('a Shape board whose chunk cannot arrive says so, and the next open loads it', async () => {
   let setOpen: (id: string | null) => void = () => {};
-  /** The window's Shape layer, as App mounts it: only while a board is open. */
   function Window() {
     const [id, set] = useState<string | null>(null);
     setOpen = set;
@@ -171,7 +147,6 @@ test.skipIf(!hasDom)('a Shape board whose chunk cannot arrive says so, and the n
   await act(async () => setOpen('shp_1'));
   await settle();
   expect(host!.querySelector('[data-shape-layer] [data-lazy-load-failed]') !== null).toBe(true);
-  // The Inbox is back: closing and opening the board loads it.
   mock.module('#shape-board', () => ({ default: ({ id }: { id: string }) => <div data-board={id} /> }));
   await act(async () => setOpen(null));
   await act(async () => setOpen('shp_1'));

@@ -1,13 +1,7 @@
-/**
- * The shared read of a thread's Ask (askReads.ts). What regresses: calls made together reading more than once,
- * a change during a read being lost (a call then must get a read that left after it), a failed read sticking,
- * or two threads sharing a read.
- */
 import { expect, test } from 'bun:test';
 import type { InboxAskModel } from '../api';
 import { createAskReader } from './askReads';
 
-/** A read the test answers by hand; `n` is the read's number, so a caller can tell which read it got. */
 function server() {
   const sent: Array<{ thread: string; answer: (n?: number) => void; fail: () => void }> = [];
   const read = (thread: string) =>
@@ -37,18 +31,15 @@ test('a change during a read: a call then reads again at once, shared by its tas
   await tick();
   expect(s.sent).toHaveLength(1);
 
-  // An event while the first read is on its way (it may not have seen the change): its readers share one new read.
   const during = [readAsk('thr_1'), readAsk('thr_1')];
   await tick();
   expect(s.sent).toHaveLength(2);
 
-  // The newer read may land first: each caller gets the answer of the read it shared.
   s.sent[1]!.answer();
   expect((await Promise.all(during)).map(nOf)).toEqual([2, 2]);
   s.sent[0]!.answer();
   expect(nOf(await first)).toBe(1);
 
-  // Nothing more came: no third read.
   await tick();
   expect(s.sent).toHaveLength(2);
 });

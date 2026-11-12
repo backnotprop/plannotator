@@ -1,9 +1,3 @@
-/**
- * A diagram file in the surface (4.4): Plannotator's DiagramViewer full
- * screen, pinch and pan, a tap on a node or an edge hands the part to the
- * shell's comment sheet. Loaded lazily, with the engine behind it.
- */
-
 import { useMemo } from 'react';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { DiagramViewer, type DiagramHostDraft } from '@plannotator/ui/components/diagram/DiagramViewer';

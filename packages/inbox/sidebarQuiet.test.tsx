@@ -1,12 +1,3 @@
-/**
- * A sidebar project with nothing waiting is drawn quiet (muted text). It used
- * to carry the class `ib-q`, which the question card also uses (#1838), so a
- * quiet project rendered as a bordered card with 20px margins in the sidebar.
- * The failure this catches is the folder sharing a class with any question
- * card style again: it must not match `.pn-inbox .ib-q`.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

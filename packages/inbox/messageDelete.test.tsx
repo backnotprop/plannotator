@@ -1,16 +1,3 @@
-/**
- * Delete on words selected in an agent's message (the owner's ask, approval
- * "inbox-toolbar-delete"): the message's selection toolbar offers Delete
- * before Comment and 👍, as plan review's does (no label picker), and Delete
- * hands the window a DELETION on those words, which the feedback a Send
- * carries tells the agent to remove. Failures to catch: Delete missing from
- * the message toolbar again, the label picker coming back with it, the
- * person's own message taking it, or a Delete that reaches the agent as an
- * empty comment.
- *
- * Driven through the real MessageBody, ui Viewer and web-highlighter; no
- * Inbox server. DOM-gated (DOM_TESTS=1), listed in tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -54,7 +41,6 @@ async function render(author: InboxMessageWire['author'], saved: Annotation[]) {
     attachments: [],
     questions: [],
   } as unknown as InboxMessageWire;
-  // As the thread passes it: only an agent's live message takes comments.
   const comments = author.kind === 'agent'
     ? { annotations: [] as Annotation[], onSave: async (annotation: Annotation) => (saved.push(annotation), true) }
     : undefined;
@@ -101,7 +87,6 @@ test.skipIf(!hasDom)("words in an agent's message: Delete, Comment, 👍 (plan r
   expect(saved[0]!.text ?? '').toBe('');
   expect(el.querySelector('mark.annotation-highlight.deletion')?.textContent).toBe('and a 429 waits for Retry-After');
 
-  // What the window sends for it, as the store keeps it (packages/inbox/attachments.ts builds the Send's feedback).
   const record: InboxAnnotationRecord = {
     id: saved[0]!.id,
     project_id: 'prj_x',

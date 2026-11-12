@@ -12,7 +12,6 @@ describe('reviewFiles', () => {
     expect(files.map((file) => file.path).sort()).toEqual(parsed.map((file) => file.path).sort());
     expect(loose.map((file) => file.path).sort()).toEqual(['a-link', 'docs/guide/intro.md', 'docs/index.md']);
     expect(files.slice(-loose.length)).toEqual(loose);
-    // The folder comes first in the tree, though git has the root files ahead of it.
     expect(tree[0]).toMatchObject({ type: 'folder', path: 'src' });
     expect(files[0]!.path.startsWith('src/')).toBe(true);
     expect(parsed[0]!.path).toBe('README.md');

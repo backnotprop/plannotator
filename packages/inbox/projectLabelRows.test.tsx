@@ -1,11 +1,3 @@
-/**
- * A row names its project by its folder (owner's pick, 2026-10-29), adding
- * the parent only when two projects with rows in the list share it. The
- * server's name ("plannotator · plannotator", lengthened by a stored project
- * the list does not show) is what agents read; the row does not show it.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -20,7 +12,6 @@ const AGENT = { kind: 'agent' as const, host: 'claude-code', session: 'ses_a', n
 
 const PROJECTS = [
   { id: 'prj_repo', root: '/Users/me/plannotator/plannotator', name: 'plannotator · plannotator' },
-  // Stored, no row in the list: the clash the server's name carries.
   { id: 'prj_old_wt', root: '/Users/me/old/plannotator', name: 'plannotator · old' },
   { id: 'prj_api_w', root: '/work/api', name: 'api · work' },
   { id: 'prj_api_h', root: '/personal/api', name: 'api · personal' },
@@ -53,7 +44,6 @@ function row(id: string, project: (typeof PROJECTS)[number]): InboxListRow {
 
 const SECTIONS: InboxListSection[] = [
   { id: 'waiting', label: 'Waiting on you', threads: [row('msg_repo', PROJECTS[0]!), row('msg_w', PROJECTS[2]!)] },
-  // A folded Quiet row counts as listed: opening Quiet does not rename the rows above.
   { id: 'quiet', label: 'Quiet', threads: [row('msg_h', PROJECTS[3]!)] },
 ];
 
@@ -105,23 +95,18 @@ const projectOf = (el: HTMLElement, id: string) => el.querySelector(`[data-threa
 test.skipIf(!hasDom)('a row reads its folder name unless another listed project shares it, in every row shape', () => {
   for (const shape of ['wide', 'narrow', 'phone'] as const) {
     const el = render(shape);
-    // The only clash is with a project that has no row: the folder name alone.
     expect(projectOf(el, 'msg_repo')).toBe('plannotator');
-    // "api" twice in the list (one row in the folded Quiet): each adds its parent.
     expect(projectOf(el, 'msg_w')).toBe('api · work');
     act(() => root?.unmount());
     host?.remove();
   }
 });
 
-// ListRow is memoized on its row's content: a row whose data did not change must still draw the name the
-// list now gives its project, when another project's row lands and makes the name clash.
 test.skipIf(!hasDom)('a row already drawn adds its parent once a row from another project with its name lands', () => {
   for (const shape of ['wide', 'narrow', 'phone'] as const) {
     const repo = row('msg_repo', PROJECTS[0]!);
     const el = render(shape, [{ id: 'waiting', label: 'Waiting on you', threads: [repo] }]);
     expect(projectOf(el, 'msg_repo')).toBe('plannotator');
-    // The same row data (a fresh object, as each list read brings), and the old worktree's thread arriving.
     draw(shape, [{ id: 'waiting', label: 'Waiting on you', threads: [{ ...repo }, row('msg_wt', PROJECTS[1]!)] }]);
     expect(projectOf(el, 'msg_repo')).toBe('plannotator · plannotator');
     expect(projectOf(el, 'msg_wt')).toBe('plannotator · old');

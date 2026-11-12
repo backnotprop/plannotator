@@ -1,13 +1,3 @@
-/**
- * Drawing on an image or a video frame (DOM_TESTS=1; approval
- * "inbox-markup-flow"): the drawing screen's ✓ (or Enter) adds the drawing to
- * the reply at once as its own comment, selected, with the window's toast and
- * its Undo; × on the box's picture takes it out; a note goes onto the same
- * comment; a drawing with no words shows its picture as its card (the agent
- * still gets the stand-in words); Escape discards, and a click outside never
- * loses strokes. The drawing screen sits over the whole window (in
- * `.pn-inbox`), not inside the pane.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { act, useState } from 'react';
@@ -26,7 +16,6 @@ let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
 const restores: (() => void)[] = [];
 
-/** Replace a member for one test (restored after it). */
 function stub<T extends object>(target: T, key: string, descriptor: PropertyDescriptor) {
   const previous = Object.getOwnPropertyDescriptor(target, key);
   Object.defineProperty(target, key, { configurable: true, ...descriptor });
@@ -38,11 +27,8 @@ const FRAME = '/home/me/.plannotator/inbox/markups/' + 'c'.repeat(64) + '.jpg';
 
 type Post = { url: string; body: Record<string, unknown> | null };
 let posts: Post[] = [];
-/** How long the markups route takes to answer (a slow upload). */
 let uploadMs = 0;
-/** How long each canvas encode takes, one entry per call (none left: at once). */
 let encodeMs: number[] = [];
-/** Saving an annotation fails (the server refuses it). */
 let failSaves = false;
 
 beforeEach(() => {
@@ -51,7 +37,6 @@ beforeEach(() => {
   encodeMs = [];
   failSaves = false;
   if (!hasDom) return;
-  // A 2D context that draws nothing; a canvas that hands back a small PNG or JPEG.
   const ctx = new Proxy({}, { get: () => () => {} });
   stub(HTMLCanvasElement.prototype, 'getContext', { value: () => ctx, writable: true });
   stub(HTMLCanvasElement.prototype, 'toBlob', {
@@ -64,12 +49,10 @@ beforeEach(() => {
     writable: true,
   });
   stub(Element.prototype, 'setPointerCapture', { value: () => {}, writable: true });
-  // A page URL, so the image's route parses (at about:blank happy-dom fails it, and the pane says the image could not be shown).
   const happy = (globalThis as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
   const was = location.href;
   happy.setURL('http://127.0.0.1:4100/');
   restores.push(() => happy.setURL(was));
-  // happy-dom has no Path2D (the pen's stroke is one).
   stub(globalThis, 'Path2D', { value: class {}, writable: true });
   stub(URL, 'createObjectURL', { value: () => 'blob:frame', writable: true });
   stub(URL, 'revokeObjectURL', { value: () => {}, writable: true });
@@ -96,7 +79,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // The CSS check runs in the plain pass too, where there is no document.
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
@@ -161,10 +143,8 @@ function record(annotation: object, id: string, attachmentId = shot.id): InboxAn
 }
 
 let toasts: Omit<InboxToastModel, 'id'>[] = [];
-/** The thread's records from outside the pane: an edit in the panel, a Send that closes them. */
 let setThreadRecords: (update: (now: InboxAnnotationRecord[]) => InboxAnnotationRecord[]) => void = () => {};
 
-/** The pane with its records kept as the thread keeps them (a save upserts, a removal drops). */
 function Harness({ attachment, initial = [] }: { attachment: InboxAttachmentState; initial?: InboxAnnotationRecord[] }) {
   const [records, setRecords] = useState(initial);
   setThreadRecords = setRecords;
@@ -208,7 +188,6 @@ async function render(node: React.ReactNode) {
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
 const $ = <T extends Element = HTMLElement>(selector: string) => document.querySelector<T>(selector);
 
-/** Open the drawing screen and draw one stroke on it. */
 async function openAndDraw() {
   await act(async () => $<HTMLButtonElement>('[data-markup-open]')!.click());
   await settle();
@@ -237,7 +216,6 @@ const typeInto = async (area: HTMLTextAreaElement, value: string) => {
 test.skipIf(!hasDom)('the ✓ adds the drawing to the reply at once: a comment, selected, with the toast; the box keeps its picture and offers a note', async () => {
   await render(<Harness attachment={shot} />);
   await openAndDraw();
-  // The drawing screen is over the whole window, not inside the pane (beside the thread it sat under the thread column).
   const overlay = $('[data-pn-image-annotator-stage]')!.closest('.pn-visible-viewport-overlay')!;
   expect(overlay.parentElement!.classList.contains('pn-inbox')).toBe(true);
   expect(overlay.closest('[data-attachment-pane]')).toBeNull();
@@ -249,14 +227,12 @@ test.skipIf(!hasDom)('the ✓ adds the drawing to the reply at once: a comment, 
   const [added] = saved();
   expect(saved()).toHaveLength(1);
   expect(added).toMatchObject({ text: MARKUP_ONLY_TEXT, images: [{ path: MARKED }] });
-  // In the reply: its card shows the picture (no stand-in words), and it is selected so the drawing lies on the image.
   const card = $(`[data-annotation-id="${added!.id}"]`)!;
   expect(card.querySelector('[data-markup-picture] img')).not.toBeNull();
   expect(card.textContent).not.toContain(MARKUP_ONLY_TEXT);
   expect($('[data-showing-markup]')).not.toBeNull();
   expect(toasts.map((t) => t.lead)).toEqual(['Markup added to your reply']);
   expect(typeof toasts[0]!.onUndo).toBe('function');
-  // The box: the picture with its check and ×, "Note (optional)", Add note waiting for words.
   expect($('[data-image-composer] [data-markup-kept] img')).not.toBeNull();
   expect($<HTMLTextAreaElement>('[data-image-composer] textarea')!.placeholder).toBe('Note (optional)');
   expect($<HTMLButtonElement>('[data-image-comment-save]')!.textContent).toBe('Add note');
@@ -278,7 +254,6 @@ test.skipIf(!hasDom)('a note goes onto the same comment; the stand-in words give
   const card = $(`[data-annotation-id="${id}"]`)!;
   expect(card.textContent).toContain('Make the step dots the heading.');
   expect(card.querySelector('[data-markup-picture]')).toBeNull();
-  // The box is clear for the next comment.
   expect($('[data-markup-kept]')).toBeNull();
   expect($<HTMLTextAreaElement>('[data-image-composer] textarea')!.placeholder).toBe('Comment on this image…');
 });
@@ -311,7 +286,6 @@ test.skipIf(!hasDom)('Escape discards the drawing and adds nothing; a click outs
   await render(<Harness attachment={shot} />);
   await openAndDraw();
   const overlay = () => $('[data-pn-image-annotator-stage]')?.closest<HTMLElement>('.pn-visible-viewport-overlay') ?? null;
-  // A stray click outside: the drawing stays open.
   await act(async () => overlay()!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
   await settle();
   expect(overlay()).not.toBeNull();
@@ -320,7 +294,6 @@ test.skipIf(!hasDom)('Escape discards the drawing and adds nothing; a click outs
   expect(overlay()).toBeNull();
   expect(posts).toEqual([]);
   expect(toasts).toEqual([]);
-  // An empty drawing: a click outside closes it, and adds nothing.
   await act(async () => $<HTMLButtonElement>('[data-markup-open]')!.click());
   await settle();
   await act(async () => overlay()!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -376,7 +349,6 @@ test.skipIf(!hasDom)('a video frame takes the same flow: Enter adds the marked-u
   expect(saved()[1]).toMatchObject({ id: added!.id, text: 'The logo is clipped here.', inboxVideo: { time: 102.4 } });
   expect($('[data-markup-kept]')).toBeNull();
 
-  // Undo from the toast takes it out.
   await act(async () => toasts[0]!.onUndo!());
   await settle();
   expect(removed()).toEqual([added!.id as string]);
@@ -400,11 +372,9 @@ test.skipIf(!hasDom)('a note and a redraw build on the comment as it reads now: 
   await press('Enter');
   await settle();
   const id = saved()[0]!.id as string;
-  // Words written on the card in Annotations meanwhile.
   await act(async () =>
     setThreadRecords((now) => now.map((r) => (r.id === id ? { ...r, annotation: { ...r.annotation, text: 'Panel words' } } : r))),
   );
-  // A redraw replaces the picture and keeps the words; no second "added" toast (its Undo would take the whole comment).
   await act(async () => $<HTMLButtonElement>('[data-markup-kept] [data-markup-redraw]')!.click());
   await settle();
   await act(async () => $('[data-pn-image-annotator-stage] img')!.dispatchEvent(new Event('load')));
@@ -416,7 +386,6 @@ test.skipIf(!hasDom)('a note and a redraw build on the comment as it reads now: 
   await settle();
   expect(saved()[1]).toMatchObject({ id, text: 'Panel words', images: [{ path: MARKED }] });
   expect(toasts).toHaveLength(1);
-  // A note follows the panel's words.
   await typeInto($<HTMLTextAreaElement>('[data-image-composer] textarea')!, 'Box note');
   await act(async () => $<HTMLButtonElement>('[data-image-comment-save]')!.click());
   await settle();
@@ -430,10 +399,8 @@ test.skipIf(!hasDom)('once its comment is gone (removed in the panel, or sent), 
   await settle();
   const first = saved()[0]!.id as string;
   expect($('[data-markup-kept]')).not.toBeNull();
-  // The card deleted in the panel, or the reply sent: the record leaves the unsent ones.
   await act(async () => setThreadRecords((now) => now.filter((r) => r.id !== first)));
   await settle();
-  // (A boolean: bun cannot print a happy-dom element in a failure.)
   expect($('[data-markup-kept]') !== null).toBe(false);
   expect($<HTMLTextAreaElement>('[data-image-composer] textarea')!.placeholder).toBe('Comment on this image…');
   await openAndDraw();
@@ -483,7 +450,6 @@ test('on a phone the drawing’s × is a 44 px target', () => {
   expect(size + 2 * Number(inset![1])).toBeGreaterThanOrEqual(44);
 });
 
-/** A film in the pane, paused at 1:42 (happy-dom's media element keeps no time: a plain field stands in). */
 async function renderFilm() {
   stub(HTMLMediaElement.prototype, 'pause', { value: () => {}, writable: true });
   stub(HTMLMediaElement.prototype, 'currentTime', {
@@ -528,7 +494,6 @@ test.skipIf(!hasDom)("on a video too, a note keeps the panel's words and the mom
   expect(saved()[1]).toMatchObject({ id, text: 'Panel words\n\nBox note', inboxVideo: { time: 102.4 } });
 });
 
-/** Two ✓ presses whose encodes finish far apart: the second lands after the first drawing is already in the reply. */
 async function twoLateChecks() {
   encodeMs = [5, 120];
   uploadMs = 20;
@@ -544,7 +509,6 @@ test.skipIf(!hasDom)('one drawing per opening: a ✓ whose encode lands after th
   await twoLateChecks();
   expect(saved()).toHaveLength(1);
   expect(toasts).toHaveLength(1);
-  // The next opening takes its drawing (a redraw of the same comment).
   await act(async () => $<HTMLButtonElement>('[data-markup-kept] [data-markup-redraw]')!.click());
   await settle();
   await act(async () => $('[data-pn-image-annotator-stage] img')!.dispatchEvent(new Event('load')));
@@ -572,7 +536,6 @@ test.skipIf(!hasDom)('playing on never drops a redraw that is waiting to be save
   await press('Enter');
   await settle();
   expect(saved()).toHaveLength(1);
-  // A redraw the server refuses: it waits in the row, to go with the note.
   failSaves = true;
   await act(async () => $<HTMLButtonElement>('[data-video-composer] [data-markup-redraw]')!.click());
   await settle();
@@ -582,7 +545,6 @@ test.skipIf(!hasDom)('playing on never drops a redraw that is waiting to be save
   failSaves = false;
   const video = $<HTMLVideoElement>('video[data-video-player]')!;
   await act(async () => video.dispatchEvent(new Event('play')));
-  // (Booleans: bun cannot print a happy-dom element in a failure.)
   expect($('[data-video-composer] [data-markup-kept]') !== null).toBe(true);
   expect($<HTMLButtonElement>('[data-video-comment-save]')!.disabled).toBe(false);
   await act(async () => $<HTMLButtonElement>('[data-video-comment-save]')!.click());
@@ -592,7 +554,6 @@ test.skipIf(!hasDom)('playing on never drops a redraw that is waiting to be save
   expect((last.images as { name: string }[])[0]!.name).toMatch(/marked up$/);
 });
 
-/** Draw on the drawing screen already open (a redraw). */
 async function openAndDrawAgain() {
   await act(async () => $('[data-pn-image-annotator-stage] img')!.dispatchEvent(new Event('load')));
   const canvas = $('[data-pn-image-annotator-stage] canvas')!;

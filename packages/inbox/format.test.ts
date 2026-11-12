@@ -1,14 +1,6 @@
-/**
- * Times and counts as the window says them (the stress test of 2026-10-12,
- * rows 10 to 12 and 24): a time in a thread says its day when it is not
- * today, a date in the list says its year when it is not this year, and a
- * count over 999 has its thousands separated. Today's times and small counts
- * read exactly as before.
- */
 import { describe, expect, test } from 'bun:test';
 import { dateTime, dayWords, formatCount, plural, questionCount, shortAgentName, shortTime, whenTime } from './format';
 
-// Local times, so the day boundaries are the person's own.
 const now = new Date(2026, 9, 12, 21, 30);
 const at = (y: number, m: number, d: number, h = 20, min = 22) => new Date(y, m, d, h, min).toISOString();
 

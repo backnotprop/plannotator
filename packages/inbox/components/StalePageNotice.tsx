@@ -1,15 +1,6 @@
 import { useRef } from 'react';
 import { Icon } from '../icons';
 
-/**
- * "Inbox updated to X · Reload" (stalePage.ts): this page is older than the Inbox it talks to. In the look of the
- * list's "N new · Show" line (the owner: "similar to when you get a new message and you click it and it refreshes
- * the page"), with a × that hides it for this release. Never a reload by itself: the person presses it.
- *
- * While Reload saves (`busy`) it stays focusable (`aria-disabled`, presses ignored), so focus is still on it when a
- * save fails and the toast says why; the × works throughout. The × moves focus to where the person was reading: the
- * thread's subject, or the list's first row.
- */
 export function StalePageNotice({ version, busy, onReload, onDismiss }: { version: string; busy: boolean; onReload: () => void; onDismiss: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const dismiss = () => {

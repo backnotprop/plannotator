@@ -5,20 +5,11 @@ import { inboxApi, type InboxAskChat } from '../api';
 import { Icon } from '../icons';
 import { askChatGroups, askChatName, askChatTime, askRowState } from './askModel';
 
-/**
- * The window's header: the current chat (Ask's sparkle in the accent colour,
- * "Ask AI · <thread name>", a caret) and the dropdown of chats, on the Inbox's own menu (`.ib-pm`;
- * Base UI carries the keys: arrows, Home/End, type-ahead, Escape and Tab close,
- * focus back on the chip). The list is read when it opens, so an answer in
- * another chat shows there and nowhere before that (told to the owner).
- * Rows have no close X: End stays on the round button.
- */
 export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat; phone: boolean; onPick: (chat: InboxAskChat) => void }) {
   const [chats, setChats] = useState<readonly InboxAskChat[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const chip = useRef<HTMLButtonElement>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
-  // Drawn inside the window's root, so its styles and theme reach the menu.
   useLayoutEffect(() => setPortal(chip.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
 
   const read = () => {
@@ -26,7 +17,6 @@ export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat;
     inboxApi.askChats().then(
       (answer) => setChats(answer.chats),
       () => {
-        // The menu still shows the chat on screen and what it read last.
       },
     );
   };
@@ -65,7 +55,6 @@ export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat;
   return (
     <Menu.Root modal={false} onOpenChange={(open) => open && read()}>
       <Menu.Trigger ref={chip} className="ib-ask-chip" aria-label={`${askChatName(current.subject)}, chats`} data-ask-chip="">
-        {/* Told apart from a draft's window at a glance (approval "inbox-reply-floaters"): Ask's sparkle and "Ask AI · <thread>". */}
         <AskSparkle />
         <span className="ib-ask-chipname" dir="auto">
           Ask AI · {askChatName(current.subject)}
@@ -96,7 +85,6 @@ export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat;
   );
 }
 
-/** Lucide's sparkles (the Inbox's own icons have no such mark): Ask's header, and its row in the corner's list. */
 export function AskSparkle({ size = 15, className = 'ib-ic ib-ask-sparkle' }: { size?: number; className?: string }) {
   return (
     <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" data-ask-sparkle="">

@@ -1,4 +1,3 @@
-/** Tests: the page's state from a pulls answer, its rows the server's own rule makes of it (no threads). */
 import { inboxPullItems, inboxPullStacks, inboxReviewRows, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import type { PullsState } from './usePulls';
 

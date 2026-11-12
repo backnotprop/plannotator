@@ -1,11 +1,3 @@
-/**
- * A Change it the host did not take (a Shapes server that restarted and keeps refusing, Shape turned off, a server
- * that is gone) must not swallow the person's words: the same box opens again with them and says why, on a marked
- * part as on the whole board. An Ask the host did not take stays in the Ask panel and says so. What regresses: the
- * box closing on submit and the text vanishing with no message, or a failed Ask vanishing (an unhandled rejection).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,7 +12,6 @@ import { bridgeSanitizerDom } from '../../tests/helpers/chat-sanitizer-dom';
 const hasDom = typeof document !== 'undefined';
 const surface = (hasDom ? await import('@plannotator/ui/components/shape/ShapeSurface') : {}) as typeof import('@plannotator/ui/components/shape/ShapeSurface');
 
-// happy-dom cannot host DOMPurify as it stands; without the bridge the drawing (and its marked part) comes out empty.
 let unbridge: (() => void) | null = null;
 beforeAll(() => {
   if (hasDom) unbridge = bridgeSanitizerDom();
@@ -51,7 +42,6 @@ const wait = async (done: () => boolean) => {
   for (let i = 0; i < 50 && !done(); i++) await act(() => new Promise((r) => setTimeout(r, 20)));
 };
 
-/** The board, desktop-wide (happy-dom lays nothing out, so every width reads 0, a phone's). */
 async function mount(note: ShapeHost['note'], ask: ShapeHost['ask'] = async () => { throw new Error('not in this test'); }): Promise<HTMLElement> {
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1280 });
@@ -76,11 +66,9 @@ async function mount(note: ShapeHost['note'], ask: ShapeHost['ask'] = async () =
 const globalComment = (el: HTMLElement) =>
   [...el.querySelectorAll<HTMLButtonElement>('.shp-head-side button')].find((b) => b.textContent?.trim() === 'Global comment') ?? null;
 
-/** The marked part "k" in the drawing (inside the view's shadow root). */
 const markedPart = (el: HTMLElement) =>
   [...el.querySelectorAll('.shp-drawn-host')].map((h) => h.shadowRoot?.querySelector<HTMLElement>('[data-mark="k"]')).find(Boolean) ?? null;
 
-/** Open the composer (the whole board's, or a marked part's), type, and press `button`. */
 async function compose(el: HTMLElement, words: string, button = 'Change it', on: 'board' | 'part' = 'board') {
   if (on === 'part') {
     await wait(() => !!markedPart(el));
@@ -119,7 +107,6 @@ test.skipIf(!hasDom)("a Change it on a marked part the host refused: that part's
   expect(sent).toEqual(['k']);
   expect(document.querySelector('[data-comment-popover-error]')?.textContent).toBe(surface.SHAPE_CHANGE_NOT_SENT);
   expect((document.querySelector('[data-comment-popover] textarea') as HTMLTextAreaElement).value).toBe('Two whistles');
-  // The part's own box (its quote in the header), not the whole board's.
   expect(document.querySelector('[data-comment-popover]')?.textContent).toContain('One whistle');
 });
 

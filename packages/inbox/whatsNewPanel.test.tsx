@@ -1,11 +1,3 @@
-/**
- * What's new's TL;DR and releases panel as drawn (approval
- * .product/approved/inbox-whats-new-tldr/, round 2): the selected row follows
- * the release the page shows (`#whats-new=<v>`), rows are links that switch
- * the notes on a plain click and stay links for Cmd-click, the Latest card
- * is compact or full, each row's fallback words, the TL;DR ledger, loading
- * with the known line, "Can't reach GitHub" with Try again, and the sheet.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -134,7 +126,6 @@ test.skipIf(!hasDom)('a plain click switches the notes; Cmd-click is left to the
   act(() => void row.dispatchEvent(meta));
   expect(meta.defaultPrevented).toBe(false);
   expect(opened).toEqual(['0.28.50']);
-  // The release already open is not opened again.
   act(() => panel(el).querySelector<HTMLAnchorElement>('[data-whats-new-release="0.28.53"]')!.click());
   expect(opened).toEqual(['0.28.50']);
 });
@@ -143,7 +134,6 @@ test.skipIf(!hasDom)('the Latest card: compact while the latest release is open,
   const el = render({ version: '0.28.53', model: model('0.28.53') });
   const card = () => panel(el).querySelector<HTMLElement>('[data-whats-new-latest]')!;
   expect(card().dataset.whatsNewLatest).toBe('compact');
-  // Compact: its version, date and "You have this" only; the TL;DR is in the ledger right beside it.
   expect(card().querySelector('.ib-wn-cl, .ib-wn-rl, .ib-wn-rp, li')).toBeNull();
   expect(card().textContent).not.toContain('Start an agent');
   expect(card().querySelector('.ib-wn-rv')!.textContent).toBe('0.28.53You have this');
@@ -164,7 +154,6 @@ test.skipIf(!hasDom)("each earlier row: two TL;DR lines, else the release list's
   expect(words('0.28.43').textContent).toBe('Voice dictation, combine projects');
   expect(words('0.28.42').textContent).toBe('Choose how your list looks.');
   expect(words('0.28.39').textContent).toBe('No summary');
-  // Versions and dates sit in their own columns.
   expect(panel(el).querySelector('[data-whats-new-release="0.28.50"] .ib-wn-rd')?.textContent).toBe('Nov 5');
   expect(panel(el).querySelector('.ib-wn-phead')?.textContent).toBe('Releases5');
 });
@@ -184,7 +173,6 @@ test.skipIf(!hasDom)('the TL;DR ledger: each label with its dot in one column; n
     ['Fixed', 'ib-wn-dot ib-wn-d-fixed', 'Prints in full'],
     ['Security', null, 'Tokens rotate'],
   ]);
-  // The ledger comes before the notes.
   expect(ledger.compareDocumentPosition(el.querySelector('.ib-wn-body')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   rerender({ version: '0.28.50', model: model('0.28.50') });
   expect(el.querySelector('[data-whats-new-tldr]')).toBeNull();
@@ -198,7 +186,6 @@ test.skipIf(!hasDom)('loading: the heading and the known line at once, then "Get
   expect(el.querySelector('[data-whats-new-known] .ib-wn-known')?.textContent).toBe('Voice dictation, combine projects');
   expect(el.querySelector('[data-whats-new-known] .ib-wn-from')?.textContent).toBe("From the release list in 0.28.53's notes");
   expect(el.querySelector('[data-whats-new-loading] [role="status"]')?.textContent).toBe('Getting the notes from GitHub');
-  // A release with no known line: placeholder bars in the TL;DR's place.
   rerender({ version: '0.28.39', model: null });
   expect(el.querySelector('[data-whats-new-known]')).toBeNull();
   expect(el.querySelectorAll('.ib-wn-tldr .ib-wn-sk').length).toBe(3);
@@ -216,10 +203,8 @@ test.skipIf(!hasDom)("offline and not saved: Can't reach GitHub, with Try again 
   const github = card.querySelector<HTMLAnchorElement>('[data-whats-new-open-github]')!;
   expect(github.href).toBe('https://github.com/backnotprop/plannotator/releases/tag/v0.28.43');
   expect(github.target).toBe('_blank');
-  // The known line still shows above it; the plain error line does not.
   expect(el.querySelector('[data-whats-new-known]')).not.toBeNull();
   expect(el.querySelector('.ib-error')).toBeNull();
-  // Not found (update checks off): the server's words, no Try again.
   rerender({ version: '0.28.43', model: null, error: { message: 'These release notes aren\'t saved on this computer, and update checks are off.', code: 'notes_not_found' } });
   expect(el.querySelector('[data-whats-new-retry]')).toBeNull();
   expect(el.querySelector('[data-whats-new-missing] p')?.textContent).toContain('update checks are off');

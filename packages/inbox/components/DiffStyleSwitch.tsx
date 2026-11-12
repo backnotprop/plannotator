@@ -1,18 +1,3 @@
-/**
- * Split | Unified in a guided review (approval "inbox-guide-diff-style",
- * #2107): the control the guide reader raises in a tab out of the first
- * section card (the guide chain's `renderSectionTab`) where the host's bar
- * does not draw the diff controls (the pull request page). It writes code
- * review's own diff layout (diffOptions.ts), so the choice holds in both.
- * Native radios in a radiogroup: Tab reaches the one chosen, the arrows
- * choose. The guided review and the full-window review draw one Split /
- * Unified button in their bars instead (DiffControls).
- *
- * `icons`: the pull request page's flat review (the owner's note on r7, "limit the amount of text so the user can focus
- * on the diff"): two marks, the tooltip and each radio's name saying which is which. `name`: another switch on the page
- * (the one docked in the top bar) keeps its own radio group.
- */
-
 import type React from 'react';
 import { useConfigValue } from '@plannotator/ui/config';
 import type { InboxDiffStyle } from '../api';
@@ -24,12 +9,6 @@ const CHOICES: { id: InboxDiffStyle; label: string; tip: string }[] = [
   { id: 'unified', label: 'Unified', tip: 'Unified: old and new in one column. Also code review.' },
 ];
 
-/**
- * Pierre's `diffs-icon-diff-split` and `diffs-icon-diff-unified` (@pierre/diffs dist/sprite.js) in one line: its
- * square cut into two panes, its minus and plus. Every stroke lands on a pixel. Pierre's panes are two solid tones,
- * which read as a dark block at this size; here only the chosen mark's panes fill, faintly, in those same two tones
- * (`.ib-mark-old`, `.ib-mark-new`: inbox.css).
- */
 const MARKS: Record<InboxDiffStyle, React.ReactElement> = {
   split: (
     <svg className="ib-mark" viewBox="0 0 15 15" width="15" height="15" fill="none" stroke="currentColor" aria-hidden="true">
@@ -56,7 +35,6 @@ export function DiffStyleSwitch({
 }: {
   icons?: boolean;
   name?: string;
-  /** The group's name, told apart when the page has several. */
   label?: string;
 } = {}) {
   const style = useConfigValue('diffStyle');

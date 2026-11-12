@@ -1,19 +1,3 @@
-/**
- * 👍 Looks good, as the window draws it (design record "inbox-acknowledge",
- * approved 2026-10-15, amended 2026-10-16: it is sent through to the agent):
- * the whole window (InboxApp) over a REAL Inbox in a temp data dir (its own
- * process, tests/helpers/inbox-dom-server.ts with its plain agent news, and
- * an Undo window of a few seconds). What is proved: the thread's foot is
- * Reply and Looks good side by side, with no New message button; Looks good
- * is hidden while a question waits; a click presses the button, draws the
- * pill under the message ("goes to … in a few seconds"), shows no toast
- * (approval "inbox-reaction-tray"), and the row reads "👍 Looks good" in place of "Read" once the
- * list settles; Z takes it back. Once the window passes the line says it is
- * saved for the agent, and once its session took it, "👍 Looks good ·
- * Delivered to Claude Code, <time>". The line's other states on their own.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -70,13 +54,11 @@ async function serverRow(threadId: string) {
 }
 
 const TESTS = 7;
-/** The Undo window this file's Inbox runs with: long enough for a test's clicks, short enough to wait out. */
 const UNDO_WINDOW_MS = 2_500;
 
 beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-ack-dom-')));
-  // Never the real tailscale, never the real data dir.
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
@@ -133,7 +115,6 @@ afterEach(() => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
-  // Which groups are closed is kept for the page (listGroups.ts): each test starts with Quiet and Snoozed closed.
   resetListGroupsForTests();
   root = null;
   host = null;
@@ -186,7 +167,6 @@ test.skipIf(!hasDom)('the foot is Reply and Looks good side by side; there is no
   expect(footButtons(el)).toEqual(['Reply', '👍Looks good']);
   expect(el.querySelector('[data-new-message]')).toBeNull();
   expect(ackButton(el)!.getAttribute('aria-pressed')).toBe('false');
-  // No native title, and no tooltip with a mouse: resting on it opens its reaction tray (approval "inbox-reaction-tray").
   expect(ackButton(el)!.hasAttribute('title')).toBe(false);
   expect(el.querySelector('section.ib-pane .ib-pfoot [data-react-more]')?.getAttribute('aria-label')).toBe("More reactions for Claude Code's message");
 });
@@ -207,26 +187,21 @@ test.skipIf(!hasDom)('a click presses the button and the pill shows, with no toa
   act(() => ackButton(el)!.click());
   await until(() => ackButton(el)?.getAttribute('aria-pressed') === 'true', 'the pressed button');
   expect(posted.filter((p) => p.path.endsWith('/ack'))).toEqual([{ path: `/api/inbox/messages/${thread}/ack`, body: expect.objectContaining({ ack: true }) }]);
-  // The thread holds the same messages, the last one acknowledged; inside the Undo window it is not sent yet.
   const messages = await serverMessages(thread);
   expect(messages).toHaveLength(before);
   expect(messages.at(-1)!.ack).toMatchObject({ label: 'Looks good', settled_seq: null });
   const pill = el.querySelector('[data-ack-pill]') as HTMLElement;
   expect(pill.getAttribute('data-ack-pill')).toBe('pending');
   expect(pill.textContent).toContain('goes to Claude Code in a few seconds');
-  // No toast after a reaction (approval "inbox-reaction-tray"): the pill under the message is the confirmation.
   expect(el.querySelector('.ib-toast')).toBeNull();
   expect((await serverRow(thread)).section).toBe('quiet');
 
-  // Leave the thread: the row settles in Quiet and says Looks good in place of Read.
   act(() => (el.querySelector('.ib-phead [aria-label="Close the thread"]') as HTMLButtonElement).click());
   await until(() => el.querySelector('[data-section-id="quiet"] .ib-band') !== null, 'the Quiet band');
-  // Quiet is folded: open it.
   act(() => (el.querySelector('[data-section-id="quiet"] .ib-band') as HTMLButtonElement).click());
   await until(() => el.querySelector(`[data-section-id="quiet"] [data-row="${thread}"]`) !== null, 'the row in Quiet');
   expect(el.querySelector(`.ib-listcol [data-row="${thread}"]`)?.textContent).toContain('👍 Looks good');
 
-  // Z inside the Undo window (the toast is kept unseen): the ack and its Mark read are gone.
   press('z');
   await until(async () => (await serverMessages(thread)).at(-1)!.ack === null, 'the Undo');
   expect((await serverRow(thread)).read_at ?? null).toBeNull();
@@ -286,7 +261,6 @@ test.skipIf(!hasDom)('the pressed button takes it back; the line says each state
     const pillRoot = createRoot(box);
     act(() => pillRoot.render(<AckPill ack={ack} agent="Claude Code" wakes={wakes} connection={connection} />));
     const pill = box.querySelector('[data-ack-pill]')!;
-    // A 👍 asks nothing of the agent: never a Send now beside it.
     expect(box.querySelector('button')).toBeNull();
     const out = { state: pill.getAttribute('data-ack-pill'), text: pill.textContent ?? '' };
     act(() => pillRoot.unmount());
@@ -295,15 +269,12 @@ test.skipIf(!hasDom)('the pressed button takes it back; the line says each state
   };
   expect(lineOf({ ...base, settled_seq: null }, true)).toMatchObject({ state: 'pending', text: expect.stringContaining('goes to Claude Code in a few seconds') });
   expect(lineOf({ ...base, settled_seq: 5, note_id: 'msg_note' }, true)).toMatchObject({ state: 'queued', text: expect.stringContaining('Queued for Claude Code; it gets this as its next turn.') });
-  // The same honest words as a reply's line, from the session's connection now (deliveryLine).
   const sent = { ...base, settled_seq: 5, note_id: 'msg_note' };
   expect(lineOf(sent, true, { busy: true, idle_since: null, send_now: true })).toMatchObject({ state: 'queued', text: expect.stringContaining('Queued · Claude Code is working; it gets this when its turn ends.') });
   expect(lineOf(sent, true, { busy: false, idle_since: at, send_now: true })).toMatchObject({ state: 'sending', text: expect.stringContaining('Sending to Claude Code…') });
   expect(lineOf(sent, true, null)).toMatchObject({ state: 'queued', text: expect.stringContaining('Queued for Claude Code; it gets this when its session is back.') });
   expect(lineOf({ ...base, settled_seq: 5, note_id: 'msg_note' }, false)).toMatchObject({ state: 'saved', text: expect.stringContaining('Saved for Claude Code. It sees it when it next reads this thread.') });
-  // Settled before it was sent through (an older Inbox): no wake will take it.
   expect(lineOf({ ...base, settled_seq: 5 }, true).state).toBe('saved');
-  // The window ended after the thread moved on: not sent, and says why.
   expect(lineOf({ ...base, settled_seq: 5, note_id: null, not_sent: 'replied' }, true)).toEqual({ state: 'not-sent', text: '👍 Looks goodnot sent: you replied' });
   expect(lineOf({ ...base, settled_seq: 5, note_id: null, not_sent: 'wrote_again' }, true)).toEqual({ state: 'not-sent', text: '👍 Looks goodnot sent: Claude Code wrote again' });
   const delivered = lineOf({ ...base, settled_seq: 5, note_id: 'msg_note', delivered_at: '2026-10-15T11:04:00.000Z' }, true);
@@ -319,17 +290,13 @@ test.skipIf(!hasDom)('after the Undo window the 👍 is sent: saved for the agen
   act(() => ackButton(el)!.click());
   await until(() => el.querySelector('[data-ack-pill]')?.getAttribute('data-ack-pill') === 'pending', 'the pending line');
   await until(async () => (await serverMessages(thread)).at(-1)!.ack?.settled_seq != null, 'the Undo window to pass');
-  // The window reads the thread again (this test's EventSource is a stand-in): the 👍 waits for the agent.
   act(() => root?.unmount());
   host?.remove();
   const again = await renderApp(`#thread=${thread}`);
   await until(() => again.querySelector('[data-ack-pill]')?.getAttribute('data-ack-pill') === 'saved', 'the saved line');
-  // Sent: the reaction control leaves the message (no button, no tray to reach by keyboard); the line under it stays
-  // (owner, 2026-11-07, approval "inbox-reaction-tray"). The store refuses a change too (store-ack-delivery.test.ts).
   expect(ackButton(again)).toBeNull();
   expect(again.querySelector('section.ib-pane [data-react-more]')).toBeNull();
   expect(again.querySelector('[data-ack-pill]')!.textContent).toMatch(/^👍 Looks good/);
-  // Its session's connection takes it, as the bridge's `delivered` records.
   const session = (await serverMessages(thread)).at(-1)!.author as { session: string };
   (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ deliver: { session: session.session } })}\n`);
   (child!.stdin as import('bun').FileSink).flush();
@@ -339,6 +306,5 @@ test.skipIf(!hasDom)('after the Undo window the 👍 is sent: saved for the agen
   const last = await renderApp(`#thread=${thread}`);
   await until(() => last.querySelector('[data-ack-pill]')?.getAttribute('data-ack-pill') === 'delivered', 'the delivered line');
   expect(last.querySelector('[data-ack-pill]')!.textContent).toMatch(/^👍 Looks goodDelivered to Claude Code, \d/);
-  // The note that carried it is not drawn as a message of the thread.
   expect(last.querySelectorAll('section.ib-pane [data-message-id]').length).toBe((await serverMessages(thread)).length);
 }, 30_000);

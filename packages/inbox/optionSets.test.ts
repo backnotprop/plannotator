@@ -1,11 +1,3 @@
-/**
- * A question's picture choices as a gallery of their own (approval
- * "inbox-image-swipe", "Option sets"): the zoom on a choice steps through
- * that question's choices only, in choice order, and the caption names each.
- * What regresses here: the set picking up another question's pictures or the
- * thread's other images, the order following the thread instead of the
- * choices, and the caption's letter doubling a label that already has one.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { AttachmentStep } from './stepping';
@@ -37,8 +29,6 @@ const MESSAGE = {
 } as unknown as InboxMessageWire;
 const EARLIER = { id: M1, questions: [] } as unknown as InboxMessageWire;
 
-// The thread's steps in thread order: an earlier message's image, then this message's text images in the order the text
-// shows them (the second question's pictures first here, and D before B), then an attached file.
 const today = step(image('att_today', 'shots/today.png', M1));
 const q1 = step(image('att_q1', 'shots/q1.png', M2));
 const q2 = step(image('att_q2', 'shots/q2.png', M2));
@@ -52,14 +42,12 @@ describe('option sets', () => {
   test('the zoom steps through that question\'s pictures only, in choice order, not the thread\'s order', () => {
     const set = optionSetOf([EARLIER, MESSAGE], STEPS, optionSetId(M2, 'q-design'))!;
     expect(set.steps.map((s) => s.attachment.id)).toEqual(['att_a', 'att_b', 'att_d']);
-    // A choice without a picture is skipped, but each keeps its own letter.
     expect(set.choices.map((c) => [c.letter, c.label])).toEqual([
       ['A', 'Gmail-style ⋯'],
       ['B', 'Quiet hover menu'],
       ['D', 'Header menu only'],
     ]);
     expect(set.choices[0]!.recommended).toBe(true);
-    // The other question's pictures are a set of their own.
     expect(optionSetOf([EARLIER, MESSAGE], STEPS, optionSetId(M2, 'q-dots'))!.steps.map((s) => s.attachment.id)).toEqual(['att_q1', 'att_q2']);
   });
 
@@ -74,7 +62,6 @@ describe('option sets', () => {
     expect(optionSetOf([MESSAGE], STEPS, optionSetId(M2, 'q-none'))).toBeNull();
     expect(optionSetOf([MESSAGE], STEPS, 'no-colon')).toBeNull();
     expect(optionSetOf([MESSAGE], STEPS, null)).toBeNull();
-    // Only B captured so far: one picture is not a set (the viewer steps through the thread as before).
     expect(optionSetOf([MESSAGE], [today, b], optionSetId(M2, 'q-design'))).toBeNull();
   });
 
@@ -102,7 +89,6 @@ describe('option sets', () => {
   test('mixed or repeated letters: unlabeled choices keep positions, and a clash makes the question use positions', () => {
     expect(choiceLetters(['C · x', 'plain', 'A · y']).map((c) => c.letter)).toEqual(['C', 'B', 'A']);
     expect(choiceLetters(['plain', 'B · y']).map((c) => c.lettered)).toEqual([false, true]);
-    // Two labels both "A", or an unlabeled third choice next to a "C" label: no two choices share a letter.
     expect(choiceLetters(['A · one', 'A · two']).map((c) => c.letter)).toEqual(['A', 'B']);
     expect(choiceLetters(['C · x', 'plain', 'plain']).map((c) => c.letter)).toEqual(['A', 'B', 'C']);
     expect(choiceName('A · two', 1, ['A · one', 'A · two'])).toBe('B · A · two');
@@ -115,9 +101,7 @@ describe('option sets', () => {
     expect(lettered(['X-axis', 'Y-axis', 'Both axes'])).toEqual([false, false, false]);
     expect(lettered(['T-shirt sizes', 'E-mail', 'U-turn'])).toEqual([false, false, false]);
     expect(lettered(['U.S. only', 'A.I. summary', 'A–B test'])).toEqual([false, false, false]);
-    // A Roman-numeral style label beyond the first n letters stays unlettered.
     expect(lettered(['I. Intro', 'Body', 'End'])).toEqual([false, false, false]);
-    // Real forms still count.
     expect(lettered(['A. Tabs', 'B — Sidebar', 'C) Menu'])).toEqual([true, true, true]);
     expect(lettered(['A - x', 'B: y'])).toEqual([true, true]);
   });

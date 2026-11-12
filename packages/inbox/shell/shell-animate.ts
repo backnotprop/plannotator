@@ -1,24 +1,3 @@
-// Copied from the Workspaces app's shell animator module for the Inbox
-// sidebar (the owner, 2026-10-09: the same component and motion). Port:
-// imports from `motion/react`, which re-exports the same framer-motion 12.43.0.
-
-/**
- * The shell spring's animator, in its own chunk (a boot-size trim carried
- * over from the Workspaces app).
- *
- * framer's animator is not needed to paint the shell: every shell surface
- * mounts SETTLED at 0 or 1, and the first spring runs on the first open or
- * close. shell-motion.ts loads this module right after the shell's first
- * paint and again on demand, so the first toggle finds it loaded.
- *
- * `animate` here is framer's own `animate(motionValue, target, options)`
- * path for one MotionValue, step for step (framer-motion 12
- * animation/animate/index.mjs and subject.mjs): the per-value animation from
- * `animateSingleValue`, wrapped in `GroupAnimationWithThen`, with the
- * top-level `onComplete` run on `finished`. Importing the two pieces instead
- * of `animate` leaves out the sequence and element-subject arms, which the
- * shell never calls, so the chunk the first toggle may wait for is smaller.
- */
 import {
 	GroupAnimationWithThen,
 	animateSingleValue,
@@ -37,5 +16,4 @@ export function animate(
 	return animation;
 }
 
-/** Its type, for shell-motion.ts's type-only import (erased at build). */
 export type ShellAnimate = typeof animate;

@@ -1,14 +1,3 @@
-/**
- * A thread read waits for what its code and math need before it draws (#2593):
- * the grammars and KaTeX are chunks the Inbox serves on first use, and ui's
- * CodeBlock and math components paint plain code / TeX source first when they
- * are not in yet. What regresses: the first thread with code in a tab painting
- * its fences plain, then highlighted (or its math as TeX, then typeset); a
- * thread with no code held up for nothing; a grammar loaded for a diagram fence.
- *
- * `@pierre/diffs` and the KaTeX loader are stood in for through ui's seams, so
- * a test holds a grammar or KaTeX "in flight" and sees whether the read waits.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { __resetCodeHighlightCacheForTests, __setCodeHighlightModuleForTests, ensureHighlight, highlightToHtml } from '@plannotator/ui/utils/codeHighlight';
@@ -23,7 +12,6 @@ function thread(...bodies: string[]): InboxThread {
   return { thread_id: 'msg_0', messages } as InboxThread;
 }
 
-/** Stand-in for `@pierre/diffs`: each attach waits until `release()`; `asked` is every grammar asked for. */
 function heldPierre() {
   const held: Array<() => void> = [];
   const asked: string[] = [];
@@ -40,7 +28,6 @@ function heldPierre() {
   return { asked, release: () => held.splice(0).forEach((resolve) => resolve()) };
 }
 
-/** Whether `promise` has settled after the queue drains (a real chunk takes a task at least). */
 async function settled(promise: Promise<unknown>): Promise<boolean> {
   let done = false;
   void promise.then(() => (done = true));
@@ -62,14 +49,12 @@ afterEach(() => {
 
 test('a thread with code draws only once each fence can paint highlighted, in the window theme', async () => {
   const pierre = heldPierre();
-  // The plain fence on screen today: no highlighted markup to paint.
   expect(highlightToHtml(TS, 'ts', THEME)).toBeNull();
   const ready = threadDrawReady(thread('Before.', '```ts\n' + TS + '\n```\n\nand\n\n```rust\nfn main() {}\n```'));
   expect(await settled(ready)).toBe(false);
   expect(pierre.asked.sort()).toEqual(['rust', 'ts']);
   pierre.release();
   expect(await settled(ready)).toBe(true);
-  // What ui's applyHighlight paints on its first write once the thread draws: highlighted, never plain.
   expect(highlightToHtml(TS, 'ts', THEME)).toContain('<span style="color:#d73a49">');
   expect(highlightToHtml('fn main() {}', 'rust', THEME)).not.toBeNull();
 });
@@ -112,7 +97,6 @@ test('a grammar whose chunk failed is asked for again on the next read, and then
   const asked: string[] = [];
   let up = false;
   __setCodeHighlightModuleForTests({
-    // The Inbox was away for the first fetch, back for the second.
     getSharedHighlighter: ({ langs }: { langs: string[] }) => {
       asked.push(...langs);
       return up ? Promise.resolve(undefined) : Promise.reject(new TypeError('Failed to fetch dynamically imported module'));
@@ -136,16 +120,13 @@ test('a chunk that stalled past the cap holds one read only: the next draws at o
     const started = Date.now();
     await threadDrawReady(thread('```go\nfunc main() {}\n```'));
     expect(Date.now() - started).toBeGreaterThanOrEqual(35);
-    // Still on its way: a reopen (or another thread in Go) is not held again.
     expect(await settled(threadDrawReady(thread('```go\nfunc other() {}\n```')))).toBe(true);
-    // ui's fence on screen swaps in the highlighted markup when the grammar lands, as after the cap today.
     let swapped = false;
     void ensureHighlight('go', THEME).then((ok) => (swapped = ok));
     pierre.release();
     await settled(Promise.resolve());
     expect(swapped).toBe(true);
     expect(highlightToHtml('func main() {}', 'go', THEME)).not.toBeNull();
-    // Landed: a stall no longer counts, and a new language waits as before.
     expect(await settled(threadDrawReady(thread('```rust\nfn main() {}\n```')))).toBe(false);
     pierre.release();
   } finally {

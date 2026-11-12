@@ -1,11 +1,3 @@
-/**
- * When a page that lived through an Inbox restart may take the new run's
- * session (sessionAdopt.ts). Failures to catch: a page that keeps being
- * refused after a plain restart; and, the other way, a page taking the
- * session of an Inbox that is not provably the one it loaded from (another
- * data folder, a store behind the page, another release), or taking it before
- * it has read again what a reload would bring.
- */
 import { expect, test } from 'bun:test';
 import { adoptRestartedInbox, readHello, type RestartHealth, type SessionAdoptDeps } from './sessionAdopt';
 
@@ -39,7 +31,6 @@ const hello = { serverSession: NEW, cursor: 42 };
 test('the same data, continued, on the same release: the page reads everything again, then takes the session', async () => {
   const { state, deps } = world();
   expect(await adoptRestartedInbox(hello, deps)).toEqual({ state: 'adopted' });
-  // The reads come before the session: no write carries it until the page shows what a reload would.
   expect(state.calls).toEqual(['health', 'catch-up', 'adopt']);
   expect(state.session).toBe(NEW);
 });

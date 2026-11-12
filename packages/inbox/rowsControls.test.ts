@@ -1,17 +1,8 @@
-/**
- * Settings → Rows' control model (rowsControls.ts) against the stored look (core `INBOX_ROWS_OPTIONS`,
- * `inboxRowsRead`; listLook.ts): the proof that the page of approval "inbox-rows-settings-page" breaks no saved look.
- * What this catches: a stored look the controls cannot show, or that a click-by-click rebuild from the controls
- * writes back differently (a migration by accident); an option no control can turn on or off; a look saved before
- * Pull requests existed reading as hidden; Minimal, Balanced or Detailed writing anything but the lists they wrote
- * before this page; a control that reaches into another control's options.
- */
 import { describe, expect, test } from 'bun:test';
 import { INBOX_ROWS_DEFAULT, INBOX_ROWS_OPTIONS, inboxRowsList, inboxRowsRead } from '@plannotator/core/inbox-types';
 import { LIST_LOOK_OFF, lookFromRows, rowsFromLook, type ListLook } from './listLook';
 import { ROWS_CONTROLS, ROWS_MAIN_CONTROLS, ROWS_MORE_CONTROLS, ROWS_PRESETS, lookFromControlValues, lookWithChoice, rowsChangeWords, rowsControlValues, rowsPreset } from './rowsControls';
 
-/** Every distinct stored look: each subset of the option names, settled by core's own rules. */
 function everyStoredLook(): string[][] {
   const seen = new Map<string, string[]>();
   const n = INBOX_ROWS_OPTIONS.length;
@@ -28,7 +19,6 @@ function everyStoredLook(): string[][] {
 describe('Settings → Rows control model', () => {
   test('every stored look reads into the controls and writes back the identical list', () => {
     const looks = everyStoredLook();
-    // 22 options; the rival rules leave 774,144 distinct looks. A new option or rule changes this on purpose.
     expect(looks.length).toBe(774_144);
     let bad: { stored: string[]; back: string[] } | null = null;
     for (const stored of looks) {
@@ -71,7 +61,6 @@ describe('Settings → Rows control model', () => {
       minimal: ['smallNames', 'hidePreview', 'titleFirst'],
       detailed: ['roomy', 'previewTwo', 'marksThreads', 'marksProjects', 'repoLogo'],
     });
-    // Each is already settled, so a click saves it as written; and a look one option away matches none.
     for (const preset of ROWS_PRESETS) expect(inboxRowsList(rowsFromLook(preset.look))).toEqual(rowsFromLook(preset.look));
     expect(rowsPreset(lookFromRows(['smallNames', 'hidePulls']))).toBeNull();
   });

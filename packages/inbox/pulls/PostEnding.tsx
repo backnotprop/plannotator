@@ -1,15 +1,3 @@
-/**
- * The end of a pull request's review in the Inbox (the owner's answer C on #2590: the person chooses at the end).
- * Two places a review can go:
- *
- * - **Post to GitHub/GitLab**: the comments and Approve, Request changes or Comment go on the PR, as
- *   `plannotator review <PR url>` posts them: the review app's own decision arm (`buildDecisionSpec` with
- *   `platform`), its submit dialog and its providers, through `#platform-post`.
- * - **Send to the agent**: today's path, the verdict as a reply in the agent's thread (`agentControl`, the host's).
- *
- * The choice shows only when both can happen: with no agent (or a teammate's PR, whose agent path takes no
- * verdict), posting is the only ending; with no PR to post to, the agent's is.
- */
 import { Suspense, useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { PlatformPostPart } from '../lazyParts';
 import type { InboxPull } from '@plannotator/core/inbox-types';
@@ -25,10 +13,8 @@ import { Icon } from '../icons';
 import type { PlatformAction } from '../guide/platform-post-types';
 import { platformRules, postablePull, postedSignature, postedWords, resolvePlatformDecisionAction } from './postRules';
 
-// `#platform-post` is packages/inbox/guide/PlatformPost.tsx (package.json `imports`): the review app's dialog.
 const PlatformPost = PlatformPostPart.Part;
 
-/** Draws nothing: hands the boundary's notice to the host once it commits. */
 function LoadFailed({ notice, onFailed }: { notice: ReactNode; onFailed: (notice: ReactNode) => void }) {
   useEffect(() => onFailed(notice), [notice, onFailed]);
   return null;
@@ -46,7 +32,6 @@ function readDestination(): ReviewDestination {
   }
 }
 
-/** Where the person last chose a review goes (kept across reviews, as the review app keeps its own), and its setter. */
 export function useReviewDestination(): [ReviewDestination, (next: ReviewDestination) => void] {
   const [picked, setPicked] = useState<ReviewDestination>(readDestination);
   const choose = useCallback((next: ReviewDestination) => {
@@ -54,13 +39,11 @@ export function useReviewDestination(): [ReviewDestination, (next: ReviewDestina
     try {
       window.localStorage.setItem(DEST_KEY, next);
     } catch {
-      // Storage off: the choice holds for this page.
     }
   }, []);
   return [picked, choose];
 }
 
-/** Where this review goes: posting when there is no agent, the agent when there is no PR to post to, else the pick. */
 export function reviewEnding(pull: InboxPull | null, hasAgent: boolean, picked: ReviewDestination): ReviewDestination | null {
   const postable = !!postablePull(pull);
   if (!postable) return hasAgent ? 'agent' : null;
@@ -68,32 +51,18 @@ export function reviewEnding(pull: InboxPull | null, hasAgent: boolean, picked: 
 }
 
 export interface PostEndingProps {
-  /** The PR this review can be posted to; null or unpostable (closed, its head unknown): the agent's ending alone. */
   pull: InboxPull | null;
-  /** The agent the other ending sends to ("Claude Code"), with its control; null: posting is the only ending. */
   agent: { name: string; host?: string | null; control: ReactNode } | null;
   comments: readonly CodeAnnotation[];
-  /** What the comments were written on (PlatformPost's `anchor`). */
   anchor: 'diff' | 'guide' | 'stack';
-  /** The diff is not ready, or something else is on its way. */
   busy: boolean;
-  /** The person's pick (`useReviewDestination`), with its setter. */
   picked: ReviewDestination;
   onPick: (next: ReviewDestination) => void;
-  /** The review went on the PR: the host clears the comments that went (`posted`, their ids) and says so. */
   onPosted: (result: { action: PlatformAction; url: string; label: string; posted: readonly CodeAnnotation[] }) => void;
-  /** Comments that went at the commit they were read on, ahead of the review itself. */
   onWent?: (went: readonly CodeAnnotation[]) => void;
-  /** The comments as stored right now, for a host whose comments another window can change. */
   readComments?: () => readonly CodeAnnotation[];
-  /**
-   * The commit the comments were written on (the layer patch's own head, `InboxPullDiffAnswer.head_sha`), posted to
-   * instead of the list's; null: not known, nothing can be posted. Absent: the list's head.
-   */
   headSha?: string | null;
-  /** The server refused the commit posted to (`pull_moved`; on GitHub `pull_commit_gone`, a force-push): the host reads the PR again. */
   onMoved?: () => void;
-  /** Why this person's review has no agent to go to: said on the forge's mark. */
   note?: string;
 }
 
@@ -107,10 +76,7 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
   const destination: ReviewDestination = !target ? 'agent' : !agent ? 'forge' : picked;
   const choose = onPick;
   const [open, setOpen] = useState<{ action: PlatformAction; chooseEvent: boolean } | null>(null);
-  // Kept once opened: a partial or refused attempt's plan (its narrowed retry) survives a Cancel and a reopen.
   const [mounted, setMounted] = useState(false);
-  // The dialog's chunk could not arrive: ui's notice (with Reload) beside the control, which stays usable. The
-  // next Post or Comment… asks for the chunk again.
   const [loadFailure, setLoadFailure] = useState<ReactNode>(null);
   const loadFailed = useCallback((notice: ReactNode) => {
     PlatformPostPart.retry();
@@ -123,10 +89,6 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
     setMounted(true);
     setOpen(mode);
   }, []);
-  // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written. A
-  // comment already posted on this PR is never posted again, at any head (a guard for a host whose comments outlive a
-  // post, or come back before it drops them: Start review drops what went); a follow-up carries only what is new (or a
-  // main comment).
   const [done, setDone] = useState<{ key: string; head: string; action: PlatformAction; ids: ReadonlySet<string> } | null>(null);
   const sameKey = !!done && !!target && done.key === target.key;
   const sameHead = sameKey && done!.head === target!.head_sha;
@@ -152,10 +114,8 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
             },
           })
         : null,
-    [rules?.label, rules?.mrLabel, rules?.selfAuthored, rules?.requestChangesSupported, rules?.selfRequestChangesBlocked, comments.length], // eslint-disable-line react-hooks/exhaustive-deps
+    [rules?.label, rules?.mrLabel, rules?.selfAuthored, rules?.requestChangesSupported, rules?.selfRequestChangesBlocked, comments.length],
   );
-  // As the review app's `runPlatformDecisionAction`: a muted decision (the person's own PR) does nothing; the rest
-  // open the dialog on their event.
   const run = useCallback(
     (id: DecisionActionId) => {
       if (!spec || !rules || busy || open) return;
@@ -174,7 +134,7 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
       'request-changes': () => run('request-changes'),
       'note-with-feedback': () => run('note-with-feedback'),
       'approve-with-notes': () => run('approve-with-notes'),
-      'discard-and-finish': () => {}, // the platform arm never offers it
+      'discard-and-finish': () => {},
     }),
     [run],
   );
@@ -229,7 +189,6 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
                 <Icon name="checkCircle" size={14} />
                 {postedWords({ label: rules.label, action: done!.action })}
               </button>
-              {/* A follow-up: a main comment only (the dialog needs one when there is nothing new to post). */}
               <button
                 type="button"
                 className="ib-btn ib-sm"
@@ -245,7 +204,6 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
           )}
         </span>
       )}
-      {/* The dialog is a chunk the Inbox serves: one that cannot arrive says so beside the control, never the window unmounted. */}
       {mounted && (
         <LazyBlockBoundary fallback={(notice) => <LoadFailed notice={notice} onFailed={loadFailed} />}>
           <Suspense fallback={null}>
@@ -271,9 +229,7 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
               hostReadsAgain={Boolean(onMoved)}
               onPosted={(result) => {
                 setOpen(null);
-                // A follow-up comment after an approval still reads as the approval.
                 const action = sameHead && result.action === 'comment' ? done!.action : result.action;
-                // At the commit it went to: a newer one on screen by now is still to be reviewed.
                 setDone({ key: target.key, head: result.head, action, ids: new Set([...(sameKey ? done!.ids : []), ...result.posted.map(postedSignature)]) });
                 onPosted({ ...result, action, label: rules.label });
               }}

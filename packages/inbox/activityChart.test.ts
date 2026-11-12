@@ -1,11 +1,3 @@
-/**
- * Settings → Activity's chart model (activityChart.ts). What regresses: a range that
- * no longer fits the width (or never scrolls when it cannot), rows whose
- * biggest marks touch the next row, a mark the pointer cannot hit (or a hit on
- * empty space), a preview that scrolls or leaves the hours spaced apart, a
- * full screen that no longer fills the window, day columns off by an hour
- * across a clock change, or busy neighbouring hours drawn apart.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxActivityModel } from '@plannotator/core/inbox-types';
 import {
@@ -43,7 +35,6 @@ describe('layout', () => {
         expect(layout.cell * days * 24).toBeCloseTo(width, 5);
       }
     }
-    // A week at a desktop's Settings width: hours a few px apart, rows thin, all of it under the preview's height.
     const week = activityLayout(1000, 7 * 24, 120, 'blend', 'preview');
     expect(week.cell).toBeLessThan(7);
     expect(week.pitch).toBeLessThanOrEqual(5);
@@ -54,7 +45,6 @@ describe('layout', () => {
     const fits = activityLayout(1392, 7 * 24, 60, 'blend', 'full', 760);
     expect(fits.scrolls).toBe(false);
     expect(fits.cell * 168).toBeCloseTo(1392, 5);
-    // Few threads: rows grow to fill the height, up to the size's widest spacing.
     expect(fits.pitch).toBeGreaterThan(9 - 0.01);
     const many = activityLayout(1392, 7 * 24, 140, 'blend', 'full', 760);
     expect(many.top + 140 * many.pitch).toBeLessThanOrEqual(760 + 0.25 * 140);
@@ -112,7 +102,6 @@ describe('days', () => {
     expect(to.getDate()).toBe(8);
     const days = activityDays(from, to);
     expect(days).toHaveLength(7);
-    // Contiguous: each day starts where the one before ended, whatever its length.
     for (let i = 1; i < days.length; i++) expect(days[i]!.col).toBe(days[i - 1]!.col + days[i - 1]!.hours);
     expect(days[6]!.col + days[6]!.hours).toBe(Math.round((to.getTime() - from.getTime()) / 3_600_000));
   });
@@ -129,7 +118,6 @@ describe('paths', () => {
   test('neighbouring hours join into one shape; hours apart do not', () => {
     expect(activityJoin(10, 4, 14, 4, 20)).not.toBeNull();
     expect(activityJoin(10, 2, 40, 2, 20)).toBeNull();
-    // One mark inside the other: nothing to join.
     expect(activityJoin(10, 5, 11, 1, 20)).toBeNull();
   });
 
@@ -140,7 +128,6 @@ describe('paths', () => {
     const paths = activityPaths(rows, layout, activityDays(new Date(2026, 10, 1), new Date(2026, 10, 8)));
     expect(paths.marks).toBe(800);
     expect(paths.tiers).toHaveLength(3);
-    // A run goes whole into its busiest hour's tier: 12 messages is the top tier, so nothing in the faint one.
     expect(paths.tiers[0]).toBe('');
     expect(paths.tiers[2]!.length).toBeGreaterThan(0);
   });

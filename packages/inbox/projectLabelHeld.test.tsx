@@ -1,15 +1,3 @@
-/**
- * One name per project on screen (owner's pick, 2026-10-29: the folder's
- * name, the parent only when two projects on screen share it), while the list
- * is held. The list holds still while a thread is open and the sidebar does
- * not: archiving a project's only thread takes it out of the sidebar at once,
- * but its row stays on screen until the thread closes. The real-data check of
- * #2349 found the two then named the other "superfans" project two ways (the
- * sidebar "superfans", its row "superfans · a"). The whole window (InboxApp)
- * over a REAL Inbox in a temp data dir (tests/helpers/inbox-dom-server.ts).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -57,7 +45,6 @@ async function readLine(): Promise<string> {
   return line.trim();
 }
 
-/** An agent's first message from `root`: the folder becomes a project. */
 async function firstFrom(root: string): Promise<{ sent: string; project: string }> {
   const stdin = child!.stdin as import('bun').FileSink;
   stdin.write(`${JSON.stringify({ first: { root, session: `ses_${root.split('/').at(-2)}`, body: `News from ${root}.` } })}\n`);
@@ -140,7 +127,6 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** Base UI opens on the pointer's press, as a person's click does. */
 async function press(el: HTMLElement) {
   await act(async () => {
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -166,12 +152,9 @@ test.skipIf(!hasDom)('archiving the only thread of a clashing project while the 
     root.render(<InboxApp />);
   });
   await until(() => !!document.querySelector('section.ib-pane') && !!projectRow(a.project) && rowName(a.sent) !== null, 'the thread, the sidebar and the rows');
-  // Two "superfans" on screen: each names its parent, the same in both places.
   expect(sidebarName(a.project)).toBe('superfans · a');
   expect(rowName(a.sent)).toBe('superfans · a');
 
-  // Archive b's only thread from its project menu, the thread still open: b leaves the sidebar at once,
-  // its row stays on screen (the held list) until the thread closes.
   await press(projectRow(b.project)!.querySelector<HTMLElement>('.ib-pmore')!);
   await until(() => !!document.querySelector(`[data-project-menu="${b.project}"] [data-project-action="archive"]`), 'the menu');
   await act(async () => {
@@ -180,7 +163,6 @@ test.skipIf(!hasDom)('archiving the only thread of a clashing project while the 
   await until(() => projectRow(b.project) === null, 'b to leave the sidebar');
   expect(rowName(b.sent)).not.toBeNull();
 
-  // One name for a in both places while b's row is still on screen.
   expect(sidebarName(a.project)).toBe(rowName(a.sent));
   expect(rowName(a.sent)).toBe('superfans · a');
 });

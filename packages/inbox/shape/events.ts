@@ -1,12 +1,6 @@
-/**
- * What changed between two reads of a board, as the board's events
- * (ShapeHost `events`). Shared by the Inbox's host (inboxShapeHost.ts) and the
- * standalone Shape page's (standalone/host.ts); no request of its own.
- */
 import type { ShapeEvent, ShapeSessionStatus } from '@plannotator/ui/components/shape';
 import type { ShapeLoadedWire } from '../api';
 
-/** What changed between two reads of a board, as the board's events. */
 export function shapeEventsBetween(before: ShapeLoadedWire | null, now: ShapeLoadedWire): ShapeEvent[] {
   const out: ShapeEvent[] = [];
   if (!before) return out;

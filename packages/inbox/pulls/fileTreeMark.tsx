@@ -1,8 +1,3 @@
-/**
- * IconFileTree of @pierre/icons 0.9.0 (Apache-2.0, https://github.com/pierrecomputer/pierre), colours through
- * currentColor: the files' button on the PR page.
- */
-
 const svg = { viewBox: '0 0 16 16', width: 15, height: 15, fill: 'currentColor', 'aria-hidden': true } as const;
 
 export function FileTreeMark() {

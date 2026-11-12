@@ -42,7 +42,6 @@ describe('searchFeedback', () => {
   test('one word in common is not enough, and filler words never count: "Pin threads" does not answer "threads reorder"', () => {
     expect(titles('threads reorder')).toEqual([]);
     expect(titles('lamp')).toEqual([]);
-    // "really", "please", "would", "with" and "inbox" are filler: each of these still shares one meaningful word.
     for (const text of ['please really, the lamp would be nice', 'inbox lamp', 'with the lamp please']) expect(titles(text)).toEqual([]);
     expect(titles('the lighthouse lamp please')).toEqual(['Lighthouse lamp', 'Lighthouse lamp flickers at dusk']);
   });

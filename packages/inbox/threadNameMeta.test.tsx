@@ -1,16 +1,3 @@
-/**
- * The open thread's name: the top bar's title by the list's rule
- * (`threadChipName`), with the whole subject in its tooltip; the meta line no
- * longer repeats it as a pill (the owner, 2026-11-02, on approval
- * "inbox-thread-header"; it replaces design study "thread-name-header"'s
- * pill). The body's heading stays the subject. The failures this catches: a
- * named thread whose open view never says its name, a name shown twice (bar
- * and pill, or a subject that already starts with it), a title that keeps the
- * old name after a rename, a one-message thread losing the name, the subject
- * shown twice at the top, and no way to read the whole subject behind a name.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -97,12 +84,9 @@ async function render(t: InboxThread) {
 const meta = () => host!.querySelector<HTMLElement>('.ib-pbody > [data-thread-meta]');
 const pill = () => meta()?.querySelector<HTMLElement>('.ib-key') ?? null;
 const bar = () => host!.querySelector<HTMLElement>('[data-header-subject]');
-/** The bar title's words: its tooltip hangs on them, not on the box that takes the bar's free room. */
 const barWords = () => bar()!.querySelector<HTMLElement>('[data-header-title]');
 const heading = () => host!.querySelector<HTMLElement>('.ib-pbody > h2.ib-subject');
 
-// The owner's call on approval "inbox-thread-header" (2026-11-02): the top bar shows the thread's name by the list's rule
-// (`threadChipName`), so the meta line no longer repeats it as a pill; the body's heading stays the subject.
 test.skipIf(!hasDom)('a named thread: the bar shows its name, the heading the subject, and the meta line no pill', async () => {
   await render(thread('session-refresh', 3));
   expect(bar()!.textContent).toBe('session-refresh');
@@ -122,7 +106,6 @@ test.skipIf(!hasDom)("no name, or a subject that already starts with the name: n
   draw(thread('the refresh guard', 3));
   await settle();
   expect(bar()!.textContent).toBe(SUBJECT);
-  // The list's rule: a name that only starts a longer word of the subject still shows.
   draw(thread('the refresh', 3, 'The refreshed guard is in.'));
   await settle();
   expect(bar()!.textContent).toBe('the refresh');
@@ -162,16 +145,12 @@ test.skipIf(!hasDom)('the top bar always shows the thread name, its tooltip the 
       body.dispatchEvent(new Event('scroll'));
     });
   };
-  // Named, at the top: the name is there already (one message too); its tooltip is the whole subject, cut or not,
-  // never the native title; the heading still the subject.
   await render(thread('session-refresh', 1));
   expect(bar()!.textContent).toBe('session-refresh');
   expect(bar()!.hasAttribute('data-on')).toBe(true);
   expect(bar()!.hasAttribute('title')).toBe(false);
   expect(await tooltipOf(barWords()!)).toBe(SUBJECT);
   expect(heading()!.textContent).toBe(SUBJECT);
-  // Unnamed, at the top: hidden, so the subject does not show twice; scrolled away: the subject, whole in its
-  // tooltip only when cut.
   draw(thread(null, 3));
   await settle();
   expect(bar()!.textContent).toBe(SUBJECT);
@@ -183,7 +162,6 @@ test.skipIf(!hasDom)('the top bar always shows the thread name, its tooltip the 
   expect(await tooltipOf(barWords()!)).toBe(SUBJECT);
 });
 
-// The bar's title is aria-hidden and the heading is the subject, so the name needs its own text for a screen reader.
 test.skipIf(!hasDom)('a screen reader hears "Thread name: X" right after the heading for a named thread, and nothing extra for an unnamed one', async () => {
   await render(thread('session-refresh', 1));
   const sr = host!.querySelector<HTMLElement>('.ib-pbody .ib-sr[data-thread-name-sr]');
