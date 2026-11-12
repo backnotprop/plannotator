@@ -1188,6 +1188,12 @@ export class InboxStore {
     return name === null ? null : this.newestOpen(projectId, this.rootsNamed(projectId, name));
   }
 
+  /** The open thread a message with this `thread` name and no reply_to would join in the project, or null. */
+  threadRoutedBy(projectId: string, name: unknown): string | null {
+    const checked = checkInboxThreadName(name);
+    return checked.ok ? this.routeThread(projectId, checked.name) : null;
+  }
+
   /**
    * The newest open thread of `roots` (oldest first): in `projectId`'s own
    * folder when it has one, so a combine never moves a live conversation;

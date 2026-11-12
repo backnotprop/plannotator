@@ -182,6 +182,8 @@
     "./inbox/pi-session-claim": "./inbox/pi-session-claim.ts",
     "./inbox/qwen-sessions": "./inbox/qwen-sessions.ts",
     "./inbox/devices": "./inbox/devices.ts",
+    "./inbox/agent-pairing": "./inbox/agent-pairing.ts",
+    "./inbox/agent-relay-client": "./inbox/agent-relay-client.ts",
     "./inbox/attachments": "./inbox/attachments.ts",
     "./inbox/video": "./inbox/video.ts",
     "./inbox/audio": "./inbox/audio.ts",
