@@ -33,41 +33,5 @@
     "path": "apps/hook/hooks/mod/inbox-contract.ts",
     "pattern": "^// --- CONTRACT ",
     "readBy": "apps/hook/hooks/mod/inbox-contract.test.ts"
-  },
-  {
-    "path": "packages/references/src/",
-    "pattern": "^// Source: ",
-    "readBy": "packages/references/test/registry.test.ts (each file's first two lines name its Workspaces source and commit)",
-    "alsoKeepNextLines": 1
-  },
-  {
-    "path": "packages/server/ai-runtime.ts",
-    "text": "// Claude SDK not available.",
-    "readBy": "packages/ai/providers/model-discovery.test.ts"
-  },
-  {
-    "path": "apps/pi-extension/server/ai-runtime.ts",
-    "text": "// Claude SDK not available.",
-    "readBy": "packages/ai/providers/model-discovery.test.ts"
-  },
-  {
-    "path": "packages/server/ai-runtime.ts",
-    "text": "// OpenCode not available.",
-    "readBy": "packages/ai/providers/opencode-sdk.test.ts"
-  },
-  {
-    "path": "apps/pi-extension/server/ai-runtime.ts",
-    "text": "// OpenCode not available.",
-    "readBy": "packages/ai/providers/opencode-sdk.test.ts"
-  },
-  {
-    "path": "packages/review-editor/App.tsx",
-    "pattern": "^// Re-fetch diff when hideWhitespace toggles",
-    "readBy": "packages/review-editor/utils/autoViewedCallSites.test.ts"
-  },
-  {
-    "path": "packages/review-editor/App.tsx",
-    "pattern": "^// --- Diff staleness ---",
-    "readBy": "packages/review-editor/utils/autoViewedCallSites.test.ts"
   }
 ]

@@ -68,7 +68,7 @@ describe('what is left exactly as it is', () => {
     expect(strip(source, 'view.tsx')).toBe(source);
   });
 
-  test('tool directives, license notices and a shebang stay byte for byte', () => {
+  test('directives for tools that run here, license notices and a shebang stay byte for byte', () => {
     const source = [
       '#!/usr/bin/env bun',
       '/// <reference types="bun-types" />',
@@ -77,24 +77,25 @@ describe('what is left exactly as it is', () => {
       '// @ts-expect-error a reason',
       'const a: number = "x";',
       'const b = /* @__PURE__ */ make();',
-      'run(); // eslint-disable-line no-console',
-      '// biome-ignore lint/x: because',
       'const c = import(/* @vite-ignore */ path);',
-      '// oxlint-disable no-control-regex',
+      '/** @deprecated use d2 */',
+      'export const d = 1;',
       '',
     ].join('\n');
     expect(strip(source)).toBe(source);
   });
 
+  test('lint directives go: no linter runs in this repo', () => {
+    expect(strip('run(); // eslint-disable-line no-console\n// biome-ignore lint/x: because\nwalk();\n// oxlint-disable no-control-regex\n')).toBe('run();\nwalk();\n');
+  });
+
+  test('prose that mentions a directive is not one', () => {
+    expect(strip('// a sentence about eslint and @ts-ignore\nconst x = 1;\n')).toBe('const x = 1;\n');
+  });
+
   test('a comment on the keep-list stays, any other is removed', () => {
     const keep: KeepEntry[] = [{ path: '*', pattern: '^// inbox-guard: own child', readBy: 'a test' }];
     expect(strip('kill(pid); // inbox-guard: own child (spawned here)\nother(); // why\n', 'a.test.ts', keep)).toBe('kill(pid); // inbox-guard: own child (spawned here)\nother();\n');
-  });
-
-  test('a keep entry can keep the line comment right after the one it matches, and no further', () => {
-    const keep: KeepEntry[] = [{ path: 'src/', pattern: '^// Source: ', alsoKeepNextLines: 1, readBy: 'a test' }];
-    const source = '// Source: elsewhere at abc.\n// Changed: a seam.\n// More history.\n\nexport const x = 1; // gone\n';
-    expect(strip(source, 'src/a.ts', keep)).toBe('// Source: elsewhere at abc.\n// Changed: a seam.\n\nexport const x = 1;\n');
   });
 
   test('stripping twice changes nothing more', () => {

@@ -8,7 +8,6 @@ export interface KeepEntry {
   text?: string;
   pattern?: string;
   readBy: string;
-  alsoKeepNextLines?: number;
 }
 
 export const REPO_ROOT = join(import.meta.dir, '..', '..');
@@ -26,10 +25,8 @@ export function isExcludedPath(path: string): boolean {
   return EXCLUDED_FILES.has(path) || EXCLUDED_FOLDERS.test(path);
 }
 
-const LINE_OR_BLOCK_DIRECTIVE =
-  /^(@ts-(expect-error|ignore|nocheck|check)\b|eslint-(disable|enable)|biome-ignore|oxlint-(disable|enable)|prettier-ignore|deno-(lint|fmt)-ignore|[@#]__(PURE|NO_SIDE_EFFECTS|INLINE|KEY)__|@vite-ignore|webpack[A-Z]\w*\s*:|@jsx(ImportSource|Runtime|Frag)?\b|(istanbul|c8|v8) ignore|@refresh reset|[#@] sourceMappingURL=|@deprecated\b)/;
-
-const BLOCK_ONLY_DIRECTIVE = /^(eslint(-env)?\s|globals?\s|exported\s)/;
+const DIRECTIVE =
+  /^(@ts-(expect-error|ignore|nocheck|check)\b|@deprecated\b|@jsx(ImportSource|Runtime|Frag)?\b|[@#]__(PURE|NO_SIDE_EFFECTS)__|@vite-ignore|@refresh reset|[#@] sourceMappingURL=)/;
 
 const TRIPLE_SLASH_DIRECTIVE = /^\/\/\/\s*<(reference|amd-module|amd-dependency)\b/;
 
@@ -42,9 +39,7 @@ function bodyOf(comment: string): string {
 
 export function isDirective(comment: string): boolean {
   if (TRIPLE_SLASH_DIRECTIVE.test(comment)) return true;
-  const body = bodyOf(comment);
-  if (LINE_OR_BLOCK_DIRECTIVE.test(body)) return true;
-  return comment.startsWith('/*') && BLOCK_ONLY_DIRECTIVE.test(body);
+  return DIRECTIVE.test(bodyOf(comment));
 }
 
 export function isLicense(comment: string): boolean {
