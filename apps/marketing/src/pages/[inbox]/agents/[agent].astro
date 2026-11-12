@@ -10,14 +10,14 @@ import AgentsPageScript from '../../../components/inbox/AgentsPageScript.astro';
 import Inline from '../../../components/inbox/Inline.astro';
 import '../../../components/inbox/agents.css';
 import { INBOX_LAUNCHED } from '../../../lib/inbox-launch';
-import { AGENTS, COLUMNS, cellOf, tierOf, type Agent } from '../../../lib/inbox-agents';
+import { LISTED_AGENTS, COLUMNS, cellOf, tierOf, type Agent } from '../../../lib/inbox-agents';
 
 // /inbox/agents/<slug>/: one setup page per agent, one template. The best way
 // first, then the other ways, a check, troubleshooting, what works, examples.
 // Every word about the agent comes from src/lib/inbox-agents.ts.
 export function getStaticPaths() {
   if (!INBOX_LAUNCHED) return [];
-  return AGENTS.map((agent) => ({ params: { inbox: 'inbox', agent: agent.slug }, props: { agent } }));
+  return LISTED_AGENTS.map((agent) => ({ params: { inbox: 'inbox', agent: agent.slug }, props: { agent } }));
 }
 
 const { agent } = Astro.props as { agent: Agent };

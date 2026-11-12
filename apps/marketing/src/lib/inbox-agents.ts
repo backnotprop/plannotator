@@ -75,6 +75,8 @@ export interface Agent {
   shot?: { name: string; alt: string };
   /** The full setup guide on docs.plannotator.ai, where one exists. */
   docs?: string;
+  /** false: kept here, but no page, tile, row or sitemap entry. Default true. */
+  listed?: boolean;
 }
 
 export const COLUMNS = {
@@ -660,6 +662,8 @@ export const AGENTS: Agent[] = [
     slug: 'openclaw',
     name: 'OpenClaw',
     tier: 'plugin',
+    // @plannotator/openclaw is not published yet, so the install step can't work.
+    listed: false,
     lede: 'The plugin gives your own OpenClaw chats the Inbox tool. Your reply comes back into the same chat as a new message.',
     diff: 'Inbox only · your own chats only',
     inbox: {
@@ -685,7 +689,7 @@ export const AGENTS: Agent[] = [
     setup: [
       { do: 'Install Plannotator.', code: INSTALL },
       {
-        do: 'Add the plugin. It needs OpenClaw 2026.11.5 or newer, or a beta from 2026.11.5-beta.1. The running Gateway loads it without a restart.',
+        do: 'Add the plugin. It needs OpenClaw 2026.11.5-beta.1 or newer. Until 2026.11.5 comes out that means OpenClaw’s beta (tested on 2026.11.5-beta.2). The running Gateway loads it without a restart.',
         code: 'openclaw plugins install @plannotator/openclaw',
       },
       openInbox('The Inbox opens in your browser. Settings → Agents lists OpenClaw.'),
@@ -693,8 +697,8 @@ export const AGENTS: Agent[] = [
     ],
     other: [
       {
-        title: 'Turn the tool on without the Inbox',
-        steps: [{ do: 'Merge this into your Plannotator config. It applies from the next message in each chat.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
+        title: 'Turn the tool on by hand',
+        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must have run once on this computer. It applies from the next message in each chat.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
       },
     ],
     check: wakeCheck('OpenClaw'),
@@ -705,14 +709,14 @@ export const AGENTS: Agent[] = [
         src: 'apps/openclaw-plugin/README.md:19; docs/agent-guides/inbox-notifications-and-agents.md:256,261',
       },
       {
-        symptom: 'The tool refuses in a group chat',
+        symptom: 'OpenClaw has no `plannotator_inbox` tool in a group or channel',
         fix: 'Only your own chats get it: OpenClaw on this computer and your own direct messages. Never a group or a channel, even when you write there.',
         src: 'apps/openclaw-plugin/README.md:23-26; docs/agent-guides/inbox-notifications-and-agents.md:257',
       },
       {
-        symptom: 'Your reply never shows up on its own',
-        fix: 'It needs OpenClaw 2026.11.5-beta.1 or newer. OpenClaw 2026.11.3 installs the plugin but can’t start a turn with your reply.',
-        src: 'docs/agent-guides/inbox-notifications-and-agents.md:255; apps/openclaw-plugin/package.json (compat)',
+        symptom: 'OpenClaw refuses to install the plugin',
+        fix: 'The plugin needs OpenClaw 2026.11.5-beta.1 or newer. Older OpenClaw, such as 2026.11.3, refuses to install it.',
+        src: 'apps/openclaw-plugin/package.json (openclaw.install.minHostVersion >=2026.11.5-beta.1); the integration builder’s fact-check',
       },
       {
         symptom: 'The plugin does nothing after you installed it again',
@@ -725,11 +729,10 @@ export const AGENTS: Agent[] = [
     ],
     limits: [
       { text: 'After `/new` your reply goes into the chat’s new conversation.', src: 'apps/openclaw-plugin/README.md:32' },
-      { text: 'OpenClaw’s Control UI shows your reply as a System notice.', src: 'docs/agent-guides/inbox-notifications-and-agents.md:260' },
       { text: 'OpenClaw must run on the same computer as the Inbox. An OpenClaw on a VPS can’t reach it yet.', src: 'apps/openclaw-plugin/README.md:11,33' },
       { text: 'Not verified on Windows.', src: 'apps/openclaw-plugin/inbox.test.ts (a fake OpenClaw host; nothing runs a real OpenClaw on Windows)' },
     ],
-    examples: ['Ask OpenClaw in your Telegram DM to send you a question. Answer it in the Inbox and the answer comes back to you in Telegram.'],
+    examples: ['Ask OpenClaw to send you a question. Answer it in the Inbox and OpenClaw goes on with your answer in the same chat.'],
   },
   {
     slug: 'hermes-agent',
@@ -771,8 +774,8 @@ export const AGENTS: Agent[] = [
         steps: [{ do: 'Run this when `plannotator inbox` couldn’t. It applies without restarting Hermes.', code: 'hermes config set plugins.entries.plannotator.allow_gateway_injection true' }],
       },
       {
-        title: 'Turn the tool on without the Inbox',
-        steps: [{ do: 'Merge this into your Plannotator config. It applies to new Hermes sessions.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
+        title: 'Turn the tool on by hand',
+        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must have run once on this computer. It applies to new Hermes sessions.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
       },
     ],
     check: wakeCheck('Hermes Agent'),
@@ -789,9 +792,9 @@ export const AGENTS: Agent[] = [
         src: 'apps/hermes-plugin/__init__.py:15,156; apps/hermes-plugin/hermes.py:64-69; docs/agent-guides/inbox-notifications-and-agents.md:269',
       },
       {
-        symptom: 'In the classic command-line window the woken turn doesn’t show',
-        fix: 'It runs but stays hidden until you type something. Hermes’s newer TUI shows it live.',
-        src: 'owner note 2026-11-12 (proven on Hermes 0.23.1); not in the repo',
+        symptom: 'The classic command-line window doesn’t show your reply',
+        fix: 'In Hermes’s classic command-line window (`hermes`) your reply still starts a turn and is saved in the session, but that window doesn’t show it. Hermes’s TUI (`hermes --tui`) shows your reply and the answer as they happen.',
+        src: 'the integration builder’s test on Hermes Agent 0.23.1; not in the repo',
       },
       {
         symptom: 'The tool refuses in a chat',
@@ -813,11 +816,14 @@ export const AGENTS: Agent[] = [
         src: 'docs/agent-guides/inbox-notifications-and-agents.md:269; apps/hermes-plugin/__init__.py:15',
       },
       {
-        text: 'In Hermes’s classic command-line window the woken turn runs but stays hidden until you type something. Hermes’s newer TUI shows it live.',
-        src: 'owner note 2026-11-12; not in the repo',
+        text: 'In Hermes’s classic command-line window (`hermes`) your reply still starts a turn and is saved in the session, but that window doesn’t show it. Hermes’s TUI (`hermes --tui`) shows your reply and the answer as they happen.',
+        src: 'the integration builder’s test on Hermes Agent 0.23.1; not in the repo',
       },
       { text: 'Hermes and Plannotator must run on the same computer.', src: 'apps/hermes-plugin/README.md:7; PR #3217 (no remote or VPS mode yet)' },
-      { text: 'Tested on Hermes 0.23.1.', src: 'owner note 2026-11-12; the repo’s tests use a stub of Hermes (inbox-notifications-and-agents.md:271)' },
+      {
+        text: 'Tested on Hermes Agent 0.23.1 on Linux, with a stand-in model. Not yet tested on macOS, in the Desktop app, or with real chat accounts.',
+        src: 'the integration builder’s test; the repo’s tests use a stub of Hermes (inbox-notifications-and-agents.md:271)',
+      },
       { text: 'Not verified on Windows.', src: 'tests/hermes-plugin.test.ts (a stub of Hermes)' },
     ],
     examples: [
@@ -1404,5 +1410,7 @@ export const AGENTS: Agent[] = [
 ];
 
 export const agentHref = (slug: string) => `/inbox/agents/${slug}/`;
-export const agentsOfTier = (tier: Tier) => AGENTS.filter((a) => a.tier === tier);
+/** The agents the site shows: every page, tile, row and sitemap entry reads this. */
+export const LISTED_AGENTS = AGENTS.filter((a) => a.listed !== false);
+export const agentsOfTier = (tier: Tier) => LISTED_AGENTS.filter((a) => a.tier === tier);
 export const tierOf = (id: Tier) => TIERS.find((t) => t.id === id)!;

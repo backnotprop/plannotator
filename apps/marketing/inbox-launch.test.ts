@@ -8,13 +8,13 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { AGENTS, COLUMNS, TIERS, cellOf } from './src/lib/inbox-agents';
+import { AGENTS, COLUMNS, LISTED_AGENTS, TIERS, cellOf } from './src/lib/inbox-agents';
 
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const switchFile = join(marketingRoot, 'src/lib/inbox-launch.ts');
 const postPath = 'blog/the-age-of-the-inbox/index.html';
 const agentsPath = 'inbox/agents/index.html';
-const agentPaths = AGENTS.map((a) => `inbox/agents/${a.slug}/index.html`);
+const agentPaths = LISTED_AGENTS.map((a) => `inbox/agents/${a.slug}/index.html`);
 
 let temporaryRoot = '';
 const dist = { on: '' };
@@ -145,8 +145,8 @@ describe('Plannotator Inbox launch switch', () => {
     const sitemap = await read(dist.on, 'sitemap-0.xml');
     expect(sitemap).toContain('<loc>https://plannotator.ai/inbox/agents/</loc>');
     const rows = overview.match(/<li class="ag-row[^"]*"[^>]*>[\s\S]*?<\/li>/g) ?? [];
-    expect(rows).toHaveLength(AGENTS.length);
-    const ordered = TIERS.flatMap((t) => AGENTS.filter((a) => a.tier === t.id));
+    expect(rows).toHaveLength(LISTED_AGENTS.length);
+    const ordered = TIERS.flatMap((t) => LISTED_AGENTS.filter((a) => a.tier === t.id));
     ordered.forEach((agent, i) => {
       const href = `/inbox/agents/${agent.slug}/`;
       expect(rows[i]).toContain(`href="${href}"`);
@@ -155,14 +155,28 @@ describe('Plannotator Inbox launch switch', () => {
     });
     for (const [i, path] of agentPaths.entries()) {
       const html = await read(dist.on, path);
-      expect(text(html.match(/<h1\b[\s\S]*?<\/h1>/)?.[0] ?? '')).toBe(AGENTS[i].name);
+      expect(text(html.match(/<h1\b[\s\S]*?<\/h1>/)?.[0] ?? '')).toBe(LISTED_AGENTS[i].name);
       const copies = [...html.matchAll(/data-copy="([^"]*)"/g)].map(([, v]) =>
         v.replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'),
       );
-      const a = AGENTS[i];
+      const a = LISTED_AGENTS[i];
       const codes = [...a.setup, ...a.other.flatMap((o) => o.steps), a.check, ...a.trouble].map((s) => s.code).filter(Boolean);
       expect(codes.length, path).toBeGreaterThan(0);
       for (const code of codes) expect(copies, path).toContain(code);
+    }
+  });
+
+  // An agent marked listed: false (a plugin not published yet) stays in the
+  // data but must not reach the site: no page, no link and no sitemap entry.
+  test('on: an unlisted agent has no page and nothing links to it', async () => {
+    const unlisted = AGENTS.filter((a) => a.listed === false);
+    const pages = files(dist.on).filter((f) => f.endsWith('.html'));
+    const sitemap = await read(dist.on, 'sitemap-0.xml');
+    for (const agent of unlisted) {
+      const href = `/inbox/agents/${agent.slug}/`;
+      expect(existsSync(join(dist.on, `inbox/agents/${agent.slug}/index.html`)), agent.slug).toBe(false);
+      expect(sitemap, agent.slug).not.toContain(href);
+      for (const page of pages) expect(await read(dist.on, page), `${page} links ${href}`).not.toContain(`href="${href}"`);
     }
   });
 
