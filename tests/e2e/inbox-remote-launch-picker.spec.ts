@@ -21,6 +21,8 @@
  *     is back" with the note; the Send is held, the toast says Claude Code starts on Mac mini when it's back, and
  *     Cancel takes it back (the outbox entry `cancelled`, nothing started). Its group offers no "Another folder on
  *     Mac mini…" (nothing is read); MacBook's still does.
+ *  6. Mac mini still asleep: the "+" on its project names it once; a page that never read it offers no "+" there;
+ *     the Board's New card lists MacBook's projects only, and makes the card.
  *
  * `RL_PICKER_SHOTS` saves the picker's pictures (default /tmp/remote-launch-picker/build), 1440×900 and a 390 phone,
  * light; `RL_PICKER_DARK_SHOTS` their dark ones at 1440 (default /tmp/remote-launch-picker/build-dark);
@@ -512,5 +514,41 @@ test("5. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes
   const outbox = await getJson(macbook, '/api/inbox/outbox');
   expect((outbox.waiting as unknown[]).length).toBe(0);
   expect(mini.fake.starts().length).toBe(startsBefore);
+  expect(errors).toEqual([]);
+});
+
+test("6. Mac mini still asleep: \"+\" names it once where its last read is held, a page that never read it offers no \"+\" there, and New card lists MacBook's projects only", async ({ browser }) => {
+  const [desktop] = contexts.map((c) => c.pages()[0]!);
+  const list = await getJson(macbook, '/api/inbox/threads?machines=1');
+  const projects = list.projects as { id: string; name: string; machine?: string }[];
+  const idOf = (name: string, machine: string) => projects.find((p) => p.name === name && p.machine === machine)!.id;
+  const infra = idOf('infra', mini.id);
+  const web = idOf('web-app', macbook.id);
+
+  // This page read Mac mini before it slept: its "+" holds the start, and its tip names Mac mini once.
+  await expect(desktop!.locator(`[data-pplus="${infra}"]`)).toHaveAttribute('aria-label', "New session in infra · Mac mini, starts when it's back");
+
+  // A page loaded while Mac mini sleeps has never read it: nothing says what could start there.
+  const fresh = await window(browser, false);
+  await expect(fresh.locator(`[data-pplus="${web}"]`)).toHaveCount(1);
+  await expect(fresh.locator('.ib-projrow').filter({ hasText: 'infra' })).toHaveCount(1);
+  await expect(fresh.locator(`[data-pplus="${infra}"]`)).toHaveCount(0);
+
+  // The Board's cards are made in this Inbox: New card lists its own projects, and the card is made.
+  const on = await fetch(`${base(macbook)}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ board: { on: true } }) });
+  expect(on.status).toBe(200);
+  await fresh.goto(`${macbook.url}#board`);
+  await fresh.locator('[data-board-new]').click();
+  const card = fresh.locator('.ib-ncd');
+  await expect(card).toBeVisible();
+  await card.locator('[data-new-card-project]').click();
+  await expect(fresh.locator('.ib-pm .ib-pmi')).toHaveCount(2);
+  expect((await fresh.locator('.ib-pm .ib-pmi').allInnerTexts()).sort()).toEqual(['billing-svc', 'web-app']);
+  await fresh.locator('.ib-pm .ib-pmi').filter({ hasText: 'billing-svc' }).click();
+  await card.locator('[data-new-card-title]').fill('Retry the 409 with the same key');
+  const made = fresh.waitForResponse((r) => new URL(r.url()).pathname === '/api/inbox/cards' && r.request().method() === 'POST');
+  await card.locator('[data-new-card-add]').last().click();
+  expect((await made).status()).toBeLessThan(300);
+  await expect(card).toHaveCount(0);
   expect(errors).toEqual([]);
 });
