@@ -638,6 +638,12 @@ export interface InboxMessage {
    */
   wait_started_at?: string | null;
   /**
+   * Try again on a launched session's turn that ended in an error (`InboxRun.turn_error`): the session this message
+   * goes to once more, though a read already settled it. It counts only while `delivery` is unset. Absent otherwise.
+   * Additive.
+   */
+  sent_again_to?: string | null;
+  /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
    * every other message and on records older than step 5.
@@ -1195,6 +1201,8 @@ export interface InboxRun {
   cause: string | null;
   /** `failed` because the folder is not trusted: Open in Terminal runs plain `claude` there. */
   untrusted: boolean;
+  /** `failed` because the session's last turn ended in an error (its note is in the thread): Try again sends the message again. */
+  turn_error?: true;
   /** With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it). */
   home_folder?: true;
   /** With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this. */
