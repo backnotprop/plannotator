@@ -230,8 +230,12 @@ for (const phone of [
       await swipe(plain[10]!, 110, 'flick');
       await expect(toast(page)).toContainText(/read/i);
       await expect.poll(() => offset(page, plain[10]!)).toBe('');
-      await toast(page).locator('[data-toast-undo]').tap({ timeout: 30_000 });
-      await expect(live(page)).toHaveText('Moved back.');
+      // Chromium can drop the first tap that follows a real-touch flick (the toast and the live region stay as they
+      // were); a tap again on the Undo still showing is the person's.
+      await expect(async () => {
+        if ((await toast(page).locator('[data-toast-undo]').count()) > 0) await toast(page).locator('[data-toast-undo]').tap({ timeout: 5_000 });
+        await expect(live(page)).toHaveText('Moved back.', { timeout: 2_000 });
+      }).toPass({ timeout: 20_000 });
       await expect(toast(page)).toHaveCount(0);
 
       // A long swipe right on the thread with open questions asks first; Cancel leaves the row where it was.
