@@ -17,13 +17,14 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
   - Tests never run the real GitHub CLI, and never signal an Inbox except through `tests/helpers/inbox-process.ts`.
   - Every test guards a behavior that can regress: no copy snapshots of prose, no round-trip prop tests, no implementation echo.
   - Test agent-facing instructions (tool text, skills, `--help`) clean room: a fresh agent with only that text, in a scratch folder outside this repo, given a real task. Judge what it does, not what it says.
+- **No code comments:** write none (names and tests explain code; behavior lives in `docs/agent-guides/`). Only tool directives, license notices and comments a test reads stay; `tests/no-comments.test.ts` enforces it, and `bun scripts/strip-comments.ts <file>` removes them. See [No code comments](docs/agent-guides/project-and-development.md#no-code-comments).
 - **No new Inbox keyboard shortcuts without the owner's approval** (see the Inbox shortcuts note in [Keyboard Shortcuts](docs/agent-guides/guides-and-shared-ui.md#keyboard-shortcuts)). Shortcuts elsewhere go through the shortcut registry.
 - **Git:** never rebase or force-push a shared branch; merge main instead.
 - **Releases:** follow [`.agents/skills/release/SKILL.md`](.agents/skills/release/SKILL.md).
 
 ## Topic guides
 
-- [`project-and-development.md`](docs/agent-guides/project-and-development.md): repository map, server runtimes, installation, development, Testing Rules, build, marketing site.
+- [`project-and-development.md`](docs/agent-guides/project-and-development.md): repository map, server runtimes, installation, development, Testing Rules, no code comments, build, marketing site.
 - [`environment.md`](docs/agent-guides/environment.md): every environment variable and config-only setting.
 - [`plan-review.md`](docs/agent-guides/plan-review.md): plan review flow, Guides in VS Code, Pi plan review and the Pi `plannotator` tool.
 - [`claude-code-mod.md`](docs/agent-guides/claude-code-mod.md): the Claude Code hooks module (non-blocking flows, the `plannotator` tool, its Ask this session client and Inbox wake, version skew).

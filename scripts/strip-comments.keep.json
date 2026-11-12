@@ -1,0 +1,73 @@
+[
+  {
+    "path": "*",
+    "pattern": "^(//|/\\*)\\s*inbox-guard: own child",
+    "readBy": "tests/never-touch-the-real-inbox.test.ts (tests/helpers/real-inbox-scan.ts)"
+  },
+  {
+    "path": "*",
+    "pattern": "^(//|/\\*)\\s*no-browser-guard: sentinel under test",
+    "readBy": "tests/no-browser-sentinel.test.ts (tests/helpers/no-browser-scan.ts)"
+  },
+  {
+    "path": "*",
+    "pattern": "^(//|/\\*)\\s*child-env-guard:",
+    "readBy": "tests/child-env-guard.test.ts (tests/helpers/child-env-scan.ts)"
+  },
+  {
+    "path": "packages/shared/plannotator-tool.ts",
+    "pattern": "^// --- CONTRACT ",
+    "readBy": "apps/hook/hooks/mod/tool.test.ts"
+  },
+  {
+    "path": "apps/hook/hooks/mod/tool.ts",
+    "pattern": "^// --- CONTRACT ",
+    "readBy": "apps/hook/hooks/mod/tool.test.ts"
+  },
+  {
+    "path": "packages/shared/inbox/connection.ts",
+    "pattern": "^// --- CONTRACT ",
+    "readBy": "apps/hook/hooks/mod/inbox-contract.test.ts"
+  },
+  {
+    "path": "apps/hook/hooks/mod/inbox-contract.ts",
+    "pattern": "^// --- CONTRACT ",
+    "readBy": "apps/hook/hooks/mod/inbox-contract.test.ts"
+  },
+  {
+    "path": "packages/references/src/",
+    "pattern": "^// Source: ",
+    "wholeGroup": true,
+    "readBy": "packages/references/test/registry.test.ts (each file's first two lines name its Workspaces source and commit)"
+  },
+  {
+    "path": "packages/server/ai-runtime.ts",
+    "text": "// Claude SDK not available.",
+    "readBy": "packages/ai/providers/model-discovery.test.ts"
+  },
+  {
+    "path": "apps/pi-extension/server/ai-runtime.ts",
+    "text": "// Claude SDK not available.",
+    "readBy": "packages/ai/providers/model-discovery.test.ts"
+  },
+  {
+    "path": "packages/server/ai-runtime.ts",
+    "text": "// OpenCode not available.",
+    "readBy": "packages/ai/providers/opencode-sdk.test.ts"
+  },
+  {
+    "path": "apps/pi-extension/server/ai-runtime.ts",
+    "text": "// OpenCode not available.",
+    "readBy": "packages/ai/providers/opencode-sdk.test.ts"
+  },
+  {
+    "path": "packages/review-editor/App.tsx",
+    "pattern": "^// Re-fetch diff when hideWhitespace toggles",
+    "readBy": "packages/review-editor/utils/autoViewedCallSites.test.ts"
+  },
+  {
+    "path": "packages/review-editor/App.tsx",
+    "pattern": "^// --- Diff staleness ---",
+    "readBy": "packages/review-editor/utils/autoViewedCallSites.test.ts"
+  }
+]
