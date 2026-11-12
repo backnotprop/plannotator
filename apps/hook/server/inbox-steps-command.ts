@@ -1,14 +1,3 @@
-/**
- * `plannotator inbox steps <thread> --json '<list>'` (approval
- * "inbox-thread-steps", 2026-11-03): an agent's steps in a thread, from a
- * shell. Sugar over `plannotator inbox call steps` (inbox-call-command.ts),
- * so who is calling, the result on stdout and the exit codes are that
- * command's: no steps logic lives here.
- *
- * Works only while the person has steps on (config.json `inboxSteps`); off,
- * the Inbox answers `steps_off` and writes nothing (exit 1).
- */
-
 import { INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
 import { hasHelpFlag } from "./cli";
 import { runInboxCallCommand, type CallCommandDeps } from "./inbox-call-command";
@@ -55,7 +44,6 @@ export function parseStepsCommand(argv: readonly string[]): ParsedStepsCommand {
   return { ok: true, thread: positional[0]!, json: json === "-" ? null : json, stdin: json === "-", session };
 }
 
-/** Run `plannotator inbox steps …`; resolves to the exit code. */
 export async function runInboxStepsCommand(argv: readonly string[], deps: CallCommandDeps): Promise<number> {
   const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));

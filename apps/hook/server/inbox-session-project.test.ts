@@ -1,13 +1,3 @@
-/**
- * PLANNOTATOR_SESSION_PROJECT as the CLI reads it (`inboxSessionProjectFromEnv`,
- * `inboxProjectFolderFor`) and as the stdio shim applies it. What can regress:
- * a malformed or foreign value moving a call out of its folder, the same id
- * under another host counting as this session, a folder that is a file or gone
- * being used, and the shim filling the session's folder over a `project_path`
- * the agent named. Where the calls land end to end is proved in
- * packages/server/inbox-project.model.test.ts. No Inbox runs here: the shim
- * talks to an in-process fake on loopback.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,22 +42,18 @@ describe("the folder a call files under", () => {
     const f = folders();
     const mine: InboxSessionProject = { host: "claude-code", session: "s1", folder: f.top };
     expect(inboxProjectFolderFor(mine, { host: "claude-code", session: "s1" }, f.sub)).toBe(f.top);
-    // `inbox call --session s1` names no host: the id is this session's.
     expect(inboxProjectFolderFor(mine, { host: null, session: "s1" }, f.sub)).toBe(f.top);
     expect(inboxProjectFolderFor(mine, { session: "s1" }, f.sub)).toBe(f.top);
-    // Another session, the same id under another host, no caller, no value: the working folder.
     expect(inboxProjectFolderFor(mine, { host: "claude-code", session: "s2" }, f.sub)).toBe(f.sub);
     expect(inboxProjectFolderFor(mine, { host: "pi", session: "s1" }, f.sub)).toBe(f.sub);
     expect(inboxProjectFolderFor(mine, null, f.sub)).toBe(f.sub);
     expect(inboxProjectFolderFor(null, { host: "claude-code", session: "s1" }, f.sub)).toBe(f.sub);
-    // A file, or a folder that is gone.
     expect(inboxProjectFolderFor({ ...mine, folder: f.file }, { host: "claude-code", session: "s1" }, f.sub)).toBe(f.sub);
     expect(inboxProjectFolderFor({ ...mine, folder: join(f.root, "gone") }, { host: "claude-code", session: "s1" }, f.sub)).toBe(f.sub);
   });
 });
 
 describe("plannotator inbox mcp with a session project", () => {
-  /** One tools/call through the real shim to a fake Inbox; the arguments the Inbox received. */
   async function through(args: Record<string, unknown>, options: { cwd: string; sessionProject: InboxSessionProject | null; hostSession: { host: string; session: string; name: string } | null }) {
     const received: Record<string, unknown>[] = [];
     const fake = Bun.serve({

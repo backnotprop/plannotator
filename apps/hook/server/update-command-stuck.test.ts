@@ -1,9 +1,3 @@
-/**
- * `plannotator update` when GitHub is difficult (QA item 30): it reads the
- * release page first and needs no API, and when it cannot check at all it
- * ends with the command that always works. Fake GitHub on loopback; no
- * network, no installer.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

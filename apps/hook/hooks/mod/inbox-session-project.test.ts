@@ -1,12 +1,3 @@
-/**
- * PLANNOTATOR_SESSION_PROJECT, which the mod exports beside
- * PLANNOTATOR_SESSION_TAG so the session's shell commands (`plannotator inbox
- * call`, `plannotator card`) file where its `plannotator_inbox` tool does.
- * What can regress: the value following the shell's `cd` (the split the audit
- * found, D1), not following a `/cd`, naming a folder that is gone, or a write
- * on every Bash call. Where it lands is proved end to end in
- * packages/server/inbox-project.model.test.ts.
- */
 import { describe, expect, test } from 'bun:test'
 import { PlannotatorMod } from './controller'
 import { fakeHost } from './testing/fake-host'
@@ -34,10 +25,10 @@ describe('the session project its shell inherits', () => {
       const { mod, exported } = session(where, inbox)
       try {
         await mod.exportSessionProject()
-        where.cwd = '/w/top/repo/src' // a shell cd
+        where.cwd = '/w/top/repo/src'
         await mod.exportSessionProject()
         await mod.exportSessionProject()
-        where.root = where.cwd = '/w/top/repo' // Claude Code's /cd
+        where.root = where.cwd = '/w/top/repo'
         await mod.exportSessionProject()
         expect(exported).toEqual(['claude-code:s1:/w/top', 'claude-code:s1:/w/top/repo'])
       } finally {
@@ -77,9 +68,6 @@ describe('the session project its shell inherits', () => {
   })
 })
 
-// The three places register.ts exports it (review of #2528): the instance switch, the main loop's turn start and
-// each Bash call. Each step below moves the root where only that trigger can see it, so removing any one fails.
-// And a hung write never holds a Bash call.
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
 
 async function freshHooks(name: string) {
@@ -110,7 +98,6 @@ function engine() {
   const world = {
     root: '/w/top',
     env,
-    /** Set to hold every PLANNOTATOR_SESSION_PROJECT write until released. */
     hold: null as Promise<void> | null,
     $: {
       env: {
@@ -161,17 +148,14 @@ describe('the hooks that export it', () => {
     const pass = (e: unknown) => e
     await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/w/top/repo/src' }))
     await settle()
-    // The instance switch alone (no turn yet).
     expect(world.env.get('PLANNOTATOR_SESSION_PROJECT')).toBe('claude-code:sess-wire:/w/top')
 
-    // A /cd between turns: the main loop's next turn start names it; a subagent's does not.
     world.root = '/w/top/repo'
     await hook('turn.start')($, { turnId: 'turn-sub', text: '', agentId: 'agent-1' }, pass)
     expect(world.env.get('PLANNOTATOR_SESSION_PROJECT')).toBe('claude-code:sess-wire:/w/top')
     await hook('turn.start')($, { turnId: 'turn-1', text: '' }, pass)
     expect(world.env.get('PLANNOTATOR_SESSION_PROJECT')).toBe('claude-code:sess-wire:/w/top/repo')
 
-    // A worktree move inside the turn: the next Bash call names it before the command runs.
     world.root = '/w/other'
     let seenByCommand: string | undefined
     await hook('tool.call')($, { tool: 'Bash', command: 'plannotator card list' }, (e: unknown) => ((seenByCommand = world.env.get('PLANNOTATOR_SESSION_PROJECT')), e))
@@ -185,12 +169,10 @@ describe('the hooks that export it', () => {
     world.hold = new Promise<void>((resolve) => (release = resolve))
     const started = performance.now()
     await hook('session.start')(world.$, { isInteractive: true }, async () => ({ cwd: '/w/top/repo/src' }))
-    // A worktree move: the Bash call has a new value to write, and that write hangs too.
     world.root = '/w/other'
     let ran = false
     await hook('tool.call')(world.$, { tool: 'Bash', command: 'ls' }, (e: unknown) => ((ran = true), e))
     expect(ran).toBe(true)
-    // Bounded (250 ms per wait), never held until the write lands.
     expect(performance.now() - started).toBeLessThan(2_000)
     expect(world.env.get('PLANNOTATOR_SESSION_PROJECT')).toBeUndefined()
     world.hold = null

@@ -1,14 +1,3 @@
-/**
- * `plannotator inbox icon set <file> --request <id>`: an agent hands an animated icon back, after an Inbox message
- * ("Animate it", packages/inbox/agents/animatePrompt.ts) asked it to animate one of the person's agent icons. A command
- * and not a tool, as `inbox rows` and `inbox projects` are: tool text costs every session tokens, and this runs seldom.
- *
- * A thin client over `POST /api/inbox/icon-animate` on this computer's listener (packages/server/inbox-icon-animate.ts),
- * which keeps the picture through the upload's own checks and changes only the icon the request names.
- *
- * stdout: one line, or JSON with --json. A refusal goes to stderr as `<code>: <message>` and exits 1; bad usage exits 2.
- */
-
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -27,9 +16,7 @@ export const INBOX_ICON_USAGE = [
   "with a better version.",
 ].join("\n");
 
-/** One request never waits longer: a wedged Inbox must not hang the agent. */
 const REQUEST_TIMEOUT_MS = 30_000;
-/** The server's cap is 512 KB; a much larger file is refused here without reading it. */
 const READ_CAP = 4 * 1024 * 1024;
 
 const TYPES: Record<string, string> = { svg: "image/svg+xml", png: "image/png", gif: "image/gif", webp: "image/webp", jpg: "image/jpeg", jpeg: "image/jpeg" };
@@ -63,7 +50,6 @@ export interface IconCommandDeps {
   timeoutMs?: number;
 }
 
-/** Run `plannotator inbox icon …`; resolves to the exit code. */
 export async function runInboxIconCommand(argv: readonly string[], deps: IconCommandDeps): Promise<number> {
   const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
@@ -94,7 +80,6 @@ export async function runInboxIconCommand(argv: readonly string[], deps: IconCom
   } catch (error) {
     return refused("not_running", `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`);
   }
-  // The type named here is only a label: the Inbox sniffs the bytes.
   const type = TYPES[path.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
   try {
     const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/icon-animate`, {

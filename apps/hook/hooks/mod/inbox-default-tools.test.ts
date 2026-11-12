@@ -6,13 +6,8 @@ import { startInboxServer, type InboxServer } from '@plannotator/server/inbox'
 import { INBOX_TOOL_ACTIONS, mcpAnswerOf, parseInboxToolList } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 
-/** Every action a default Inbox serves: not `card`, listed only while the person has the Board on (config.json `inboxBoard`, off by default), nor `steps`, listed only while they have thread steps on (`inboxSteps`, off by default). */
 const SERVED_ACTIONS = INBOX_TOOL_ACTIONS.filter((name) => name !== 'card' && name !== 'steps')
 
-// The failure this guards: a Claude Code session that starts before the Inbox
-// ever ran registers plannotator_inbox from the bundled list, and that list
-// drifted from what the Inbox actually serves (a renamed field, a new action),
-// so Claude calls the Inbox with arguments it refuses.
 describe('the bundled Inbox tool list', () => {
   let dataDir: string
   let inbox: InboxServer

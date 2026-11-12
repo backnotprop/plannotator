@@ -1,12 +1,3 @@
-/**
- * Live app probe contract for annotate URL resolution (phase 1).
- *
- * Loopback http URLs default to live mode when the probe returns HTML;
- * --static forces the classic conversion pipeline; --app forces live and
- * fails loudly when it cannot apply; non-loopback URLs keep the conversion
- * pipeline untouched. Probes run against a throwaway Bun.serve.
- */
-
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { isLoopbackHostname, resolveAnnotateTarget } from "./annotate-resolution";
 
@@ -17,8 +8,6 @@ let jsonUrl: string;
 let unreachableUrl: string;
 
 beforeAll(() => {
-  // A second loopback service on a DIFFERENT port: the probe's off-origin
-  // redirect rule is exercised without any real external fetch.
   otherApp = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -57,7 +46,6 @@ beforeAll(() => {
   });
   htmlUrl = `http://127.0.0.1:${fakeApp.port}/`;
   jsonUrl = `http://127.0.0.1:${fakeApp.port}/api`;
-  // A port nothing listens on: connection refused, fast.
   unreachableUrl = "http://127.0.0.1:1/";
 });
 
@@ -96,12 +84,9 @@ describe("isLoopbackHostname", () => {
   });
 
   test("rejects 127.-prefixed DNS names: only literal 127/8 IPv4 addresses count", () => {
-    // A string-prefix test would classify these attacker-resolvable domains
-    // as loopback and proxy an off-box origin.
     expect(isLoopbackHostname("127.0.0.1.evil.example")).toBe(false);
     expect(isLoopbackHostname("127.evil.example")).toBe(false);
     expect(isLoopbackHostname("127.example.com")).toBe(false);
-    // Malformed near-literals are not literals either.
     expect(isLoopbackHostname("127.0.0")).toBe(false);
     expect(isLoopbackHostname("127.0.0.256")).toBe(false);
     expect(isLoopbackHostname("127.0.0.1.2")).toBe(false);
@@ -124,8 +109,6 @@ describe("annotate URL resolution: live app probe", () => {
   });
 
   test("a loopback JSON endpoint stays on the static pipeline (its legacy error verbatim)", async () => {
-    // The conversion pipeline has always rejected non-HTML content types;
-    // the probe must not turn that into a live session or a new error shape.
     const result = await resolve(jsonUrl);
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -178,8 +161,6 @@ describe("annotate URL resolution: live app probe", () => {
   });
 
   test("a failed probe without --app falls back to the static pipeline verbatim", async () => {
-    // The static pipeline then fails its own way (dead URL), proving the
-    // probe failure did not invent a new terminal state.
     const result = await resolve(unreachableUrl);
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -189,9 +170,6 @@ describe("annotate URL resolution: live app probe", () => {
   });
 
   test("a failed probe announces the static downgrade on the log line, naming --app", async () => {
-    // The cold-dev-server case: the probe fails (server not up yet) and the
-    // session silently opened as a static conversion. The downgrade must be
-    // said out loud, with --app as the way to force live mode.
     const lines: string[] = [];
     await resolveAnnotateTarget({
       rawFilePath: unreachableUrl,
@@ -245,13 +223,6 @@ describe("annotate URL resolution: live app probe", () => {
   });
 
   test("a redirect off the loopback origin never becomes a live session", async () => {
-    // The live surface would be dead on arrival (the iframe immediately
-    // navigates off the proxy), so eligibility is judged on the FINAL
-    // response URL and the target falls through to the static pipeline.
-    // Here that pipeline's own SSRF guard then rejects the cross-port
-    // loopback redirect; its error surfaces verbatim, exactly like any
-    // other static-pipeline terminal state. The invariant under test is
-    // that no live session starts.
     const result = await resolve(`http://127.0.0.1:${fakeApp.port}/redirect-away`);
     expect(result.ok).toBe(false);
     if (!result.ok) {

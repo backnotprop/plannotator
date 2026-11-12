@@ -1,14 +1,3 @@
-/**
- * `plannotator review <bitbucket PR URL>` end to end: a real spawn of the CLI
- * entry against the local fake Bitbucket API (tests/test-fixtures/bitbucket),
- * wired through PLANNOTATOR_BITBUCKET_API_URL. Covers what only the whole
- * chain proves: URL detection → auth → fetch → review server payload →
- * PR context → posting a review back to the platform.
- *
- * The CLI imports the built single-file HTML from ../dist at module load; the
- * API routes under test never serve it, so placeholders are created when a
- * real build is absent and removed afterwards.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,7 +22,7 @@ async function waitForReady(readyFile: string): Promise<string> {
   for (let i = 0; i < 200; i++) {
     if (existsSync(readyFile)) {
       const text = readFileSync(readyFile, "utf-8");
-      try { return (JSON.parse(text) as { url: string }).url; } catch { /* partially written */ }
+      try { return (JSON.parse(text) as { url: string }).url; } catch { }
     }
     await Bun.sleep(100);
   }
@@ -74,12 +63,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (proc) {
-    try { await fetch(`${base}/api/exit`, { method: "POST" }); } catch { /* already gone */ }
+    try { await fetch(`${base}/api/exit`, { method: "POST" }); } catch { }
     const exited = await Promise.race([proc.exited, Bun.sleep(5_000).then(() => null)]);
     if (exited === null) proc.kill();
   }
   fake?.stop();
-  // Only the stubs this file wrote; never the dist folder (a build may be writing into it).
   removeStubbedHtml(stubs);
   rmSync(workDir, { recursive: true, force: true });
 });
@@ -94,7 +82,6 @@ describe("plannotator review <bitbucket PR>", () => {
       headSha: "c0a227ce2c516b48f1093561a903bf89f2b4282a",
     });
     expect(diff.platformUser).toBe("Ada Reviewer");
-    // The token must never reach the browser or the terminal.
     expect(JSON.stringify(diff)).not.toContain(TOKEN);
     expect(stderr).not.toContain(TOKEN);
   });
@@ -132,7 +119,6 @@ describe("plannotator review <bitbucket PR>", () => {
     const posted = fake.requests
       .filter((r) => r.method === "POST")
       .map((r) => [r.path.replace("/2.0/repositories/ws/repo/pullrequests/1", ""), r.body]);
-    // Inline comments before the general comment (#1583: newest-first feed).
     expect(posted).toEqual([
       ["/comments", { content: { raw: "nit: `product`?" }, inline: { path: "src/math.ts", to: 9 } }],
       ["/comments", { content: { raw: "LGTM with one nit." } }],

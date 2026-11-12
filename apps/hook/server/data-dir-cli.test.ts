@@ -1,13 +1,3 @@
-/**
- * `plannotator data-dir` (#2305): skills ask it for the data directory
- * instead of naming ~/.plannotator. Guards that it prints the folder the
- * runtime really uses (the XDG one on an XDG install, also past a stray
- * ~/.plannotator), creates nothing, and keeps stdout to the bare path an
- * agent can use.
- *
- * Every run gets a temp HOME and XDG_DATA_HOME and no inherited
- * PLANNOTATOR_DATA_DIR, so the real data dir is never resolved.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -87,8 +77,6 @@ test("past a stray ~/.plannotator it prints the XDG folder and names the stray o
   expect(out.code).toBe(0);
   expect(out.stdout.trim()).toBe(join(xdg, "plannotator"));
   expect(out.stderr).toContain(join(home, ".plannotator"));
-  // Pinned on purpose (#2411 review): the note must tell an agent to leave
-  // the other folder alone, since it may hold the person's older data.
   expect(out.stderr).toContain("leave it alone");
 }, 30_000);
 

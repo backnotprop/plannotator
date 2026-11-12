@@ -12,7 +12,6 @@ function fakeHost(env: Record<string, string>, files: readonly string[]): ShellH
 }
 
 describe('which shell the mod runs its scripts in', () => {
-  // Installs on other drives and in other folders, so nothing passes by matching C:\Program Files.
   const windows = { OS: 'Windows_NT', PROGRAMFILES: 'D:\\Apps', LOCALAPPDATA: 'E:\\Profiles\\me\\AppData\\Local' }
   const machineWide = 'D:\\Apps\\Git\\bin\\bash.exe'
   const perUser = 'E:\\Profiles\\me\\AppData\\Local\\Programs\\Git\\bin\\bash.exe'
@@ -34,7 +33,6 @@ describe('which shell the mod runs its scripts in', () => {
     expect(await findGitBash(fakeHost(env, all))).toBe(onPath)
     expect(await findGitBash(fakeHost(env, [machineWide, perUser]))).toBe(machineWide)
     expect(await findGitBash(fakeHost(env, [perUser]))).toBe(perUser)
-    // Named but missing: the search goes on rather than trusting it.
     expect(await findGitBash(fakeHost({ ...env, CLAUDE_CODE_GIT_BASH_PATH: 'G:\\gone.exe' }, all))).toBe(onPath)
   })
 
@@ -53,7 +51,6 @@ describe('which shell the mod runs its scripts in', () => {
   })
 })
 
-// The scripts that differ under Git Bash, run for real where it is installed, found as the mod finds it.
 const GIT_BASH =
   process.platform === 'win32'
     ? ((await findGitBash({ exists: async (path) => existsSync(path), env: async (name) => process.env[name] })) ?? undefined)
@@ -66,7 +63,6 @@ describe.skipIf(!GIT_BASH)("Git Bash's own variants of the scripts", () => {
     useShell(POSIX_SHELL)
     // inbox-guard: own child (a renamed copy of ping this test started, never an Inbox)
     for (const pid of pids.splice(0)) Bun.spawnSync(['taskkill', '/F', '/PID', pid])
-    // Windows frees a killed process's folder a moment later.
     for (const dir of dirs.splice(0)) {
       for (let i = 0; i < 20; i++) {
         try {
@@ -79,7 +75,6 @@ describe.skipIf(!GIT_BASH)("Git Bash's own variants of the scripts", () => {
     }
   })
   const scratch = () => {
-    // Not named after the CLI: the stop check looks for "plannotator" in the whole command line.
     const dir = mkdtempSync(join(tmpdir(), 'pn-git-bash-'))
     dirs.push(dir)
     return dir
@@ -89,7 +84,6 @@ describe.skipIf(!GIT_BASH)("Git Bash's own variants of the scripts", () => {
     return { code: result.exitCode, out: result.stdout.toString().trim() }
   }
 
-  /** A long-running native process named like the CLI, started the way the mod starts the CLI, with its MSYS pid. */
   function launchStandIn(name: string): { dir: string; pid: string } {
     const dir = scratch()
     const exe = join(dir, `${name}.exe`)
@@ -123,7 +117,6 @@ describe.skipIf(!GIT_BASH)("Git Bash's own variants of the scripts", () => {
     useShell(gitBashShell(GIT_BASH as string))
     const dir = scratch()
     mkdirSync(join(dir, 'sub'))
-    // `cd -P` gives the long path: a temp folder under an 8.3 name (`RUNNER~1`, CI's) is compared as that.
     const want = realpathSync.native(dir).replaceAll('\\', '/')
     expect(run(inboxProjectDirArgv(tmpdir(), dir))).toEqual({ code: 0, out: want })
     expect(run(inboxProjectDirArgv(dir, 'sub'))).toEqual({ code: 0, out: `${want}/sub` })

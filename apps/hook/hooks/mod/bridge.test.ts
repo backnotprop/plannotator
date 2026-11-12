@@ -1,8 +1,3 @@
-/**
- * The mod's pull-bridge client against the real server half
- * (packages/ai/session-bridge-pull.ts), with `$.http.fetch` answered by the
- * server's own request handler.
- */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createPullSessionBridge, type PullSessionBridge } from '../../../../packages/ai/session-bridge-pull.ts'
 import { readFileSync } from 'node:fs'
@@ -34,7 +29,6 @@ function wire(host: FakeHost, bridge: PullSessionBridge, options: { olderServer?
     if (!response) return { status: 404, ok: false, text: '' }
     let text = await response.text()
     if (options.olderServer && url.endsWith('/poll')) {
-      // A server from before the `features` advert.
       const { features: _features, ...rest } = JSON.parse(text)
       text = JSON.stringify(rest)
     }
@@ -86,7 +80,6 @@ describe('Ask this session over the pull bridge', () => {
     await until(() => host.submits.length === 1)
     expect(host.submits[0]).toBe('[Plannotator Ask AI] Why step 2?')
 
-    // Its turn starts, framed as Claude Code frames a plugin's prompt (seen live).
     turns.onTurnStart('turn-1', 'The plannotator plugin sent a message:\n[Plannotator Ask AI] Why step 2?\nThis is how Claude Code surfaces a prompt a plugin submits between turns.')
     turns.onText('turn-1', 'Because ')
     turns.onText('turn-1', 'it is needed.')
@@ -102,8 +95,6 @@ describe('Ask this session over the pull bridge', () => {
     await running
   })
 
-  // Review of #2780: Claude Code resolves `{ drop }` for a prompt it refuses (after a Stop, until someone types).
-  // Read as taken, the question waited for a turn that never came; it ends `failed`, with words even for an empty reason.
   for (const [reason, shown] of [
     ['the session was stopped and nobody has sent input since', 'the session was stopped and nobody has sent input since'],
     ['  ', SESSION_COULD_NOT_ANSWER_TEXT],
@@ -131,7 +122,6 @@ describe('Ask this session over the pull bridge', () => {
       expect(seen.error).toBe('failed')
       expect(seen.message).toBe(shown)
       expect(seen.done).toBeNull()
-      // Nothing waits in the engine for it: no later turn is taken as its answer.
       expect(turns.queuedPrompts()).toEqual([])
 
       live = false
@@ -164,9 +154,6 @@ describe('Ask this session over the pull bridge', () => {
     await running
   })
 
-  // The failure this guards: a poll stays open up to 15 s past `/clear` or a
-  // lease move, and an interrupt arriving on it aborted the turn of whatever
-  // conversation the process had gone on with, and reported ok.
   test('an interrupt on a held poll after the session ended aborts nothing and reports ok: false', async () => {
     live = true
     server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
@@ -195,8 +182,6 @@ describe('Ask this session over the pull bridge', () => {
     await running
   })
 
-  // The failure this guards: "Interrupt and ask now" aborted a turn another
-  // plugin's prompt started, cutting off the answer that plugin waits for.
   test("an interrupt never aborts a turn another plugin's prompt started", async () => {
     live = true
     server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
@@ -217,8 +202,6 @@ describe('Ask this session over the pull bridge', () => {
     await running
   })
 
-  // The failure this guards: another plugin's prompt was folded into our Ask question's turn, and the
-  // reviewer's Stop then aborted that turn, cutting off the answer the other plugin waits for.
   test("a Stop on a question whose turn another plugin's prompt joined closes the question and aborts nothing", async () => {
     live = true
     server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
@@ -273,9 +256,6 @@ describe('Ask this session over the pull bridge', () => {
     await running
   })
 
-  // The failure this guards: the person typed into the question's turn, and
-  // the reply to their prompt streamed into Plannotator as the answer, and
-  // "Interrupt and ask now" then aborted the person's own work.
   test('a prompt typed into the question\'s turn settles it as taken over, and the turn is never interrupted', async () => {
     live = true
     server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
@@ -303,7 +283,6 @@ describe('Ask this session over the pull bridge', () => {
     expect(seen.message).toBe(TAKEN_OVER_BY_PERSON_TEXT)
     expect(seen.deltas).toBe('Because ')
 
-    // A late Stop and "Interrupt and ask now" both leave the person's turn alone.
     controller.abort()
     await expect(server.bridge.interrupt!()).rejects.toThrow(TAKEN_OVER_INTERRUPT_TEXT)
     expect(host.aborted).toEqual([])
@@ -313,9 +292,6 @@ describe('Ask this session over the pull bridge', () => {
     await running
   })
 
-  // The failure this guards: a newer mod against an older CLI, whose server
-  // reads `taken_over` as `failed` and whose UI then replaces the partial
-  // answer with the error.
   test('against a server that does not advertise taken_over, a take-over settles as the partial answer plus the note', async () => {
     live = true
     server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
@@ -357,8 +333,6 @@ describe('Ask this session over the pull bridge', () => {
   })
 })
 
-// The controller decides from these whether to start the loop again, so each
-// way a loop ends has to say which it was.
 describe('how a bridge loop ends', () => {
   const POLL = 'http://127.0.0.1:4321/api/ai/bridge/poll'
 
@@ -372,7 +346,6 @@ describe('how a bridge loop ends', () => {
     host.onFetch = (url) => {
       if (url !== POLL) return { status: 200, ok: true, text: '{}' }
       polls += 1
-      // The first poll is answered; then the server goes silent ($.http.fetch gives up).
       if (polls === 1) return { status: 200, ok: true, text: JSON.stringify({ commands: [] }) }
       throw new Error('The operation timed out.')
     }
@@ -396,7 +369,6 @@ describe('how a bridge loop ends', () => {
     host.onFetch = (url) => {
       if (url !== POLL) return { status: 200, ok: true, text: '{}' }
       pollTimes.push(host.clock)
-      // Superseded twice (another client polls this server), then the server closes.
       const body = pollTimes.length <= 2 ? { commands: [], superseded: true } : { commands: [], closing: true }
       return { status: 200, ok: true, text: JSON.stringify(body) }
     }

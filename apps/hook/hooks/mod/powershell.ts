@@ -1,32 +1,5 @@
-/**
- * Windows PowerShell 5.1 as the mod's shell on Windows. It ships with every
- * Windows 10 and 11, so the mod needs nothing else installed. Each POSIX script
- * has a PowerShell twin here with the same arguments, output and exit codes.
- *
- * - The script travels as `-EncodedCommand` (UTF-16, base64): nothing is ever
- *   parsed off a command line, and the execution policy does not apply.
- * - Each argument travels inside it as base64 too, decoded into `$argv`.
- *   Base64 holds no quote, so no argument can end a string early; escaping
- *   `'` would not be enough, since PowerShell also reads `‘ ’ ‚ ‛` as single
- *   quotes.
- * - Output lines end in `\n` alone (`Write-Line`), as the POSIX scripts' do:
- *   the readers split on `\n` and match whole lines.
- * - A pid is a Windows pid, which `Get-Process` and `Stop-Process` take.
- *
- * The scripts are terse on purpose. Each one travels whole on every call, as
- * UTF-16 in base64, so each character costs about 2.7 on the command line,
- * which Windows caps at 32,767 characters. The launch script alone is about
- * 3,000 characters, or 8,000 encoded. So the explanations live in these
- * TypeScript comments, and none sit inside the PowerShell text.
- *
- * The names below (`settled`, `feedback.md`, the debug log's size cap) are
- * launch.ts's; this file imports nothing from it, and powershell.test.ts
- * keeps the two in step.
- */
-
 import type { ModShell, ShellScriptId } from './shell'
 
-/** Runs before every script: stop on errors, UTF-8 output, and the helpers the scripts share. */
 const PRELUDE = String.raw`$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
@@ -36,7 +9,6 @@ function Read-Argument([string]$encoded) { [Text.Encoding]::Unicode.GetString([C
 `
 
 const SCRIPTS: Record<ShellScriptId, string> = {
-  /** Polls every 100 ms, up to `argv[0]` times, for any of the other paths; exit 0 when one appears, 1 on timeout. */
   wait: String.raw`$tries = [int]$argv[0]
 $paths = @($argv | Select-Object -Skip 1)
 for ($i = 0; $i -lt $tries; $i++) {
@@ -47,18 +19,6 @@ for ($i = 0; $i -lt $tries; $i++) {
 }
 exit 1`,
 
-  /**
-   * Starts the CLI detached and returns at once. The CLI runs under a hidden
-   * watcher process (`Start-Process`), which puts its streams on the launch
-   * directory's files, writes its pid, waits for it, and writes its exit code
-   * (127 when it never started) through `exit.tmp` so the `exit` file appears
-   * whole. A bare CLI name is looked up as an .exe on `PATH` only: given a
-   * bare name, `Process.Start` would also search the session's folder first,
-   * so a `plannotator.exe` in a cloned repository would run.
-   * `Quote-Argument` quotes each CLI argument the way the Windows
-   * command-line parser reads it back; `Write-Value` writes each of the
-   * watcher's inputs into its script as base64, decoded where it is read.
-   */
   launch: String.raw`function Quote-Argument([string]$text) {
   if ($text -ne '' -and $text -notmatch '[\s"]') { return $text }
   $quoted = '"'
@@ -122,15 +82,9 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($watcher)
 $null = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -WindowStyle Hidden -ArgumentList '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded
 exit 0`,
 
-  /** Creates the directory `argv[0]` (with its parents) and prints the folder the script runs in, as a Windows path. */
   mkdir: String.raw`$null = [IO.Directory]::CreateDirectory($argv[0])
 Write-Line (Get-Location).ProviderPath`,
 
-  /**
-   * Removes the named files from the launch directory `argv[0]`. Unless a
-   * `feedback.md` is left for the agent to read, it also removes the settled
-   * markers and the directory itself.
-   */
   cleanup: String.raw`$dir = $argv[0]
 foreach ($name in @($argv | Select-Object -Skip 1)) {
   Remove-Item -LiteralPath (Join-Child $dir $name) -Force -ErrorAction SilentlyContinue
@@ -145,12 +99,6 @@ if (-not (Test-Path -LiteralPath (Join-Child $dir 'feedback.md'))) {
 }
 exit 0`,
 
-  /**
-   * Claims launch `argv[0]` for claimant `argv[1]`: exit 0 when this claimant
-   * holds it, 3 when another does or the launch is gone, 4 on an error. The
-   * claim is the `settled\by` file, made with CreateNew so exactly one process
-   * wins, where the POSIX script's claim is the mkdir of `settled/`.
-   */
   claim: String.raw`$dir = $argv[0]
 $me = $argv[1]
 $settled = Join-Child $dir 'settled'
@@ -176,13 +124,6 @@ try {
   exit 4
 } catch { exit 4 }`,
 
-  /**
-   * Prints each launch directory that can go. `--cleaned`, `--dead` and
-   * `--expired` set the mode for the directories after them: a directory with
-   * no `stdin` always goes; a settled one goes once delivered, reported or
-   * undecided (and in `expired` mode, when its CLI is gone); otherwise
-   * `dead` and `expired` take the ones whose CLI is no longer running.
-   */
   prune: String.raw`$mode = 'cleaned'
 foreach ($dir in $argv) {
   if ($dir -eq '--cleaned' -or $dir -eq '--dead' -or $dir -eq '--expired') {
@@ -213,12 +154,6 @@ foreach ($dir in $argv) {
 }
 exit 0`,
 
-  /**
-   * Appends stdin to the debug log `argv[0]`, first rotating a log over
-   * 1 MiB to `.1`. It copies stdin as bytes: `[Console]::In` would decode it
-   * in the system code page, since a process Claude Code starts has no
-   * console.
-   */
   'debug-append': String.raw`$log = $argv[0]
 $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($log))
 if ((Test-Path -LiteralPath $log) -and (Get-Item -LiteralPath $log).Length -gt 1048576) {
@@ -232,17 +167,9 @@ $buffer.WriteTo($file)
 $file.Close()
 exit 0`,
 
-  /** Exit 0 when process `argv[0]` runs, 1 when it does not. */
   alive: String.raw`if (Get-Process -Id ([int]$argv[0]) -ErrorAction SilentlyContinue) { exit 0 }
 exit 1`,
 
-  /**
-   * Ends the CLI `argv[0]`: exit 3 when one of the other paths exists (the
-   * session already settled), 4 when that pid is not a plannotator process,
-   * 5 when it cannot be stopped, 6 when its command line cannot be read.
-   * Windows has no TERM, so the CLI is ended outright, which also leaves no
-   * decision and keeps its draft.
-   */
   stop: String.raw`$id = 0L
 if (-not [long]::TryParse($argv[0], [ref]$id)) { exit 4 }
 foreach ($path in @($argv | Select-Object -Skip 1)) {
@@ -253,23 +180,12 @@ if (-not $process -or [string]$process.CommandLine -cnotmatch 'plannotator') { e
 try { Stop-Process -Id $id -Force } catch { exit 5 }
 exit 0`,
 
-  /** Prints `ok`, through a .NET call like the other scripts make, so a locked-down PowerShell fails it. */
   probe: String.raw`$null = [IO.File]::Exists([IO.Path]::Combine('probe', 'ok'))
 Write-Line 'ok'`,
 
-  /** Removes the file `argv[0]`, if it is there. */
   rm: String.raw`Remove-Item -LiteralPath $argv[0] -Force -ErrorAction SilentlyContinue
 exit 0`,
 
-  /**
-   * Reads `argv[2]` bytes of the transcript `argv[1]` from byte `argv[0]` (1
-   * based), prints its last 19 custom-title lines (each cut to 4,096
-   * characters), then `end:<offset>:<last line's length>`, or `end::` when the
-   * file cannot be read. The POSIX script also prints the file's inode
-   * (`id:<n>`) so a rewrite under the same name is noticed; NTFS's file id
-   * needs a compiled call per read, so here a rewrite is noticed only when the
-   * file shrank.
-   */
   'transcript-title': String.raw`$start = [int64]$argv[0] - 1
 $path = $argv[1]
 $length = [int]$argv[2]
@@ -306,10 +222,6 @@ foreach ($title in @($titles | Select-Object -Last 19)) { Write-Line $title }
 Write-Line ('end:' + $offset + ':' + $last)
 exit 0`,
 
-  /**
-   * Prints the first `"forkedFrom":{"sessionId":"<id>"` in the first `argv[1]`
-   * bytes of the transcript `argv[0]`, or nothing (no such row, no file).
-   */
   'transcript-forked-from': String.raw`$path = $argv[0]
 $length = [int]$argv[1]
 try {
@@ -330,13 +242,6 @@ $found = [regex]::Match($text, '"forkedFrom":\{"sessionId":"[A-Za-z0-9._-]*"')
 if ($found.Success) { Write-Line $found.Value }
 exit 0`,
 
-  /**
-   * For each `.jsonl` file in the folder `argv[0]` (the `argv[2]` most recently
-   * written), looks in its last `argv[1]` bytes and prints its last 4
-   * `continued-in` lines (each cut to 1,024 characters), whatever follows
-   * them; at most 400 lines, nothing for a folder that is not there. A file is
-   * read a line at a time, never held whole.
-   */
   'transcript-continued-in': String.raw`$length = [int64]$argv[1]
 $most = [int]$argv[2]
 try {
@@ -371,11 +276,6 @@ foreach ($path in $paths) {
 }
 exit 0`,
 
-  /**
-   * Claims the Inbox message directory `argv[0]` for claimant `argv[1]`, with
-   * the same exit codes and the same CreateNew claim on its `by` file as
-   * `claim` above.
-   */
   'inbox-claim': String.raw`$dir = $argv[0]
 $me = $argv[1]
 $by = Join-Child $dir 'by'
@@ -398,7 +298,6 @@ try {
   exit 4
 } catch { exit 4 }`,
 
-  /** Gives back claimant `argv[1]`'s claim on `argv[0]` by removing it, unless the message was already delivered or reported. */
   'inbox-release': String.raw`$dir = $argv[0]
 $me = $argv[1]
 $holder = try { [IO.File]::ReadAllText((Join-Child $dir 'by')) } catch { '' }
@@ -407,7 +306,6 @@ if ((Test-Path -LiteralPath (Join-Child $dir 'delivered')) -or (Test-Path -Liter
 Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 exit 0`,
 
-  /** Prints the folder `argv[1]` names (absolute, or relative to the session folder `argv[0]`; empty for the session folder itself) as a full Windows path; exit 3 when it is not a folder. */
   'inbox-project': String.raw`$cwd = $argv[0]
 $given = $argv[1]
 try {
@@ -419,7 +317,6 @@ try {
 } catch { exit 3 }`,
 }
 
-/** `text` as PowerShell's `-EncodedCommand` wants it: UTF-16LE, base64. Built by hand: a hooks module has no Buffer. */
 export function encodePowerShell(text: string): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
   const bytes: number[] = []
@@ -438,13 +335,11 @@ export function encodePowerShell(text: string): string {
   return out
 }
 
-/** The full script for `id` with `args`: the prelude, the arguments as `$argv`, then the script. */
 export function powerShellScript(id: ShellScriptId, args: readonly string[]): string {
   const encoded = args.map((arg) => `(Read-Argument '${encodePowerShell(arg)}')`).join(', ')
   return `${PRELUDE}$argv = @(${encoded})\n${SCRIPTS[id]}\n`
 }
 
-/** Runs each script's PowerShell twin in `powershell` (powershell.exe). */
 export function powerShellShell(powershell: string): ModShell {
   return {
     argv: (id, _posix, _tag, args) => [powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodePowerShell(powerShellScript(id, args))],

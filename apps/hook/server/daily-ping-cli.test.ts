@@ -1,9 +1,3 @@
-/**
- * The CLI's daily ping wiring (registerCliSession in index.ts) as a real
- * process: `plannotator annotate` from source with a release __CLI_VERSION__,
- * under the test sandbox, sends its tool's ping to a loopback receiver (never
- * the live host). The tool mapping itself is cliDailyPingTool's test.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +22,6 @@ test("plannotator annotate sends the annotate ping, with the favicon config.json
   mkdirSync(home, { recursive: true });
   writeFileSync(join(dataDir, "ping.json"), JSON.stringify({ firstWeek: "2026-01-05" }));
   writeFileSync(join(root, "doc.md"), "# Doc\n");
-  // The favicon set in Settings rides the ping: config.json in the data dir.
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ favicon: "glass" }));
 
   const bodies: string[] = [];
@@ -49,7 +42,6 @@ test("plannotator annotate sends the annotate ping, with the favicon config.json
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
-      // The sandbox: the ping goes only to this loopback receiver.
       PLANNOTATOR_TEST_SANDBOX: root,
       PLANNOTATOR_TELEMETRY_URL: `http://127.0.0.1:${receiver.port}`,
       PLANNOTATOR_BROWSER: NO_BROWSER,

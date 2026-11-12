@@ -1,8 +1,3 @@
-/**
- * A `Host` made of memory for the mod's bun tests: a file map, a manual clock
- * and timers, recorded process runs, submits, logs and fetches.
- */
-
 import type { Host, HttpResult, ProcessResult, TranscriptMessage } from '../host'
 
 export interface RunCall {
@@ -21,13 +16,9 @@ export interface FakeHost extends Host {
   statuses: (string | undefined)[]
   aborted: string[]
   transcript: TranscriptMessage[]
-  /** Answer a process run (the detached launcher, the liveness probe). */
   onRun: (call: RunCall) => ProcessResult | void
-  /** Answer a fetch (the bridge). */
   onFetch: (url: string, body: unknown) => Promise<HttpResult> | HttpResult
-  /** Called whenever the code under test waits; tests create files here. */
   onWait: (paths: readonly string[]) => void
-  /** Run every timer once (one tick). */
   tick(): Promise<void>
   clock: number
 }
@@ -51,7 +42,6 @@ export function fakeHost(): FakeHost {
     onWait: () => undefined,
     async tick() {
       for (const fn of [...timers]) fn()
-      // Let the async work the timers started settle.
       for (let index = 0; index < 500; index += 1) await Promise.resolve()
     },
     now: async () => host.clock,
@@ -72,16 +62,12 @@ export function fakeHost(): FakeHost {
       host.runs.push(call)
       const answered = host.onRun(call)
       if (answered) return answered
-      // What the real scripts do to the files, so several instances sharing
-      // one file map see each other: the launcher writes the pid, a claim
-      // renames its file (one winner).
       if (argv[3] === 'plannotator-launch') {
         const dir = argv[4] as string
         if (!host.files.has(`${dir}/pid`)) host.files.set(`${dir}/pid`, '4242\n')
       } else if (argv[3] === 'plannotator-rm') {
         host.files.delete(argv[4] as string)
       } else if (argv[3] === 'plannotator-claim') {
-        // mkdir "$dir/settled" (one winner), naming the claimant; a claimant's own claim wins again.
         const dir = argv[4] as string
         const me = argv[5] as string
         const by = host.files.get(`${dir}/settled/by`)
@@ -126,7 +112,6 @@ export function fakeHost(): FakeHost {
     randomHex: (bytes) => 'ab'.repeat(bytes),
     debug: () => undefined,
     sha256: async (text) => {
-      // Not SHA-256; a stable digest is all the tests need.
       let hash = 0
       for (const char of text) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
       return `h${hash.toString(16)}-${text.length}`

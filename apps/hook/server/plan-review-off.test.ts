@@ -1,10 +1,3 @@
-/**
- * The plan-review hook with plan review turned off (`PLANNOTATOR_PLAN_REVIEW`,
- * config.json `planReview`): Claude Code's ExitPlanMode gets no decision, so
- * Claude Code shows its own dialog. A regression either reopens a browser
- * review for a person who cannot see it, or ignores the env override.
- * Runs use a temp HOME and data dir with the browser and Inbox connect disabled.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,7 +78,6 @@ describe("Claude Code's ExitPlanMode with plan review off", () => {
   }, 30_000);
 
   test("env on over config off: the review opens", async () => {
-    // The server waits for a decision. The timeout kills it once it is up.
     const run = await runHook({ env: "1", config: { planReview: false }, timeoutMs: 6_000 });
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain("http://");

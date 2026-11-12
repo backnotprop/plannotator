@@ -1,11 +1,3 @@
-/**
- * Codex Session Parser Tests
- *
- * Run: bun test apps/hook/server/codex-session.test.ts
- *
- * Uses synthetic JSONL fixtures matching the real Codex rollout format.
- */
-
 import { describe, expect, test, afterEach } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,8 +12,6 @@ import {
   getRecentCodexMessages,
   resolveCodexStopPlan,
 } from "./codex-session";
-
-// --- Fixture Helpers ---
 
 function rolloutLine(type: string, payload: Record<string, unknown>): string {
   return JSON.stringify({
@@ -159,8 +149,6 @@ function buildRollout(...lines: string[]): string {
   return lines.join("\n");
 }
 
-// --- Temp file helpers ---
-
 let tempFiles: string[] = [];
 
 function writeTempRollout(content: string): string {
@@ -176,8 +164,6 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-// --- Tests ---
 
 describe("findCodexRolloutByThreadId", () => {
   test("respects CODEX_HOME for session discovery (#852)", () => {
@@ -201,17 +187,6 @@ describe("findCodexRolloutByThreadId", () => {
   });
 });
 
-// --- Multi-rollout threads (#1367) ---
-
-/**
- * One Codex thread can span several rollout files. Fallback semantics differ
- * by consumer: annotate-last asks a THREAD-level question and walks the
- * candidates newest-first until one yields a message (the newest segment may
- * be empty or aborted), while the Stop hook asks a TURN-level question and
- * takes only the first existing candidate — the current turn cannot live in
- * an older segment, so a fallback file's plan is stale by construction.
- * These tests pin both contracts.
- */
 describe("multi-rollout threads (#1367)", () => {
   const THREAD_ID = "0196f8a2-1111-2222-3333-1234567890ab";
 
@@ -232,11 +207,6 @@ describe("multi-rollout threads (#1367)", () => {
     return home;
   }
 
-  /**
-   * Write a rollout segment into <home>/sessions/<date>/ with an exact mtime.
-   * Segmented threads use issue-realistic `_<segment>`-suffixed filenames:
-   *   rollout-<timestamp>-<thread-id>_<segment>.jsonl (#1367)
-   */
   function writeSegment(
     home: string,
     date: { year: string; month: string; day: string },
@@ -255,7 +225,6 @@ describe("multi-rollout threads (#1367)", () => {
     return path;
   }
 
-  /** Mirrors the annotate-last selection in index.ts. */
   function resolveLastMessage(home: string): string | null {
     return withCodexHome(home, () => {
       for (const rollout of findCodexRolloutsByThreadId(THREAD_ID)) {
@@ -266,13 +235,6 @@ describe("multi-rollout threads (#1367)", () => {
     });
   }
 
-  /**
-   * Mirrors the Stop-hook plan selection in index.ts: the Stop hook asks a
-   * TURN-level question, and the current turn can only live in the newest
-   * segment, so only the first EXISTING candidate is consulted — never a
-   * fallback across segments (a fallback file's plan is stale by
-   * construction and would reopen already-decided plan reviews).
-   */
   function resolvePlan(
     home: string,
     options: { turnId?: string; stopHookActive?: boolean } = {}
@@ -317,10 +279,6 @@ describe("multi-rollout threads (#1367)", () => {
 
   test("newest-first ordering follows mtime, not directory or filename order", () => {
     const home = sessionsHome();
-    // The newer-mtime segment sits in the EARLIER day directory with the
-    // lexicographically SMALLER filename, so both the reverse directory walk
-    // and any filename/readdir ordering would put it LAST. Only the mtime
-    // sort ranks it first — this fixture fails if that sort is neutered.
     const newerMtime = writeSegment(
       home,
       { year: "2026", month: "06", day: "04" },
@@ -354,7 +312,6 @@ describe("multi-rollout threads (#1367)", () => {
       buildRollout(sessionMeta(), assistantMessage("Answer before the crash")),
       "2026-06-04T10:00:00Z"
     );
-    // An aborted segment can be created and never written to.
     writeSegment(home, day, "2026-06-04T11-00-00", "", "2026-06-04T11:00:00Z", 1);
 
     expect(resolveLastMessage(home)).toBe("Answer before the crash");
@@ -418,12 +375,6 @@ describe("multi-rollout threads (#1367)", () => {
   test("Stop hook takes only the newest existing segment — never resurrects an older segment's plan", () => {
     const home = sessionsHome();
     const day = { year: "2026", month: "06", day: "04" };
-    // The older segment ends with an already-decided proposed plan — the
-    // normal shape after a plan is approved and the session resumes. The
-    // current turn lives in the newest segment and produced no plan, so the
-    // Stop hook must report no plan rather than fall back and reopen the
-    // settled review. The turn gate refuses a turn id it cannot anchor in the
-    // file it was handed, which is exactly the shape of every fallback file.
     writeSegment(
       home,
       day,
@@ -702,10 +653,6 @@ describe("getLatestCodexPlan", () => {
 
   describe("Codex Stop skip diagnostics", () => {
     test("classifies a blank Stop turn id without reading stale plan content", () => {
-      // A PRESENT but blank turn id is a truncated or foreign payload, never an
-      // old Codex, so it still fails closed. The path does not exist: reaching
-      // the file at all would throw, which is the point — that payload must
-      // never load plan content.
       expect(resolveCodexStopPlan("not-read.jsonl", { turnId: "   " })).toEqual({
         plan: null,
         skipReason: "missing-turn-id",
@@ -748,10 +695,6 @@ describe("getLatestCodexPlan", () => {
     });
   });
 
-  // Codex rust-v0.114.0/0.115.0/0.116.0 ship the hooks engine but send a Stop
-  // payload with no `turn_id` field at all (it arrived in rust-v0.117.0). On
-  // those versions the turn is derived from the rollout instead of failing
-  // closed, which would leave plan review silently disabled.
   describe("Codex Stop turn id fallback", () => {
     test("resolves the plan of the rollout's current turn", () => {
       const path = writeTempRollout(
@@ -773,9 +716,6 @@ describe("getLatestCodexPlan", () => {
     });
 
     test("anchors on the turn's FIRST marker, so a mid-turn compaction keeps the plan visible", () => {
-      // Compaction re-emits a `turn_context` carrying the in-flight turn's id.
-      // Naming the turn from the LAST marker is fine; anchoring the scan there
-      // would hide every plan the turn produced before the compaction point.
       const turnId = "turn-compacted";
       const path = writeTempRollout(
         buildRollout(
@@ -843,8 +783,6 @@ describe("getLatestCodexPlan", () => {
         ),
       );
 
-      // The payload names the older turn: its plan is returned, and no fallback
-      // is reported — the rollout's newest turn never enters the decision.
       expect(resolveCodexStopPlan(path, { turnId: "turn-old" })).toEqual({
         plan: { text: "Older turn's plan", source: "plan-item" },
         skipReason: null,
@@ -858,8 +796,6 @@ describe("getLatestCodexPlan", () => {
       });
 
       expect(messages).toHaveLength(1);
-      // The line must name the missing field and the turn it fell back to —
-      // that is the whole diagnostic value. No debug flag gates it.
       expect(messages[0]).toContain("turn_id");
       expect(messages[0]).toContain("turn-42");
     });
@@ -929,9 +865,6 @@ describe("getLatestCodexPlan", () => {
   });
 
   test("does not scrape an older turn's assistant proposed plan for a Stop event without a turn id", () => {
-    // A turn-id-less payload now resolves the turn from the rollout instead of
-    // failing closed (Codex < 0.117 sends no turn_id), but the resolved turn is
-    // the CURRENT one — an earlier, already-decided turn's plan stays invisible.
     const completedTurnId = "turn-completed";
     const currentTurnId = "turn-current";
     const path = writeTempRollout(
@@ -967,11 +900,6 @@ describe("getLatestCodexPlan", () => {
   });
 
   test("keeps a plan item written before a mid-turn compaction", () => {
-    // Auto-compaction persists a `compacted` line and then re-emits
-    // `turn_context` carrying the SAME turn id as the in-flight turn (Codex
-    // `Session::replace_compacted_history`). Anchoring the turn on its LAST
-    // marker would start the scan after the compaction point and lose the
-    // plan this turn already produced.
     const turnId = "turn-compacted-plan-item";
     const path = writeTempRollout(
       buildRollout(
@@ -992,8 +920,6 @@ describe("getLatestCodexPlan", () => {
   });
 
   test("keeps an assistant proposed plan written before a mid-turn compaction", () => {
-    // Same shape, but through the assistant fallback, which is gated on the
-    // scan having entered the named turn rather than on a per-entry turn id.
     const turnId = "turn-compacted-assistant";
     const path = writeTempRollout(
       buildRollout(
@@ -1074,11 +1000,6 @@ describe("getLatestCodexPlan", () => {
   });
 });
 
-// Codex rust-v0.114.0/0.115.0/0.116.0 record a blocking Stop hook's reason as a
-// DEVELOPER-role message and continue the same turn with stop_hook_active; the
-// `<hook_prompt>` user message the de-duplication above keys on only arrived in
-// rust-v0.117.0 (`build_hook_prompt_message`). Without a pre-0.117 boundary the
-// guard is inert on exactly the versions the rollout turn-id fallback enables.
 describe("deny/resubmit de-duplication on the rollout-fallback path", () => {
   test("does not re-serve an unchanged denied plan after a developer-role continuation", () => {
     const turnId = "turn-fallback-denied";
@@ -1134,9 +1055,6 @@ describe("deny/resubmit de-duplication on the rollout-fallback path", () => {
   });
 
   test("anchors on the LAST developer message, so turn-setup instructions are not a boundary", () => {
-    // Codex records policy/personality developer instructions when it builds the
-    // turn. Those precede the plan, so only the continuation recorded after it
-    // may act as the boundary.
     const turnId = "turn-fallback-setup";
     const path = writeTempRollout(
       buildRollout(
@@ -1153,8 +1071,6 @@ describe("deny/resubmit de-duplication on the rollout-fallback path", () => {
   });
 
   test("still serves the plan on a first Stop of the turn", () => {
-    // stop_hook_active is false: nothing has been reviewed yet, so a developer
-    // message in the turn must not suppress anything.
     const turnId = "turn-fallback-first-stop";
     const path = writeTempRollout(
       buildRollout(
@@ -1172,9 +1088,6 @@ describe("deny/resubmit de-duplication on the rollout-fallback path", () => {
   });
 
   test("a payload-named turn keeps the 0.117+ behaviour: no developer boundary", () => {
-    // Same rollout, but the Stop payload carried a turn_id, which is the modern
-    // shape. There the `<hook_prompt>` item is authoritative and a developer
-    // message must NOT be treated as a boundary.
     const turnId = "turn-payload-developer";
     const path = writeTempRollout(
       buildRollout(
@@ -1212,9 +1125,6 @@ describe("deny/resubmit de-duplication on the rollout-fallback path", () => {
   });
 
   test("prefers the hook prompt over a later developer message on the fallback path", () => {
-    // A rollout that somehow carries both shapes: the <hook_prompt> boundary
-    // wins, so a developer message recorded after the revised plan cannot
-    // suppress it.
     const turnId = "turn-fallback-both";
     const path = writeTempRollout(
       buildRollout(
@@ -1234,9 +1144,6 @@ describe("deny/resubmit de-duplication on the rollout-fallback path", () => {
   });
 
   test("fails closed on a non-string turn id instead of throwing", () => {
-    // The Stop payload is untrusted JSON; a foreign or malformed turn_id must
-    // be refused before the rollout is read, from inside the module rather than
-    // only at the CLI call site.
     for (const raw of [42, true, null, {}, []]) {
       expect(
         resolveCodexStopPlan("not-read.jsonl", {

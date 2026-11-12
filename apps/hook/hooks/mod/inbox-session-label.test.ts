@@ -3,20 +3,6 @@ import { InboxLink, INBOX_SESSION_NAMES_MAX, inboxRegistryPathOf, readSessionNam
 import { register } from './register'
 import { fakeHost } from './testing/fake-host'
 
-// Session labels (approval "inbox-session-label", Change 2026-11-01): a Claude
-// Code session shows a label only once it is named with `/rename`. The engine
-// tells a plugin the name nowhere else, so `command.run` keeps it in `$.store`.
-// The failures this catches: an unnamed session showing anything; the wiring from
-// the hook through `PlannotatorMod` to the link coming undone, which no fake
-// `label` can see; a `/clear` losing a name the engine kept, or keeping one the
-// engine moved; a `--resume` not finding the name; another session's name; a poll
-// that cannot read the store blanking a labelled row; the hook changing
-// `/rename`'s or `/clear`'s answer, or stopping or holding them when `$` fails; a
-// write with the mod off; and a write of nothing new undoing another session's.
-//
-// That a real `/rename` raises this hook needs the engine, so it is checked by
-// hand in a real session; apps/hook/tests/register.test.ts does not run it.
-
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
 
@@ -41,7 +27,6 @@ function linkOver(host: ReturnType<typeof fakeHost>, label?: () => string | Prom
 
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
 
-/** The module's hooks as the engine holds them: `event` to its matcher and function. */
 function hooks(registerOn: typeof register = register) {
   const held = new Map<string, { matcher: unknown; run: Hook }[]>()
   registerOn((event: string, ...args: unknown[]) => {
@@ -49,15 +34,10 @@ function hooks(registerOn: typeof register = register) {
   })
   return {
     only: (event: string) => held.get(event)![0]!.run,
-    /** The `command.run` hook the engine selects for `command`, by its matcher. */
     command: (command: string) => held.get('command.run')!.find((hook) => (hook.matcher as { command: string[] }).command.includes(command))!.run,
   }
 }
 
-/**
- * `$.clock.sleep` on real time, the way the bound around the store needs it: a
- * sleep that answers at once would end that bound before any write.
- */
 const realSleep = (ms: number, options?: { signal?: AbortSignal }) =>
   new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ms)
@@ -241,7 +221,6 @@ describe('the command.run hook', () => {
       session: { id: async () => 'unnamed' },
       store: {
         ...shared.$.store,
-        // This read lands first; the other session's whole write lands before this one acts on it.
         get: async (key: string) => {
           const seen = shared.values.get(key)
           await on.command('rename')(shared.$, { command: 'rename', args: 'Named elsewhere' }, () => ({ ref: 1 }))
@@ -254,11 +233,6 @@ describe('the command.run hook', () => {
   })
 })
 
-/**
- * What session.start decided lives in the module, one answer per process, and a
- * process has only one first session.start. So each test here gets its own copy
- * of the module; the query only keeps Bun from handing back the cached one.
- */
 async function freshRegister(name: string): Promise<typeof register> {
   const path = `./register?${name}`
   return ((await import(path)) as { register: typeof register }).register
@@ -351,14 +325,12 @@ describe('the poll', () => {
   })
 })
 
-/** The `$` the module runs on, in memory: enough for the real session.start, instance and link. */
 function engineOver(firstSession: string) {
   const files = new Map<string, string>([
     ['/bin/sh', ''],
     [inboxRegistryPathOf(DATA), REGISTRY],
   ])
   const store = new Map<string, unknown>()
-  /** Each `$.clock.every` fires on its own period, as the engine's: the self-heal's 30 s is not the tick's 1 s. */
   const timers = new Set<{ ms: number; fn: () => void; due: number }>()
   const polls: { session: unknown; label: unknown }[] = []
   let clock = 1_000_000
@@ -437,7 +409,6 @@ describe('from /rename to a poll body', () => {
     let turn = 0
     const nextInstance = () => on.only('turn.start')($, { turnId: `turn-${(turn += 1)}`, text: '' }, pass)
     const rename = (args: string) => on.command('rename')($, { command: 'rename', args }, async () => ({ ref: 1 }))
-    /** `/clear` as the engine runs it: the session ends and the process goes on under a new id, all inside `next`. */
     const clear = (args: string, nextId: string) =>
       on.command('clear')($, { command: 'clear', args }, async () => {
         await end()
@@ -450,7 +421,6 @@ describe('from /rename to a poll body', () => {
       return world.polls.slice(seen)
     }
 
-    // Unnamed: the row reads as it always did.
     await on.only('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/ai-collab' }))
     expect((await pollsFrom(0)).every((poll) => poll.session === 'sess-wired' && poll.label === '')).toBe(true)
 
@@ -462,14 +432,11 @@ describe('from /rename to a poll body', () => {
     await world.tick(3)
     expect(world.polls.at(-1)).toEqual({ session: 'sess-wired', label: 'Docs pass' })
 
-    // A poll speaks for its own session, wherever the process's id has gone.
     world.sessionId = 'sess-elsewhere'
     await world.tick(3)
     expect(world.polls.at(-1)).toEqual({ session: 'sess-wired', label: 'Docs pass' })
     world.sessionId = 'sess-wired'
 
-    // A resume is another process: the name is the store's, set past the hooks here
-    // so this can only pass by reading it, and it shows on the first poll.
     await end()
     const named = readSessionNames(world.store.get(STORE_INBOX_SESSION_NAMES))
     await $.store.set(STORE_INBOX_SESSION_NAMES, { ...named, 'sess-wired': { name: 'Kept in the store', at: 1 } })
@@ -477,19 +444,16 @@ describe('from /rename to a poll body', () => {
     await nextInstance()
     expect((await pollsFrom(seen)).every((poll) => poll.label === 'Kept in the store')).toBe(true)
 
-    // /clear: the engine writes the name onto the new session id, so the new id shows it.
     await clear('', 'sess-cleared')
     seen = world.polls.length
     await nextInstance()
     expect((await pollsFrom(seen)).every((poll) => poll.session === 'sess-cleared' && poll.label === 'Kept in the store')).toBe(true)
 
-    // /clear <name>: the session it left has that name, the new one none.
     await clear('Finished', 'sess-fresh')
     seen = world.polls.length
     await nextInstance()
     expect((await pollsFrom(seen)).every((poll) => poll.session === 'sess-fresh' && poll.label === '')).toBe(true)
 
-    // Back to the session /clear named, in this process, then to one never named.
     await end()
     world.sessionId = 'sess-cleared'
     seen = world.polls.length

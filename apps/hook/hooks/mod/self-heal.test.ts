@@ -3,8 +3,6 @@ import { InboxLink } from './inbox'
 import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
 import { fakeHost } from './testing/fake-host'
 
-// Seen live: a session.end that was not this session's disposed the instance,
-// and an idle session then got no Inbox reply until the person typed.
 describe('disposesOnSessionEnd', () => {
   const current = { sessionId: 'session-1' }
 
@@ -53,7 +51,6 @@ describe('InboxLink.ensureTicking', () => {
   test('a tick the engine stopped firing (one refused $.clock.every) is armed again; a firing one is left alone', async () => {
     const host = fakeHost()
     const armed: (() => void)[] = []
-    // The engine took the timer and never calls it.
     host.every = (_ms, fn) => {
       armed.push(fn)
       return { cancel: () => undefined }
@@ -70,7 +67,6 @@ describe('InboxLink.ensureTicking', () => {
     await link.ensureTicking()
     expect(armed).toHaveLength(2)
 
-    // The new timer fires: nothing more is armed.
     for (let second = 0; second < 30; second++) {
       armed[1]!()
       host.clock += 1_000

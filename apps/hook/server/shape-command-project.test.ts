@@ -1,9 +1,3 @@
-/**
- * `plannotator shape update` when the working folder cannot be read as a project (unreadable, or `/`): the agent
- * gets one `project_unresolved` line and exit 1, never an uncaught InboxError and its stack trace. What regresses:
- * the project rule's throw escapes `runShapeCommand`. In process, with a stand-in project rule; no Inbox, no git,
- * nothing outside a temp folder.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,12 +34,6 @@ test("an unreadable working folder refuses update in one line", async () => {
   expect(out).toEqual([]);
 });
 
-/**
- * The help says "run `plannotator shape update` from the project's folder". The folder the command runs in
- * decides the project, even inside an agent session whose own folder is another repository; the session's
- * folder is used only when the shell's folder gives none. What regresses: a board made from a scratch or PR
- * folder is filed under the session's repository, and its file links open that repository's files.
- */
 describe("which folder a board is filed under", () => {
   const setup = () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "shape-cli-where-")));
@@ -95,10 +83,6 @@ describe("which folder a board is filed under", () => {
   });
 });
 
-/**
- * The real CLI's folder (`shapeCommandFolder`, what index.ts passes). A deleted folder makes `process.cwd()`
- * throw, which killed the command with a stack trace before it could fall back to the session's folder.
- */
 describe("the folder the CLI runs in, when it was deleted", () => {
   const gone = () => {
     throw Object.assign(new Error("ENOENT: no such file or directory, uv_cwd"), { code: "ENOENT" });

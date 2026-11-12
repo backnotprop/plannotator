@@ -1,22 +1,3 @@
-/**
- * DeepSeek Harness plan review bridge (`plannotator dsh-plan`).
- *
- * The @plannotator/dsh plugin (apps/dsh-plugin) answers DSH's `exit_plan_mode`
- * review by running this internal subcommand: the plan arrives as JSON on
- * stdin and one JSON line comes back on stdout. The agent-facing text is
- * composed here with the shared prompt templates for the `dsh` runtime, so the
- * plugin never duplicates prompt logic and prompt overrides in config.json
- * apply.
- *
- *   stdin:  { plan: string, timeoutSeconds?: number | null, cwd?: string }
- *   stdout: { approved, feedback?, message?, savedPath?, answersOnly? }
- *
- * `message` on an approval is the approved-with-notes prompt (present only
- * when the reviewer left notes; DSH's own tool result already says the plan
- * was approved). On a denial it is the denied prompt, or the answered prompt
- * when the reviewer only answered the plan's questions.
- */
-
 import type { PlannotatorConfig } from "@plannotator/shared/config";
 import {
   composePlanDeniedMessage,
@@ -26,9 +7,7 @@ import {
 
 export interface DshPlanInput {
   plan: string;
-  /** Seconds before the review gives up; null waits until a decision. */
   timeoutSeconds: number | null;
-  /** The DSH session's working directory, when the caller sends it. */
   cwd?: string;
 }
 
@@ -69,7 +48,6 @@ export function dshPlanTimeoutFeedback(timeoutSeconds: number): string {
   return `[Plannotator] No response within ${timeoutSeconds} seconds. Port released automatically. Please call ${getPlanToolName("dsh")} again.`;
 }
 
-/** The stdout record for one decision, with the agent-facing message composed. */
 export function composeDshPlanOutput(
   result: DshPlanDecision,
   config?: PlannotatorConfig,

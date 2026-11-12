@@ -1,13 +1,3 @@
-/**
- * Vibe Session Discovery Tests
- *
- * Run: bun test apps/hook/server/vibe-session.test.ts
- *
- * Uses synthetic fixtures matching Vibe's $VIBE_HOME/logs/session layout:
- *   session_<ts>_<id>/messages.jsonl
- *   .session_index.json  — { "<dirName>": { session_id, cwd, mtime_ns } }
- */
-
 import { describe, expect, test, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, utimesSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -95,12 +85,9 @@ describe("resolveVibeSessionLogForCwd", () => {
   test("falls back to meta.json cwd filter when the index is absent", () => {
     const home = makeVibeHome();
     const cwd = "/Users/test/project";
-    // An other-project session with a NEWER mtime must never win over the
-    // matching one: the fallback filters on meta.json cwd, not bare mtime.
     writeSession(home, "session_other", vibeLine("assistant", "other", "m0"), 200, "/elsewhere");
     writeSession(home, "session_old", vibeLine("assistant", "old", "m1"), 1, cwd);
     writeSession(home, "session_new", vibeLine("assistant", "new", "m2"), 100, cwd);
-    // No .session_index.json — picks the newest matching session by mtime.
     const log = resolveVibeSessionLogForCwd(cwd, { vibeHome: home });
     expect(log).toBeTruthy();
     expect(log!.endsWith("session_new/messages.jsonl")).toBe(true);
@@ -191,7 +178,6 @@ describe("getRecentVibeMessages", () => {
     );
     const msgs = getRecentVibeMessages(messagesPath, 2);
     expect(msgs).toHaveLength(2);
-    // newest-first
     expect(msgs[0].text).toBe("newest");
     expect(msgs[1].text).toBe("middle");
   });

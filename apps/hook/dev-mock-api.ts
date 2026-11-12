@@ -1,41 +1,9 @@
-/**
- * Vite plugin that mocks plannotator API endpoints for local development.
- *
- * Three plan versions are wired up so the Versions tab, the diff badge, and
- * the full word-level inline diff engine can all be exercised without running
- * a real hook session.
- *
- * ─── TOGGLE: default demo vs diff-engine stress test ─────────────────────
- *
- * Default (no flag): serves the Real-time Collaboration implementation plan
- * — the project's long-standing default demo. Pairs with DEMO_PLAN_CONTENT
- * in packages/editor/demoPlan.ts (wired through App.tsx).
- *
- * Diff-test (`VITE_DIFF_DEMO=1 bun run dev:hook`): serves the Auth Service
- * Refactor 20-case diff-engine stress test. Pairs with DIFF_DEMO_PLAN_CONTENT
- * in packages/editor/demoPlanDiffDemo.ts. Covers 20 numbered cases (①–⑳)
- * using realistic plan-shaped content — full paragraphs, complete code
- * blocks, lists, tables, blockquotes — each annotated with an identical
- * "What to watch for" blockquote label in both V2 and V3 so each case is
- * cleanly isolated in the diff view. ⑯–⑳ document known limitations.
- *
- * Both files check `VITE_DIFF_DEMO` on the same code path so the V3
- * (current plan) and V2 (previous plan) stay paired — you never get the
- * default V3 diffed against the test V2 or vice versa.
- *
- * The Versions Browser lets you select V1 as the base instead, which shows
- * a more structural diff (outline → full spec) within whichever mode is on.
- */
 import type { Plugin } from 'vite';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { isCodeFilePath } from '../../packages/shared/code-file';
 import { preloadFile } from '@pierre/diffs/ssr';
 
-// ─── Default plans (Real-time Collaboration) ─────────────────────────────
-// What every dev sees when running `bun run dev:hook` without any flag.
-// Matches the pre-branch demo content; kept identical so the project's
-// default demo story doesn't change.
 const PLAN_V1_DEFAULT = `# Implementation Plan: Real-time Collaboration
 
 ## Overview
@@ -229,9 +197,6 @@ flowchart LR
 **Target:** Ship MVP in next sprint
 `;
 
-// ─── V1: earliest rough draft (diff-test mode) ────────────────────────────
-// Shows in the Versions Browser as the oldest entry.  Demonstrates a
-// structural V1→V2 diff: mostly pure additions as the plan gets fleshed out.
 const PLAN_V1_DIFF_TEST = `# Auth Service Refactor
 
 ## Goals
@@ -254,22 +219,6 @@ const PLAN_V1_DIFF_TEST = `# Auth Service Refactor
 - Increased latency from revocation-list lookups
 `;
 
-// ─── V2: intermediate version ─────────────────────────────────────────────
-// This is `previousPlan` — the diff baseline shown by default on load.
-//
-// Structure rule: every blockquote label and every surrounding line is
-// IDENTICAL to V3 so they become unchanged context in the diff. Only the
-// eight marked lines/sections actually differ.
-//
-// Differences vs V3 (each maps to the numbered case in the file header):
-//   ① has "## Background" section (absent in V3)       → pure deletion
-//   ② heading: "Security Model"   (V3: "Security Architecture") → heading inline diff
-//   ③ paragraph: "**strong**"     (V3: "**proven**")            → bold inline diff
-//   ④ paragraph: `Authorization`  (V3: `X-Auth-Token`)          → backtick gate
-//   ⑤ code line: '1h'             (V3: '24h')                   → code-line edge case
-//   ⑥ list item: "every request"  (V3: "each request")          → list-item inline diff
-//   ⑦ checkbox:  "[ ]"            (V3: "[x]")                   → checkbox state gate
-//   ⑧ no Observability section    (V3 has one)                  → pure addition
 const PLAN_V2_DIFF_TEST = `# Auth Service Refactor — Diff Demo
 
 This is a realistic plan document being used to exercise the word-level diff engine. Each case below is a real chunk of plan content — full paragraphs, complete code blocks, checklist items, tables — not line-by-line test fixtures. The blockquote label above each case explains in plain language what you should see when you click the **+N/−M** diff badge at the top of the page. Eighteen cases total: the first fifteen demonstrate expected behaviors; the last three surface known limitations discovered during an adversarial audit.
@@ -546,9 +495,6 @@ This change lands in section 3 of the contributor guide alongside the updated re
 - Do we need a break-glass path for customer-managed keys in the first release, or is platform-managed sufficient for phase one?
 `;
 
-// Resolve which demo pair to serve. See file-header comment for the toggle.
-// Accept "1", "true", or any truthy string so `VITE_DIFF_DEMO=1` or
-// `VITE_DIFF_DEMO=true` both work. App.tsx does the symmetric check for V3.
 const USE_DIFF_DEMO =
   process.env.VITE_DIFF_DEMO === "1" ||
   process.env.VITE_DIFF_DEMO === "true";
@@ -569,7 +515,6 @@ const versions = [
 const versionPlans: Record<number, string> = {
   1: PLAN_V1,
   2: PLAN_V2,
-  // Version 3 is the current plan — served live by the editor (demoPlanDiffDemo.ts)
 };
 
 export function devMockApi(): Plugin {
@@ -777,7 +722,7 @@ export function devMockApi(): Plugin {
             return;
           }
           res.end(JSON.stringify({
-            plan: undefined, // Editor uses its own DIFF_DEMO_PLAN_CONTENT
+            plan: undefined,
             origin: 'claude-code',
             previousPlan: PLAN_V2,
             versionInfo: { version: 3, totalVersions: 3, project: 'demo' },
@@ -846,7 +791,7 @@ export function devMockApi(): Plugin {
                 options: { disableFileHeader: true },
               });
               prerenderedHTML = result.prerenderedHTML;
-            } catch { /* fall back to client-side rendering */ }
+            } catch { }
             res.end(JSON.stringify({ codeFile: true, contents, filepath: resolved, prerenderedHTML }));
           } else {
             res.end(JSON.stringify({ markdown: contents, filepath: resolved }));

@@ -1,17 +1,3 @@
-/**
- * `plannotator shape frame`. No real browser runs here: Chrome is found by a stand-in, and run by a
- * stand-in that writes the picture itself (NO_BROWSER rules). What regresses if these fail:
- * - with no Chrome the command fails or hangs instead of one line and exit 0 (the agent stops);
- * - `--at` words (end, a time, beat N) are misread, or a moment past the scene is pictured anyway;
- * - the throwaway server lets the page write (seen, notes) or hold a stream open, binds anywhere but
- *   127.0.0.1, or outlives the command;
- * - a Chrome that hangs holds the agent past the timeout, or is left running;
- * - each run leaves a Chrome profile behind in temp (agents run frame after every draw);
- * - the picture lands in a folder other users share, or readable by them;
- * - a Chrome that quits right after sending the picture is reported as a failure.
- * The real runner (defaultRunChrome) is driven here only by stand-in programs: a shell script that
- * sleeps, and a tiny script that answers the DevTools pipe. Never a browser.
- */
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +9,6 @@ import { chromeArgs, defaultRunChrome, findChrome, NO_CHROME_LINE, parseShapeFra
 
 const wasBrowser = process.env.PLANNOTATOR_BROWSER;
 process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
-// Every folder a test makes, removed when the file is done.
 const made: string[] = [];
 afterAll(() => {
   if (wasBrowser === undefined) delete process.env.PLANNOTATOR_BROWSER;
@@ -37,7 +22,6 @@ const scratch = () => {
   return dir;
 };
 
-/** A stand-in "Chrome" program in a scratch folder: `body` is its script after the #! line. */
 function standIn(shebang: string, body: string): string {
   const path = join(scratch(), "chrome");
   writeFileSync(path, `#!${shebang}\n${body}`);
@@ -191,7 +175,6 @@ describe("shape frame", () => {
     expect(s.profile.startsWith(tmpdir())).toBe(true);
     expect(chromeArgs({ profile: s.profile, phone: false })).toEqual(expect.arrayContaining(["--headless=new", `--user-data-dir=${s.profile}`, "--remote-debugging-pipe"]));
     expect(chromeArgs({ profile: s.profile, phone: false }).some((a) => a.startsWith("--remote-debugging-port"))).toBe(false);
-    // Stopped once the command returns, and Chrome's profile is gone with it.
     expect(await fetch(url.origin).then(() => "up", () => "down")).toBe("down");
     expect(existsSync(s.profile)).toBe(false);
   });
@@ -245,7 +228,6 @@ describe("shape frame", () => {
   });
 
   test("a Chrome that quits right after sending the picture: saved (0600), not a failure", async () => {
-    // Answers the DevTools pipe (fd 3 in, fd 4 out) like Chrome, and exits as soon as the picture is sent.
     const chrome = standIn(
       process.execPath,
       `const fs = require("fs");

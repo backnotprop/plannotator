@@ -1,23 +1,6 @@
-/**
- * Codex Session Parser
- *
- * Extracts the last rendered assistant message from a Codex rollout file.
- * Codex stores sessions at $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl
- * (default ~/.codex when CODEX_HOME is unset)
- *
- * Detection: Codex injects CODEX_THREAD_ID into every spawned process.
- * The thread ID is the UUID in the rollout filename.
- *
- * Rollout format (JSONL, one object per line):
- *   {"timestamp":"...","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"..."}]}}
- *   {"timestamp":"...","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"...","call_id":"..."}}
- */
-
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-
-// --- Types ---
 
 type CodexPlanSource = "plan-item" | "assistant-message";
 
@@ -62,16 +45,7 @@ export type CodexStopSkipReason = "missing-turn-id" | "missing-turn-marker";
 
 export interface CodexStopPlanLookup {
   plan: CodexPlanResult | null;
-  /**
-   * Why no plan was looked for at all, as opposed to a turn that simply
-   * produced none. Diagnostic only: both outcomes are a silent no-op.
-   */
   skipReason: CodexStopSkipReason | null;
-  /**
-   * The turn id the scan used, set ONLY when it was derived from the rollout
-   * because the Stop payload carried no `turn_id` field. The caller surfaces
-   * it on stderr; a payload-named turn leaves this undefined.
-   */
   fallbackTurnId?: string;
 }
 
@@ -79,15 +53,6 @@ const TURN_START_TYPES = new Set(["task_started", "turn_started"]);
 const TURN_COMPLETE_TYPES = new Set(["task_complete", "turn_completed"]);
 const PROPOSED_PLAN_RE = /<proposed_plan>([\s\S]*?)<\/proposed_plan>/gi;
 
-// --- Rollout File Discovery ---
-
-/**
- * Resolve the Codex home directory. Codex stores config and state under
- * $CODEX_HOME when set, falling back to ~/.codex
- * (https://developers.openai.com/codex/config-advanced#config-and-state-locations).
- * Same pattern as COPILOT_HOME in copilot-session.ts and CLAUDE_CONFIG_DIR
- * in session-log.ts. (#852)
- */
 function codexHome(): string {
   return process.env.CODEX_HOME || join(homedir(), ".codex");
 }
@@ -100,28 +65,12 @@ function mtimeMs(path: string): number {
   }
 }
 
-/**
- * Find every Codex rollout file for a given thread ID, newest first.
- * The thread ID is the UUID portion of the filename:
- *   rollout-<timestamp>-<uuid>.jsonl
- *
- * A single thread can span multiple rollout files (Codex segments long
- * conversations). Fallback semantics are the CALLER's decision (#1367):
- * thread-level questions (annotate-last) fall back across candidates because
- * the newest segment may be empty or aborted, while turn-level questions
- * (the Stop hook's plan detection) must take only the first existing
- * candidate — the current turn cannot live in an older segment, so anything
- * a fallback file yields there is stale by construction.
- *
- * Scans $CODEX_HOME/sessions/ (default ~/.codex/sessions/).
- */
 export function findCodexRolloutsByThreadId(threadId: string): string[] {
   const sessionsDir = join(codexHome(), "sessions");
 
   try {
     const matches: string[] = [];
 
-    // Walk YYYY/MM/DD directories in reverse order (most recent first)
     const years = readdirSync(sessionsDir).sort().reverse();
     for (const year of years) {
       const yearDir = join(sessionsDir, year);
@@ -146,8 +95,6 @@ export function findCodexRolloutsByThreadId(threadId: string): string[] {
       }
     }
 
-    // Newest first by mtime; the filename carries the same timestamp, so a
-    // filename comparison breaks ties and covers a failed stat.
     return matches.sort((a, b) => {
       const byMtime = mtimeMs(b) - mtimeMs(a);
       return byMtime !== 0 ? byMtime : b.localeCompare(a);
@@ -157,11 +104,6 @@ export function findCodexRolloutsByThreadId(threadId: string): string[] {
   }
 }
 
-/**
- * Find the newest Codex rollout file for a given thread ID.
- * Callers that need to survive an empty newest segment (a thread split
- * across rollout files) should use findCodexRolloutsByThreadId instead (#1367).
- */
 export function findCodexRolloutByThreadId(threadId: string): string | null {
   return findCodexRolloutsByThreadId(threadId)[0] ?? null;
 }
@@ -173,8 +115,6 @@ function isDir(path: string): boolean {
     return false;
   }
 }
-
-// --- Message Extraction ---
 
 function parseRolloutEntries(rolloutPath: string): RolloutEntry[] {
   const content = readFileSync(rolloutPath, "utf-8");
@@ -228,10 +168,6 @@ function findLastIndex(
   return -1;
 }
 
-/**
- * A rollout line that opens — or reopens — a turn: the turn's `task_started`
- * event and every `turn_context` snapshot Codex writes for it.
- */
 function isTurnMarker(entry: RolloutEntry): boolean {
   return (
     (entry.type === "event_msg" &&
@@ -245,31 +181,12 @@ function getTurnId(entry: RolloutEntry): string | null {
   return typeof turnId === "string" && turnId ? turnId : null;
 }
 
-/**
- * Index of the FIRST marker naming `turnId` — where that turn begins in this
- * rollout file — or -1 when the turn is not anchored in the file at all.
- *
- * Deliberately not the LAST marker: mid-turn compaction re-emits a
- * `turn_context` line carrying the same turn id as the in-flight turn (Codex
- * `Session::replace_compacted_history`), so the last marker sits after the
- * compaction point and a plan the turn produced before it would be invisible.
- */
 function findTurnStartIndex(entries: RolloutEntry[], turnId: string): number {
   return entries.findIndex(
     (entry) => isTurnMarker(entry) && getTurnId(entry) === turnId
   );
 }
 
-/**
- * The turn the rollout says is current: the id of the LAST id-carrying turn
- * marker in the file, or null when the file has none.
- *
- * That single rule covers both shapes the Stop hook can catch. A turn still in
- * flight owns the last markers by construction — a completed turn's markers can
- * only be followed by a newer turn's — and when Stop fires at turn end the last
- * marker is that turn's own. Compaction is safe because this only names the
- * turn; where it BEGINS is still `findTurnStartIndex`'s first-marker anchor.
- */
 function findLatestRolloutTurnId(entries: RolloutEntry[]): string | null {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
@@ -317,25 +234,6 @@ function findLastHookPromptIndex(
   return -1;
 }
 
-/**
- * The pre-`<hook_prompt>` shape of the same boundary.
- *
- * Codex only started recording a blocking Stop hook's continuation as a
- * `<hook_prompt>` USER message in rust-v0.117.0
- * (`codex_protocol::items::build_hook_prompt_message`). On rust-v0.114.0,
- * v0.115.0 and v0.116.0 — the versions the rollout turn-id fallback exists to
- * support — `codex-rs/core/src/codex.rs` records it as
- * `DeveloperInstructions::new(continuation_prompt).into()`, i.e. a
- * `ResponseItem::Message { role: "developer" }`, and then continues the SAME
- * turn with `stop_hook_active = true`.
- *
- * Nothing in that message identifies the hook that wrote it (the text is the
- * hook's own `reason`, which Plannotator lets the user re-template), so the
- * role is all there is to key on. The LAST one in the turn is the right
- * anchor: Codex records the continuation and immediately re-runs the model, so
- * a later developer message can only come from a turn that kept going after
- * the block.
- */
 function isDeveloperMessage(entry: RolloutEntry): boolean {
   if (entry.type !== "response_item") return false;
   if (entry.payload?.type !== "message") return false;
@@ -393,15 +291,6 @@ export function logCodexStopSkip(
   (opts.write ?? console.error)(`[DEBUG] Codex Stop plan review skipped: ${detail}`);
 }
 
-/**
- * One unconditional stderr line whenever the rollout fallback named the turn,
- * so a user on a Codex that sends no `turn_id` can see WHY plan review behaves
- * the way it does without setting PLANNOTATOR_DEBUG.
- *
- * stderr, never stdout: stdout is the Stop hook's JSON decision channel. Codex
- * only reads a Stop hook's stderr when it exits with code 2, and this hook
- * always exits 0, so the line is a captured breadcrumb, never agent input.
- */
 export function logCodexStopTurnIdFallback(
   turnId: string,
   opts: { write?: (message: string) => void } = {},
@@ -422,7 +311,6 @@ function collectPlanCandidates(
   for (let i = Math.max(startIndex, 0); i < entries.length; i++) {
     const entry = entries[i];
     if (isTurnMarker(entry)) {
-      // A `turn_context` line may omit the id; those keep the active turn.
       const boundaryTurnId = getTurnId(entry);
       if (boundaryTurnId) activeTurnId = boundaryTurnId;
     }
@@ -432,8 +320,6 @@ function collectPlanCandidates(
       candidates.push({ index: i, text: planItemText, source: "plan-item" });
     }
 
-    // Unlike plan items, a raw assistant <proposed_plan> carries no turn id of
-    // its own, so it counts only while the scan is inside the named turn.
     const assistantPlanText =
       activeTurnId === turnId ? getAssistantProposedPlanText(entry) : null;
     if (assistantPlanText) {
@@ -459,16 +345,6 @@ function pickLatestPreferredPlan(
   return candidates.at(-1) || null;
 }
 
-/**
- * Extract the last assistant message from a Codex rollout file.
- *
- * Walks backward through the JSONL, finds the last entry where:
- *   type === "response_item"
- *   payload.type === "message"
- *   payload.role === "assistant"
- *
- * Extracts output_text blocks from payload.content.
- */
 export function getLastCodexMessage(
   rolloutPath: string,
   options: GetLastCodexMessageOptions = {}
@@ -479,7 +355,6 @@ export function getLastCodexMessage(
     : -1;
   const endIndex = activeTurnStart === -1 ? entries.length - 1 : activeTurnStart - 1;
 
-  // Walk backward
   for (let i = endIndex; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "response_item") continue;
@@ -493,14 +368,6 @@ export function getLastCodexMessage(
   return null;
 }
 
-/**
- * Extract up to `limit` of the most recent assistant messages from a Codex
- * rollout file. Returned newest-first.
- *
- * Used by the picker UI to let users choose among recent messages rather
- * than always defaulting to the newest transcript entry — which is incorrect
- * after a /rewind.
- */
 export interface CodexRecentMessage {
   messageId: string;
   text: string;
@@ -529,8 +396,6 @@ export function getRecentCodexMessages(
 
     const text = getMessageText(entry, ["output_text"]);
     if (!text) continue;
-    // Codex doesn't expose a stable message id in the rollout format we read,
-    // so fall back to an index-based id. Stable within a single rollout read.
     messages.push({
       messageId: `codex-msg-${i}`,
       text,
@@ -540,24 +405,6 @@ export function getRecentCodexMessages(
   return messages;
 }
 
-/**
- * Extract the latest Codex plan from a rollout file.
- *
- * Primary source: persisted completed TurnItem::Plan events.
- * Fallback source: raw assistant response_item messages that still contain a
- * <proposed_plan> block in the rollout transcript.
- *
- * When stopHookActive is true, this only returns a changed post-feedback plan,
- * measured across the boundary the previous blocking Stop left in the turn (a
- * `<hook_prompt>` user message on Codex >= 0.117, a developer-role message on
- * the rollout-fallback path that serves Codex < 0.117):
- * - no plan after that boundary => null
- * - identical plan after that boundary => null
- *
- * The turn comes from options.turnId, or from the rollout's own turn markers
- * when the Stop payload carried no `turn_id` field, and must be anchored in the
- * file: see resolveCodexStopPlan, which this thin wrapper drops the reason from.
- */
 export function getLatestCodexPlan(
   rolloutPath: string,
   options: GetLatestCodexPlanOptions = {}
@@ -565,22 +412,10 @@ export function getLatestCodexPlan(
   return resolveCodexStopPlan(rolloutPath, options).plan;
 }
 
-/**
- * The Stop hook's single entry point: the plan to review, plus the reason no
- * plan was looked for. Reads and parses the rollout at most once — the hook
- * needs both answers and the file is the whole session transcript.
- */
 export function resolveCodexStopPlan(
   rolloutPath: string,
   options: GetLatestCodexPlanOptions = {}
 ): CodexStopPlanLookup {
-  // A payload that NAMES a turn but names it unusably — blank, or any
-  // non-string a foreign/untyped caller hands through — is truncated or
-  // foreign, not an old Codex: fail closed before the file is read, so stale
-  // plan content is never even loaded. Keyed on the field being present,
-  // because an absent field is the old-Codex shape handled below. The
-  // non-string coercion lives here rather than only at the call site so the
-  // module fails closed for every caller instead of throwing at `.trim()`.
   const rawTurnId: unknown = options.turnId;
   const payloadTurnId =
     rawTurnId === undefined
@@ -594,19 +429,9 @@ export function resolveCodexStopPlan(
 
   const entries = parseRolloutEntries(rolloutPath);
 
-  // Codex only added `turn_id` to the Stop payload in rust-v0.117.0
-  // (rust-v0.116.0-alpha.12); rust-v0.114.0/0.115.0/0.116.0 ship the hooks
-  // engine and send a Stop payload without the field. Their rollouts still
-  // record the turn id on every turn marker (`TurnContext::to_turn_context_item`
-  // writes `turn_id: Some(sub_id)`), so derive the current turn from the file
-  // rather than failing closed and silently disabling plan review there.
   const turnId = payloadTurnId ?? findLatestRolloutTurnId(entries);
   if (!turnId) return { plan: null, skipReason: "missing-turn-marker" };
 
-  // The named turn must be anchored in THIS rollout file. Without an anchor,
-  // every plan in the file belongs to some other turn — the normal shape of an
-  // older segment of a split thread, which routinely ends with an
-  // already-decided plan that must not be reopened.
   const turnStartIndex = findTurnStartIndex(entries, turnId);
   if (turnStartIndex === -1) {
     return { plan: null, skipReason: "missing-turn-marker" };
@@ -615,9 +440,6 @@ export function resolveCodexStopPlan(
   return {
     plan: findPlanInTurn(entries, turnStartIndex, turnId, {
       stopHookActive: !!options.stopHookActive,
-      // Only the rollout-fallback path (a Stop payload with no `turn_id`, i.e.
-      // Codex < 0.117) accepts the developer-role continuation boundary, so
-      // every Codex that sends `turn_id` keeps byte-identical behaviour.
       allowDeveloperBoundary: payloadTurnId === undefined,
     }),
     skipReason: null,
@@ -635,13 +457,6 @@ function toPlanResult(
   return candidate ? { text: candidate.text, source: candidate.source } : null;
 }
 
-/**
- * The deny→resubmit guard: across the boundary the previous blocking Stop left
- * in the turn, return the plan only when it is genuinely NEW.
- *
- * - no plan after the boundary  => the plan on screen is the one already denied
- * - identical plan after it     => the model resubmitted it unchanged
- */
 function planChangedAcrossBoundary(
   candidates: CodexPlanCandidate[],
   boundaryIndex: number
@@ -686,12 +501,6 @@ function findPlanInTurn(
     return planChangedAcrossBoundary(candidates, lastHookPromptIndex);
   }
 
-  // Codex < 0.117 has no `<hook_prompt>` item at all: it records the blocking
-  // Stop hook's reason as a developer-role message and continues the same turn
-  // with `stop_hook_active = true`. Without this the guard above is inert on
-  // exactly the versions the rollout turn-id fallback newly enables, and a
-  // denied plan the model did not revise gets re-served for review on every
-  // Stop of that turn.
   const lastDeveloperIndex = options.allowDeveloperBoundary
     ? findLastDeveloperMessageIndex(entries, turnStartIndex)
     : -1;

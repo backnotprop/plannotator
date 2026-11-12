@@ -1,11 +1,3 @@
-/**
- * The mod tells the Inbox when Claude Code holds this session's replies (approval "inbox-stopped-reply"):
- * after Claude Code dropped a reply's prompt (#2780, the person stopped the session), the `state` event says
- * `held: true` at once and every poll carries it; the person's input lifts it, and a `state` event says
- * `held: false`. The window's "Stopped: goes in when you type in that session" reads exactly this. The failure
- * this catches: an event that never goes out (the line waits for the next poll) or never says the hold lifted.
- * A memory host, no Inbox.
- */
 import { describe, expect, test } from 'bun:test'
 import { PromptDropped } from './host'
 import { InboxLink, inboxRegistryPathOf } from './inbox'
@@ -63,16 +55,13 @@ describe('the held state the mod reports', () => {
     link.start()
     await ticks(host, 6)
     expect(host.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
-    // Told at once by the state event, not left to the next poll.
     expect(states.map((state) => state[INBOX_HELD_POLL_FIELD])).toEqual([true])
     const pollsWhileHeld = polls.length
     await ticks(host, 3)
-    // Nothing tried again while held, and every poll since says so.
     expect(host.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
     expect(polls.length).toBeGreaterThan(pollsWhileHeld)
     for (const poll of polls.slice(pollsWhileHeld)) expect(poll[INBOX_HELD_POLL_FIELD]).toBe(true)
 
-    // The person types: the hold lifts, the Inbox hears it, and the reply goes in at the idle after.
     stopDropping()
     link.onForeignPrompt({ originKind: 'composer' })
     const pollsAfter = polls.length

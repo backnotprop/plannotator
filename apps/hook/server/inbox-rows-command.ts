@@ -1,23 +1,9 @@
-/**
- * `plannotator inbox rows …` (approval "inbox-rows-settings-page"): a person asks an agent to change how the rows of
- * their Inbox list look, and the agent lists the options, sets some, and can undo the last change. A command and not
- * a tool, as `inbox projects` is: tool text costs every session tokens, and this runs seldom.
- *
- * A thin client over the route the window uses on this computer's listener (`GET` and `POST /api/inbox/settings`
- * `rows`, `rows_by`, `rows_undo`). It can reach row options only: it sends no other setting. Every word it prints is
- * core's (`@plannotator/core/inbox-types`), the one place the owner's words live.
- *
- * stdout: a text answer, or JSON with --json. A refusal goes to stderr as `<code>: <message>` and exits 1; bad usage
- * exits 2.
- */
-
 import { INBOX_ROWS_DEFAULT, inboxRowsRead, type InboxRowsOption } from "@plannotator/core/inbox-types";
 import { INBOX_ROWS_USAGE, INBOX_ROWS_WORDS, inboxRowsApply, inboxRowsChangeLines, inboxRowsListing, inboxRowsListingJson, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
-/** One request never waits longer: a wedged Inbox must not hang the agent. */
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export type ParsedRowsCommand = { ok: true; op: "list" } | { ok: true; op: "set"; pairs: string[] } | { ok: true; op: "undo" } | { ok: false; error: string };
@@ -34,14 +20,12 @@ export function parseRowsCommand(argv: readonly string[]): ParsedRowsCommand {
 export interface RowsCommandDeps {
   json: boolean;
   ensureRunning: () => Promise<InboxRegistryEntry>;
-  /** The agent session this shell runs in, when it names one: sent with a change, so the window says who made it. */
   by?: InboxRowsBy | null;
   out?: (text: string) => void | Promise<void>;
   err?: (text: string) => void;
   timeoutMs?: number;
 }
 
-/** Run `plannotator inbox rows …`; resolves to the exit code. */
 export async function runInboxRowsCommand(argv: readonly string[], deps: RowsCommandDeps): Promise<number> {
   const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
@@ -71,7 +55,6 @@ export async function runInboxRowsCommand(argv: readonly string[], deps: RowsCom
     const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
     return { status: response.status, body };
   };
-  /** The look as the windows read it: never saved is the defaults. */
   const lookOf = (body: Record<string, unknown> | null): InboxRowsOption[] => inboxRowsRead(body?.rows) ?? [...INBOX_ROWS_DEFAULT];
   const failed = (answer: { status: number; body: Record<string, unknown> | null }) => refused(typeof answer.body?.code === "string" ? answer.body.code : "error", typeof answer.body?.error === "string" ? answer.body.error : `The Inbox answered ${answer.status}. Nothing changed.`);
   try {

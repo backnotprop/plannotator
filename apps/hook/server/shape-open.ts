@@ -1,16 +1,3 @@
-/**
- * `plannotator shape open [<shp_id>]`: the Shape page for people without the
- * Plannotator Inbox (SPEC.md §4, "CLI"). It reuses the Shapes server that
- * `shapes/server.json` names, or starts one detached (`plannotator shape
- * serve`, internal), then opens the page: the grid of boards, or one board.
- *
- * Like every `plannotator shape …`, it runs only while Shape is on (index.ts
- * prints the one `shape_off` line otherwise).
- *
- * `shape serve` (internal, not in the help): runs the Shapes server in this
- * process until no page has been open for 30 minutes. A second one exits at
- * once when one already runs.
- */
 import { closeSync, mkdirSync, openSync, rmSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -26,23 +13,14 @@ export const SHAPE_SERVER_LOG = "server.log";
 
 export interface ShapeOpenDeps {
   dataDir: string;
-  /** Opens the URL in the person's browser; `remote` when nothing could open it here. */
   openUrl: (url: string) => Promise<"opened" | "none" | "remote" | "failed">;
-  /** Starts `plannotator shape serve` detached (tests pass a stand-in). */
   spawnServer?: (dataDir: string) => void;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
-  /** How long to wait for a started server (tests shorten it). */
   startTimeoutMs?: number;
-  /**
-   * Bare `plannotator shape`: when a Shape page is already open on the running server, print the address and open
-   * no second tab (the open page shows each new version by itself). `shape open` always opens one: an agent runs it
-   * on purpose. When the count cannot be read (an older server, no answer in time), a page is opened.
-   */
   reuseOpenPage?: boolean;
 }
 
-/** `shape open` arguments: one board id at most, and `--json`. */
 export function parseShapeOpen(argv: readonly string[]): { ok: true; id: string | null; json: boolean } | { ok: false; error: string } {
   let id: string | null = null;
   let json = false;
@@ -55,7 +33,6 @@ export function parseShapeOpen(argv: readonly string[]): { ok: true; id: string 
   return { ok: true, id, json };
 }
 
-/** The page's address: the grid, or one board (`#shape=<id>`). */
 export function shapePageUrl(base: string, id: string | null): string {
   return id ? `${base}/#shape=${encodeURIComponent(id)}` : `${base}/`;
 }
@@ -72,13 +49,11 @@ function takeStartLock(dataDir: string): (() => void) | null {
     return take();
   } catch {
     try {
-      // A starter that died holding it: break it once it is old.
       if (Date.now() - statSync(path).mtimeMs > START_LOCK_STALE_MS) {
         rmSync(path, { force: true });
         return take();
       }
     } catch {
-      // gone meanwhile, or taken again
     }
     return null;
   }
@@ -91,7 +66,6 @@ function defaultSpawn(dataDir: string): void {
   const self = selfCommand();
   const child = spawn(self[0]!, [...self.slice(1), "shape", "serve"], {
     detached: true,
-    // Never the caller's folder: a long-lived process would hold the agent's project as its working directory.
     cwd: dir,
     windowsHide: true,
     stdio: ["ignore", log, log],
@@ -101,7 +75,6 @@ function defaultSpawn(dataDir: string): void {
   closeSync(log);
 }
 
-/** The running Shapes server, starting one detached when none runs. Throws when it cannot start. */
 export async function ensureShapeServer(deps: Pick<ShapeOpenDeps, "dataDir" | "spawnServer" | "startTimeoutMs">): Promise<RunningShapeServer> {
   const running = await runningShapeServer(deps.dataDir);
   if (running) return running;
@@ -120,7 +93,6 @@ export async function ensureShapeServer(deps: Pick<ShapeOpenDeps, "dataDir" | "s
   throw new Error(`The Shape page's server did not start; see ${join(shapesDirOf(deps.dataDir), SHAPE_SERVER_LOG)}.`);
 }
 
-/** `plannotator shape open [<shp_id>] [--json]`; the exit code. */
 export async function runShapeOpen(argv: readonly string[], deps: ShapeOpenDeps): Promise<number> {
   const out = deps.stdout ?? ((text: string) => process.stdout.write(`${text}\n`));
   const err = deps.stderr ?? ((text: string) => process.stderr.write(`${text}\n`));
@@ -151,7 +123,6 @@ export async function runShapeOpen(argv: readonly string[], deps: ShapeOpenDeps)
   return 0;
 }
 
-/** `plannotator shape serve` (internal): the Shapes server in this process, until it is idle. */
 export async function runShapeServe(deps: { dataDir: string; pageGzip: () => Uint8Array; version: string }): Promise<number> {
   if (await runningShapeServer(deps.dataDir)) return 0;
   let resolveExit: (code: number) => void = () => {};

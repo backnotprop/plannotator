@@ -1,15 +1,3 @@
-/**
- * `plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]` (design brief
- * "export-decisions" step 2; the owner: agents get a command line only, no new tool action). A thin client over the
- * window's own routes on this computer's listener: the download (`GET /api/inbox/threads/:id/decisions`) and Post
- * decisions (`POST /api/inbox/threads/:id/decisions/post`), starting a stopped Inbox detached as `inbox projects`
- * does. No export or forge logic lives here.
- *
- * stdout: the file (no --out), or with --out nothing; with --pr one line, "Decisions posted on <ref>: <url>" (or
- * updated; "… as a comment instead (why)" when the description could not take them). Where they go is the person's
- * setting, read by the Inbox. A refusal goes to stderr as `<code>: <message>` and exits 1; bad usage exits 2.
- */
-
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -27,7 +15,6 @@ export const INBOX_EXPORT_DECISIONS_USAGE = [
   "<ref>: owner/repo#123, group/project!45 or the URL.",
 ].join("\n");
 
-/** One request never waits longer: a wedged Inbox (or a slow forge) must not hang the agent. */
 const REQUEST_TIMEOUT_MS = 90_000;
 
 export type ParsedExportDecisionsCommand =
@@ -58,11 +45,9 @@ export interface ExportDecisionsCommandDeps {
   ensureRunning: () => Promise<InboxRegistryEntry>;
   out?: (text: string) => void | Promise<void>;
   err?: (text: string) => void;
-  /** Tests: how long one request may take. */
   timeoutMs?: number;
 }
 
-/** This computer's zone, so the file's dates read as the person's. */
 function localZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -71,7 +56,6 @@ function localZone(): string {
   }
 }
 
-/** Run `plannotator inbox export-decisions …`; resolves to the exit code. */
 export async function runInboxExportDecisionsCommand(argv: readonly string[], deps: ExportDecisionsCommandDeps): Promise<number> {
   const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
@@ -110,7 +94,6 @@ export async function runInboxExportDecisionsCommand(argv: readonly string[], de
     try {
       body = JSON.parse(text);
     } catch {
-      // Not the Inbox's JSON refusal: its status says enough.
     }
     return refused(body.code ?? `http_${response.status}`, body.error ?? `The Inbox answered ${response.status}.`);
   }

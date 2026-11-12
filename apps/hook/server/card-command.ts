@@ -1,25 +1,3 @@
-/**
- * `plannotator card …`: the Board's card call from a shell (approval
- * "inbox-board", step 1), for an agent or a lane that logs from the shell.
- * A thin client over the Inbox's `card` MCP tool (packages/server/inbox-mcp-cards.ts):
- * one `tools/call` to the running Inbox's `/mcp`, started detached when it is
- * stopped, exactly as `plannotator inbox mcp` reaches it. The rules live once,
- * in the server.
- *
- * Listed in `plannotator --help` while the person has the Board on. Its own
- * `--help` answers without config or an Inbox, Board on or off.
- *
- * The session: inside an agent host session (a Claude Code session's
- * `PLANNOTATOR_SESSION_TAG`, a Pi bash call's `PI_SESSION_ID`) the card is
- * that session's, as its `plannotator_inbox` tool would make it, and in that
- * session's project (`PLANNOTATOR_SESSION_PROJECT`) unless `--project` names
- * one; otherwise it is nobody's in particular, the project is the shell's
- * folder, and `list` lists every card in the project.
- *
- * stdout: the tool's text (or its structured result with --json). A refusal
- * goes to stderr as `<code>: <message>` and exits 1; bad usage exits 2.
- */
-
 import { resolve } from "node:path";
 import { mcpAnswerOf } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -31,7 +9,6 @@ export { CARD_COMMAND_USAGE };
 
 type Op = "create" | "move" | "say" | "link" | "ship" | "drop" | "list" | "initiative_delete";
 
-/** A parsed command: the tool's arguments (without the filled ones), or why it is not one. */
 export type ParsedCardCommand =
   | { ok: true; op: Op; args: Record<string, unknown>; project: string | null; json: boolean }
   | { ok: false; error: string };
@@ -50,7 +27,6 @@ const VALUE_FLAGS: Record<string, string> = {
   "--project": "project",
 };
 
-/** The positional arguments each command takes, by the tool field they fill. */
 const POSITIONAL: Record<Op, { names: readonly string[]; required: number }> = {
   create: { names: ["title"], required: 0 },
   move: { names: ["card_id", "column"], required: 2 },
@@ -63,7 +39,6 @@ const POSITIONAL: Record<Op, { names: readonly string[]; required: number }> = {
 };
 
 export function parseCardCommand(argv: readonly string[]): ParsedCardCommand {
-  // `card done <crd_id>` is `card ship` (its column is Done).
   const op = (argv[0] === "done" ? "ship" : argv[0]) as Op | undefined;
   if (!op || !Object.hasOwn(POSITIONAL, op)) return { ok: false, error: op ? `Unknown card command: ${op}` : "A card command: create, move, say, link, ship, drop, list or initiative_delete." };
   const args: Record<string, unknown> = { op };
@@ -109,7 +84,6 @@ export interface CardCommandDeps {
   err?: (text: string) => void;
 }
 
-/** Run `plannotator card …`; resolves to the exit code. */
 export async function runCardCommand(argv: readonly string[], deps: CardCommandDeps): Promise<number> {
   const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
@@ -122,8 +96,6 @@ export async function runCardCommand(argv: readonly string[], deps: CardCommandD
     err(`${parsed.error}\n${CARD_COMMAND_USAGE}\n`);
     return 2;
   }
-  // Inside an agent host session the card is that session's, as its plannotator_inbox tool would make it, in that
-  // session's project when --project names none (PLANNOTATOR_SESSION_PROJECT), wherever the shell stands.
   const host = inboxHostSessionFromEnv(deps.env);
   const project = parsed.project !== null ? resolve(deps.cwd, parsed.project) : inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host, deps.cwd);
   const args: Record<string, unknown> = { ...parsed.args, project_path: project };
@@ -152,7 +124,6 @@ export async function runCardCommand(argv: readonly string[], deps: CardCommandD
     return 1;
   }
   const answer = mcpAnswerOf(text);
-  // The card action held back (INBOX_CARD_ACTION_ON), or an Inbox older than the Board: no card tool.
   const noCards = (text: string) => /tool card not found|unknown tool/i.test(text);
   if (!answer || answer.error) {
     const message = answer?.error?.message ?? "Plannotator Inbox gave no answer.";

@@ -31,8 +31,6 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator --help");
     expect(output).toContain("plannotator --version, -v");
     expect(output).toContain("plannotator [--browser <name>]");
-    // Deliberate literal: the review usage line is API surface for agents
-    // probing --help (and for the knowledge-skill freshness guard).
     expect(output).toContain("plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--title <text>] [--tailscale] [--gate] [DIRECTORY | PR_URL]");
     expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
@@ -57,7 +55,6 @@ describe("CLI subcommand help", () => {
   test("recognizes `review --help` as a subcommand help invocation", () => {
     expect(isSubcommandHelpInvocation(["review", "--help"])).toBe("review");
     expect(isSubcommandHelpInvocation(["review", "-h"])).toBe("review");
-    // help flag may appear after other args (agents probe in various ways)
     expect(isSubcommandHelpInvocation(["annotate", "file.md", "--help"])).toBe(
       "annotate",
     );
@@ -83,8 +80,6 @@ describe("CLI subcommand help", () => {
   });
 
   test("covers every command advertised in top-level help", () => {
-    // Each command listed in formatTopLevelHelp() must respond to --help so the
-    // advertised "run 'plannotator <command> --help'" contract holds.
     for (const sub of [
       "annotate",
       "copilot-last",
@@ -111,7 +106,6 @@ describe("CLI subcommand help", () => {
       "plannotator review [--git | --gitbutler]",
     );
     expect(formatSubcommandHelp("review")).toContain("--gitbutler");
-    // Deliberate literals: the open-state flag tokens are API surface.
     expect(formatSubcommandHelp("review")).toContain("--base <ref>");
     expect(formatSubcommandHelp("review")).toContain("--diff-type <type>");
     expect(formatSubcommandHelp("review")).toContain("--patch-file <path | ->");
@@ -129,7 +123,6 @@ describe("CLI subcommand help", () => {
     expect(formatSubcommandHelp("uninstall")).toContain(
       "not stored on a Plannotator server",
     );
-    // unknown key falls back to top-level help
     expect(formatSubcommandHelp("nope")).toBe(formatTopLevelHelp());
   });
 });
@@ -389,16 +382,6 @@ describe("interactive no-arg invocation", () => {
 });
 
 describe("guide subcommand through the entrypoint", () => {
-  // Guards the argv hand-off in apps/hook/server/index.ts: the entrypoint
-  // strips the annotate gate flags (`--json` among them) from the whole argv
-  // before dispatching, and `plannotator guide share --json` must still print
-  // the JSON record the guide CLI owns rather than the bare URL.
-  //
-  // The entrypoint imports the built app HTML (`../dist/*.html`) at module
-  // load, so it will not even start without those files, and the CI test job
-  // does not run `bun run build:hook`. The guide subcommand never serves them,
-  // so the test stands in placeholders for whichever one is missing and removes
-  // exactly those again afterwards; a real build is left alone.
   test("guide share --json prints the JSON record, wherever --json sits", async () => {
     const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
@@ -445,10 +428,6 @@ describe("guide subcommand through the entrypoint", () => {
 });
 
 describe("--title through the entrypoint (#2289)", () => {
-  // Guards the hand-off in apps/hook/server/index.ts: a misused --title stops
-  // the CLI before any session starts, with the strict gate's usage exit (2)
-  // under --require-approval and 1 otherwise. Stubs the built HTML like the
-  // guide test above.
   test("refuses a misused --title before starting anything", async () => {
     const { mkdtempSync, rmSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");

@@ -2,12 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import { InboxLink, inboxRegistryPathOf, pluginVersionOf } from './inbox'
 import { fakeHost } from './testing/fake-host'
 
-// The restart warning (owner approval "restart-warning"): the mod tells the
-// Inbox what it loaded on every poll, so the Inbox can say a restart would
-// load a newer plugin. The failure this catches: a poll that drops the fields
-// (the Inbox then can never tell an outdated session), or one that sends them
-// from an older mod's host that cannot read them (it must then say nothing).
-
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
 
@@ -60,7 +54,6 @@ describe('the poll says what this process loaded', () => {
 
   test('a read that failed still sends the field, with null parts: a missing field only ever means an older mod', async () => {
     const host = fakeHost()
-    // What register.ts answers when $.plugin.root or plugin.json could not be read.
     host.loadedPlugin = async () => ({ version: null, root: null, loaded_at: 1_700_000_000_000 })
     const { link, polls } = linkOver(host)
     link.start()
@@ -88,7 +81,6 @@ describe('the poll says what this process loaded', () => {
     link.dispose()
     expect(polls.length).toBeGreaterThanOrEqual(2)
     for (const poll of polls) expect(poll.session_folder).toBe('/home/me/code/billing-api')
-    // Where it works now still follows the session (New message's project).
     expect(polls[polls.length - 1]!.project_path).toBe('/home/me/code/billing-api/services/api')
   })
 })

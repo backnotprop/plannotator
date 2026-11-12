@@ -1,12 +1,3 @@
-/**
- * Copilot Session Lock Detection Tests
- *
- * Run: bun test apps/hook/server/copilot-session.test.ts
- *
- * Uses temp dirs mirroring the real ~/.copilot/session-state/<uuid>/
- * layout with synthetic inuse.<pid>.lock files.
- */
-
 import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,8 +6,6 @@ import {
   matchCopilotSessionLockToPids,
   findCopilotSessionByAncestorPids,
 } from "./copilot-session";
-
-// --- Fixture Helpers ---
 
 let tempDirs: string[] = [];
 
@@ -44,8 +33,6 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-// --- Tests ---
 
 describe("matchCopilotSessionLockToPids", () => {
   test("matches a pid in the chain against its session lock", () => {
@@ -183,8 +170,6 @@ describe("findCopilotSessionByAncestorPids", () => {
   });
 
   test("skips a stale lock and keeps walking the chain", () => {
-    // Pid 100 was reused after its copilot session died; its stale lock
-    // must not shadow the live session locked by pid 300.
     const stateDir = makeSessionStateDir();
     addSession(stateDir, "aaaa-1111", ["inuse.100.lock"]);
     const live = addSession(stateDir, "bbbb-2222", ["inuse.300.lock"]);

@@ -10,24 +10,14 @@ interface ReviewOutcome {
   feedback: string;
   annotations: readonly unknown[];
   exit?: boolean;
-  /** The review server's marker for the PR-platform status post. */
   platform?: boolean;
 }
 
 export interface ReviewOutput {
   decision: "approved" | "annotated" | "dismissed";
-  /** The plaintext CLI output, excluding its final console newline. */
   message: string;
 }
 
-/**
- * Whether request-changes feedback gets the denied suffix. Everything the
- * reviewer sent does, including feedback with no code annotations (PR
- * description, PR comment and editor comments ride only in `feedback`); the
- * one exception is the platform path's status post, which the review server
- * marks with `platform: true` and which only reports where the review went.
- * Never inferred from an empty annotation list.
- */
 export function reviewFeedbackWantsSuffix(result: {
   feedback: string;
   annotations: readonly unknown[];
@@ -56,19 +46,12 @@ export function buildReviewOutput(
   }
   return {
     decision: "annotated",
-    // Preserve the newline between the original feedback and suffix console.log
-    // calls. PR feedback gets the suffix too; the platform status post does not.
     message: reviewFeedbackWantsSuffix(result)
       ? `${result.feedback}\n${getReviewDeniedSuffix(origin, config)}`
       : result.feedback,
   };
 }
 
-/**
- * Whether this CLI's review consumer delivers approval notes for the origin.
- * Direct review renders notes in both plaintext and JSON messages. The OpenCode
- * bridge also checks the plugin's declared support before advertising this.
- */
 export function supportsReviewApprovalNotes(_origin: Origin | undefined): boolean {
   return true;
 }

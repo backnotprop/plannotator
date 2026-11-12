@@ -1,8 +1,3 @@
-/**
- * #2007: the classic PermissionRequest command hook answers an ExitPlanMode
- * the Claude Code mod already approved (its own classic.PermissionRequest hook
- * was skipped by an organization's guard plugin), without a second review.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,13 +34,11 @@ afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-/** The SHA-256 the mod computes (register.ts: crypto.subtle over the UTF-8 text). */
 async function modSha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/** Write a record exactly as the mod does (its path helper, its record builder, its hash). */
 async function writeModRecord(
   dataDir: string,
   options: { session?: string; toolUseId?: string; plan?: string; permissionMode?: string; at?: number } = {},
@@ -96,7 +89,6 @@ describe("takeModPlanApproval", () => {
       updatedPermissions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
     });
     expect(existsSync(path)).toBe(false);
-    // Taken: the same request again finds nothing, and the classic review runs.
     expect(takeModPlanApproval(event, { dataDir, now: Date.now() })).toBeNull();
   });
 
@@ -151,7 +143,6 @@ describe("takeModPlanApproval", () => {
     const dataDir = scratch();
     const dir = modPlanApprovalsDir(dataDir, SESSION)!;
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    // Forged: the hash of the requested plan, the text of another.
     const path = join(dir, "toolu_02.json");
     writeFileSync(path, JSON.stringify({ v: 1, hash: modPlanHash(PLAN), plan: "# Never reviewed\n", at: Date.now() }));
 
@@ -161,7 +152,6 @@ describe("takeModPlanApproval", () => {
 
   test("a symlinked plan-approvals folder is not followed", async () => {
     const dataDir = scratch();
-    // A real folder holding a valid record elsewhere, linked in as the session's folder.
     const elsewhere = join(scratch(), "elsewhere");
     await writeModRecord(elsewhere);
     const real = modPlanApprovalsDir(elsewhere, SESSION)!;
@@ -189,7 +179,6 @@ describe("the classic hook as a process", () => {
   const entry = resolve(import.meta.dir, "index.ts");
   let stubs: string[] = [];
   beforeAll(() => {
-    // The CLI imports the built HTML; the path tested here never serves it.
     stubs = stubHookDistHtml();
   });
   afterAll(() => removeStubbedHtml(stubs));
@@ -243,13 +232,11 @@ describe("the classic hook as a process", () => {
         },
       },
     });
-    // No session was registered: no server ran.
     expect(existsSync(join(dataDir, "sessions")) ? readdirSync(join(dataDir, "sessions")) : []).toEqual([]);
   }, 30_000);
 
   test("without a record the classic review opens as before", async () => {
     const dataDir = scratch();
-    // The server would wait for a decision; it is killed once it is up.
     const { stdout, stderr } = await runHook(dataDir, permissionRequest(), 6_000);
 
     expect(stdout).toBe("");

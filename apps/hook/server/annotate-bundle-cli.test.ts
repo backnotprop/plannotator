@@ -1,14 +1,3 @@
-/**
- * `plannotator annotate a.md b.html ...` (several existing file paths) opens
- * ONE review of all of them, run as the real process: the server runs in
- * `annotate-bundle` mode with the files in the typed order, one decision
- * settles it, and the host result record names each file with its comment
- * count. Mixed arguments keep the #1483 errors (with the bundle hint), and a
- * strict gate takes only a single target or only file paths.
- *
- * Every run uses a temp PLANNOTATOR_DATA_DIR and cwd; nothing touches the
- * real ~/.plannotator.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +10,6 @@ let stubs: string[] = [];
 let root = "";
 
 beforeAll(() => {
-  // The CLI imports the built HTML; API-only tests need just a stub.
   stubs = stubHookDistHtml();
   root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-annotate-bundle-cli-")));
   mkdirSync(join(root, "docs"));
@@ -72,7 +60,6 @@ async function waitFor<T>(read: () => T | null | undefined, ms = 20_000): Promis
   }
 }
 
-/** Start the CLI the way the Claude Code mod does: a ready file and a host result file. */
 function start(args: string[], launch: string) {
   const dir = join(root, "data", "claude-code-mod", "session-1", launch);
   mkdirSync(dir, { recursive: true });
@@ -112,7 +99,6 @@ describe("annotate with several file paths", () => {
 
     const plan = await (await fetch(`${url}/api/plan`)).json();
     expect(plan.mode).toBe("annotate-bundle");
-    // Typed order; the duplicate of mock.html is dropped.
     expect(plan.bundle).toEqual([
       { path: mock, renderAs: "html" },
       { path: spec, renderAs: "markdown" },
@@ -135,7 +121,6 @@ describe("annotate with several file paths", () => {
       { path: mock, annotationCount: 0 },
       { path: spec, annotationCount: 2 },
     ]);
-    // The agent's message names every file of the review.
     expect(record.message).toContain(mock);
     expect(record.message).toContain(spec);
   }, 30_000);
@@ -158,7 +143,6 @@ describe("annotate with several file paths", () => {
     const result = runSync(["spec.md", "image.png"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(join(root, "image.png"));
-    // Under a strict gate the same misconfiguration is exit 2, never a rejection.
     expect(runSync(["spec.md", "image.png", "--gate", "--json", "--require-approval"]).exitCode).toBe(2);
   });
 
@@ -173,13 +157,10 @@ describe("annotate with several file paths", () => {
     const result = runSync(["spec.md", "please", "--gate", "--json", "--result-file", "out.json"]);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("A strict annotate gate takes one target");
-    // Refused by probe alone: the first argument is not opened or reported.
     expect(result.stderr).not.toContain("Resolved:");
     expect(result.stdout).toBe("");
   });
 
-  // The failure: `annotate a.md typo.md` opened a.md alone (exit 0) while the
-  // agent was told both files were open.
   test("a list of file paths with a missing one opens nothing and names it", () => {
     const result = runSync(["spec.md", "typo.md"]);
     expect(result.exitCode).toBe(1);
@@ -187,8 +168,6 @@ describe("annotate with several file paths", () => {
     expect(runSync(["spec.md", "typo.md", "--gate", "--json", "--require-approval"]).exitCode).toBe(2);
   });
 
-  // The failure (#1718 re-review): an existing directory beside a file read
-  // as "File not found: ."; a stray `.` / `..` must keep opening the file.
   test("a stray . or .. beside a file opens the file, never 'not found'", async () => {
     for (const [args, launch] of [[[".", "spec.md"], "dot"], [["spec.md", ".."], "dotdot"]] as const) {
       const { proc, base } = start([...args], `bundle-${launch}`);

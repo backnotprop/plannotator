@@ -1,14 +1,3 @@
-/**
- * DeepSeek Harness Session Reader Tests
- *
- * Run: bun test apps/hook/server/dsh-session.test.ts
- *
- * Uses synthetic fixtures matching DSH's $DSH_HOME/sessions layout:
- *   <project-key>/<encoded-session-id>/session.v4.jsonl.zstd
- * The live file is a run of zstd frames, one per append batch, so the
- * compressed fixtures are two frames concatenated.
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
@@ -54,7 +43,6 @@ function assistantRow(id: string, content: unknown[], time = 1_700_000_000_000):
 
 const text = (value: string) => ({ type: "text", text: value });
 
-/** Two append batches, as DSH writes them: older messages, then newer ones. */
 const firstBatch = [
   header,
   JSON.stringify({ type: "turn/start", data: { turn: 1 } }),
@@ -77,8 +65,6 @@ function writeCompressed(dir: string, name = "session.v4.jsonl.zstd"): string {
 }
 
 describe("getRecentDshMessages", () => {
-  // Catches: reading only the first zstd frame (the newest messages live in
-  // later frames), or treating tool/reasoning-only rows as rendered messages.
   test("multi-frame zstd log: newest text messages first, tool-call and reasoning blocks skipped", () => {
     const home = makeDshHome();
     const log = writeCompressed(sessionDir(home, "s1"));
@@ -91,8 +77,6 @@ describe("getRecentDshMessages", () => {
     expect(messages[0].timestamp).toBe(new Date(1_700_000_000_000).toISOString());
   });
 
-  // Catches: a reader that only understands .zstd (DSH can be configured to
-  // write plain JSONL, and older generations exist).
   test("an uncompressed log reads the same way", () => {
     const home = makeDshHome();
     const dir = sessionDir(home, "s1");
@@ -108,8 +92,6 @@ describe("getRecentDshMessages", () => {
     expect(getRecentDshMessages(log, 1).map((m) => m.messageId)).toEqual(["m3"]);
   });
 
-  // Catches: one half-written append frame (a read racing DSH's write) making
-  // the whole log unreadable, so `last` finds nothing in a live session.
   test("a truncated last frame keeps the messages before it", () => {
     const home = makeDshHome();
     const dir = sessionDir(home, "s1");
@@ -124,8 +106,6 @@ describe("getRecentDshMessages", () => {
     expect(getRecentDshMessages(log, 25).map((m) => m.messageId)).toEqual(["m3", "m1"]);
   });
 
-  // Catches: a tail too short to hold the next frame's magic making the reader
-  // drop the newest complete frame and serve an older answer.
   test("a partial magic number after the last frame keeps that frame", () => {
     const home = makeDshHome();
     const dir = sessionDir(home, "s1");
@@ -139,8 +119,6 @@ describe("getRecentDshMessages", () => {
     expect(getRecentDshMessages(log, 25).map((m) => m.messageId)).toEqual(["m3", "m1"]);
   });
 
-  // Catches: one damaged append frame in the middle of a live log dropping
-  // every newer frame, so `last` serves an old answer.
   test("a damaged frame in the middle keeps the frames on both sides", () => {
     const home = makeDshHome();
     const dir = sessionDir(home, "s1");
@@ -154,8 +132,6 @@ describe("getRecentDshMessages", () => {
     expect(getRecentDshMessages(log, 25).map((m) => m.messageId)).toEqual(["m3", "m1"]);
   });
 
-  // Catches: the retry decoding a longer prefix once per frame (quadratic: a
-  // long live session made `last` take seconds once a frame was damaged).
   test("a damaged frame costs about two decodes per frame, not one per prefix", () => {
     const frames: Buffer[] = [];
     for (let i = 0; i < 400; i++) {
@@ -174,13 +150,8 @@ describe("getRecentDshMessages", () => {
     expect(decodes).toBeLessThanOrEqual(2 * frames.length + 4);
   });
 
-  // Catches: after a damaged frame, a frame whose compressed data happens to
-  // hold a zstd magic number (so it does not decode in pieces) being dropped,
-  // with `last` then serving an older answer.
   test("after a damaged frame, the scan resyncs on a frame holding a stray magic number", () => {
     const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
-    // Incompressible bytes, so zstd stores them verbatim and the magic stays
-    // inside the frame's data.
     const noise = Buffer.concat(Array.from({ length: 64 }, (_, i) => createHash("sha256").update(`noise-${i}`).digest()));
     const middle = Buffer.from(Bun.zstdCompressSync(Buffer.concat([
       Buffer.from("MIDDLE\n"), noise.subarray(0, 1000), magic, noise.subarray(1000), Buffer.from("\n"),
@@ -199,8 +170,6 @@ describe("getRecentDshMessages", () => {
     expect(out.endsWith("AFTER\n")).toBe(true);
   });
 
-  // Catches: a corrupt log throwing out of annotate-last instead of reporting
-  // that no message was found.
   test("an undecodable log yields no messages", () => {
     const home = makeDshHome();
     const dir = sessionDir(home, "s1");
@@ -210,8 +179,6 @@ describe("getRecentDshMessages", () => {
 });
 
 describe("findDshSessionLog", () => {
-  // Catches: looking the session up under the wrong project key, or by the
-  // raw id when DSH encodes it (here `:` and `~` become ~XXXX escapes).
   test("finds the session by its encoded id under any project directory", () => {
     const home = makeDshHome();
     sessionDir(home, "other", "--Users-test-other--");
@@ -221,7 +188,6 @@ describe("findDshSessionLog", () => {
     expect(findDshSessionLog("a:b~c", { dshHome: home })).toBe(log);
   });
 
-  // Catches: picking a stale pre-migration generation over the live one.
   test("prefers the newest generation in the session directory", () => {
     const home = makeDshHome();
     const dir = sessionDir(home, "s1");
@@ -233,8 +199,6 @@ describe("findDshSessionLog", () => {
     expect(findDshSessionLog("s1", { dshHome: home })).toBe(live);
   });
 
-  // Catches: annotate-last opening another session's message when the
-  // calling session has no log.
   test("returns null for an unknown session or a missing sessions folder", () => {
     const home = makeDshHome();
     writeCompressed(sessionDir(home, "s1"));
@@ -244,8 +208,6 @@ describe("findDshSessionLog", () => {
 });
 
 describe("resolveDshHome", () => {
-  // Catches: a blank DSH_HOME resolving sessions against the cwd (DSH treats
-  // blank as unset).
   test("uses DSH_HOME when set and ignores a blank value", () => {
     expect(resolveDshHome({ DSH_HOME: "/tmp/dsh-home" })).toBe("/tmp/dsh-home");
     expect(resolveDshHome({ DSH_HOME: "  " })).not.toBe("  ");

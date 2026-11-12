@@ -1,10 +1,3 @@
-/**
- * An idle Claude Code session, a reply from the person, and a `session.end`
- * in between that leaves the process running. Seen live: a session idle after
- * an idle compaction got no Inbox reply until the person typed (the instance
- * was disposed and nothing made it again). A real Inbox in process, a running
- * `ClaudeSession`.
- */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -36,7 +29,6 @@ async function until(what: string, check: () => unknown | Promise<unknown>, ms =
   }
 }
 
-/** The session asked in the Inbox and sits idle, polling. */
 async function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-mod-session-end-')))
   roots.push(root)
@@ -63,7 +55,6 @@ async function world() {
   await until('the session to poll', async () =>
     ((await (await fetch(`${base}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }).sessions.some((s) => s.session === SESSION),
   )
-  /** The person's Send, through the route the window posts to. */
   const reply = async (words: string) =>
     (
       (await (
@@ -99,7 +90,6 @@ describe('session.end while the session goes on', () => {
 
   test('the instance disposed with the session still there: the self-heal makes it again and the waiting reply goes in, once', async () => {
     const w = await world()
-    // This session's own end, and the process goes on: nothing polls the Inbox now.
     expect(w.session.endSession(SESSION)).toBe(true)
     const id = await w.reply('Use the ARM runner.')
     await Bun.sleep(2_500)

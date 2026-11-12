@@ -1,28 +1,10 @@
-/**
- * CLI half of the Claude Code mod's non-blocking plan review
- * (`plannotator claude-mod-plan`, internal; the mod is `apps/hook/hooks/mod/`).
- *
- * The mod answers ExitPlanMode at once and starts this subcommand detached. A
- * revision Claude submits while the review is open reaches the running server
- * through a file the mod writes (`revisionFile`), never a new endpoint: the
- * subcommand polls it, pushes a newer revision into the open tab with the plan
- * server's `updatePlan`, and acknowledges it in `<revisionFile>.ack`.
- */
-
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 
-/** What the mod writes on stdin when it starts the subcommand. */
 export interface ModPlanInput {
   plan: string;
   planFilePath?: string;
   permissionMode?: string;
   revisionFile?: string;
-  /**
-   * The Claude Code session's root (`$.session.root()`): a plan whose chain
-   * its history project holds is continued there, so a shell `cd` between
-   * submits keeps one chain (#2197). New chains still start under the CLI's
-   * cwd's project. An older mod sends none: the cwd alone, as before.
-   */
   projectRoot?: string;
 }
 
@@ -51,10 +33,6 @@ export interface ModPlanRevision {
   plan: string;
 }
 
-/**
- * The newest revision in the file when it is newer than `afterSeq`. A file the
- * mod is still writing does not parse and reads as "nothing yet".
- */
 export function readModPlanRevision(path: string, afterSeq: number): ModPlanRevision | null {
   if (!existsSync(path)) return null;
   try {
@@ -71,7 +49,6 @@ export function readModPlanRevision(path: string, afterSeq: number): ModPlanRevi
 
 export interface ModPlanRevisionAck {
   seq: number;
-  /** False when a decision was already being recorded: the mod tells Claude to wait. */
   accepted: boolean;
   revision?: number;
   version?: number;
@@ -85,6 +62,5 @@ export function writeModPlanRevisionAck(revisionFile: string, ack: ModPlanRevisi
     writeFileSync(temp, JSON.stringify(ack), "utf8");
     renameSync(temp, path);
   } catch {
-    // The mod times out waiting and tells Claude the review is still open.
   }
 }

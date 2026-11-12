@@ -1,12 +1,3 @@
-/**
- * `plannotator card …` as real processes (approval "inbox-board", step 1):
- * the CLI's thin client over the Inbox's `card` tool. It starts a stopped
- * Inbox detached (no browser), keeps one card current in one command each,
- * makes the card the agent session's when it runs inside one, exits 1 with
- * the tool's own refusal and 2 on bad usage, and stays out of
- * `plannotator --help` (HIDDEN_SUBCOMMANDS). Every process gets a temp HOME
- * and data dir; only Inboxes these tests started are stopped.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +17,6 @@ let stubs: string[] = [];
 const started: { entry: InboxEntry; root: string }[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built HTML; these tests never read the pages.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -36,7 +26,6 @@ afterEach(async () => {
   await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
 const agents = stubbedAgentClis();
 
 function sandbox() {
@@ -62,7 +51,6 @@ function sandbox() {
     GIT_CONFIG_NOSYSTEM: "1",
     PLANNOTATOR_INBOX_CONNECT: "0",
   };
-  // The Board is something the person turns on (config.json `inboxBoard`, off by default): on here.
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
   return { root, dataDir, project, browserMarker, env };
@@ -84,11 +72,6 @@ async function card(box: Box, args: string[], extraEnv: Record<string, string> =
   return { code, stdout, stderr };
 }
 
-/**
- * A card call never makes a project: the folder gets one the way it always
- * does, by a message. `card list` starts the Inbox (and writes nothing); one
- * send_message through its /mcp makes the project.
- */
 async function seed(box: Box) {
   expect((await card(box, ["list"])).stdout).toContain("No cards");
   const registry = readInboxRegistry(box.dataDir)!;
@@ -106,11 +89,9 @@ async function plannotator(box: Box, args: string[]) {
   return { stdout, stderr };
 }
 
-// Held back with INBOX_CARD_ACTION_ON: skipped while the Inbox does not serve the card tool.
 describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
   test("create starts a stopped Inbox without a browser; move, say, ship and list keep the card current", async () => {
     const box = sandbox();
-    // From a folder the Inbox never saw: refused, and nothing made.
     const early = await card(box, ["create", "Too early"]);
     expect(early.code).toBe(1);
     expect(early.stderr).toStartWith("card_no_project:");
@@ -120,7 +101,6 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(made.code).toBe(0);
     const created = JSON.parse(made.stdout) as { card: { id: string; agent: unknown } };
     expect(created.card).toMatchObject({ column: "todo", said: "lane started" });
-    // Outside an agent session, the card is nobody's in particular.
     expect(created.card.agent).toMatchObject({ kind: "agent", session: null });
     expect(existsSync(box.browserMarker)).toBe(false);
     const id = created.card.id;
@@ -163,7 +143,6 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(handover.code).toBe(1);
     expect(handover.stdout).toBe("");
     expect(handover.stderr).toStartWith("validation_error: you:");
-    // An agent from before v2 says its old column ids: still taken.
     expect(JSON.parse((await card(box, ["move", id, "designing", "--json"])).stdout).card.column).toBe("in_progress");
     const dropped = await card(box, ["drop", id]);
     expect(dropped.code).toBe(2);
@@ -197,8 +176,6 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(top.stdout).toContain("plannotator card <create|move|say|link|ship|drop|list|initiative_delete>");
   }, 30_000);
 
-  // The agent tool's Board-off line (INBOX_TOOL_BOARD_OFF_NOTE) sends agents here while the Board is off:
-  // the help must answer then, reach no Inbox, and say where the person turns the Board on.
   test("the CLI prints the nudge when a call made an initiative, and not when it joined one", async () => {
     const box = sandbox();
     await seed(box);
@@ -221,14 +198,12 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(help.code).toBe(0);
     expect(help.stderr).toBe("");
     expect(help.stdout).toContain("plannotator card create <title>");
-    // Pinned on purpose: the place the Board-off line promises.
     expect(help.stdout).toContain("Inbox Settings → Capabilities");
     expect(inboxEntryOf(box.dataDir)).toBeNull();
     expect(existsSync(join(box.dataDir, "inbox"))).toBe(false);
   }, 30_000);
 });
 
-// The action held back (INBOX_CARD_ACTION_ON false): the command says so, and changes nothing.
 describe.if(!INBOX_CARD_ACTION_ON)("plannotator card while the card action is held back", () => {
   test("exits 1 saying this Inbox does not offer cards yet", async () => {
     const box = sandbox();
@@ -250,13 +225,11 @@ describe("parseCardCommand", () => {
       json: true,
     });
     expect(parseCardCommand(["create", "--thread", "msg_1"])).toMatchObject({ ok: true, args: { op: "create", thread_id: "msg_1" } });
-    // `card done` is `card ship` (its column is Done).
     expect(parseCardCommand(["done", "crd_x", "--say", "merged"])).toMatchObject({ ok: true, args: { op: "ship", card_id: "crd_x", say: "merged" } });
     expect(parseCardCommand(["say", "crd_x", "a", "b"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["say", "crd_x", "a", "--say", "b"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["create"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["list", "--all"])).toMatchObject({ ok: true, args: { op: "list", include_resolved: true } });
-    // --initiative names one; "" (take the card out) reaches the tool as "", not as a missing value.
     expect(parseCardCommand(["create", "Invoices", "--initiative", "Billing"])).toMatchObject({ ok: true, args: { op: "create", title: "Invoices", initiative: "Billing" } });
     expect(parseCardCommand(["say", "crd_x", "--initiative", ""])).toMatchObject({ ok: true, args: { op: "say", card_id: "crd_x", initiative: "" } });
     expect(parseCardCommand(["initiative_delete", "Billing"])).toMatchObject({ ok: true, args: { op: "initiative_delete", initiative: "Billing" } });

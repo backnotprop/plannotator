@@ -1,12 +1,3 @@
-/**
- * Qwen Code session log tests (`plannotator last` under Qwen Code).
- *
- * Ported from the NonoElRobot fork (commit c6a02a0), with credit, plus the
- * active-branch cases. Synthetic fixtures in temp folders follow Qwen's layout
- * `<projects>/<sanitized cwd>/chats/<session id>.jsonl`; nothing reads the
- * real ~/.qwen.
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,7 +63,6 @@ describe("getQwenProjectsDir", () => {
   });
 
   test("defaults to ~/.qwen/projects", () => {
-    // A made-up home: the test never names the real one.
     const home = join(tmpdir(), "qwen-session-home");
     expect(getQwenProjectsDir({ env: {}, home })).toBe(join(home, ".qwen", "projects"));
   });
@@ -118,7 +108,6 @@ describe("findQwenSessionLog", () => {
     const projectsDir = makeProjectsDir();
     const slug = sanitizeQwenCwd("/work/project");
     const a = writeChatLog(projectsDir, slug, "a.jsonl", assistantLine("u1", [{ text: "a" }]));
-    // A log the escaping id would name, outside the chats folder.
     writeFileSync(join(projectsDir, slug, "evil.jsonl"), assistantLine("e", [{ text: "evil" }]));
     const found = findQwenSessionLog({
       env: { QWEN_CODE_PROJECT_DIR: join(projectsDir, slug), QWEN_CODE_SESSION_ID: "../evil" },
@@ -136,7 +125,6 @@ describe("findQwenSessionLog", () => {
     const ask = writeChatLog(projectsDir, slug, `${QWEN_ASK_AI_SESSION_PREFIX}-0000-4000-8000-000000000002.jsonl`, assistantLine("u2", [{ text: "ask" }]));
     utimesSync(ask, 200, 200);
     expect(findQwenSessionLog({ env: {}, cwd: "/work/project", projectsDir })).toBe(own);
-    // The hook's copy of the prefix is the one the Ask AI provider uses.
     expect(QWEN_ASK_AI_CHAT_PREFIX).toBe(QWEN_ASK_AI_SESSION_PREFIX);
   });
 
@@ -173,8 +161,6 @@ describe("getRecentQwenMessages", () => {
   });
 
   test("after /rewind, a reply on the abandoned branch is never offered", () => {
-    // u1 -> a1 -> u2 -> a2 (rewound away); the rewind record re-roots at a1,
-    // then u3 -> a3 continue the active branch.
     const log = writeLog(
       userLine("u1", "first", { parentUuid: null }),
       assistantLine("a1", [{ text: "Kept answer." }], { parentUuid: "u1" }),

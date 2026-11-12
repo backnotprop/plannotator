@@ -1,7 +1,3 @@
-/**
- * `plannotator sessions` lists OpenCode's in-process servers beside the
- * binary's, marked as in OpenCode, and drops one whose server has stopped.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

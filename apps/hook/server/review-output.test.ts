@@ -86,9 +86,6 @@ describe("direct review output", () => {
     });
   });
 
-  // PR description, PR comment and editor comments ride only in `feedback`,
-  // so such a review has zero annotations; it is still the reviewer's
-  // feedback and gets the suffix like any other.
   test("feedback with zero code annotations gets the suffix when it is not the platform post", () => {
     const feedback = "## PR description\n\nExplain the fallback.";
     expect(

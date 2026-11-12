@@ -1,12 +1,3 @@
-/**
- * `plannotator inbox rows …` (inbox-rows-command.ts) against a stand-in for the Inbox's settings route (a local
- * listener that keeps a look in memory; no Inbox is started, nothing is read from the person's data).
- * What this catches: the command reaching any setting but rows (it must send only `rows`, `rows_by`, `rows_undo`); a
- * change sent without who made it, so the window cannot say "<agent> changed"; a refused value that still saves;
- * a set that changes nothing writing anyway (a pointless Undo step); undo's answer read as a change when there was
- * nothing to put back; usage mistakes that exit 0; the command missing from `plannotator inbox`'s usage (the guide's
- * section is inbox-help.test.ts's).
- */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { INBOX_ROWS_USAGE, INBOX_ROWS_USAGE_LINE, INBOX_ROWS_WORDS } from "@plannotator/core/inbox-types";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -65,7 +56,6 @@ describe("plannotator inbox rows", () => {
     const { code, out } = await run(["set", "spacing=compact", "time=ago"]);
     expect([code, posts]).toEqual([0, [{ rows: ["compact", "smallNames", "relativeTime"], rows_by: { host: "claude-code", session: "ses_1" } }]]);
     expect(out).toBe(`${INBOX_ROWS_WORDS.changedHead}\n  Spacing: Comfortable -> Compact\n  Time: 9:12 PM -> 10m ago\n${INBOX_ROWS_WORDS.changedFoot}\n`);
-    // A shell that names no session still works; the save carries no one.
     await run(["set", "spacing=roomy"], null);
     expect(posts.at(-1)).toEqual({ rows: ["smallNames", "roomy", "relativeTime"] });
   });
@@ -92,7 +82,6 @@ describe("plannotator inbox rows", () => {
     const wrong = await run(["reset"]);
     expect([wrong.code, wrong.err.includes(INBOX_ROWS_USAGE), posts.length]).toEqual([2, true, 0]);
     expect((await run(["--help"])).out).toBe(`${INBOX_ROWS_USAGE}\n`);
-    // `inbox rows --help` is the command's own usage, not the whole guide.
     expect(isSubcommandHelpInvocation(["inbox", "rows", "--help"])).toBeNull();
     expect(INBOX_COMMAND_USAGE).toContain(INBOX_ROWS_USAGE_LINE);
   });

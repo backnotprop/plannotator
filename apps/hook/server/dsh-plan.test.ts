@@ -1,12 +1,3 @@
-/**
- * DeepSeek Harness plan bridge tests (`plannotator dsh-plan`).
- *
- * Run: bun test apps/hook/server/dsh-plan.test.ts
- *
- * Every composition test passes its own config, so none reads config.json.
- * The process test runs the real subcommand under a temp data dir.
- */
-
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +17,6 @@ describe("parseDshPlanInput", () => {
     });
   });
 
-  // Catches: a zero, negative or non-numeric timeout ending the review at once.
   test("a missing or unusable timeout waits for a decision", () => {
     for (const timeoutSeconds of [undefined, null, 0, -5, "30"]) {
       const parsed = parseDshPlanInput(JSON.stringify({ plan: "# Plan", timeoutSeconds }));
@@ -34,8 +24,6 @@ describe("parseDshPlanInput", () => {
     }
   });
 
-  // Catches: opening an empty review (the plugin then waits on nothing) or
-  // crashing on bad JSON instead of exiting non-zero so the plugin falls back.
   test("refuses bad JSON and an empty plan", () => {
     expect(parseDshPlanInput("{").ok).toBe(false);
     expect(parseDshPlanInput(JSON.stringify({ plan: "   " })).ok).toBe(false);
@@ -44,8 +32,6 @@ describe("parseDshPlanInput", () => {
 });
 
 describe("composeDshPlanOutput", () => {
-  // Catches: the plugin steering an empty "approved with notes" message into
-  // the agent after a plain approval.
   test("a plain approval carries no message", () => {
     expect(composeDshPlanOutput({ approved: true }, noConfig)).toEqual({ approved: true });
     expect(composeDshPlanOutput({ approved: true, feedback: "  \n" }, noConfig)).toEqual({ approved: true });
@@ -60,8 +46,6 @@ describe("composeDshPlanOutput", () => {
     expect(out.message).toContain("/p/plan.md");
   });
 
-  // Catches: dsh-plan ignoring the user's prompt overrides (the reason the
-  // message is composed here and not in the plugin).
   test("a runtime prompt override for dsh applies", () => {
     const config: PlannotatorConfig = {
       prompts: { plan: { runtimes: { dsh: { approvedWithNotes: "NOTES: {{feedback}}", denied: "NO via {{toolName}}: {{feedback}}" } } } },
@@ -70,8 +54,6 @@ describe("composeDshPlanOutput", () => {
     expect(composeDshPlanOutput({ approved: false, feedback: "y" }, config).message).toBe("NO via exit_plan_mode: y");
   });
 
-  // Catches: the denied prompt naming another host's plan tool, which sends
-  // the DSH agent looking for a tool it does not have.
   test("a denial names exit_plan_mode and carries the feedback", () => {
     const out = composeDshPlanOutput({ approved: false, feedback: "Split step 2." }, noConfig);
     expect(out.approved).toBe(false);
@@ -81,7 +63,6 @@ describe("composeDshPlanOutput", () => {
     expect(out.answersOnly).toBeUndefined();
   });
 
-  // Catches: an answers-only deny getting the "not approved" prompt.
   test("an answers-only denial uses the answered prompt and says so", () => {
     const answered = composeDshPlanOutput({ approved: false, feedback: "A: yes", answersOnly: true }, noConfig);
     const denied = composeDshPlanOutput({ approved: false, feedback: "A: yes" }, noConfig);
@@ -97,7 +78,6 @@ describe("plannotator dsh-plan", () => {
   let stubs: string[] = [];
 
   beforeAll(() => {
-    // The CLI imports the built HTML; API-only tests need just a stub.
     stubs = stubHookDistHtml();
   });
   afterAll(() => {
@@ -105,9 +85,6 @@ describe("plannotator dsh-plan", () => {
     for (const root of roots) rmSync(root, { recursive: true, force: true });
   });
 
-  // Catches: the subcommand not wired to the dsh origin, the server not
-  // offering approve-with-notes, or stdout missing the composed message the
-  // plugin steers into the agent.
   test("an approval with notes comes back as one JSON line with the composed message", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-dsh-plan-")));
     roots.push(root);
@@ -120,7 +97,6 @@ describe("plannotator dsh-plan", () => {
         PLANNOTATOR_PORT: "0",
         PLANNOTATOR_REMOTE: "0",
         PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
-        // Explicit, not only from the preload: this child must never open a browser.
         PLANNOTATOR_BROWSER: NO_BROWSER,
         PLANNOTATOR_READY_FILE: readyFile,
         PLANNOTATOR_AI: "disabled",

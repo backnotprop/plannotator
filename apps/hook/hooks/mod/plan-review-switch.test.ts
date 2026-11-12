@@ -1,11 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { register } from './register'
 
-// The plan review switch (`PLANNOTATOR_PLAN_REVIEW` / `planReview`, #2299):
-// off, the mod leaves ExitPlanMode to Claude Code's own dialog. It fails when
-// the mod still denies the call with "waiting for review", or answers
-// classic.PermissionRequest itself, for a person who turned it off.
-
 const DATA = '/data'
 
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
@@ -18,7 +13,6 @@ function hooks(registerOn: typeof register) {
   return (event: string) => held.get(event)!
 }
 
-/** Each test gets its own module: session.start decides once per process. */
 async function freshRegister(name: string): Promise<typeof register> {
   const path = `./register?${name}`
   return ((await import(path)) as { register: typeof register }).register
@@ -27,7 +21,6 @@ async function freshRegister(name: string): Promise<typeof register> {
 function engine(env: Record<string, string>, config?: Record<string, unknown>) {
   const files = new Map<string, string>([['/bin/sh', '']])
   if (config) files.set(`${DATA}/config.json`, JSON.stringify(config))
-  // A sleep moves the clock, so a wait in the mod ends instead of spinning.
   let now = 1_000_000
   const values: Record<string, string> = { HOME: '/home/me', PLANNOTATOR_DATA_DIR: DATA, PLANNOTATOR_INBOX_TOOL: '0', ...env }
   return {
@@ -54,7 +47,6 @@ function engine(env: Record<string, string>, config?: Record<string, unknown>) {
     clock: { now: async () => now, sleep: async (ms: number) => void (now += ms), every: () => ({ cancel: () => undefined }) },
     store: { get: async () => undefined, set: async () => undefined },
     process: {
-      // The detached CLI comes up at once (`plannotator-launch <dir> ...` writes its ready file).
       run: async (argv: string[]) => {
         const at = argv.indexOf('plannotator-launch')
         if (at >= 0) files.set(`${argv[at + 1]}/ready`, `${JSON.stringify({ url: 'http://localhost:4321', isRemote: false, port: 4321 })}\n`)
@@ -84,9 +76,6 @@ describe('the plan review switch', () => {
     expect(await on('classic.PermissionRequest')($, permission, () => passed)).toBe(passed)
   })
 
-  // The PR's own config key, with a control: unset, the same engine gets the
-  // mod's review, so the pass-through is the switch and not a mod that never
-  // started. Fails when the mod ignores `planReview` in config.json.
   test('config.json planReview false: ExitPlanMode passes through, where unset the mod reviews it', async () => {
     const reviewing = hooks(await freshRegister('plan-review-unset'))
     const $on = engine({})

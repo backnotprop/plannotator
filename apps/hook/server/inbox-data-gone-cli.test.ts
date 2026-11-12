@@ -1,12 +1,3 @@
-/**
- * `plannotator inbox` as a process: an Inbox whose data folder is removed
- * (an e2e's temp dir, cleaned up while the Inbox it started still runs) exits
- * on its own instead of running on headless, with or without `--tailscale`
- * (a fake `tailscale` inside the world, removed with it), and never makes the
- * folder again. The CLI from source, or the compiled binary when
- * PLANNOTATOR_INBOX_TEST_BINARY names one. Temp worlds only; the real
- * `tailscale` never runs; only the pids these tests started are signalled.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,7 +7,6 @@ import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests
 import { createInboxWorld, registry, removeStubbedHtml, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
 
 const worlds: InboxWorld[] = [];
-/** Each Inbox started, with its world: killed after only when still provably that Inbox (its data folder may be gone). */
 const started: { entry: InboxEntry; root: string }[] = [];
 let stubs: string[] = [];
 
@@ -26,7 +16,6 @@ afterEach(async () => {
   removeStubbedHtml(stubs.splice(0));
 });
 
-/** `tailscale` as a script in the world: the owner, an empty serve config, serve on and off. Removed with the world. */
 function fakeTailscale(w: InboxWorld): void {
   const script = [
     "#!/bin/sh",
@@ -75,7 +64,6 @@ describe("plannotator inbox: the data folder removed while it runs", () => {
       if (args.includes("--tailscale")) expect(registry(w)).toMatchObject({ tailscale: { url: expect.stringContaining("box.tail0000.ts.net") } });
 
       rmSync(w.root, { recursive: true, force: true });
-      // Two misses in a row, plus slack for a loaded machine.
       expect(await exitsWithin(pid, 3 * INBOX_DATA_CHECK_MS)).toBe(true);
       expect(existsSync(w.root)).toBe(false);
     }, 60_000);

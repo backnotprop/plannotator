@@ -15,16 +15,12 @@ function serveOnLaunch(host: FakeHost, port = 4321) {
   }
 }
 
-/** What register.ts does with a Bash call: the answer, or 'run' when the command runs as written. */
 async function bashCall(mod: PlannotatorMod, command: string, agentId?: string) {
   const input = shellTakeOver(command, !!agentId)
   if (!input) return 'run' as const
   return answerShellCall(mod, input)
 }
 
-// The failure: Claude runs the CLI through Bash (the owner's case: annotate
-// INDEX.html --gate --json), the session blocks, and Ask AI offers separate
-// AIs because the server was started without the session's bridge token.
 describe('Bash take-over', () => {
   test('an agent-run annotate opens through the tool launch, with the bridge, and answers with the tool text', async () => {
     const host = fakeHost()
@@ -39,8 +35,6 @@ describe('Bash take-over', () => {
     expect(byBash?.argv.slice(5)).toEqual(byTool?.argv.slice(5))
     expect(byBash?.env?.PLANNOTATOR_SESSION_BRIDGE_TOKEN?.length).toBeGreaterThanOrEqual(32)
     expect(byBash?.env?.PLANNOTATOR_HOST_RESULT_FILE).toBe(`${byBash?.argv[4]}/result.json`)
-    // The Bash result is the tool's own text, in the Bash tool's record shape
-    // (each launch names its own session id, so that line differs).
     const withoutSession = (text: string) => text.replace(/^Session: pn-[0-9a-f]{6}\n/, '')
     expect(answer).toEqual({ result: { stdout: expect.stringMatching(/^Session: pn-[0-9a-f]{6}\n/), stderr: '', interrupted: false } })
     const bashText = 'result' in answer ? answer.result.stdout : ''
@@ -108,8 +102,6 @@ describe('Bash take-over', () => {
     expect(host.runs.filter(isLaunch)).toHaveLength(0)
   })
 
-  // The failure: a subagent working in its own worktree runs `plannotator
-  // review` and the mod, launching in the session's cwd, opens the wrong diff.
   test('a subagent\'s command always runs as written', async () => {
     const host = fakeHost()
     serveOnLaunch(host)

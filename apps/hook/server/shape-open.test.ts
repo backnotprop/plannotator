@@ -1,16 +1,3 @@
-/**
- * `plannotator shape open` (shape-open.ts): the Shape page without the Inbox.
- *
- * What regresses:
- *  - it starts a server or opens a page while Shape is off (the switch must
- *    print only `shape_off`, as for every `plannotator shape …`);
- *  - a second `open` starts a second server instead of reusing the running one;
- *  - a stale `server.json` (its process gone) is taken as running;
- *  - an unknown board id opens a page that shows nothing;
- *  - the address it prints and opens is not the board's (`#shape=<id>`);
- *  - bare `plannotator shape` opens a second tab while a Shape page is already
- *    open, or opens none when it cannot tell (an older server).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,7 +60,6 @@ describe("runShapeOpen", () => {
         opened.push(url);
         return "opened" as const;
       },
-      // Stands in for the detached `plannotator shape serve`: the same server, in this process.
       spawnServer: (dataDir: string) => {
         spawned++;
         void startShapeServer({ dataDir, shape: true }).then((s) => servers.push(s));
@@ -111,7 +97,6 @@ describe("runShapeOpen", () => {
   });
 });
 
-/** A page holding the event stream open, as the Shape page does; close() drops it and waits until the server saw it. */
 async function connectPage(dataDir: string, entry: { url: string }) {
   const controller = new AbortController();
   const response = await fetch(`${entry.url}${SHAPE_EVENTS_PATH}`, { signal: controller.signal });
@@ -126,7 +111,6 @@ async function connectPage(dataDir: string, entry: { url: string }) {
 }
 
 describe("bare `plannotator shape`: the page already open, if there is one", () => {
-  /** A running Shapes server in this process, and a spy for openUrl that opens nothing. */
   async function running() {
     const w = world();
     const server = await startShapeServer({ dataDir: w.dataDir, shape: true, port: 0 });
@@ -168,7 +152,6 @@ describe("bare `plannotator shape`: the page already open, if there is one", () 
 
   test("no page is open: it opens one", async () => {
     const r = await running();
-    // One that came and went counts for nothing.
     await (await connectPage(r.w.dataDir, r.entry)).close();
     expect(await runShapeOpen([], { ...r.deps, reuseOpenPage: true })).toBe(0);
     expect(r.opened).toEqual([`${r.entry.url}/`]);
@@ -177,7 +160,6 @@ describe("bare `plannotator shape`: the page already open, if there is one", () 
 
   test("an older server that does not report its pages: it opens one", async () => {
     const w = world();
-    // A Shapes server from before the field: it answers who it is, but not how many pages it has.
     const old = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -212,8 +194,6 @@ describe("bare `plannotator shape`: the page already open, if there is one", () 
 });
 
 describe("through the entrypoint", () => {
-  // The real CLI from source: the switch gate in index.ts, the detached `shape serve`, the reuse. The server it
-  // starts is this test's own process (its pid is in the sandbox's server.json), and it is stopped at the end.
   test("off: shape_off and no server; on: one detached server, reused, serving the page and the boards", async () => {
     const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
     const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
@@ -241,7 +221,6 @@ describe("through the entrypoint", () => {
     };
     let serverPid: number | null = null;
     try {
-      // Bare `plannotator shape` (it opens the page) is gated like `open`.
       for (const argv of [[], ["open"], ["open", w.id], ["serve"]]) {
         const r = await run(...argv);
         expect(r.code).toBe(1);
@@ -266,8 +245,6 @@ describe("through the entrypoint", () => {
       expect(list.shapes.map((s) => s.id)).toEqual([w.id]);
       const help = await run("open", "--help");
       expect(`${help.stdout}${help.stderr}`).toContain("plannotator shape open [<shp_id>]");
-      // Bare `plannotator shape` opens the page like `open` with no id (the browser is the no-browser sandbox's),
-      // prints its address and reuses the server; the usage moved to --help, which opens nothing.
       const bare = await run();
       expect(bare.code, bare.stderr).toBe(0);
       expect(bare.stdout).toBe(`http://127.0.0.1:${started.port}/\n`);
@@ -278,8 +255,6 @@ describe("through the entrypoint", () => {
       expect(shapeHelp.code).toBe(0);
       expect(`${shapeHelp.stdout}${shapeHelp.stderr}`.trim()).toBe(SHAPE_COMMAND_USAGE);
 
-      // The wiring in index.ts: with a page open, bare `plannotator shape` opens no tab, and `shape open` still
-      // does. A stand-in browser (it opens nothing) writes each address it is handed to a file.
       const marker = join(w.root, "browser-opened");
       const browser = join(w.root, "fake-browser.sh");
       writeFileSync(browser, `#!/bin/sh\necho "$1" >> '${marker}'\n`);
@@ -293,7 +268,6 @@ describe("through the entrypoint", () => {
         expect(bareOpen.stdout).toBe(`http://127.0.0.1:${started.port}/\n`);
         const named = await runWith(recording, "open");
         expect(named.code, named.stderr).toBe(0);
-        // The browser is started detached: wait for `open`'s address, then a little longer for a stray one from bare.
         for (let i = 0; i < 100 && !existsSync(marker); i++) await Bun.sleep(30);
         await Bun.sleep(300);
         expect(readFileSync(marker, "utf8")).toBe(`http://127.0.0.1:${started.port}/\n`);

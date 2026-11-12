@@ -1,13 +1,3 @@
-/**
- * `plannotator feedback` as real processes against a local fake endpoint
- * (PLANNOTATOR_FEEDBACK_URL; never the real Worker): it sends the message,
- * the category and contact when given, the version, the OS name and
- * `surface: "cli"`, and nothing else; prints "Sent"; exits 1 with the
- * Worker's reason when it refuses, and with one plain line (no stack) when it
- * is unreachable, not deployed or silent past the time limit; 2 on bad usage (sending
- * nothing), and answers --help without sending. Every process gets a temp
- * HOME and data dir, no browser, no update check and no Inbox connect.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +15,6 @@ const fakes: ReturnType<typeof Bun.serve>[] = [];
 let stubs: string[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built HTML; these tests never read the pages.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -92,12 +81,9 @@ describe("plannotator feedback (processes)", () => {
     expect(endpoint.received[0]!.method).toBe("POST");
     const body = endpoint.received[0]!.body as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual(["category", "contact", "message", "os", "surface", "version"]);
-    // A source run has no baked version: `dev`.
     expect(body).toMatchObject({ message: "The Inbox is great, but the list jumps on reload", category: "bug", contact: "me@example.com", version: "dev", surface: "cli" });
   }, 30_000);
 
-  // What a person might approve: shell syntax quoted from their own work, including a heredoc of
-  // their own (a line that is exactly EOF) and the end word inside a longer line.
   const HOSTILE = [
     "Setting $HOME breaks it, and `touch INJECTED` should not run; $(touch INJECTED2) neither.",
     "Use <<'EOF' in your docs:",
@@ -107,7 +93,6 @@ describe("plannotator feedback (processes)", () => {
     "'@ and ünïcødé 🎉 too.",
   ].join("\n");
 
-  /** The bash forms as shipped: the copied prompt, the CLI help's example, the skill and the README's curl. */
   function shippedTemplates(fakeUrl: string): { name: string; script: string; json: boolean }[] {
     const fence = (text: string, after: string) => {
       const start = text.indexOf("```", text.indexOf(after)) + 3;
@@ -141,7 +126,6 @@ describe("plannotator feedback (processes)", () => {
   test("each shipped template, run by bash as written: the approved text arrives byte for byte, and nothing in it runs", async () => {
     const endpoint = fakeEndpoint();
     const templates = shippedTemplates(endpoint.url);
-    // Every template was found and filled (none silently empty).
     for (const t of templates) {
       expect(t.script, t.name).toContain(t.json ? JSON.stringify(HOSTILE).slice(1, -1) : HOSTILE);
       expect(t.script, t.name).toContain(`<<'${FEEDBACK_HEREDOC_END}'`);
@@ -239,7 +223,6 @@ describe("runFeedbackCommand: a service that never answers", () => {
   test("a fetch that throws is the same plain line, never a stack", async () => {
     const err: string[] = [];
     const code = await runFeedbackCommand(["hi"], {
-      // A refusing loopback URL, never the live default, even though fetch is stubbed.
       env: { PLANNOTATOR_FEEDBACK_URL: "http://127.0.0.1:9/feedback" },
       version: "dev",
       fetch: (async () => {

@@ -1,13 +1,3 @@
-/**
- * Vibe Plan Resolver Tests
- *
- * Run: bun test apps/hook/server/vibe-plan.test.ts
- *
- * Uses synthetic fixtures in temp dirs matching Vibe's $VIBE_HOME/plans and
- * logs/session layouts. VIBE_HOME is saved in beforeEach and restored in
- * afterEach (house testing rule: never leak a mutated env past a test).
- */
-
 import { describe, expect, test, afterEach, beforeEach } from "bun:test";
 import {
   mkdtempSync,
@@ -52,9 +42,6 @@ function makeVibeHome(): string {
   return home;
 }
 
-/** A Vibe transcript line: tool results carry tool_result.output shaped by
- * the tool's project_result (write_file: file_path/bytes_written/content;
- * edit: file/old_string/new_string). */
 function toolResultLine(output: Record<string, unknown>): string {
   return JSON.stringify({ role: "tool", tool_call_id: "tc1", tool_result: { output, duration: 0.5 } });
 }
@@ -140,7 +127,6 @@ describe("findVibePlanInTranscript", () => {
     const transcript = join(home, "t.jsonl");
     writeFileSync(transcript, toolResultLine({ file_path: planPath, bytes_written: 1, content: "x" }));
     expect(findVibePlanInTranscript(transcript, { vibeHome: linkedHome })).toBe(planPath);
-    // And the reverse: VIBE_HOME is real, the transcript spells the link.
     const linkedPlan = join(linkedHome, "plans", "1789000002-linked.md");
     writeFileSync(transcript, toolResultLine({ file_path: linkedPlan, bytes_written: 1, content: "x" }));
     expect(findVibePlanInTranscript(transcript, { vibeHome: home })).toBe(linkedPlan);
@@ -149,8 +135,6 @@ describe("findVibePlanInTranscript", () => {
   test("tolerates a non-normalized transcript path but not a plans subdirectory", () => {
     const home = makeVibeHome();
     writeFileSync(join(home, "plans", "1789000003-slash.md"), "# Slash");
-    // A doubled separator / `.` segment used to leave dirname() with a
-    // trailing slash (or a `.`) that the exact string compare missed.
     const unnormalized = `${home}/./plans//1789000003-slash.md`;
     const transcript = join(home, "t.jsonl");
     writeFileSync(transcript, toolResultLine({ file_path: unnormalized, bytes_written: 1, content: "x" }));
@@ -211,7 +195,6 @@ describe("resolveLatestVibePlan", () => {
     const newest = join(home, "plans", "1789009999-newest.md");
     writeFileSync(pinned, "# Pinned plan");
     writeFileSync(newest, "# Newest plan");
-    // newest has the later mtime; the transcript points at pinned.
     utimesSync(pinned, 1, 1);
     utimesSync(newest, 100, 100);
     const transcript = join(home, "t.jsonl");

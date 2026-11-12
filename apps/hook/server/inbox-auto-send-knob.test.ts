@@ -1,9 +1,3 @@
-/**
- * `PLANNOTATOR_INBOX_AUTO_SEND_MS` can only shorten the wait, and only where
- * it cannot be used against a person's real Inbox: a build that is not a
- * release, or the test sandbox. A release ignores it, so an agent starting
- * the Inbox with `--background` cannot make replies jump into turns.
- */
 import { expect, test } from "bun:test";
 import { INBOX_AUTO_SEND_AFTER_MS } from "@plannotator/core/inbox-types";
 import { autoSendAfterMsFromEnv } from "./inbox-command";

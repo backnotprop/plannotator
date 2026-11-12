@@ -4,9 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CLAIM_EXIT, claimArgv, cleanupArgv, DEBUG_LOG_MAX_BYTES, debugAppendArgv, pruneArgv, STOP_EXIT, stopArgv } from './launch'
 
-// The TERM fallback for an older CLI runs this script for real. The failures
-// it guards: signalling a pid that no longer belongs to Plannotator (reused
-// after a reboot or crash), or killing a CLI whose decision is already on disk.
 describe('stopArgv (TERM for a CLI without host close)', () => {
   const children: ReturnType<typeof Bun.spawn>[] = []
   const dirs: string[] = []
@@ -55,8 +52,6 @@ describe('stopArgv (TERM for a CLI without host close)', () => {
     expect(alive(child.pid)).toBe(true)
   })
 
-  // No ps (Debian slim without procps; BusyBox's has no -p): the pid cannot be
-  // verified, so nothing is signalled and the close says so.
   test('a system whose ps cannot verify the pid: nothing is signalled', async () => {
     const child = spawn('sleep 30; : plannotator review')
     const emptyPath = tempDir()
@@ -74,9 +69,6 @@ describe('stopArgv (TERM for a CLI without host close)', () => {
   })
 })
 
-// These scripts are what keeps two Claude Code processes on one session from
-// delivering a decision twice, the store from growing forever, and a shared
-// debug log from being clobbered; they run for real here.
 describe('the scripts several Claude Code processes share', () => {
   const dirs: string[] = []
   afterEach(() => {
@@ -110,7 +102,6 @@ describe('the scripts several Claude Code processes share', () => {
     const answers = await Promise.all([run(claimArgv(dir, 'process-a')), run(claimArgv(dir, 'process-b'))])
     expect(answers.map((answer) => answer.code).sort()).toEqual([CLAIM_EXIT.won, CLAIM_EXIT.lost])
     const winner = readFileSync(join(dir, 'settled', 'by'), 'utf8')
-    // A timed-out call whose claim was made: the same claimant wins again, the other still loses.
     expect((await run(claimArgv(dir, winner))).code).toBe(CLAIM_EXIT.won)
     expect((await run(claimArgv(dir, winner === 'process-a' ? 'process-b' : 'process-a'))).code).toBe(CLAIM_EXIT.lost)
   })
@@ -131,7 +122,6 @@ describe('the scripts several Claude Code processes share', () => {
     expect(existsSync(removed)).toBe(false)
     expect((await run(claimArgv(removed, 'process-b'))).code).toBe(CLAIM_EXIT.lost)
 
-    // Cleanup started (stdin gone) before anyone claimed: too late to deliver.
     const late = launchDir(root, 'late', { 'result.json': '{}', 'feedback.md': 'for Claude' })
     expect((await run(claimArgv(late, 'process-b'))).code).toBe(CLAIM_EXIT.lost)
   })
@@ -140,13 +130,11 @@ describe('the scripts several Claude Code processes share', () => {
     const root = tempDir()
     const cleaned = launchDir(root, 'cleaned', { 'feedback.md': 'kept for Claude' })
     const removed = join(root, 'removed')
-    // A claim on a server that stopped without a decision, and a delivered claim: done.
     const settled = launchDir(root, 'settled-own', { stdin: '', pid: '999995' })
     mkdirSync(join(settled, 'settled'))
     const delivered = launchDir(root, 'delivered', { stdin: '', pid: '999994', 'result.json': '{}' })
     mkdirSync(join(delivered, 'settled'))
     writeFileSync(join(delivered, 'settled', 'delivered'), '1')
-    // Claimed but never marked delivered (its claimant quit while Claude was busy): kept for its session to report.
     const stranded = launchDir(root, 'stranded', { stdin: '', pid: '999993', 'result.json': '{}' })
     mkdirSync(join(stranded, 'settled'))
     const ownDead = launchDir(root, 'own-dead', { stdin: '', pid: '999999' })
@@ -178,10 +166,6 @@ describe('the scripts several Claude Code processes share', () => {
     expect(lines.sort()).toEqual(['one', 'three', 'two'])
   })
 
-  // The failure: two writers past the limit both rotated, the second moving
-  // the fresh log over the first's debug.log.1, which lost the old log. The
-  // window is narrow, so this checks the invariant (old log kept, no line
-  // lost, no lock left behind) rather than reproducing the race every run.
   test('two writers past the limit rotate once: the old log survives as debug.log.1', async () => {
     const dir = join(tempDir(), 'claude-code-mod')
     mkdirSync(dir)
@@ -191,7 +175,6 @@ describe('the scripts several Claude Code processes share', () => {
     await Promise.all([run(debugAppendArgv(log), 'one\n'), run(debugAppendArgv(log), 'two\n')])
     const rotated = readFileSync(`${log}.1`, 'utf8')
     expect(rotated.startsWith(old)).toBe(true)
-    // A line appended while the other writer rotated lands in either file; none is lost.
     const fresh = [...rotated.slice(old.length).split('\n'), ...readFileSync(log, 'utf8').split('\n')].filter(Boolean)
     expect(fresh.sort()).toEqual(['one', 'two'])
     expect(existsSync(`${log}.rotating`)).toBe(false)

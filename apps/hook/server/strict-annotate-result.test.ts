@@ -92,8 +92,6 @@ describe("strict annotate exit policy", () => {
   });
 
   test("reserves exit 2 for gate errors, distinct from decision outcomes", () => {
-    // grep convention: 0 = approved, 1 = negative human outcome,
-    // 2 = the gate itself was misconfigured or could not start.
     expect(STRICT_GATE_ERROR_EXIT_CODE).toBe(2);
     expect(
       annotateOutcomeExitCode({ exit: true, feedback: "" }, true),
@@ -115,8 +113,6 @@ describe("annotate startup failure exit codes", () => {
   });
 
   test("routes strict startup failures to the gate error code", () => {
-    // A mistyped path is a configuration error, not "the reviewer requested
-    // changes" — exit 1 would make automation misread it as a rejection.
     expect(
       annotateStartupFailureExitCode({ requireApproval: true }),
     ).toBe(STRICT_GATE_ERROR_EXIT_CODE);
@@ -135,12 +131,6 @@ describe("annotate startup failure exit codes", () => {
   });
 
   test("routes every annotate startup failure through the shared helper", () => {
-    // The annotate startup path must not reach a bare `process.exit(1)`: each
-    // of the six failure classes (missing path, unreachable URL, empty folder,
-    // ambiguous name, missing/unsupported file, oversized file) has to pick
-    // its code from the parsed strict options. The failure classes live in
-    // annotate-resolution.ts, which returns them instead of exiting; index.ts
-    // maps every returned failure onto the helper.
     const source = readFileSync(
       join(import.meta.dir, "index.ts"),
       "utf8",
@@ -154,18 +144,9 @@ describe("annotate startup failure exit codes", () => {
     expect(end).toBeGreaterThan(start);
 
     const annotateStartupBlock = source.slice(start, end);
-    // No bare exit(1) anywhere in the annotate startup path — that code is the
-    // reviewer-requested-changes signal once a strict flag is in play. (The
-    // tolerant handoff's `process.exit(0)` is fine: exit 0 is never a strict
-    // outcome and the handoff is gated off strict invocations.)
     expect(annotateStartupBlock).not.toContain("process.exit(1)");
-    // The tolerance gate must be the NEGATED strict predicate: an inverted
-    // gate (tolerance in strict mode) cannot be spawn-tested without starting
-    // a server, so pin the source shape here.
     expect(annotateStartupBlock).toContain("!strictAnnotate");
     expect(annotateStartupBlock).toContain("isStrictAnnotateInvocation(");
-    // The usage failure and every resolution failure route through the helper
-    // that reads the strict flags.
     for (const failure of [
       "Usage: plannotator annotate",
       "resolution.message",
@@ -181,8 +162,6 @@ describe("annotate startup failure exit codes", () => {
       );
     }
 
-    // The extracted resolution pipeline returns failures instead of exiting;
-    // every failure class must be present there and none may exit directly.
     const resolutionSource = readFileSync(
       join(import.meta.dir, "annotate-resolution.ts"),
       "utf8",

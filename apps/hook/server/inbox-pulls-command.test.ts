@@ -1,12 +1,3 @@
-/**
- * `plannotator inbox pulls ls|add|rm` (approval "inbox-pr-binding",
- * 2026-11-08) against a stand-in Inbox in this process that records the call.
- * The failures these guard: `rm` with no ref that silently takes nothing off
- * (or everything); `--all` that does not reach the Inbox as `["all"]`; a ref
- * dropped on its way; the session the script names lost (so the change is
- * refused as not in the thread); and bad usage that exits like a refusal.
- * No real Inbox, gh or agent runs.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { parsePullsCommand, runInboxPullsCommand } from "./inbox-pulls-command";
@@ -16,7 +7,6 @@ afterEach(() => {
   for (const server of servers.splice(0)) server.stop();
 });
 
-/** A stand-in /mcp that records each tools/call and answers like the Inbox. */
 function standIn() {
   const calls: { name: string; arguments: Record<string, unknown> }[] = [];
   const server = Bun.serve({

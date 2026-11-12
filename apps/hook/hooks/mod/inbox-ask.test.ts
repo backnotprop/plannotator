@@ -1,12 +1,3 @@
-/**
- * Ask AI in the Claude Code mod: the mod's real code in a simulated session
- * (testing/claude-session.ts) against a real Inbox on a temp data dir, with the
- * person as the window's own requests. The moments that need a clock or a bad
- * server use a memory host. Real Claude Code is tests/manual/inbox-ask-claude.ts.
- *
- * Ask is on in every Inbox, so the first thing guarded is that nothing happens
- * to a session until a question waits.
- */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -44,7 +35,6 @@ async function until(check: () => boolean | Promise<boolean>, ms = 8_000): Promi
   }
 }
 
-/** An Inbox with one thread the session owns, and what it takes to open a session on it. */
 async function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-mod-inbox-ask-')))
   roots.push(root)
@@ -68,7 +58,6 @@ async function world() {
     sessions.push(session)
     return session
   }
-  /** Another session replies in the thread, and owns it from then on. */
   const handOff = (session: string) =>
     client.callTool({
       name: 'send_message',
@@ -80,7 +69,6 @@ async function world() {
 const clientFetches = (session: ClaudeSession) => session.host.fetches.filter((fetch) => fetch.includes(inboxAskBridgeBase(SESSION)))
 const inboxPolled = (session: ClaudeSession) => session.host.fetches.some((fetch) => fetch.includes(INBOX_BRIDGE_POLL_PATH))
 
-/** The question as the window sends it: POST /ask, then a query on the provider it named. */
 async function asked(server: InboxServer, threadId: string, turnId: string, question = 'Why now?') {
   const response = await postAsk(server, threadId, turnId, question)
   expect(response.status).toBe(200)
@@ -89,7 +77,6 @@ async function asked(server: InboxServer, threadId: string, turnId: string, ques
   return runQuery(server, await aiSession(server, posted.provider_id!, threadId), question)
 }
 
-/** The race: the client's poll said `ready`, then the person's turn started before the question arrived. */
 function queueBehindPersonsTurn(session: ClaudeSession): void {
   const realFetch = session.host.fetch
   let raced = false
@@ -107,11 +94,6 @@ async function savedTurns(server: InboxServer, threadId: string): Promise<InboxA
   return (await readAsk(server, threadId)).conversation?.turns ?? []
 }
 
-/**
- * Records what the session's polls said and heard, and has the Inbox answer them
- * at once: a poll held its full 20 s would end after the test, and only an
- * answered poll can start anything.
- */
 function answeredPolls(session: ClaudeSession) {
   const polls: { sent: Record<string, unknown>; answered: string | null }[] = []
   const realFetch = session.host.fetch
@@ -177,7 +159,6 @@ describe('a question waits', () => {
     expect(first.messages.map((message) => message.code)).toEqual(['agent_busy'])
     expect(session.host.submits).toEqual([])
 
-    // The client sits in a 15 s poll that said `busy`; the turn's end has to reach the Inbox on its own.
     session.endTurn()
     await Bun.sleep(500)
     const retry = await asked(server, threadId, 'turn-0001')
@@ -232,7 +213,6 @@ describe('a question waits', () => {
     await first.finished
     expect(session.mod.turns.askInFlight).toBe(false)
     await until(async () => (await readAsk(server, threadId)).running === null)
-    // Past the 750 ms poll of a running question: the client now sits in its 15 s poll, and the Inbox hands the next question to it.
     await Bun.sleep(1_000)
 
     session.mod.dispose()
@@ -244,9 +224,6 @@ describe('a question waits', () => {
     expect(session.turns).toHaveLength(1)
   })
 
-  // The failure this guards: a question queued behind the person's turn, then a /clear they queued in that turn.
-  // The /clear goes first, and a pending `$.prompt.submit` can't be withdrawn, so the question ran as a live turn
-  // of the NEW conversation, which no tracker owned; Ask again after the hand-off then sent it a second time.
   test('a question still queued at /clear never runs in the new conversation, and Ask again sends it once', async () => {
     const { server, threadId, open, handOff } = await world()
     const session = await open()
@@ -257,7 +234,6 @@ describe('a question waits', () => {
     await until(() => session.host.submits.length === 1)
     expect(session.running?.text).toBe('My own work.')
 
-    // Their turn ends with the /clear they queued in it: it goes before the pending submit.
     session.endTurn()
     session.clear('session-b')
     await until(() => session.turns.length === 2)
@@ -268,9 +244,7 @@ describe('a question waits', () => {
     await first.finished
     expect(first.messages.at(-1)?.code).toBe('session_gone')
 
-    // The thread moves to the new conversation, and the person asks again: one live question turn in all.
     await handOff('session-b')
-    // Asked again until the new conversation's connection has told the Inbox it can answer (no live path till then).
     let providerId: string | null = null
     await until(async () => {
       providerId = ((await (await postAsk(server, threadId, 'turn-0001', 'Why now?')).json()) as AskAnswer).provider_id
@@ -287,8 +261,6 @@ describe('a question waits', () => {
     expect(await savedTurns(server, threadId)).toMatchObject([{ id: 'turn-0001', session: 'session-b', answer: 'Here it is.' }])
   }, 20_000)
 
-  // The failure this guards: Stop on a queued question settled it in the old tracker, so nothing was carried
-  // at /clear and its still-pending prompt ran as a live turn of the new conversation, which no tracker owned.
   test('a question Stopped while still queued, then a /clear: its turn is aborted in the new conversation', async () => {
     const { server, threadId, open } = await world()
     const session = await open()
@@ -298,7 +270,6 @@ describe('a question waits', () => {
     const first = await asked(server, threadId, 'turn-0001')
     await until(() => session.host.submits.length === 1)
     expect(session.running?.text).toBe('My own work.')
-    // The reviewer presses Stop while it waits.
     expect((await fromWindow(server, '/api/ai/abort', { sessionId: first.sessionId })).status).toBe(200)
     await until(() => !session.mod.turns.askInFlight)
     await first.finished
@@ -313,8 +284,6 @@ describe('a question waits', () => {
     expect(session.mod.turns.busy).toBe(false)
   }, 20_000)
 
-  // The failure this guards: a carried prompt the engine never ran stayed armed, so the same words asked again
-  // in the new conversation had their turn aborted, the question never settled, and the session stayed busy.
   test('a queued question the engine discards at /clear: the same words asked again are answered', async () => {
     const { server, threadId, open, handOff } = await world()
     const session = await open()
@@ -382,7 +351,6 @@ describe('how the client stops', () => {
   const ASK_POLL = `http://127.0.0.1:4321${inboxAskBridgeBase(SESSION)}${BRIDGE_POLL_PATH}`
   const answer = (body: unknown, status = 200) => ({ status, ok: status < 300, text: JSON.stringify(body) })
 
-  /** A link on a memory host whose Inbox always has a question waiting; `onAskPoll` plays the client's bridge. */
   function link(host: FakeHost, onAskPoll: (count: number, stop: () => void) => ReturnType<typeof answer> | Promise<ReturnType<typeof answer>>) {
     host.files.set(inboxRegistryPathOf('/data'), registry)
     const inbox: InboxLink = new InboxLink({
