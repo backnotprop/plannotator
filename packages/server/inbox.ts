@@ -242,6 +242,7 @@ import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
 import { inboxNamesShown, inboxSessionsShown } from "./inbox-session-names";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
+import { createInboxCommentDrafts } from "./inbox-comment-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
@@ -4447,6 +4448,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const listener of draftListeners) listener(threadId);
     },
   });
+  const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
     codeReviewOn,
@@ -6069,6 +6071,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
       if (drafted) return drafted;
+      const commentDrafted = await commentDrafts.route(req, url);
+      if (commentDrafted) return commentDrafted;
       // Ask AI: on for everyone; only the owner's own window is answered.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;

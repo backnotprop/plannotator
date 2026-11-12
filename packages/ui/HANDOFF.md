@@ -3105,3 +3105,12 @@ An `<img>` tag inside a table cell or a sentence is not an HTML block, so `Inlin
 
 - **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
 - **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.
+
+## Comment card: files, a host tool slot and a host-kept draft (unreleased; additive, opt-in, no core change)
+
+- **`UploadTransport.files?: boolean`** (`utils/upload`). Under a `CommentUploadContext` whose transport says `files: true`, the comment box's attachments button takes any file: a picture still opens `ImageAnnotator`; any other file uploads at once and is added as `ImageAttachment` with the new optional **`kind: 'file'`**. `ImageThumbnail` takes **`file?: boolean`** and draws a file tile instead of loading the path; `AnnotationPanel` and `CodeFilePopout` pass it. Exports print such entries under `**Attached files:**` (`utils/attachedLines`), pictures under `**Attached images:**` as before.
+- **`CommentCardToolsContext`** (`components/CommentCardTools`): a component the comment card draws in its tool row, given `{ textareaRef, phone, onBusyChange }`; Comment waits while it reports busy. The Plannotator Inbox puts its dictation mic there.
+- **`CommentDraftHostContext`** (`components/CommentDraftHost`, hook `hooks/useHostCommentDraft`): for a global comment with a `draftKey`, the box reads the host's draft on open (filling an empty box, else offering it), writes changes after 400 ms of quiet, and clears it on Comment, Discard, Ask AI and a spending extra action. A write the host answers with `{ conflict }` shows "This comment changed in another window" with Use that one / Keep mine (`data-comment-draft-conflict`); Keep mine writes with `force`.
+- **A host that provides none of these sees no change.**
+
+Pinned by `components/CommentPopover.hostDraft.test.tsx`.

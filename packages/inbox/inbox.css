@@ -9057,18 +9057,18 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-vbars { flex: 0 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 22px; }
 .ib-vbars > span { flex: none; width: 2px; height: 20px; border-radius: 1px; background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); transform: scaleY(0.08); }
 .ib-vbars > span[data-v] { background: var(--primary); }
-.pn-inbox .ib-vmic { flex: none; display: inline-flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-@media (hover: hover) { .pn-inbox .ib-vmic:hover { background: var(--muted); color: var(--foreground); } }
-.pn-inbox .ib-vmic:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.pn-inbox .ib-vmic[data-state="live"], .pn-inbox .ib-vmic[data-state="live"]:hover { background: var(--primary); color: var(--primary-foreground); }
-.pn-inbox .ib-vmic[data-state="sending"] { color: var(--primary); cursor: default; }
-.pn-inbox .ib-vmic[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
-.pn-inbox .ib-vmic[aria-disabled="true"]:hover { background: none; color: var(--muted-foreground); }
+:is(.pn-inbox, .pn-cbox) .ib-vmic { flex: none; display: inline-flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+@media (hover: hover) { :is(.pn-inbox, .pn-cbox) .ib-vmic:hover { background: var(--muted); color: var(--foreground); } }
+:is(.pn-inbox, .pn-cbox) .ib-vmic:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:is(.pn-inbox, .pn-cbox) .ib-vmic[data-state="live"], :is(.pn-inbox, .pn-cbox) .ib-vmic[data-state="live"]:hover { background: var(--primary); color: var(--primary-foreground); }
+:is(.pn-inbox, .pn-cbox) .ib-vmic[data-state="sending"] { color: var(--primary); cursor: default; }
+:is(.pn-inbox, .pn-cbox) .ib-vmic[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+:is(.pn-inbox, .pn-cbox) .ib-vmic[aria-disabled="true"]:hover { background: none; color: var(--muted-foreground); }
 .pn-inbox .ib-cp-foot .ib-vmic { width: 34px; height: 34px; border-radius: 7px; }
 .pn-inbox .ib-fcomp .ib-vmic { width: 30px; }
-.pn-inbox .ib-dtlink { flex: none; padding: 0; border: 0; background: none; font: inherit; color: var(--muted-foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; cursor: pointer; }
+:is(.pn-inbox, .pn-cbox) .ib-dtlink { flex: none; padding: 0; border: 0; background: none; font: inherit; color: var(--muted-foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; cursor: pointer; }
 .pn-inbox .ib-dtlink:hover { color: var(--foreground); }
-.pn-inbox .ib-dtlink.ib-vstrong { font-weight: 600; color: var(--foreground); }
+:is(.pn-inbox, .pn-cbox) .ib-dtlink.ib-vstrong { font-weight: 600; color: var(--foreground); }
 .ib-vnote { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 0 12px 2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
 .ib-vnote.ib-verr .ib-vnote-t { color: var(--destructive); }
 .ib-vnote-t { flex: 1 1 260px; min-width: 0; }
@@ -9084,9 +9084,9 @@ mark.ib-vmark { color: inherit; background: color-mix(in oklch, var(--primary) 1
 mark.ib-vmark.ib-vfade { background: transparent; }
 @media (prefers-reduced-motion: reduce) { mark.ib-vmark { transition: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-vmic { width: 36px; height: 36px; border-radius: 8px; }
-  .pn-inbox .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
-  .pn-inbox .ib-dtlink { padding: 8px 2px; }
+  :is(.pn-inbox, .pn-cbox) .ib-vmic { width: 36px; height: 36px; border-radius: 8px; }
+  :is(.pn-inbox, .pn-cbox) .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
+  :is(.pn-inbox, .pn-cbox) .ib-dtlink { padding: 8px 2px; }
   /* A phone's row holds the status or the chips, not both: they step aside until the words land. Nothing wraps, so the button stays under the finger. */
   /* Each child before the voice foot (the row's last but compose's Send), as a `:has()` of its own: no `:has(…) > :not(…)`, see .ib-pfoot's route form. */
   .ib-rfoot > :not(.ib-dtfoot, .ib-rclip):has(~ :where(.ib-dtfoot) .ib-vline), .ib-cp-foot > :not(.ib-dtfoot, .ib-cp-clip, [data-compose-send]):has(~ :where(.ib-dtfoot) .ib-vline) { display: none; }
@@ -12093,3 +12093,12 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .pn-inbox .ib-sb-sheet-in .ib-setrow .ib-theme-tg { position: static; transform: none; flex: none; width: 44px; height: 44px; margin-left: auto; border-radius: 10px; }
 .pn-inbox .ib-sb-sheet-in .ib-setrow .ib-theme-tg::after { content: none; }
 .pn-inbox .ib-sb-sheet-in .ib-theme-tg .ib-ic { width: 20px; height: 20px; }
+
+.pn-cbox .ib-vmic { width: 30px; height: 30px; border-radius: 8px; }
+.pn-cbox-row:has(> .pn-cbox-vline, > .pn-cbox-vnote:not(:empty)) { flex-wrap: wrap; }
+.pn-cbox-row > :is(.pn-cbox-vline, .pn-cbox-vnote) { order: -1; flex-basis: 100%; min-width: 0; display: flex; min-height: 28px; align-items: center; padding: 0 4px 2px 6px; }
+.pn-cbox-row > .pn-cbox-vnote:empty { display: none; }
+.pn-cbox-vnote .ib-vnote { padding: 0; }
+@media (pointer: coarse) {
+  .pn-cbox .ib-vmic { width: 44px; height: 44px; border-radius: 10px; }
+}

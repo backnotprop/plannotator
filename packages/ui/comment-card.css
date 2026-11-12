@@ -129,3 +129,8 @@ mark.annotation-highlight.comment-draft { background: color-mix(in oklab, var(--
 @media (pointer: coarse) {
   .pn-cbox-row > .pn-picture-status button { min-width: 44px; min-height: 44px; }
 }
+.pn-cbox-conflict { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0; }
+.pn-cbox-conflict > span { flex: 1 1 100%; }
+@media (pointer: coarse) {
+  .pn-cbox-conflict button { min-height: 44px; }
+}

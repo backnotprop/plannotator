@@ -25,6 +25,8 @@ export interface UploadResult {
 export interface UploadTransport {
   /** Upload one image file and resolve to its stored reference. */
   upload(file: File, options?: UploadOptions): Promise<UploadResult>;
+  /** Takes any file, not only pictures: the comment's attachments list a file by name (`ImageAttachment.kind` 'file'). */
+  files?: boolean;
 }
 
 export interface UploadOptions {

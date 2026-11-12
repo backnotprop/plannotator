@@ -6176,21 +6176,22 @@ export class InboxStore {
     return out;
   }
 
-  private commentPictures(images: unknown): { path: string; name: string }[] | undefined {
+  private commentPictures(images: unknown): { path: string; name: string; kind?: "file" }[] | undefined {
     if (images === undefined || images === null || (Array.isArray(images) && images.length === 0)) return undefined;
     const field = "annotation.images";
     if (!Array.isArray(images) || images.length > INBOX_COMMENT_PICTURES_MAX) {
       throw new InboxError("validation_error", `${field}: at most ${INBOX_COMMENT_PICTURES_MAX} pictures, each { path, name }.`, { field });
     }
     return images.map((image, index) => {
-      const { path, name } = (image && typeof image === "object" ? image : {}) as { path?: unknown; name?: unknown };
+      const { path, name, kind } = (image && typeof image === "object" ? image : {}) as { path?: unknown; name?: unknown; kind?: unknown };
+      const file = kind === "file";
       const picture = inboxCommentPicture(path);
       if (!picture || typeof name !== "string" || name.trim() === "" || name.length > 200) {
         throw new InboxError("validation_error", `${field}[${index}]: { path: "<upload id>/<file name>", name } of a picture you uploaded.`, { field });
       }
       const upload = readInboxUpload(this.dir, picture.upload_id);
-      if (!upload || upload.kind !== "image") throw new InboxError("upload_not_found", `${field}[${index}]: that picture is no longer here; add it again.`, { field });
-      return { path: path as string, name: inboxViewingText(name, 200) || "image" };
+      if (!upload || (!file && upload.kind !== "image")) throw new InboxError("upload_not_found", `${field}[${index}]: that ${file ? "file" : "picture"} is no longer here; add it again.`, { field });
+      return { path: path as string, name: inboxViewingText(name, 200) || (file ? upload.name : "image"), ...(file ? { kind: "file" as const } : {}) };
     });
   }
 

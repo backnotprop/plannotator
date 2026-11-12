@@ -887,6 +887,14 @@ export interface LanState {
 /** Where Post decisions puts a thread's decisions: the PR's description (default), a comment, or a short section plus the comment. */
 export type DecisionsPostTo = 'description' | 'comment' | 'both';
 
+type ImageRef = { path: string; name: string; kind?: 'file' };
+
+export interface InboxCommentDraftView {
+  text: string;
+  images: ImageRef[];
+  updated_at: string;
+}
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -1987,6 +1995,10 @@ export const inboxApi = {
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
+  commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
+  saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }) =>
+    post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body),
+  deleteCommentDraft: (threadId: string, key: string) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/comment-draft/delete'), { key }),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**
    * `files`: the box's file changes since it last held the draft's files (`files_add`, `files_remove`,
