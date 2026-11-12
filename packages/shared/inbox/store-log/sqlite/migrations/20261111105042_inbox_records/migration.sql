@@ -14,8 +14,7 @@ CREATE TABLE `annotations` (
 	`thread_id` text NOT NULL,
 	`project_id` text NOT NULL,
 	`first_seq` integer NOT NULL,
-	`seq` integer NOT NULL,
-	`record` text NOT NULL
+	`seq` integer NOT NULL
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `answers` (
@@ -48,7 +47,6 @@ CREATE TABLE `cards` (
 	`project_id` text NOT NULL,
 	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
-	`record` text NOT NULL,
 	`card` text NOT NULL,
 	`heard_seq` integer NOT NULL
 ) STRICT;
@@ -70,8 +68,7 @@ CREATE TABLE `events` (
 CREATE TABLE `initiatives` (
 	`id` text PRIMARY KEY,
 	`first_seq` integer NOT NULL,
-	`seq` integer NOT NULL,
-	`record` text NOT NULL
+	`seq` integer NOT NULL
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `mentions` (
@@ -80,7 +77,6 @@ CREATE TABLE `mentions` (
 	`target_actor_id` text NOT NULL,
 	`label` text,
 	`wakes` integer,
-	`record` text NOT NULL,
 	CONSTRAINT `mentions_pk` PRIMARY KEY(`message_id`, `position`)
 ) STRICT;
 --> statement-breakpoint
@@ -104,8 +100,7 @@ CREATE TABLE `messages` (
 	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
 	`subject` text,
-	`body` text NOT NULL,
-	`record` text NOT NULL
+	`body` text NOT NULL
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `meta` (
@@ -118,7 +113,6 @@ CREATE TABLE `projects` (
 	`key` text NOT NULL,
 	`root` text NOT NULL,
 	`name` text NOT NULL,
-	`record` text NOT NULL,
 	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
 	`deleted_at` text
@@ -138,8 +132,7 @@ CREATE TABLE `questions` (
 	`sent_reply_id` text,
 	`asked_by_actor_id` text,
 	`first_seq` integer NOT NULL,
-	`seq` integer NOT NULL,
-	`record` text NOT NULL
+	`seq` integer NOT NULL
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `read_state` (
@@ -157,8 +150,7 @@ CREATE TABLE `steps` (
 	`thread_id` text,
 	`project_id` text,
 	`first_seq` integer NOT NULL,
-	`seq` integer NOT NULL,
-	`record` text NOT NULL
+	`seq` integer NOT NULL
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `thread_names` (
@@ -183,8 +175,7 @@ CREATE TABLE `thread_pulls` (
 	`thread_id` text,
 	`project_id` text,
 	`first_seq` integer NOT NULL,
-	`seq` integer NOT NULL,
-	`record` text NOT NULL
+	`seq` integer NOT NULL
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `threads` (

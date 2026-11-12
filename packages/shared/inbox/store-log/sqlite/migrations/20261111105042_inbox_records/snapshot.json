@@ -213,16 +213,6 @@
       "entityType": "columns"
     },
     {
-      "table": "annotations",
-      "name": "record",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
       "table": "answers",
       "name": "id",
       "type": "text",
@@ -444,16 +434,6 @@
     },
     {
       "table": "cards",
-      "name": "record",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "cards",
       "name": "card",
       "type": "text",
       "notNull": true,
@@ -613,16 +593,6 @@
       "entityType": "columns"
     },
     {
-      "table": "initiatives",
-      "name": "record",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
       "table": "mentions",
       "name": "message_id",
       "type": "text",
@@ -667,16 +637,6 @@
       "name": "wakes",
       "type": "integer",
       "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "mentions",
-      "name": "record",
-      "type": "text",
-      "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
@@ -843,16 +803,6 @@
       "entityType": "columns"
     },
     {
-      "table": "messages",
-      "name": "record",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
       "table": "meta",
       "name": "key",
       "type": "text",
@@ -905,16 +855,6 @@
     {
       "table": "projects",
       "name": "name",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "projects",
-      "name": "record",
       "type": "text",
       "notNull": true,
       "autoincrement": false,
@@ -1093,16 +1033,6 @@
       "entityType": "columns"
     },
     {
-      "table": "questions",
-      "name": "record",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
       "table": "read_state",
       "name": "thread_id",
       "type": "text",
@@ -1206,16 +1136,6 @@
       "table": "steps",
       "name": "seq",
       "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "steps",
-      "name": "record",
-      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -1366,16 +1286,6 @@
       "table": "thread_pulls",
       "name": "seq",
       "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "thread_pulls",
-      "name": "record",
-      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
