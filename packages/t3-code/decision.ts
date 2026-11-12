@@ -7,7 +7,6 @@ import {
   type PlannotatorTarget,
 } from "@plannotator/shared/plannotator-tool";
 
-/** The CLI's host result record (apps/hook/server/host-result.ts), the fields T3 reads. */
 export const hostResultSchema = z.object({
   v: z.literal(1),
   surface: z.enum(["plan", "review", "annotate", "annotate-last"]).optional(),
@@ -18,11 +17,6 @@ export const hostResultSchema = z.object({
 });
 export type T3HostResult = z.infer<typeof hostResultSchema>;
 
-/**
- * Feedback longer than this goes to a file Claude reads, never truncated: the
- * Claude Code mod's limit (`INLINE_LIMIT_BYTES` in apps/hook/hooks/mod/delivery.ts),
- * well under T3's 120,000-character message cap.
- */
 export const T3_INLINE_LIMIT_BYTES = 12 * 1024;
 export const T3_FEEDBACK_FILE = "feedback.md";
 
@@ -30,11 +24,8 @@ export interface T3DecisionContext {
   kind: "annotate" | "review" | "last";
   subject: string;
   sessionId: string;
-  /** The launch's own target (from the ready line); the record's wins. */
   target?: PlannotatorTarget;
-  /** A gated session (annotate or review): Claude was told to wait for the sign-off, so a bare approval is sent. */
   gate?: boolean;
-  /** The review's own folder: where an oversized message is written. */
   directory: string;
   inlineLimitBytes?: number;
 }
@@ -51,7 +42,6 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
-/** The outcome a decision's heading names: the Claude Code mod's words (`outcomeOf`). */
 function outcomeOf(record: T3HostResult, surface: string): string {
   const count = record.annotationCount;
   const comments = typeof count === "number" && count > 0 ? ` · ${plural(count, "comment", "comments")}` : "";
@@ -59,17 +49,6 @@ function outcomeOf(record: T3HostResult, surface: string): string {
   return surface === "review" ? `Changes requested${comments}` : `Feedback${comments}`;
 }
 
-/**
- * What a settled review sends to its T3 conversation, worded as the Claude
- * Code mod words it (`deliveryFor`): Close, Done with nothing to send and a
- * review LGTM send nothing (a gated approval excepted); feedback is
- * headed `Plannotator: <subject> (pn-…) — <outcome>.` with its Target line;
- * a message over the inline limit is written to the review's feedback.md and
- * Claude is told to Read it. One difference from the mod: a review posted
- * straight to the PR platform is always sent (the mod sends it only for a
- * gated review) (`Review posted` and its status line,
- * as on Pi and OpenCode), since T3 has no log or suggestion line to show it in.
- */
 export function t3Decision(record: T3HostResult, context: T3DecisionContext): T3Decision {
   const surface = record.surface ?? (context.kind === "last" ? "annotate-last" : context.kind);
   if (record.decision === "dismissed") {

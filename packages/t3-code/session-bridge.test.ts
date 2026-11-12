@@ -116,7 +116,6 @@ describe("T3 question correlation", () => {
     expect((await ask(rpc)).answer).toBe("Recovered answer");
   });
   test("last skips the run that called it (its 'opening it now' text) and any run still writing", () => {
-    // What regresses: `plannotator last` opened the agent's own current message.
     const items = [
       item(1, "user_message", "Write the plan", { runId: "run-1", messageId: "m1" }),
       item(2, "assistant_message", "Here is the plan.", { runId: "run-1" }),
@@ -126,9 +125,7 @@ describe("T3 question correlation", () => {
     const running = { ...snapshot(items, { activeRunId: "run-2", status: "running" }),
       recentRuns: [{ runId: "run-1", status: "completed", startedAt: null }, { runId: "run-2", status: "running", startedAt: null }] };
     expect(lastFinishedAssistantMessage(running, "thread-a")?.text).toBe("Here is the plan.");
-    // A run reported only through activeRunId still counts as unfinished.
     expect(lastFinishedAssistantMessage({ ...running, recentRuns: [] }, "thread-a")?.text).toBe("Here is the plan.");
-    // From a terminal with nothing running, the newest message is the last one.
     const idle = { ...snapshot(items), recentRuns: [{ runId: "run-1", status: "completed", startedAt: null }, { runId: "run-2", status: "completed", startedAt: null }] };
     expect(lastFinishedAssistantMessage(idle, "thread-a")?.text).toBe("Opening it in Plannotator now.");
     expect(lastFinishedAssistantMessage({ ...running, items: items.slice(2) }, "thread-a")).toBeUndefined();

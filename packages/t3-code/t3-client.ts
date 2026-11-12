@@ -58,11 +58,6 @@ export interface T3Rpc {
   call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
 }
 
-/**
- * A refusal that means the request never reached a tool: the grant was
- * refused (401: revoked, expired, or replaced by a new login) or the server no
- * longer knows the MCP session (404). Safe to retry once on a fresh session.
- */
 function isSessionRefusal(error: unknown): boolean {
   if (error instanceof UnauthorizedError) return true;
   const status = (error as { status?: unknown; data?: { status?: unknown } } | null)?.status
@@ -75,8 +70,6 @@ function isSessionRefusal(error: unknown): boolean {
 async function openClient(url: URL, token: () => string | undefined): Promise<Client> {
   const client = new Client({ name: "plannotator-t3", version: "0.0.1" });
   try {
-    // The token is read for every request, so a new `plannotator t3 login`
-    // applies to a running worker without restarting it.
     await client.connect(new StreamableHTTPClientTransport(url, { authProvider: { token: async () => token() } }));
     return client;
   } catch (error) {
@@ -98,7 +91,6 @@ export class T3Client implements T3Rpc {
       result = await this.client.callTool({ name, arguments: args }, { signal, timeout: 60_000 });
     } catch (error) {
       if (signal?.aborted || !isSessionRefusal(error)) throw error;
-      // After a new login the old MCP session may be refused; open a new one.
       const previous = this.client;
       this.client = await openClient(this.url, this.token);
       void previous.close().catch(() => {});

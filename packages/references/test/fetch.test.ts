@@ -1,11 +1,3 @@
-// The outbound fetch policy. Ported from the Workspaces suite (main 7379b0195):
-//   apps/rooms/test/external-refs-fetch.test.ts
-// Workspaces ran these against a Miniflare outbound service
-// (test/fixtures/posthog-ingest.js, the redirect-source.example and
-// redirect-target.example routes); here the same routes are a fake origin
-// behind the port's fetch. The wrapper always calls it with
-// redirect: "manual", so the fake answers redirects as a server would.
-
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from "bun:test";
 
 import { githubAdapter } from "../src/adapters/github.ts";
@@ -20,7 +12,6 @@ import { fakeProvider, json, makePort } from "./helpers.ts";
 const SOURCE = "https://redirect-source.example";
 const TARGET = "https://redirect-target.example";
 
-/** What reached the redirect target: the credential header it carried. */
 let targets: Array<{ privateToken: string | null }>;
 
 const origin: FetchLike = async (input, init) => {
@@ -60,7 +51,6 @@ const origin: FetchLike = async (input, init) => {
 
 const call = (input: string | URL | Request, init?: RequestInit) => externalRefsFetch(origin, input, init);
 
-// Bun runs every test file in one process: the console spy is restored after each test.
 let info: Mock<typeof console.info>;
 beforeEach(() => {
 	targets = [];
@@ -173,8 +163,6 @@ describe("external reference fetch", () => {
 	});
 
 	it("aborts a provider request at the ten-second deadline", async () => {
-		// Bun's fake timers do not drive AbortSignal.timeout: the deadline
-		// signal is replaced by one the test fires, so no real wait runs.
 		const deadline = new AbortController();
 		const timeout = spyOn(AbortSignal, "timeout").mockImplementation(() => deadline.signal);
 		try {
@@ -206,7 +194,6 @@ describe("the port's user agent and log", () => {
 		return found.ref;
 	};
 
-	/** A fake GitHub and GitLab answering one issue each, one PR list, and one PR. */
 	function forges() {
 		const fake = fakeProvider();
 		fake.on("GET https://api.github.com/repos/a/b/issues/1", () => json(200, { title: "t", state: "open" }));
@@ -297,7 +284,6 @@ describe("the port's user agent and log", () => {
 				async () => {
 					throw new Error("log sink down");
 				},
-				// A non-native thenable over a rejected promise.
 				() => {
 					const inner = Promise.reject(new Error("log sink down"));
 					return { then: (ok: (v: unknown) => unknown, fail: (e: unknown) => unknown) => inner.then(ok, fail) };

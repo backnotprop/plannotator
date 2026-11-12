@@ -1,20 +1,3 @@
-/**
- * HTTP endpoint handlers for AI features.
- *
- * These handlers are provider-agnostic — they work with whatever AIProvider
- * is registered in the provided ProviderRegistry. They're designed to be
- * mounted into any Plannotator server (plan review, code review, annotate).
- *
- * Endpoints:
- *   POST /api/ai/session       — Create or fork an AI session
- *   POST /api/ai/query         — Send a message and stream the response
- *   POST /api/ai/abort         — Abort the current query
- *   GET  /api/ai/sessions      — List active sessions
- *   GET  /api/ai/capabilities  — Check if AI features are available
- *   POST /api/ai/bridge/poll   — "Ask this session" pull bridge: host long-poll (session-bridge-pull.ts)
- *   POST /api/ai/bridge/event  — "Ask this session" pull bridge: host progress events
- */
-
 import { resolveModelChoice } from "@plannotator/core/model-catalog";
 import type { AIContext, AIMessage, AIProvider, CreateSessionOptions } from "./types.ts";
 import type { ProviderRegistry } from "./provider.ts";
@@ -22,7 +5,6 @@ import type { SessionManager } from "./session-manager.ts";
 import { SessionBridgeProvider, SessionBridgeSession } from "./session-bridge.ts";
 import { SESSION_BRIDGE_EVENT_PATH, SESSION_BRIDGE_POLL_PATH } from "./session-bridge-pull.ts";
 
-/** Canonical paths handled by the shared AI endpoint runtime. */
 export const AI_ENDPOINT_PATHS = [
   "/api/ai/capabilities",
   "/api/ai/session",
@@ -34,129 +16,56 @@ export const AI_ENDPOINT_PATHS = [
   "/api/ai/bridge/event",
 ] as const;
 
-/**
- * Endpoints whose requests legitimately stay open (SSE answers, the bridge
- * long-poll): servers with a per-request idle timeout lift it for these.
- */
 export function isLongLivedAIEndpointPath(path: string): boolean {
   return path === "/api/ai/query" || path === SESSION_BRIDGE_POLL_PATH;
 }
 
-/** A path handled by the shared AI endpoint runtime. */
 export type AIEndpointPath = (typeof AI_ENDPOINT_PATHS)[number];
 
 const AI_ENDPOINT_PATH_SET: ReadonlySet<string> = new Set(AI_ENDPOINT_PATHS);
 
-/** Return whether a request path is a known shared AI endpoint. */
 export function isAIEndpointPath(path: string): path is AIEndpointPath {
   return AI_ENDPOINT_PATH_SET.has(path);
 }
 
-// ---------------------------------------------------------------------------
-// Types for request/response
-// ---------------------------------------------------------------------------
-
 export interface CreateSessionRequest {
-  /** The context mode and content for the session. */
   context: AIContext;
-  /** Instance ID of the provider to use (optional — uses default if omitted). */
   providerId?: string;
-  /** Optional model override. */
   model?: string;
-  /** Max agentic turns. */
   maxTurns?: number;
-  /** Max budget in USD. */
   maxBudgetUsd?: number;
-  /** Reasoning effort — one of the selected model's `reasoningEfforts`. */
   reasoningEffort?: string;
 }
 
 export interface QueryRequest {
-  /** The session ID to query. */
   sessionId: string;
-  /** The user's prompt/question. */
   prompt: string;
-  /**
-   * Optional context update (e.g., new annotations since session was created).
-   * Separate-AI providers only: an "Ask this session" question ignores it,
-   * because the session that receives it is the agent the feedback is for and
-   * would read it as instructions (#1748). Drafts go there as `draftAnnotations`.
-   */
   contextUpdate?: string;
-  /** "Ask this session" only: what to do when the host session is busy. */
   busyPolicy?: "wait" | "interrupt";
-  /**
-   * "Ask this session" only: the reviewer's unsubmitted annotations as a plain
-   * list, framed by the bridge as read-only context (see `AIQueryOptions`).
-   * Ignored by every other provider.
-   */
   draftAnnotations?: string;
 }
 
 export interface AbortRequest {
-  /** The session ID to abort. */
   sessionId: string;
-  /** A newer question replaced this answer. Session bridges keep a host turn running. */
   reason?: "supersede";
 }
 
-// ---------------------------------------------------------------------------
-// Handler factory
-// ---------------------------------------------------------------------------
-
 export interface AIEndpointDeps {
-  /** Provider registry (one per server or shared). */
   registry: ProviderRegistry;
-  /**
-   * Providers registered ONLY so their model catalogs can be served to the
-   * agent-job launchers (Review Agents, Code Tour, Guided Review), used when a
-   * session bridge makes the bridge the sole Ask AI provider. They never take
-   * an Ask AI session and are never listed under `providers`: a
-   * `?activate=<id>` probe naming one runs its discovery and reports it under
-   * `catalogProviders`, which only the launchers' catalog loader reads.
-   */
   catalogRegistry?: ProviderRegistry;
-  /** Session manager instance (one per server). */
   sessionManager: SessionManager;
-  /** Resolve the current working directory for new AI sessions. */
   getCwd?: () => string;
-  /** Optional hook to finish lazy provider capability loading before reporting capabilities. */
   beforeCapabilities?: () => Promise<void> | void;
-  /**
-   * Optional hook to run provider-specific lazy initialization, either before
-   * creating a session (`session`) or for an explicit `?activate=` probe
-   * (`activate`, which reports the refreshed model list and so must wait).
-   */
   beforeProviderSession?: (
     providerId: string,
     reason: "session" | "activate",
     requestedModel?: string,
   ) => Promise<void> | void;
-  /**
-   * "Ask this session" only: whether a request may create a session on, or
-   * query, the session-bridge provider (the runtime checks the Host header is
-   * a loopback name with the server's own port, so a DNS-rebinding page cannot
-   * type into the user's agent session). Absent means refuse: the bridge never
-   * answers without a guard. Other providers never consult it.
-   */
   authorizeSessionBridgeRequest?: (req: Request) => boolean;
-  /**
-   * "Ask this session" pull bridge (session-bridge-pull.ts), present when a
-   * host that runs this server as a separate process handed it a bridge
-   * token. Its two endpoints answer 404 without it, and are also gated by
-   * `authorizeSessionBridgeRequest` (loopback Host) before the token check.
-   */
   pullBridge?: { handle(req: Request): Promise<Response> | null };
-  /**
-   * A dropped `/api/ai/query` stream leaves the question running: the answer
-   * keeps draining and the provider decides what to do with it. The Inbox's
-   * Ask AI saves it, so a reload or a sleeping phone stops nothing. Default off:
-   * a disconnect aborts. `/api/ai/abort` aborts either way.
-   */
   keepRunningOnDisconnect?: boolean;
 }
 
-/** Error code for a bridge request refused by `authorizeSessionBridgeRequest`. */
 export const SESSION_BRIDGE_FORBIDDEN_HOST = "session_bridge_forbidden_host";
 
 function sessionBridgeForbidden(): Response {
@@ -173,13 +82,6 @@ function sessionBridgeForbidden(): Response {
 const MAX_CLIENT_MAX_TURNS = 99;
 const MAX_CLIENT_BUDGET_USD = 5;
 
-/**
- * Run a lazy initializer (model discovery) at most once on success. Callers
- * share one in-flight run and never see its error; a failed run may be retried
- * by a later call once `retryAfterMs` has passed, so a transient failure does
- * not pin the fallback for the life of the process while a persistently
- * broken tool is not re-spawned on every session.
- */
 export function createBestEffortOnce(
   initialize: () => Promise<void>,
   retryAfterMs = 60_000,
@@ -197,18 +99,6 @@ export function createBestEffortOnce(
   };
 }
 
-/**
- * Deferred model discovery shared by both runtimes. Discovery spawns the
- * provider's CLI, so it runs on first explicit activation (?activate= from a
- * model picker) or the first session, never at startup. An `?activate=` probe
- * always waits for it (it reports the refreshed list). A session waits only
- * for providers registered with `blockSession` (the default); the others
- * resolve the model against their current list and let discovery finish in
- * the background — unless that list is still the static fallback and does not
- * offer the requested model (e.g. `opus[1m]`, which the fallback lacks), where
- * resolving now would silently change the pick for the first session only, so
- * the session waits for discovery (bounded by the provider's own timeout).
- */
 export function createDeferredModelDiscovery() {
   const initializers = new Map<string, () => Promise<void>>();
   const background = new Map<string, Pick<AIProvider, "models" | "modelsSource">>();
@@ -248,20 +138,6 @@ function clampPositiveNumber(value: unknown, max: number): number | undefined {
   return Math.min(max, value);
 }
 
-/**
- * Create the route handler map for AI endpoints.
- *
- * Usage in a Bun server:
- * ```ts
- * const aiHandlers = createAIEndpoints({ registry, sessionManager });
- *
- * // In your request handler:
- * if (url.pathname.startsWith('/api/ai/')) {
- *   const handler = aiHandlers[url.pathname];
- *   if (handler) return handler(req);
- * }
- * ```
- */
 export function createAIEndpoints(deps: AIEndpointDeps) {
   const {
     registry,
@@ -275,10 +151,6 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
     keepRunningOnDisconnect = false,
   } = deps;
 
-  // Streams whose question /api/ai/abort already handled. The browser drops a
-  // superseded answer's fetch only after that abort is acknowledged, so its
-  // disconnect can arrive after the next question started; it must not abort
-  // again (the session-level abort would hit the new question).
   const liveStreams = new Map<string, Set<{ handled: boolean }>>();
 
   const handlePullBridge = async (req: Request): Promise<Response> => {
@@ -292,13 +164,6 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
   return {
     "/api/ai/capabilities": async (req: Request) => {
       await beforeCapabilities?.();
-      // Explicit provider activation (?activate=<providerId>): run the same
-      // deferred initializer the session path uses, then report the refreshed
-      // metadata — so the client's model picker can move past a provider's
-      // static fallback without creating a session. A plain capabilities
-      // probe must never activate anything: the editor calls it automatically
-      // on load, and activating there would reintroduce the eager launch this
-      // deferral exists to prevent.
       const activateId = new URL(req.url).searchParams.get("activate");
       const catalogOnly = activateId && !registry.get(activateId) ? catalogRegistry?.get(activateId) : undefined;
       if (activateId && (registry.get(activateId) || catalogOnly)) {
@@ -339,7 +204,6 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         );
       }
 
-      // Resolve provider: by ID, or default
       const providerEntry = providerId
         ? { id: providerId, provider: registry.get(providerId) }
         : registry.getDefault();
@@ -358,15 +222,8 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
 
       try {
         await beforeProviderSession?.(providerEntry.id, "session", model);
-        // Resolve the model against the post-activation list with the shared
-        // resolver (exact id → the model an alias covers → same-family alias →
-        // the provider's default), so a stale pre-discovery pick lands on the
-        // closest current model. Providers that report no models pass the
-        // request through verbatim.
         const models = provider.models ?? [];
         const effectiveModel = models.length > 0 ? resolveModelChoice(model ?? "", models) : model;
-        // Only forward an effort the resolved model accepts (a model that
-        // reports no efforts takes none); unlisted models pass it through.
         const modelInfo = models.find((candidate) => candidate.id === effectiveModel);
         const effectiveEffort =
           reasoningEffort && (!modelInfo || modelInfo.reasoningEfforts?.some((e) => e.id === reasoningEffort))
@@ -383,9 +240,6 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
           reasoningEffort: effectiveEffort,
         };
 
-        // Fork if parent session is provided AND provider supports it.
-        // Providers that can't fork (e.g. Codex) fall back to a fresh
-        // session with the full system prompt — no fake history.
         const shouldFork = context.parent && provider.capabilities.fork;
         const session = shouldFork
           ? await provider.forkSession(options)
@@ -444,11 +298,6 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
 
       const isSessionBridge = entry.session instanceof SessionBridgeSession;
 
-      // A separate AI gets the context update in front of the prompt. "Ask
-      // this session" never does: that session is the agent the review is
-      // for, and the update is the feedback export of drafts the reviewer has
-      // not submitted, which it would carry out (#1748). Drafts reach it only
-      // as `draftAnnotations`, inside the bridge's read-only frame.
       const effectivePrompt = contextUpdate && !isSessionBridge
         ? `[Context update: the user has made changes since this conversation started]\n${contextUpdate}\n\n${prompt}`
         : prompt;
@@ -457,12 +306,10 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         ...(isSessionBridge && draftAnnotations !== undefined && { draftAnnotations }),
       };
 
-      // Set label from first query if not already set
       if (!entry.label) {
         entry.label = prompt.slice(0, 80);
       }
 
-      // Stream the response using Server-Sent Events (SSE)
       const encoder = new TextEncoder();
       const marker = { handled: false };
       let markers = liveStreams.get(sessionId);
@@ -472,7 +319,6 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         markers!.delete(marker);
         if (markers!.size === 0 && liveStreams.get(sessionId) === markers) liveStreams.delete(sessionId);
       };
-      // Set only with `keepRunningOnDisconnect`: the question drains into nothing.
       let draining = false;
       const stream = new ReadableStream({
         async start(controller) {
@@ -500,10 +346,6 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
           }
         },
         cancel() {
-          // Client disconnected (Stop fetch abort, superseding question, tab
-          // close, navigation). Stop the in-flight turn so it doesn't keep
-          // running on the now long-lived provider process. Not when an abort
-          // request already handled this question (see liveStreams).
           draining = keepRunningOnDisconnect;
           forget();
           if (marker.handled || draining) return;

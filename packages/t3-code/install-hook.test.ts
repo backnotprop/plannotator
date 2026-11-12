@@ -41,8 +41,6 @@ test("install updates only the T3 hook, preserving shared settings and mixed Bas
 });
 
 test("reinstall replaces the SDK-only gate earlier builds wrote, so T3's own entrypoint reaches the binary", () => {
-  // What regresses: a hook written before T3 named its entrypoint staying in
-  // settings beside the new one (or never opening inside a T3 thread).
   const { file, executable, dataDir } = fixture();
   const old = `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=${quoteHookWord(dataDir)} ${quoteHookWord(executable)} t3-hook;; esac`;
   writeFileSync(file, JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: old }] }] } }));
@@ -82,13 +80,11 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n%s\\n" "$PLANNOTATOR_DATA_DIR" "$1"\n', { mode: 0o755 });
   const run = (entrypoint?: string) => Bun.spawnSync(["/bin/sh", "-c", t3HookCommand(executable, dataDir)],
     { env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME!, ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }) }, stdout: "pipe", stderr: "pipe" });
-  // T3 Code names itself `t3-code`; other Agent SDK apps report `sdk-…`.
   for (const entrypoint of ["sdk-ts", "sdk-py", "t3-code"]) {
     const result = run(entrypoint);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe(dataDir + "\nt3-hook\n");
   }
-  // Every other Claude session: the shell answers, the binary never starts.
   for (const entrypoint of ["cli", "claude-desktop", "", undefined]) {
     const result = run(entrypoint);
     expect(result.exitCode).toBe(0);
@@ -97,14 +93,10 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   expect(parseT3HookCommand(t3HookCommand(executable, dataDir) + " && echo unrelated")).toBeUndefined();
   expect(parseT3HookCommand("/other/custom-command t3-hook")).toBeUndefined();
   expect(parseT3HookCommand('case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) /other/custom-command t3-hook;; esac')).toBeUndefined();
-  // The SDK-only gate earlier builds wrote is still found, so reinstall and uninstall replace it.
   expect(parseT3HookCommand('case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=\'/d\' \'/bin/plannotator\' t3-hook;; esac')).toEqual({ executable: "/bin/plannotator" });
-  // The ungated form earlier builds wrote is still recognized, so reinstall and uninstall replace it.
   expect(parseT3HookCommand(`PLANNOTATOR_DATA_DIR='/data' '${executable}' t3-hook`)).toEqual({ executable });
 });
 
-// Five starts of the compiled binary, about 1.3 s each on a loaded CI runner:
-// past bun's 5 s default (it timed out at 6.4 s in CI), so the limit is explicit.
 test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper registers an executable hook and removes only its registration", () => {
   const { file, executable, dataDir } = fixture();
   mkdirSync(join(executable, ".."), { recursive: true });
@@ -126,9 +118,6 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper regi
   const interactive = hook("cli");
   expect(interactive.exitCode).toBe(0);
   expect(interactive.stdout.toString()).toBe("");
-  // The binary's own gate, for a hook registered without the shell's: `{}` before any startup work.
-  // Unparseable input that gets past the binary's entrypoint checks is logged to t3-code/hook.log,
-  // so the log shows whether `t3-code` got through them.
   const hookLog = join(dataDir, "t3-code", "hook.log");
   mkdirSync(join(dataDir, "t3-code"), { recursive: true });
   const direct = (entrypoint: string) => Bun.spawnSync([executable, "t3-hook"], { env: { ...env, CLAUDE_CODE_ENTRYPOINT: entrypoint }, stdin: Buffer.from("not json"), stdout: "pipe", stderr: "pipe" });
@@ -137,7 +126,6 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper regi
   expect(JSON.parse(gated.stdout.toString())).toEqual({});
   expect(gated.stderr.toString()).toBe("");
   expect(existsSync(hookLog)).toBe(false);
-  // T3's own entrypoint passes the binary's gate.
   const t3 = direct("t3-code");
   expect(t3.exitCode).toBe(0);
   expect(JSON.parse(t3.stdout.toString())).toEqual({});

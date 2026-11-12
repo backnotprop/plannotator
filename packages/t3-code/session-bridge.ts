@@ -11,7 +11,6 @@ function snapshotStatus(snapshot: T3ThreadRead): SessionBridgeStatus {
 export class T3SessionBridge implements SessionBridge {
   readonly host = "t3" as const;
   readonly modes = { turn: true, transient: false };
-  /** T3 is never interrupted: Stop only stops listening, and there is no "Interrupt and ask now". */
   readonly interruptible = false;
   private currentStatus: SessionBridgeStatus = "gone";
   private active: AbortController | undefined;
@@ -49,7 +48,6 @@ export class T3SessionBridge implements SessionBridge {
     const before = await this.thread.read({ limit: 1 }, signal);
     const status = snapshotStatus(before);
     if (status !== "ready") { sink.error(status === "gone" ? "gone" : status === "blocked" ? "blocked" : "busy"); return; }
-    // Timeline positions include activity hidden by the messages view.
     let position = before.thread.itemCount > 0 ? before.thread.itemCount - 1 : undefined;
     const sent = await this.thread.send(request.text, `plannotator-ask:${request.askId}`, signal);
     const deadline = Date.now() + this.deadlineMs;
@@ -62,7 +60,6 @@ export class T3SessionBridge implements SessionBridge {
       const foreign = local.find((item) => item.type === "user_message" && item.runId === sent.runId && item.messageId !== sent.messageId);
       const answerItems = local.filter((item) => item.type === "assistant_message" && item.runId === sent.runId && (!ours || item.position > ours.position));
       if (foreign) {
-        // Fetching mutable or truncated text after takeover can include the new prompt's answer.
         const partial = answerItems.filter((item) => item.position < foreign.position && item.status === "completed" && !item.textTruncated)
           .map((item) => item.text).filter(Boolean).join("\n\n");
         if (partial) sink.delta(partial);
@@ -72,7 +69,6 @@ export class T3SessionBridge implements SessionBridge {
       const status = snapshot.recentRuns.find((item) => item.runId === sent.runId)?.status ?? await this.thread.runStatus(sent.runId, signal);
       if (T3_TERMINAL.has(status)) {
         if (status !== "completed") { sink.error("failed", `The T3 question ended with status ${status}.`); return; }
-        // A recovered pull command can receive T3's original idempotent receipt.
         if (!ours && position !== undefined) { position = undefined; continue; }
         if (!ours) throw new Error("T3 completed the run without its correlated question.");
         const answer = (await Promise.all(answerItems.map((item) => this.thread.fullText(item, signal)))).filter(Boolean).join("\n\n");

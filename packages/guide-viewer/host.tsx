@@ -2,34 +2,16 @@ import React, { createContext, useContext } from 'react';
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import type { DiffFile } from './types';
 
-/**
- * The guide chain (GuideView → GuideSectionCard → GuideFileCard) is rendered by
- * two hosts: the Plannotator review app and the portable guide viewer. Both
- * supply the same narrow contract through this context instead of the app's
- * ~200-field ReviewState, which is what lets the chain live in a package
- * without a server, a dock, or annotations behind it.
- *
- * Decision record: adr/decisions/007-portable-guided-reviews-20260815.md (D2).
- */
-
-/** A "reveal this file" navigation event. `token` bumps per event so re-revealing the same path re-fires. */
 export interface GuideRevealTarget {
   path: string;
   token: number;
 }
 
-/** The host's active global-search match, if it has a search. */
 export interface GuideActiveSearchMatch {
   id: string;
   filePath: string;
 }
 
-/**
- * The minimum a diff renderer must accept from the guide chain. In Plannotator
- * this is `AllFilesCodeView`; the props below are exactly the guide-specific
- * subset added for the virtualized guide (#1158): one file per instance, a
- * tokenized scroll target, and remount-continuity for the viewport window.
- */
 export interface GuideDiffRendererProps {
   files: DiffFile[];
   fileScrollTarget: { filePath: string; token: number } | null;
@@ -38,15 +20,9 @@ export interface GuideDiffRendererProps {
   initialScrollPosition: number;
   onScrollPositionChange: (position: number) => void;
   onFileCollapsedChange: (filePath: string, collapsed: boolean) => void;
-  /** The focused card is the keyboard/annotation target. */
   isActive: boolean;
   allowScrollChaining: true;
-  /**
-   * Passed only when the guide fits each file's box to its content (GuideView `fitFileHeights`): the renderer reports the
-   * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
-   */
   onContentHeightChange?: (height: number) => void;
-  /** No scroller of its own: as tall as its content, against the page's scroller (a `fitFileHeights` host). */
   scrollsWithPage?: boolean;
 }
 
@@ -55,161 +31,44 @@ export interface GuideDiffRendererContext {
   focused: boolean;
 }
 
-/** A comment about the whole guided review, not tied to a line or a file. */
 export interface GuideGlobalComment {
   id: string;
   text: string;
 }
 
-/**
- * A host that takes comments on the review (the Inbox, the review app) passes
- * its global comments here. The chain draws the "Global comment" button in
- * the header's actions and the comments under the header, before the first
- * section; the host owns the composer and where a comment is kept.
- */
 export interface GuideGlobalComments {
   comments: readonly GuideGlobalComment[];
-  /**
-   * Open the host's composer for a new global comment, anchored to the
-   * chain's button. Absent: the comments are shown and no button is drawn
-   * (a read-only review).
-   */
   onAdd?: (anchor: HTMLElement) => void;
-  /** The comment chosen in the list: the host shows it where it lists comments. */
   onSelect?: (id: string) => void;
   selectedId?: string | null;
 }
 
 export interface GuideHostValue<P extends object = Record<string, unknown>> {
-  /** Every file of the review the guide describes. Guide refs resolve against this list. */
   files: DiffFile[];
-  /** Renders one file's diff. */
   DiffRenderer: React.ComponentType<GuideDiffRendererProps & P>;
-  /**
-   * Extra props forwarded to every DiffRenderer instance (annotation, staging,
-   * search and AI wiring in-app; nothing in a read-only host). Called per card
-   * so per-card values (e.g. a pending selection only for the focused file) can
-   * be expressed without leaking focus state into the host.
-   */
   getDiffRendererProps: (context: GuideDiffRendererContext) => P;
-  /** Host-owned reveal channel (sidebar/outline jumps). Optional — the chain falls back to a local channel. */
   revealFile?: GuideRevealTarget | null;
   onRevealFile?: (path: string) => void;
-  /** Host-owned global search: the active match is routed to its chapter so an offscreen file mounts first. */
   activeSearchMatch?: GuideActiveSearchMatch | null;
-  /**
-   * Paths the host knows are generated (the review server's `generatedFiles`).
-   * Optional: without it the built-in name list decides (lockfiles, minified
-   * files, source maps). Used only to sort a chapter's files by kind.
-   */
   generatedFiles?: ReadonlySet<string>;
-  /**
-   * Draws the guide overview's diagram (format version 2). The guide chain
-   * never imports a diagram engine itself (the review app's bundle must not
-   * carry one; tests/entry-assets.test.ts), so a host that can draw Mermaid
-   * passes it here. Absent, or answering null: the diagram's source is shown
-   * as text (Mermaid) or a note says the viewer does not draw it (HTML).
-   */
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => React.ReactNode | null;
-  /**
-   * Draws a chapter's diagram (format version 5) at the top of the chapter's
-   * code pane, full width, above its first file (approval
-   * "guide-chapter-diagrams", placement A), under a "Diagram" header that
-   * folds it. The chain caps the drawing's box at 320px (the canvas fits the
-   * drawing inside it; Expand opens it full size). `index` is the chapter's
-   * 0-based place, for a drawing id unique on the page. Absent, or answering
-   * null: the chapter shows as it would with no diagram (never its source,
-   * never a note).
-   */
   renderChapterDiagram?: (diagram: GuideOverviewDiagram, index: number) => React.ReactNode | null;
-  /**
-   * Where a chapter diagram's fold is kept, so it stays folded when the guide
-   * opens again (the review app: its cookie storage, which outlives its random
-   * ports). Absent: the browser's localStorage; with neither, the fold lasts
-   * while the page is open.
-   */
   diagramFoldStore?: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void };
-  /**
-   * Draw every chapter diagram folded, its "Diagram" header closed, whatever the fold store says (the Inbox's
-   * Chapter diagrams switch off). One click opens it for this view; the store is not written, so the person's own
-   * folds are as they were when the switch is on again. Absent: the store decides.
-   */
   chapterDiagramsFolded?: boolean;
-  /**
-   * A picture slot under the title when the guide's overview has no diagram
-   * (the Inbox's code review: "Show me" asks the agent for one). Answering
-   * null (or absent) leaves the guide exactly as it is.
-   */
   renderOverviewFigure?: () => React.ReactNode | null;
-  /**
-   * The review's own actions on the title's line, ahead of Global comment (GuideView `threadHeading`: the Inbox's
-   * Show me). No other heading draws them. Answering null (or absent) adds nothing.
-   */
   renderHeadActions?: () => React.ReactNode | null;
-  /**
-   * A control the host raises in a small tab out of a section card's top-right
-   * edge (the Inbox: its Split | Unified switch). Called with
-   * each card's index (the "Everything else" card's is the number of
-   * sections); answering null (or absent) leaves that card exactly as it is.
-   * The card draws the tab in its own background and border, only as wide as
-   * the control; the host draws only the control. The tab assumes the guide
-   * sits on `--background`, as it does in every host.
-   */
   renderSectionTab?: (index: number, card: { folded: boolean; diffs: number; title: string }) => React.ReactNode | null;
-  /**
-   * Controls a host draws on a file card's summary row, at its right (the VS
-   * Code extension: Open in editor, Diff). Answering null (or absent) leaves
-   * the card exactly as it is.
-   */
   renderFileActions?: (file: DiffFile) => React.ReactNode | null;
-  /**
-   * Content a host adds at the foot of a section card's prose column, under
-   * its file chips (the VS Code extension: ask the agent about this chapter,
-   * and the chapter's answers). Called with the card's index; answering null
-   * (or absent) leaves the card exactly as it is.
-   */
   renderSectionFooter?: (index: number) => React.ReactNode | null;
-  /**
-   * A section card's file column when the chapter has no files in the diff (a
-   * guide written before the change exists: Shape's Code view lists the files
-   * each step plans). Called with the card's index; answering null (or
-   * absent) shows the usual "No chapter files in the current diff".
-   */
   renderSectionEmpty?: (index: number) => React.ReactNode | null;
-  /**
-   * Draws a guide link the chain cannot follow itself (a `symbol:` link, a
-   * `code:` link to a file outside the guide): the VS Code extension asks
-   * the language server. Answering null (or absent) shows the link's label
-   * as plain text, as before.
-   */
   renderLink?: (href: string, label: React.ReactNode, key: string | number) => React.ReactNode | null;
-  /**
-   * Global comments: comments on the whole review, not a line or a file.
-   * Absent (guides.show, the VS Code reader): no button and no list.
-   */
   globalComments?: GuideGlobalComments;
-  /**
-   * The layout the host's renderer draws, for a content-fit box's first estimate (GuideView `fitFileHeights`):
-   * Split pairs a removed line with an added one on one row. Absent: counted as Unified (an over-estimate in Split,
-   * which the renderer's measured height then corrects).
-   */
   diffStyle?: 'split' | 'unified';
-  /** The renderer can read a changed file's whole text: it draws an arrow row after the last hunk. For the same estimate. */
   opensWholeFiles?: boolean;
-  /**
-   * Files sit flush, edge to edge (the Inbox's PR page): a content-fit box has no border, padding or corner of its own,
-   * and holds exactly its renderer's height, so one file's header meets the last code row of the file above. Absent:
-   * the bordered box, as before.
-   */
   flushFiles?: boolean;
-  /**
-   * Fold or open every file's diff at once (a host bar's Collapse all). Each new `token` applies `collapsed` to every
-   * card again; a file folded or opened by hand after that keeps its own state. Absent: each card keeps its own.
-   */
   collapseAll?: { collapsed: boolean; token: number };
 }
 
-// The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.
 const GuideHostContext = createContext<GuideHostValue<any> | null>(null);
 
 export function GuideHostProvider<P extends object>({
@@ -222,7 +81,6 @@ export function GuideHostProvider<P extends object>({
   return <GuideHostContext.Provider value={value}>{children}</GuideHostContext.Provider>;
 }
 
-/** Throws when no host is mounted — rendering the guide chain without one is always a wiring bug. */
 export function useGuideHost(): GuideHostValue<Record<string, unknown>> {
   const value = useContext(GuideHostContext);
   if (!value) throw new Error('GuideHostProvider is missing above the guide chain');

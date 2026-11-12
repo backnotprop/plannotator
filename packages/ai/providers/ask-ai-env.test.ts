@@ -1,10 +1,3 @@
-/**
- * Every agent process Ask AI starts carries Plannotator's integration off
- * (ask-ai-env.ts), checked against fake CLIs that record what they were
- * started with. No real agent CLI ever runs. Pi and Qwen Code are checked in
- * their own provider tests (pi-sdk-models.test.ts, qwen-sdk.test.ts), the
- * OpenCode provider's call in opencode-sdk.test.ts.
- */
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +12,6 @@ const dir = mkdtempSync(join(tmpdir(), "plannotator-ask-ai-env-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const posix = process.platform !== "win32";
 
-/** The switches as a fake saw them: `KEY=value` lines its shell wrote. */
 function switchesIn(file: string): Record<string, string> {
 	if (!existsSync(file)) return {};
 	return Object.fromEntries(
@@ -30,7 +22,6 @@ function switchesIn(file: string): Record<string, string> {
 	);
 }
 
-/** A shell prelude that records the three switches in `file`. */
 function recordSwitches(file: string): string {
 	return [
 		`printf 'PLANNOTATOR_ASK_AI_CHILD=%s\\n' "$PLANNOTATOR_ASK_AI_CHILD" >> '${file}'`,
@@ -58,7 +49,6 @@ describe("the marker the integrations read", () => {
 	});
 });
 
-/** A fake `codex app-server`: answers initialize and model/list. */
 function fakeCodex(envFile: string, argvFile: string): string {
 	const script = join(dir, "fake-codex-app-server.mjs");
 	writeFileSync(
@@ -90,12 +80,10 @@ process.stdin.on("data", (d) => {
 	);
 }
 
-/** The runs a fake codex logged: one argv line each. */
 function codexRuns(argvFile: string): string[] {
 	return existsSync(argvFile) ? readFileSync(argvFile, "utf8").split("\n").filter(Boolean).map((line) => line.slice(4)) : [];
 }
 
-/** Run `fn` with CODEX_HOME at a temp folder holding `config` (never the real ~/.codex), and the env keys in `extra`. */
 async function inCodexSandbox(config: string | null, extra: Record<string, string>, fn: () => Promise<void>): Promise<void> {
 	const home = mkdtempSync(join(dir, "codex-home-"));
 	if (config !== null) writeFileSync(join(home, "config.toml"), config);
@@ -113,7 +101,6 @@ async function inCodexSandbox(config: string | null, extra: Record<string, strin
 	}
 }
 
-/** Deep-merge `overlay` into `base`, table into table, as Codex merges a `-c` layer over config.toml. */
 function mergeTables(base: Record<string, unknown>, overlay: Record<string, unknown>): void {
 	for (const [key, value] of Object.entries(overlay)) {
 		const existing = base[key];
@@ -125,7 +112,6 @@ function mergeTables(base: Record<string, unknown>, overlay: Record<string, unkn
 	}
 }
 
-/** The `plannotator-inbox` entry Codex would build from `config` (one file, or the person's then the project's) plus the override Ask AI chooses for it. */
 function inboxEntryAfterOverride(config: string | null | string[]): Record<string, unknown> | undefined {
 	const [flag, override] = codexAskAiConfigArgs(config);
 	expect(flag).toBe("-c");
@@ -144,8 +130,6 @@ function inboxEntryAfterOverride(config: string | null | string[]): Record<strin
 }
 
 describe("Codex: `codex app-server`", () => {
-	// Codex rejects an MCP entry with both `command` and `url`, or neither, and
-	// then the whole config: app-server would not start at all.
 	test("the override leaves a valid, disabled Inbox entry over a stdio entry, a url entry (any form) and no entry", () => {
 		const configs: Record<string, string | null> = {
 			"no config.toml": null,
@@ -192,9 +176,7 @@ describe("Codex: `codex app-server`", () => {
 		write(join(root, "repo", ".codex"), "# repo");
 		write(join(root, "repo", "sub", ".codex"), "# sub");
 		expect(readCodexConfigTexts(join(root, "repo", "sub"), { CODEX_HOME: home })).toEqual(["# home", "# sub", "# repo"]);
-		// The .codex that is CODEX_HOME is read once.
 		expect(readCodexConfigTexts(join(root, "repo"), { CODEX_HOME: join(root, "repo", ".codex") })).toEqual(["# repo"]);
-		// No git root above: only cwd's own .codex.
 		write(join(root, "loose", ".codex"), "# loose");
 		write(join(root, "loose", "sub", ".codex"), "# loose sub");
 		expect(readCodexConfigTexts(join(root, "loose", "sub"), { CODEX_HOME: home })).toEqual(["# home", "# loose sub"]);
@@ -224,15 +206,12 @@ describe("Claude: the Agent SDK's `claude`", () => {
 	test.if(posix)("runs with the switches in its env and the Inbox MCP server disallowed", async () => {
 		const envFile = join(dir, "claude-env.txt");
 		const argvFile = join(dir, "claude-argv.txt");
-		// Records its env and argv and exits, so the session ends with an error.
 		const claude = fakeCli("claude", `#!/bin/sh\n${recordSwitches(envFile)}\nfor a in "$@"; do printf '%s\\n' "$a" >> '${argvFile}'; done\nexit 1\n`);
 		const provider = new ClaudeAgentSDKProvider({ type: "claude-agent-sdk", cwd: dir, claudeExecutablePath: claude });
 		const session = await provider.createSession({ context: { mode: "plan-review", plan: { plan: "# Plan" } } });
 		for await (const _ of session.query("hello")) {
-			// Drain until the fake exits.
 		}
 		expect(switchesIn(envFile)).toEqual(OFF);
-		// The whole server, whatever its transport (an HTTP entry never runs the shim).
 		const argv = readFileSync(argvFile, "utf8").split("\n").filter(Boolean);
 		const at = argv.findIndex((a) => a === "--disallowedTools" || a.startsWith("--disallowedTools="));
 		expect(at).toBeGreaterThanOrEqual(0);
@@ -242,8 +221,6 @@ describe("Claude: the Agent SDK's `claude`", () => {
 });
 
 describe("OpenCode: the installed SDK's createOpencodeServer", () => {
-	// The SDK takes no env; withAskAiChildEnv relies on it copying process.env
-	// synchronously inside the call. This runs the real SDK, not a mock.
 	test.if(posix)("copies the switches into `opencode serve`, and process.env is back as it was when the call returns", async () => {
 		const binDir = mkdtempSync(join(dir, "bin-"));
 		const envFile = join(dir, "opencode-env.txt");
@@ -258,7 +235,6 @@ describe("OpenCode: the installed SDK's createOpencodeServer", () => {
 		let server: { url: string; close(): void } | undefined;
 		try {
 			const starting = withAskAiChildEnv(() => createOpencodeServer({ hostname: "127.0.0.1", port: 0, timeout: 10_000 }));
-			// Restored before the server is even up: no other code sees the switches.
 			expect(process.env.PLANNOTATOR_ASK_AI_CHILD).toBeUndefined();
 			server = await starting;
 			expect(server.url).toBe("http://127.0.0.1:4999");
@@ -271,7 +247,6 @@ describe("OpenCode: the installed SDK's createOpencodeServer", () => {
 		}
 	}, 15_000);
 
-	// Newer `opencode serve` prints this line without the "opencode " prefix.
 	test.if(posix)("resolves on the unprefixed `server listening on <url>` line", async () => {
 		const binDir = mkdtempSync(join(dir, "bin-"));
 		writeFileSync(join(binDir, "opencode"), `#!/bin/sh\necho "server listening on http://127.0.0.1:4999"\nexec sleep 30\n`);

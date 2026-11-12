@@ -72,7 +72,6 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
   const options: AdapterOptions = { endpoint: new URL(`http://127.0.0.1:${t3.port}/mcp`), dataDir, command: cliCommand, workerCommand: [...cliCommand, "t3"] };
   const store = new T3Credentials(dataDir, options.endpoint);
   store.save({ endpoint: options.endpoint.href, epoch: "test-grant", tokens: { access_token: "test-access", token_type: "Bearer" } });
-  // Workers started here exit 4 s after their last review settles (production: 10 min).
   const childEnv = { ...process.env, PLANNOTATOR_BROWSER: "/usr/bin/true", PLANNOTATOR_GLIMPSE: "0", PLANNOTATOR_T3_WORKER_IDLE_MS: "4000" };
   const runHook = async (entrypoint: string) => {
     const hook = Bun.spawn([...cliCommand, "t3-hook"], { cwd: project, env: { ...childEnv, PLANNOTATOR_DATA_DIR: dataDir, CLAUDE_CODE_ENTRYPOINT: entrypoint },
@@ -98,7 +97,6 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
   try {
     await expect(cli({ action: "list" })).rejects.toThrow("--thread is required");
     expect(existsSync(join(dataDir, "inbox"))).toBe(false);
-    // An interactive Claude session (not T3's Agent SDK) is answered before T3 is contacted.
     const interactive = await runHook("cli");
     expect(interactive).toEqual({ stdout: "{}\n", stderr: "", code: 0 });
     expect(calls).toHaveLength(0);
@@ -128,10 +126,8 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
     const created = await (await fetch(`${url}/api/ai/session`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ context: { mode: "annotate", annotate: { filePath: join(project, "notes.md"), markdown: "# Notes" } }, providerId: "session-bridge" }) })).json();
     const answer = await fetch(`${url}/api/ai/query`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: created.sessionId, prompt: "Explain this note." }) });
     expect(await answer.text()).toContain("Scripted T3 answer");
-    // The command has exited. A stopped worker leaves the review alive; the next CLI adopts it.
     await daemonStatus(options, "thread-a", true);
     await eventually(async () => !(await daemonStatus(options, "thread-a") as { running: boolean }).running);
-    // A worker unregisters before it stops answering: once it reads as not running, its registry is gone.
     expect(existsSync(join(daemonDirectory(options, "thread-a"), "daemon.json"))).toBe(false);
     expect(await cli({ t3_thread_id: "thread-a", action: "list" })).toContain(id);
     expect((await fetch(`${url}/api/approve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ feedback: "", annotations: [] }) })).status).toBe(200);
@@ -149,8 +145,6 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
     const reviewOpened = await cli({ t3_thread_id: "thread-a", action: "review" });
     const reviewId = reviewOpened.match(/Session: (pn-[0-9a-f]{6})/)![1]!;
     const reviewUrl = reviewOpened.match(/in Plannotator: (http:\/\/\S+)/)![1]!;
-    // Feedback far over T3's 120,000-character message cap: written to the
-    // review's feedback.md and named in a short message (it used to retry forever).
     const longFeedback = `T3 code feedback\n${"Consider this line. ".repeat(8000)}`;
     expect(longFeedback.length).toBeGreaterThan(120_000);
     expect((await fetch(`${reviewUrl}/api/feedback`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approved: false, feedback: longFeedback, annotations: [] }) })).status).toBe(200);
@@ -169,12 +163,10 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
     expect(existsSync(join(dataDir, "inbox"))).toBe(false);
     expect(messages.get("thread-b") ?? []).toHaveLength(0);
     expect(calls.filter((call) => call.name === "t3_thread_send" && String(call.args.message).includes("Explain this note."))).toHaveLength(1);
-    // Nothing open and nothing to deliver: the worker exits by itself, and the next command starts a new one.
     await eventually(async () => !(await daemonStatus(options, "thread-a") as { running: boolean }).running, 20_000);
     expect(existsSync(join(daemonDirectory(options, "thread-a"), "daemon.json"))).toBe(false);
     expect(await cli({ t3_thread_id: "thread-a", action: "list" })).toContain("No open Plannotator reviews");
     expect((await daemonStatus(options, "thread-a") as { running: boolean }).running).toBe(true);
-    // Logout stops the endpoint's workers and forgets the grant.
     const logout = Bun.spawn([...cliCommand, "t3", "logout", "--url", options.endpoint.href, "--data-dir", dataDir], { cwd: project, env: childEnv, stdout: "pipe", stderr: "pipe" });
     const [loggedOut, , logoutCode] = await Promise.all([new Response(logout.stdout).text(), new Response(logout.stderr).text(), logout.exited]);
     expect(logoutCode).toBe(0);

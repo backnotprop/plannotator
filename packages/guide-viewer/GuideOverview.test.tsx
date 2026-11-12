@@ -107,11 +107,9 @@ describe('guide overview (format version 2)', () => {
     await mount(<View guide={GUIDE} value={hostValue()} />);
     const overview = overviewEl()!;
     expect(overview.textContent).toContain('Delivery asks computeBackoff for a budget (the call).');
-    // Above the first chapter in document order.
     const firstChapter = host!.querySelector('[data-guide-section="0"]')!;
     expect(overview.compareDocumentPosition(firstChapter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(linkButtons()).toEqual(['code:src/deliver.ts#L2', 'chapter:3']);
-    // A symbol and a file outside the guide stay plain text: no raw markdown, no control.
     expect(overview.textContent).not.toContain('](');
     const plain = [...overview.querySelectorAll('span[data-guide-link]')].map((s) => s.getAttribute('data-guide-link'));
     expect(plain).toEqual(['symbol:computeBackoff', 'code:docs/notes.md']);
@@ -126,7 +124,6 @@ describe('guide overview (format version 2)', () => {
     };
     await click('code:src/deliver.ts#L2');
     expect(revealed).toEqual(['src/deliver.ts']);
-    // Chapter 2 has a file: a link to it would reveal it. Chapter 3 is prose only: it scrolls to the card.
     const scrolled: string[] = [];
     const proto = (globalThis as { HTMLElement: typeof HTMLElement }).HTMLElement.prototype as HTMLElement & { scrollIntoView: unknown };
     const original = proto.scrollIntoView;

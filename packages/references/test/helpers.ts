@@ -1,13 +1,8 @@
-// Test helpers: a fake provider behind the port's fetch, and a port built
-// around it. Nothing inside the package is faked; providers are faked at the
-// HTTP boundary only. Fixture values are low-entropy on purpose.
-
 import type { ProviderId } from "../src/contract.ts";
 import type { FetchLike, ReferenceCredentialAnswer, ReferencePort } from "../src/port.ts";
 
 export interface SeenCall {
 	readonly method: string;
-	/** Absolute URL, query kept, fragment dropped. */
 	readonly url: string;
 	readonly headers: Headers;
 	readonly body: string | null;
@@ -22,9 +17,6 @@ export function json(status: number, body: unknown, headers: Record<string, stri
 	});
 }
 
-/** A fake provider. Routes are keyed "METHOD absolute-url" (query
- * included). A value is a handler, or a list of handlers served in order
- * (the last one repeats). An unknown route answers 404. */
 export function fakeProvider() {
 	const routes = new Map<string, Handler[]>();
 	const calls: SeenCall[] = [];
@@ -49,7 +41,6 @@ export function fakeProvider() {
 	return {
 		fetch,
 		calls,
-		/** Arm a route. */
 		on(key: string, ...handlers: Handler[]): void {
 			routes.set(key, handlers);
 		},
@@ -60,8 +51,6 @@ export function fakeProvider() {
 	};
 }
 
-/** A port over a fetch. `credentials` answers by "provider host"; a
- * function answers every call. Every credential request is recorded. */
 export function makePort(
 	fetch: FetchLike,
 	credentials:

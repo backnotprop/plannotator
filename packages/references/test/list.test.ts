@@ -1,13 +1,3 @@
-// list(query): one filtered page of issues per provider. New in Plannotator
-// (not ported from Workspaces). Canned GraphQL answers behind the port's
-// fetch only. Guards: each filter reaches the provider in its own words;
-// oldest first is honoured (Linear by reading backwards); labels mean every
-// label; search values cannot add a qualifier or an operator; rows carry the
-// grammar's canonical, the filter facts and the provider's state; inputs are
-// checked before any credential is asked; rows outside the scope, host or
-// workspace, or failing the re-check, are dropped, and an emptied page keeps
-// its cursor.
-
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from "bun:test";
 
 import { createGithubAdapter, githubAdapter } from "../src/adapters/github.ts";
@@ -29,8 +19,6 @@ interface GraphqlBody {
 	variables: Record<string, unknown>;
 }
 const bodyOf = (call: SeenCall): GraphqlBody => JSON.parse(call.body ?? "{}") as GraphqlBody;
-
-// ── GitHub ──────────────────────────────────────────────────────────────────
 
 const GH_GRAPHQL = "POST https://api.github.com/graphql";
 const ghToken: ReferenceCredential = { kind: "bearer", token: "token-user", host: "github.com" };
@@ -64,7 +52,6 @@ describe("GitHub list", () => {
 							pageInfo: { hasNextPage: true, endCursor: "Y3Vyc29yOjI=" },
 							nodes: [
 								ghIssue(1),
-								// Without the label asked for: the re-check drops it.
 								ghIssue(2, { labels: { nodes: [{ name: "p1" }] } }),
 								ghIssue(3, { state: "CLOSED", stateReason: "NOT_PLANNED", milestone: null, assignees: { nodes: [] } }),
 							],
@@ -155,10 +142,8 @@ describe("GitHub list", () => {
 							pageInfo: { hasNextPage: false },
 							nodes: [
 								ghIssue(1, { milestone: { title: "V1" } }),
-								// Another milestone, or one label short: dropped.
 								ghIssue(2, { milestone: { title: "v1.1" } }),
 								ghIssue(3, { labels: { nodes: [{ name: "bug" }] } }),
-								// Labels past the page read for the row: kept, never dropped for a label.
 								ghIssue(4, { labels: { pageInfo: { hasNextPage: true }, nodes: [{ name: "bug" }] } }),
 							],
 						},
@@ -272,7 +257,6 @@ describe("GitHub list", () => {
 		for (const query of [
 			{ scope: "acme/web", labels: ['say "hi"'], text: "crash" },
 			{ scope: "acme/web", milestone: "back\\slash", text: "crash" },
-			// 100 one-letter words: 199 characters raw, 399 once each word is quoted.
 			{ scope: "acme/web", text: Array(100).fill("a").join(" ") },
 		]) {
 			expect(await githubAdapter.list?.(query, port), JSON.stringify(query)).toEqual({
@@ -335,7 +319,6 @@ describe("GitHub list", () => {
 		expect(variables["q"]).toBe(
 			'repo:acme/web is:issue is:open label:"needs review" sort:created-asc "login" "fails" "repo:other/secret"',
 		);
-		// The label filter narrowed ghIssue(4) (bug, p1) away; without it the row stays.
 		const plain = await githubAdapter.list?.({ scope: "acme/web", text: "login" }, port);
 		expect(plain?.ok && plain.items.map((i) => i.ref.url)).toEqual(["https://github.com/acme/web/issues/4"]);
 	});
@@ -379,7 +362,6 @@ describe("GitHub list", () => {
 							pageInfo: {},
 							nodes: [
 								ghIssue(6, { url: "https://github.acme.example/acme/web/issues/6" }),
-								// The same repository path on another served host: not this list's.
 								ghIssue(7),
 							],
 						},
@@ -396,8 +378,6 @@ describe("GitHub list", () => {
 		expect(gh.calls.map((c) => c.headers.get("authorization"))).toEqual(["Bearer token-ghes"]);
 	});
 });
-
-// ── GitLab ──────────────────────────────────────────────────────────────────
 
 function glIssue(iid: number, over: Record<string, unknown> = {}) {
 	return {
@@ -428,9 +408,7 @@ describe("GitLab list", () => {
 							nodes: [
 								glIssue(1),
 								glIssue(2, { webUrl: "https://gitlab.com/g/sub/p/-/work_items/2", state: "closed" }),
-								// Another milestone (a wildcard such as `Started` can answer it): dropped.
 								glIssue(3, { milestone: { title: "16.1" } }),
-								// No milestone at all (the `Any`/`None` wildcards): dropped.
 								glIssue(4, { milestone: null }),
 							],
 						},
@@ -504,7 +482,6 @@ describe("GitLab list", () => {
 							nodes: [
 								glIssue(1, { webUrl: `https://${host}/g/sub/p/-/issues/1`, state: "closed" }),
 								glIssue(2, { webUrl: `https://${host}/g/sub/p/-/issues/2`, labels: { nodes: [{ title: "Any" }] } }),
-								// The same project path on gitlab.com: not this list's.
 								glIssue(3),
 								glIssue(4, { webUrl: `https://${host}/g/sub/p/-/issues/4`, state: "locked" }),
 							],
@@ -571,8 +548,6 @@ describe("GitLab list", () => {
 	});
 });
 
-// ── Linear ──────────────────────────────────────────────────────────────────
-
 const LIN_GRAPHQL = "POST https://api.linear.app/graphql";
 const linKey: ReferenceCredential = { kind: "linear-api-key", token: "key-lin", host: "linear.app", account: "acme" };
 
@@ -600,7 +575,6 @@ describe("Linear list", () => {
 			return json(200, {
 				data: {
 					issues: {
-						// Linear answers a `last` page in its own (newest first) order.
 						pageInfo: { hasNextPage: false, endCursor: "end", hasPreviousPage: true, startCursor: "start-2" },
 						nodes: [linIssue(2), linIssue(1, { assignee: null })],
 					},
@@ -680,7 +654,6 @@ describe("Linear list", () => {
 				json(200, {
 					data: {
 						issues: {
-							// The newest page: no previous page, so no cursor even with a startCursor.
 							pageInfo: { hasNextPage: true, endCursor: "end-3", hasPreviousPage: false, startCursor: "start-4" },
 							nodes: [linIssue(6), linIssue(5)],
 						},

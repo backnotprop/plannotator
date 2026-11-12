@@ -9,29 +9,14 @@ import React, {
 } from 'react';
 
 const INITIAL_MOUNTED_CODE_VIEWS = 2;
-/**
- * Guides with at most this many files mount every CodeView up front instead of
- * running the outer window: the window exists to bound hundreds of shells, and
- * for a small changeset the eviction/remount churn (and the blank shells it
- * leaves while scrolling) costs more than the handful of CodeViews it saves.
- */
 export const GUIDE_EAGER_MOUNT_MAX_FILES = 15;
 const OUTER_OVERSCAN_PX = 1_200;
 const FORCE_MOUNT_MS = 1_500;
-/**
- * Scrolling faster than this (px per ms, 750 px a frame) passes files instead of showing them: End, Home, a long
- * scrollbar throw. Nothing mounts until it slows. A hard trackpad flick peaks near 600 px a frame and stays under it.
- */
 const PASSING_SPEED = 45;
-/** A frame longer than this while scrolling (ms): the page is falling behind, so on-screen files come first. */
 const FALLING_BEHIND_MS = 40;
-/** How long End or Home may take to start moving the view before it counts as having done nothing (a text field has the key). */
 const KEY_SCROLL_START_FRAMES = 6;
-/** A jump further than this many views goes at once: a smooth scroll would mount everything it passes. */
 const SMOOTH_JUMP_VIEWS = 2;
-/** A smooth scroll that has not moved for this many frames is over. */
 const SMOOTH_DONE_FRAMES = 3;
-/** The target held still this many frames, with nothing left to mount, ends a jump. */
 const LANDED_FRAMES = 8;
 const LANDING_MAX_MS = 4_000;
 
@@ -42,21 +27,13 @@ interface RegisteredShell {
 
 type Subscriber = () => void;
 
-/**
- * A file kept in place while the files around it settle: a jump's target (`jumpTo`) or what a fast scroll stopped on.
- * After End it is the end of the scroll that is kept (`end`), not a file.
- */
 interface Landing {
   element: HTMLElement;
   root: HTMLElement | null;
-  /** End's landing: the view stays at the end of the scroll while the files there draw and measure. */
   end: boolean;
-  /** End's landing: the furthest the view scrolled at the last look. The view going up with that unchanged is the person's scroll. */
   lastEnd: number;
-  /** Where to keep it, on screen. A jump: null, its own place at the top of the view. */
   heldTop: number | null;
   lastScrollTop: number;
-  /** A smooth scroll is still running: leave it alone until it stops. */
   smooth: boolean;
   lastTop: number;
   stillFrames: number;
@@ -64,17 +41,8 @@ interface Landing {
   raf: number;
 }
 
-/** Any of these on the page means the person took the scroll back. */
 const TAKE_OVER_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
-/**
- * The nearest ancestor that actually scrolls the guide, or null for the
- * window. `body`/`html` are never returned: an overflow set on them propagates
- * to the viewport (the element itself does not scroll — its scrollHeight equals
- * its clientHeight), so observing it as an IntersectionObserver root would make
- * every shell "near" and mount every file, and hang the scroll listener on an
- * element that never emits scroll events.
- */
 function findScrollRoot(host: HTMLElement): HTMLElement | null {
   let current = host.parentElement;
   while (current) {
@@ -98,21 +66,6 @@ function setEquals(left: ReadonlySet<string>, right: ReadonlySet<string>): boole
   return true;
 }
 
-/**
- * One outer-window coordinator for every file shell in a Guided Review.
- *
- * Pierre virtualizes lines INSIDE each mounted CodeView. This manager keeps a
- * CodeView for every file on screen or within the overscan of it, however many
- * that is (anything on screen draws, at any window size), and none for the rest,
- * without making 250 shell components rerender on every scroll-window update:
- * subscribers are keyed per file id.
- *
- * When a window change lands depends on the scroll. Moving: at once, so a flick
- * runs into files already drawn. Passing (see PASSING_SPEED, and End and Home at
- * any speed): not yet, because those files are gone by the next frame. At rest:
- * what is on screen at once, the rest of the window one file a frame, nearest
- * first, so arriving somewhere far never blocks on mounts nobody is looking at yet.
- */
 class GuideViewportManager {
   private entries = new Map<string, RegisteredShell>();
   private elementIds = new WeakMap<HTMLElement, string>();
@@ -131,9 +84,7 @@ class GuideViewportManager {
   private passedLastFrame = false;
   private lastMotion: 'rest' | 'moving' | 'passing' = 'rest';
   private fallingBehind = false;
-  /** End or Home was pressed: the browser's animated scroll to the far end, if the key moves this view. */
   private keyScroll: { moved: boolean; frames: number; end: boolean } | null = null;
-  /** End moved this view: where it comes to rest is held at the end of the scroll (`holdEnd`). */
   private endArriving = false;
   private landing: Landing | null = null;
 
@@ -141,12 +92,6 @@ class GuideViewportManager {
     this.eager = eager;
   }
 
-  /**
-   * Eager mode mounts every registered shell and keeps it mounted: no window,
-   * no observer, no scroll tracking. Flipping it at runtime (a refreshed diff
-   * crossing the file threshold) either mounts everything or re-arms the
-   * window machinery against the current host.
-   */
   setEager = (eager: boolean): void => {
     if (eager === this.eager) return;
     this.eager = eager;
@@ -172,7 +117,6 @@ class GuideViewportManager {
 
     this.scrollRoot = findScrollRoot(host);
     this.lastScrollTop = this.readScrollTop();
-    // Each scroll reads how fast the view is moving (and, with no observer, the window itself).
     const scrollTarget: EventTarget = this.scrollRoot ?? window;
     scrollTarget.addEventListener('scroll', this.handleOuterScroll, { passive: true });
     window.addEventListener('keydown', this.handleKey, { passive: true });
@@ -201,9 +145,6 @@ class GuideViewportManager {
     if (!element) {
       this.entries.delete(id);
       this.pinned.delete(id);
-      // Ref detachment means the subscriber is unmounting too; remove the id
-      // without notifying that departing component. A future shell with the
-      // same id reads the fresh false snapshot on subscription.
       this.mounted.delete(id);
       this.scheduleReconcile();
       return;
@@ -217,9 +158,6 @@ class GuideViewportManager {
     }
     this.observer?.observe(element);
 
-    // Avoid a blank first paint before IntersectionObserver's first delivery.
-    // Only the first couple of shells seed eagerly; the observer immediately
-    // replaces them with the real viewport window.
     if (this.mounted.size < INITIAL_MOUNTED_CODE_VIEWS) {
       this.setMounted(new Set([...this.mounted, id]));
     }
@@ -244,8 +182,6 @@ class GuideViewportManager {
   setPinned = (id: string, pinned: boolean): void => {
     if (pinned === this.pinned.has(id)) return;
     if (this.eager) {
-      // Everything registered is already mounted; only track the pin so a later
-      // switch back to the window keeps the focused file alive.
       if (pinned) this.pinned.add(id);
       else this.pinned.delete(id);
       return;
@@ -276,18 +212,11 @@ class GuideViewportManager {
     }, FORCE_MOUNT_MS);
   };
 
-  /** At once, unless a fast scroll is carrying files under the pointer: each would mount for the one frame it is there. */
   private mountOrWait(id: string): void {
     if (this.passedLastFrame) this.scheduleReconcile();
     else this.setMounted(new Set([...this.mounted, id]));
   }
 
-  /**
-   * Takes this file to the top of the view. Near, the scroll is smooth; far, it goes at once, so nothing on the way
-   * mounts. Files above the target may still swap their estimated height for a measured one as they draw, so this
-   * keeps the target in place until they settle, unless the person scrolls first. `instant`: at once however near
-   * (a reader whose boxes fit their content, where the page's own place-holding would stop a smooth scroll).
-   */
   jumpTo = (id: string, options: { instant?: boolean } = {}): void => {
     const element = this.entries.get(id)?.element;
     if (!element) return;
@@ -297,7 +226,6 @@ class GuideViewportManager {
     const view = root?.getBoundingClientRect() ?? new DOMRectReadOnly(0, 0, window.innerWidth, window.innerHeight);
     const smooth = !options.instant && Math.abs(element.getBoundingClientRect().top - view.top) <= SMOOTH_JUMP_VIEWS * view.height;
     element.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'start' });
-    // Arrived in this frame: what is on screen there draws in it too, not when the observer next reports.
     if (!smooth) {
       const onScreen = [...this.entries].filter(([, entry]) => isOnScreen(entry.element.getBoundingClientRect(), view));
       this.setMounted(new Set([...this.mounted, ...onScreen.map(([entryId]) => entryId)]));
@@ -305,7 +233,6 @@ class GuideViewportManager {
     this.startLanding({ element, root, heldTop: null, smooth, end: false });
   };
 
-  /** A fast scroll just stopped: the file at the top of the view stays put while the files above it draw and measure. */
   private holdInPlace(): void {
     if (this.landing) return;
     const view = this.getRootRect();
@@ -321,11 +248,6 @@ class GuideViewportManager {
     if (element) this.startLanding({ element, root: this.scrollRoot, heldTop: top, smooth: false, end: false });
   }
 
-  /**
-   * End just brought the view to rest. The browser aimed at the end as it was when the key went down, and the files
-   * there then draw at their measured heights, which moves the end. The view stays at it until they settle, unless
-   * the person scrolls first. Not when the view rests more than a view from the end: the key did something else.
-   */
   private holdEnd(): boolean {
     const host = this.host;
     if (!host) return false;
@@ -336,7 +258,6 @@ class GuideViewportManager {
     return true;
   }
 
-  /** The furthest the view scrolls. */
   private readScrollEnd(root: HTMLElement | null): number {
     return root ? root.scrollHeight - root.clientHeight : document.documentElement.scrollHeight - window.innerHeight;
   }
@@ -357,7 +278,6 @@ class GuideViewportManager {
     if (landing.end) {
       const scrollTop = landing.root ? landing.root.scrollTop : window.scrollY;
       const end = this.readScrollEnd(landing.root);
-      // The view went up and the scroll is as tall as it was: the person's own scroll (a scrollbar drag has no event).
       if (end === landing.lastEnd && scrollTop <= landing.lastScrollTop - 1) {
         this.endLanding();
         return;
@@ -380,7 +300,6 @@ class GuideViewportManager {
     const top = landing.element.getBoundingClientRect().top;
     const scrollTop = landing.root ? landing.root.scrollTop : window.scrollY;
     const moved = Math.abs(top - landing.lastTop) >= 0.5;
-    // The file moved and so did the scroll, and not by this code: a scrollbar drag going on (it has no event of its own).
     if (!landing.smooth && moved && Math.abs(scrollTop - landing.lastScrollTop) >= 1) {
       this.endLanding();
       return;
@@ -392,7 +311,6 @@ class GuideViewportManager {
       const viewTop = landing.root?.getBoundingClientRect().top ?? 0;
       const wanted = landing.heldTop ?? viewTop + (parseFloat(getComputedStyle(landing.element).scrollMarginTop) || 0);
       if (Math.abs(top - wanted) >= 1) {
-        // At the very end of the scroll this does nothing, and the file holds still where it is.
         if (landing.heldTop === null) landing.element.scrollIntoView({ behavior: 'instant', block: 'start' });
         else if (landing.root) landing.root.scrollTop += top - wanted;
         else window.scrollBy({ top: top - wanted, behavior: 'instant' });
@@ -459,7 +377,6 @@ class GuideViewportManager {
       if (!this.holdEnd() && arrived) this.holdInPlace();
     } else if (arrived) this.holdInPlace();
 
-    // With no IntersectionObserver (older embedded browsers) this reads the window itself on each scroll.
     const measuredRoot = typeof IntersectionObserver === 'undefined' ? this.getRootRect() : null;
     const next = new Set<string>();
     for (const [id, entry] of this.entries) {
@@ -467,13 +384,10 @@ class GuideViewportManager {
       if (near || id === this.forcedId || this.pinned.has(id)) next.add(id);
     }
 
-    // Before the first observer delivery, retain the tiny eager seed rather
-    // than flashing every CodeView off and back on.
     if (next.size === 0 && this.mounted.size > 0) return;
 
     if (motion === 'moving' && !this.fallingBehind) {
       this.setMounted(next);
-      // A scroll ends with no event of its own: the next frame finds out.
       this.scheduleReconcile();
       return;
     }
@@ -482,12 +396,10 @@ class GuideViewportManager {
     if (motion === 'moving' || !setEquals(step, next)) this.scheduleReconcile();
   }
 
-  /** How the view moved since the last look. A smooth jump's scroll counts as moving; a landing's small re-aims do not. */
   private readMotion(): 'rest' | 'moving' | 'passing' {
     const top = this.readScrollTop();
     const now = performance.now();
     const moved = Math.abs(top - this.lastScrollTop);
-    // Capped: the first scroll after a pause is measured against a frame or two, not the whole pause.
     const elapsed = Math.max(1, Math.min(now - this.lastScrollAt, 50));
     this.fallingBehind = this.lastMotion === 'moving' && now - this.lastScrollAt > FALLING_BEHIND_MS;
     this.lastScrollTop = top;
@@ -508,12 +420,10 @@ class GuideViewportManager {
       }
     }
     if (moved < 1) {
-      // One still frame in the middle of a fast scroll (input slower than the frames) is not the end of it.
       const passedLastFrame = this.passedLastFrame;
       this.passedLastFrame = false;
       return passedLastFrame ? 'passing' : 'rest';
     }
-    // A step of more than a view: nothing on screen now was on screen last frame, however slow the frames are.
     const viewHeight = this.scrollRoot ? this.scrollRoot.clientHeight : window.innerHeight;
     this.passedLastFrame = moved > viewHeight || moved / elapsed > PASSING_SPEED;
     return this.passedLastFrame ? 'passing' : 'moving';
@@ -523,10 +433,6 @@ class GuideViewportManager {
     return this.scrollRoot ? this.scrollRoot.scrollTop : window.scrollY;
   }
 
-  /**
-   * One frame's step toward the window at rest: everything on screen now, plus the nearest other file, and as many
-   * files dropped as that mounted (at least one). Pins and jump targets mounted at once already, on their own paths.
-   */
   private settleStep(next: Set<string>): Set<string> {
     const root = this.getRootRect();
     const step = new Set<string>();
@@ -615,7 +521,6 @@ export function GuideViewportProvider({
 }: {
   children: ReactNode;
   className?: string;
-  /** Mount every registered shell immediately and keep it mounted (small guides). */
   eager?: boolean;
 }) {
   const [manager] = useState(() => new GuideViewportManager(eager));
@@ -647,10 +552,6 @@ export function useGuideFileWindow(id: string, pinned = false): {
   const requestMount = useCallback(() => manager.requestMount(id), [manager, id]);
   const jumpTo = useCallback((options?: { instant?: boolean }) => manager.jumpTo(id, options), [manager, id]);
 
-  // The guide has one focus arbiter. The focused file is pinned: it stays mounted
-  // (with any open annotation composer) while it scrolls out of the window. Focus
-  // follows the pointer and keyboard focus, so once either enters another file this
-  // one unpins and may unmount when it is off screen, its composer with it.
   useEffect(() => {
     manager.setPinned(id, pinned);
     return () => manager.setPinned(id, false);

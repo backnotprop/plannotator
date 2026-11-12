@@ -1,8 +1,3 @@
-/**
- * `CreateSessionOptions.oneShot` (the Inbox's PR risk agent): what the providers tell their agent CLIs. What regresses:
- * a background judgment getting tools, the person's settings or a saved session; Pi's default model being rewritten.
- * Each CLI here is a scratch script: no test runs a real agent.
- */
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +24,6 @@ function script(name: string, body: string): string {
 }
 
 describe("Claude", () => {
-  /** The flags the SDK started `claude` with, and what it wrote to its stdin (the system prompt goes there). */
   const startOf = async (oneShot: { systemPrompt: string } | undefined) => {
     const name = Math.random().toString(36).slice(2);
     const log = join(dir, `claude-${name}.txt`);
@@ -42,7 +36,6 @@ describe("Claude", () => {
   test.skipIf(process.platform === "win32")("no tools, only its own prompt, no hooks, no MCP servers, no saved session; settings load, so it routes where the person set it up", async () => {
     const { argv, stdin } = await startOf({ systemPrompt: "JUDGE" });
     expect(argv.some((a) => a === "--tools=" || a === "--tools")).toBe(true);
-    // Bedrock or Vertex set in settings.json: without them, a diff would go to whatever login this Claude has.
     expect(argv.some((a) => a.startsWith("--setting-sources"))).toBe(false);
     expect(JSON.parse(argv[argv.indexOf("--settings") + 1]!)).toEqual({ disableAllHooks: true });
     expect(argv).toContain("--strict-mcp-config");
@@ -62,7 +55,6 @@ describe("Claude", () => {
 });
 
 describe("Pi", () => {
-  /** A `pi` in Bun's own runner: it keeps its argv and what it was sent, answers each command, and ends a prompt at once. */
   const fakePi = () => {
     const log = join(dir, `pi-${Math.random().toString(36).slice(2)}.jsonl`);
     const path = script(
@@ -174,7 +166,6 @@ describe("Codex", () => {
     expect(codexAskAiConfigArgs([config]).join(" ")).not.toContain("web_search");
   });
 
-  /** A `codex` that answers every request, then does what the test says in the turn. */
   const fakeCodex = (turn: string) => {
     const log = join(dir, `codex-${Math.random().toString(36).slice(2)}.txt`);
     const path = script(

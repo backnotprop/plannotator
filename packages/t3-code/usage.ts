@@ -1,7 +1,3 @@
-/**
- * `plannotator t3 --help`. The first part (up to "Ask this session") is the
- * owner-approved setup text for the Inbox wake: keep it short and plain.
- */
 export const T3_CLI_USAGE = [
   "Usage:",
   "  plannotator t3 login --url <T3 MCP URL>",

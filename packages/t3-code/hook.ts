@@ -29,17 +29,11 @@ function configuredEndpoints(dataDir: string): URL[] {
     try {
       const value = z.object({ endpoint: z.string(), tokens: z.object({ access_token: z.string().min(1) }) }).parse(JSON.parse(readFileSync(join(root, entry.name, "oauth.json"), "utf8")) as unknown);
       endpoints.push(t3Endpoint(value.endpoint));
-    } catch { /* Only valid, authorized connections participate. */ }
+    } catch { }
   }
   return endpoints;
 }
 
-/**
- * The hook's answer for one Bash call: `{}` (run the command as written)
- * unless the call is an ordinary Plannotator command in a T3 conversation this
- * machine is authorized for. Only Agent SDK sessions can be T3's, so every
- * other Claude session is answered before anything is read or contacted.
- */
 export async function prepareT3Hook(value: unknown, selfCommand: readonly string[], dataDir: string,
   env: NodeJS.ProcessEnv = process.env, timeoutMs = 6500): Promise<Record<string, unknown>> {
   if (!isAgentSdkEntrypoint(env.CLAUDE_CODE_ENTRYPOINT)) return {};
@@ -52,7 +46,6 @@ export async function prepareT3Hook(value: unknown, selfCommand: readonly string
   if (!endpoints.length) return {};
   const matches: Array<{ endpoint: URL; thread: string; cwd: string }> = [];
   const controller = new AbortController();
-  // Under Claude's 10 s hook timeout, connecting included: a hanging endpoint fails quietly.
   const timer = setTimeout(() => controller.abort(new Error("T3 automatic connection timed out.")), timeoutMs);
   try {
     for (const endpoint of endpoints) {
@@ -74,12 +67,10 @@ export async function prepareT3Hook(value: unknown, selfCommand: readonly string
     const path = join(directory, `${randomUUID()}.json`);
     privateWrite(path, { v: 1, endpoint: match.endpoint.href, thread: match.thread, input });
     const command = [...selfCommand, "t3-hook", "open", path, "--data-dir", dataDir].map(shellWord).join(" ");
-    // Permission evaluation still applies to the updated command.
     return { hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: { ...event.tool_input, command } } };
   } finally { clearTimeout(timer); }
 }
 
-/** `work`, or the signal's reason once it aborts; a result that arrives after that is handed to `discard`. */
 function untilAborted<T>(work: Promise<T>, signal: AbortSignal, discard: (late: T) => void): Promise<T> {
   if (signal.aborted) { void work.then(discard, () => {}); return Promise.reject(signal.reason); }
   return new Promise<T>((resolve, reject) => {
@@ -96,7 +87,7 @@ function logHookFailure(dataDir: string, error: unknown): void {
     if (!existsSync(directory)) return;
     const reason = error instanceof Error ? error.message : String(error);
     appendFileSync(join(directory, "hook.log"), `${new Date().toISOString()} automatic T3 connection unavailable: ${reason.replace(/\s+/g, " ")}\n`, { mode: 0o600 });
-  } catch { /* Logging must never change the hook's answer. */ }
+  } catch { }
 }
 
 export async function runT3Hook(args: readonly string[], selfCommand: readonly string[]): Promise<void> {
@@ -114,9 +105,6 @@ export async function runT3Hook(args: readonly string[], selfCommand: readonly s
     process.exit(hasPlanHookOverlap(resolve(args[1]!)) ? 0 : 1);
   }
   if (!args.length) {
-    // Fail silent: an unreachable T3, a revoked grant or an ambiguous owner
-    // leaves the command as written, with no message in the conversation.
-    // The reason goes to <data dir>/t3-code/hook.log.
     const dataDir = getPlannotatorDataDir();
     let answer: Record<string, unknown> = {};
     try {
@@ -136,7 +124,6 @@ export async function runT3Hook(args: readonly string[], selfCommand: readonly s
   const root = resolve(dataDir, "t3-code", "hooks");
   const path = resolve(file);
   if (!path.startsWith(root + sep) || !launchName.test(basename(path)) || lstatSync(path).isSymbolicLink()) throw new Error("Invalid T3 hook launch path.");
-  // The launch file is used once, whatever the outcome.
   try {
     const launch = launchSchema.parse(JSON.parse(readFileSync(path, "utf8")) as unknown);
     const parsed = parsePlannotatorToolInput(launch.input);

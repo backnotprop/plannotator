@@ -27,7 +27,6 @@ function world() {
   return { directory, record, read, open };
 }
 
-/** A pid that existed and is gone. */
 function deadPid(): number {
   return Bun.spawnSync(["/bin/sh", "-c", "exit 0"]).pid;
 }
@@ -38,14 +37,12 @@ async function tick(reviews: T3Reviews): Promise<void> {
 
 describe("T3 review records", () => {
   test("a launch that never came up does not keep the worker alive, and the next worker does not inherit it", async () => {
-    // What regresses: a worker killed while opening a review left a record
-    // with no port; it was adopted by every later worker and idle() stayed false forever.
     const w = world();
-    w.record("pn-aaaaa1", { pid: deadPid() });                                     // its CLI died too
-    w.record("pn-aaaaa2", {});                                                     // killed before the CLI started
-    w.record("pn-aaaaa3", { pid: process.pid, createdAt: Date.now() - T3_OPEN_ABANDONED_MS - 1000 }); // alive, never ready
-    w.record("pn-aaaaa4", { pid: process.pid });                                   // still within its opening window
-    w.record("pn-aaaaa5", { pid: deadPid(), port: 1, url: "http://127.0.0.1:1" }); // opened, server gone
+    w.record("pn-aaaaa1", { pid: deadPid() });
+    w.record("pn-aaaaa2", {});
+    w.record("pn-aaaaa3", { pid: process.pid, createdAt: Date.now() - T3_OPEN_ABANDONED_MS - 1000 });
+    w.record("pn-aaaaa4", { pid: process.pid });
+    w.record("pn-aaaaa5", { pid: deadPid(), port: 1, url: "http://127.0.0.1:1" });
     const reviews = w.open();
     await tick(reviews);
     for (const id of ["pn-aaaaa1", "pn-aaaaa2", "pn-aaaaa3", "pn-aaaaa5"]) {

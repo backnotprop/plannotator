@@ -1,28 +1,3 @@
-/**
- * A broken pipe to a nested RPC agent is a PROVIDER failure, never a host
- * crash (#1378).
- *
- * The reported crash: opening a plan review from Pi on Windows exited the
- * whole Pi host with `write EPIPE` out of `PiProcessNode.send()`. The child's
- * stdin closed between the `destroyed` check and the write, and the resulting
- * `error` event on a stream with no listener escalated to `uncaughtException`.
- *
- * Two layers of coverage:
- *
- *  - The end-to-end block runs the provider in a REAL `node` child against a
- *    fake Pi that closes its own stdin. Node is the Pi runtime, and Bun's
- *    node:stream / node:child_process shims do not reproduce the unhandled-
- *    'error'-kills-the-process rule, so an in-process test could pass against
- *    code that still kills the host (the lesson live-proxy-node.test.ts was
- *    built on). The child installs no `uncaughtException` handler: it printing
- *    its result line at all is the proof that nothing escaped.
- *  - The unit block drives writeChildLine/guardChildStreams with stream
- *    doubles, which is the only way to pin BOTH failure shapes deterministically
- *    — a synchronous throw from write(), and an asynchronous error delivered to
- *    the write callback / 'error' event. Which one a real pipe produces is a
- *    platform and timing race.
- */
-
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -31,26 +6,6 @@ import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import { guardChildStreams, writeChildLine } from "./child-io.ts";
 
-// ---------------------------------------------------------------------------
-// End to end, in a real node process
-// ---------------------------------------------------------------------------
-
-/**
- * A stand-in for `pi --mode rpc`. Reads its behavior from a file so one
- * executable path can be healthy or broken across successive spawns, which is
- * what lets the session-level recovery case be exercised.
- *
- * Three modes:
- *  - "closed-stdin" closes fd 0 outright — the read end of the parent's stdin
- *    pipe — and only then announces itself, so a parent that waits for that
- *    announcement is guaranteed to find a pipe with no reader on its next
- *    write. It stays alive afterwards, so the failure under test is the broken
- *    PIPE and not an ordinary child exit.
- *  - "break-after-first" answers one request and closes stdin in the same
- *    tick, which breaks the pipe MID-session without the parent having to
- *    synchronize on anything. That is the reported shape.
- *  - "echo" is a healthy RPC peer, used for the recovery half.
- */
 const FAKE_PI = `#!/usr/bin/env node
 import { closeSync, readFileSync, readSync } from "node:fs";
 
@@ -112,9 +67,6 @@ if (mode === "closed-stdin") {
 }
 `;
 
-// The fake Pi is launched through a shebang, which Windows cannot do. The bug
-// itself is platform-independent and the unit block below covers it on every
-// platform; this block just needs a real POSIX pipe to break.
 const describeE2E = process.platform === "win32" ? describe.skip : describe;
 
 describeE2E("Pi provider stdio failure (real node child)", () => {
@@ -150,28 +102,19 @@ describeE2E("Pi provider stdio failure (real node child)", () => {
 				child.exited,
 			]);
 
-			// The load-bearing assertion: an unguarded stream error would have
-			// terminated this process before it could print anything.
 			expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
 
 			const results = JSON.parse(stdout.trim().split("\n").pop()!);
 
-			// The in-flight request rejects, with a message that names the pipe.
 			expect(results.brokenRejected).toBe(true);
 			expect(String(results.brokenMessage).toLowerCase()).toContain("stdin");
-			// The provider is marked dead, so the next query re-spawns it...
 			expect(results.brokenAliveAfter).toBe(false);
-			// ...and listeners are told, which is what ends a streaming query.
 			expect(results.brokenSawProcessExited).toBe(true);
-			// A fire-and-forget send afterwards must not throw at its caller.
 			expect(results.postFailureSendThrew).toBe(false);
 
-			// A fresh process works normally afterwards.
 			expect(results.recoveredSessionId).toBe("fake-session");
 			expect(results.recoveredAlive).toBe(true);
 
-			// End to end: the query surfaces an error message rather than hanging
-			// or crashing, and the next query on the same session completes.
 			expect(results.sessionFailedMessages.some((m: { type: string }) => m.type === "error")).toBe(true);
 			expect(results.sessionRecoveredTypes).toContain("result");
 		} finally {
@@ -180,13 +123,8 @@ describeE2E("Pi provider stdio failure (real node child)", () => {
 	}, 60_000);
 });
 
-// ---------------------------------------------------------------------------
-// Both write-failure shapes, deterministically
-// ---------------------------------------------------------------------------
-
 type WriteCb = (err?: Error | null) => void;
 
-/** Minimal stand-in for a child's stdin with a scriptable failure mode. */
 function fakeStdin(mode: "sync-throw" | "async-error" | "ok") {
 	const stream = new EventEmitter() as EventEmitter & {
 		destroyed: boolean;
@@ -226,8 +164,6 @@ describe("writeChildLine", () => {
 		}).not.toThrow();
 		expect(returned!.message).toContain("EPIPE");
 		expect(returned!.message).toContain("Pi process");
-		// The sync path reports through the return value only, so a caller that
-		// handles it cannot also be double-failed by the async channel.
 		expect(failures).toHaveLength(0);
 	});
 
@@ -236,7 +172,6 @@ describe("writeChildLine", () => {
 		const returned = writeChildLine(asProc(fakeStdin("async-error")), "x\n", "Pi process", (e) =>
 			failures.push(e),
 		);
-		// The write was accepted, so nothing is known yet at call time.
 		expect(returned).toBeNull();
 		await new Promise((r) => setTimeout(r, 5));
 		expect(failures).toHaveLength(1);
@@ -270,13 +205,11 @@ describe("guardChildStreams", () => {
 		const proc = new EventEmitter() as EventEmitter & Record<string, unknown>;
 		proc.stdin = new EventEmitter();
 		proc.stdout = new EventEmitter();
-		proc.stderr = null; // stdio: "ignore" leaves this null
+		proc.stderr = null;
 
 		const failures: string[] = [];
 		guardChildStreams(proc as unknown as ChildProcess, "Pi process", (e) => failures.push(e.message));
 
-		// Without these listeners each of these emits would be an
-		// uncaughtException that takes the host agent down.
 		expect(() => proc.emit("error", new Error("spawn ENOENT"))).not.toThrow();
 		expect(() => (proc.stdin as EventEmitter).emit("error", new Error("write EPIPE"))).not.toThrow();
 		expect(() => (proc.stdout as EventEmitter).emit("error", new Error("read ECONNRESET"))).not.toThrow();

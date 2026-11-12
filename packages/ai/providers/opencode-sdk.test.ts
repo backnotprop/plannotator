@@ -1,27 +1,3 @@
-/**
- * Guards for the opencode-serve orphan leak:
- *
- * 1. The provider must spawn its OWN server on an OS-assigned port (port 0),
- *    never share a fixed default port. A shared port made every Plannotator
- *    process attach to the first server spawned; interrupted sessions orphaned
- *    it and later sessions piled unevictable per-directory instances into it.
- * 2. A process "exit" handler must close the spawned server (the CLI routes
- *    SIGINT/SIGTERM through process.exit, so this is what covers Ctrl-C), and
- *    dispose must both close the server and remove that handler.
- * 3. A failure AFTER the spawn (client construction) must reap the child and
- *    remove the handler so a retry cannot strand the first server.
- * 4. dispose() during an in-flight spawn must not resurrect the provider: the
- *    completing spawn reaps its own server and the start rejects.
- * 5. Neither runtime's AI setup may call the provider's fetchModels eagerly at
- *    startup — it spawns `opencode serve`, so it must stay behind the deferred
- *    provider initializer (?activate= / first session), like Codex.
- *
- * The SDK is mocked before the provider import so no real `opencode serve` is
- * ever spawned. bun runs all test files in one process, so the module mock
- * leaks process-wide; that is safe (and desirable) here because this provider
- * is the only consumer of @opencode-ai/sdk and no test may spawn a real
- * server.
- */
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -31,7 +7,6 @@ interface FakeSpawn {
 	port?: number;
 	timeout?: number;
 	closed: boolean;
-	/** The switches process.env held when the SDK was called (it copies process.env into the spawn there). */
 	env: Record<string, string | undefined>;
 }
 
@@ -92,8 +67,6 @@ describe("OpenCodeProvider server lifecycle", () => {
 		await provider.ensureServer();
 
 		expect(spawned.length).toBe(1);
-		// port 0 = OS-assigned free port. A fixed default here reintroduces the
-		// shared-server pile-up.
 		expect(spawned[0]!.port).toBe(0);
 		expect(process.listeners("exit").length).toBe(listenersBefore + 1);
 
@@ -109,8 +82,6 @@ describe("OpenCodeProvider server lifecycle", () => {
 		const added = process.listeners("exit").filter((l) => !before.has(l));
 		expect(added.length).toBe(1);
 
-		// Simulate the process exiting without a clean dispose (Ctrl-C routes
-		// through process.exit, which runs "exit" listeners).
 		(added[0] as () => void)();
 		expect(spawned[0]!.closed).toBe(true);
 
@@ -119,7 +90,6 @@ describe("OpenCodeProvider server lifecycle", () => {
 
 	test("`opencode serve` starts with Plannotator's integration off, and the host's own env is untouched", async () => {
 		const saved = process.env.PLANNOTATOR_INBOX_TOOL;
-		// The person turned the Inbox tool on for their own sessions.
 		process.env.PLANNOTATOR_INBOX_TOOL = "1";
 		try {
 			const provider = makeProvider();
@@ -154,15 +124,10 @@ describe("OpenCodeProvider server lifecycle", () => {
 		await expect(provider.ensureServer()).rejects.toThrow(
 			"client construction failed",
 		);
-		// The first spawn must be closed and its exit handler removed — a
-		// leaked handler here would keep a dead server's closure registered
-		// forever, and a leaked server is the orphan class this fix exists
-		// to kill.
 		expect(spawned.length).toBe(1);
 		expect(spawned[0]!.closed).toBe(true);
 		expect(process.listeners("exit").length).toBe(listenersBefore);
 
-		// The retry starts clean: one fresh spawn, one handler.
 		await provider.ensureServer();
 		expect(spawned.length).toBe(2);
 		expect(spawned[1]!.closed).toBe(false);
@@ -182,7 +147,6 @@ describe("OpenCodeProvider server lifecycle", () => {
 		});
 
 		const inFlight = provider.ensureServer();
-		// Let doStart enter createOpencodeServer before disposing.
 		await Bun.sleep(0);
 		expect(spawned.length).toBe(1);
 
@@ -190,12 +154,9 @@ describe("OpenCodeProvider server lifecycle", () => {
 		openGate();
 
 		await expect(inFlight).rejects.toThrow("disposed during startup");
-		// The late-completing spawn must reap its own server and leave no
-		// handler behind — a disposed provider must never hold a live child.
 		expect(spawned[0]!.closed).toBe(true);
 		expect(process.listeners("exit").length).toBe(listenersBefore);
 
-		// The provider is still usable afterwards: a fresh start respawns.
 		spawnGate = null;
 		await provider.ensureServer();
 		expect(spawned.length).toBe(2);
@@ -220,10 +181,8 @@ describe("OpenCodeProvider server lifecycle", () => {
 		expect(failure?.message).toContain("not found on PATH");
 		expect(failure?.cause).toBe(enoent);
 
-		// Must not register an exit handler when spawn fails before completion
 		expect(process.listeners("exit").length).toBe(listenersBefore);
 
-		// Provider recovers cleanly when CLI becomes available
 		serverError = null;
 		await provider.ensureServer();
 		expect(spawned.length).toBe(1);
@@ -237,8 +196,6 @@ describe("OpenCodeProvider server lifecycle", () => {
 
 	test("passes other startup failures through unchanged", async () => {
 		const provider = makeProvider();
-		// The SDK's exit failure embeds the child's stderr; "not found" there
-		// is not a missing binary and must not be rewritten as one.
 		const exited = new Error(
 			"Server exited with code 1\nServer output: Error: model not found",
 		);
@@ -251,9 +208,6 @@ describe("OpenCodeProvider server lifecycle", () => {
 describe("no eager opencode spawn at runtime startup", () => {
 	const repoRoot = resolve(import.meta.dir, "../../..");
 
-	// Both runtimes must keep opencode model discovery behind the deferred
-	// provider initializer. An eager fetchModels() at startup spawns
-	// `opencode serve` on every session for every user with opencode on PATH.
 	for (const relPath of [
 		"packages/server/ai-runtime.ts",
 		"apps/pi-extension/server/ai-runtime.ts",
@@ -271,17 +225,9 @@ describe("no eager opencode spawn at runtime startup", () => {
 	}
 });
 
-/**
- * Ask AI subscribes to OpenCode's events and waits for the first frame before
- * it sends the question, so a short turn cannot finish before anyone listens.
- * What regresses if this fails: a stream that never sends a frame (the SDK
- * retries a refused connection forever) leaves Ask AI hanging with no answer
- * and no error; or the question is sent before the stream is live.
- */
 describe("OpenCode Ask AI event stream", () => {
 	type Event = { type: string; properties: Record<string, unknown> };
 
-	/** A stream that yields queued events and ends when its signal aborts. */
 	function fakeStream(signal: AbortSignal) {
 		const queue: Event[] = [];
 		let wake: (() => void) | null = null;
@@ -322,7 +268,6 @@ describe("OpenCode Ask AI event stream", () => {
 				},
 			},
 			event: {
-				// The v1 client's shape: one options object.
 				subscribe: async (options: { signal: AbortSignal }) => {
 					log.push("subscribe");
 					signals.push(options.signal);
@@ -391,7 +336,6 @@ describe("OpenCode Ask AI event stream", () => {
 		expect(messages).toHaveLength(1);
 		expect(messages[0]).toMatchObject({ type: "error", code: "provider_error" });
 		expect(String(messages[0]!.error)).toContain("did not connect");
-		// The subscription is closed, not left retrying in the background.
 		expect(signals[0]!.aborted).toBe(true);
 	});
 
@@ -405,13 +349,6 @@ describe("OpenCode Ask AI event stream", () => {
 	});
 });
 
-/**
- * The same three cases through the REAL v1 client against a local SSE server
- * standing in for `opencode serve`. What regresses if this fails: the signal
- * never reaches the client's stream (a wrong call shape is silently ignored),
- * so a timed-out or finished question leaves its /event connection open, and a
- * refused one is retried forever in the background.
- */
 describe("OpenCode Ask AI event stream through the real client", async () => {
 	const { createOpencodeClient } = await import("@opencode-ai/sdk/client");
 	const encoder = new TextEncoder();

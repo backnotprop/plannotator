@@ -1,8 +1,3 @@
-/**
- * The Qwen Code Ask AI provider against a fake `qwen`
- * (tests/test-fixtures/fake-qwen-cli.ts). No real Qwen Code runs, and
- * QWEN_HOME always points into a temp folder.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -21,8 +16,6 @@ afterEach(() => {
 	if (savedQwenHome === undefined) delete process.env.QWEN_HOME;
 	else process.env.QWEN_HOME = savedQwenHome;
 	for (const provider of providers.splice(0)) provider.dispose();
-	// No fake qwen outlives its test: kill a run this test started only while
-	// its pid still runs this test's fake script (a pid can be reused).
 	for (const fake of fakes.splice(0)) {
 		for (const run of fakeQwenRuns(fake.log)) {
 			const ps = spawnSync("ps", ["-o", "command=", "-p", String(run.pid)], { env: process.env, encoding: "utf8" });
@@ -30,7 +23,6 @@ afterEach(() => {
 			try {
 				process.kill(run.pid, "SIGKILL");
 			} catch {
-				// Already gone.
 			}
 		}
 	}
@@ -87,20 +79,17 @@ describe("QwenSDKProvider", () => {
 
 		const [run1, run2] = fakeQwenRuns(fake.log);
 		const qwenId = run1!.args[1]!;
-		// Marked as an Ask AI chat, so `plannotator last` can skip it.
 		expect(qwenId.startsWith(QWEN_ASK_AI_SESSION_PREFIX)).toBe(true);
 		expect(qwenId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 		const rest = [
 			"--output-format", "stream-json", "--include-partial-messages",
 			"--approval-mode", "plan",
-			// Plan mode alone runs a write tool the user's settings auto-approve.
 			"--exclude-tools=exit_plan_mode,edit,write_file,notebook_edit,save_memory,manage_memory,enter_worktree,exit_worktree",
 			"--max-wall-time", "10m",
 			"--model", "qwen3-coder-plus",
 		];
 		expect(run1!.args).toEqual(["--session-id", qwenId, ...rest]);
 		expect(run2!.args).toEqual(["--resume", qwenId, ...rest]);
-		// The review context goes with the first question only, and on stdin.
 		expect(run1!.stdin).toContain("# The plan under review");
 		expect(run1!.stdin).toContain("What does step 2 do?");
 		expect(run1!.args.join(" ")).not.toContain("step 2");
@@ -108,9 +97,6 @@ describe("QwenSDKProvider", () => {
 		expect(run2!.stdin).toContain("And step 3?");
 	});
 
-	// The Inbox MCP server Plannotator adds to Qwen's settings.json inherits
-	// Qwen's env: with the marker it lists no tools, so an Ask AI question can
-	// never post to the person's Inbox.
 	test.if(posix)("every qwen run starts with Plannotator's integration off", async () => {
 		const { fake, provider } = setup();
 		const session = await newSession(provider);
@@ -138,13 +124,10 @@ describe("QwenSDKProvider", () => {
 	test.if(posix)("a first question that got no answer is retried as a new qwen session, not a resume", async () => {
 		const { fake, provider } = setup();
 		const session = await newSession(provider);
-		// Even with Qwen's "No saved session found" on stderr: a first question
-		// has no session to lose, so it is not asked again in the same query.
 		fake.setMode("no-session");
 		const failed = await ask(session, "First try");
 		expect(failed[0]).toMatchObject({ type: "error", code: "qwen_process_exit" });
 		expect((failed[0] as { error: string }).error).toContain("exited with code 1");
-		// A failing first question runs once: there is no saved session to miss.
 		expect(fakeQwenRuns(fake.log)).toHaveLength(1);
 
 		fake.setMode("answer");
@@ -155,7 +138,6 @@ describe("QwenSDKProvider", () => {
 		expect(run1!.args[0]).toBe("--session-id");
 		expect(run2!.args[0]).toBe("--session-id");
 		expect(run2!.args[1]).not.toBe(run1!.args[1]);
-		// The retry still carries the review context: no conversation holds it yet.
 		expect(run2!.stdin).toContain("# The plan under review");
 	});
 
@@ -199,7 +181,6 @@ describe("QwenSDKProvider", () => {
 		expect(run3!.args[1]!.startsWith(QWEN_ASK_AI_SESSION_PREFIX)).toBe(true);
 		expect(run3!.stdin).toContain("# The plan under review");
 		expect(run3!.stdin).toContain("Second");
-		// Later questions continue the new session.
 		expect(run4!.args.slice(0, 2)).toEqual(["--resume", run3!.args[1]]);
 		expect(run4!.stdin).not.toContain("# The plan under review");
 	});
@@ -216,7 +197,6 @@ describe("QwenSDKProvider", () => {
 		fake.setMode("answer");
 		await ask(session, "Third");
 		const runs = fakeQwenRuns(fake.log);
-		// Not asked again as a new session, and the next question resumes the same one.
 		expect(runs).toHaveLength(3);
 		expect(runs[1]!.args.slice(0, 2)).toEqual(["--resume", runs[0]!.args[1]]);
 		expect(runs[2]!.args.slice(0, 2)).toEqual(["--resume", runs[0]!.args[1]]);
@@ -234,7 +214,6 @@ describe("QwenSDKProvider", () => {
 		fake.setMode("answer");
 		await ask(session, "Third");
 		const runs = fakeQwenRuns(fake.log);
-		// No retry of the timed-out run, and the same conversation afterwards.
 		expect(runs).toHaveLength(3);
 		expect(runs[2]!.args.slice(0, 2)).toEqual(["--resume", runs[0]!.args[1]]);
 	});

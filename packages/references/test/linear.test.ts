@@ -1,10 +1,3 @@
-// The Linear read adapter. Ported from the Workspaces suite (main 7379b0195):
-//   apps/rooms/test/external-refs-providers.test.ts  "linear — resolve, refresh custody, and state tables"
-// The refresh cases (single-flight, the rotated pair persisted, a refused or
-// transient refresh) test the token custody that is now the port's; here
-// they become the port's two unavailable answers. The OAuth connect cases
-// stay in Workspaces.
-
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from "bun:test";
 
 import { githubAdapter } from "../src/adapters/github.ts";
@@ -24,7 +17,6 @@ function refOf(url: string) {
 	return found.ref;
 }
 
-/** Arm the GraphQL endpoint: Bearer asserted, then `answer` builds `data`. */
 function armGraphql(
 	lin: ReturnType<typeof fakeProvider>,
 	token: string,
@@ -38,7 +30,6 @@ function armGraphql(
 	});
 }
 
-// Bun runs every test file in one process: the console spy is restored after each test.
 let info: Mock<typeof console.info>;
 beforeEach(() => {
 	info = spyOn(console, "info").mockImplementation(() => {});
@@ -161,7 +152,6 @@ describe("linear resolve", () => {
 		});
 		expect(lin.calls).toHaveLength(0);
 
-		// A credential with no account binds to no workspace and reads nothing.
 		const unbound = makePort(lin.fetch, { "linear linear.app": { kind: "bearer", token: "token-lin", host: "linear.app" } });
 		expect(await linearAdapter.resolve(refOf("https://linear.app/acme/issue/ENG-123"), unbound)).toEqual({
 			ok: false,
@@ -169,7 +159,6 @@ describe("linear resolve", () => {
 		});
 		expect(lin.calls).toHaveLength(0);
 
-		// The bound workspace still answers normally.
 		const own = await linearAdapter.resolve(refOf("https://linear.app/acme/issue/ENG-123"), port);
 		expect(own.ok && own.facts.title).toBe("Acme internal work");
 	});
@@ -243,8 +232,6 @@ describe("linear resolve", () => {
 describe("linear personal API keys (the linear-api-key kind)", () => {
 	const apiKey: ReferenceCredential = { kind: "linear-api-key", token: "key-lin", host: "linear.app", account: "acme" };
 
-	/** Linear's own rule: a personal key is the bare header value, and a
-	 * `Bearer`-prefixed key is refused with 401 (read as credentialDead). */
 	function armPersonalKey(lin: ReturnType<typeof fakeProvider>): void {
 		lin.on(GRAPHQL, ({ headers }) =>
 			headers.get("authorization") === "key-lin"

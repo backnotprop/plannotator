@@ -1,34 +1,3 @@
-/**
- * Qwen Code provider (registered as "qwen-sdk"): Ask AI answered by the
- * user's installed `qwen` CLI.
- *
- * One short-lived `qwen` process per question. `qwen -o stream-json` answers
- * one prompt and exits; the conversation lives in Qwen Code's own session
- * store. The first question starts it with `--session-id <uuid>`, later ones
- * continue it with `--resume <uuid>`. The ids start with
- * QWEN_ASK_AI_SESSION_PREFIX, so `plannotator last` can skip these chats.
- * When a resume finds no saved session (the user turned Qwen's chat
- * recording off, or a run died before Qwen saved it), the question is sent
- * once more as a new session with the review context.
- *
- * - The prompt goes on stdin, never argv: cmd.exe caps a command line at
- *   about 8 KB and the first question carries the whole review context.
- * - `--approval-mode plan`, plus the tools in QWEN_EXCLUDED_TOOLS turned
- *   off. Plan mode alone is not read-only: Qwen runs a tool the user's
- *   settings auto-approve before it applies the plan-mode block. So the
- *   file-writing, memory and worktree tools are removed outright. Still
- *   allowed: any other tool the user's Qwen settings auto-approve (a
- *   trusted MCP server, or an allow rule), and a shell command Qwen's
- *   plan-mode shell policy accepts.
- * - `exit_plan_mode` is off too: the Plannotator Qwen extension opens a plan
- *   review on it, and an Ask AI answer must never do that.
- * - `--max-wall-time` bounds the run; qwen exits with code 55 when it is
- *   over.
- *
- * Written with node:child_process, so this one file serves the Bun server
- * and the Pi extension (Node), like codex-app-server.ts.
- */
-
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -57,11 +26,6 @@ export { mapQwenLine, QWEN_ASK_AI_SESSION_PREFIX } from "./qwen-events.ts";
 
 const PROVIDER_NAME = "qwen-sdk";
 const QWEN_PROCESS_LABEL = "Qwen process";
-/**
- * Turned off for every Ask AI run (`--exclude-tools`). A whole-tool deny
- * removes the tool, and a deny wins over the user's allow rules, which plan
- * mode alone does not (see the header). Names from Qwen Code's ToolNames.
- */
 export const QWEN_EXCLUDED_TOOLS = [
 	"exit_plan_mode",
 	"edit",
@@ -69,35 +33,16 @@ export const QWEN_EXCLUDED_TOOLS = [
 	"notebook_edit",
 	"save_memory",
 	"manage_memory",
-	// Allowed by default, so plan mode runs them: they make a branch and a
-	// checkout under <repo>/.qwen/worktrees.
 	"enter_worktree",
 	"exit_worktree",
 ] as const;
-/** What qwen prints when `--resume <id>` names no saved session (Qwen's config.ts). */
 const QWEN_NO_SAVED_SESSION_TEXT = "No saved session found";
-/** The run's wall-clock budget (qwen's `--max-wall-time`). */
 const QWEN_MAX_WALL_TIME = "10m";
-/** qwen's exit code when `--max-wall-time` ran out. */
 const QWEN_WALL_TIME_EXIT = 55;
-/** Kept from the end of stderr, to explain a run that failed. */
 const STDERR_TAIL_CHARS = 4000;
-/**
- * After its result line, qwen may still be writing the session it continues
- * next time. The next question waits this long for it to exit, then stops it.
- */
 const PREVIOUS_RUN_GRACE_MS = 5_000;
-/**
- * `close` (stdout drained) normally follows `exit`; a child qwen started and
- * left holding the pipe would delay it forever, so `exit` ends the run after
- * this long anyway.
- */
 const EXIT_WITHOUT_CLOSE_MS = 1_000;
 
-/**
- * The Qwen Code folder: `$QWEN_HOME` (`~` expanded, a relative path taken
- * from `cwd`, as qwen does), else `~/.qwen`.
- */
 export function qwenHomeDir(
 	env: NodeJS.ProcessEnv = process.env,
 	home: string = homedir(),
@@ -112,7 +57,6 @@ export function qwenHomeDir(
 	return resolve(cwd, configured);
 }
 
-/** Comments and trailing commas removed, strings kept (qwen reads its settings with comments allowed). */
 function stripJsonComments(text: string): string {
 	let out = "";
 	let i = 0;
@@ -140,7 +84,6 @@ function stripJsonComments(text: string): string {
 	return out.replace(/,(\s*[}\]])/g, "$1");
 }
 
-/** The models in the user's Qwen Code settings; empty when there are none or the file cannot be read. */
 export async function readQwenCatalog(qwenHome: string): Promise<CatalogModel[]> {
 	try {
 		const text = (await readFile(join(qwenHome, "settings.json"), "utf8")).replace(/^﻿/, "");
@@ -150,7 +93,6 @@ export async function readQwenCatalog(qwenHome: string): Promise<CatalogModel[]>
 	}
 }
 
-/** The error shown for a run that ended without a result line. */
 export function qwenExitError(code: number | null, failure?: Error, stderrTail?: string): string {
 	let message: string;
 	if (code === QWEN_WALL_TIME_EXIT) {
@@ -167,14 +109,9 @@ export function qwenExitError(code: number | null, failure?: Error, stderrTail?:
 	return message;
 }
 
-// ---------------------------------------------------------------------------
-// One-shot process
-// ---------------------------------------------------------------------------
-
 type LineListener = (line: Record<string, unknown>) => void;
 type EndListener = (code: number | null, failure?: Error) => void;
 
-/** One `qwen` run. Exported for tests. */
 export class QwenProcess {
 	private proc: ChildProcess | null = null;
 	private buffer = "";
@@ -192,10 +129,6 @@ export class QwenProcess {
 		return this.ended;
 	}
 
-	/**
-	 * Start the run and write `prompt` to its stdin. A start or pipe failure
-	 * is reported through `onEnd`, never thrown and never unhandled.
-	 */
 	start(
 		qwenPath: string,
 		args: string[],
@@ -213,9 +146,6 @@ export class QwenProcess {
 		try {
 			proc = spawn(file!, rest, {
 				cwd,
-				// Plannotator's integration off in this Qwen (ask-ai-env.ts):
-				// the Inbox MCP server Plannotator adds to Qwen's settings.json
-				// inherits the env, and so lists no tools.
 				env: askAiChildEnv(),
 				stdio: ["pipe", "pipe", "pipe"],
 				windowsHide: true,
@@ -225,11 +155,8 @@ export class QwenProcess {
 			return;
 		}
 		this.proc = proc;
-		// Before anything else: a stream error with no listener would crash
-		// the host process, not just this provider (#1378).
 		guardChildStreams(proc, QWEN_PROCESS_LABEL, (error) => this.fail(error));
 		proc.stdout?.on("data", (chunk: Buffer) => this.readChunk(chunk.toString()));
-		// Drained in full: a stderr pipe nobody reads fills and stalls the child.
 		proc.stderr?.on("data", (chunk: Buffer) => {
 			this.stderrTail = (this.stderrTail + chunk.toString()).slice(-STDERR_TAIL_CHARS);
 		});
@@ -264,7 +191,7 @@ export class QwenProcess {
 		try {
 			parsed = JSON.parse(line);
 		} catch {
-			return; // Not a JSON line (a stray log line).
+			return;
 		}
 		if (parsed && typeof parsed === "object") this.lineListener?.(parsed as Record<string, unknown>);
 	}
@@ -289,10 +216,6 @@ export class QwenProcess {
 		for (const wake of this.endWaiters.splice(0)) wake();
 	}
 
-	/**
-	 * Resolves once the run has ended, or after `ms` (then the run is
-	 * stopped), or at once when `signal` aborts (the run is left alone).
-	 */
 	async settle(ms: number, signal?: AbortSignal): Promise<void> {
 		if (this.ended || signal?.aborted) return;
 		await new Promise<void>((done) => {
@@ -314,14 +237,9 @@ export class QwenProcess {
 		try {
 			if (!killWindowsProcessTree(proc.pid)) proc.kill();
 		} catch {
-			// Already gone.
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
 
 export class QwenSDKProvider implements AIProvider {
 	readonly name = PROVIDER_NAME;
@@ -363,7 +281,6 @@ export class QwenSDKProvider implements AIProvider {
 		);
 	}
 
-	/** Continue a Qwen Code session this provider started; `sessionId` is the Qwen session id. */
 	async resumeSession(sessionId: string): Promise<QwenSDKSession> {
 		const session = new QwenSDKSession(
 			{
@@ -383,7 +300,6 @@ export class QwenSDKProvider implements AIProvider {
 		this.sessions.clear();
 	}
 
-	/** The models from the user's Qwen Code settings.json. Runs no `qwen`. */
 	async fetchModels(): Promise<void> {
 		const cwd = this.config.cwd ?? process.cwd();
 		const models = await readQwenCatalog(qwenHomeDir(process.env, homedir(), cwd));
@@ -391,29 +307,18 @@ export class QwenSDKProvider implements AIProvider {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Session
-// ---------------------------------------------------------------------------
-
 interface SessionConfig {
 	systemPrompt: string;
 	cwd: string;
 	qwenExecutablePath: string;
 	model?: string;
 	maxTurns?: number;
-	/** The conversation already exists in Qwen Code's store. */
 	resume: boolean;
 }
 
 class QwenSDKSession extends BaseSession {
 	private config: SessionConfig;
 	private child: QwenProcess | null = null;
-	/**
-	 * The Qwen Code session id (QWEN_ASK_AI_SESSION_PREFIX + random). A new
-	 * one is picked when no conversation holds the review context yet and the
-	 * old id may be taken: a first question with no answer (qwen may have
-	 * stored the id), or a resume that found no saved session.
-	 */
 	private qwenSessionId: string;
 	private conversationStarted: boolean;
 
@@ -445,10 +350,6 @@ class QwenSDKSession extends BaseSession {
 		return args;
 	}
 
-	/**
-	 * One qwen run. Yields its messages; a run that ends without a result is
-	 * returned as `error` (not yielded), so the caller can retry instead.
-	 */
 	private async *run(prompt: string, signal: AbortSignal): AsyncGenerator<AIMessage, RunOutcome> {
 		const resumed = this.conversationStarted;
 		const queue: AIMessage[] = [];
@@ -517,10 +418,6 @@ class QwenSDKSession extends BaseSession {
 				this.qwenSessionId = newQwenAskAISessionId();
 			}
 		}
-		// A resume that printed nothing, exited with an error and said Qwen's
-		// fixed "No saved session found with ID …" (exit 1). Any other startup
-		// failure (sign-in, network, a bad model, an unknown flag) is shown as
-		// the error and the conversation is kept: Qwen still has it.
 		const noSavedSession =
 			resumed &&
 			!answered &&
@@ -541,15 +438,11 @@ class QwenSDKSession extends BaseSession {
 		const { gen, signal } = started;
 
 		try {
-			// The previous run may still be saving the conversation this one
-			// continues. Stop does not wait this out.
 			await this.child?.settle(PREVIOUS_RUN_GRACE_MS, signal);
 			if (signal.aborted) return;
 
 			let outcome = yield* this.run(prompt, signal);
 			if (outcome.noSavedSession && !signal.aborted) {
-				// The conversation is gone from Qwen's store. Start a new one with
-				// the review context and ask again; only the history is lost.
 				this.conversationStarted = false;
 				this._firstQuerySent = false;
 				this.qwenSessionId = newQwenAskAISessionId();
@@ -567,16 +460,13 @@ class QwenSDKSession extends BaseSession {
 		}
 	}
 
-	/** Stop the running question. Called by the provider on dispose. */
 	killProcess(): void {
 		this.child?.kill();
 	}
 }
 
 interface RunOutcome {
-	/** The error for a run that ended without a result; null otherwise. */
 	error: AIMessage | null;
-	/** A resume that found no saved session. */
 	noSavedSession: boolean;
 }
 

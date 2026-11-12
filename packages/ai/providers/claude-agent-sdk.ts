@@ -1,16 +1,3 @@
-/**
- * Claude Agent SDK provider — the first concrete AIProvider implementation.
- *
- * Uses @anthropic-ai/claude-agent-sdk to create sessions that can:
- * - Start fresh with Plannotator context as the system prompt
- * - Fork from a parent Claude Code session (preserving full history)
- * - Resume a previous Plannotator inline chat session
- * - Stream text deltas back to the UI in real time
- *
- * Sessions are read-only by default (tools limited to Read, Glob, Grep)
- * to keep inline chat safe and cost-bounded.
- */
-
 import { execFile } from "node:child_process";
 import { buildSystemPrompt, buildForkPreamble, buildEffectivePrompt } from "../context.ts";
 import { BaseSession } from "../base-session.ts";
@@ -31,24 +18,8 @@ import {
 } from "@plannotator/core/model-catalog";
 import { askAiChildEnv } from "./ask-ai-env.ts";
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 const PROVIDER_NAME = "claude-agent-sdk";
 
-/**
- * Default tools for inline chat. Read-only investigation plus *scoped* read-only
- * git so the agent can inspect the changes itself (e.g. `git diff`) instead of
- * having the whole diff pasted into the prompt — which matters because large
- * diffs don't fit in the prompt budget.
- *
- * These are deliberately NOT bare `Bash`. In the Agent SDK, `allowedTools`
- * pre-approves matching calls; anything that doesn't match falls through to the
- * permission flow. So `Bash(git diff:*)` auto-approves `git diff …`, while any
- * other shell command (including a write git command or an injected compound
- * command) surfaces an Allow/Deny card instead of running silently.
- */
 const DEFAULT_ALLOWED_TOOLS = [
   "Read",
   "Glob",
@@ -65,50 +36,18 @@ const DEFAULT_ALLOWED_TOOLS = [
 
 const DEFAULT_MAX_TURNS = 99;
 const DEFAULT_MODEL = "sonnet";
-/** Model discovery must never hang a picker: bound the `claude` spawn + reply. */
 const MODEL_DISCOVERY_TIMEOUT_MS = 10_000;
 
-// ---------------------------------------------------------------------------
-// Bedrock / Vertex model resolution
-// ---------------------------------------------------------------------------
-
-/** Env-var truthiness, matching Claude Code's own `1`/`true` convention. */
 function isTruthyEnv(value: string | undefined): boolean {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
-/**
- * A model string that already names a Bedrock/Vertex target — a full ARN
- * (`arn:aws:bedrock:...`) or any inference-profile / publisher id containing
- * `anthropic.` (e.g. `us.anthropic.claude-...`). Bare aliases like
- * `claude-sonnet-4-6` deliberately do NOT match.
- */
 function isCloudModelId(model: string): boolean {
   return model.startsWith("arn:") || model.includes("anthropic.");
 }
 
-/**
- * Resolve the model identifier to hand the Claude Agent SDK.
- *
- * Plannotator's model picker uses bare aliases (`claude-sonnet-4-6`). Those
- * are valid against the first-party Anthropic API but are rejected by Bedrock
- * and Vertex, which require a full inference-profile id / ARN — producing
- * `400 The provided model identifier is invalid`. Claude Code itself reads
- * those identifiers from `ANTHROPIC_MODEL` and the
- * `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` env vars; we mirror that here:
- *
- *   - Off Bedrock/Vertex: return the requested model unchanged.
- *   - Already a cloud identifier (ARN / `anthropic.` profile): pass through.
- *   - A bare family alias (opus/sonnet/haiku): map to the matching
- *     `ANTHROPIC_DEFAULT_*_MODEL` env var when set.
- *   - Anything else: fall back to `ANTHROPIC_MODEL`, or `undefined` so the SDK
- *     inherits the environment's default model.
- *
- * Returning `undefined` is meaningful: the caller omits `--model` entirely,
- * letting the spawned `claude` resolve the model from its own env config.
- */
 export function resolveSDKModel(
   requestedModel: string | undefined,
   env: Record<string, string | undefined> = process.env,
@@ -118,10 +57,8 @@ export function resolveSDKModel(
     isTruthyEnv(env.CLAUDE_CODE_USE_VERTEX);
   if (!onCloud) return requestedModel;
 
-  // Already a Bedrock/Vertex identifier — trust it as-is.
   if (requestedModel && isCloudModelId(requestedModel)) return requestedModel;
 
-  // Map a bare family alias to the user's configured default ARN.
   if (requestedModel) {
     const family = requestedModel.toLowerCase();
     if (family.includes("opus") && env.ANTHROPIC_DEFAULT_OPUS_MODEL) {
@@ -135,20 +72,13 @@ export function resolveSDKModel(
     }
   }
 
-  // Fall back to the env default model, or let the SDK inherit from the env.
   return env.ANTHROPIC_MODEL || undefined;
 }
 
-// ---------------------------------------------------------------------------
-// SDK query options — typed to catch typos at compile time
-// ---------------------------------------------------------------------------
-
 interface ClaudeSDKQueryOptions {
-  /** Omitted when undefined so the SDK inherits the env's default model (Bedrock/Vertex). */
   model?: string;
   maxTurns: number;
   allowedTools: string[];
-  /** The built-in tools on offer; `[]` turns them all off. */
   tools?: string[];
   cwd: string;
   abortController: AbortController;
@@ -165,23 +95,11 @@ interface ClaudeSDKQueryOptions {
   settings?: { disableAllHooks?: boolean };
   effort?: string;
   strictMcpConfig?: boolean;
-  /** The whole env of the `claude` process (the SDK does not merge it with process.env). */
   env: Record<string, string | undefined>;
   disallowedTools: string[];
 }
 
-/**
- * Removed from every Ask AI session whatever the person's settings allow: the
- * Plannotator Inbox MCP server, by its whole-server name (`mcp__<server>`, a
- * server-level spec the SDK's `disallowedTools` takes). This covers an
- * HTTP-transport `plannotator-inbox` entry too, which the env marker
- * (ask-ai-env.ts) cannot reach.
- */
 const ASK_AI_DISALLOWED_TOOLS = ["mcp__plannotator-inbox"];
-
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
 
 export class ClaudeAgentSDKProvider implements AIProvider {
   readonly name = PROVIDER_NAME;
@@ -191,11 +109,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     streaming: true,
     tools: true,
   };
-  // Fallback used only until fetchModels() replaces it with the installed
-  // `claude`'s own list (the SDK's supportedModels()).
   models: CatalogModel[] = CLAUDE_FALLBACK_MODELS;
   modelsSource: 'fallback' | 'discovered' = 'fallback';
-  /** The installed `claude`'s version, from `claude --version` during discovery. */
   toolVersion: string | undefined;
 
   private config: ClaudeAgentSDKConfig;
@@ -245,17 +160,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     });
   }
 
-  /**
-   * Populate `models` from the installed `claude` via the SDK's
-   * supportedModels(). Starts a throwaway CLI process with no prompt, no
-   * settings sources (so no user hooks or plugins run) and no MCP servers,
-   * reads the list from the initialize handshake, and closes it. Bounded by
-   * MODEL_DISCOVERY_TIMEOUT_MS. On failure the static fallback stays and the
-   * error propagates, so the runtime's once-wrapper may retry later.
-   */
   async fetchModels(): Promise<void> {
-    // `claude --version` runs alongside discovery (once, since a success is
-    // kept for the process) and is kept even if discovery fails.
     const versionProbe = this.toolVersion ? undefined : this.probeToolVersion();
     try {
       await this.discoverModels();
@@ -265,7 +170,6 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     }
   }
 
-  /** The installed `claude`'s version; undefined without a path or on any failure. */
   private probeToolVersion(): Promise<string | undefined> {
     const path = this.config.claudeExecutablePath;
     if (!path) return Promise.resolve(undefined);
@@ -292,9 +196,6 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           cwd: this.config.cwd ?? process.cwd(),
           abortController,
           persistSession: false,
-          // On purpose: only the model list is read, so no user, project or
-          // local settings load (no hooks or plugins run). Sessions leave the
-          // option out, so the SDK loads every source, like the CLI.
           settingSources: [],
           strictMcpConfig: true,
           env: askAiChildEnv(),
@@ -316,12 +217,11 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     } finally {
       if (timer) clearTimeout(timer);
       abortController.abort();
-      try { q?.close(); } catch { /* already closed */ }
+      try { q?.close(); } catch { }
     }
   }
 
   dispose(): void {
-    // No persistent resources to clean up
   }
 
   private baseConfig(options?: CreateSessionOptions) {
@@ -333,19 +233,11 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       allowedTools: this.config.allowedTools ?? DEFAULT_ALLOWED_TOOLS,
       permissionMode: this.config.permissionMode ?? "default",
       claudeExecutablePath: this.config.claudeExecutablePath,
-      // Left out unless a caller set it: the SDK then loads every source, as
-      // starting `claude` in that folder does (sdk.d.ts: "When omitted, all
-      // sources are loaded (matches CLI defaults)").
       ...(this.config.settingSources && { settingSources: this.config.settingSources }),
     };
   }
 }
 
-// ---------------------------------------------------------------------------
-// SDK import cache — resolve once, reuse across all queries
-// ---------------------------------------------------------------------------
-
-// biome-ignore lint/suspicious/noExplicitAny: SDK types resolved at runtime via dynamic import
 let sdkQueryFn: ((...args: any[]) => any) | null = null;
 
 async function getSDKQuery() {
@@ -356,17 +248,12 @@ async function getSDKQuery() {
   return sdkQueryFn!;
 }
 
-/** A streaming-input prompt that sends nothing and ends when aborted. */
 async function* idlePrompt(signal: AbortSignal): AsyncGenerator<never> {
   await new Promise<void>((resolve) => {
     if (signal.aborted) resolve();
     else signal.addEventListener("abort", () => resolve(), { once: true });
   });
 }
-
-// ---------------------------------------------------------------------------
-// Session
-// ---------------------------------------------------------------------------
 
 interface SessionConfig {
   systemPrompt: string | null;
@@ -383,13 +270,11 @@ interface SessionConfig {
   resumeSessionId?: string;
   claudeExecutablePath?: string;
   settingSources?: string[];
-  /** A single judgment (`CreateSessionOptions.oneShot`). */
   oneShot?: boolean;
 }
 
 class ClaudeAgentSDKSession extends BaseSession {
   private config: SessionConfig;
-  /** Active Query object — needed to send control responses (permission decisions) */
   private _activeQuery: { streamInput: (iter: AsyncIterable<unknown>) => Promise<void> } | null = null;
 
   constructor(config: SessionConfig) {
@@ -424,7 +309,6 @@ class ClaudeAgentSDKSession extends BaseSession {
       for await (const message of stream) {
         const mapped = mapSDKMessage(message);
 
-        // Capture the real session ID from the init message
         if (
           !this._resolvedId &&
           "session_id" in message &&
@@ -467,14 +351,7 @@ class ClaudeAgentSDKSession extends BaseSession {
     ).catch(() => {});
   }
 
-  // -------------------------------------------------------------------------
-  // Internal
-  // -------------------------------------------------------------------------
-
   private buildQueryOptions(): ClaudeSDKQueryOptions {
-    // On Bedrock/Vertex, bare aliases (e.g. "claude-sonnet-4-6") are rejected
-    // with a 400; resolveSDKModel() maps them to the configured ARN or returns
-    // undefined so the SDK inherits the environment's default model.
     const resolvedModel = resolveSDKModel(this.config.model);
     const opts: ClaudeSDKQueryOptions = {
       ...(resolvedModel !== undefined && { model: resolvedModel }),
@@ -486,9 +363,6 @@ class ClaudeAgentSDKSession extends BaseSession {
       abortController: this._currentAbort!,
       includePartialMessages: true,
       persistSession: true,
-      // Plannotator's integration off in this `claude` (ask-ai-env.ts): the
-      // plugin's ExitPlanMode hook exits at once instead of opening a review.
-      // The SDK replaces the child's env with this, so it is the full live env.
       env: askAiChildEnv(),
       ...(this.config.claudeExecutablePath && {
         pathToClaudeCodeExecutable: this.config.claudeExecutablePath,
@@ -502,10 +376,6 @@ class ClaudeAgentSDKSession extends BaseSession {
       opts.maxBudgetUsd = this.config.maxBudgetUsd;
     }
 
-    // A single judgment: only this prompt, no tools, no MCP servers, no hooks and
-    // no session left behind. Settings load as they do for Ask AI: they can say
-    // where this person's Claude sends code (Bedrock, Vertex), and leaving them
-    // out would send a diff to whatever login it has instead.
     if (this.config.oneShot) {
       return {
         ...opts,
@@ -518,14 +388,11 @@ class ClaudeAgentSDKSession extends BaseSession {
       };
     }
 
-    // After the first query resolves a real session ID, all subsequent
-    // queries must resume that session to continue the conversation.
     if (this._resolvedId) {
       opts.resume = this._resolvedId;
       return this.applyPermissionMode(opts);
     }
 
-    // First query: use Claude Code's built-in prompt with our context appended
     if (this.config.systemPrompt) {
       opts.systemPrompt = {
         type: "preset",
@@ -557,17 +424,6 @@ class ClaudeAgentSDKSession extends BaseSession {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Message mapping
-// ---------------------------------------------------------------------------
-
-/**
- * Map an SDK message to one or more AIMessages.
- *
- * An SDK assistant message can contain both text and tool_use content blocks
- * in a single response. We emit each block as a separate AIMessage so no
- * content is dropped.
- */
 function mapSDKMessage(msg: Record<string, unknown>): AIMessage[] {
   const type = msg.type as string;
 
@@ -585,7 +441,6 @@ function mapSDKMessage(msg: Record<string, unknown>): AIMessage[] {
         if (block.type === "text" && typeof block.text === "string") {
           textParts.push(block.text);
         } else if (block.type === "tool_use") {
-          // Flush accumulated text before the tool_use block
           if (textParts.length > 0) {
             messages.push({ type: "text", text: textParts.join("") });
             textParts.length = 0;
@@ -599,7 +454,6 @@ function mapSDKMessage(msg: Record<string, unknown>): AIMessage[] {
         }
       }
 
-      // Flush any remaining text after the last block
       if (textParts.length > 0) {
         messages.push({ type: "text", text: textParts.join("") });
       }
@@ -622,7 +476,6 @@ function mapSDKMessage(msg: Record<string, unknown>): AIMessage[] {
     }
 
     case "user": {
-      // SDK wraps tool results in SDKUserMessage (type: "user")
       if (msg.tool_use_result != null) {
         return [{
           type: "tool_result",
@@ -668,10 +521,6 @@ function mapSDKMessage(msg: Record<string, unknown>): AIMessage[] {
       return [{ type: "unknown", raw: msg }];
   }
 }
-
-// ---------------------------------------------------------------------------
-// Factory registration
-// ---------------------------------------------------------------------------
 
 import { registerProviderFactory } from "../provider.ts";
 

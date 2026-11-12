@@ -64,7 +64,6 @@ function FileChip({
   );
 }
 
-/** "Tests 2" / "Generated 1" above a kind's chips, shown only when a chapter mixes kinds. */
 function KindSubhead({ kind, count }: { kind: FileKind; count: number }) {
   return (
     <div data-guide-kind-subhead={kind} className="flex items-center gap-1.5 px-0.5 pt-1 text-[10.5px] font-medium text-muted-foreground">
@@ -75,31 +74,14 @@ function KindSubhead({ kind, count }: { kind: FileKind; count: number }) {
   );
 }
 
-/** The card's own border colour (`border-border/50`): the tab's outline continues it. */
 const CARD_BORDER = 'color-mix(in oklab, var(--border) 50%, transparent)';
-/** The open card's background (`bg-card`). */
 const CARD_FILL = 'var(--card)';
-/**
- * The folded card's background (`bg-muted/10`) made opaque over the guide's
- * ground, so the tab's fill hides the card's top border under it.
- */
 const FOLDED_CARD_FILL = 'color-mix(in oklab, var(--muted) 10%, var(--background))';
-/** Space around the control inside the tab, and the tab's corner radii (the card's rounded-lg). */
 const TAB_PAD_X = 6;
 const TAB_PAD_Y = 4;
 const TAB_RADIUS = 8;
-/** The inverse radius where the tab's left side meets the card's top edge. */
 const TAB_SHOULDER = 10;
 
-/**
- * A host's control in a small tab rising out of the card's top edge at its
- * top right (GuideHostValue.renderSectionTab): the card's own background and
- * border, only as wide as the control, rounded top corners, and a curved
- * shoulder into the card's top edge. One SVG path draws it: the fill covers
- * the card's top border under the tab, a 1px stroke on half-pixel coordinates
- * continues the card's border, so the outline is one line with no seam. It is
- * part of the card: it scrolls with it.
- */
 function SectionTab({ fill, lead, children }: { fill: string; lead?: React.ReactNode; children: React.ReactNode }) {
   const controlRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -120,11 +102,10 @@ function SectionTab({ fill, lead, children }: { fill: string; lead?: React.React
 
   const h = size?.h ?? 0;
   const w = size?.w ?? 0;
-  const T = h + TAB_PAD_Y * 2; // the tab's height above the card's top edge
+  const T = h + TAB_PAD_Y * 2;
   const s = TAB_SHOULDER;
   const W = s + w + TAB_PAD_X * 2;
   const r = TAB_RADIUS;
-  // The card starts right under the row: its top border is the pixel row [T, T+1].
   const xl = s - 0.5;
   const xr = W - 0.5;
   const y0 = 0.5;
@@ -144,8 +125,6 @@ function SectionTab({ fill, lead, children }: { fill: string; lead?: React.React
           <path d={outline} style={{ fill: 'none', stroke: CARD_BORDER, strokeWidth: 1 }} />
         </svg>
       )}
-      {/* The host's lead (GuideView bare: the header's actions) on the same row, left of the tab, centred on it. It
-          ends 8px short of the tab and may only take the room left of it, so the two never meet. */}
       {lead && (
         <div
           data-guide-section-tab-lead=""
@@ -164,13 +143,11 @@ function SectionTab({ fill, lead, children }: { fill: string; lead?: React.React
   );
 }
 
-/** Where folded chapter diagrams are listed (one key, newest last), and how many it keeps. */
 const DIAGRAM_FOLDS_KEY = 'plannotator-guide-diagram-folds';
 const DIAGRAM_FOLDS_KEPT = 60;
 
 type FoldStore = { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void };
 
-/** The browser's localStorage, when the page has one it may use. */
 function localFoldStore(): FoldStore | null {
   try {
     return typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
@@ -179,7 +156,6 @@ function localFoldStore(): FoldStore | null {
   }
 }
 
-/** A short name for one chapter's diagram: its chapter's title and its source, so a redrawn diagram opens again. */
 export function chapterDiagramFoldId(title: string, source: string): string {
   let hash = 5381;
   const text = `${title}\n${source}`;
@@ -201,21 +177,12 @@ function writeFold(store: FoldStore | null, id: string, folded: boolean): void {
   try {
     store?.setItem(DIAGRAM_FOLDS_KEY, next.join(' '));
   } catch {
-    // Storage refused (private mode, quota): the fold lasts while the page is open.
   }
 }
 
-/**
- * A chapter's diagram at the top of its code pane: a "Diagram" header whose caret folds it, as a file's does, and
- * the host's drawing under it, its box capped at 320px (the canvas fits the drawing inside it; Expand opens it full
- * size) so a tall diagram does not push the chapter's code away. The fold is
- * kept (the host's store, else localStorage), so the diagram stays folded when the guide opens again. A host with
- * `chapterDiagramsFolded` draws it folded at first and keeps nothing.
- */
 function ChapterDiagram({ kind, foldId, children }: { kind: string; foldId: string; children: React.ReactNode }) {
   const { diagramFoldStore, chapterDiagramsFolded } = useGuideHost();
   const store = diagramFoldStore ?? localFoldStore();
-  // The host's `chapterDiagramsFolded`: folded at first, and the person's clicks last only while the page is open.
   const [folded, setFolded] = useState(() => chapterDiagramsFolded === true || readFolds(store).includes(foldId));
   const toggle = () => {
     const next = !folded;
@@ -251,7 +218,6 @@ interface GuideSectionCardProps {
   files: DiffFile[];
   index: number;
   total: number;
-  /** False for the "Everything else" card: it is not one of the guide's sections, so it carries no "NN / NN". */
   numbered?: boolean;
   reviewed?: boolean;
   showReviewed?: boolean;
@@ -260,19 +226,11 @@ interface GuideSectionCardProps {
   revealTarget: { filePath: string; token: number } | null;
   onActivate: (filePath: string) => void;
   onRequestReveal: (filePath: string) => void;
-  /** Renders guide links (`chapter:`, `code:`) in the chapter overview. */
   renderLink?: GuideLinkRenderer;
-  /** Each file's box as tall as its diff (GuideView `fitFileHeights`); see GuideFileCard `fitContent`. */
   fitFileHeights?: boolean;
-  /** Drawn on the tab's row, left of the tab, when this card has one (GuideView `bare`: the header's actions). */
   tabLead?: React.ReactNode;
 }
 
-/**
- * One original Guided Review chapter. Every file keeps its natural description
- * and bounded card in document flow; GuideFileCard decides whether that shell's
- * one-file Pierre CodeView is inside the shared outer mount window.
- */
 export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   section,
   files,
@@ -295,8 +253,6 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   const cardRef = useRef<HTMLDivElement>(null);
   const position = numbered ? `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}` : null;
   const isCollapsed = showReviewed ? collapsedOverride ?? reviewed : collapsedOverride === true;
-  // A chapter's diagram (format version 5), drawn by the host at the top of the chapter's code pane; a host that
-  // cannot draw it leaves the chapter exactly as it is without one.
   const chapterDiagram = section.diagram && !isCollapsed ? (host.renderChapterDiagram?.(section.diagram, index) ?? null) : null;
 
   const filesByPath = useMemo(() => new Map(host.files.map((file) => [file.path, file])), [host.files]);
@@ -308,8 +264,6 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
     return summaries;
   }, [section.diffs]);
 
-  // Within the chapter, files come together by kind (code, tests, generated),
-  // keeping the author's order inside each kind. Chips and diff cards share it.
   const chipGroups = useMemo(
     () => groupByFileKind(section.diffs, (ref) => ref.file, host.generatedFiles),
     [section.diffs, host.generatedFiles],
@@ -324,15 +278,10 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
     ? revealTarget
     : null;
 
-  // Reopen a reviewed chapter before its target file shell force-mounts and
-  // scrolls itself into view. Reviewed persistence remains unchanged because
-  // this is only the local visual override.
   useEffect(() => {
     if (!targetBelongsHere) return;
     setCollapsedOverride(false);
     onActivate(targetBelongsHere.filePath);
-    // Token identifies the reveal event; callback identity must not replay it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetBelongsHere?.token]);
 
   const handleToggleReviewed = () => {
@@ -340,9 +289,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
     onToggleReviewed?.();
   };
 
-  // A host's control in a tab on this card (the Inbox's diff layout); nothing otherwise.
   const tab = host.renderSectionTab?.(index, { folded: isCollapsed, diffs: section.diffs.length, title: section.title }) ?? null;
-  // A host's content at the foot of the prose column (VS Code: ask about this chapter); nothing otherwise.
   const footer = host.renderSectionFooter?.(index) ?? null;
   const tabbed = tab !== null && tab !== undefined && tab !== false;
   const withTab = (card: React.ReactNode, fill: string) =>
@@ -354,7 +301,6 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
     ) : (
       card
     );
-  // Squared under the tab, which carries the corner; a jump to the card keeps the tab in view.
   const tabbedCardStyle: React.CSSProperties | undefined = tabbed ? { borderTopRightRadius: 0, scrollMarginTop: 56 } : undefined;
 
   if (isCollapsed) {
@@ -391,7 +337,6 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
 
   return withTab(
     <div ref={cardRef} data-guide-section={index} style={tabbedCardStyle} className="scroll-mt-4 overflow-clip rounded-lg border border-border/50 bg-card">
-      {/* Stacked below md; a proportional chapter column on tablets; the fixed 440px column from lg up (desktop unchanged). */}
       <div data-guide-section-grid="" className="md:grid md:grid-cols-[minmax(260px,36%)_minmax(0,1fr)] lg:grid-cols-[440px_minmax(0,1fr)]">
         <div data-guide-section-narrative="" className="border-b border-border/40 md:border-b-0 md:border-r">
           <div className="px-4 py-4 md:sticky md:top-0 md:flex md:max-h-[calc(100dvh-48px)] md:flex-col md:overflow-y-auto md:overflow-x-hidden md:px-6 md:py-5">
