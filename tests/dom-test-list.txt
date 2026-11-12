@@ -137,6 +137,7 @@ packages/inbox/phoneStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/sharedPictureChoice.test.tsx
+packages/inbox/sameLabelChoices.test.tsx
 packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx

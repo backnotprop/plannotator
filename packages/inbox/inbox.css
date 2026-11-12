@@ -5411,7 +5411,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .question-block > div:first-child > span:last-child > :is(span, button)[aria-pressed="true"] { color: var(--ib-calm-s, var(--primary)); }
 .pn-inbox .question-block > div:first-child svg { color: var(--ib-qc-svg-s); }
 .pn-inbox .question-block label[data-question-option] { border-radius: var(--ib-qc-opt-r-s, 7px); }
-.pn-inbox .question-block label[data-question-option]:hover { background: var(--ib-qc-opt-hover-s, color-mix(in oklab, var(--muted) 45%, transparent)); }
+/* A touch screen keeps :hover on the row last tapped: the fill would stay on a row that is not picked. */
+@media (hover: hover) { .pn-inbox .question-block label[data-question-option]:hover { background: var(--ib-qc-opt-hover-s, color-mix(in oklab, var(--muted) 45%, transparent)); } }
 .pn-inbox .question-block [data-question-tile] { border-radius: var(--ib-qc-tile-r-s, 9px); }
 /* A picture tile draws its own state (border and tint); its label stays clear. */
 .pn-inbox .question-block [data-question-tile] > label[data-question-option], .pn-inbox .question-block [data-question-tile] > label[data-question-option]:hover, .pn-inbox .question-block [data-question-tile] > label[data-question-option]:has(input:checked) { background: transparent; border-radius: 0; }
