@@ -161,17 +161,17 @@ const readCheck = (name: string) => ({
 const inboxLog: Trouble = {
   symptom: 'The Inbox doesn’t open',
   fix: 'Read `~/.plannotator/inbox/inbox.log`. Stop a stuck Inbox process and run `plannotator inbox` again.',
-  src: 'IB:466-468',
+  src: 'IB:479-481',
 };
 const toolEnv: Trouble = {
   symptom: 'The switches in Settings → Agents are greyed out',
   fix: '`PLANNOTATOR_INBOX_TOOL` is set in your shell. It decides for every agent until you unset it.',
-  src: 'IB:427',
+  src: 'IB:440',
 };
 const noBinary: Trouble = {
   symptom: 'The tool says to install Plannotator',
   fix: 'It found no `plannotator` binary. Install Plannotator or set `PLANNOTATOR_BIN` to its path.',
-  src: 'IB:429-431',
+  src: 'IB:442-444',
 };
 const notConnected = (name: string): Trouble => ({
   symptom: `\`plannotator inbox\` says it couldn’t connect ${name}`,
@@ -181,12 +181,12 @@ const notConnected = (name: string): Trouble => ({
 const neverWoken = (name: string): Trouble => ({
   symptom: 'Your reply never shows up in the session on its own',
   fix: `Nothing can wake ${name}: it sees a reply when it reads the thread. Tell it to check the Inbox.`,
-  src: 'IB:438; SET:282-287 (seen when it checks the Inbox; it can’t be woken)',
+  src: 'IB:451; SET:283-288 (seen when it checks the Inbox; it can’t be woken)',
 });
 const dockPath: Trouble = {
   symptom: 'The `plannotator-inbox` server fails to start',
   fix: 'An app started from the Dock may not see your shell’s `PATH`. Put the full path to `plannotator` in the config. `which plannotator` prints it.',
-  src: 'IB:323',
+  src: 'IB:336',
 };
 
 // Cells that read the same for many agents.
@@ -200,7 +200,7 @@ const noPermissions: Cell = {
   level: 'no',
   label: 'No',
   detail: 'Its permission prompts stay in the agent.',
-  src: 'LCH:81-83, LCH:194 (cards only for Claude Code and Codex sessions the Inbox started)',
+  src: 'LCH:84-86, LCH:220 (cards only for Claude Code and Codex sessions the Inbox started)',
 };
 const noAsk: Cell = {
   level: 'no',
@@ -220,7 +220,7 @@ const mcpByHand = (name: string): Cell => ({
   level: 'part',
   label: 'MCP by hand',
   detail: `Add \`plannotator inbox mcp\` to ${name} as an MCP server named \`plannotator-inbox\`. The Inbox doesn’t connect ${name} for you.`,
-  src: 'IB:310-312 (any MCP client); AG has no entry for this agent; HELP has no line for it',
+  src: 'IB:323-325 (any MCP client); AG has no entry for this agent; HELP has no line for it',
 });
 const launchedOnly = (detail: string, src: string): Cell => ({ level: 'part', label: 'Sessions it started', detail, src });
 const noPlan = (src: string): Cell => ({ level: 'no', label: 'No', detail: 'Plannotator doesn’t open its plans yet.', src });
@@ -242,13 +242,13 @@ export const AGENTS: Agent[] = [
         level: 'yes',
         label: 'Built in',
         detail: 'The plugin gives Claude a `plannotator_inbox` tool. It is on by default and its first use starts the Inbox in the background.',
-        src: 'IB:201-205; docs/agent-guides/claude-code-mod.md:918',
+        src: 'IB:202-206; docs/agent-guides/claude-code-mod.md:968',
       },
       reply: {
         level: 'yes',
         label: 'Wakes it',
         detail: 'Your reply arrives as a new turn once Claude finishes what it is doing. Send now puts it into the turn Claude is in.',
-        src: 'IB:203; WAKE',
+        src: 'IB:204; WAKE',
       },
       start: {
         level: 'yes',
@@ -258,7 +258,7 @@ export const AGENTS: Agent[] = [
       },
       permissions: launchedOnly(
         'In a session the Inbox started, Claude’s permission prompts come to the Inbox as cards you allow or deny.',
-        'LCH:81-83 (inbox permission-hook on PermissionRequest, launched sessions only)',
+        'LCH:84-86 (inbox permission-hook on PermissionRequest, launched sessions only)',
       ),
     },
     plannotator: {
@@ -318,7 +318,7 @@ export const AGENTS: Agent[] = [
         symptom: 'Claude has no `plannotator_inbox` tool',
         fix: 'Check that `claude plugin list` shows `plannotator@plannotator` and restart Claude Code. The tool needs Claude Code 2.1.287 or newer in an interactive session.',
         code: 'claude plugin list',
-        src: 'HELP:381; IB:203',
+        src: 'HELP:383; IB:204',
       },
       {
         symptom: 'Settings → Agents says the Claude Code mod is off',
@@ -329,35 +329,43 @@ export const AGENTS: Agent[] = [
         symptom: 'Settings → Agents says `plugin needs an update`',
         fix: 'Update the plugin and restart Claude Code.',
         code: 'claude plugin marketplace update plannotator\nclaude plugin update plannotator@plannotator',
-        src: 'SET:39-41; INST:141',
+        src: 'SET:40-42; INST:141',
       },
       {
         symptom: 'No Send now on a reply or the sidebar says Reload Claude Code',
         fix: 'That session runs an older plugin. Type `/reload-plugins` in it. If it is still listed, type `/exit` and start it again with the command the Inbox gives you.',
         code: 'cd <folder> && claude --resume <session id>',
-        src: 'IB:436; IB:462',
+        src: 'IB:449; IB:475',
       },
       {
         symptom: 'Your reply says Queued',
         fix: 'Claude is working and gets the reply when its turn ends. Press Send now to put it into the running turn.',
-        src: 'IB:123; IB:435',
+        src: 'IB:124; IB:448',
       },
       {
         symptom: 'On Windows the tool never appears',
         fix: 'The plugin needs Git Bash or a PowerShell 5.1 that may run `-EncodedCommand`. Constrained Language Mode or a security product can block it. `PLANNOTATOR_MOD_SHELL=sh` or `powershell` picks one.',
-        src: 'docs/agent-guides/claude-code-mod.md:50-62',
+        src: 'docs/agent-guides/claude-code-mod.md:98-125',
       },
       {
         symptom: 'The installer says `DUPLICATE HOOK DETECTED`',
         fix: 'Remove the plannotator hook from `~/.claude/settings.json`. The plugin has its own and plan review would open twice.',
         src: 'SH:3627-3634',
       },
+      {
+        symptom: 'A session the Inbox started says `Claude Code couldn’t answer`',
+        fix: 'Its turn ended in an error such as low credit or a sign-in or a rate limit. The note above it says which. Fix that and press Try again to send your message again.',
+        src: 'LCH:65,71 (the turn_error note and Try again); packages/core/inbox-run-line.ts:36',
+      },
       inboxLog,
     ],
     limits: [
-      { text: 'In `claude -p` and SDK runs the plugin adds no Inbox tool and nothing wakes the session.', src: 'IB:205' },
+      {
+        text: 'In `claude -p` and other SDK runs the plugin adds no Inbox tool and nothing wakes the session. The chat panel of Claude Code’s VS Code extension gets both.',
+        src: 'IB:206; docs/agent-guides/claude-code-mod.md:31-35,41-62 (resolveAllowed lets a claude-vscode panel session through)',
+      },
       { text: 'Starting Claude Code from the Inbox is off on Windows by default.', src: 'LCH:5' },
-      { text: 'Claude’s own `AskUserQuestion` stays in Claude Code. Questions reach the Inbox when Claude sends them there.', src: 'LCH:81' },
+      { text: 'Claude’s own `AskUserQuestion` stays in Claude Code. Questions reach the Inbox when Claude sends them there.', src: 'LCH:84' },
     ],
     examples: [
       'Leave plan mode and the plan opens in Plannotator while Claude keeps working.',
@@ -379,16 +387,16 @@ export const AGENTS: Agent[] = [
     inbox: {
       tool: offAtFirst(
         'The extension gives Pi a `plannotator_inbox` tool. It is off until you turn it on in the Inbox’s Settings, because Pi sends every tool with each request (about 2,750 tokens for this one).',
-        'IB:207-215',
+        'IB:208-216',
       ),
-      reply: { level: 'yes', label: 'Wakes it', detail: 'Your reply arrives as a follow-up once Pi is idle. Send now steers it into the run.', src: 'IB:213; WAKE' },
+      reply: { level: 'yes', label: 'Wakes it', detail: 'Your reply arrives as a follow-up once Pi is idle. Send now steers it into the run.', src: 'IB:214; WAKE' },
       start: {
         level: 'yes',
         label: 'Yes',
         detail: 'Pick New Pi session in a new message. Pi 0.79.1 or newer with the extension. The Inbox runs that session, so it pauses when the Inbox stops and your next reply continues it.',
-        src: 'LCH:157-174',
+        src: 'LCH:183-200',
       },
-      permissions: { level: 'no', label: 'No', detail: 'Pi has no permission prompts of its own.', src: 'LCH:175' },
+      permissions: { level: 'no', label: 'No', detail: 'Pi has no permission prompts of its own.', src: 'LCH:201' },
     },
     plannotator: {
       plan: {
@@ -410,7 +418,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL, see: 'The installer’s `PI USERS` part prints the extension command.' },
       { do: 'Add the extension. It needs Pi 0.79.1 or newer.', code: 'pi install npm:@plannotator/pi-extension' },
       openInbox('The Inbox opens in your browser. Settings → Agents lists Pi through `Plannotator’s extension`.'),
-      { do: 'Turn the tool on for Pi in Settings → Agents. Then type `/reload` in Pi.', code: '/reload', see: 'Pi has a `plannotator_inbox` tool.' },
+      { do: '`plannotator inbox` turned the tool on when it found the extension. Type `/reload` in Pi.', code: '/reload', see: 'Pi has a `plannotator_inbox` tool.' },
     ],
     other: [
       onWindows,
@@ -422,27 +430,32 @@ export const AGENTS: Agent[] = [
     trouble: [
       {
         symptom: 'Pi has no `plannotator_inbox` tool',
-        fix: 'The tool is off until you turn it on. Run `plannotator inbox` once and turn it on in Settings → Agents. Then `/reload` in Pi (`/restart` in Oh My Pi).',
-        src: 'IB:424-425',
+        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the extension. If you turned the tool off yourself, turn it on in Settings → Agents. Then `/reload` in Pi (`/restart` in Oh My Pi).',
+        src: 'IB:74,437-438; packages/server/inbox-agents.ts:1582-1590 (a tool way saves inboxTool on)',
       },
       {
         symptom: 'Settings → Agents says Pi needs a reload',
         fix: 'Update the extension and reload Pi.',
         code: 'pi update --extensions',
-        src: 'SET:75; IB:462',
+        src: 'SET:76; IB:475',
       },
       noBinary,
       {
         symptom: 'No tool in print or JSON mode',
         fix: 'That is expected. Nothing could bring a reply back there, so the tool stays inactive.',
-        src: 'IB:215',
+        src: 'IB:216',
+      },
+      {
+        symptom: 'A Pi session the Inbox started says `Pi’s turn ended with an error`',
+        fix: 'Pi’s provider refused the turn, for example a model your login doesn’t allow or an expired login. The note gives Pi’s own words. Fix that in Pi and reply again.',
+        src: 'LCH:202',
       },
       toolEnv,
       inboxLog,
     ],
     limits: [
       { text: 'Ask this session doesn’t work in remote mode.', src: 'apps/pi-extension/README.md:268' },
-      { text: 'Starting Pi from the Inbox is macOS and Linux for now.', src: 'LCH:244' },
+      { text: 'Starting Pi from the Inbox is macOS and Linux for now.', src: 'LCH:271' },
     ],
     examples: [
       'Start Pi with `--plan` and review its plan in Plannotator.',
@@ -460,13 +473,13 @@ export const AGENTS: Agent[] = [
     inbox: {
       tool: offAtFirst(
         'The plugin gives OpenCode a `plannotator_inbox` tool. It is off until you turn it on in the Inbox’s Settings, because OpenCode sends every tool with each request.',
-        'IB:217-223',
+        'IB:218-224',
       ),
       reply: {
         level: 'part',
         label: 'Wakes OpenCode 2',
         detail: 'On OpenCode 2 your reply arrives as a new turn once the session is idle. OpenCode 1 has the tool but sees your reply only when it reads the thread.',
-        src: 'IB:223; WAKE',
+        src: 'IB:224; WAKE',
       },
       start: noStart,
       permissions: noPermissions,
@@ -486,7 +499,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL, see: 'The installer ends with `Then restart OpenCode (OpenCode 2: run opencode2 reload).`' },
       { do: 'Add the plugin to `opencode.json`. This is OpenCode 2.', file: 'opencode.json', code: '{ "plugins": [{ "package": "@plannotator/opencode@latest" }] }' },
       openInbox('The Inbox opens in your browser. Settings → Agents lists OpenCode through `Plannotator’s plugin`.'),
-      { do: 'Turn the tool on for OpenCode in Settings → Agents. Then reload OpenCode.', code: 'opencode2 reload', see: '`opencode2 plugin list` shows `plannotator` and OpenCode has a `plannotator_inbox` tool.' },
+      { do: '`plannotator inbox` turned the tool on when it found the plugin. Reload OpenCode.', code: 'opencode2 reload', see: '`opencode2 plugin list` shows `plannotator` and OpenCode has a `plannotator_inbox` tool.' },
     ],
     other: [
       onWindows,
@@ -497,8 +510,8 @@ export const AGENTS: Agent[] = [
     trouble: [
       {
         symptom: 'OpenCode has no `plannotator_inbox` tool',
-        fix: 'Turn the tool on in Settings → Agents. Then run `opencode2 reload` on OpenCode 2 or restart OpenCode 1.',
-        src: 'IB:424-425',
+        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin in your global OpenCode config. If you turned the tool off yourself, turn it on in Settings → Agents. Then run `opencode2 reload` on OpenCode 2 or restart OpenCode 1.',
+        src: 'IB:74,220,437-438; packages/server/inbox-agents.ts:1582-1590',
       },
       {
         symptom: 'OpenCode says `Plugin is not configured`',
@@ -538,9 +551,9 @@ export const AGENTS: Agent[] = [
     inbox: {
       tool: offAtFirst(
         'The plugin gives the agent a `plannotator_inbox` tool. It is off until you turn it on in the Inbox’s Settings, because DeepSeek Harness sends every tool with each request.',
-        'IB:227-233; apps/dsh-plugin/README.md',
+        'IB:228-234; apps/dsh-plugin/README.md',
       ),
-      reply: { level: 'yes', label: 'Wakes it', detail: 'Your reply arrives as a new turn once the session is idle. Send now steers it into the running turn.', src: 'IB:233; WAKE' },
+      reply: { level: 'yes', label: 'Wakes it', detail: 'Your reply arrives as a new turn once the session is idle. Send now steers it into the running turn.', src: 'IB:234; WAKE' },
       start: noStart,
       permissions: noPermissions,
     },
@@ -554,7 +567,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL },
       { do: 'Add the plugin to the profile you use.', code: 'dsh plugin --profile <profile> add @plannotator/dsh' },
       openInbox('The Inbox opens in your browser. Settings → Agents lists DeepSeek Harness.'),
-      { do: 'Turn the tool on for DeepSeek Harness in Settings → Agents. Then restart DeepSeek Harness.', see: 'The agent has a `plannotator_inbox` tool.' },
+      { do: '`plannotator inbox` turned the tool on when it found the plugin. Restart DeepSeek Harness.', see: 'The agent has a `plannotator_inbox` tool.' },
     ],
     other: [
       { title: 'DeepSeek Harness Desktop', steps: [{ do: 'Open and quit Desktop once. Then add the plugin to its profile.', code: 'dsh plugin --profile desktop add @plannotator/dsh' }] },
@@ -565,25 +578,25 @@ export const AGENTS: Agent[] = [
     trouble: [
       {
         symptom: 'The agent has no `plannotator_inbox` tool',
-        fix: 'Turn the tool on in Settings → Agents and restart DeepSeek Harness. The tool appears only once the Inbox has run on this computer.',
-        src: 'HELP:383',
+        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then restart DeepSeek Harness.',
+        src: 'IB:75,230; HELP:385; packages/server/inbox-agents.ts:1582-1590',
       },
       {
         symptom: 'No tool in a headless or sdk or acp profile',
         fix: 'Those profiles get no tool and no wake. Use an interactive profile.',
-        src: 'IB:235',
+        src: 'IB:236',
       },
       {
         symptom: 'You connected it as an MCP server',
         fix: 'Use the plugin instead. Over MCP the Inbox can’t tell DeepSeek Harness sessions apart and can’t wake them.',
-        src: 'HELP:383; HAR (dsh)',
+        src: 'HELP:385; HAR (dsh)',
       },
       inboxLog,
     ],
     limits: [
       { text: 'Needs DeepSeek Harness 0.2.1-rc.2 or newer and below 0.3.0.', src: 'apps/dsh-plugin/README.md (Requirements)' },
-      { text: 'There is no reminder about the Inbox at the start of a session yet.', src: 'IB:233' },
-      { text: 'By default DeepSeek Harness sends its session to DeepSeek, and that includes the Inbox messages the agent reads.', src: 'IB:239' },
+      { text: 'There is no reminder about the Inbox at the start of a session yet.', src: 'IB:234' },
+      { text: 'By default DeepSeek Harness sends its session to DeepSeek, and that includes the Inbox messages the agent reads.', src: 'IB:240' },
       { text: 'Not verified on Windows.', src: 'apps/dsh-plugin/README.md (only a default binary path for Windows)' },
     ],
     examples: ['Leave plan mode and the plan opens in Plannotator.'],
@@ -613,7 +626,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL },
       { do: 'Add the plugin.', code: 'cline plugin install npm:@plannotator/cline' },
       openInbox('The Inbox opens in your browser. Settings → Agents lists Cline.'),
-      { do: 'Turn the tool on for Cline in Settings → Agents. Start a new Cline session.', see: 'The new session has a `plannotator_inbox` tool.' },
+      { do: '`plannotator inbox` turned the tool on when it found the plugin. Start a new Cline session.', see: 'The new session has a `plannotator_inbox` tool.' },
     ],
     other: [
       {
@@ -626,15 +639,15 @@ export const AGENTS: Agent[] = [
     trouble: [
       {
         symptom: 'Cline has no `plannotator_inbox` tool',
-        fix: 'Turn it on in Settings → Agents and start a new session. A running session keeps the tools it started with.',
-        src: 'HELP:384',
+        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then start a new session. A running session keeps the tools it started with.',
+        src: 'HELP:386,392 (Cline with its plugin); packages/server/inbox-agents.ts:1234-1243 (AG cline: a tool way with the plugin)',
       },
       {
         symptom: 'A reply arrives only after you type',
         fix: 'Cline stops a plugin after 30 idle minutes. Type anything in that session and the reply comes in.',
         src: 'apps/cline-plugin/README.md (Good to know)',
       },
-      { symptom: 'No Send now', fix: 'Cline takes a reply only when it is idle, so there is no Send now.', src: 'HELP:411' },
+      { symptom: 'No Send now', fix: 'Cline takes a reply only when it is idle, so there is no Send now.', src: 'HELP:415' },
       inboxLog,
     ],
     limits: [
@@ -644,23 +657,192 @@ export const AGENTS: Agent[] = [
     examples: ['Ask Cline to send you a question with options and pick one in the Inbox.'],
   },
   {
+    slug: 'openclaw',
+    name: 'OpenClaw',
+    tier: 'plugin',
+    lede: 'The plugin gives your own OpenClaw chats the Inbox tool. Your reply comes back into the same chat as a new message.',
+    diff: 'Inbox only · your own chats only',
+    inbox: {
+      tool: offAtFirst(
+        'The plugin gives OpenClaw a `plannotator_inbox` tool in your own chats. It is off until you turn it on, because OpenClaw sends every tool with each request.',
+        'apps/openclaw-plugin/README.md:17-26',
+      ),
+      reply: {
+        level: 'yes',
+        label: 'Wakes it',
+        detail: 'Your reply goes into the same chat as a new message, after the turn that is running. OpenClaw 2026.11.5-beta.1 or newer.',
+        src: 'apps/openclaw-plugin/README.md:11,30; docs/agent-guides/inbox-notifications-and-agents.md:255,259; WAKE',
+      },
+      start: noStart,
+      permissions: noPermissions,
+    },
+    plannotator: {
+      plan: noPlan('apps/openclaw-plugin/openclaw.plugin.json (contracts.tools: plannotator_inbox only)'),
+      review: { level: 'no', label: 'No', detail: 'The plugin has no review command.', src: 'apps/openclaw-plugin/openclaw.plugin.json' },
+      annotate: { level: 'no', label: 'No', detail: 'The plugin has no annotate command.', src: 'apps/openclaw-plugin/openclaw.plugin.json' },
+      ask: noAsk,
+    },
+    setup: [
+      { do: 'Install Plannotator.', code: INSTALL },
+      {
+        do: 'Add the plugin. It needs OpenClaw 2026.11.5 or newer, or a beta from 2026.11.5-beta.1. The running Gateway loads it without a restart.',
+        code: 'openclaw plugins install @plannotator/openclaw',
+      },
+      openInbox('The Inbox opens in your browser. Settings → Agents lists OpenClaw.'),
+      { do: '`plannotator inbox` turned the tool on when it found the plugin. Send a new message in one of your own OpenClaw chats.', see: 'The agent has a `plannotator_inbox` tool.' },
+    ],
+    other: [
+      {
+        title: 'Turn the tool on without the Inbox',
+        steps: [{ do: 'Merge this into your Plannotator config. It applies from the next message in each chat.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
+      },
+    ],
+    check: wakeCheck('OpenClaw'),
+    trouble: [
+      {
+        symptom: 'OpenClaw has no `plannotator_inbox` tool',
+        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. It applies from the next message in each chat.',
+        src: 'apps/openclaw-plugin/README.md:19; docs/agent-guides/inbox-notifications-and-agents.md:256,261',
+      },
+      {
+        symptom: 'The tool refuses in a group chat',
+        fix: 'Only your own chats get it: OpenClaw on this computer and your own direct messages. Never a group or a channel, even when you write there.',
+        src: 'apps/openclaw-plugin/README.md:23-26; docs/agent-guides/inbox-notifications-and-agents.md:257',
+      },
+      {
+        symptom: 'Your reply never shows up on its own',
+        fix: 'It needs OpenClaw 2026.11.5-beta.1 or newer. OpenClaw 2026.11.3 installs the plugin but can’t start a turn with your reply.',
+        src: 'docs/agent-guides/inbox-notifications-and-agents.md:255; apps/openclaw-plugin/package.json (compat)',
+      },
+      {
+        symptom: 'The plugin does nothing after you installed it again',
+        fix: 'After `openclaw plugins uninstall` OpenClaw keeps the plugin turned off. Turn it back on.',
+        code: 'openclaw plugins enable plannotator',
+        src: 'apps/openclaw-plugin/README.md:31',
+      },
+      { symptom: 'No Send now', fix: 'A plugin can’t steer a running OpenClaw turn, so your reply waits for the turn to end.', src: 'docs/agent-guides/inbox-notifications-and-agents.md:259' },
+      inboxLog,
+    ],
+    limits: [
+      { text: 'After `/new` your reply goes into the chat’s new conversation.', src: 'apps/openclaw-plugin/README.md:32' },
+      { text: 'OpenClaw’s Control UI shows your reply as a System notice.', src: 'docs/agent-guides/inbox-notifications-and-agents.md:260' },
+      { text: 'OpenClaw must run on the same computer as the Inbox. An OpenClaw on a VPS can’t reach it yet.', src: 'apps/openclaw-plugin/README.md:11,33' },
+      { text: 'Not verified on Windows.', src: 'apps/openclaw-plugin/inbox.test.ts (a fake OpenClaw host; nothing runs a real OpenClaw on Windows)' },
+    ],
+    examples: ['Ask OpenClaw in your Telegram DM to send you a question. Answer it in the Inbox and the answer comes back to you in Telegram.'],
+  },
+  {
+    slug: 'hermes-agent',
+    name: 'Hermes Agent',
+    tier: 'plugin',
+    lede: 'The plugin gives Hermes Agent the Inbox tool in your own sessions. Your reply starts a turn in the session that asked.',
+    diff: 'Inbox only · your own sessions only',
+    inbox: {
+      tool: offAtFirst(
+        'The plugin gives Hermes a `plannotator_inbox` tool in your own sessions. It is off until you turn it on, because Hermes sends every tool with each request.',
+        'apps/hermes-plugin/README.md:18; IB:251',
+      ),
+      reply: {
+        level: 'yes',
+        label: 'Wakes it',
+        detail: 'Your reply starts a turn in the Hermes session that asked once it is idle, through Hermes’s own plugin system. It needs one Hermes setting on, which `plannotator inbox` turns on for you.',
+        src: 'IB:251; docs/agent-guides/inbox-notifications-and-agents.md:268-269; apps/hermes-plugin/hermes.py:64-75; WAKE',
+      },
+      start: noStart,
+      permissions: noPermissions,
+    },
+    plannotator: {
+      plan: noPlan('apps/hermes-plugin/plugin.yaml (provides plannotator_inbox only); PR #3217 (no /plan review hook)'),
+      review: { level: 'no', label: 'No', detail: 'The plugin has no review command.', src: 'apps/hermes-plugin/plugin.yaml' },
+      annotate: { level: 'no', label: 'No', detail: 'The plugin has no annotate command.', src: 'apps/hermes-plugin/plugin.yaml' },
+      ask: noAsk,
+    },
+    setup: [
+      { do: 'Install Plannotator.', code: INSTALL },
+      { do: 'Add the plugin.', code: 'hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable' },
+      openInbox(
+        'The terminal says `Connected Hermes Agent … to the Inbox` and that Plannotator turned on Hermes Agent’s `plugins.entries.plannotator.allow_gateway_injection` so your replies can start a turn in the session that asked.',
+      ),
+      { do: '`plannotator inbox` turned the tool on when it found the plugin. Start a new Hermes session.', see: 'The session has a `plannotator_inbox` tool.' },
+    ],
+    other: [
+      {
+        title: 'Let replies start a turn yourself',
+        steps: [{ do: 'Run this when `plannotator inbox` couldn’t. It applies without restarting Hermes.', code: 'hermes config set plugins.entries.plannotator.allow_gateway_injection true' }],
+      },
+      {
+        title: 'Turn the tool on without the Inbox',
+        steps: [{ do: 'Merge this into your Plannotator config. It applies to new Hermes sessions.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
+      },
+    ],
+    check: wakeCheck('Hermes Agent'),
+    trouble: [
+      {
+        symptom: 'Hermes has no `plannotator_inbox` tool',
+        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then start a new Hermes session. A running one keeps the tools it started with.',
+        src: 'IB:76,251; docs/agent-guides/inbox-notifications-and-agents.md:265',
+      },
+      {
+        symptom: 'Your reply never shows up on its own',
+        fix: 'Hermes hasn’t let the plugin start a turn. Run this. Until then your reply is saved and Hermes sees it when it next reads the thread.',
+        code: 'hermes config set plugins.entries.plannotator.allow_gateway_injection true',
+        src: 'apps/hermes-plugin/__init__.py:15,156; apps/hermes-plugin/hermes.py:64-69; docs/agent-guides/inbox-notifications-and-agents.md:269',
+      },
+      {
+        symptom: 'In the classic command-line window the woken turn doesn’t show',
+        fix: 'It runs but stays hidden until you type something. Hermes’s newer TUI shows it live.',
+        src: 'owner note 2026-11-12 (proven on Hermes 0.23.1); not in the repo',
+      },
+      {
+        symptom: 'The tool refuses in a chat',
+        fix: 'Only your own sessions get it: the terminal and the TUI and the Desktop app and your own direct messages. Your direct messages count when you are on that platform’s DM admin list (`allow_admin_from`) or when its allowlist names only you.',
+        src: 'apps/hermes-plugin/README.md:22; IB:251',
+      },
+      { symptom: 'No Send now', fix: 'Hermes takes a reply only when the session is idle, so there is no Send now.', src: 'docs/agent-guides/inbox-notifications-and-agents.md:268' },
+      {
+        symptom: 'You want replies to stop starting turns',
+        fix: 'Turn the setting off. Hermes then sees your replies when it reads the thread.',
+        code: 'hermes config set plugins.entries.plannotator.allow_gateway_injection false',
+        src: 'packages/core/inbox-hermes.ts:7; PR #3238',
+      },
+      inboxLog,
+    ],
+    limits: [
+      {
+        text: 'Your reply starts a turn only while one Hermes setting is on. `plannotator inbox` turns it on for you. With it off your reply is saved and Hermes sees it only when it next reads the thread.',
+        src: 'docs/agent-guides/inbox-notifications-and-agents.md:269; apps/hermes-plugin/__init__.py:15',
+      },
+      {
+        text: 'In Hermes’s classic command-line window the woken turn runs but stays hidden until you type something. Hermes’s newer TUI shows it live.',
+        src: 'owner note 2026-11-12; not in the repo',
+      },
+      { text: 'Hermes and Plannotator must run on the same computer.', src: 'apps/hermes-plugin/README.md:7; PR #3217 (no remote or VPS mode yet)' },
+      { text: 'Tested on Hermes 0.23.1.', src: 'owner note 2026-11-12; the repo’s tests use a stub of Hermes (inbox-notifications-and-agents.md:271)' },
+      { text: 'Not verified on Windows.', src: 'tests/hermes-plugin.test.ts (a stub of Hermes)' },
+    ],
+    examples: [
+      'Ask Hermes to send you a question with options and pick one in the Inbox.',
+      'Write to a Hermes session from New message in the Inbox.',
+    ],
+  },
+  {
     slug: 'codex',
     name: 'Codex',
     tier: 'hooks',
     lede: 'Codex reaches the Inbox through MCP and a hook reviews its plans. On Codex 0.149 or newer your reply arrives as its next turn.',
     diff: 'Starts from the Inbox with permission cards · reply wakes 0.149 and newer · plan review at the end of a turn',
     inbox: {
-      tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Codex for you. The Codex app and IDE extension share it.', 'IB:77; AG (codex)'),
+      tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Codex for you. The Codex app and IDE extension share it.', 'IB:78; AG (codex)'),
       reply: {
         level: 'part',
         label: 'Wakes Codex 0.149+',
         detail: 'With Codex 0.149 or newer your reply arrives in the thread that asked as its next turn, never in the middle of one. An older Codex sees it when it reads the thread.',
-        src: 'IB:325; WAKE; packages/server/inbox-codex-wake.ts',
+        src: 'IB:338; WAKE; packages/server/inbox-codex-wake.ts',
       },
-      start: { level: 'yes', label: 'Yes', detail: 'Pick New Codex session in a new message. Codex 0.149 or newer and signed in.', src: 'LCH:188-190 (CODEX_LAUNCH_MIN_VERSION 0.149.0)' },
+      start: { level: 'yes', label: 'Yes', detail: 'Pick New Codex session in a new message. Codex 0.149 or newer and signed in.', src: 'LCH:214-216 (CODEX_LAUNCH_MIN_VERSION 0.149.0)' },
       permissions: launchedOnly(
         'In a session the Inbox started, Codex’s approvals for commands and file changes come to the Inbox as cards.',
-        'LCH:194 (inbox-launch-codex-permission.ts)',
+        'LCH:220 (inbox-launch-codex-permission.ts)',
       ),
     },
     plannotator: {
@@ -704,7 +886,7 @@ export const AGENTS: Agent[] = [
       {
         symptom: 'Your reply isn’t delivered',
         fix: 'It needs Codex 0.149 or newer and a `codex` the Inbox can find on its `PATH` or in the ChatGPT app. An older Codex reads the reply when it checks the thread.',
-        src: 'IB:439; IB:325',
+        src: 'IB:452; IB:338',
       },
       {
         symptom: '`plannotator inbox` says Codex before 0.35 has no `codex mcp add`',
@@ -721,15 +903,20 @@ export const AGENTS: Agent[] = [
         fix: 'Follow Plan review hook by hand under Other ways.',
         src: 'SH:1711-1720',
       },
-      { symptom: 'A `codex exec` run never got your reply', fix: 'One-shot runs end before a reply. It stays in the Inbox for a later run to read.', src: 'IB:325' },
-      { symptom: 'No Send now', fix: 'Codex takes a reply only as its next turn, so there is no Send now.', src: 'IB:325' },
-      { symptom: 'Starting Codex from the Inbox says to sign in', fix: 'Run `codex login` in a terminal.', code: 'codex login', src: 'packages/core/inbox-launch-ready.ts:45; SET:380' },
+      { symptom: 'A `codex exec` run never got your reply', fix: 'One-shot runs end before a reply. It stays in the Inbox for a later run to read.', src: 'IB:338' },
+      { symptom: 'No Send now', fix: 'Codex takes a reply only as its next turn, so there is no Send now.', src: 'IB:338' },
+      { symptom: 'Starting Codex from the Inbox says to sign in', fix: 'Run `codex login` in a terminal.', code: 'codex login', src: 'packages/core/inbox-launch-ready.ts:45; SET:381' },
+      {
+        symptom: 'A Codex session the Inbox started says `Codex’s turn ended with an error`',
+        fix: 'Codex refused the turn, for example a model your login doesn’t allow or an expired login. The note gives Codex’s own words. Fix that in Codex and reply again.',
+        src: 'LCH:222 (A failed turn); packages/server/inbox-launch-host.ts:99',
+      },
       inboxLog,
     ],
     limits: [
       { text: 'Plan review doesn’t work on Windows, because Codex hooks are off there.', src: 'scripts/install.ps1:1314-1322; INST:431' },
-      { text: 'Starting Codex from the Inbox is macOS and Linux for now.', src: 'LCH:244' },
-      { text: 'In a session the Inbox started, a question Codex asks on its own is answered Cancel for now. Questions it sends to the Inbox work.', src: 'LCH:195' },
+      { text: 'Starting Codex from the Inbox is macOS and Linux for now.', src: 'LCH:271' },
+      { text: 'In a session the Inbox started, a question Codex asks on its own is answered Cancel for now. Questions it sends to the Inbox work.', src: 'LCH:221' },
     ],
     examples: [
       'Ask Codex for a plan. It opens in Plannotator when the turn ends.',
@@ -844,12 +1031,12 @@ export const AGENTS: Agent[] = [
     lede: 'An extension opens Qwen Code’s plans in Plannotator and it reaches the Inbox through MCP. On macOS and Linux your reply arrives as its next turn.',
     diff: 'Plan review · reply wakes it on macOS and Linux',
     inbox: {
-      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to Qwen’s `settings.json` and keeps your comments in it.', 'IB:79,88; AG (qwen)'),
+      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to Qwen’s `settings.json` and keeps your comments in it.', 'IB:80,89; AG (qwen)'),
       reply: {
         level: 'part',
         label: 'Wakes it on macOS and Linux',
         detail: 'With Qwen Code 0.24 or newer in a terminal on macOS or Linux your reply arrives as its next turn. Plannotator registers itself as a trusted sender in Qwen Code to do that.',
-        src: 'IB:327-332; WAKE; packages/server/inbox-qwen-wake.ts',
+        src: 'IB:340-345; WAKE; packages/server/inbox-qwen-wake.ts',
       },
       start: noStart,
       permissions: noPermissions,
@@ -882,13 +1069,13 @@ export const AGENTS: Agent[] = [
       {
         symptom: 'Your reply never shows up on its own',
         fix: 'It needs Qwen Code 0.24 or newer in a terminal on macOS or Linux. `qwen -p` and sessions an editor or `qwen serve` drives aren’t woken.',
-        src: 'IB:327-332',
+        src: 'IB:340-345',
       },
       inboxLog,
     ],
     limits: [
       { text: 'Notes you add when you approve a plan can’t reach the agent, so plan review doesn’t offer them.', src: 'apps/qwen-code/README.md (Plan review in Qwen Code)' },
-      { text: 'Replies don’t wake Qwen Code on Windows.', src: 'IB:332' },
+      { text: 'Replies don’t wake Qwen Code on Windows.', src: 'IB:345' },
     ],
     examples: ['Leave plan mode and the plan opens in Plannotator.'],
   },
@@ -899,8 +1086,8 @@ export const AGENTS: Agent[] = [
     lede: 'A hook opens Gemini CLI’s plans in Plannotator and it reaches the Inbox through MCP.',
     diff: 'Plan review · annotate files only',
     inbox: {
-      tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Gemini CLI for you (Gemini CLI 0.1.19 or newer).', 'IB:78; AG (gemini)'),
-      reply: notWoken('WAKE (gemini not in it); SET:287'),
+      tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Gemini CLI for you (Gemini CLI 0.1.19 or newer).', 'IB:79; AG (gemini)'),
+      reply: notWoken('WAKE (gemini not in it); SET:288'),
       start: noStart,
       permissions: noPermissions,
     },
@@ -986,8 +1173,8 @@ export const AGENTS: Agent[] = [
     lede: 'The plugin adds review and annotate to Amp’s command palette and it reaches the Inbox through MCP.',
     diff: 'No plan review',
     inbox: {
-      tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Amp for you.', 'IB:80; AG (amp)'),
-      reply: notWoken('WAKE (amp not in it); SET:287'),
+      tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Amp for you.', 'IB:81; AG (amp)'),
+      reply: notWoken('WAKE (amp not in it); SET:288'),
       start: noStart,
       permissions: noPermissions,
     },
@@ -1058,8 +1245,8 @@ export const AGENTS: Agent[] = [
     lede: 'Plannotator adds review and annotate skills to Kiro CLI and it reaches the Inbox through MCP.',
     diff: 'No plan review · annotate files only',
     inbox: {
-      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.kiro/settings/mcp.json` for you.', 'IB:81; AG (kiro)'),
-      reply: notWoken('WAKE (kiro not in it); SET:287'),
+      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.kiro/settings/mcp.json` for you.', 'IB:82; AG (kiro)'),
+      reply: notWoken('WAKE (kiro not in it); SET:288'),
       start: noStart,
       permissions: noPermissions,
     },
@@ -1129,8 +1316,8 @@ export const AGENTS: Agent[] = [
     lede: 'Cursor reaches the Inbox through MCP. It sends you messages and questions and reads your answers when it checks.',
     diff: 'Inbox only · connected for you',
     inbox: {
-      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.cursor/mcp.json` for you.', 'IB:81; AG (cursor)'),
-      reply: notWoken('WAKE (cursor not in it); IB:132 (Not woken)'),
+      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.cursor/mcp.json` for you.', 'IB:82; AG (cursor)'),
+      reply: notWoken('WAKE (cursor not in it); IB:133 (Not woken)'),
       start: noStart,
       permissions: noPermissions,
     },
@@ -1156,10 +1343,10 @@ export const AGENTS: Agent[] = [
     ],
     check: readCheck('Cursor'),
     trouble: [
-      { symptom: 'Settings → Agents says `Not found on this computer`', fix: 'The Inbox looks for `~/.cursor` or `cursor` or `cursor-agent` on your `PATH`. Open Cursor once or add the server by hand.', src: 'IB:81' },
+      { symptom: 'Settings → Agents says `Not found on this computer`', fix: 'The Inbox looks for `~/.cursor` or `cursor` or `cursor-agent` on your `PATH`. Open Cursor once or add the server by hand.', src: 'IB:82' },
       dockPath,
       neverWoken('Cursor'),
-      { symptom: 'Cursor forgets to use the Inbox', fix: 'Cursor has no global rules file, so Plannotator can’t add its note for you. Paste it into Customize → Rules.', src: 'IB:108-110' },
+      { symptom: 'Cursor forgets to use the Inbox', fix: 'Cursor has no global rules file, so Plannotator can’t add its note for you. Paste it into Customize → Rules.', src: 'IB:109-111' },
     ],
     limits: [{ text: 'You can run `plannotator review` or `plannotator annotate` in a terminal next to Cursor.', src: 'apps/hook/server/cli.ts' }],
     examples: ['Ask Cursor to send you a question when it needs a decision. Answer it in the Inbox.'],
@@ -1172,8 +1359,8 @@ export const AGENTS: Agent[] = [
     lede: 'VS Code and Windsurf and Zed and Goose and JetBrains and the Claude app reach the Inbox through MCP. So does any agent that speaks MCP.',
     diff: 'Inbox only · you add it in most apps',
     inbox: {
-      tool: mcpTool('Add `plannotator inbox mcp` as a stdio MCP server named `plannotator-inbox`. The Inbox’s first screen and Settings give the exact step for each app.', 'IB:310-323; AG (windsurf, claude-app)'),
-      reply: notWoken('IB:340'),
+      tool: mcpTool('Add `plannotator inbox mcp` as a stdio MCP server named `plannotator-inbox`. The Inbox’s first screen and Settings give the exact step for each app.', 'IB:323-336; AG (windsurf, claude-app)'),
+      reply: notWoken('IB:353'),
       start: noStart,
       permissions: noPermissions,
     },
@@ -1199,8 +1386,8 @@ export const AGENTS: Agent[] = [
     check: readCheck('your agent'),
     trouble: [
       dockPath,
-      { symptom: 'claude.ai can’t reach the Inbox', fix: 'claude.ai connectors can’t reach this computer. Use the Claude app.', src: 'HAR:174' },
-      { symptom: 'Your agent only takes an address', fix: 'Use `http://127.0.0.1:<port>/mcp`. Prefer the command: the port can change when the Inbox restarts.', src: 'HAR:290-293' },
+      { symptom: 'claude.ai can’t reach the Inbox', fix: 'claude.ai connectors can’t reach this computer. Use the Claude app.', src: 'HAR:183' },
+      { symptom: 'Your agent only takes an address', fix: 'Use `http://127.0.0.1:<port>/mcp`. Prefer the command: the port can change when the Inbox restarts.', src: 'HAR:312-315' },
       neverWoken('an MCP agent'),
     ],
     limits: [],
