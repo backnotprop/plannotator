@@ -59,7 +59,11 @@ interface ListModel {
   tags?: InboxInitiative[];
 }
 const list = async (server: InboxServer): Promise<ListModel> => (await (await fetch(url(server, "/api/inbox/threads?archived=exclude"))).json()) as ListModel;
-const rowTags = async (server: InboxServer, threadId: string) => (await list(server)).sections.flatMap((s) => s.threads).find((row) => row.thread_id === threadId)?.tags;
+// A row in no tag carries no `tags`; a thread the list does not hold reads as null.
+const rowTags = async (server: InboxServer, threadId: string) => {
+  const row = (await list(server)).sections.flatMap((s) => s.threads).find((r) => r.thread_id === threadId);
+  return row ? (row.tags ?? []) : null;
+};
 const tagThread = (server: InboxServer, threadId: string, tag: string, on: boolean) => post(server, `/api/inbox/threads/${threadId}/tags`, { tag, on });
 const makeTag = async (server: InboxServer, name: string) => ((await (await post(server, "/api/inbox/initiatives", { name })).json()) as { initiative: InboxInitiative }).initiative;
 
