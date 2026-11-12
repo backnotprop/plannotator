@@ -1274,7 +1274,7 @@ The Workspaces app's side (it has its own contract, and decides how to draw a me
 
 The eight questions the first draft left open were ruled on 2026-10-08; each is now part of the sections above.
 
-1. Pairing through the relay is not in v1. With neither path on, "Pair a phone" offers the Wi-Fi switch (section 1).
+1. Pairing through the relay is not in v1. With neither path on, "Pair a phone" offers the Wi-Fi switch (section 1). A cloud agent is not paired by redeeming an offer at all: this computer makes its device when the person pairs it here (section 13, 2026-11-11).
 2. The QR link carries no `mailbox`; the redemption's answer carries the relay (section 1).
 3. The phone's relay switch is `PUT .../devices/:dev/carriage`. Its state lives in the device record, and a reconnect registers only devices with carriage on (sections 2 and 4).
 4. Pushes go out for questions and guided reviews only (section 4, Push).
@@ -1431,3 +1431,48 @@ The owner's ask (approval `inbox-audio-attachments`, not in this repo): an agent
 - `GET attachments/:id/audio[?version=sent]` through the door: the `video` route's contract (11.2) for kind `audio` (`415 attachment_not_audio` otherwise), `Content-Type` the sniffed `audio/*` type. `download` is unchanged.
 - Comments are section 11's: `blockId: "video"`, `inboxVideo: { time }`, and no `images` (a recording has no frame). The feedback text is the same, `At 0:12 (12.5 s of 1:23)` under each comment.
 - An app that does not know `audio` reads it as `file` (`readInboxAttachmentKind`) and shows Download, as today. To play it, the app can stream the `audio` route with the same player plumbing as a video (AVPlayer / ExoPlayer take audio by Range the same way).
+
+## 13. Cloud agents (2026-11-11)
+
+A cloud agent (a Claude Code routine, a Grok Bot routine, any webhook the person pastes in Settings → Devices → Cloud agents) is a device of platform `agent`. A phone is the person; a cloud agent is not. It acts as an agent: it posts as itself, sees only the threads it was given, and can never answer, approve or act for the person.
+
+### Minted, not redeemed
+
+The person pairs a cloud agent on this computer (`POST /api/inbox/cloud-agents`), so the Inbox makes its device at once: no offer, no code, no redemption, nothing through the relay. The device record is section 2's with `platform: "agent"` and `carriage: false`, its token stored as its SHA-256 only, its pairing secret in `inbox/device-secrets/<dev id>` (0600). Nothing else is stored for it; `inbox/cloud-agents.json` names its device id beside the webhook address and key.
+
+The pair answer carries the **pairing string** once, and no other answer ever does:
+
+    plannotator-pairing-1.<base64url of {"d": "<dev id>", "t": "<tok_ token>", "s": "<pairing secret>"}>
+
+The routine keeps it as `PLANNOTATOR_PAIRING`. `s` is section 4's pairing secret, from which the relay keys come once the relay carries the agent door.
+
+Remove (`POST /api/inbox/cloud-agents/:session/remove`) revokes the device at once (the next call is `401 device_revoked`), deletes its secret file and the webhook address and key. Its messages stay in their threads. The window's device list (`GET /api/inbox/devices`) leaves agent devices out; they show under Cloud agents.
+
+### The agent door
+
+`POST /api/inbox/agent/call`, `Authorization: Bearer <the pairing's token>`, body `{ "tool": "<name>", "arguments": { … } }`. The checks, in order:
+
+1. This computer only, for now. Through the tailnet's listener: `403 local_only`. A Host that is not loopback, an `X-Forwarded-For` that is not loopback, or a `Forwarded` header: `403 forbidden_host`. Any `Origin`: `403 origin_not_allowed`. The tailnet's and the Wi-Fi's door-only listeners do not serve it, and the relay's commands (section 4) never reach it.
+2. The token. None: `401 device_token_missing`. A phone's or a linked machine's: `403 device_not_an_agent`. Unknown: `401 device_token_invalid`. Revoked, or its cloud agent removed: `401 device_revoked`.
+3. The tool: `send_message`, `read_thread`, `search` or `resolve_message`, run by the same handlers as `/mcp`. Any other name answers the result `tool_not_allowed`.
+4. Who is calling is the Inbox's to say. `send_message` is written as `{ kind: "agent", host: <the kind's host>, session: "cloud.<12 hex>", name: <its name> }`; `read_thread` reads as that session. `agent_session`, `agent_name` or `agent_host` in the arguments: `identity_forced`. `project_path`: `project_forced` (a new thread goes in the project chosen at pairing). A field outside the tool's list below: `validation_error`. No `_meta` reaches the tool: no peek, no working folder, no wake claim from the caller.
+5. Its scope. A thread is the agent's when it wrote in it, the person sent it there (New message, `to`), or the person tagged it there. An id outside its threads answers exactly as one that does not exist (`thread_not_found`, `message_not_found`).
+   - `read_thread` (`thread_id`, `message_id`, `limit`, `expand`, `before`, `after`, `include_resolved`): every id must be in its threads. With no thread or message, it lists its own threads only (`asked_by: "me"`).
+   - `search` (`query`, `limit`): every project, its threads only; `total` counts only those.
+   - `send_message` (`body`, `subject`, `thread`, `reply_to`, `supersedes`, `done`, `idempotency_key`, `attachments`): `reply_to` must be in its threads. A `thread` name that an open thread outside its scope already holds: `thread_name_taken`. Its idempotency keys are its own.
+   - `resolve_message` (`message_id`, `resolved`): through a message it sent, else `not_your_message`.
+6. Files are bytes, never paths. `attachments` is `[{ "name": "shot.png", "data": "<base64>" }]`, at most 16 MiB together (`attachments_too_large`); a string there is a path on this computer: `attachment_path_refused`. A body that shows a picture by path (`![alt](path)`): `image_path_refused`. A question's running-app prototype is refused (the Inbox probes nothing for it); `pulls` and `steps` are not taken.
+
+Answers: `200 { "result": <the tool's result> }`, a refusal from 3 to 6 as `isError` with `<code>: <message>`, as on `/mcp`; 1 and 2 are HTTP refusals `{ error, code }`.
+
+What it can never do: answer or pick a question, send for the person, 👍, approve a permission prompt, launch or stop a session, read drafts, read another thread or the thread list, read or name a file on this computer, change a setting, pair or unpair, list devices, open the event stream, or get relay carriage or pushes.
+
+At the phone's door (section 2) and through the relay's commands (section 4) an agent device's token is refused: `403 agent_not_accepted_here` (with Phones off, the door's unknown-route 404).
+
+### Waking
+
+As before the door: the person's New message to the agent, a reply to its message, or a tag, is POSTed to its webhook (docs/agent-guides/inbox-notifications-and-agents.md, "Cloud agents"). Its own read through the door settles what it read, as any agent's read does.
+
+### Not yet
+
+The relay carrying the door (a sealed `{ tool, arguments }` under U, its result under K), files from the Inbox to the agent, guided reviews (`get_guide_brief`, `submit_guide`), and the Settings screen showing the pairing string with the routine's prompt. Until the relay carries it, `plannotator inbox call` uses the door only when `PLANNOTATOR_PAIRING` holds a pairing string and `PLANNOTATOR_PAIRING_DOOR` is `http://127.0.0.1:<port>`.
