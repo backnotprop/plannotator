@@ -5,8 +5,8 @@
  *
  * The registry below is the one list of items. A new sidebar row (a future Artifacts row, say) is one more entry:
  * its place in the default layout, whether it hides, and its words. Starred and Projects are not items: they
- * always sit between the two stacks and scroll. Agents scrolls there with them and is an item, so it hides (the
- * owner, 2026-11-09); it does not move. The notices (Update, What's new, Can't check, Reload agents) are not items.
+ * always sit between the two stacks and scroll. Tags and Agents scroll there with them and are items, so they hide
+ * (the owner, 2026-11-09; approval "inbox-thread-tags"); they do not move. The notices (Update, What's new, Can't check, Reload agents) are not items.
  *
  * Pure functions only, shared by the window and the server.
  */
@@ -16,7 +16,7 @@
  * - `brand`: the logo row, always first at the top. It hides; it does not move.
  * - `stack`: a row in the top or bottom stack. It moves, and hides unless it is locked.
  * - `settings-row`: an icon button on the Settings row. It hides; it rides with Settings.
- * - `middle`: a section that scrolls between the two stacks (Agents). It hides; it does not move.
+ * - `middle`: a section that scrolls between the two stacks (Tags, Agents). It hides; it does not move.
  */
 export type InboxSidebarPlace = 'brand' | 'stack' | 'settings-row' | 'middle';
 export type InboxSidebarStack = 'top' | 'bottom';
@@ -43,6 +43,7 @@ export const INBOX_SIDEBAR_ITEMS = [
   { id: 'artifacts', label: 'Artifacts', place: 'stack', stack: 'top', hideable: true },
   { id: 'reviews', label: 'Reviews', place: 'stack', stack: 'top', hideable: true },
   { id: 'drafts', label: 'Drafts', place: 'stack', stack: 'top', hideable: true },
+  { id: 'tags', label: 'Tags', place: 'middle', hideable: true },
   { id: 'agents', label: 'Agents', place: 'middle', hideable: true },
   { id: 'copy-prompt', label: 'Copy prompt', place: 'stack', stack: 'bottom', hideable: true },
   { id: 'feedback', label: 'Feedback', place: 'stack', stack: 'bottom', hideable: true },

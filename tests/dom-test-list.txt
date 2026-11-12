@@ -131,6 +131,7 @@ packages/inbox/notificationStates.test.tsx
 packages/inbox/attachmentStepping.test.tsx
 packages/inbox/imageZoom.test.tsx
 packages/inbox/fullView.test.tsx
+packages/inbox/htmlOpensInInteract.test.tsx
 packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
@@ -179,6 +180,7 @@ packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
+packages/inbox/threadSessionsHeader.test.tsx
 packages/inbox/taterMark.test.tsx
 packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
@@ -318,6 +320,7 @@ packages/ui/hooks/useAnnotationHighlighter.selectionEdges.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.releaseOutside.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.caretDrag.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.wobbleClick.test.tsx
+packages/ui/hooks/useAnnotationHighlighter.touchRest.test.tsx
 packages/ui/components/AnnotationToolbar.scrollOut.test.tsx
 packages/ui/hooks/useClickWord.test.tsx
 packages/ui/components/Viewer.clickAWord.test.tsx
@@ -609,6 +612,8 @@ packages/inbox/reviewPaneGuide.test.tsx
 packages/inbox/reviewJump.test.tsx
 packages/inbox/reviewAllFilesTree.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
+packages/inbox/pulls/pullLaunchpad.test.tsx
+packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideChapterDiagram.test.tsx
@@ -703,9 +708,11 @@ packages/inbox/phoneSidebarSheet.test.tsx
 packages/inbox/composerDrag.test.tsx
 packages/inbox/agents/ownAgentIcons.test.tsx
 packages/inbox/agents/setAgentIcons.test.tsx
+packages/inbox/agents/agentRename.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
 packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx
 packages/review-editor/components/PRMediaScope.test.tsx
 packages/ui/components/InlineMarkdown.imgTags.test.tsx
+packages/inbox/threadTags.test.tsx

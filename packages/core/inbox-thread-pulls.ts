@@ -106,20 +106,20 @@ export function inboxThreadPullRefError(text: string): string {
   return `'${shown}' is not a full PR ref. Write owner/repo#123, group/project!45 or the PR's URL; nothing was changed.`;
 }
 
-/** One ref as an agent or the person writes it, or its refusal. */
-export function parseInboxThreadPullRef(value: unknown): InboxThreadPullRef | { error: string } {
+/** One ref as an agent or the person writes it, or its refusal. `projectHost`: the thread's project's remote host (`parseForgePullRef`). */
+export function parseInboxThreadPullRef(value: unknown, projectHost?: string | null): InboxThreadPullRef | { error: string } {
   if (typeof value !== "string" || value.trim() === "") return { error: inboxThreadPullRefError(typeof value === "string" ? value : String(value)) };
-  const ref = value.length > 600 ? null : parseForgePullRef(value);
+  const ref = value.length > 600 ? null : parseForgePullRef(value, projectHost);
   if (!ref) return { error: inboxThreadPullRefError(value.trim()) };
   return { key: forgeRefKey(ref), url: forgePullUrl(ref), ref };
 }
 
 /** Every ref of a list read, each once, or the first refusal (then nothing is changed). */
-export function parseInboxThreadPullRefs(values: unknown, field: string): { refs: InboxThreadPullRef[] } | { error: string; field: string } {
+export function parseInboxThreadPullRefs(values: unknown, field: string, projectHost?: string | null): { refs: InboxThreadPullRef[] } | { error: string; field: string } {
   if (!Array.isArray(values)) return { error: `${field}: a list of PRs, e.g. ["owner/repo#123"].`, field };
   const refs: InboxThreadPullRef[] = [];
   for (const [index, value] of values.entries()) {
-    const parsed = parseInboxThreadPullRef(value);
+    const parsed = parseInboxThreadPullRef(value, projectHost);
     if ("error" in parsed) return { error: parsed.error, field: `${field}[${index}]` };
     if (!refs.some((ref) => ref.key === parsed.key)) refs.push(parsed);
   }

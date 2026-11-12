@@ -5,12 +5,14 @@
  *
  *   GET  /api/inbox/agent-faces   `{ faces, rev }`
  *   POST /api/inbox/agent-faces   `{ agent, sessions?, face }`: one agent's face (`agent`: its own mark again); `{ faces, rev }`
+ *   POST /api/inbox/agent-faces   `{ agent, sessions?, name }`: its given name (null or blank: none), in the same
+ *                                 entry as its face; `{ faces, rev }`
  *   POST /api/inbox/agent-faces   `{ adopt: { [agent id]: face } }`: this browser's faces from before, once; `{ faces, rev }`
  *
  * Every answer and event also carries `icons`, the pictures uploaded for "Your own…" (inbox-agent-icons.ts).
  *
  * A save tells every window (`event: agent-faces` with `{ faces, rev }`). Agents, the MCP, search, the phone's door and
- * a linked machine's forward never see faces: they stay on the computer whose Inbox the window shows.
+ * a linked machine's forward never see faces or given names: they stay on the computer whose Inbox the window shows.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";

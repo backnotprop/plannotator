@@ -406,6 +406,61 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     expect(fake.calls()).toEqual([]);
   });
 
+  test("Hermes Agent with Plannotator's plugin: its tool on, and Hermes's own config set lets the plugin wake its sessions, once", async () => {
+    fake.install("hermes");
+    const plugin = join(fake.home, ".hermes", "plugins", "plannotator");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(join(plugin, "plugin.yaml"), readFileSync(join(import.meta.dir, "..", "..", "apps", "hermes-plugin", "plugin.yaml")));
+    const report = await connect();
+    expect(report.added).toEqual(["hermes"]);
+    expect(loadConfig().inboxTool).toEqual({ hermes: true });
+    expect(fake.calls()).toEqual([{ name: "hermes", args: ["config", "set", "plugins.entries.plannotator.allow_gateway_injection", "true"] }]);
+    expect((await connect()).added).toEqual([]);
+    expect(fake.calls()).toHaveLength(1);
+  });
+
+  test("Hermes Agent's wake switch: turned on by the run says which setting and how to undo it; already on, hermes is not run and nothing is said", async () => {
+    fake.install("hermes");
+    const plugin = join(fake.home, ".hermes", "plugins", "plannotator");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(join(plugin, "plugin.yaml"), readFileSync(join(import.meta.dir, "..", "..", "apps", "hermes-plugin", "plugin.yaml")));
+    writeFileSync(join(fake.home, ".hermes", "config.yaml"), "plugins:\n  entries:\n    plannotator:\n      allow_gateway_injection: true\n");
+    const already = await connect();
+    expect(already.added).toEqual(["hermes"]);
+    expect(fake.calls()).toEqual([]);
+    expect(formatConnectReport(already).join("\n")).not.toContain("allow_gateway_injection");
+
+    rmSync(join(dataDir, "inbox", "agents.json"), { force: true });
+    writeFileSync(join(fake.home, ".hermes", "config.yaml"), "plugins:\n  entries: {}\n");
+    const changed = await connect();
+    expect(fake.calls()).toHaveLength(1);
+    expect(formatConnectReport(changed)).toContain(
+      "Plannotator turned on Hermes Agent's plugins.entries.plannotator.allow_gateway_injection, so your replies can start a turn in the session that asked. To turn it off: hermes config set plugins.entries.plannotator.allow_gateway_injection false",
+    );
+  });
+
+  test("Hermes Agent without the plugin is left to the person with the one-line install, and hermes is never run", async () => {
+    fake.install("hermes");
+    mkdirSync(join(fake.home, ".hermes"), { recursive: true });
+    const report = await connect();
+    expect(report.manual).toEqual(["hermes"]);
+    expect(report.manual_why).toEqual([{ agent: "hermes", why: "add Plannotator's Hermes Agent plugin (hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable)" }]);
+    expect(loadConfig().inboxTool).toBeUndefined();
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("Hermes Agent: a refused config set is reported and tried again on the next run", async () => {
+    fake.install("hermes");
+    const plugin = join(fake.home, ".hermes", "plugins", "plannotator");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(join(plugin, "plugin.yaml"), readFileSync(join(import.meta.dir, "..", "..", "apps", "hermes-plugin", "plugin.yaml")));
+    const failed = await connect({ FAKE_AGENT_FAIL: "hermes" });
+    expect(failed.failed.map((entry) => entry.agent)).toEqual(["hermes"]);
+    expect(failed.failed[0]!.reason).toContain("hermes config set plugins.entries.plannotator.allow_gateway_injection true exited with code 3");
+    expect((await connect()).already).toEqual(["hermes"]);
+    expect(fake.calls()).toHaveLength(2);
+  });
+
   test("Cline with Plannotator's plugin installed from npm: inboxTool on for it, and cline is never run", async () => {
     fake.install("cline");
     const pkg = join(fake.home, ".cline", "plugins", "_installed", "npm", "plannotator-cline-1a2b3c", "package", "node_modules", "@plannotator", "cline");
