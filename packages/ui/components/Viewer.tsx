@@ -93,7 +93,7 @@ import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
 import { useClickWord } from '../hooks/useClickWord';
 import { getClickAWord } from '../utils/clickAWordPolicy';
-import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
+import { useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
 import { getVisibleCommentDrafts } from '../utils/commentCardPolicy';
 import { shelveCommentDraft, shelvedCommentDrafts } from '../utils/commentDraftShelf';
 import { CommentDraftBadges } from './CommentDraftBadges';
@@ -462,6 +462,19 @@ export interface ViewerProps {
    * The label picker stays off. Absent → unchanged.
    */
   textDeletions?: boolean;
+  /**
+   * Opt-in, with `textComments`: question cards take comments too, as they do
+   * in plan review: the prompt, its context, and each choice's label and
+   * description are ordinary text for the selection toolbar and the
+   * highlights; the card's own controls (the radios and checkboxes,
+   * "Other…", the footer, a picture choice's picture) stay out. A click on a
+   * choice still picks it at once; a drag across its words, or a double-click
+   * on one, selects them and never picks (the card's own guard). For a host
+   * whose reader comments on a whole message, questions included (the
+   * Plannotator Inbox). A host's own card (`renderQuestionCard`) stays out.
+   * Absent → unchanged (cards are left out of selection).
+   */
+  questionTextComments?: boolean;
   /**
    * Opt-in: words a text-selection comment box opens with, for the selected
    * text (a host's suggested comment, kept with one press or written over).
@@ -943,6 +956,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   htmlEmbeds,
   textComments = false,
   textDeletions = false,
+  questionTextComments = false,
   suggestComment,
   vimModeEnabled = false,
   vimHudEnabled = false,
@@ -1518,28 +1532,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     return () => window.clearTimeout(timer);
   }, [blocks, locationHash, scrollToAnchor, scrollViewport]);
 
-  // Use the native copy event so clipboard writes are synchronous (Safari
-  // rejects the async navigator.clipboard API outside the user-gesture window).
-  // web-highlighter clears the DOM selection on mouseup, so the browser has
-  // nothing to copy by the time Cmd+C fires — we inject the captured text here.
-  useEffect(() => {
-    const handleCopy = (e: ClipboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      // A live selection where nothing is annotated (an Inbox action item's text) is
-      // the person's own: the browser copies it, never an older toolbar's text.
-      const live = window.getSelection();
-      if (live && !live.isCollapsed && live.rangeCount > 0 && containerRef.current && rangeInsideExcluded(containerRef.current, live.getRangeAt(0))) return;
-
-      if (toolbarState?.selectionText) {
-        e.preventDefault();
-        e.clipboardData?.setData('text/plain', toolbarState.selectionText);
-      }
-    };
-
-    document.addEventListener('copy', handleCopy);
-    return () => document.removeEventListener('copy', handleCopy);
-  }, [toolbarState]);
+  // Ctrl+C / Cmd+C with the toolbar up or the selection's composer open is
+  // `useAnnotationHighlighter`'s (`utils/highlightCopy`): the native copy
+  // event, so the clipboard write stays synchronous inside the key press.
 
   // `ViewerHandle.reopenComment`: a comment being written that the host kept
   // when its file closed, back in its composer. A global comment opens the
@@ -2225,9 +2220,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 />
               );
               // `textComments`: a question card's words are not commented on
-              // (its own controls already are excluded); a box-less wrapper
-              // keeps its layout.
-              if (question && textCommentsOnly) {
+              // (its own controls already are excluded) unless the host asks
+              // for them (`questionTextComments`); a box-less wrapper keeps
+              // its layout.
+              if (question && textCommentsOnly && !questionTextComments) {
                 return (
                   <div key={group.block.id} className="annotation-exclude" style={{ display: 'contents' }}>
                     {rendered}

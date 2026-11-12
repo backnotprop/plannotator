@@ -929,6 +929,62 @@ test('a phone: hold to talk, the keyboard stays down, Cancel on screen, and a ta
   await context.close();
 });
 
+test('a phone: "Transcribing…" after words that nearly fill the line goes to the next line, inside the box and clear of its ⌄', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w, { phone: true });
+  const box = await openReply(page, w, w.threads[6]!);
+  // Words up to a few pixels short of the line's end, in whatever font the runner has.
+  const words = await box.evaluate((el: HTMLTextAreaElement) => {
+    const style = getComputedStyle(el);
+    const measure = document.createElement('canvas').getContext('2d')!;
+    measure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const room = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 4;
+    let text = '';
+    for (const word of 'Cards for now but keep the totals column from the table design and show the overdue ones first'.split(' ')) {
+      if (measure.measureText(text ? `${text} ${word}` : word).width > room) break;
+      text = text ? `${text} ${word}` : word;
+    }
+    return text;
+  });
+  await box.fill(words);
+  await box.evaluate((el: HTMLTextAreaElement) => {
+    el.setSelectionRange(el.value.length, el.value.length);
+    el.blur();
+  });
+  w.send({ upstream: [{ text: 'Keep the totals.', hold: true }] });
+  await mic(pane(page)).tap();
+  await expect(line(pane(page), 'tap')).toBeVisible();
+  // Long enough for the fake device's speech to be heard, or the stop ends the take with nothing sent.
+  await page.waitForTimeout(1200);
+  await mic(pane(page)).tap();
+  await expect(line(pane(page), 'sending')).toBeVisible();
+  const marker = pane(page).locator('.ib-rbox .ib-vph i');
+  await expect(marker).toBeVisible();
+  const at = await page.evaluate(() => {
+    const rbox = document.querySelector('section.ib-pane .ib-rbox')!;
+    const mirror = rbox.querySelector('[data-pn-mobile-editable-mirror]')!;
+    const style = getComputedStyle(mirror);
+    const outer = mirror.getBoundingClientRect();
+    const word = rbox.querySelector('.ib-vph i')!.getBoundingClientRect();
+    const close = rbox.querySelector('[data-reply-close]')!.getBoundingClientRect();
+    return {
+      text: { left: outer.left + parseFloat(style.paddingLeft), right: outer.right - parseFloat(style.paddingRight), top: outer.top + parseFloat(style.paddingTop), bottom: outer.bottom, line: parseFloat(style.lineHeight) },
+      word: { left: word.left, right: word.right, top: word.top, bottom: word.bottom },
+      close: { left: close.left, right: close.right, top: close.top, bottom: close.bottom },
+    };
+  });
+  expect(at.word.left).toBeGreaterThanOrEqual(at.text.left - 0.5);
+  expect(at.word.right).toBeLessThanOrEqual(at.text.right + 0.5);
+  expect(at.word.bottom).toBeLessThanOrEqual(at.text.bottom + 0.5);
+  expect(at.word.top, 'on the line under the words').toBeGreaterThanOrEqual(at.text.top + at.text.line - 4);
+  const overlaps = at.word.left < at.close.right && at.close.left < at.word.right && at.word.top < at.close.bottom && at.close.top < at.word.bottom;
+  expect(overlaps, 'clear of the ⌄').toBe(false);
+  await shot(page, 'phone-transcribing-next-line');
+  w.send({ release: true });
+  await expect(box).toHaveValue(`${words} Keep the totals.`);
+  await context.close();
+});
+
 test.describe('a take being transcribed outlives full screen’s card', () => {
   const engines = [
     { name: 'Chromium', ios: false },

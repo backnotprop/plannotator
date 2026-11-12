@@ -10,8 +10,8 @@
  *  - a reload draws the badge again from the draft, and the same comment from
  *    the full-screen popout lands on the same message;
  *  - Send carries them, and the agent's read_thread reads which part;
- *  - an archived message, a sent reply and the person's own message open
- *    nothing, as they take no comment on their words;
+ *  - the person's own message takes a comment on a part (approval
+ *    "inbox-annotate-own-and-questions"); an archived message opens nothing;
  *  - on a phone: a tap opens the composer inside the window, a swipe scrolls
  *    the thread, a sideways drag pans, and neither opens anything;
  *  - on a phone, full screen: two fingers pinch-zoom about themselves, one or
@@ -272,7 +272,7 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   expect(world.errors).toEqual([]);
 });
 
-test("the person's own message, a sent reply and an archived message open no composer, as their words open no toolbar", async () => {
+test("the person's own message takes a comment on a diagram part (approval inbox-annotate-own-and-questions); an archived message opens no composer", async () => {
   const { page, claude, project } = world;
   const sent = await claude.send({ project_path: project, subject: 'Locked diagrams', thread: 'locked-diagrams', body: BODY });
   const id = sent.message_id as string;
@@ -280,7 +280,7 @@ test("the person's own message, a sent reply and an archived message open no com
   const mermaid = message(page, id).locator('[data-diagram-block="mermaid"]');
   await expect(mermaid.locator('[data-diagram-svg] svg')).toBeVisible();
 
-  // The person's own reply shows a diagram: nothing to comment on.
+  // The person's own reply shows a diagram: its parts take comments, as an agent's do.
   await openReply(page);
   await page.locator('.ib-rbox textarea').fill(['Mine:', '', '```mermaid', 'flowchart TD', '  X[My part] --> Y[Other part]', '```'].join('\n'));
   await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
@@ -288,6 +288,8 @@ test("the person's own message, a sent reply and an archived message open no com
   const mine = page.locator('article[data-author="person"] [data-diagram-block="mermaid"]').last();
   await expect(mine.locator('[data-diagram-svg] svg')).toBeVisible();
   await clickPart(page, part(mine, 'My part'));
+  await expect(composer(page)).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(composer(page)).toHaveCount(0);
 
   // Archived: the agent's message before the archive takes none either.

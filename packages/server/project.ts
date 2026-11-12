@@ -5,12 +5,22 @@
  * Priority: git repo name > directory name > null
  *
  * Pure string functions re-exported from @plannotator/shared/project.
- * detectProjectName() is Bun-specific (uses Bun.$).
+ * detectProjectName() is Bun-specific (uses Bun.spawn).
  */
 
-import { $ } from "bun";
+import { childEnv } from "@plannotator/shared/child-env";
 import { extractRepoName, extractDirName } from "@plannotator/shared/project";
 export { sanitizeTag, extractRepoName, extractDirName } from "@plannotator/shared/project";
+
+/**
+ * A git command's stdout, or null when it fails. Bun.spawn rather than Bun
+ * Shell, which cannot hide the console window git would open on Windows.
+ */
+export async function gitStdout(args: string[], cwd: string): Promise<string | null> {
+  const proc = Bun.spawn(["git", ...args], { cwd, env: childEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore", windowsHide: true });
+  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  return exitCode === 0 ? stdout : null;
+}
 
 /**
  * Detect project name from current context
@@ -23,9 +33,9 @@ export { sanitizeTag, extractRepoName, extractDirName } from "@plannotator/share
 export async function detectProjectName(cwd = process.cwd()): Promise<string | null> {
   // Try git repo name first
   try {
-    const result = await $`git rev-parse --show-toplevel`.cwd(cwd).quiet().nothrow();
-    if (result.exitCode === 0) {
-      const repoName = extractRepoName(result.stdout.toString());
+    const toplevel = await gitStdout(["rev-parse", "--show-toplevel"], cwd);
+    if (toplevel !== null) {
+      const repoName = extractRepoName(toplevel);
       if (repoName) return repoName;
     }
   } catch {
