@@ -87,7 +87,11 @@ test('six sessions of five agents: four marks at most, an ended session says so,
   await open(page, world!.six);
   await expect(line(page)).toHaveAttribute('data-thread-sessions', '6');
   await expect(line(page).locator('[data-pile]')).toHaveAttribute('data-pile', '4');
-  await line(page).locator('.ib-ss-tog').click();
+  // A mouse resting on it opens it, and the opened band then lies over the button, so a click lands on the band
+  // (its left padding here, not a name, which would filter the list) and keeps it open.
+  await line(page).locator('.ib-ss-tog').hover();
+  await expect(names(page)).toHaveCount(6);
+  await line(page).locator('.ib-ss-band').click({ position: { x: 2, y: 14 } });
   await expect(names(page)).toHaveCount(6);
   await expect(names(page).filter({ hasText: 'Cursor' })).toHaveAttribute('data-state', 'ended');
   const long = names(page).first().locator('.ib-ss-nm');
