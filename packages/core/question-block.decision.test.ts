@@ -101,30 +101,30 @@ describe("Decision: [statement](url)", () => {
 
 describe("findQuestionBlocks", () => {
   const DOC = [
-    "# Plan", //                                   1
+    "# Plan",
     "",
-    ":::question", //                              3
+    ":::question",
     "Where should losing versions be kept?",
     "",
     "- [ ] Local",
     "- [ ] Server",
-    ":::", //                                      8
+    ":::",
     "",
-    "```markdown", //                              10
+    "```markdown",
     ":::question",
     "Not a question, it is in a fence?",
     ":::",
     "```",
     "",
-    ":::question-text", //                         16
+    ":::question-text",
     "Where should losing versions be kept?",
-    ":::", //                                      18
+    ":::",
     "",
-    ":::question", //                              20
+    ":::question",
     "Where should losing versions be kept?",
     "",
     "- [ ] Local",
-    ":::", //                                      24
+    ":::",
   ].join("\n");
 
   test("locates each block by its opening and closing lines with its exact text", () => {
@@ -192,11 +192,6 @@ describe("{ decisionLines: false } (a host with no decisions)", () => {
 });
 
 describe("{ decisionLines: false } keeps the default parse's choices for every shape", () => {
-  // What regresses if this fails: a `Decision:` line right under a choice is
-  // folded into it (a plain bullet's lazy continuation, a task-list choice's
-  // indented description), so the window's label ("SQLite Decision: when
-  // answered") no longer matches the stored one ("SQLite") and the Inbox
-  // refuses the pick (422).
   const shapes: Record<string, string> = {
     "plain bullets, the line right under them": "Which database?\n- Postgres\n- SQLite\nDecision: when answered",
     "plain bullets, after a blank line": "Which database?\n\n- Postgres\n- SQLite\n\nDecision: when answered",
@@ -216,8 +211,6 @@ describe("{ decisionLines: false } keeps the default parse's choices for every s
       expect(plain.recommendation).toBe(byDefault.recommendation);
       expect(plain.decisionOnAnswer).toBeUndefined();
       expect(plain.decision).toBeUndefined();
-      // An indented line is never a decision line (it must start the line), so both parses keep it under its
-      // choice; a line at the start is context here.
       if (!name.includes("indented")) expect(plain.context).toContain("Decision:");
     });
   }

@@ -1,8 +1,3 @@
-/**
- * Clone from a git URL (approval "launch-create-clone", C1-C8): which pasted texts are repos, accounts or words, and the
- * URL git is given. A wrong read clones the wrong repo, offers a clone for words, or passes something git would take
- * as an option or a credential.
- */
 import { describe, expect, test } from "bun:test";
 import { inboxGitRemoteKey, parseInboxGitUrl } from "./inbox-git-url";
 
@@ -41,7 +36,6 @@ describe("parseInboxGitUrl", () => {
   });
 
   test("never a credential, an option, a path trick, or a protocol beyond https and ssh", () => {
-    // The user and password of an https URL are dropped from what git is given.
     expect(parseInboxGitUrl("https://me:ghp_secret@github.com/acme/billing-api")).toMatchObject({ url: "https://github.com/acme/billing-api.git" });
     for (const text of [
       "-uhttps://github.com/acme/x",

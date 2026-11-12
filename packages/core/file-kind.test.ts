@@ -3,7 +3,6 @@ import { fileKind, groupByFileKind, isDefaultGeneratedPath, isTestPath } from '.
 
 describe('isTestPath', () => {
   test.each([
-    // JS / TS
     'src/retry.test.ts',
     'src/Button.spec.tsx',
     'src/sync/__tests__/client.ts',
@@ -14,36 +13,25 @@ describe('isTestPath', () => {
     'tests/e2e/sync.spec.ts',
     'e2e/login.ts',
     'test/helpers.js',
-    // Go
     'pkg/server/handler_test.go',
     'internal/testdata/golden.txt',
-    // Python
     'app/tests/test_models.py',
     'test_utils.py',
     'utils_test.py',
-    // Rust
     'crates/core/tests/integration.rs',
-    // Java / Kotlin
     'src/test/java/com/acme/AppTest.java',
-    // Ruby
     'spec/models/user_spec.rb',
-    // Swift (capitalized folder)
     'Tests/AppTests/AppTests.swift',
-    // fixtures anywhere
     'packages/core/fixtures/guide.json',
-    // pytest and Django
     'app/conftest.py',
     'polls/tests.py',
-    // Cypress, e2e and tsd type tests
     'cypress/login.cy.ts',
     'src/app.e2e.ts',
     'src/types.test-d.ts',
-    // Gradle / Kotlin source sets and test fixtures
     'app/src/androidTest/kotlin/MainTest.kt',
     'shared/src/commonTest/kotlin/Sync.kt',
     'service/src/integrationTest/java/ApiIT.java',
     'lib/src/testFixtures/java/Builders.java',
-    // .NET test projects
     'Acme.Tests/OrderTests.cs',
     'src/Acme.UnitTests/Fakes.cs',
   ])('%s is a test', (path) => {
@@ -69,12 +57,10 @@ describe('isTestPath', () => {
     'src/contest/score.ts',
     'src/latest_test',
     '.test.ts',
-    // a test marker before a non-code extension
     'openapi.spec.yaml',
     'contracts/payment.spec.json',
     'scripts/load_test.md',
     'docs/api.test.html',
-    // source-set shape only directly under src; .NET shape needs a dot
     'src/main/kotlin/LatestTest/Foo.kt',
     'app/main/androidTest/Foo.kt',
     'Tests.Shared/Helpers.cs',
@@ -96,7 +82,6 @@ describe('fileKind', () => {
   test("the host's generated set decides when given, in both directions", () => {
     const generated = new Set(['src/schema.gen.ts']);
     expect(fileKind('src/schema.gen.ts', generated)).toBe('generated');
-    // .gitattributes un-marked a lockfile: the host set leaves it out.
     expect(fileKind('bun.lock', generated)).toBe('code');
   });
 

@@ -2,11 +2,8 @@ import { describe, expect, it } from "bun:test";
 
 import { diffHunkLines, parseDiffToFiles, stripPatchColor } from "./diff-files";
 
-// #1661: `color.diff = always` (git) or `ui.color = "always"` (jj) wraps every
-// patch line in ANSI escapes, which used to parse to 0 files with no error.
 describe("colorized patches", () => {
   const ESC = "\x1b";
-  // Shape of real `git -c color.diff=always diff` output (git 2.50).
   const colorized = [
     `${ESC}[1mdiff --git a/a.txt b/a.txt${ESC}[m`,
     `${ESC}[1mindex 7898192..422c2b7 100644${ESC}[m`,
@@ -199,8 +196,6 @@ describe("parseDiffToFiles — change-type status", () => {
 });
 
 describe("diffHunkLines", () => {
-  // Real `git diff` (git 2.50): a SQL comment line removed and a line added
-  // that look like file headers, and a last line that gains its newline.
   const sql = [
     "diff --git a/q.sql b/q.sql",
     "index 9e0d66f..66b56d4 100644",
@@ -239,7 +234,6 @@ describe("diffHunkLines", () => {
   });
 
   it("places an empty side after the line its header names", () => {
-    // Hunks of a new file and of a deleted one, as git writes them.
     expect(sides(["--- /dev/null", "+++ b/n.ts", "@@ -0,0 +1,2 @@", "+a", "+b", ""].join("\n"))).toEqual([[1, 1, 1, 3]]);
     expect(sides(["--- a/d.ts", "+++ /dev/null", "@@ -1,2 +0,0 @@", "-a", "-b", ""].join("\n"))).toEqual([[1, 3, 1, 1]]);
     expect(sides(["@@ -3,0 +4,2 @@", "+x", "+y", ""].join("\n"))).toEqual([[4, 4, 4, 6]]);
@@ -263,7 +257,6 @@ describe("diffHunkLines", () => {
   });
 
   it("refuses a combined diff", () => {
-    // `git diff` of a merge conflict writes `@@@` hunks with two prefix columns.
     const combined = ["diff --cc x", "--- a/x", "+++ b/x", "@@@ -1,1 -1,1 +1,2 @@@", "- old", " +new", "++more", ""].join("\n");
     expect(diffHunkLines(combined)).toBeNull();
   });

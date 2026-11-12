@@ -1,25 +1,3 @@
-/**
- * Reviews in the Inbox: whose move a review is, and the rows. What regresses:
- *  - a review waiting on the person not On you, or still On you after they
- *    sent feedback or approved (the audit's "an approved linked PR stays On
- *    you": the pulls rule alone keeps it there);
- *  - an approval lost once the person writes again ("Thanks!"), sticking the
- *    row in With your agents;
- *  - an approved review shown Ready to land while the forge still holds the
- *    person's PR (changes asked, checks failing or running);
- *  - a teammate's PR put in Ready to land, or its review request lost from On you;
- *  - a review thread listed twice (once as a thread, once as its PR), a PR the
- *    person handed over shown as not reviewed, or a listed PR shown as reviewed;
- *  - an archived review thread listed with no open PR left, or a review sent
- *    after the archive (the Inbox brings the thread back) hidden;
- *  - a review whose PR merged still listed as Ready to land or On you, or a
- *    newer review sent after the merge hidden;
- *  - a teammate's PR (a fork's, or on a long-lived branch) claimed by branch
- *    into the person's local review, hiding its row or the review;
- *  - a PR merely mentioned in a review thread claimed into its row, hiding a
- *    teammate's "Review requested" row;
- *  - a source field that an agent made multi-line or unbounded.
- */
 import { describe, expect, test } from "bun:test";
 import { inboxPullMove, inboxPullStacks, type InboxPull, type InboxPullLink } from "./inbox-pulls";
 import { inboxReviewLinkOf, INBOX_REVIEW_SOURCE_FIELD_MAX, inboxReviewPatchSize, inboxReviewStartOf, inboxReviewGroups, inboxReviewIsOf, inboxReviewLandingChanges, inboxReviewLandingOf, inboxReviewMove, inboxReviewRows, inboxReviewSourceOf, type InboxReviewLanding, type InboxReviewThread } from "./inbox-reviews";
@@ -92,10 +70,8 @@ describe("inboxReviewMove", () => {
   test("the person's answer moves a local review: waiting on them, feedback sent, approved", () => {
     expect(inboxReviewMove(review({ thread_id: "t" }))).toEqual({ move: "on_you", reason: "review_ready" });
     expect(inboxReviewMove(review({ thread_id: "t", ...changes("t") }))).toEqual({ move: "agents", reason: "feedback_sent" });
-    // Comments or words sent without a verdict are feedback too.
     expect(inboxReviewMove(review({ thread_id: "t", answered: { message_id: "m", at: "2026-11-04T11:00:00.000Z" } }))).toEqual({ move: "agents", reason: "feedback_sent" });
     expect(inboxReviewMove(review({ thread_id: "t", ...approved("t") }))).toEqual({ move: "ready", reason: "approved" });
-    // The person wrote again after approving ("Thanks!", a yes to the agent): the verdict still decides.
     const chat = { message_id: "later", at: "2026-11-04T12:00:00.000Z" };
     expect(inboxReviewMove(review({ thread_id: "t", ...approved("t"), answered: chat }))).toEqual({ move: "ready", reason: "approved" });
     expect(inboxReviewMove(review({ thread_id: "t", ...approved("t"), answered: chat }), [pr({ number: 9, checks: "failure" })])).toEqual({ move: "on_you", reason: "failing" });
@@ -109,7 +85,6 @@ describe("inboxReviewMove", () => {
     expect(inboxReviewMove(review({ thread_id: "t", ...words }), [pull])).toEqual({ move: "waiting", reason: "others" });
     expect(inboxReviewMove(review({ thread_id: "t" }), [pull], true)).toEqual({ move: "waiting", reason: "others" });
     expect(inboxReviewMove(review({ thread_id: "t" }), [{ ...pull, requested: true }], true)).toEqual({ move: "on_you", reason: "requested" });
-    // The person's own PR still takes their verdict here: a post on it answers nothing.
     expect(inboxReviewMove(review({ thread_id: "t" }), [pr({ number: 9 })], true)).toEqual({ move: "on_you", reason: "review_ready" });
     expect(inboxReviewMove(review({ thread_id: "t", ...approved("t") }), [pull])).toEqual({ move: "waiting", reason: "others" });
     expect(inboxReviewMove(review({ thread_id: "t", ...changes("t") }), [pull])).toEqual({ move: "waiting", reason: "others" });
@@ -118,7 +93,6 @@ describe("inboxReviewMove", () => {
 
   test("an approved review of the person's linked PR leaves On you, where the pulls rule alone keeps it", () => {
     const pull = pr({ number: 412 });
-    // The audit's finding: linked and checks done is On you whatever the person answered.
     expect(inboxPullMove(pull, true).move).toBe("on_you");
     expect(inboxReviewMove(review({ thread_id: "t" }), [pull]).move).toBe("on_you");
     expect(inboxReviewMove(review({ thread_id: "t", ...approved("t") }), [pull])).toEqual({ move: "ready", reason: "approved" });
@@ -131,7 +105,6 @@ describe("inboxReviewMove", () => {
     expect(inboxReviewMove(a, [pr({ number: 3, checks: "pending" })])).toEqual({ move: "waiting", reason: "checks_running" });
     expect(inboxReviewMove(a, [pr({ number: 4, state: "draft" })])).toEqual({ move: "waiting", reason: "draft" });
     expect(inboxReviewMove(a, [pr({ number: 5, reviewers: ["jun"] })])).toEqual({ move: "waiting", reason: "forge_review" });
-    // A merged layer under the stack holds nothing.
     expect(inboxReviewMove(a, [pr({ number: 6, state: "merged", checks: "failure" }), pr({ number: 7 })])).toEqual({ move: "ready", reason: "approved" });
   });
 
@@ -158,19 +131,16 @@ describe("inboxReviewRows", () => {
     const rows = inboxReviewRows({
       threads: [review({ thread_id: "t_review", source: { kind: "pr", pr: { url: top.url } } }), review({ thread_id: "t_local", source: { kind: "local" } })],
       stacks,
-      // The agent's own thread names #413 and reviewed it; #875 was handed to a thread whose review has not arrived.
       links: { [top.key]: link("t_review"), [handed.key]: link("t_handed", "owner") },
     });
     const byId = new Map(rows.map((row) => [row.id, row]));
     expect(rows).toHaveLength(5);
-    // The stack is under its review thread, once: no row of its own.
     expect(byId.get("t_review")).toMatchObject({ reviewed: true, thread_id: "t_review", pull_keys: [top.key], move: "on_you", reason: "review_ready" });
     expect(byId.get("t_review")!.stacks.map((s) => s.id)).toEqual([top.key]);
     expect(rows.some((row) => !row.reviewed && row.stacks[0]?.layers.some((l) => l.key === low.key))).toBe(false);
     expect(byId.get("t_local")).toMatchObject({ reviewed: true, stacks: [], move: "on_you" });
     expect(byId.get("t_handed")).toMatchObject({ reviewed: true, review: null, move: "agents", reason: "curating", pull_keys: [handed.key] });
     expect(byId.get(lone.key)).toMatchObject({ reviewed: false, thread_id: null, move: "not_reviewed" });
-    // A teammate's review request stays On you, not reviewed.
     expect(byId.get(theirs.key)).toMatchObject({ reviewed: false, move: "on_you", reason: "requested" });
   });
 
@@ -204,7 +174,6 @@ describe("inboxReviewRows", () => {
       review({ thread_id: "t_stack", source: { kind: "pr", pr: { url: merged.url } }, ...approved("t_stack") }),
       review({ thread_id: "t_lone", source: { kind: "pr", pr: { url: lone.url } } }),
     ];
-    // The list keeps merged PRs (`pulls`); a merged PR under no open stack is in no stack.
     const rows = inboxReviewRows({
       threads,
       pulls: [merged, open, lone],
@@ -224,7 +193,6 @@ describe("inboxReviewRows", () => {
   test("a teammate's fork PR on the review's branch is not the review's (B1): it keeps its own row", () => {
     const fork = pr({ number: 77, head: "main", head_repo: "tomas/billing-svc", mine: false, author: "tomas" });
     const rows = inboxReviewRows({
-      // A local review of `main`, approved, in a thread that names #77.
       threads: [review({ thread_id: "t", source: { kind: "local", branch: "main", repo: "billing-svc" }, ...approved("t") })],
       stacks: inboxPullStacks([fork]),
       links: { [fork.key]: link("t") },
@@ -251,7 +219,6 @@ describe("inboxReviewRows", () => {
     expect(inboxReviewIsOf(own, pr({ number: 2, head: "retry-jitter", mine: false }))).toBe(false);
     expect(inboxReviewIsOf(own, pr({ number: 3, head: "retry-jitter", head_repo: "dana/billing-svc" }))).toBe(false);
     expect(inboxReviewIsOf({ kind: "local", branch: "main" }, pr({ number: 4, head: "main" }))).toBe(false);
-    // Naming the PR itself still matches whoever wrote it.
     expect(inboxReviewIsOf({ kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/5" } }, pr({ number: 5, mine: false }))).toBe(true);
   });
 
@@ -260,14 +227,12 @@ describe("inboxReviewRows", () => {
     const mine = pr({ number: 412, head: "retry-jitter" });
     const handed = pr({ number: 413, head: "other" });
     const rows = inboxReviewRows({
-      // A local review of branch retry-jitter whose thread also names tomas's PR.
       threads: [review({ thread_id: "t_local" }), review({ thread_id: "t_handed", source: { kind: "local", branch: "elsewhere" } })],
       stacks: inboxPullStacks([theirs, mine, handed]),
       links: { [theirs.key]: link("t_local"), [mine.key]: link("t_local"), [handed.key]: link("t_handed", "owner") },
     });
     const byId = new Map(rows.map((row) => [row.id, row]));
     expect(byId.get(theirs.key)).toMatchObject({ reviewed: false, move: "on_you", reason: "requested" });
-    // The review's branch is #412's head: that PR is the review's.
     expect(byId.get("t_local")!.pull_keys).toEqual([mine.key]);
     expect(byId.get("t_handed")!.pull_keys).toEqual([handed.key]);
     expect(rows).toHaveLength(3);
@@ -280,7 +245,6 @@ describe("inboxReviewRows", () => {
     };
     expect(groupOf(review({ thread_id: "t" }))).toBe("on_you");
     expect(groupOf(review({ thread_id: "t", ...changes("t") }))).toBe("agents");
-    // Round 2 arrives: the earlier verdict no longer answers it.
     expect(groupOf(review({ thread_id: "t", round: 2, latest_review_id: "t_r2" }))).toBe("on_you");
     expect(groupOf(review({ thread_id: "t", round: 2, latest_review_id: "t_r2", ...approved("t") }))).toBe("ready");
   });
@@ -381,7 +345,6 @@ describe("landed PRs", () => {
   });
 
   test("the record compares reviews by id: a new review counts however the clocks disagree", () => {
-    // By this machine's clock the new review is older than the merge.
     const thread = review({ thread_id: "t", round: 2, latest_review_id: "t_r2", reviewed_at: "2026-11-04T11:00:00.000Z" });
     expect(inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [], landed: [landing()] }).map((r) => r.id)).toEqual(["t"]);
   });
@@ -408,7 +371,6 @@ describe("landed PRs", () => {
     expect(rows.length).toBe(1);
     expect(rows[0]!.reviewed).toBe(false);
     expect(rows[0]!.reason).not.toBe("curating");
-    // A review already there is not curating: an ended agent doesn't take it off the page.
     const reviewed = inboxReviewRows({ threads: [review({ thread_id: "t" })], stacks, links: { [pull.key]: link({ ...live, ended: true }) }, pulls: [pull] });
     expect(reviewed[0]!.reviewed).toBe(true);
   });
@@ -457,7 +419,6 @@ describe("New review on local changes", () => {
     const before = inboxReviewRows({ threads: [], stacks: [], links: {}, started });
     expect(before).toHaveLength(1);
     expect(before[0]).toMatchObject({ id: "t_new", thread_id: "t_new", reviewed: true, review: null, move: "agents", reason: "curating", started: begun, updated_at: begun.at });
-    // Its agent ended before any card: curated by no one, so no row. A card that did arrive keeps its row.
     expect(inboxReviewRows({ threads: [], stacks: [], links: {}, started, ended: () => true })).toEqual([]);
     expect(inboxReviewRows({ threads: [review({ thread_id: "t_new" })], stacks: [], links: {}, started, ended: () => true })).toHaveLength(1);
     const after = inboxReviewRows({ threads: [review({ thread_id: "t_new" })], stacks: [], links: {}, started });
@@ -482,7 +443,6 @@ describe("a pull request link", () => {
   });
 
   test("Bitbucket and hosts it can't read say so; anything else isn't a link", () => {
-    // The key is the list's own, so a listed PR is found whatever its capitals; and what reads as a flag isn't a link.
     const of = (text: string) => inboxReviewLinkOf(text) as { ref: { key: string } };
     expect(of("https://gitlab.com/Northwind/Ledger/-/merge_requests/61").ref.key).toBe("gitlab.com/northwind/ledger#61:pull");
     expect(of("Acme/Caps#8").ref.key).toBe(of("acme/caps#8").ref.key);

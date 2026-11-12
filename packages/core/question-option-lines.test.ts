@@ -1,10 +1,3 @@
-/**
- * Option lines (approval "inbox-question-tradeoffs"): `Pros:`, `Cons:` and
- * `Prototype:` indented under a `- [ ]` choice, and a question's own
- * `Prototype:` line, read only when a host asks (`optionLines`, the Inbox).
- * Plan review, annotate and every older reader keep each line as text, so the
- * key, labels and answers never change.
- */
 import { describe, expect, test } from 'bun:test';
 import { parseQuestionBlock } from './question-block';
 import { parseInboxQuestionBlocks, prototypeTargets } from './inbox-questions';

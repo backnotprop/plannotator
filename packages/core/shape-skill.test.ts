@@ -1,9 +1,3 @@
-/**
- * Shape's "What to know" and "What's changed" are no longer something agents write (approvals "shape-know-removed",
- * "shape-whats-changed-removed"). What regresses if these fail:
- * - `plannotator shape --help`, the Inbox's `/shape` or the kit an agent prints asks for `views.know` or `views.changed` again;
- * - an agent that sends either anyway (or a saved board that has it) is refused, or it becomes parts again.
- */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,7 +23,6 @@ describe('agents are not asked for views.know', () => {
     const example = JSON.parse(json!.replaceAll('…', ''));
     expect(example.views.know).toBeUndefined();
     expect(example.views.changed).toBeUndefined();
-    // Its caveat sits behind a number instead.
     expect(example.refs.some((r: { sub?: string }) => r.sub)).toBe(true);
   });
 });

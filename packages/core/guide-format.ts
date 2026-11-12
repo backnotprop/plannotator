@@ -1,64 +1,19 @@
-/**
- * Portable Guided Review format — the versioned snapshot document plus the
- * pure `(snapshot) → HTML` renderer every producer shares (Plannotator UI,
- * `plannotator guide export`, future agent skills).
- *
- * Browser-safe and dependency-free: this module is consumed by the review UI,
- * the CDN viewer, both servers, and the CLI. It must never import `node:*`.
- *
- * Decision record: adr/decisions/007-portable-guided-reviews-20260815.md (D1, D5, D9).
- */
-
 import { parseDiffToFiles } from "./diff-files";
 import type { CodeGuideOutput, GuideDiffRef, GuideOverview, GuideOverviewDiagram, GuideOverviewDiagramKind, GuideSection } from "./guide";
 import { readGuideDiffNotes, type GuideDiffNote } from "./guide-notes";
 
-/** Discriminator for a portable guided-review snapshot. */
 export const GUIDE_SNAPSHOT_KIND = "plannotator-guided-review" as const;
 
-/**
- * The base snapshot schema version: every guide without a version-2 field is
- * written as version 1, byte for byte as before version 2 existed. (The
- * guides.show viewer tree is also namespaced by it: `/v1/`.)
- */
 export const GUIDE_SNAPSHOT_VERSION = 1 as const;
 
-/**
- * Format version 2 adds one optional field, `guide.overview` (the agent's
- * overview and its diagram). A snapshot carries version 2 exactly when it has
- * an overview, so a version-1 reader (an old pinned viewer, which rejects
- * unknown fields) is never handed a field it cannot read.
- */
 export const GUIDE_SNAPSHOT_OVERVIEW_VERSION = 2 as const;
 
-/**
- * Format version 3 adds a drawn overview picture: `guide.overview.diagram`
- * may carry `css`, `width`, `height` and `tall` (an HTML picture drawn by
- * Shape's renderer in the Inbox's code review). A snapshot carries version 3
- * exactly when its diagram has one of them, so a version-2 reader (strict)
- * never meets them; a source-only diagram stays version 2 byte for byte.
- */
 export const GUIDE_SNAPSHOT_DRAWN_VERSION = 3 as const;
 
-/**
- * Format version 4 adds the author's notes on lines of a file:
- * `guide.sections[].diffs[].notes` (context notes in the Inbox's code review).
- * A snapshot carries version 4 exactly when some file has a note, so a
- * version-3 reader (strict) never meets one; everything version 3 allows
- * (an overview, drawn or not) is allowed with it.
- */
 export const GUIDE_SNAPSHOT_NOTES_VERSION = 4 as const;
 
-/**
- * Format version 5 adds a diagram per chapter: `guide.sections[].diagram`,
- * the same shape as the overview's (drawn keys allowed on an html one). A
- * snapshot carries version 5 exactly when some chapter has a diagram, so a
- * version-4 reader (strict) never meets one; everything version 4 allows is
- * allowed with it.
- */
 export const GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION = 5 as const;
 
-/** Every snapshot version the current parser reads. */
 export const GUIDE_SNAPSHOT_VERSIONS = [
   GUIDE_SNAPSHOT_VERSION,
   GUIDE_SNAPSHOT_OVERVIEW_VERSION,
@@ -67,10 +22,8 @@ export const GUIDE_SNAPSHOT_VERSIONS = [
   GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION,
 ] as const;
 
-/** The drawn-picture keys of an overview diagram (format version 3). */
 const DRAWN_DIAGRAM_KEYS = ["css", "width", "height", "tall"] as const;
 
-/** Whether an overview diagram uses a version-3 key. */
 export function guideDiagramIsDrawn(diagram: GuideOverviewDiagram | undefined): boolean {
   return !!diagram && DRAWN_DIAGRAM_KEYS.some((key) => diagram[key] !== undefined);
 }
@@ -78,31 +31,22 @@ export type GuideSnapshotVersion = (typeof GUIDE_SNAPSHOT_VERSIONS)[number];
 
 const OVERVIEW_DIAGRAM_KINDS: readonly GuideOverviewDiagramKind[] = ["mermaid", "html"];
 
-/** DOM id of the inert `<script type="application/json">` carrying the snapshot inside an exported HTML file. */
 export const GUIDE_SNAPSHOT_SCRIPT_ID = "plannotator-guided-review";
 
-/** `<meta name>` marker on exported documents. */
 export const GUIDE_EXPORT_META_NAME = "plannotator-guided-review";
 
-/** Structural sanity caps — these bound parsing work, they are NOT size limits (D1: no caps on diff size). */
 export const MAX_GUIDE_SECTIONS = 100;
 export const MAX_GUIDE_DIFF_REFS = 50_000;
 
-/** What kind of changeset the guide describes. Rendered in the viewer header so a reader knows what they are looking at. */
 export type GuideSourceKind = "local" | "pr" | "workspace" | "commit";
 
-/** The exact review the guide was generated against — the diff panes are drawn from `rawPatch` and nothing else. */
 export interface GuideSnapshotReview {
   readonly rawPatch: string;
-  /** Human label, e.g. "main..HEAD" or "PR #123". */
   readonly gitRef: string;
-  /** Plannotator diff type id, e.g. "since-base", "merge-base", "commit:<sha>", "workspace-current". */
   readonly diffType?: string;
-  /** Base ref the diff was computed against, when the diff type has one. */
   readonly base?: string;
 }
 
-/** Pull/merge request identity, when the guide is of a PR. */
 export interface GuideSnapshotPullRequest {
   readonly url: string;
   readonly number?: number;
@@ -110,41 +54,28 @@ export interface GuideSnapshotPullRequest {
   readonly platform?: "github" | "gitlab";
 }
 
-/** Where the changeset came from. Every field but `kind` is optional so any producer can be honest about what it knows. */
 export interface GuideSnapshotSource {
   readonly kind: GuideSourceKind;
-  /** e.g. "owner/repo" or a directory name. */
   readonly repo?: string;
   readonly branch?: string;
   readonly headSha?: string;
   readonly pr?: GuideSnapshotPullRequest;
-  /** For `kind: "commit"` — the commit the guide describes. */
   readonly commitSha?: string;
 }
 
-/** Provenance of the guide text itself. */
 export interface GuideSnapshotGenerator {
   readonly engine?: string;
   readonly model?: string;
   readonly generatedAt?: string;
-  /** Reviewer-supplied instructions that shaped this guide, kept for provenance (D5). */
   readonly customInstructions?: string;
 }
 
-/** Presentation hint recorded by the exporter; the viewer may honor it, the reader may override it. */
 export interface GuideSnapshotTheme {
   readonly palette?: string;
 }
 
-/** The guide plus the reader's checkbox state. Never carries persistence flags (`saved`/`moved`). */
 export type GuideSnapshotGuide = CodeGuideOutput & { readonly reviewed: readonly boolean[] };
 
-/**
- * Versioned data contract shared by downloaded files, the CDN viewer, and
- * hosted guides. `version` is 1, or 2 when `guide.overview` is present, or 3
- * when its diagram is a drawn picture (`css`, `width` and `height`, `tall`:
- * code review's overview drawing), so a v2 reader never meets those fields.
- */
 export interface GuideSnapshot {
   readonly kind: typeof GUIDE_SNAPSHOT_KIND;
   readonly version: GuideSnapshotVersion;
@@ -156,23 +87,16 @@ export interface GuideSnapshot {
   readonly theme?: GuideSnapshotTheme;
 }
 
-/** A version-1 snapshot: no overview. */
 export type GuideSnapshotV1 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_VERSION };
-/** A version-2 snapshot: the guide carries an overview. */
 export type GuideSnapshotV2 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_OVERVIEW_VERSION };
-/** A version-3 snapshot: the overview's diagram is a drawn picture. */
 export type GuideSnapshotV3 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_DRAWN_VERSION };
-/** A version-4 snapshot: some file carries the author's notes. */
 export type GuideSnapshotV4 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_NOTES_VERSION };
-/** A version-5 snapshot: some chapter carries a diagram. */
 export type GuideSnapshotV5 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION };
 
-/** Whether a version keeps notes on lines (4 and up). */
 function versionHasNotes(version: GuideSnapshotVersion): boolean {
   return version === GUIDE_SNAPSHOT_NOTES_VERSION || version === GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION;
 }
 
-/** The version a guide is written as: 5 with a chapter diagram, else 4 with a note, else 3 with a drawn overview, 2 with an overview, else 1. */
 export function guideSnapshotVersionFor(guide: Pick<CodeGuideOutput, "overview" | "sections">): GuideSnapshotVersion {
   if (guide.sections.some((section) => section.diagram !== undefined)) return GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION;
   if (guide.sections.some((section) => section.diffs.some((ref) => (ref.notes?.length ?? 0) > 0))) return GUIDE_SNAPSHOT_NOTES_VERSION;
@@ -180,19 +104,12 @@ export function guideSnapshotVersionFor(guide: Pick<CodeGuideOutput, "overview" 
   return guideDiagramIsDrawn(guide.overview.diagram) ? GUIDE_SNAPSHOT_DRAWN_VERSION : GUIDE_SNAPSHOT_OVERVIEW_VERSION;
 }
 
-/**
- * What a producer captures when a guide job LAUNCHES: the exact review the
- * guide will describe. Stored beside the saved guide and turned into a
- * snapshot at export time (decision record D6). Never read at export time
- * from live session state — the on-screen diff may have moved since.
- */
 export interface GuideLaunchReview {
   readonly rawPatch: string;
   readonly gitRef: string;
   readonly diffType?: string;
   readonly base?: string;
   readonly source: GuideSnapshotSource;
-  /** Reviewer-supplied instructions the guide was generated with (provenance). */
   readonly customInstructions?: string;
 }
 
@@ -202,15 +119,9 @@ export interface BuildGuideSnapshotInput {
   readonly review: GuideLaunchReview;
   readonly generator?: GuideSnapshotGenerator;
   readonly theme?: GuideSnapshotTheme;
-  /** Injected for deterministic tests; defaults to now. */
   readonly exportedAt?: string;
 }
 
-/**
- * Assemble a snapshot from producer-side pieces. Pure; strips
- * persistence-only guide flags. Version 1 unless the guide has an overview,
- * which makes it version 2 (a guide without one is byte-identical to before).
- */
 export function buildGuideSnapshot(input: BuildGuideSnapshotInput): GuideSnapshot {
   const { guide } = input;
   const reviewed = new Array<boolean>(guide.sections.length).fill(false);
@@ -250,11 +161,6 @@ export function buildGuideSnapshot(input: BuildGuideSnapshotInput): GuideSnapsho
   };
 }
 
-/**
- * The sections as a snapshot of `version` carries them: a chapter's diagram
- * only from version 5 (copied, so stray producer fields never travel), notes
- * only from version 4.
- */
 function snapshotSections(sections: GuideSection[], version: GuideSnapshotVersion): GuideSection[] {
   const kept = versionHasNotes(version) ? sections : withoutNotes(sections);
   if (!kept.some((section) => "diagram" in section)) return kept;
@@ -263,20 +169,17 @@ function snapshotSections(sections: GuideSection[], version: GuideSnapshotVersio
   );
 }
 
-/** Below version 4 a diff reference carries no `notes` key, not even an empty list (an older reader refuses it). */
 function withoutNotes(sections: GuideSection[]): GuideSection[] {
   if (!sections.some((section) => section.diffs.some((ref) => "notes" in ref))) return sections;
   return sections.map((section) => ({ ...section, diffs: section.diffs.map(({ notes: _notes, ...ref }) => ref) }));
 }
 
-/** Only `{ text, diagram? }` travels (a drawn diagram's own keys with it): stray producer fields never reach a snapshot. */
 function copyOverview(overview: GuideOverview): GuideOverview {
   const d = overview.diagram;
   if (!d) return { text: overview.text };
   return { text: overview.text, diagram: copyDiagram(d) };
 }
 
-/** A diagram's own keys, and nothing else. */
 function copyDiagram(d: GuideOverviewDiagram): GuideOverviewDiagram {
   return {
     kind: d.kind,
@@ -288,11 +191,9 @@ function copyDiagram(d: GuideOverviewDiagram): GuideOverviewDiagram {
   };
 }
 
-/** Stable parse failure for malformed or unsupported snapshot data. */
 export interface GuideSnapshotParseError {
   readonly _tag: "GuideSnapshotParseError";
   readonly message: string;
-  /** JSON-path-ish location, e.g. `$.guide.sections[2].diffs[0].file`. */
   readonly path: string;
 }
 
@@ -304,19 +205,10 @@ type Parsed<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: GuideSnapshotParseError };
 
-// ---------------------------------------------------------------------------
-// Parsing — strict, total, unknown fields rejected at every level.
-// ---------------------------------------------------------------------------
-
 function fail(path: string, message: string): Parsed<never> {
   return { ok: false, error: { _tag: "GuideSnapshotParseError", path, message } };
 }
 
-/**
- * Type guard for the failure branch. `packages/core` compiles without
- * strictNullChecks, where `if (!x.ok)` does not narrow a discriminated union;
- * a user-defined guard does.
- */
 function isFail<T>(x: Parsed<T>): x is { readonly ok: false; readonly error: GuideSnapshotParseError } {
   return !x.ok;
 }
@@ -325,7 +217,6 @@ function asRecord(input: unknown, path: string): Parsed<Record<string, unknown>>
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return fail(path, "Expected an object");
   }
-  // SAFETY: object/null/array checks above establish a string-keyed object.
   return { ok: true, value: input as Record<string, unknown> };
 }
 
@@ -364,7 +255,6 @@ function optNum(record: Record<string, unknown>, key: string, path: string): Par
 function parseDiffRef(input: unknown, path: string, version: GuideSnapshotVersion): Parsed<GuideDiffRef> {
   const object = asRecord(input, path);
   if (isFail(object)) return object;
-  // Notes exist from version 4: an older document stays as strict as every reader of its version.
   const s = strict(object.value, versionHasNotes(version) ? ["file", "summary", "notes"] : ["file", "summary"], path);
   if (isFail(s)) return s;
   const file = str(s.value.file, `${path}.file`, { nonEmpty: true });
@@ -390,7 +280,6 @@ function parseDiffRef(input: unknown, path: string, version: GuideSnapshotVersio
 function parseSection(input: unknown, path: string, version: GuideSnapshotVersion): Parsed<GuideSection> {
   const object = asRecord(input, path);
   if (isFail(object)) return object;
-  // A chapter's diagram exists only in version 5: an older document stays as strict as every reader of its version.
   const s = strict(object.value, version === GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION ? ["title", "overview", "diffs", "diagram"] : ["title", "overview", "diffs"], path);
   if (isFail(s)) return s;
   const title = str(s.value.title, `${path}.title`, { nonEmpty: true });
@@ -426,11 +315,9 @@ function parseOverview(input: unknown, path: string, version: GuideSnapshotVersi
   return { ok: true, value: { text: text.value, diagram: diagram.value } };
 }
 
-/** An overview's or a chapter's diagram: `{ kind, source }`, plus the drawn keys from version 3 (html only). */
 function parseDiagram(input: unknown, dpath: string, version: GuideSnapshotVersion): Parsed<GuideOverviewDiagram> {
   const dobj = asRecord(input, dpath);
   if (isFail(dobj)) return dobj;
-  // The drawn keys exist from version 3: a version-2 document stays as strict as every version-2 reader.
   const drawnVersion = version === GUIDE_SNAPSHOT_DRAWN_VERSION || versionHasNotes(version);
   const d = strict(dobj.value, drawnVersion ? ["kind", "source", ...DRAWN_DIAGRAM_KEYS] : ["kind", "source"], dpath);
   if (isFail(d)) return d;
@@ -452,7 +339,6 @@ function parseDiagram(input: unknown, dpath: string, version: GuideSnapshotVersi
 const CANVAS_MIN = 200;
 const CANVAS_MAX = 4000;
 
-/** A version-3 diagram's drawn keys: HTML only, a canvas given whole or not at all. */
 function parseDrawnKeys(record: Record<string, unknown>, dpath: string, kind: GuideOverviewDiagramKind, required = true): Parsed<Partial<GuideOverviewDiagram>> {
   const out: Partial<GuideOverviewDiagram> = {};
   const used = DRAWN_DIAGRAM_KEYS.filter((key) => record[key] !== undefined);
@@ -481,7 +367,6 @@ function parseDrawnKeys(record: Record<string, unknown>, dpath: string, kind: Gu
     if (isFail(tcss)) return tcss;
     out.tall = { source: tsource.value, ...(tcss.value !== undefined && { css: tcss.value }) };
   }
-  // Version 3 exists for a drawn picture; versions 4 (notes) and 5 (chapter diagrams) take any diagram.
   if (required && Object.keys(out).length === 0) return fail(dpath, "A version-3 diagram carries css, width and height, or tall");
   return { ok: true, value: out };
 }
@@ -490,8 +375,6 @@ function parseGuide(input: unknown, version: GuideSnapshotVersion): Parsed<Guide
   const path = "$.guide";
   const object = asRecord(input, path);
   if (isFail(object)) return object;
-  // Version 1 has no overview: the field is unknown there, as it is to every
-  // version-1 reader, so a v1 document can never carry one.
   const fields = version === GUIDE_SNAPSHOT_VERSION
     ? ["title", "intent", "sections", "unplacedFiles", "reviewed"]
     : ["title", "intent", "overview", "sections", "unplacedFiles", "reviewed"];
@@ -539,7 +422,6 @@ function parseGuide(input: unknown, version: GuideSnapshotVersion): Parsed<Guide
   }
 
   if (!Array.isArray(s.value.reviewed)) return fail(`${path}.reviewed`, "Expected an array");
-  // Normalize to sections.length: pad with false, drop extras.
   const reviewed = new Array<boolean>(sections.length).fill(false);
   for (let i = 0; i < s.value.reviewed.length; i++) {
     const value = s.value.reviewed[i];
@@ -595,9 +477,6 @@ function parsePullRequest(input: unknown, path: string): Parsed<GuideSnapshotPul
   if (isFail(s)) return s;
   const url = str(s.value.url, `${path}.url`, { nonEmpty: true });
   if (isFail(url)) return url;
-  // Hosted pages render this straight into an href, so only web URLs pass;
-  // CSP and React already neuter `javascript:` links, this keeps that guard
-  // from resting on them alone.
   if (!/^https?:\/\//i.test(url.value)) return fail(`${path}.url`, "Expected an http(s) URL");
   const number = optNum(s.value, "number", path);
   if (isFail(number)) return number;
@@ -680,16 +559,10 @@ function parseTheme(input: unknown): Parsed<GuideSnapshotTheme | undefined> {
   return { ok: true, value: palette.value === undefined ? {} : { palette: palette.value } };
 }
 
-/**
- * What a parse accepts. `versions`: the snapshot versions read (default every
- * one this parser knows); a reader that must answer as an older release did
- * (the Inbox with Code review off: 1 and 2) names its own.
- */
 export interface GuideSnapshotParseOptions {
   readonly versions?: readonly GuideSnapshotVersion[];
 }
 
-/** Parse an unknown value into a snapshot (version 1 to 5). Never throws. */
 export function parseGuideSnapshot(input: unknown, options: GuideSnapshotParseOptions = {}): GuideSnapshotParseResult {
   const object = asRecord(input, "$");
   if (isFail(object)) return object;
@@ -732,7 +605,6 @@ export function parseGuideSnapshot(input: unknown, options: GuideSnapshotParseOp
   };
 }
 
-/** Parse serialized JSON into a snapshot (version 1 to 5). Never throws. */
 export function parseGuideSnapshotJson(text: string, options: GuideSnapshotParseOptions = {}): GuideSnapshotParseResult {
   let input: unknown;
   try {
@@ -743,26 +615,15 @@ export function parseGuideSnapshotJson(text: string, options: GuideSnapshotParse
   return parseGuideSnapshot(input, options);
 }
 
-// ---------------------------------------------------------------------------
-// Patch inspection — file list and language detection (best-effort hints).
-// ---------------------------------------------------------------------------
-
 export interface GuidePatchFile {
   readonly path: string;
   readonly patch: string;
 }
 
-/** Per-file chunks of a unified diff with their resolved (post-image) path. */
 export function listGuidePatchFiles(rawPatch: string): GuidePatchFile[] {
   return parseDiffToFiles(rawPatch).map((file) => ({ path: file.path, patch: file.patch }));
 }
 
-/**
- * Extension → Shiki grammar id. A superset of what the review UI recognizes.
- * This only drives `<link rel="modulepreload">` hints in exported HTML; the
- * viewer still lazy-loads any grammar the preload list missed, so gaps here
- * cost latency, never correctness.
- */
 const EXTENSION_LANGUAGES: Readonly<Record<string, string>> = {
   ts: "typescript", mts: "typescript", cts: "typescript", tsx: "tsx",
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
@@ -785,10 +646,8 @@ const BASENAME_LANGUAGES: Readonly<Record<string, string>> = {
   cmakelists: "cmake",
 };
 
-/** Every grammar id `guideLanguageForPath` can return — the only chunks an export's `viewer.langs` pin can ever reference. */
 export const GUIDE_LANGUAGE_IDS: readonly string[] = [...new Set([...Object.values(EXTENSION_LANGUAGES), ...Object.values(BASENAME_LANGUAGES)])].sort();
 
-/** Shiki grammar id for a path, or undefined when the viewer should render plain text. */
 export function guideLanguageForPath(path: string): string | undefined {
   const base = path.split("/").pop() ?? path;
   const lowerBase = base.toLowerCase();
@@ -799,7 +658,6 @@ export function guideLanguageForPath(path: string): string | undefined {
   return EXTENSION_LANGUAGES[lowerBase.slice(dot + 1)];
 }
 
-/** Sorted, deduplicated grammar ids the viewer will need for this patch (preload hint). */
 export function detectGuideLanguages(rawPatch: string): string[] {
   const langs = new Set<string>();
   for (const file of listGuidePatchFiles(rawPatch)) {
@@ -809,56 +667,28 @@ export function detectGuideLanguages(rawPatch: string): string[] {
   return [...langs].sort();
 }
 
-// ---------------------------------------------------------------------------
-// HTML rendering — the one place an exported document is built.
-// ---------------------------------------------------------------------------
-
-/** Where the viewer lives. Produced by the CDN build (manifest) and pinned into every export. */
 export interface GuideViewerAssets {
-  /** Absolute base, e.g. "https://guides.show/v1/". Must be https (http allowed for localhost only). */
   readonly baseUrl: string;
-  /** Path relative to `baseUrl`, e.g. "viewer.8f3a2c.js". */
   readonly js: string;
-  /** Path relative to `baseUrl`, e.g. "viewer.8f3a2c.css". */
   readonly css: string;
-  /** Subresource integrity for `js`/`css` (sha384-…). Strongly recommended; omitted only for local dev. */
   readonly jsIntegrity?: string;
   readonly cssIntegrity?: string;
-  /** Grammar chunks by Shiki id, relative to `baseUrl`, e.g. { typescript: "langs/typescript.ab12.js" }. */
   readonly langs?: Readonly<Record<string, string>>;
 }
 
 export interface GuideHtmlOptions {
   readonly viewer: GuideViewerAssets;
-  /**
-   * Set when the document is served by a guide host (guides.show `/g/<id>` or a
-   * self-hosted origin) rather than downloaded as a file. Adds a canonical URL,
-   * Open Graph metadata (title + intent) so links unfurl, and the
-   * `plannotator-guided-review-hosted` meta the viewer reads to offer a
-   * "Download this guide" affordance. Never set on the portable file.
-   */
   readonly hosted?: GuideHostedPage;
 }
 
-/** Where a hosted guide page lives. */
 export interface GuideHostedPage {
-  /** Canonical URL of the page (no fragment). */
   readonly url: string;
 }
 
-/** `<meta name>` on hosted pages carrying the canonical URL; absent on downloaded files. */
 export const GUIDE_HOSTED_META_NAME = "plannotator-guided-review-hosted";
-/** `<meta name>` on an encrypted hosted page: the URL the viewer fetches the ciphertext from. */
 export const GUIDE_PAYLOAD_META_NAME = "plannotator-guided-review-payload";
-/** URL-fragment parameter carrying the AES-256-GCM key of an encrypted hosted guide (`#key=…`), as plan share links do. */
 export const GUIDE_SHARE_KEY_PARAM = "key";
 
-/**
- * The viewer build a producer pins into exports. Producers embed the
- * generated `guide-viewer-manifest` module (gitignored; every shipping build
- * writes it from its own viewer build) and may override the base URL for local development or
- * self-hosting via `PLANNOTATOR_GUIDE_VIEWER_URL` (https, or http localhost).
- */
 export function resolveGuideViewerAssets(
   manifest: Omit<GuideViewerAssets, "baseUrl">,
   options?: { readonly baseUrl?: string; readonly defaultBaseUrl?: string },
@@ -869,7 +699,6 @@ export function resolveGuideViewerAssets(
   return { ...manifest, baseUrl: base };
 }
 
-/** Where published viewer builds live (decision record D7/D8). */
 export const DEFAULT_GUIDE_VIEWER_BASE_URL = "https://guides.show/v1/";
 
 export function escapeHtmlText(input: string): string {
@@ -880,12 +709,6 @@ function escapeHtmlAttribute(input: string): string {
   return escapeHtmlText(input).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
-/**
- * Make JSON safe to inline inside `<script type="application/json">`: a patch
- * line containing `</script>` (or `<!--`, or U+2028/9) must not terminate or
- * corrupt the element. Escaped as JSON unicode escapes, so `JSON.parse` of the
- * element's text yields the original bytes.
- */
 export function escapeJsonForHtmlScript(json: string): string {
   return json
     .replaceAll("&", "\\u0026")
@@ -895,7 +718,6 @@ export function escapeJsonForHtmlScript(json: string): string {
     .replaceAll("\u2029", "\\u2029");
 }
 
-/** Validate and normalize a viewer base URL. Returns null when it must not be embedded. */
 export function normalizeGuideViewerBaseUrl(input: string): URL | null {
   let parsed: URL;
   try {
@@ -935,11 +757,6 @@ function describeSource(snapshot: GuideSnapshot): string {
   return parts.join(" ");
 }
 
-/**
- * The no-JavaScript body: title, intent, every chapter's overview and file
- * list. Readable when guides.show is unreachable; replaced by the viewer once
- * it mounts. Deliberately simple (decision record, D6 note).
- */
 export function renderGuideFallbackHtml(snapshot: GuideSnapshot): string {
   const g = snapshot.guide;
   const sections = g.sections
@@ -978,12 +795,6 @@ ${unplaced}
 </article>`;
 }
 
-// The fallback article is for readers whose viewer never arrives (offline,
-// blocked, no JS). Everyone else would otherwise see it flash for the second
-// or two the viewer takes to download on a cold cache, so it stays invisible
-// for the first moments and reveals itself only if nothing has replaced it
-// (CSS-only, no script needed). The body ground paints in the right theme
-// immediately.
 export const FALLBACK_STYLE = `
 html{color-scheme:light dark}
 body.pgr-fallback-body{margin:0;background:#f5f7f6}
@@ -999,11 +810,6 @@ body.pgr-fallback-body{margin:0;background:#f5f7f6}
 @media (prefers-color-scheme:dark){body.pgr-fallback-body{background:#121815}.pgr-fallback{color:#dbe4df}.pgr-fallback .meta{color:#93a39c}.pgr-fallback a{color:#63c8b0}}
 `.trim();
 
-/**
- * Render a portable Guided Review document. Size ≈ the snapshot; the renderer
- * is referenced from `options.viewer`, never embedded (D1).
- * Throws only when `viewer.baseUrl` is not an https URL (or http localhost).
- */
 export function createGuideHtml(snapshot: GuideSnapshot, options: GuideHtmlOptions): string {
   const head = buildGuideHead({
     viewer: options.viewer,
@@ -1031,18 +837,9 @@ ${head.script}
 export interface GuideShellHtmlOptions {
   readonly viewer: GuideViewerAssets;
   readonly hosted: GuideHostedPage;
-  /** Same-origin URL the viewer fetches the encrypted payload from (e.g. `/api/g/<id>`). */
   readonly payloadUrl: string;
 }
 
-/**
- * The page a guide host serves for an ENCRYPTED shared guide: the pinned
- * viewer and nothing else — no title, no snapshot, no fallback prose, because
- * the host cannot read the guide. The viewer fetches `payloadUrl`, decrypts
- * with the key in the URL fragment (`#key=…`), and renders exactly as it would
- * an embedded snapshot. Same head (stylesheet, SRI, CSP, fallback style) as
- * `createGuideHtml`, so hosted and downloaded pages never drift.
- */
 export function createGuideShellHtml(options: GuideShellHtmlOptions): string {
   const head = buildGuideHead({
     viewer: options.viewer,
@@ -1072,11 +869,9 @@ interface GuideHeadInput {
   readonly languages: readonly string[];
   readonly hosted?: GuideHostedPage;
   readonly payloadUrl?: string;
-  /** Snapshot version for the export meta marker; defaults to the base version. */
   readonly version?: GuideSnapshotVersion;
 }
 
-/** Shared `<head>` + viewer `<script>` for exported and hosted guide pages. */
 function buildGuideHead(input: GuideHeadInput): { head: string; script: string } {
   const base = normalizeGuideViewerBaseUrl(input.viewer.baseUrl);
   if (!base) throw new Error(`Refusing to embed a non-https viewer base URL: ${input.viewer.baseUrl}`);
@@ -1090,8 +885,6 @@ function buildGuideHead(input: GuideHeadInput): { head: string; script: string }
     .filter((path): path is string => typeof path === "string")
     .map((path) => `<link rel="modulepreload" href="${escapeHtmlAttribute(new URL(path, base).href)}" crossorigin="anonymous">`)
     .join("\n");
-  // A hosted page fetches its payload from its own origin; a downloaded file
-  // only ever talks to the viewer origin.
   const hostedOrigin = input.hosted ? safeOrigin(input.hosted.url) : null;
   const connectSrc = hostedOrigin && hostedOrigin !== origin ? `${origin} ${hostedOrigin}` : origin;
   const csp = [
@@ -1121,9 +914,6 @@ function buildGuideHead(input: GuideHeadInput): { head: string; script: string }
       ].join("\n")
     : "";
   const payloadMeta = input.payloadUrl ? `<meta name="${GUIDE_PAYLOAD_META_NAME}" content="${escapeHtmlAttribute(input.payloadUrl)}">` : "";
-  // A hosted plain guide's URL is the whole capability, and a file put on
-  // some web host is no different: outbound links (the PR link, links in
-  // overviews) must never carry the page URL as Referer.
   const referrerMeta = `<meta name="referrer" content="no-referrer">`;
   const head = [
     `<meta charset="utf-8">`,
@@ -1144,7 +934,6 @@ function buildGuideHead(input: GuideHeadInput): { head: string; script: string }
   return { head, script };
 }
 
-/** `og:site_name` for a hosted page: the host that serves it (a self-host is not guides.show). */
 function hostedSiteName(url: string): string {
   try {
     return new URL(url).host || "guides.show";
@@ -1167,7 +956,6 @@ function truncateForMeta(text: string): string {
   return flat.length > 300 ? `${flat.slice(0, 297)}…` : flat;
 }
 
-/** Read the snapshot back out of an exported document's DOM (viewer boot). */
 export function readEmbeddedGuideSnapshot(doc: {
   getElementById(id: string): { textContent: string | null } | null;
 }): GuideSnapshotParseResult | null {
@@ -1176,7 +964,6 @@ export function readEmbeddedGuideSnapshot(doc: {
   return parseGuideSnapshotJson(el.textContent ?? "");
 }
 
-/** Bounded, filesystem-safe filename derived from the guide title. */
 export function guideExportFilename(title: string): string {
   const slug = title
     .normalize("NFKD")

@@ -1,29 +1,3 @@
-/**
- * Shape's agent text, in one place (approval "shape-skill"). Three outputs are
- * built from the pieces below, so they cannot drift apart:
- *
- *   - the Inbox's `/shape` skill (`SHAPE_SKILL`): the thread steps + `SHAPE_GUIDE`.
- *     The Inbox lists it in the reply box's "/" while Settings → Capabilities →
- *     Shape is on; it is human-only: the window pastes this body into the reply
- *     that names it, the way the review skills go (`@plannotator/core/inbox-review`).
- *     With Shape off (or never set) it is not listed, so no agent reads a word of it.
- *   - `plannotator shape --help` (`SHAPE_COMMAND_USAGE` in apps/hook/server/cli.ts):
- *     `SHAPE_HELP_INTRO` + `SHAPE_GUIDE`. The CLI prints it only while Shape is on.
- *   - the `## plannotator shape` section of apps/skills/core/plannotator/SKILL.md
- *     (`SHAPE_SKILL_SECTION`, `SHAPE_SKILL_DESCRIPTION_PHRASE`), written there by
- *     `bun run gen:skills` (scripts/gen-skill-sections.ts) once `shape` is released.
- *
- * The section, the description phrase, the guide and the help are the owner's
- * approved words (.product/approved/shape-skill/approval.md): never edit them
- * here alone.
- *
- * The stance ends with `SHAPE_PICTURE_LOOK` and the guide with `SHAPE_ANIMATIONS_SECTION`,
- * both from ./shape-animate.ts (approval "shape-animated-scenes"), which also builds
- * `plannotator shape --help animate` from the same words.
- *
- * Browser-safe, no dependencies: the server lists it and the window pastes it.
- */
-
 import { SHAPE_ANIMATIONS_SECTION, SHAPE_PICTURE_LOOK } from './shape-animate';
 
 export interface ShapeSkillText {
@@ -32,11 +6,6 @@ export interface ShapeSkillText {
   body: string;
 }
 
-/**
- * How to draw a board and keep it current: the stance, the update loop, the
- * JSON format and the drawing rules. Nothing in it depends on the Inbox, so
- * the `/shape` skill and `plannotator shape --help` both end with it.
- */
 export const SHAPE_GUIDE = `## The stance
 
 - Draw the thing itself, as you would on a whiteboard for someone new to it: the pieces, where each one lives, and what passes between them. Big pictures, little words, nothing key withheld.
@@ -125,10 +94,6 @@ Draw it however you like, by hand or from a one-off script. The board makes it b
 
 ${SHAPE_ANIMATIONS_SECTION}`;
 
-/**
- * The start of `plannotator shape --help`: the welcome, how to open the page
- * (or leave the open one be), and the commands.
- */
 export const SHAPE_HELP_INTRO = [
   "Welcome to Shape. The person wants to see the work the way you see it, so they can say",
   "\"yes, that's it\" or point at the part that is wrong. Draw it as you would on a whiteboard: a JSON file you",
@@ -190,11 +155,6 @@ export const SHAPE_HELP_INTRO = [
   "else this project's.",
 ].join("\n");
 
-/**
- * The owner's approved words (approval "shape-skill", 2026-11-04): the
- * description phrase, after "Guided Reviews,", and the section of the
- * plannotator skill. Byte for byte; scripts/gen-skill-sections.ts writes them.
- */
 export const SHAPE_SKILL_DESCRIPTION_PHRASE = "Shape boards (a picture of the work the person can point at and correct),";
 
 export const SHAPE_SKILL_SECTION = `## plannotator shape
@@ -202,7 +162,6 @@ export const SHAPE_SKILL_SECTION = `## plannotator shape
 When the person asks for Shape, a board, or to "shape" a piece of work, run \`plannotator shape --help\` first and follow it. It is the whole guide: how to open Shape in their browser (or bring up the page that is already open), how to draw the board, and how to keep it current. If it says Shape is off, it also says how to turn it on: run that only because the person asked for Shape.
 `;
 
-/** The Inbox-only part of `/shape`: the thread it draws, and the thread's ids on each update. */
 const THREAD_STEPS = `# Shape: draw this thread as a living board
 
 DRAFT. The person wants to see the work in this thread the way you see it, so they can say "yes, that's it" or point at the part that is wrong. Draw it as a board: a JSON file you store with \`plannotator shape update\`. The board opens from this thread's header in the Plannotator Inbox. You keep it current: each update is a new version, and the board shows what changed.
@@ -230,7 +189,6 @@ export const SHAPE_SKILL: ShapeSkillText = {
   body: BODY,
 };
 
-/** The Shape skill by name (the "/" list's built-in), or undefined. */
 export function shapeSkill(name: string): ShapeSkillText | undefined {
   return name === SHAPE_SKILL.name ? SHAPE_SKILL : undefined;
 }

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { derivePersonThreadSubject, PERSON_THREAD_NAME_COLUMNS, PERSON_THREAD_NAME_WORDS, suggestPersonThreadName } from "./inbox-questions";
 
-/** Display columns as the rule counts them (CJK and emoji two). */
 function columns(text: string): number {
   let n = 0;
   for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)) {
@@ -11,13 +10,10 @@ function columns(text: string): number {
   return n;
 }
 
-/** First lines a person writes in New message, and the chip compose fills in. "" means the placeholder shows. */
 const TABLE: [string, string][] = [
-  // The owner's three examples.
   ["I want to explore what adding a board would look like. Kanban specifically. And the kanban needs to be well thought out.", "Kanban board"],
   ["can you fix the paste bug in the reply box", "Paste bug"],
   ["Hey, where did we get with the portless setup?", "Portless setup"],
-  // Requests and questions.
   ["Hey Claude, can you look at why the build is failing on main? It started this morning.", "Build failing"],
   ["Should we use Postgres or SQLite for the inbox store?", "Postgres or SQLite"],
   ["Let's add dark mode to the settings page", "Dark mode"],
@@ -32,12 +28,10 @@ const TABLE: [string, string][] = [
   ["Reply box loses focus after picking an answer", "Reply box"],
   ["Can you write tests for the markdown preview?", "Markdown preview"],
   ["Fix the crash in packages/inbox/compose/ComposeDialog.tsx", "Crash"],
-  // A message that is only a link.
   ["https://github.com/backnotprop/plannotator/pull/1934", "PR 1934"],
   ["Hey can you check https://github.com/backnotprop/plannotator/pull/1934#issuecomment-123 and tell me what you think", "PR 1934"],
   ["https://github.com/backnotprop/plannotator/issues/12", "Issue 12"],
   ["https://example.com/docs/getting-started", "Getting started"],
-  // A bare question, filler, code: nothing good, so nothing invented.
   ["What do you think?", ""],
   ["thoughts?", ""],
   ["ok", ""],
@@ -45,20 +39,17 @@ const TABLE: [string, string][] = [
   ["```\nerror: cannot find module\n```", ""],
   ["supercalifragilisticexpialidociousness is great", ""],
   ["🔥🔥🔥", ""],
-  // Other languages.
   ["看板ボードを追加したらどうなるか検討したいです。特にカンバン方式で。", "看板ボード"],
   ["我想给收件箱加一个看板视图", "看板视图"],
   ["칸반 보드를 추가하고 싶어요", "칸반 보드"],
   ["¿Puedes arreglar el error de pegado en la caja de respuesta?", "Error de pegado"],
   ["Je voudrais un mode sombre pour les paramètres", "Mode sombre"],
   ["Kannst du dir den Login-Flow auf dem iPad ansehen?", "Login-Flow"],
-  // Junk the review found: markup, invisible characters, nothing but filler words, a plain statement first.
   ["<script>alert(1)</script>", ""],
   ["can you fix the pa\u200bste bug", "Paste bug"],
   ["So I want to make the thing work better", "Thing work better"],
   ["I think we should do it", ""],
   ["日本語のテキストです。カンバンボードを追加したいです。", "カンバンボード"],
-  // Images.
   ["![](./design/board-mock.png)", "Board mock"],
   ["Look at this ![Checkout drawer](./shots/c.png)", "Checkout drawer"],
 ];
@@ -92,7 +83,6 @@ describe("suggestPersonThreadName: compose fills the thread's chip with a short 
   });
 
   test("a 1 MB line (an unclosed link, tag or image) is named in milliseconds, not minutes: the markdown rules read only its start", () => {
-    // Repeated unclosed openers backtracked quadratically before the cut: 24 KB of "![a](b" took 125 ms, so 1 MB took minutes.
     for (const evil of ["[x](y".repeat(200_000), "<a ".repeat(330_000), "![a](b".repeat(170_000), "[".repeat(1_000_000), "word ".repeat(200_000)]) {
       const started = performance.now();
       suggestPersonThreadName(evil);

@@ -2,7 +2,7 @@ export interface ArchivedPlan {
   filename: string;
   title: string;
   date: string;
-  timestamp: string;  // ISO string from file mtime
+  timestamp: string;
   status: "approved" | "denied" | "unknown";
   size: number;
 }

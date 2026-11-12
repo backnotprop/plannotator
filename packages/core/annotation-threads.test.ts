@@ -1,9 +1,3 @@
-/**
- * The one threading rule every `inReplyTo` consumer applies. Failures to
- * catch: a cycle member being treated as a reply (and then dropped by a
- * renderer that only walks down from roots), a self-reference threading
- * under itself, and the ingest accepting a write that would close a cycle.
- */
 import { describe, expect, test } from "bun:test";
 import { resolveReplyParents, resolveThreadRootTimestamps, validateReplyTarget } from "./annotation-threads";
 
@@ -36,7 +30,6 @@ describe("resolveReplyParents", () => {
   });
 
   test("a chain that runs into a cycle: the run-in stays replies, the cycle is roots, in any input order", () => {
-    // c -> b -> x -> y -> x. Listed cycle-first and run-in-first.
     for (const items of [
       [a("x", "y"), a("y", "x"), a("b", "x"), a("c", "b")],
       [a("c", "b"), a("b", "x"), a("x", "y"), a("y", "x")],
@@ -49,9 +42,6 @@ describe("resolveReplyParents", () => {
     }
   });
 
-  // A hostile or buggy tool can POST a 5,000-deep chain; walking each chain
-  // to its root without memoization made this quadratic (5,000 = 431 ms,
-  // 20,000 = 9.8 s), and the panel re-ran it on every render.
   test("a 5,000-deep chain resolves parents and root timestamps in linear time", () => {
     const items = [{ id: "0", inReplyTo: undefined as string | undefined, createdA: 0 }];
     for (let i = 1; i < 5000; i++) items.push({ id: String(i), inReplyTo: String(i - 1), createdA: i });
@@ -102,7 +92,6 @@ describe("validateReplyTarget", () => {
     expect(validateReplyTarget(all, "p", "nope")).toContain("nope");
     expect(validateReplyTarget(all, "p", 42)).toContain("inReplyTo");
     expect(validateReplyTarget(all, "p", "")).toContain("inReplyTo");
-    // r -> p; setting p -> r closes p -> r -> p.
     expect(validateReplyTarget(all, "p", "r")).toContain("cycle");
   });
 

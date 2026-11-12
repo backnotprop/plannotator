@@ -21,7 +21,6 @@ import {
 } from './shape';
 import { SHAPE_OUTSIDE_CSS, SHAPE_OUTSIDE_HTML, SHAPE_SAFE_HTML } from '../../tests/fixtures/shape-outside-loads';
 
-// An invented board: a kettle that whistles once.
 function board(overrides: Partial<ShapeBoard> = {}): ShapeBoard {
   return {
     title: 'The kettle whistles once',
@@ -180,7 +179,6 @@ describe('What to know', () => {
     expect(r.ok).toBe(false);
     expect(errors(r)).toContain('views.reqs: Requirements are gone');
     expect(errors(r)).toContain("ref's sub");
-    // Agents are no longer asked for views.know (approval "shape-know-removed").
     expect(errors(r)).not.toContain('know');
   });
 
@@ -338,7 +336,6 @@ describe('character references in a data-code', () => {
     expect(codes('a.ts&nbsp;#L1')).toEqual(['a.ts\u00a0#L1']);
     expect(codes('a&#0;b\u0000c&#xD800;')).toEqual(['a\ufffdb\ufffdc\ufffd']);
     expect(codes('a&#150;b&#x80;&#159;&#129;&#160;')).toEqual(['a\u2013b\u20ac\u0178\u0081\u00a0']);
-    // What the check reads is what is drawn: an en dash, not a C1 control in the path.
     expect(parseShapeCodeTarget(codes('a&#150;b.ts#L1')[0]!)).toEqual({ path: 'a\u2013b.ts', line: 1 });
   });
 });
@@ -410,8 +407,6 @@ describe('checkShapeNoteInput', () => {
   });
 });
 
-// ── How it works examples ("Follow an example") ──
-// An invented drawing: a kettle with an arrow named by data-edge.
 const KETTLE_HOW = {
   html: '<div data-mark="how-boil">Water boils</div><svg><g data-edge="hot"><path d="M0 0 H10"/></g></svg><span data-edge="hot">hot enough</span><div data-mark="how-whistle">It whistles</div><div data-mark="how-quiet">Stays quiet</div>',
   width: 800,

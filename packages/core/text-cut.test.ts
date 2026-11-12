@@ -1,9 +1,3 @@
-/**
- * Cutting text never breaks a character. A derived Inbox subject is cut at
- * 120 code units; a prompt with an emoji across that point drew "�…" (the
- * stress test of 2026-10-12, row 26), because `slice` kept half of the
- * emoji's surrogate pair.
- */
 import { describe, expect, test } from "bun:test";
 import { cutText, sliceText } from "./text-cut";
 
@@ -28,7 +22,6 @@ describe("sliceText", () => {
   });
 
   test("keeps a letter with its combining marks", () => {
-    // "e" + combining acute, twice.
     expect(sliceText("éé", 3)).toBe("é");
   });
 

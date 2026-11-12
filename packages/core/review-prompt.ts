@@ -1,12 +1,3 @@
-/**
- * Pure, browser-safe prompt context shared by the review-agent and guide
- * prompt builders: the per-diff-type "what to review / how to inspect it"
- * instruction and the multi-repo workspace context lines. Moved here from
- * packages/server/agent-review-message.ts (which re-exports every name) so
- * @plannotator/core/guide-prompt can build Plannotator's exact guide user
- * message in any runtime. Zero dependencies beyond ./diff-type.
- */
-
 import {
   JJ_TRUNK_REVSET,
   jjCommitRevset,
@@ -83,21 +74,14 @@ export function getLocalDiffInstruction(
 ): LocalDiffInstruction | null {
   const effectiveDiffType = normalizeLocalDiffType(diffType);
 
-  // commit:<sha> — a single historical commit, not the working tree.
   const commitRef = parseCommitDiffType(effectiveDiffType);
   if (commitRef) {
     return {
       target: `the changes introduced by commit ${commitRef.sha.slice(0, 7)}`,
-      // First-parent diff, NOT `git show`: the on-screen patch is
-      // `<sha>^ <sha>`, and for a merge commit `git show`'s combined-diff
-      // presentation renders a different (often empty) changeset — the agent
-      // must inspect exactly what the reviewer is looking at.
       inspect: `This is a historical commit, not the working tree. Run \`git diff ${commitRef.sha}^ ${commitRef.sha}\` — the commit against its first parent — to inspect exactly the changeset under review (do not use \`git show\`; its merge-commit presentation differs). For a root commit with no parent, use \`git show ${commitRef.sha}\` instead.`,
     };
   }
 
-  // jj-commit:<commit id> — one jj revision against its FIRST parent, the
-  // same changeset the Commits rail opened.
   const jjCommit = parseJjCommitDiffType(effectiveDiffType);
   if (jjCommit) {
     const revset = jjCommitRevset(jjCommit.commitId);

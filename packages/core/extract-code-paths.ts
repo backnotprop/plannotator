@@ -6,24 +6,9 @@ import {
 
 const FENCED_CODE_BLOCK = /(^|\n)([ \t]*)(```|~~~)[\s\S]*?\n\2\3/g;
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
-// Match InlineMarkdown.tsx's bare-URL regex exactly so URL ranges excised
-// here mirror the ranges the renderer would consume.
 const URL_REGEX = new RegExp("https?://[^\\s<>\"']+", "g");
 const BACKTICK_SPAN = /`([^`\n]+)`/g;
 
-/**
- * Extract candidate code-file paths from markdown text. Mirrors the renderer's
- * detection precedence so the validator only sees paths the renderer would
- * actually linkify:
- *   1. fenced code blocks and HTML comments are stripped first;
- *   2. URL ranges are excised before the bare-prose scan (URLs win);
- *   3. backtick spans matching `isCodeFilePath` are collected;
- *   4. bare-prose paths matching `CODE_PATH_BARE_REGEX` and
- *      `isCodeFilePathStrict` are collected.
- *
- * Hash anchors (`#L42`) are stripped from results to match the renderer's
- * `cleanPath` transform. Returns deduped candidate strings.
- */
 export function extractCandidateCodePaths(markdown: string): string[] {
 	const stripped = markdown
 		.replace(FENCED_CODE_BLOCK, "")

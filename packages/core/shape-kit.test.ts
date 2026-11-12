@@ -1,8 +1,3 @@
-/**
- * The kit agents print with `plannotator shape kit`. What regresses if these fail:
- * a helper draws something the store refuses, a run stops being the same picture,
- * or the follow-a-path helpers stop naming what their css looks for.
- */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,15 +53,11 @@ describe('the kit', () => {
     let said = '';
     try { tile('gemini', 0, 0); } catch (e) { said = (e as Error).message; }
     expect(said).toContain('gemini is not in the kit');
-    // Every name it offers is one the kit draws.
     const names = /\((.+)\)/.exec(said)![1]!.split(', ');
     expect(names).toContain('codex');
     for (const name of names) expect(tile(name, 0, 0)).toContain('<g class="obj">');
   });
 
-  // Boards draw only in Sharp (approval "shape-board-sharp-only"): what only the drawing can carry is the elbow and
-  // the arrowhead's shape. What regresses: a rounded elbow or an open chevron coming back, a line drawn twice, or a
-  // path a person follows lighting its line but not its filled head.
   test('a line turns square at its elbows; an arrow ends in one small closed head the board fills', () => {
     const tags = (html: string) => [...html.matchAll(/<path\b[^>]*>/g)].map((m) => m[0]);
     const elbow = tags(arrow([[0, 0], [100, 0], [100, 80]], { tone: 'soft' }));

@@ -1,20 +1,3 @@
-/**
- * The guide builder: a draft of a Guided Review that an agent builds piece by
- * piece through the `guide_*` tools, checked on every call, and turned into a
- * portable snapshot on `guide_finish` (approved spec "Guided Reviews in VS
- * Code", section 4.4). Pure and browser-safe: the VS Code extension holds the
- * draft and relays the tools; the web app's job runner can use the same model
- * later. Anything core cannot know (whether a symbol exists, whether Mermaid
- * renders, how to sanitize HTML, whether a file outside the change exists) is
- * asked of the host through `GuideBuilderHooks`; without a hook the check that
- * needs it is skipped or answered conservatively, and the answer says so.
- *
- * Drafts are plain JSON (`serializeGuideDraft` / `parseGuideDraft`) so a host
- * can persist after every call and resume. Every operation returns a new
- * draft; the input is never mutated. Every answer ends with the progress line
- * ("5 chapters · 6 of 8 files placed").
- */
-
 import { parseDiffToFiles, type DiffFileStatus } from "./diff-files";
 import type { CodeGuideOutput, GuideOverview, GuideOverviewDiagram, GuideSection } from "./guide";
 import {
@@ -28,15 +11,8 @@ import { findGuideLinks, parseGuideLink, type GuideLink, type GuideLinkSource } 
 import { validateGuideOutput } from "./guide-prompt";
 import { GUIDE_BUILDER_TOOL_NAMES, type GuideBuilderToolName } from "./guide-builder-tools";
 
-// ---------------------------------------------------------------------------
-// Limits
-// ---------------------------------------------------------------------------
-
-/** At most this many chapters (the methodology says 2-6, never more than 10). */
 export const GUIDE_BUILDER_MAX_CHAPTERS = 10;
-/** Cap on an overview diagram's source, Mermaid or HTML, in UTF-8 bytes. */
 export const GUIDE_OVERVIEW_DIAGRAM_MAX_BYTES = 64 * 1024;
-/** Hygiene caps on the agent's text. */
 export const GUIDE_BUILDER_TEXT_LIMITS = {
   title: 200,
   intent: 1_000,
@@ -47,34 +23,25 @@ export const GUIDE_BUILDER_TEXT_LIMITS = {
   reason: 500,
 } as const;
 
-// ---------------------------------------------------------------------------
-// Draft model
-// ---------------------------------------------------------------------------
-
 export const GUIDE_DRAFT_KIND = "plannotator-guide-draft" as const;
 export const GUIDE_DRAFT_VERSION = 1 as const;
 
-/** A line range on the head side (`start`..`end`, inclusive) or a hunk of the file's diff (1-based). */
 export type GuideFocusRange = { readonly start: number; readonly end: number } | { readonly hunk: number };
 
 export interface GuideDraftFile {
   readonly file: string;
   readonly summary: string;
-  /** Reader hints: the lines or hunks that matter in a big file. Not part of the snapshot. */
   readonly focus?: readonly GuideFocusRange[];
 }
 
 export interface GuideDraftChapter {
-  /** Stable id (`c1`, `c2`, …), never reused, so reordering never breaks a reference. */
   readonly id: string;
   readonly title: string;
   readonly overview: string;
   readonly files: readonly GuideDraftFile[];
-  /** One diagram drawn at the top of the chapter's text. */
   readonly diagram?: GuideOverviewDiagram;
 }
 
-/** A changed file the agent left out of every chapter on purpose. */
 export interface GuideDraftUnplaced {
   readonly file: string;
   readonly reason?: string;
@@ -83,16 +50,13 @@ export interface GuideDraftUnplaced {
 export interface GuideDraft {
   readonly kind: typeof GUIDE_DRAFT_KIND;
   readonly version: typeof GUIDE_DRAFT_VERSION;
-  /** The change the guide describes. `rawPatch` is the authority on which files are in it. */
   readonly review: GuideLaunchReview;
-  /** Provenance carried into the snapshot (engine, model, instructions). */
   readonly generator?: GuideSnapshotGenerator;
   readonly title: string;
   readonly intent: string;
   readonly overview?: GuideOverview;
   readonly chapters: readonly GuideDraftChapter[];
   readonly unplaced: readonly GuideDraftUnplaced[];
-  /** The number the next chapter id takes. */
   readonly nextChapter: number;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -101,11 +65,9 @@ export interface GuideDraft {
 export interface CreateGuideDraftInput {
   readonly review: GuideLaunchReview;
   readonly generator?: GuideSnapshotGenerator;
-  /** Injected for deterministic tests; defaults to now. */
   readonly now?: string;
 }
 
-/** A new, empty draft for a change. */
 export function createGuideDraft(input: CreateGuideDraftInput): GuideDraft {
   const now = input.now ?? new Date().toISOString();
   return {
@@ -123,14 +85,12 @@ export function createGuideDraft(input: CreateGuideDraftInput): GuideDraft {
   };
 }
 
-/** JSON for persisting the draft (it carries the patch). */
 export function serializeGuideDraft(draft: GuideDraft): string {
   return JSON.stringify(draft);
 }
 
 export type GuideDraftParseResult = { readonly ok: true; readonly draft: GuideDraft } | { readonly ok: false; readonly error: string };
 
-/** Read a persisted draft back (from JSON text or an already-parsed value). Never throws. */
 export function parseGuideDraft(input: unknown): GuideDraftParseResult {
   let value = input;
   if (typeof input === "string") {
@@ -181,14 +141,9 @@ function isDraftDiagram(value: unknown): boolean {
   return isRecord(value) && (value.kind === "mermaid" || value.kind === "html") && typeof value.source === "string";
 }
 
-/** The link syntax a diagram's source uses. */
 function diagramLinkSource(diagram: GuideOverviewDiagram): GuideLinkSource {
   return diagram.kind === "mermaid" ? "mermaid" : "html";
 }
-
-// ---------------------------------------------------------------------------
-// The change (parsed once per patch)
-// ---------------------------------------------------------------------------
 
 interface ChangeHunk {
   readonly newStart: number;
@@ -232,7 +187,6 @@ function changeOf(draft: GuideDraft): ChangeIndex {
   return index;
 }
 
-/** The changed files of the draft's patch, in patch order. */
 export function guideDraftChangedFiles(draft: GuideDraft): string[] {
   return changeOf(draft).files.map((f) => f.path);
 }
@@ -254,7 +208,6 @@ function levenshtein(a: string, b: string, max: number): number {
   return prev[b.length];
 }
 
-/** The changed file a mistyped path most likely meant, if one is close. */
 export function suggestChangedPath(path: string, changed: readonly string[]): string | undefined {
   const lower = path.toLowerCase();
   const exactCase = changed.find((p) => p.toLowerCase() === lower);
@@ -284,23 +237,13 @@ function notInChange(path: string, draft: GuideDraft): string {
     : `\`${path}\` is not in this change. Call guide_read to see the changed files.`;
 }
 
-// ---------------------------------------------------------------------------
-// Progress
-// ---------------------------------------------------------------------------
-
 export interface GuideDraftProgress {
   readonly chapters: number;
-  /** Files placed in a chapter. */
   readonly placed: number;
-  /** Changed files in all. */
   readonly total: number;
-  /** Files marked "not in a chapter" on purpose. */
   readonly leftOut: number;
-  /** Changed files neither placed nor marked, in patch order. */
   readonly remaining: readonly string[];
-  /** True when guide_finish would pass (header set, files all accounted for, no empty chapter). */
   readonly ready: boolean;
-  /** "5 chapters · 6 of 8 files placed", the line every answer ends with. */
   readonly line: string;
 }
 
@@ -334,10 +277,6 @@ export function guideDraftProgress(draft: GuideDraft): GuideDraftProgress {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Hooks (host-provided checks) and answers
-// ---------------------------------------------------------------------------
-
 export type GuideSymbolResolution =
   | { readonly status: "found" }
   | { readonly status: "ambiguous"; readonly candidates: readonly string[] }
@@ -348,47 +287,27 @@ export type GuideFileResolution = { readonly exists: true; readonly lineCount?: 
 export type GuideMermaidCheck = { readonly ok: true } | { readonly ok: false; readonly error: string };
 
 export interface GuideHtmlSanitizeResult {
-  /** The sanitized HTML that is stored. */
   readonly html: string;
-  /** Plain descriptions of what was removed ("a <script> element", "an onclick handler"). */
   readonly removed: readonly string[];
 }
 
 type MaybePromise<T> = T | Promise<T>;
 
-/**
- * What only the host can check. Every hook is optional. Without
- * `resolveSymbol`, a symbol is looked for by name in the changed lines and
- * accepted unchecked when not found there. Without `resolveFile`, a `code:`
- * link outside the change is accepted unchecked. Without `checkMermaid`, only
- * the diagram's structure is checked. Without `sanitizeHtml`, HTML diagrams
- * are refused.
- */
 export interface GuideBuilderHooks {
-  /** Find a symbol with the language server (workspace and document symbols), or by text search. */
   resolveSymbol?(query: { readonly name: string; readonly path?: string }): MaybePromise<GuideSymbolResolution>;
-  /** Whether a path outside the change exists at the head, and how many lines it has. */
   resolveFile?(query: { readonly path: string }): MaybePromise<GuideFileResolution>;
-  /** Render the Mermaid source with the same engine the reader uses; Mermaid's own error on failure. */
   checkMermaid?(source: string): MaybePromise<GuideMermaidCheck>;
-  /** Sanitize HTML (DOMPurify: no script, no on* handlers, no iframes, no forms, no external URLs). */
   sanitizeHtml?(source: string): MaybePromise<GuideHtmlSanitizeResult>;
-  /** Clock, for deterministic tests. */
   now?(): string;
 }
 
 export interface GuideBuilderAnswer {
-  /** False when the call was refused; the draft is then unchanged. */
   readonly ok: boolean;
-  /** The plain-language answer for the agent, ending with the progress line. */
   readonly text: string;
   readonly draft: GuideDraft;
-  /** True when the draft changed (persist it). */
   readonly changed: boolean;
   readonly progress: GuideDraftProgress;
-  /** guide_add_chapter: the new chapter's id. */
   readonly chapterId?: string;
-  /** guide_finish / save as is: the validated snapshot to save. */
   readonly snapshot?: GuideSnapshot;
 }
 
@@ -406,10 +325,6 @@ function commit(next: GuideDraft, hooks: GuideBuilderHooks | undefined, lines: A
   const draft: GuideDraft = { ...next, updatedAt: hooks?.now?.() ?? new Date().toISOString() };
   return { ...answer(draft, true, lines, extra), changed: true };
 }
-
-// ---------------------------------------------------------------------------
-// Text and link checks
-// ---------------------------------------------------------------------------
 
 function cleanText(value: string, name: string, max: number, opts?: { oneLine?: boolean }): { ok: true; value: string } | { ok: false; error: string } {
   const text = value.trim();
@@ -429,9 +344,7 @@ function utf8Bytes(text: string): number {
 }
 
 interface LinkCheck {
-  /** Links that do not resolve: the call is refused. */
   readonly problems: string[];
-  /** Links accepted without a full check, or checked later (chapters not written yet). */
   readonly notes: string[];
   readonly checked: number;
 }
@@ -440,7 +353,6 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** The symbol's name in the changed lines (added or context), as a whole word. */
 function symbolInChange(change: ChangeIndex, name: string, path?: string): boolean {
   const last = name.split(/\.|::|#/).filter(Boolean).pop() ?? name;
   const word = new RegExp(`(^|[^A-Za-z0-9_$])${escapeRegExp(last)}($|[^A-Za-z0-9_$])`);
@@ -478,8 +390,6 @@ async function checkCodePath(
       if (last > lines) out.problems.push(`\`${href}\`: \`${path}\` has ${plural(lines, "line")} at the head.`);
       return;
     }
-    // Modified or renamed: the patch shows only the hunks, so the file's
-    // length at the head comes from the host when it can tell.
     if (hooks?.resolveFile) {
       const found = await hooks.resolveFile({ path });
       if (found.exists && found.lineCount !== undefined && last > found.lineCount) {
@@ -558,7 +468,6 @@ async function checkLinks(
   return { ...out, checked };
 }
 
-/** Chapter links that point past the last chapter, for guide_finish. */
 function chapterLinkProblems(text: string, source: GuideLinkSource, chapterCount: number, where: string): string[] {
   const problems: string[] = [];
   for (const occurrence of findGuideLinks(text, source)) {
@@ -575,7 +484,6 @@ function danglingChapter(href: string, count: number): boolean {
   return !!parsed?.ok && parsed.link.kind === "chapter" && parsed.link.chapter > count;
 }
 
-/** Turn links to chapters past `count` into plain text (markdown), drop their `click` lines (Mermaid) or `href`s (HTML). */
 function dropDanglingChapterLinks(text: string, source: GuideLinkSource, count: number): string {
   if (source === "markdown") {
     return text.replace(/\[([^\]\n]*)\]\(\s*(chapter:[^)\s]*)\s*\)/gi, (whole, label: string, href: string) => (danglingChapter(href, count) ? label : whole));
@@ -603,11 +511,6 @@ const MERMAID_DIAGRAM_TYPES = [
   "radar", "radar-beta", "treemap", "treemap-beta",
 ];
 
-/**
- * Structural check of Mermaid source, without rendering it: not empty, and
- * its first line (after a `---` front matter block, `%%` comments and blank
- * lines) names a diagram type. Returns the problem, or null.
- */
 export function checkMermaidStructure(source: string): string | null {
   const lines = source.split(/\r?\n/);
   let i = 0;
@@ -626,10 +529,6 @@ export function checkMermaidStructure(source: string): string | null {
   }
   return null;
 }
-
-// ---------------------------------------------------------------------------
-// Chapter references
-// ---------------------------------------------------------------------------
 
 function chapterList(draft: GuideDraft): string {
   if (draft.chapters.length === 0) return "There are no chapters yet; add one with guide_add_chapter.";
@@ -665,16 +564,11 @@ function describeChapter(draft: GuideDraft, index: number): string {
   return `chapter ${index + 1} (${draft.chapters[index].id})`;
 }
 
-// ---------------------------------------------------------------------------
-// Operations
-// ---------------------------------------------------------------------------
-
 export interface GuideSetHeaderArgs {
   readonly title?: string;
   readonly intent?: string;
 }
 
-/** guide_set_header: the guide's title (one line) and intent (1-2 sentences). Either may be set alone. */
 export async function guideSetHeader(draft: GuideDraft, args: GuideSetHeaderArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   if (args.title === undefined && args.intent === undefined) return refuse(draft, "Give a `title`, an `intent`, or both.");
   let title = draft.title;
@@ -703,12 +597,6 @@ export interface GuideSetOverviewArgs {
   readonly diagram?: { readonly kind: "mermaid" | "html"; readonly source: string } | null;
 }
 
-/**
- * guide_set_overview: a few sentences on how the change fits together, and
- * optionally one diagram. Replaces any earlier overview. Links must resolve;
- * Mermaid must render (when the host can render it); HTML is sanitized by the
- * host and capped at 64 KB, and the answer lists what was removed.
- */
 export async function guideSetOverview(draft: GuideDraft, args: GuideSetOverviewArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const t = cleanText(args.text ?? "", "overview text", GUIDE_BUILDER_TEXT_LIMITS.overview);
   if ("error" in t) return refuse(draft, t.error);
@@ -739,17 +627,10 @@ function kindLabel(diagram: GuideOverviewDiagram): string {
   return diagram.kind === "mermaid" ? "Mermaid" : "HTML";
 }
 
-/** "a Mermaid diagram", "an HTML diagram". */
 function aDiagram(diagram: GuideOverviewDiagram): string {
   return diagram.kind === "mermaid" ? "a Mermaid diagram" : "an HTML diagram";
 }
 
-/**
- * Check a diagram the agent gave (the overview's or a chapter's): its kind,
- * that it is not empty, the size cap, then Mermaid's structure and rendering
- * (when the host can render) or the host's HTML sanitizer. Answers the diagram
- * to store and what the sanitizer removed, or the reason it is refused.
- */
 async function checkDiagram(
   arg: GuideDiagramArg,
   hooks: GuideBuilderHooks | undefined,
@@ -786,7 +667,6 @@ async function checkDiagram(
   return { ok: true, diagram: { kind, source: html }, notes };
 }
 
-/** guide_clear_overview is not a tool; the host may drop the overview with this. */
 export function guideClearOverview(draft: GuideDraft, hooks?: GuideBuilderHooks): GuideBuilderAnswer {
   if (!draft.overview) return answer(draft, true, ["There is no overview."]);
   const { overview: _drop, ...rest } = draft;
@@ -796,20 +676,16 @@ export function guideClearOverview(draft: GuideDraft, hooks?: GuideBuilderHooks)
 export interface GuideAddChapterArgs {
   readonly title: string;
   readonly overview: string;
-  /** 1-based position in reading order; defaults to the end. */
   readonly position?: number;
-  /** One diagram at the top of the chapter. */
   readonly diagram?: GuideDiagramArg | null;
 }
 
-/** The link-bearing texts of a chapter: its overview and, when it has one, its diagram. */
 function chapterSources(overview: string, diagram: GuideOverviewDiagram | undefined): Array<{ text: string; source: GuideLinkSource }> {
   const sources: Array<{ text: string; source: GuideLinkSource }> = [{ text: overview, source: "markdown" }];
   if (diagram) sources.push({ text: diagram.source, source: diagramLinkSource(diagram) });
   return sources;
 }
 
-/** guide_add_chapter: a new chapter; answers its id (`c3`). */
 export async function guideAddChapter(draft: GuideDraft, args: GuideAddChapterArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   if (draft.chapters.length >= GUIDE_BUILDER_MAX_CHAPTERS) {
     return refuse(draft, `The guide already has ${GUIDE_BUILDER_MAX_CHAPTERS} chapters, the most it may have. Merge chapters instead.`);
@@ -848,11 +724,9 @@ export interface GuideUpdateChapterArgs {
   readonly chapter: string;
   readonly title?: string;
   readonly overview?: string;
-  /** A new diagram (replaces any earlier one), or null to remove it. */
   readonly diagram?: GuideDiagramArg | null;
 }
 
-/** guide_update_chapter: change a chapter's title, overview and/or diagram. */
 export async function guideUpdateChapter(draft: GuideDraft, args: GuideUpdateChapterArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const found = findChapter(draft, args.chapter ?? "");
   if ("error" in found) return refuse(draft, found.error);
@@ -890,7 +764,6 @@ export async function guideUpdateChapter(draft: GuideDraft, args: GuideUpdateCha
     removedNotes.push(...checked.notes);
     diagramLine = current.diagram ? `Replaced its diagram with ${aDiagram(diagram)}.` : `Added ${aDiagram(diagram)}.`;
   }
-  // Only the texts given now are checked again; the others passed when they were set.
   const sources = [
     ...(args.overview !== undefined ? [{ text: overview, source: "markdown" as const }] : []),
     ...(args.diagram && diagram ? [{ text: diagram.source, source: diagramLinkSource(diagram) }] : []),
@@ -907,11 +780,9 @@ export async function guideUpdateChapter(draft: GuideDraft, args: GuideUpdateCha
 
 export interface GuideMoveChapterArgs {
   readonly chapter: string;
-  /** New 1-based position in reading order. */
   readonly position: number;
 }
 
-/** Every prose and diagram text of the draft that can hold `chapter:` links, with where it is. */
 function linkTexts(draft: GuideDraft, chapters: readonly GuideDraftChapter[]): Array<{ text: string; source: GuideLinkSource; where: string }> {
   const out: Array<{ text: string; source: GuideLinkSource; where: string }> = [];
   if (draft.overview) {
@@ -927,11 +798,6 @@ function linkTexts(draft: GuideDraft, chapters: readonly GuideDraftChapter[]): A
   return out;
 }
 
-/**
- * `chapter:N` links follow reading order, so moving or removing a chapter
- * re-points them. Names each link whose target changed, so the agent can fix
- * the ones it did not mean to move.
- */
 function chapterLinkShifts(draft: GuideDraft, next: readonly GuideDraftChapter[]): string[] {
   const notes: string[] = [];
   const seen = new Set<string>();
@@ -958,7 +824,6 @@ function orderLine(draft: GuideDraft): string {
   return `Order: ${draft.chapters.map((c, i) => `${i + 1}. ${c.id} "${c.title}"`).join(", ")}.`;
 }
 
-/** guide_move_chapter: move a chapter to a new position; answers the new order. */
 export async function guideMoveChapter(draft: GuideDraft, args: GuideMoveChapterArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const found = findChapter(draft, args.chapter ?? "");
   if ("error" in found) return refuse(draft, found.error);
@@ -978,7 +843,6 @@ export interface GuideRemoveChapterArgs {
   readonly chapter: string;
 }
 
-/** guide_remove_chapter: remove a chapter; its files go back to not placed. */
 export async function guideRemoveChapter(draft: GuideDraft, args: GuideRemoveChapterArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const found = findChapter(draft, args.chapter ?? "");
   if ("error" in found) return refuse(draft, found.error);
@@ -1035,7 +899,6 @@ function checkFocus(file: ChangeFile, focus: readonly GuideFocusArg[]): { ok: tr
   return { ok: true, value: out };
 }
 
-/** guide_place_file: put a changed file in a chapter with a one-line summary. */
 export async function guidePlaceFile(draft: GuideDraft, args: GuidePlaceFileArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const path = args.file ?? "";
   const change = changeOf(draft);
@@ -1058,7 +921,6 @@ export async function guidePlaceFile(draft: GuideDraft, args: GuidePlaceFileArgs
   const wasLeftOut = draft.unplaced.some((u) => u.file === path);
   const entry: GuideDraftFile = focus ? { file: path, summary: summary.value, focus } : { file: path, summary: summary.value };
   if (existing) {
-    // Placing a file again in its own chapter replaces its summary and focus.
     const chapters = draft.chapters.map((c, i) =>
       i === found.index ? { ...c, files: c.files.map((f) => (f.file === path ? entry : f)) } : c,
     );
@@ -1080,7 +942,6 @@ export interface GuideMoveFileArgs {
   readonly chapter: string;
 }
 
-/** guide_move_file: move a placed file to another chapter (its summary and focus go with it). */
 export async function guideMoveFile(draft: GuideDraft, args: GuideMoveFileArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const path = args.file ?? "";
   if (!changeOf(draft).byPath.has(path)) return refuse(draft, notInChange(path, draft));
@@ -1107,7 +968,6 @@ export interface GuideUnplaceFileArgs {
   readonly reason?: string;
 }
 
-/** guide_unplace_file: leave a changed file out of every chapter on purpose ("Not in a chapter"). */
 export async function guideUnplaceFile(draft: GuideDraft, args: GuideUnplaceFileArgs, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const path = args.file ?? "";
   if (!changeOf(draft).byPath.has(path)) return refuse(draft, notInChange(path, draft));
@@ -1123,7 +983,6 @@ export async function guideUnplaceFile(draft: GuideDraft, args: GuideUnplaceFile
     : draft.chapters;
   const earlier = draft.unplaced.find((u) => u.file === path);
   const alreadyLeftOut = earlier !== undefined;
-  // No new reason keeps the one recorded earlier.
   const keptReason = reason ?? earlier?.reason;
   const entry: GuideDraftUnplaced = keptReason ? { file: path, reason: keptReason } : { file: path };
   const unplaced = alreadyLeftOut ? draft.unplaced.map((u) => (u.file === path ? entry : u)) : [...draft.unplaced, entry];
@@ -1144,7 +1003,6 @@ function focusText(focus: readonly GuideFocusRange[]): string {
   return focus.map((f) => ("hunk" in f ? `hunk ${f.hunk}` : f.start === f.end ? `L${f.start}` : `L${f.start}-L${f.end}`)).join(", ");
 }
 
-/** guide_read: the whole draft in reading order, plus the changed files not placed yet. */
 export async function guideRead(draft: GuideDraft): Promise<GuideBuilderAnswer> {
   const change = changeOf(draft);
   const lines: string[] = [];
@@ -1217,7 +1075,6 @@ function finishProblems(draft: GuideDraft, opts?: { allowEmptyIntent?: boolean }
   return problems;
 }
 
-/** The draft as the guide it describes, before snapshot validation. */
 export function guideDraftToOutput(draft: GuideDraft): CodeGuideOutput {
   const sections: GuideSection[] = draft.chapters.map((c) => ({
     title: c.title,
@@ -1234,11 +1091,6 @@ export function guideDraftToOutput(draft: GuideDraft): CodeGuideOutput {
   };
 }
 
-/**
- * Hard checks the authored-guide path applies (`plannotator guide export
- * --guide`): every placed or unplaced file is in the patch and placed once.
- * Returns the problems, empty when the guide passes.
- */
 export function checkAuthoredGuideFiles(guide: CodeGuideOutput, patchFiles: readonly string[]): string[] {
   const patchSet = new Set(patchFiles);
   const problems: string[] = [];
@@ -1265,9 +1117,6 @@ async function buildSnapshot(draft: GuideDraft, hooks: GuideBuilderHooks | undef
   if (authored.length > 0) return { ok: false, problems: authored };
   const validated = validateGuideOutput(output, patchFiles);
   if ("error" in validated) return { ok: false, problems: [validated.error] };
-  // The validator keeps only a section's title, overview and files; every
-  // chapter of a draft that passed finishProblems survives it, in order, so
-  // each chapter's diagram goes back on its section.
   const sections =
     validated.guide.sections.length === output.sections.length
       ? validated.guide.sections.map((section, i) => {
@@ -1293,12 +1142,6 @@ async function buildSnapshot(draft: GuideDraft, hooks: GuideBuilderHooks | undef
   return { ok: true, snapshot: parsed.value };
 }
 
-/**
- * guide_finish: run every check, build the snapshot (`buildGuideSnapshot`,
- * then the strict `parseGuideSnapshot`), and answer it. Refuses, naming every
- * problem, while files are neither placed nor marked, a chapter is empty, or
- * the header is missing. The host saves `answer.snapshot`.
- */
 export async function guideFinish(draft: GuideDraft, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   return finish(draft, hooks);
 }
@@ -1313,17 +1156,9 @@ async function finish(draft: GuideDraft, hooks: GuideBuilderHooks | undefined, o
   ], { snapshot: built.snapshot });
 }
 
-/**
- * "Save as is" (the reader's action on an unfinished draft, not a tool):
- * remaining files go to "Not in a chapter", empty chapters are dropped, then
- * the same checks as guide_finish run. The answer's draft is the adjusted
- * draft, so the host can persist what was saved.
- */
 export async function guideSaveAsIs(draft: GuideDraft, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   const remaining = guideDraftProgress(draft).remaining;
   const kept = draft.chapters.filter((c) => c.files.length > 0);
-  // Chapter links past the chapters that are left become plain text, so an
-  // unfinished draft is never refused for a link to a chapter it never wrote.
   const count = kept.length;
   const overview = draft.overview
     ? {
@@ -1349,7 +1184,6 @@ export async function guideSaveAsIs(draft: GuideDraft, hooks?: GuideBuilderHooks
   };
   const result = await finish(adjusted, hooks, { allowEmptyIntent: true });
   if (!result.ok) {
-    // Refused: nothing was saved, so the caller's draft stays exactly as it was.
     const lines = result.text.split("\n");
     return refuse(draft, ...lines.slice(0, -1));
   }
@@ -1365,23 +1199,16 @@ export async function guideSaveAsIs(draft: GuideDraft, hooks?: GuideBuilderHooks
   };
 }
 
-// ---------------------------------------------------------------------------
-// The tool dispatcher (what an MCP server calls)
-// ---------------------------------------------------------------------------
-
 const TOOL_ARGS: Record<
   GuideBuilderToolName,
   {
     readonly required: readonly string[];
     readonly optional: readonly string[];
-    /** Still accepted from an older session, but no longer offered (not listed in "It takes"). */
     readonly retired?: readonly string[];
-    /** Arguments where `null` means something (remove), not "not given". */
     readonly nullable?: readonly string[];
   }
 > = {
   guide_set_header: { required: [], optional: ["title", "intent"] },
-  // The overview's diagram moved to chapters; an older session may still send one.
   guide_set_overview: { required: ["text"], optional: [], retired: ["diagram"] },
   guide_add_chapter: { required: ["title", "overview"], optional: ["diagram", "position"] },
   guide_update_chapter: { required: ["chapter"], optional: ["title", "overview", "diagram"], nullable: ["diagram"] },
@@ -1444,17 +1271,10 @@ function checkArgs(name: GuideBuilderToolName, raw: unknown): { ok: true; args: 
   return { ok: true, args: out };
 }
 
-/** True when `name` is one of the builder's tools. */
 export function isGuideBuilderToolName(name: string): name is GuideBuilderToolName {
   return (GUIDE_BUILDER_TOOL_NAMES as readonly string[]).includes(name);
 }
 
-/**
- * Run one builder tool by name with the agent's raw arguments: argument
- * checks (unknown or missing arguments, wrong types) answer plainly instead
- * of throwing. The host persists `answer.draft` when `answer.changed`, and
- * saves `answer.snapshot` after guide_finish.
- */
 export async function runGuideBuilderTool(draft: GuideDraft, name: string, rawArgs: unknown, hooks?: GuideBuilderHooks): Promise<GuideBuilderAnswer> {
   if (!isGuideBuilderToolName(name)) return refuse(draft, `There is no tool \`${name}\`. The guide tools are: ${GUIDE_BUILDER_TOOL_NAMES.join(", ")}.`);
   const checked = checkArgs(name, rawArgs);

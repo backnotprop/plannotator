@@ -1,14 +1,3 @@
-/**
- * A `Recommended:` line naming a choice whose label is written as markdown
- * (`- [ ] [Pagefind](x.html)`): the line says `Pagefind`, the label's raw
- * text is `[Pagefind](x.html)`. Exact matching runs first; then the label's
- * plain words name it, only when exactly one choice has them.
- *
- * What regresses if this fails: the card shows no recommendation and the
- * line turns into a suggested free-text answer (and a `(Recommended)` marker
- * beside it is dropped with nothing marked), or two choices with the same
- * plain words get one picked at random.
- */
 import { describe, expect, test } from "bun:test";
 import { parseQuestionBlock, type ParsedQuestion } from "./question-block";
 
@@ -64,8 +53,6 @@ describe("a Recommended: line names a choice by the plain words of its label", (
   });
 
   test("a 19,000-character label of brackets or tags (the body cap is 20,000) parses in linear time", () => {
-    // `![` runs are left out: the picture-choice pattern (CHOICE_IMAGE_RE) takes ~160 ms on them, as on main
-    // before this; stripInlineMarkup's own `![` case is guarded in inline-markdown.test.ts.
     for (const run of ["[", "[[", "<a", "[a](", "[[a|", "[a]((", "[a](x("]) {
       const label = run.repeat(Math.ceil(19_000 / run.length)).slice(0, 19_000);
       for (const kind of ["question", "question-multi"] as const) {

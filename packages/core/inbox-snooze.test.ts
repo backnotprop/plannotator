@@ -1,11 +1,3 @@
-/**
- * Snooze's rules (approval "inbox-snooze"; core inbox-snooze.ts), shared with
- * Workspaces. What can regress: a menu time off by the hour or the day (Later
- * today's start of hour, Monday's week, a duplicate), a DST day listing a half
- * hour the clocks skip or one twice, today listing a time already past, a
- * return that stays in Quiet or keeps its old time, and a timer past
- * setTimeout's limit firing at once.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import type { InboxListRow, InboxListSection } from "./inbox-types";
 import {
@@ -29,7 +21,6 @@ afterEach(() => {
 const zone = (tz: string) => {
   process.env.TZ = tz;
 };
-/** A local wall-clock moment in the zone set now. */
 const local = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo - 1, d, h, mi);
 const ids = (now: Date) => inboxSnoozeChoices(now).map((c) => `${c.id} ${inboxSnoozeWhen(c.until, now)}`);
 
@@ -61,10 +52,8 @@ describe("the menu's times", () => {
 
   test("Tomorrow is 8:00 AM local across a DST change, not 24 hours on", () => {
     zone("America/New_York");
-    // Spring forward on Sun Mar 8, 2026: Tomorrow from Saturday is 8:00 AM EDT (12:00 UTC), 23 hours away.
     const spring = inboxSnoozeChoices(local(2026, 3, 7, 9)).find((c) => c.id === "tomorrow")!;
     expect(spring.until).toBe("2026-03-08T12:00:00.000Z");
-    // Fall back on Sun Nov 1, 2026: 8:00 AM EST is 13:00 UTC.
     const fall = inboxSnoozeChoices(local(2026, 10, 31, 9)).find((c) => c.id === "tomorrow")!;
     expect(fall.until).toBe("2026-11-01T13:00:00.000Z");
   });
@@ -93,7 +82,6 @@ describe("Pick a time", () => {
     const fall = inboxSnoozeTimes("2026-11-01", now);
     expect(fall).toHaveLength(48);
     expect(new Set(fall.map((t) => t.until)).size).toBe(48);
-    // Every time is the local time it names.
     for (const time of [...inboxSnoozeTimes("2026-03-08", now), ...fall]) {
       const at = new Date(time.until);
       expect(`${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`).toBe(time.key);
@@ -135,7 +123,6 @@ describe("the return", () => {
     const now = new Date("2026-11-04T13:00:01Z");
     expect(inboxRowAsOf(row("msg_a", { snoozed: { until, at } }), now)).toMatchObject({ section: "new", unread: true, last_at: until, snooze_back: until, snoozed: null });
     expect(inboxRowAsOf(row("msg_b", { section: "stopped", unread: true, snoozed: { until, at } }), now).section).toBe("stopped");
-    // A message after the return keeps its own, later time.
     expect(inboxRowAsOf(row("msg_c", { last_at: "2026-11-04T14:00:00.000Z", snoozed: { until, at } }), new Date("2026-11-04T15:00:00Z")).last_at).toBe("2026-11-04T14:00:00.000Z");
   });
 
@@ -144,7 +131,6 @@ describe("the return", () => {
     const after = inboxRowAsOf(r, new Date("2026-11-05T00:00:00Z"));
     expect(after).toMatchObject({ resolved_at: at, section: r.section, unread: r.unread, last_at: r.last_at, snoozed: null });
     expect(after.snooze_back ?? null).toBeNull();
-    // Still running (an agent archived it): it stays snoozed, and Unsnooze stays offered.
     expect(inboxRowAsOf(r, new Date("2026-11-04T12:00:00Z"))).toBe(r);
   });
 
