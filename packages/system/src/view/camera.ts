@@ -1,46 +1,17 @@
-// The camera: where the sheet on screen sits on the glass, and how it moves.
-// Ported from G (round 4, entry G, App.jsx and geom.js; NOTES.md steps 8f to
-// 8k). No React and no DOM here except requestAnimationFrame and the reduced
-// motion query, so the numbers can be tested on their own.
-//
-// A camera { cx, cy, k, sx, sy } puts the sheet's point (cx, cy) at the stage's
-// point (sx, sy), at scale k. The sheet on screen is always at the world's
-// origin; a dive re-roots the world on the sheet it enters, so scales never
-// compound however deep the drawing goes.
-//
-// Every move is a critically damped spring launched by the input: its fastest
-// frame is the first one, then it only slows, never overshoots and never stops
-// hard (x = 1 - (1 + wt/2)e^(-wt) from rest). The state { x, v, to } is read
-// every frame, so a second input retargets from where the camera is, with the
-// speed it has. A move is named by its time to 90% of the way (about 3/w s).
-
 export type Cam = { cx: number; cy: number; k: number; sx: number; sy: number };
 export type Rect = { x: number; y: number; w: number; h: number };
 
-/** Time to 90% of the way: a + or - step, a fit or refit, a dive into a window or out of it. */
 export const STEP_MS = 250, CAM_MS = 375, DIVE_MS = 700;
-/** The spring rests below a pixel (G step 8j: 0.003 left a 2 px snap at the end of a long move). */
 export const SETTLE = 0.0005;
-/** A dive lands (re-roots, names its sheet) this close to its end; the camera glides the rest. */
 export const LAND = 0.03;
-/** The wheel's zoom is owed and paid off about the pointer: a notch or a scroll, and a trackpad pinch. */
 export const WHEEL_TAU = 80, WHEEL_TAU_PINCH = 45;
-/** + and - step by this factor. */
 export const ZOOM_STEP = 1.25;
 /** The camera's scale stays between these (G's clamp: 15 to 800 percent). Crossing a door re-roots it, so it never stops a descent. */
 export const K_MIN = 0.15, K_MAX = 8;
-/** A drag let go while moving glides on and slows, per ms. */
 export const GLIDE_DECAY = 0.0042;
 
-// The Simple / Full move (G step 8g). Into Simple, what only Full draws fades
-// out (SW_EXIT, ease-out) and the parts start SW_LEAD after the press, when the
-// fade is 94% done. Into Full, the parts start at once; Full's own things come
-// back SW_ENTER_AT into the move (the spring is 91% of the way), lines first,
-// their words SW_STAGGER later, each over SW_IN, the words from 0.96 of their
-// size. Reduced motion: the same fades, a cut, and the world fades up over SW_CALM.
 export const SW_EXIT = 120, SW_LEAD = 60, SW_ENTER_AT = 400, SW_STAGGER = 50, SW_IN = 200, SW_CALM = 180;
 
-/** The spring's rate for a move named by its time to 90% of the way. */
 export const wOf = (ms90: number) => 3000 / ms90;
 
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -51,7 +22,6 @@ export const smooth = (e0: number, e1: number, x: number) => {
 };
 export const lerpRect = (a: Rect, b: Rect, t: number): Rect => ({ x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), w: lerp(a.w, b.w, t), h: lerp(a.h, b.h, t) });
 
-/** One step of a critically damped spring toward `to`: x the position, v its speed per second, w the rate, dt seconds. */
 export function springStep(x: number, v: number, to: number, w: number, dt: number): [number, number] {
   const d = x - to, c = v + w * d, e = Math.exp(-w * dt);
   const nd = (d + c * dt) * e;
@@ -60,12 +30,6 @@ export function springStep(x: number, v: number, to: number, w: number, dt: numb
 
 export type SpringState = { x: number; v: number; to: number };
 
-/**
- * Runs a spring on requestAnimationFrame. Its clock is the frame's own
- * timestamp (every callback of a frame shares it), and the first frame after
- * the input carries a whole frame of motion, so the first step is the largest
- * (G step 8j). Returns a stop function.
- */
 export function spring(S: SpringState, w: number, onUpdate: (x: number) => void, onDone?: () => void): () => void {
   let raf = 0, dead = false, last: number | null = null;
   const f = (ts: number) => {
@@ -91,12 +55,6 @@ export function spring(S: SpringState, w: number, onUpdate: (x: number) => void,
   };
 }
 
-/**
- * The camera between two cameras at e (0 is A, 1 is B): the scale moves in log
- * space, and the point that holds still on the glass between the two (their
- * fixed point) holds still all the way, so a zoom into a window looks like a
- * zoom, not a slide and a zoom.
- */
 export function camAt(A: Cam, B: Cam, e: number): Cam {
   const k = Math.exp(lerp(Math.log(A.k), Math.log(B.k), e));
   const sx = lerp(A.sx, B.sx, e), sy = lerp(A.sy, B.sy, e);
@@ -107,87 +65,51 @@ export function camAt(A: Cam, B: Cam, e: number): Cam {
   return { cx: Fx - (SFx - sx) / k, cy: Fy - (SFy - sy) / k, k, sx, sy };
 }
 
-/** The world's CSS transform for a camera (transform-origin 0 0). */
 export const xf = (c: Cam) => `translate(${c.sx - c.cx * c.k}px, ${c.sy - c.cy * c.k}px) scale(${c.k})`;
 
-/** A stage point in sheet units under a camera. */
 export const toSheet = (c: Cam, px: number, py: number): [number, number] => [(px - (c.sx - c.cx * c.k)) / c.k, (py - (c.sy - c.cy * c.k)) / c.k];
 
-/** The camera after a zoom by factor f about a stage point, the point holding still. */
 export function zoomAbout(c: Cam, f: number, px: number, py: number): Cam {
   const [wx, wy] = toSheet(c, px, py);
   const k = clamp(c.k * f, K_MIN, K_MAX);
   return { ...c, k, cx: wx - (px - c.sx) / k, cy: wy - (py - c.sy) / k };
 }
 
-/** The stage room a view fits its sheet into: inside PAD on every side. */
 export const PAD = 20;
 export type Stage = { w: number; h: number; layout: 'pane' | 'window' };
 
-/**
- * The camera that fits a rect at rest: the stage's width (a pane, which grows
- * down to the sheet) or the whole stage (a window), never past `kMax` (1:1 for
- * a sheet, so a sheet never rests past its own size). In a pane the rect hangs
- * from the top, so a sheet of another height lands at the same place.
- */
 export function fitRect(r: Rect, st: Stage, kMax = 1): Cam {
   const aw = Math.max(1, st.w - PAD * 2), ah = Math.max(1, st.h - PAD * 2);
   const k = Math.max(1e-3, Math.min(kMax, aw / r.w, st.layout === 'window' ? ah / r.h : Infinity));
   return { cx: r.x + r.w / 2, cy: r.y + r.h / 2, k, sx: st.w / 2, sy: st.layout === 'window' ? st.h / 2 : PAD + (r.h * k) / 2 };
 }
 
-/** The rest camera of a sheet of size w by h. */
 export const restCam = (w: number, h: number, st: Stage) => fitRect({ x: 0, y: 0, w, h }, st);
 
-/** The height a pane's stage takes for a sheet: the sheet at the width's scale, plus the room around it. */
 export const paneH = (w: number, h: number, stageW: number) => {
   const k = Math.min(1, Math.max(1, stageW - PAD * 2) / w);
   return Math.ceil(h * k + PAD * 2);
 };
 
-/** Reduced motion, read when a move starts (so a change of the setting applies to the next move). */
 export const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// ---------------------------------------------------------------- a window's door and a dive's picture (G step 8i)
-
-/** Where the camera is against a window: the inside's ratio to its own rest scale, and the door's three marks. */
 export type DoorWindow = { ratio: number; lo: number; hi: number; at: number };
 
-/** The ratio a window's inside is at when the sheet around it rests, and its door: where the sheet around lowers (lo to hi) and where the camera crosses (at). From G (doorOf). */
 export const doorOf = (r0: number) => {
   const lo = Math.max(0.5, r0 * 1.04), hi = Math.max(0.8, lo + 0.12);
   return { lo, hi, at: Math.max(1, hi + 0.08) };
 };
-/** How far into a window the wheel has the camera, on the dive's own scale (0 to 1): the sheet around lowers over 0.1 to 0.6 of it exactly as it lowers from the door's lo to hi. */
 export const doorT = (d: DoorWindow, r0: number) => {
   const t = 0.1 + (0.5 * (d.ratio - d.lo)) / (d.hi - d.lo);
   return clamp(d.ratio < d.lo ? Math.min(t, 0.1 * clamp((d.ratio - r0) / (d.lo - r0), 0, 1)) : t, 0, 1);
 };
-/**
- * The zoom readout while a dive or a climb moves through a window, at the
- * camera's way x (0 the sheet around at rest, 1 the inside at rest). k is the
- * camera's scale in the sheet around, s the inside's scale in it. The readout
- * is k * s^w: the sheet around's scale at w = 0, the inside's at w = 1. It
- * never jumps by s (a step at half way read 160% then 39%).
- *
- * w runs in a straight line over one leg of the move: from where the leg
- * started (x0, with the w it had there) to where the leg lands (re-roots, at
- * LAND from its end), where w is that end's exactly. A dive's first leg is
- * { x0: 0, w0: 0, to: 1 } and a climb's { x0: 1, w0: 1, to: 0 }, so the number
- * goes one way until the landing, then settles with the camera. A move turned
- * round starts a new leg where it is (`turnLeg`), so it neither steps at the
- * turn nor at the landing it turns to.
- */
 export type ReadingLeg = { x0: number; w0: number; to: 0 | 1 };
 export const readingWeight = (x: number, leg: ReadingLeg) => {
   const x1 = leg.to === 1 ? 1 - LAND : LAND, d = x1 - leg.x0;
   return clamp(Math.abs(d) < 1e-6 ? leg.to : leg.w0 + ((leg.to - leg.w0) * (x - leg.x0)) / d, 0, 1);
 };
-/** The leg a move takes on when it is sent toward `to` from x; the same leg when it already goes there. */
 export const turnLeg = (leg: ReadingLeg, x: number, to: 0 | 1): ReadingLeg => (leg.to === to ? leg : { x0: x, w0: readingWeight(x, leg), to });
-/** A move that starts with the inside already named (a wheel past half way into the window) reads the inside's scale throughout (`inside`). */
 export const diveReading = (k: number, s: number, x: number, leg: ReadingLeg, inside = false) => k * Math.pow(s, inside ? 1 : readingWeight(x, leg));
-/** What a dive at t draws: the sheet around, the entered box's own words, the inside's ink and paper, and how far it has unrolled. */
 export const diveInk = (t: number) => ({
   around: 1 - smooth(0.1, 0.6, t),
   box: 1 - smooth(0, 0.24, t),

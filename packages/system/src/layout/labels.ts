@@ -1,7 +1,3 @@
-// Label placement: candidate slots along every segment of a line, chosen
-// greedily in priority order and scored against parts, placed labels, other
-// lines and band headers. Fixed tie-breaks keep redraws stable. A label with
-// no free slot is not drawn at rest; it shows when its line is hovered.
 import { balance, FONTS, lh as scaleH, type Wrapped } from './measure.ts';
 import type { LabelBox, Pt, Rect } from './types.ts';
 
@@ -24,8 +20,6 @@ function segHits(box: Rect, segs: Seg[], own: string, m = 0): number {
   return n;
 }
 
-// A run another line shares exactly (a trunk on a dense sheet): a label there
-// could belong to any of them.
 function shared(a: Pt, b: Pt, segs: Seg[], own: string): boolean {
   for (const s of segs) {
     if (s.id === own) continue;
@@ -40,15 +34,8 @@ function shared(a: Pt, b: Pt, segs: Seg[], own: string): boolean {
   return false;
 }
 
-// Dense sheets: a label sits only on a run of its own line, never over another
-// line, and at least DENSE_ROOM from every other label; with no such room it
-// waits for hover. Zooming in never crowds them.
 const DENSE_ROOM = 14;
 
-// On every sheet, a line's words sit in a clear gap beside their own line:
-// never across another line (CLEAR px kept off it), never over a part, never
-// across a band's edge. A label with no such slot is reported (hidden), and
-// the layout widens the gap and tries again.
 const CLEAR = 5;
 const straddles = (box: Rect, z: Rect, m = 2) =>
   hit(box, z, m) && !(box.x >= z.x + m && box.y >= z.y + m && box.x + box.w <= z.x + z.w - m && box.y + box.h <= z.y + z.h - m);
@@ -74,7 +61,6 @@ export function placeLabels({ edges, parts, blocks, soft, bounds, dense = false,
     const all = [e.pts, ...(e.paths ?? [])].filter((p): p is Pt[] => !!p);
     for (const p of all) for (let i = 0; i < p.length - 1; i++) segs.push({ id: e.id, ab: [p[i]!, p[i + 1]!] });
   }
-  // drawn lines that are not flows (a split's dashed rule) are lines too
   for (const [i, ab] of lines.entries()) segs.push({ id: '_line' + i, ab });
   const placed: Rect[] = [];
   const order = edges
@@ -84,7 +70,6 @@ export function placeLabels({ edges, parts, blocks, soft, bounds, dense = false,
   const result: Record<string, LabelBox> = {};
   const lineH = scaleH(16);
   for (const { e } of order) {
-    // a one-line wrap first; a two-line wrap only when one line finds no room
     const wraps: Wrapped[] = [balance(e.says, FONTS.label, scaleH(250), 2)];
     const two = balance(e.says, FONTS.label, scaleH(120), 2);
     if (two.lines.length <= 2 && two.width < wraps[0]!.width - 10) wraps.push(two);
@@ -98,8 +83,6 @@ export function placeLabels({ edges, parts, blocks, soft, bounds, dense = false,
       const segList: { a: Pt; b: Pt; main: boolean }[] = [];
       for (let i = 0; i < path.length - 1; i++) segList.push({ a: path[i]!, b: path[i + 1]!, main: true });
       for (const p of e.paths ?? []) for (let i = 0; i < p.length - 1; i++) segList.push({ a: p[i]!, b: p[i + 1]!, main: false });
-      // beside a run, the side toward the rest of its own line reads as its own
-      // (a drop under a bus keeps its words inside the elbow)
       const allPts = [path, ...(e.paths ?? [])].flat();
       const mcx = allPts.length ? allPts.reduce((a, q) => a + q[0], 0) / allPts.length : 0;
       const mcy = allPts.length ? allPts.reduce((a, q) => a + q[1], 0) / allPts.length : 0;
@@ -112,13 +95,11 @@ export function placeLabels({ edges, parts, blocks, soft, bounds, dense = false,
         for (const [f, fp] of [[0.5, 0], [0.32, 6], [0.68, 6], [0.18, 14], [0.82, 14]] as const) {
           if (ax === bx) {
             const y = ay + (by - ay) * f;
-            // the rest of the line to the left of the run: left first
             const lean = strict ? (mcx < ax - 1 ? -1 : 0) : 0;
             cands.push({ x: ax + OFF, y: y - lh / 2, s: pref + fp + (lean < 0 ? 6 : 0), side: 'r' });
             cands.push({ x: ax - OFF - lw, y: y - lh / 2, s: pref + fp + (lean < 0 ? 0 : 3), side: 'l' });
           } else {
             const x = ax + (bx - ax) * f;
-            // the rest of the line below the run: below first; above it: above first
             const lean = strict ? (mcy > ay + 1 ? 1 : mcy < ay - 1 ? -1 : 0) : 0;
             cands.push({ x: x - lw / 2, y: ay - OFF - lh + 2, s: pref + fp + (lean > 0 ? 6 : 0), side: 'a' });
             cands.push({ x: x - lw / 2, y: ay + OFF, s: pref + fp + (lean > 0 ? 0 : 3), side: 'b' });
@@ -157,7 +138,6 @@ export function placeLabels({ edges, parts, blocks, soft, bounds, dense = false,
     } else {
       const t = wraps[0]!;
       const lw = t.width + PAD * 2 + (e.letter ? LETTER : 0), lh = t.lines.length * lineH + 2;
-      // no free slot: shown on hover, beside the middle of the line
       const m = path[Math.floor(path.length / 2)] ?? [0, 0];
       result[e.id] = { x: m[0] + OFF, y: m[1] - lh / 2, w: lw, h: lh, lines: t.lines, hidden: true };
     }
@@ -166,9 +146,8 @@ export function placeLabels({ edges, parts, blocks, soft, bounds, dense = false,
 }
 
 /**
- * Note letters on parts: the first free spot, from the middle of the right
- * edge. A letter keeps off every part's name: the name sits in the top left of
- * a box, so that strip counts as taken.
+ * A letter keeps off every part's name: the name sits in the top left of a box, so that strip
+ * counts as taken.
  */
 export function placeLetters(notes: { l: string; on: string }[], rects: Record<string, Rect | undefined>, taken: Rect[]) {
   const out: { l: string; x: number; y: number; on: string }[] = [];

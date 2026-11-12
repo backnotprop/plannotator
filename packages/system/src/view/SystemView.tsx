@@ -1,26 +1,3 @@
-// A drawing in a pane or a full window, travelled with a camera. Props only:
-// the Inbox owns the address, the reading and the window; this draws what it
-// is given and says what the person asked for through the callbacks.
-//
-// Step A4 (this, ported from G's App.jsx, NOTES.md steps 8f to 8k): the camera
-// (the wheel and a pinch about the pointer, + and -, fit, a drag that glides),
-// the dive into a window and back out, the wheel through a window's door, the
-// crumbs and sheet chips as controls, the zoom group and Key, the keyboard, the
-// notes, and the Simple / Full move.
-//
-// A change (step A5): a PR's revision, a plan, or the gate's touched parts.
-// Before / After switch the drawing (the parts both draw travel, the rest
-// fades); Steps puts the change's one sequence in place of the sheet. In a
-// full window the parts list stands beside the sheet and a numbered legend
-// under it; a plan is drawn dashed. With no one change, several open PRs'
-// touched parts (`touches`) mark the drawing at rest amber, each part labelled
-// with the PRs that touch it.
-//
-// The sheet on screen is always at the world's origin. A dive flies the camera
-// into a window's box while the box's inside unrolls out of it and the sheet
-// around lowers; at 97% of the way it re-roots the world on the inside sheet
-// and glides the rest. The inside is drawn from the at-rest layout the dive
-// lands on, so nothing flashes or jumps at the landing (G step 8h).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { flushSync } from 'react-dom';
 import type { Revision, SystemModel } from '../format/types.ts';
@@ -46,47 +23,27 @@ export type Reading = 'simple' | 'full';
 
 export type SystemViewProps = {
   model: SystemModel;
-  /** The sheet to show; the landing sheet when left out. A new value travels there (surface, dive, or turn the sheet). */
   sheet?: string;
-  /** The project the drawing belongs to, shown as the first crumb (the Inbox's project name). */
   project?: string;
-  /** Simple or Full (default Full) of the sheet on screen; a window's inside is drawn in the same reading. */
   reading?: Reading;
-  /** pane: the drawing fits the pane's width and grows down; window: it fits the window. */
   layout: 'pane' | 'window';
-  /** Single-key shortcuts (+, -, F, N, 1 to 9) while the focus is in the drawing (default on). The Inbox passes its Single-key shortcuts setting. */
   keys?: boolean;
-  /** A change to draw: a PR's revision, a plan, or the gate's touched parts (amber only). Opens on the sheet it touches most when `sheet` is left out. */
   revision?: Revision | GateResult;
-  /** Several open PRs on the drawing at rest, each the gate's touched parts with its label ("PR 2848"): amber only, each touched part labelled. Ignored when `revision` is given. */
   touches?: Touch[];
-  /** Before, After (default) or Steps of a change. A gate result has After only; Steps needs a revision with steps. */
   view?: 'before' | 'after' | 'steps';
-  /** plan: the change drawn dashed where not built, for Shape's System (plan) tab. Default review. */
   mode?: 'review' | 'plan';
-  /** The PR's changed files with their counts (`git diff --numstat`): they name each part's files and counts. */
   files?: ChangeFile[];
-  /** The PR as the forge knows it: its number and title (else the revision's) and its state. */
   pr?: { number?: number; title?: string; state?: 'open' | 'merged' | 'closed' };
-  /** The PR's number opens its Details (as the PR title does in the Inbox's review). */
   onOpenDetails?(): void;
-  /** The sheet on screen changed: a dive or a climb landed, a chip or a crumb was pressed, the wheel crossed a door. */
   onNavigate(sheet: string): void;
-  /** Shown as the Simple / Full switch when given, on a sheet that has both readings. */
   onReading?(r: Reading): void;
-  /** Shows Before / After / Steps when given (As built / As planned in a plan); Esc in Steps asks for After. */
   onView?(v: 'before' | 'after' | 'steps'): void;
-  /** "diff ›" and a file in the parts list: open that file of the PR. In a full window, shows the parts list. */
   onOpenFile?(path: string, part: string): void;
-  /** Shown as Open full window when given, in the pane. */
   onOpenFull?(): void;
-  /** Shown as a close button when given; Esc on the landing sheet calls it too. */
   onClose?(): void;
-  /** The host's own control at the start of the top bar, before the crumbs ("‹ Reviews"), in a pane or a window. */
   leading?: ReactNode;
 };
 
-/** A window being entered or left: the part, the sheet inside, the box its inside opens from, and how far (0 outside, 1 inside). */
 type Dive = { part: string; code: string; r: Rect; s: number; t: number };
 type DiveRun = Dive & { t0: number; leg: ReadingLeg; S: SpringState; A: Cam; B: Cam; done: boolean; then?: () => void; onIn: () => void; onOut: () => void; restIn: () => Cam };
 type Door = DoorWindow & { id: string; code: string; r: Rect; s: number };
@@ -105,7 +62,6 @@ export function SystemView({
   const size = useSize(stageRef);
   const simple = reading === 'simple';
 
-  // ---------------------------------------------------------------- the change on the drawing
   const change = revision ?? null;
   const rev = change && isRevision(change) ? change : null;
   const plan = mode === 'plan' && !!change;
@@ -113,14 +69,12 @@ export function SystemView({
   const canSteps = hasSteps(change);
   const vw: ChangeView = !change ? 'after' : view === 'steps' && canSteps ? 'steps' : view === 'before' && rev ? 'before' : 'after';
   const asBefore = vw === 'before';
-  // several open PRs at rest, when there is no one change: the same model for the same touches, so a host's new array does not turn the sheet
   const atRest = !change && touches?.length ? applyTouches(base, touches) : base;
   const model = useMemo(() => (change ? applyChange(base, change, asBefore ? 'before' : 'after', files) : atRest), [base, change, asBefore, files, atRest]);
   const stepsModel = useMemo(() => (change && canSteps && vw === 'steps' ? applyChange(base, change, 'steps', files) : null), [base, change, canSteps, vw, files]);
   const [picked, setPicked] = useState<string | null>(null);
   const [rowHover, setRowHover] = useState<string | null>(null);
 
-  // ---------------------------------------------------------------- the sheet on screen
   const [cur, setCurS] = useState(() => sheetOr(model, sheet ?? summary?.sheet));
   const curNow = useRef(cur);
   const setCur = (c: string) => { curNow.current = c; setCurS(c); };
@@ -132,20 +86,17 @@ export function SystemView({
   const turn = useRef<{ from: SheetLayout | null; cut: boolean; same?: boolean; fromModel?: SystemModel } | null>(null);
   const modelNow = useRef(model);
   if (modelNow.current !== model) {
-    // Before and After of the sheet on screen: the parts both draw travel, what one alone draws fades
     if (LRef.current && LRef.current !== L && LRef.current.id === code) turn.current = { from: LRef.current, fromModel: modelNow.current, cut: reduced(), same: true };
     modelNow.current = model;
   }
   LRef.current = L;
   const restOf = useCallback((c: string) => layoutAtRest(model, c, simple), [model, simple, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
-  const lastIn = useRef<Record<string, string>>({}); // scope -> the sheet last shown there
-  /** The sheet a window opens onto: where its scope was left, else its first sheet. */
+  const lastIn = useRef<Record<string, string>>({});
   const childFor = useCallback((sc: string) => {
     const last = lastIn.current[sc];
     return last && model.sheets[last] ? last : model.byScope[sc]?.[0];
   }, [model]);
 
-  // ---------------------------------------------------------------- the stage and the camera
   const stageW = size.w;
   const stageH = layout === 'pane' ? (L ? paneH(L.w, L.h, stageW) : 200) : size.h;
   const st: Stage = useMemo(() => ({ w: stageW, h: stageH, layout }), [stageW, stageH, layout]);
@@ -156,8 +107,7 @@ export function SystemView({
   const [, setTick] = useState(0);
   const camRef = useRef<Cam | null>(null);
   const dvRef = useRef<Dive | null>(null);
-  /** Runs what is current in the frame it is called from (a spring's frame, a wheel event), so the camera, a dive's ink and a move land in one paint. */
-  const moved = useRef(0); // when the camera last moved: idle layout waits until it has been still a while
+  const moved = useRef(0);
   const draw = (sync = true) => {
     moved.current = performance.now();
     if (worldRef.current && camRef.current) worldRef.current.style.transform = xf(camRef.current);
@@ -166,7 +116,6 @@ export function SystemView({
   };
   const putCam = (c: Cam, sync = true) => { camRef.current = c; draw(sync); };
 
-  // every move that holds the camera; whoever takes it next stops what had it
   const A = useRef<{ cam?: () => void; dive?: DiveRun | null; wheel?: { stop: () => void; x: number; X: number; v: number; w: number; px: number; py: number } | null; stepTo?: Cam | null; flight?: { from: Cam; to: Cam; S: SpringState } | null; flip?: Flip | null; glide?: boolean }>({});
   const take = (cancel?: () => void) => {
     const prev = A.current.cam;
@@ -175,9 +124,7 @@ export function SystemView({
     A.current.flight = null;
     prev?.();
   };
-  /** Reduced motion: the camera cuts and the world fades up over 180 ms. */
   const calm = () => worldRef.current?.animate([{ opacity: 0.6 }, { opacity: 1 }], { duration: SW_CALM, easing: 'ease-out' });
-  /** A flight in place (fit, refit, keep in view, + and -): ms90 to 90% of the way; v0 is speed carried from the flight it replaces. */
   const flyTo = (to: Cam, ms90 = CAM_MS, done?: () => void, v0 = 0, kick = true) => {
     const from = camRef.current;
     if (!from || reduced()) { take(); calm(); putCam(to, false); done?.(); return; }
@@ -187,7 +134,6 @@ export function SystemView({
     A.current.flight = { from, to, S };
   };
 
-  // the camera rests on the sheet when the stage first has a size, and again when it changes size
   useLayoutEffect(() => {
     if (!L || !stageW || (layout === 'window' && !size.h)) return;
     if (A.current.dive) return;
@@ -198,7 +144,6 @@ export function SystemView({
   // the world's transform is written here and by every move, never by React's style, so a frame is never a frame behind
   useLayoutEffect(() => { if (worldRef.current && camRef.current) worldRef.current.style.transform = xf(camRef.current); });
 
-  // ---------------------------------------------------------------- naming and the host's address
   const named = useRef(code);
   const [said, setSaid] = useState('');
   const name = (c: string, words: string) => {
@@ -212,17 +157,7 @@ export function SystemView({
     return sh ? `${scopeLabel(model, sh.scope)}, ${kindLabel(sh.kind).toLowerCase()} sheet` : c;
   };
 
-  // ---------------------------------------------------------------- windows and doors
-  /**
-   * Where a window's inside is drawn during a dive: over the box itself, at its
-   * width, from its top. The box at rest is a plain box (name, line, "N sheets
-   * inside"), not G's opened window with a WIN_HEAD plate over its inside, so
-   * the inside takes over from the box at the box's own place and size and
-   * unrolls down from its height; starting it WIN_HEAD lower drew it smaller
-   * than the box it replaced.
-   */
   const insideOf = (b: Rect): Rect => ({ x: b.x, y: b.y, w: b.w, h: b.h });
-  /** The window parts of a layout: the box, the scope it opens, the sheet inside and where its inside opens from. */
   const windowOf = (Lc: SheetLayout, id: string) => {
     const b = Lc.parts[id];
     const sc = b?.opens;
@@ -233,13 +168,11 @@ export function SystemView({
     const sc2 = b.w / C.w;
     return { id, code: c, C, s: sc2, r: insideOf(b) };
   };
-  /** The window under a stage point, with how close its inside is to its own rest scale (1 = at the door). */
   const windowAt = (c: Cam, px: number, py: number, Lc = LRef.current): Door | null => {
     if (!Lc || Lc.simple) return null;
     const [wx, wy] = toSheet(c, px, py);
     for (const id of Object.keys(Lc.parts)) {
       const b = Lc.parts[id]!;
-      // the box first: the inside's layout is read only for the window under the point (or the one being opened)
       if (!b.cw || wx < b.x || wx > b.x + b.w || wy < b.y || (wy > b.y + b.h && id !== near.current)) continue;
       const w = windowOf(Lc, id);
       if (!w) continue;
@@ -260,7 +193,6 @@ export function SystemView({
   const doorNow = (c: Cam): Door | null => {
     const Lc = LRef.current;
     if (!Lc || Lc.simple || dvRef.current || A.current.flip) return null;
-    // at the sheet's rest scale or below, every window is at rest (doorT is 0): nothing to read
     if (c.k <= restNow().k * (1 + 1e-6)) { near.current = null; return null; }
     const [px, py] = focusPt.current ?? [stRef.current.w / 2, stRef.current.h / 2];
     let d = windowAt(c, px, py);
@@ -273,7 +205,6 @@ export function SystemView({
     return d;
   };
 
-  /** The sheet around this one and the window this one opens from, for a climb. */
   const parentOf = (c: string) => {
     const sc = model.sheets[c]?.scope;
     if (!sc || sc === 'root') return null;
@@ -289,10 +220,9 @@ export function SystemView({
     return { pcode: cands[0], part, PL: cands[0] ? restOf(cands[0]) : null, r: null, s: 1 };
   };
 
-  // ---------------------------------------------------------------- the dive
   const diveTo = (D: DiveRun, to: 0 | 1) => {
-    D.leg = turnLeg(D.leg, D.S.x, to); // a turn round starts the readout's new leg from where it is
-    D.S.v += (to - D.S.x) * (wOf(DIVE_MS) / 2); // the input's push toward where it now goes
+    D.leg = turnLeg(D.leg, D.S.x, to);
+    D.S.v += (to - D.S.x) * (wOf(DIVE_MS) / 2);
     D.S.to = to;
   };
   const putDive = (D: Dive | null) => { dvRef.current = D; };
@@ -304,11 +234,9 @@ export function SystemView({
       A.current.dive = null;
       const inward = D.S.to === 1, { x, v } = D.S;
       (inward ? D.onIn : D.onOut)();
-      // the last few percent: the same spring, now in the world it landed in, with the speed it had
       if (glide) flyTo(inward ? D.restIn() : D.A, DIVE_MS, undefined, inward ? v / Math.max(1e-3, 1 - x) : -v / Math.max(1e-3, x), false);
       else draw(false);
     };
-    // x is the camera's way from A to B; the drawing's t starts where a wheel left the window (t0)
     const tOf = (x: number) => D.t0 + (1 - D.t0) * clamp(x, 0, 1);
     const put = (x: number) => { D.t = tOf(x); putDive(D); putCam(camAt(D.A, D.B, clamp(x, 0, 1))); };
     if (reduced()) { take(); calm(); D.S.x = D.S.to; D.t = tOf(D.S.to); putDive(D); camRef.current = camAt(D.A, D.B, D.S.to); land(false); return; }
@@ -320,8 +248,6 @@ export function SystemView({
     stop = spring(D.S, wOf(DIVE_MS), show, () => land(false));
     take(() => { stop!(); if (D.done) return; D.S.x = D.S.to; D.t = tOf(D.S.to); land(false); });
   };
-  /** The inside sheet becomes the world's origin; the camera is the same camera, written in its units. */
-  /** A move that takes the sheet's parts away (a dive, a climb, a turn) leaves the keyboard on the stage, not on a part that is about to go. */
   const holdFocus = () => {
     const a = typeof document !== 'undefined' ? document.activeElement : null;
     if (a && a !== stageRef.current && root.current?.contains(a) && !a.closest('.sys-bar')) stageRef.current?.focus({ preventScroll: true });
@@ -345,7 +271,6 @@ export function SystemView({
     endFlip();
     holdFocus();
     const B = fitRect({ x: w.r.x, y: w.r.y, w: w.r.w, h: w.C.h * w.s }, stRef.current, 1 / w.s);
-    // a wheel half way into this window: the dive goes on from there
     const d = doorNow(camRef.current);
     const t0 = d && d.id === part ? doorT(d, r0Of(w)) : 0;
     const D: DiveRun = {
@@ -358,7 +283,6 @@ export function SystemView({
     diveTo(D, 1);
     startDive(D);
   };
-  /** Up one level: the sheet around comes back with this sheet inside its window, and the dive plays backwards. */
   const surface = (then?: () => void) => {
     const D0 = A.current.dive;
     if (D0) { D0.then = then; diveTo(D0, 0); return; }
@@ -370,7 +294,6 @@ export function SystemView({
     const PL = P.PL!;
     const Bout = restCam(PL.w, PL.h, stRef.current);
     if (!P.r) {
-      // no window to climb into: the sheet around comes back at once
       setCur(P.pcode);
       camRef.current = Bout;
       name(P.pcode, `Out to ${scopeLabel(model, model.sheets[P.pcode]!.scope)}`);
@@ -384,11 +307,10 @@ export function SystemView({
     camRef.current = c2;
     setCur(P.pcode);
     near.current = null;
-    // t = 1 is this sheet where it was (c2), t = 0 the sheet around at rest
     const D: DiveRun = {
       part: P.part, code: c1, r, s: sc, t: 1, t0: 0, leg: { x0: 1, w0: 1, to: 0 }, A: Bout, B: c2, then, done: false, S: { x: 1, v: 0, to: 1 },
       restIn: () => c,
-      onIn: () => landIn(P.part, c1, r, sc, P.pcode!), // turned back in
+      onIn: () => landIn(P.part, c1, r, sc, P.pcode!),
       onOut: () => { putDive(null); name(P.pcode!, `Out to ${scopeLabel(model, model.sheets[P.pcode!]!.scope)}`); draw(false); if (D.then) setTimeout(D.then, 40); },
     };
     putDive(D);
@@ -396,8 +318,6 @@ export function SystemView({
     startDive(D);
   };
 
-  // ---------------------------------------------------------------- the wheel's doors (one territory)
-  /** After a zoom the person drives: cross a door when the scale says so. True when the world was re-rooted. */
   const crossDoor = (c: Cam, dir: number) => {
     if (A.current.dive || A.current.flip) return false;
     if (dir > 0) {
@@ -431,15 +351,12 @@ export function SystemView({
     return false;
   };
 
-  // ---------------------------------------------------------------- zoom
   const zoomBy = (f: number) => {
     if (A.current.dive) { diveTo(A.current.dive, f > 1 ? 1 : 0); return; }
     const now = camRef.current;
     if (!now) return;
     const px = stRef.current.w / 2, py = stRef.current.h / 2;
     focusPt.current = [px, py];
-    // + and - stack on the target the last step was flying to, so three fast
-    // presses reach 1.25 cubed, and the speed already there carries on
     const c = A.current.stepTo ?? now, F = A.current.flight;
     const to = zoomAbout(c, f, px, py);
     let v0 = 0;
@@ -457,17 +374,15 @@ export function SystemView({
   };
 
   const onWheel = (e: WheelEvent) => {
-    // a pane sits in a page that scrolls: there the wheel scrolls the page, and a pinch or Ctrl / Cmd with the wheel zooms
     if (stRef.current.layout === 'pane' && !e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    // a wheel during a dive turns it by its direction, from where it is
     const D = A.current.dive;
     if (D) { const to = e.deltaY < 0 ? 1 : 0; if (D.S.to !== to) diveTo(D, to); return; }
     if (!camRef.current) return;
     const rect = stageRef.current!.getBoundingClientRect();
     const px = e.clientX - rect.left, py = e.clientY - rect.top;
     focusPt.current = [px, py];
-    const dl = -e.deltaY * (e.deltaMode === 1 ? 33 : 1) * (e.ctrlKey ? 0.012 : 0.0022); // the zoom asked, in log scale
+    const dl = -e.deltaY * (e.deltaMode === 1 ? 33 : 1) * (e.ctrlKey ? 0.012 : 0.0022);
     const zoomAt = (d: number, x: number, y: number) => {
       const c = camRef.current!;
       const next = zoomAbout(c, Math.exp(d), x, y);
@@ -475,10 +390,6 @@ export function SystemView({
       if (!crossDoor(next, d > 0 ? 1 : -1)) putCam(next);
     };
     if (reduced()) { take(); zoomAt(dl, px, py); return; }
-    // the wheel's zoom is owed, and the camera pays it off about the pointer on
-    // the camera's own spring (WHEEL_TAU 80 ms reads as about 240 ms to 90%, a
-    // pinch's 45 as 135): a notch from rest launches it, a notch while it
-    // glides the same way moves its target and the speed follows
     const wFor = (pinch: boolean) => 3000 / (3 * (pinch ? WHEEL_TAU_PINCH : WHEEL_TAU));
     const W0 = A.current.wheel;
     if (W0 && A.current.cam === W0.stop) {
@@ -498,7 +409,7 @@ export function SystemView({
       const done = Math.abs(W.X - W.x) < 2e-4 && Math.abs(W.v) < 2e-3;
       if (done) W.x = W.X;
       zoomAt(W.x - x0, W.px, W.py);
-      A.current.cam = W.stop; // a door crossed mid-glide re-roots under the camera; the glide is relative, so it carries on
+      A.current.cam = W.stop;
       if (!done) raf = requestAnimationFrame(step);
       else A.current.wheel = null;
     };
@@ -515,7 +426,6 @@ export function SystemView({
     return () => el.removeEventListener('wheel', on);
   }, []);
 
-  // ---------------------------------------------------------------- the drag
   const drag = useRef<{ x: number; y: number; cam: Cam; moved: boolean; id: number; lt?: number; lx?: number; ly?: number; vx?: number; vy?: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const onDown = (e: ReactPointerEvent) => {
@@ -538,7 +448,6 @@ export function SystemView({
     setTimeout(() => { drag.current = null; }, 0);
     if (!d?.moved) return;
     setDragging(false);
-    // a drag let go while moving glides on and slows, as a map does under the hand
     if (reduced() || !d.lt || performance.now() - d.lt > 80) return;
     let vx = d.vx || 0, vy = d.vy || 0;
     if (Math.hypot(vx, vy) < 0.12) return;
@@ -556,7 +465,6 @@ export function SystemView({
     take(() => cancelAnimationFrame(raf));
   };
 
-  // ---------------------------------------------------------------- the move between layouts (Simple / Full, and sheets of one scope)
   const exitFades = useRef<Animation[]>([]);
   const pendingSimple = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shown = useRef<{ code: string; simple: boolean; L: SheetLayout | null }>({ code, simple, L });
@@ -571,11 +479,9 @@ export function SystemView({
     A.current.flip = null;
   };
   const sheetEl = () => curRef.current?.querySelector(':scope > .sys-sheet') ?? null;
-  /** The switch: into Simple, what only Full draws leaves first (from where it is), and the parts start 60 ms later. */
   const pressReading = (r: Reading) => {
     if (!onReading || A.current.dive) return;
     if (pendingSimple.current) {
-      // asked for Simple and pressed again before the parts moved: what was fading comes back from where it is
       clearTimeout(pendingSimple.current);
       pendingSimple.current = null;
       const fs = exitFades.current;
@@ -593,7 +499,6 @@ export function SystemView({
     exitFades.current = els.map((el, i) => born(el.animate([{ opacity: ops[i] }, { opacity: 0 }], { duration: SW_EXIT, easing: easeOut(), fill: 'forwards' })));
     pendingSimple.current = setTimeout(() => { pendingSimple.current = null; onReading('simple'); }, reduced() ? SW_EXIT : SW_LEAD);
   };
-  /** Another sheet of this scope (a chip, keys 1 to 9): the parts both draw travel, the rest fades, the camera refits on the same spring. */
   const turnTo = (c: string, then?: () => void) => {
     const from = curNow.current;
     if (c === from || !model.sheets[c] || A.current.dive) { then?.(); return; }
@@ -603,7 +508,6 @@ export function SystemView({
     name(c, `${kindLabel(model.sheets[c]!.kind)} sheet: ${model.sheets[c]!.title}`);
     if (then) setTimeout(then, 40);
   };
-  // after every commit: start a move when the layout on screen changed in place
   useLayoutEffect(() => {
     const was = shown.current;
     shown.current = { code, simple: !!L?.simple, L };
@@ -613,14 +517,12 @@ export function SystemView({
     turn.current = null;
     const rest = restCam(L.w, L.h, stRef.current);
     if (T && (was.code !== code || T.same) && (T.cut || !T.from)) {
-      // reduced motion, or nothing to move from: the camera cuts to the sheet and the world fades up
       take(); calm();
       camRef.current = rest;
       draw(false);
       return;
     }
     if (T && T.from && (was.code !== code || T.same)) {
-      // another sheet of the scope, or the same sheet Before and After a change
       const at = placesOf(A.current.flip);
       endFlip();
       near.current = null;
@@ -632,7 +534,6 @@ export function SystemView({
       return;
     }
     if (was.code === code && was.simple !== !!L.simple) {
-      // the same sheet in its other reading
       const F0 = A.current.flip;
       const at = placesOf(F0);
       const v0 = F0 && F0.S.x > 0.05 && F0.S.x < 0.995 ? clamp(-F0.S.v / F0.S.x, -3 * wOf(CAM_MS), 0) : 0;
@@ -650,7 +551,6 @@ export function SystemView({
       A.current.flip = startFlip({ root: root0, from: was.L, to: L, at, v0, enter: toFull ? 'full' : 'none', onDone: () => { A.current.flip = null; } });
     }
   });
-  // the leaving sheet of a turn: what it alone draws fades out over SW_EXIT; what both draw is the new sheet's, travelling
   useLayoutEffect(() => {
     const g = ghostRef.current;
     if (!g || !ghost) return;
@@ -662,9 +562,6 @@ export function SystemView({
   }, [ghost?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { clearTimeout(pendingSimple.current ?? undefined); endFlip(); dropFades(); A.current.cam?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // what the next press may need is laid out in idle time, so a press never waits on a layout (routing a big sheet's
-  // lines takes hundreds of ms): the sheet above (Esc), the sheet inside each window (a dive), the other reading
-  // (the switch), then the scope's other sheets (a chip)
   useEffect(() => {
     if (!s) return;
     const idle = (globalThis as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
@@ -677,8 +574,6 @@ export function SystemView({
     return () => { dead = true; if (idle && stop) stop(h); else clearTimeout(h); };
   }, [model, code, simple, scope, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------------------------------------------------------------- the host's address: a new `sheet` travels there
-  /** Go to any sheet: climb to the scope both share, then dive window by window, then turn the sheet. */
   const travel = (target: string, done?: () => void) => {
     const goal = scopePath(model, target).map(([id]) => id);
     let guard = 0;
@@ -693,7 +588,6 @@ export function SystemView({
         if (part && LRef.current?.parts[part]?.cw) { dive(part, step); return; }
         const host = (model.byScope[here.at(-1)!] ?? []).find((c) => !!part && restOf(c).parts[part]?.cw);
         if (host && host !== curNow.current) { turnTo(host, step); return; }
-        // no window leads there: go straight to it
         turn.current = { from: null, cut: true };
         setCur(target);
         name(target, insideWords(target));
@@ -713,15 +607,12 @@ export function SystemView({
     if (c !== named.current) { named.current = c; travel(c); }
   }); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------------------------------------------------------------- the keyboard
   const [keyOpen, setKeyOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const notesBtn = useRef<HTMLButtonElement>(null);
-  // a sheet with no notes has no card: it is shut, not hidden, so Esc goes up a level and it does not come back by itself
   const noNotes = !L?.notes.length;
   useEffect(() => { if (noNotes) setNotesOpen(false); }, [noNotes]);
   const codes = model.byScope[scope] ?? [code];
-  /** Keeps a part in view when the keyboard reaches it off the glass. */
   const keepInView = (id: string) => {
     const b = LRef.current?.parts[id], c = camRef.current;
     if (!b || !c) return;
@@ -730,7 +621,6 @@ export function SystemView({
     if (x0 >= m && y0 >= m && x1 <= W - m && y1 <= H - m) return;
     flyTo({ ...c, cx: b.x + b.w / 2, cy: b.y + b.h / 2, sx: W / 2, sy: H / 2 });
   };
-  /** The arrows: the nearest part in that direction, by the centres of their boxes. */
   const nextPart = (id: string, key: string) => {
     const P = LRef.current?.parts;
     const a = P?.[id];
@@ -760,7 +650,6 @@ export function SystemView({
       else did = false;
     } else if (k === 'Escape') {
       if (keyOpen || notesOpen) {
-        // Esc from inside the notes card gives the focus back to its button, as its close does
         if (notesOpen && t.closest('.sys-notescard')) notesBtn.current?.focus({ preventScroll: true });
         setKeyOpen(false);
         setNotesOpen(false);
@@ -793,7 +682,6 @@ export function SystemView({
   const apiRef = useRef({ dive });
   apiRef.current.dive = dive;
 
-  // ---------------------------------------------------------------- what this frame draws
   const cam = camRef.current;
   const dv = dvRef.current;
   const door = cam && L && !dv ? doorNow(cam) : null;
@@ -803,7 +691,6 @@ export function SystemView({
   const ink = diveInk(t);
   const miniL = mini ? restOf(mini.code) : null;
   const lod = cam ? lodAt(cam.k) : 2;
-  // the entered box's own words lower as its inside opens out of it
   useLayoutEffect(() => {
     const parts = curRef.current?.querySelectorAll<HTMLElement>('.sys-parts > .sys-part');
     if (!parts) return;
@@ -824,14 +711,12 @@ export function SystemView({
   // ("plannotator / Plannotator / ..." said one name twice)
   const projectCrumb = project && project.trim().toLowerCase() !== scopeLabel(model, 'root').trim().toLowerCase() ? project : '';
 
-  // the PR's number, title and state; the legend under the sheet; the parts list beside it
   const prNum = pr?.number ?? rev?.pr ?? null;
   const prTitle = pr?.title ?? rev?.title ?? '';
   const prState = pr?.state ? <span className={'sys-pr-state sys-pr-' + pr.state}><span className="sys-pr-dot" aria-hidden="true" />{STATE_WORD[pr.state]}</span> : null;
   const pickRow = (id: string) => {
     setPicked(id);
     if (LRef.current?.parts[id]) { keepInView(id); return; }
-    // a part on another sheet: go to the sheet that draws it, here first, then the change's own sheet
     const there = [...(model.byScope[scope] ?? []), summary?.sheet ?? '', ...Object.keys(model.sheets)].find((c) => c && model.sheets[c] && restOf(c).parts[id]);
     if (there) travel(there, () => keepInView(id));
   };
@@ -884,8 +769,6 @@ export function SystemView({
     <div ref={root} className={'sys sys-view sys-' + layout + (plan ? ' sys-plan' : '') + (aside ? ' sys-has-aside' : '')} data-sheet={code} data-reading={two ? reading : 'full'} data-view={change ? vw : undefined} onKeyDown={onKeyDown}>
       <div className="sys-bar">
         {leading ? <div className="sys-start"><div className="sys-lead">{leading}</div>{crumbs}</div> : crumbs}
-        {/* every chip says its sheet's kind in words: a code's first letter alone ("F" beside "Logical") named nothing,
-            and F is also the fit key; two sheets of one kind add their codes; the current one takes the selected fill */}
         {vw === 'steps' && stepsModel ? (
           <div className="sys-kind" aria-label="Steps">{rev?.steps?.title || 'Steps'}</div>
         ) : shownSheet && shownCodes.length > 1 ? (
@@ -964,7 +847,6 @@ export function SystemView({
         onClick={(e) => {
           if ((e.target as Element).closest('.sys-card-pop, .sys-zoom')) return;
           setKeyOpen(false); setNotesOpen(false);
-          // a marked part picked on the sheet picks its row in the parts list
           const el = (e.target as HTMLElement).closest<HTMLElement>('.sys-cur [data-part][data-status]');
           setPicked(el ? el.dataset.part! : null);
         }}
@@ -1029,7 +911,6 @@ export function SystemView({
 
 const STATE_WORD = { open: 'Open', merged: 'Merged', closed: 'Closed' } as const;
 
-/** "3 added · 5 changed · 1 removed", each in its ink. */
 function Tally({ s }: { s: NonNullable<ReturnType<typeof changeSummary>> }) {
   const bits = [s.added && ['added', `${s.added} added`], s.changed && ['changed', `${s.changed} changed`], s.removed && ['removed', `${s.removed} removed`]].filter((b): b is [string, string] => !!b);
   if (!bits.length) return <span className="sys-tally">No drawn part changed</span>;

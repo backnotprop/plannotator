@@ -1,20 +1,6 @@
-// Text measurement for the layout. Widths come from a canvas set in the faces
-// the drawing renders in (the Inbox's --font-sans and --font-mono), never from
-// the DOM, so a layout is a pure function of the drawing, the faces and the
-// text size.
-//
-// The text size follows the Inbox: every size the drawing sets is written
-// var(--ib-fs-N, Npx), which is N px times --ib-type / 14, never under 11 px
-// (a size already under 11 px never under its own). `px` mirrors that rule, so
-// what the layout measures is what the page draws. Line heights scale with it
-// (`lh`).
-
 export type TextSetting = {
-  /** The Inbox's body size in px (--ib-type: 12 to 15; 14 is the default). */
   type: number;
-  /** The sans face, as CSS font-family text. */
   sans: string;
-  /** The mono face, as CSS font-family text. */
   mono: string;
 };
 
@@ -26,15 +12,12 @@ export const DEFAULT_TEXT: TextSetting = {
 
 let text: TextSetting = DEFAULT_TEXT;
 
-/** A font size as the page draws var(--ib-fs-N, Npx). */
 export const px = (n: number, type = text.type) => Math.max(n < 11 ? n : 11, (n * type) / 14);
-/** A line height or a text-bound height, scaled with the text size. */
 export const lh = (n: number) => (n * text.type) / 14;
 
 const make = (weight: string, size: number, face: 'sans' | 'mono', italic = false) =>
   `${italic ? 'italic ' : ''}${weight} ${px(size)}px ${face === 'sans' ? text.sans : text.mono}`;
 
-/** The fonts the layout measures with, rebuilt for each text setting. */
 export const FONTS = {
   title: '', q: '', plateName: '', plateRole: '', boxName: '', boxRole: '', mono: '', chipName: '', monoSm: '', rowName: '',
   rowRole: '', label: '', band: '', bandMeans: '', note: '', calloutTitle: '', calloutText: '', barName: '', port: '', tag: '',
@@ -72,7 +55,6 @@ function build(): void {
 }
 build();
 
-/** Sets the faces and the text size the next layouts measure with. Returns the setting it replaced. */
 export function setText(next: TextSetting): TextSetting {
   const was = text;
   text = next;
@@ -82,7 +64,6 @@ export function setText(next: TextSetting): TextSetting {
 export const currentText = () => text;
 
 let epoch = 0;
-/** Bumped each time the faces finish loading, so a layout measured with a fallback face is not kept. */
 export const measureEpoch = () => epoch;
 
 type Ctx = { font: string; measureText(t: string): { width: number } };
@@ -93,7 +74,6 @@ function canvas(): Ctx | null {
   if (ctx !== undefined) return ctx;
   try {
     const c = typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null;
-    // a canvas that measures nothing (a test DOM without a canvas) counts as none
     ctx = c && typeof c.measureText === 'function' && c.measureText('MMMM').width > 0 ? (c as Ctx) : null;
   } catch {
     ctx = null;
@@ -101,7 +81,6 @@ function canvas(): Ctx | null {
   return ctx;
 }
 
-/** A width estimate from the font's size alone, for a page with no canvas (tests). */
 function estimate(t: string, font: string): number {
   const m = /([\d.]+)px/.exec(font);
   const size = m ? Number(m[1]) : 13;
@@ -123,9 +102,6 @@ export function textWidth(t: string, font: string): number {
   return v;
 }
 
-// Greedy wrap that breaks where the browser breaks: at spaces, between any two
-// CJK characters, and inside a word wider than the line on its own (a hostname,
-// a route), the way CSS overflow-wrap: anywhere does.
 const CJK = /[⺀-鿿가-힯豈-﫿＀-￯]/;
 let graphemes: Intl.Segmenter | undefined;
 const splitGraphemes = (w: string): string[] => {
@@ -168,11 +144,6 @@ export function wrap(t: string | null | undefined, font: string, maxW: number): 
   return { lines, width: Math.max(...lines.map((l) => textWidth(l, font))) };
 }
 
-/**
- * A box name: wraps on spaces only, to maxLines at most. A word wider than the
- * box, or a name longer than maxLines, ends in an ellipsis instead of breaking
- * inside the word. `cut` says whether anything was shortened.
- */
 export function fitName(t: string, font: string, maxW: number, maxLines = 2): { lines: string[]; cut: boolean } {
   const lines: string[] = [];
   let cur = '';
@@ -208,7 +179,6 @@ export function longestWord(t: string | null | undefined, font: string): number 
   return Math.max(0, ...tokens(t).map((tok) => textWidth(tok.t, font)));
 }
 
-/** Wraps to the narrowest width that still fits in maxLines (balanced labels). */
 export function balance(t: string, font: string, maxW: number, maxLines = 2): Wrapped {
   const one = textWidth(t, font);
   if (one <= maxW) return { lines: [t], width: one };
@@ -227,7 +197,6 @@ export function balance(t: string, font: string, maxW: number, maxLines = 2): Wr
   return best;
 }
 
-/** Waits for the faces to load, then forgets every width measured with a fallback face. */
 export async function fontsReady(setting: TextSetting = text): Promise<void> {
   const fonts = typeof document !== 'undefined' ? (document as Document & { fonts?: FontFaceSet }).fonts : undefined;
   if (fonts && typeof fonts.load === 'function') {
@@ -239,7 +208,6 @@ export async function fontsReady(setting: TextSetting = text): Promise<void> {
       await Promise.all(faces.map((f) => fonts.load(f)));
       await fonts.ready;
     } catch {
-      /* measure with what the page has */
     }
   }
   cache.clear();

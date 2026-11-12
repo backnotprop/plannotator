@@ -1,7 +1,3 @@
-// The Steps view of a change: the revision's one sequence in place of the
-// sheet, its parts as lanes and its steps top to bottom, each step the change
-// adds in green and each it changes in amber (G's Steps.jsx). A still sheet
-// fitted to the width; a long sequence scrolls.
 import { useMemo, useRef } from 'react';
 import type { SystemModel } from '../format/types.ts';
 import { Sheet } from '../draw/Sheet.tsx';

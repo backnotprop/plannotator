@@ -1,12 +1,3 @@
-// The review card's picture (walkthrough screen 5): the sheet a PR touches
-// most, cropped to the bands its changed parts sit in, with the change's inks,
-// and one line under it ("3 parts added, 5 changed, 1 line removed"). The
-// whole picture is one control: it asks the host to open the full System view.
-// Start review stays the card's only button; this adds none of its own words.
-//
-// With a revision it draws what the review agent wrote (added, changed,
-// removed); with only the gate's result (no revision yet, or one for an older
-// head) it draws the touched parts amber and says how many changed.
 import { useMemo, useRef } from 'react';
 import type { Revision, SystemModel } from '../format/types.ts';
 import type { GateResult } from '../gate/gate.ts';
@@ -21,15 +12,12 @@ import { useSize, useText } from './text.ts';
 export type SystemChangePictureProps = {
   model: SystemModel;
   change: Revision | GateResult;
-  /** The PR's changed files with their counts, when the host has them. */
   files?: ChangeFile[];
-  /** A click on the picture: the host opens the full System view of the PR. */
   onOpen(): void;
 };
 
 const PAD = 18;
 
-/** The part of a sheet a change is in: its changed parts and the bands they sit in, or the whole field when nothing is marked. */
 export function changeCrop(L: SheetLayout): Rect {
   const marked = Object.values(L.parts).filter((p) => p.status);
   const boxes: Rect[] = marked.length ? [...marked] : Object.values(L.parts);
@@ -44,11 +32,9 @@ export function changeCrop(L: SheetLayout): Rect {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
-/** Past this many lines in the crop, a card-sized picture is a tangle: it is drawn in the Simple reading, parts only. */
 const BUSY = 16;
 const inside = (r: Rect, x: number, y: number) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 
-/** The sheet as the card draws it: Full, or Simple when the change's part of it is crossed by many lines. */
 export function pictureLayout(model: SystemModel, code: string): SheetLayout {
   const full = restLayout(model, code);
   if (!hasSimple(model, code)) return full;
@@ -57,10 +43,8 @@ export function pictureLayout(model: SystemModel, code: string): SheetLayout {
   return lines > BUSY ? restLayout(model, code, { simple: true }) : full;
 }
 
-/** The change's line, each kind in its own ink. */
 export function ChangeLine({ summary }: { summary: ChangeSummary }) {
   const words = changeWords(summary);
-  // the line is one sentence; each clause takes its kind's ink, in the order changeWords writes them
   const gonePart = summary.parts.filter((p) => p.is === 'removed').length;
   const kinds = [summary.added && 'added', summary.changed && 'changed', gonePart && 'removed', summary.removed - gonePart && 'removed'].filter((x): x is string => !!x);
   const parts = words.split(', ');

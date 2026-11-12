@@ -1,8 +1,3 @@
-// bun run --cwd packages/system recipes [--check]
-// The recipes are written as Markdown in recipe/ so a person and an agent can
-// read them there. The browser-safe entry carries them as strings, in
-// src/recipe/text.ts, which this script writes from recipe/. With --check it
-// only compares, and exits 1 when text.ts is stale.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 

@@ -1,26 +1,12 @@
-// Orthogonal line routing. The method is libavoid's in small: build an
-// orthogonal visibility grid from the obstacle edges and the ports, search it
-// with A* where a bend, a crossing and a shared run each cost extra, then
-// nudge collinear runs apart onto tracks. Ported from entry G's route.js with
-// its step 8b rules on (G's `?g=off` branches are not ported).
 import type { Pt, Rect } from './types.ts';
 
-const INFLATE = 12; // lines keep this far from a part
-const STUB = 18; // a line leaves a part straight for at least this long
-const BEND = 46, CROSS = 34, SHARE = 6; // costs (SHARE is per unit length)
-// On a sheet that is not dense, a line takes at most two bends where any
-// route allows it; each bend past the second costs THIRD.
+const INFLATE = 12;
+const STUB = 18;
+const BEND = 46, CROSS = 34, SHARE = 6;
 const THIRD = 170;
 const EDGE_NEAR = 7, EDGE_K = 2;
 const PORT_GAP = 16;
-// Gutter rules (all sheets): a segment outside the envelope of the bands and
-// side columns pays OUT_K per pixel plus OUT_C, so a detour round the frame is
-// a last resort. A horizontal run in the strip between a wrapped band's rows
-// is closed to lines that do not have both ends in that band.
 const OUT_K = 7, OUT_C = 400, ENV_PAD = 30;
-// Dense sheets only: a horizontal run inside a band the line does not start
-// or end in pays BAND_K per pixel; a run along a segment already used in the
-// same direction costs BUNDLE per pixel, so lines gather into trunks.
 const BAND_K = 2.5, BUNDLE = 0.3, OPPOSE = 24, TRACK = 8;
 const STRIP_HOP = 300;
 
@@ -51,8 +37,6 @@ const gapY = (a: Rect, b: Rect) => Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h)
 const cx = (r: Rect) => r.x + r.w / 2;
 const cy = (r: Rect) => r.y + r.h / 2;
 
-// A side is blocked when another part sits right in front of it, too close
-// for a line to leave straight.
 function blocked(r: Rect, side: Side, all: Rect[]): boolean {
   const room = STUB + INFLATE + 4;
   return all.some((o) => {
@@ -76,8 +60,6 @@ export function sidesFor(a: Rect, b: Rect, all: Rect[] = []): [Side, Side] {
   const ok = (p: [Side, Side]) => !blocked(a, p[0], all) && !blocked(b, p[1], all);
   const first = gx > gy ? h : v, second = gx > gy ? v : h;
   if (ok(first)) return first;
-  // two parts side by side whose facing sides are blocked: the line leaves and
-  // enters by the same outer side (one U, two bends), not by a top and a bottom
   const ovY = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y), ovX = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
   const same: [Side, Side][] = first === h && ovY > 0 ? [['b', 'b'], ['t', 't']] : first === v && ovX > 0 ? [['r', 'r'], ['l', 'l']] : [];
   for (const q of same) if (ok(q)) return q;
@@ -90,8 +72,6 @@ function overlap(a0: number, a1: number, b0: number, b1: number): [number, numbe
   return hi >= lo ? [lo, hi] : null;
 }
 
-// Desired port coordinate along a side: inside the overlap with the far part
-// when there is one (so the line runs straight), else toward the far part.
 function desired(r: Rect, side: Side, far: Rect): { v: number; straight: boolean } {
   const pad = 14;
   if (vert(side)) {
@@ -113,7 +93,6 @@ function portPoint(r: Rect, side: Side, v: number): Pt {
 
 type Port = { part: string; side: Side; v: number; order: number; io: 'o' | 'i'; fixed?: boolean; bus?: boolean; alt?: boolean };
 
-// Spread the ports that share a side so no two lines touch.
 function spreadPorts(ports: Port[], rects: Record<string, RouteRect>, dense = false): void {
   const groups = new Map<string, Port[]>();
   for (const p of ports) {
@@ -124,13 +103,10 @@ function spreadPorts(ports: Port[], rects: Record<string, RouteRect>, dense = fa
   for (const list of groups.values()) {
     const r = rects[list[0]!.part]!, side = list[0]!.side;
     let lo = (vert(side) ? r.x : r.y) + 12, hi = (vert(side) ? r.x + r.w : r.y + r.h) - 12;
-    // a part with a sheet inside wears its cue: ports keep 30 px off that corner
     if (r.bubble && side === 't') hi = Math.max(lo, hi - 30);
     if (r.bubble && side === 'r') lo = Math.min(hi, lo + 30);
     if (r.bubble) for (const p of list) p.v = Math.min(Math.max(p.v, lo), hi);
     if (list.length < 2) continue;
-    // dense sheets: the lines leaving one side share one port, and the lines
-    // entering it share another, so they leave and arrive as one trunk
     if (dense && !list.some((p) => p.fixed)) {
       const med = (xs: Port[]) => {
         const s = xs.map((p) => p.v).sort((a, b) => a - b);
@@ -156,7 +132,6 @@ function spreadPorts(ports: Port[], rects: Record<string, RouteRect>, dense = fa
   }
 }
 
-// ------------------------------------------------------------------ grid
 type HeapItem = { s: number; f: number; c: number };
 class Heap {
   a: HeapItem[] = [];
@@ -208,7 +183,6 @@ function buildGrid(obstacles: Rect[], extraX: number[], extraY: number[], bounds
     for (const o of inf) {
       xs.add(o.x0); xs.add(o.x1); ys.add(o.y0); ys.add(o.y1);
     }
-    // channel centres: midway between neighbouring obstacle edges
     const addMids = (set: Set<number>) => {
       const s = [...set].sort((a, b) => a - b);
       for (let i = 0; i < s.length - 1; i++) if (s[i + 1]! - s[i]! > 24) set.add(Math.round((s[i]! + s[i + 1]!) / 2));
@@ -231,8 +205,6 @@ function buildGrid(obstacles: Rect[], extraX: number[], extraY: number[], bounds
       if (i < nx - 1) hFree[k] = inside((X[i]! + X[i + 1]!) / 2, Y[j]!) ? 0 : 1;
       if (j < ny - 1) vFree[k] = inside(X[i]!, (Y[j]! + Y[j + 1]!) / 2) ? 0 : 1;
     }
-  // per segment: outside the envelope; in a wrapped band's row strip (band
-  // index + 1); inside a band's box (band index + 1)
   const hOut = new Uint8Array(nx * ny), vOut = new Uint8Array(nx * ny);
   const hStrip = new Uint8Array(nx * ny), hBand = new Uint8Array(nx * ny);
   const env = ctx.env ? { x0: ctx.env.x0 - ENV_PAD, y0: ctx.env.y0 - ENV_PAD, x1: ctx.env.x1 + ENV_PAD, y1: ctx.env.y1 + ENV_PAD } : null;
@@ -259,8 +231,6 @@ function buildGrid(obstacles: Rect[], extraX: number[], extraY: number[], bounds
       }
       if (j < ny - 1) vOut[k] = outside(X[i]!, (Y[j]! + Y[j + 1]!) / 2) ? 1 : 0;
     }
-  // a run that lies along a band's edge (within EDGE_NEAR) reads as the edge
-  // itself; it pays EDGE_K per pixel, so the line keeps clear of it
   const hEdge = new Uint8Array(nx * ny), vEdge = new Uint8Array(nx * ny);
   if (!ctx.dense)
     for (const bb of boxes) {
@@ -277,8 +247,6 @@ function buildGrid(obstacles: Rect[], extraX: number[], extraY: number[], bounds
           }
         }
     }
-  // channel mode (dense sheets): inside a band a line runs across only on the
-  // strip between its rows, and up or down only in that band's risers
   if (ctx.only) {
     const stripY = new Set(strips.map((q) => Math.round((q.y0 + q.y1) / 2)));
     const riserOf: Record<string, Set<number>> = {};
@@ -311,14 +279,9 @@ type Start = { i: number; j: number; dir: number; c: number; port?: Pt };
 type Goal = { i: number; j: number; extra: number; dir: number; port: Pt; ent?: Entry };
 type Rc = { ends: Set<number>; members: Set<number> };
 
-// A* over (node, heading). Several start nodes and several goal nodes are
-// allowed: a line may leave or enter anywhere along a side, paying a little
-// for each pixel it moves away from its preferred port.
 function astar(g: Grid, starts: Start[], goals: Map<number, Goal>, rc?: Rc): Pt[] | null {
   const ends = rc?.ends ?? new Set<number>(), members = rc?.members ?? new Set<number>();
   const { nx, ny, X, Y } = g;
-  // a state is (node, heading, bends so far capped at 3); the bend count only
-  // matters where THIRD is on
   const NB = THIRD && !g.dense ? 4 : 1;
   const N = nx * ny * 4 * NB;
   const best = new Float64Array(N).fill(Infinity);
@@ -348,7 +311,7 @@ function astar(g: Grid, starts: Start[], goals: Map<number, Goal>, rc?: Rc): Pt[
     }
     for (let nd = 0; nd < 4; nd++) {
       const [di, dj] = DIRS[nd]!;
-      if (nd === (d ^ 1)) continue; // no reversing
+      if (nd === (d ^ 1)) continue;
       const ni = i + di, nj = j + dj;
       if (ni < 0 || nj < 0 || ni >= nx || nj >= ny) continue;
       const nk = ni * ny + nj;
@@ -366,9 +329,6 @@ function astar(g: Grid, starts: Start[], goals: Map<number, Goal>, rc?: Rc): Pt[
         len = Math.abs(Y[nj]! - Y[j]!);
       }
       if (!segFree) continue;
-      // the strip between a wrapped band's rows: closed to other lines, except
-      // on channels, where a line may hop across it from one riser to the next
-      // when the two rows' risers do not line up (a last resort)
       let hop = 0;
       if (dj === 0 && g.hStrip[kk] && !members.has(g.hStrip[kk]!)) {
         if (!g.only) continue;
@@ -455,14 +415,12 @@ export function simplify(pts: Pt[]): Pt[] {
 }
 
 const dirIndex = (side: Side) => ({ r: 0, l: 1, b: 2, t: 3 })[side];
-const inward = (side: Side) => ({ r: 1, l: 0, b: 3, t: 2 })[side]; // direction of travel when entering by that side
+const inward = (side: Side) => ({ r: 1, l: 0, b: 3, t: 2 })[side];
 
 type Plan =
   | { e: RouteEdge; kind: 'one'; pa: Port; pb: Port; multi: boolean }
   | { e: RouteEdge; kind: 'bus'; sp: Port[]; pb: Port; fs: Side; box: Bounds };
 
-// ------------------------------------------------------------------ main
-/** Routes every line. Returns a map from line id to its polyline (`pts`) and, for a bus, its extra runs (`paths`). */
 export function routeAll(
   edges: RouteEdge[],
   rects: Record<string, RouteRect>,
@@ -497,8 +455,6 @@ export function routeAll(
     const tR = rects[e.to];
     const srcs = e.from.filter((s) => rects[s]);
     if (!tR || !srcs.length) continue;
-    // on a dense sheet a many-to-one line is routed source by source; the
-    // shared entry port and the bundling make its trunk, through the gutters
     if (srcs.length === 1 || dense) {
       for (const src of srcs) {
         const sR = rects[src]!;
@@ -511,15 +467,12 @@ export function routeAll(
         plans.push({ e, kind: 'one', pa, pb, multi: srcs.length > 1 });
       }
     } else {
-      // a bus: the sources share a trunk on their side, one drop reaches the target
       const box = srcs
         .map((s) => rects[s]!)
         .reduce((m, r) => ({ x0: Math.min(m.x0, r.x), y0: Math.min(m.y0, r.y), x1: Math.max(m.x1, r.x + r.w), y1: Math.max(m.y1, r.y + r.h) }), { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 });
       const bR = { x: box.x0, y: box.y0, w: box.x1 - box.x0, h: box.y1 - box.y0 };
       const [fs, ts] = sidesFor(bR, tR, all.filter((r) => !srcs.some((x) => rects[x] === r)));
-      // a source's stub to the trunk keeps off band and split labels on its way
       const sp: Port[] = srcs.map((s) => ({ part: s, side: fs, v: clearOfHeads(rects[s]!, fs, vert(fs) ? cx(rects[s]!) : cy(rects[s]!), heads), order: order++, io: 'o', fixed: true }));
-      // the drop leaves the trunk at the source closest to the target's middle, if it lines up
       const pad = 14;
       const lo = vert(ts) ? tR.x + pad : tR.y + pad, hi = vert(ts) ? tR.x + tR.w - pad : tR.y + tR.h - pad;
       const mid = (lo + hi) / 2;
@@ -534,7 +487,6 @@ export function routeAll(
   }
   spreadPorts(ports, rects, dense);
 
-  // routing grid: obstacle edges plus every port and stub coordinate
   const ex: number[] = [], ey: number[] = [];
   const stubOf = (p: Port) => {
     const pt = portPoint(rects[p.part]!, p.side, p.v);
@@ -551,8 +503,6 @@ export function routeAll(
     if (pl.kind === 'bus') {
       const { fs, box } = pl;
       let t = fs === 'b' ? box.y1 + STUB : fs === 't' ? box.y0 - STUB : fs === 'r' ? box.x1 + STUB : box.x0 - STUB;
-      // when every source sits in one band or column, the trunk runs just outside
-      // it, in the gutter, not through the band's label strip
       const cs = pl.sp.map((p) => containerOf[p.part]);
       const c = cs[0];
       if (c && cs.every((x) => x === c)) {
@@ -567,8 +517,6 @@ export function routeAll(
     }
   for (const x of ctx.risers ?? []) ex.push(x.x);
   const g = buildGrid(obstacles, ex, ey, bounds, ctx);
-  // which bands a line may run along inside: the bands of its ends; the strip
-  // between a wrapped band's rows only when both ends are in that band
   const bandOfPart = (id: string) => g.bandIndex[rects[id]?.band ?? ''] ?? 0;
   const rcOf = (aId: string, bId: string): Rc => {
     const a = bandOfPart(aId), b = bandOfPart(bId);
@@ -580,9 +528,6 @@ export function routeAll(
     return b;
   };
 
-  // the stub line of a side: every grid node along it, inside the side's span
-  // (8 px from the corners, so a line can still reach the strip of a side that
-  // a shorter neighbour leaves open, with two bends instead of three)
   const SIDE_PAD = 8;
   const sideNodes = (p: Port) => {
     const r = rects[p.part]!, [dx, dy] = DIR[p.side];
@@ -600,7 +545,7 @@ export function routeAll(
     }
     return out;
   };
-  const DRIFT = 0.6; // cost per pixel away from the preferred port
+  const DRIFT = 0.6;
   const goalsFor = (p: Port) => {
     const m = new Map<number, Goal>();
     for (const n of sideNodes(p)) m.set(n.i * g.ny + n.j, { i: n.i, j: n.j, extra: Math.abs(n.along - p.v) * DRIFT, dir: inward(p.side), port: n.port });
@@ -619,12 +564,7 @@ export function routeAll(
     if (!r) return [from, [t.stub[0], from[1]], t.stub, t.pt];
     return finish(r, goals);
   };
-  // the facing side is preferred; the two sides beside it are allowed at a cost,
-  // so a line can step around a crowded band instead of threading it
   const SIDE_COST = 90;
-  // two lines never leave or enter a part at one point (they would run
-  // together and their words would sit across each other); an end within
-  // PORT_GAP of a taken one pays TAKEN
   const TAKEN = 400;
   const ends: { part: string; pt: Pt }[] = [];
   const takenCost = (part: string, pt: Pt) =>
@@ -654,8 +594,6 @@ export function routeAll(
     return finish([st?.port ?? first, ...r], goals);
   };
 
-  // shortest first, so the long lines bend around the settled short ones; a
-  // bus's trunk is fixed, so it is laid first and the other lines keep off it
   const len = (pl: Plan) => {
     if (pl.kind === 'bus') return dense ? 1e6 : -1;
     const a = portPoint(rects[pl.pa.part]!, pl.pa.side, pl.pa.v), b = portPoint(rects[pl.pb.part]!, pl.pb.side, pl.pb.v);
@@ -699,8 +637,6 @@ export function routeAll(
   return out;
 }
 
-// A bus source's port along its side, moved off any band or split label that
-// sits between the side and the gutter the stub runs to.
 function clearOfHeads(r: Rect, side: Side, v: number, heads: Rect[]): number {
   if (!vert(side)) return v;
   const reach = 70;
@@ -727,10 +663,6 @@ const shift = (s: Seg, horiz: boolean, off: number) => {
   }
 };
 
-// Dense sheets: runs of different lines along one gutter line that travel the
-// same way merge into one trunk (they share a track); trunks that overlap get
-// tracks TRACK apart by interval colouring, ordered by direction so the two
-// ways never swap sides along a gutter.
 function nudgeBundles(routes: Record<string, Routed>): void {
   const segs: Seg[] = [];
   for (const [id, r] of Object.entries(routes)) {
@@ -751,7 +683,6 @@ function nudgeBundles(routes: Record<string, Routed>): void {
   type Bundle = { dir: number; lo: number; hi: number; segs: Seg[]; track?: number };
   for (const list of groups.values()) {
     if (list.length < 2) continue;
-    // trunks: same direction, overlapping or touching
     const bundles: Bundle[] = [];
     for (const dir of [-1, 1]) {
       const own = list.filter((s) => s.dir === dir).sort((a, b) => a.lo! - b.lo!);
@@ -779,7 +710,6 @@ function nudgeBundles(routes: Record<string, Routed>): void {
       bu.track = t;
     }
     if (tracks.length < 2) continue;
-    // a riser is narrower than a gutter: its tracks squeeze to stay inside it
     const horiz = !!list[0]!.horiz;
     const room = horiz ? 26 : 11;
     const step = Math.min(TRACK, (2 * room) / (tracks.length - 1));
@@ -790,7 +720,6 @@ function nudgeBundles(routes: Record<string, Routed>): void {
   }
 }
 
-// Spread collinear runs of different lines that overlap onto 8 px tracks.
 function nudge(routes: Record<string, Routed>): void {
   const segs: Seg[] = [];
   for (const [id, r] of Object.entries(routes)) {
@@ -815,7 +744,6 @@ function nudge(routes: Record<string, Routed>): void {
       const a = s.p[s.i]!, b = s.p[s.i + 1]!;
       return horiz ? [Math.min(a[0], b[0]), Math.max(a[0], b[0])] : [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
     };
-    // interval colouring: overlapping runs take successive tracks
     list.sort((a, b) => span(a)[0] - span(b)[0]);
     const tracks: number[] = [];
     for (const s of list) {
@@ -832,22 +760,10 @@ function nudge(routes: Record<string, Routed>): void {
   }
 }
 
-// ------------------------------------------------------------------ channels
-// Dense sheets route the way a person lays out a big block diagram: on
-// channels only (the gutter between two bands, the strip between a wrapped
-// band's rows, the risers between columns, the lane beside a side column).
-// Every part side has two fixed slots, one for lines leaving and one for lines
-// arriving, so a box has at most four connection points and the lines into a
-// side meet there as one trunk with one arrowhead. After the search each
-// channel carries two lanes, one per direction (rightward above leftward,
-// downward left of upward), and every run in a lane shares it. Corners are
-// rebuilt from the lanes, so a run meets a bend in one right angle.
 const SLOT = 8, LANE = 7, NEWSLOT = 40, SLOTS_MAX = 4, SIDE_COST_C = 90;
 
 function slotCoord(r: Rect, side: Side, io: 'i' | 'o'): number {
   const cy0 = r.y + Math.min(r.h / 2, 27);
-  // rightward travel uses the upper slot, leftward the lower; downward travel
-  // the left slot, upward the right: a straight line between neighbours stays straight
   if (side === 'b') return Math.round(cx(r) + (io === 'o' ? -SLOT : SLOT));
   if (side === 't') return Math.round(cx(r) + (io === 'i' ? -SLOT : SLOT));
   if (side === 'r') return Math.round(cy0 + (io === 'o' ? -SLOT : SLOT));
@@ -888,7 +804,6 @@ function routeChannels(edges: RouteEdge[], rects: Record<string, RouteRect>, obs
     const x0 = Math.min(p0[0], p1[0]), x1 = Math.max(p0[0], p1[0]), y0 = Math.min(p0[1], p1[1]), y1 = Math.max(p0[1], p1[1]);
     return !obstacles.some((o) => !same(o, r) && x1 > o.x - 3 && x0 < o.x + o.w + 3 && y1 > o.y - 3 && y0 < o.y + o.h + 3);
   };
-  // where a slot meets its channel: the nearest channel line in front of the side
   const entry = (id: string, side: Side, io: 'i' | 'o'): Entry | null => {
     const r = rects[id]!, v = slotCoord(r, side, io);
     let node: Pt, port: Pt;
@@ -959,10 +874,7 @@ function routeChannels(edges: RouteEdge[], rects: Record<string, RouteRect>, obs
   return { out, failed };
 }
 
-// A side's two slots swap when the lines leaving one slot and the lines
-// arriving at the other would run on the same lane between them, which reads
-// as a loop back into the part. A side with a straight line to a neighbour
-// keeps its order, so that line stays straight.
+// A side with a straight line to a neighbour keeps its order, so that line stays straight.
 function slotOrder(ends: End[]): void {
   type Use = { io: 'i' | 'o'; e: End; atStart: boolean };
   const sides = new Map<string, { side: Side; list: Use[] }>();
@@ -979,8 +891,7 @@ function slotOrder(ends: End[]): void {
     if (list.some((q) => q.e.p.length < 4)) continue;
     const outs = list.filter((q) => q.io === 'o'), ins = list.filter((q) => q.io === 'i');
     if (!outs.length || !ins.length) continue;
-    const a = vert(side) ? 0 : 1; // the coordinate along the side
-    // the travel direction along the lane next to the stub
+    const a = vert(side) ? 0 : 1;
     const dirOf = (q: Use) => {
       const p = q.e.p;
       const [u, w] = q.atStart ? [p[1]!, p[2]!] : [p[p.length - 3]!, p[p.length - 2]!];
@@ -1011,8 +922,6 @@ function slotOrder(ends: End[]): void {
   }
 }
 
-// Move every run on a channel onto its direction's lane and rebuild the
-// corners from the lanes; the stubs at both ends stay on their slots.
 function laneOffsets(routes: Record<string, Routed>, XS: Set<number>, YS: Set<number>): void {
   for (const r of Object.values(routes))
     for (const p of [r.pts, ...(r.paths ?? [])]) {
