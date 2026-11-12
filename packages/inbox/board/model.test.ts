@@ -346,7 +346,7 @@ test('New card starts in the filtered initiative, never in "No initiative"', () 
 test('the history names the initiative a card was put in, and says when it was cleared', () => {
   const names = (id: string) => (id === SHAPE ? 'Shape' : null);
   const set = historyWords({ at: '2026-11-04T10:00:00.000Z', by: PERSON, kind: 'initiative', initiative: SHAPE }, names);
-  expect(`${set.before}${set.bold}${set.after}`).toBe('Initiative: Shape by you');
+  expect(`${set.before}${set.bold}${set.after}`).toBe('Tag: Shape by you');
   const cleared = historyWords({ at: '2026-11-04T10:00:00.000Z', by: PERSON, kind: 'initiative', initiative: null }, names);
-  expect(`${cleared.before}${cleared.bold ?? ''}${cleared.after}`).toBe('Initiative cleared by you');
+  expect(`${cleared.before}${cleared.bold ?? ''}${cleared.after}`).toBe('Tag cleared by you');
 });

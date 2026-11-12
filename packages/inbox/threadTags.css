@@ -1,0 +1,34 @@
+/* Thread tags (approval "inbox-thread-tags", step 1): the sidebar's Tags section (components/TagsSection.tsx), the
+   Add tag list in the row menu and the thread's ⋯ (components/AddTagMenu.tsx), and a tag's list header. Theme tokens only. */
+
+/* ---------- the sidebar: a section like Projects, straight on the sidebar's ground. ---------- */
+/* New tag: the heading's quiet icon button, always shown (not only on hover), as Agents' Add agent. */
+.pn-inbox .ib-tagsec .ib-tags-add { opacity: 1; }
+.pn-inbox .ib-tags { display: flex; flex-direction: column; }
+.pn-inbox .ib-tags .ib-proj:not(.ib-on):hover,
+.pn-inbox .ib-tags .ib-proj[data-menu]:not(.ib-on) { background: var(--ib-side-hover); }
+.pn-inbox .ib-tags .ib-tag-name { margin: 1px 0; }
+
+/* ---------- Add tag: the menu's look (`.ib-pm`), swapped in place as Snooze's times are. ---------- */
+.ib-tagm-find { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 8px; color: var(--muted-foreground); cursor: text; }
+.pn-inbox .ib-tagm-find svg.ib-ic { flex: none; }
+.ib-tagm-find input { flex: 1; min-width: 0; height: 26px; padding: 0 2px; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; }
+.ib-tagm-find input::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.ib-pm .ib-tagm-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-pmi .ib-tagm-n { margin-left: auto; padding-left: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-zsub .ib-tagm-n { margin-left: 0; padding: 0 6px 0 0; }
+.ib-pmi .ib-tagm-slot { flex: none; width: 15px; margin-left: auto; }
+.ib-pmi .ib-tagm-n + .ib-tagm-tick, .ib-pmi .ib-tagm-n + .ib-tagm-slot { margin-left: 8px; }
+.ib-pmi.ib-tagm-quiet { color: var(--muted-foreground); }
+.ib-pmi.ib-tagm-quiet[data-highlighted] { color: var(--foreground); }
+
+/* ---------- a tag's list: its `#` before the title, "5 threads · 2 projects" after it, quiet. ---------- */
+.ib-lhead-mark { display: inline-flex; flex: none; margin-right: 8px; color: var(--muted-foreground); }
+.pn-inbox .ib-lhead-mark svg.ib-ic { width: 18px; height: 18px; }
+.ib-lhead-note { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Phone: the field at the sheet's item height. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-pm-pos[data-phone] .ib-tagm-find { height: 48px; padding: 0 12px; gap: 12px; }
+  .ib-pm-pos[data-phone] .ib-tagm-find input { font-size: var(--ib-fs-16-in, 16px); }
+}
