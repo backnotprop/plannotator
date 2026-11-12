@@ -37,7 +37,7 @@ import { awayLine, outboxLine } from '../machines';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
-import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
+import { annotationOf, attachmentFeedback, isFileComment, OWN_MESSAGE_COMMENT_ROW } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures, useCommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
@@ -1131,6 +1131,11 @@ export function MessageBody({
     const id = mark?.getAttribute('data-bind-id') ?? mark?.getAttribute('data-highlight-id');
     // A link in the highlight stays a link. A comment not sent yet (its draft mark) is the Viewer's: it opens the box.
     if (!id || target.closest('a, button') || mark?.classList.contains('comment-draft')) return;
+    // A press on a choice's words picks the choice (one click, as without comments); the comment there opens from
+    // the reply box's list. A press the card cancelled (a drag, a double-click) is the selection's, as below; on a card
+    // that takes no answer now, the press opens the comment as anywhere else.
+    const option = target.closest('[data-question-option]');
+    if (option && !event.defaultPrevented && !option.querySelector('input:disabled')) return;
     // A press that ended in a selection (a drag, a double or triple click) is the comment toolbar's.
     commentsRef.current?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
   };
@@ -1156,8 +1161,12 @@ export function MessageBody({
         onSelectAnnotation={comments ? selectBadge : noop}
         selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
-        // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
-        textDeletions={comments !== undefined}
+        // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete"). Not on the
+        // person's own words (approval "inbox-annotate-own-and-questions"): "Remove this" is about the agent's text.
+        textDeletions={comments !== undefined && message.author.kind === 'agent'}
+        // The whole question takes comments, wording, context and choices (approval "inbox-annotate-own-and-questions").
+        // A click on a choice still picks it; a drag or a double-click selects (QuestionBlock's own guard).
+        questionTextComments={comments !== undefined}
         suggestComment={comments?.suggest}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
@@ -2927,9 +2936,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       return next.size === current.size ? current : next;
     });
   }, [records]);
-  /** A message comment's row in the reply box's list: "Claude Code's message, 2:58 PM". */
+  /** A message comment's row in the reply box's list: "Claude Code's message, 2:58 PM"; on the person's own, "Your message, 2:58 PM". */
   const messageCommentName = (record: InboxAnnotationRecord) => {
     const message = thread.messages.find((m) => m.id === record.message_id);
+    if (message?.author.kind === 'person') return `${OWN_MESSAGE_COMMENT_ROW} ${whenTime(record.message?.at ?? message.created_at)}`;
     const who = message ? agentName(message.author) : 'Agent';
     return `${who}'s message, ${whenTime(record.message?.at ?? message?.created_at ?? '')}`;
   };
@@ -3205,6 +3215,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     }
     return attachmentFeedback(pending, allFiles, texts, thread.project.root, {
       personMessageIds,
+      // A comment on a question's words names the question and the choice (approval "inbox-annotate-own-and-questions").
+      messageBodies: new Map(thread.messages.map((m) => [m.id, m.body])),
       // A comment that tags agents is marked in the export (approval "inbox-tag-agents").
       tagNames: (ids) => ids.map((id) => tagOpts.find((o) => o.id === id)?.label ?? 'an agent'),
       // A comment on a question's prototype is filed under the option it shows (approval "inbox-question-tradeoffs").
@@ -7145,7 +7157,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       : undefined
                   }
                   comments={
-                    isAgent && liveMessage(message)
+                    // The person's own messages take comments too, never the Inbox's own notes (approval
+                    // "inbox-annotate-own-and-questions"; the store refuses those).
+                    (isAgent || !isInboxNote(message)) && liveMessage(message)
                       ? {
                           annotations: messageComments.get(message.id) ?? NO_ANNOTATIONS,
                           onSave: (annotation) => saveMessageComment(message.id, annotation),
