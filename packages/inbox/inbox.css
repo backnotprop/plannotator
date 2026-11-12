@@ -3273,7 +3273,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-fl-nm[data-session-label] > .ib-fl-lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; }
 .ib-fl-lbl > .ib-fl-lsep { white-space: pre; }
 /* Under an open head's fold button the name takes the pointer (its hover shows the whole label; a click folds, Thread.tsx). */
-.ib-fline > .ib-fl-hit ~ .ib-fl-nm[data-session-label] { pointer-events: auto; cursor: pointer; }
+.ib-fline > .ib-fl-hit ~ .ib-fl-nm:is([data-session-label], [data-session-name]) { pointer-events: auto; cursor: pointer; }
 /* A thread a named session wrote in: the name column takes a label's room, on every head alike so they line up
    (34% of the thread's width, about 191 px in a 561 px thread, at most 288 px). The narrow thread below has no such column. */
 @container ib-thread (min-width: 561px) {
@@ -4065,6 +4065,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
    the list (components/ConnectLine.tsx: the dialog's band, moved there) and
    Settings → Agents (components/AgentsSettings.tsx). */
 .ib-mk svg.ib-glyph { stroke: var(--muted-foreground); fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.ib-gk-body, .am-gk-b { fill: #fff; }
+.ib-gk-eyes, .am-gk-e { fill: #0b0b0c; }
+.light .ib-gk-body, .light .am-gk-b { fill: #0b0b0c; }
+.light .ib-gk-eyes, .light .am-gk-e { fill: #fff; }
 /* The sound dialog's shell, wider; the body scrolls and the footer stays (a long list never pushes the buttons away). */
 .pn-inbox dialog.ib-dlg.ib-anote, dialog.ib-dlg.ib-anote { width: min(720px, calc(100vw - 32px)); border-radius: 14px; overflow: hidden; }
 dialog.ib-dlg.ib-anote[open] { display: flex; flex-direction: column; }
@@ -5777,6 +5781,9 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-tmove > svg { flex: none; color: var(--primary); }
 .ib-tmove-t { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 5px; min-width: 0; overflow-wrap: anywhere; }
 .ib-tmove-t b { font-weight: 600; color: var(--foreground); }
+/* Sessions added to a thread of several: one quiet line, the names in the text colour at the line's weight. */
+.ib-tmove[data-quiet] .ib-tmove-t { gap: 0; white-space: pre-wrap; }
+.ib-tmove[data-quiet] .ib-tmove-t b { font-weight: 500; }
 .pn-inbox .ib-tmove-undo { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--primary); cursor: pointer; border-radius: 4px; }
 .pn-inbox .ib-tmove-undo:hover { text-decoration: underline; }
 .pn-inbox .ib-tmove-undo:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -5799,7 +5806,49 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-tg-stack .ib-mk > svg, .ib-tg-stack .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
 .ib-tg-stack .ib-mk + .ib-mk { margin-left: -5px; }
 .ib-tg-plus { display: inline-flex; align-items: center; height: 16px; margin-left: 3px; padding: 0 5px; border-radius: 999px; font-size: var(--ib-fs-10-5, 10.5px); font-weight: 600; color: var(--muted-foreground); background: var(--muted); }
-.ib-tg-hwho { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); font-weight: 500; min-width: 0; }
+
+/* Who is in a thread with two or more sessions (ThreadSessions.tsx): the sessions' marks and "N sessions"
+   on the header's line, the count and time at its right. Opened, each session's name and state on a band laid over the
+   line from its left (nothing under it moves; it wraps down over the first message when the names need more room). */
+.ib-tmeta[data-sessions] { position: relative; margin-top: 2px; gap: 6px 12px; }
+.ib-tmeta[data-sessions] > .ib-tmeta-rest { margin-left: auto; gap: 2px 8px; }
+.ib-ss { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; white-space: normal; }
+.ib-ss-tog { display: inline-flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px 0 4px; border: 0; border-radius: 15px; background: none; color: inherit; font: inherit; cursor: pointer; }
+@media (hover: hover) { .ib-ss-tog:hover { background: var(--muted); } }
+.ib-ss-pile { display: inline-flex; align-items: center; flex: none; }
+.ib-ss .ib-mk { width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r); background: var(--muted); }
+.ib-ss .ib-mk > svg, .ib-ss .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
+.ib-ss-pile .ib-mk { box-shadow: 0 0 0 2px var(--card); }
+.ib-ss-pile .ib-mk + .ib-mk { margin-left: -6px; }
+.ib-ss-n { font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--muted-foreground); }
+.ib-ss-band { position: absolute; z-index: 3; left: 0; top: 0; max-width: 100%; box-sizing: border-box; padding: 5px 14px 5px 4px; border-radius: 15px; background: var(--muted); cursor: pointer; }
+.ib-ss-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; padding: 0; list-style: none; }
+.ib-ss-item { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; margin: 0; padding: 0; }
+.ib-ss-item::before, .ib-ss-item::marker { content: none; }
+.ib-ss-none { display: none; }
+.ib-ss-txt { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; font-size: var(--ib-fs-13, 13px); }
+.ib-ss-nm { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-weight: 500; }
+/* A listed session's name filters the list to its agent (as the sidebar's agent): the words alone, underlined on a
+   hover, the accent while its filter is on. */
+.ib-ss-nmb { display: inline-flex; min-width: 0; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; }
+@media (hover: hover) { .ib-ss-nmb:hover .ib-ss-nm { text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 35%, transparent); text-underline-offset: 3px; } }
+.ib-ss-nmb[aria-pressed="true"] .ib-ss-nm { color: var(--primary); }
+.pn-inbox .ib-ss-nmb:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-ss-st { white-space: nowrap; color: var(--muted-foreground); }
+.ib-ss-item[data-state="waiting"] .ib-ss-st { color: var(--primary); font-weight: 500; }
+.ib-ss-item[data-state="ended"] .ib-ss-nm { color: var(--muted-foreground); font-weight: 450; }
+.pn-inbox .ib-ss-tog:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* A phone: the count and time on their own line; opened, the band goes below the marks, one session per line, each
+   run's mark in the first column. */
+.ib-tmeta[data-sessions]:has(> .ib-ss[data-phone]) > .ib-tmeta-rest { margin-left: 0; flex-basis: 100%; }
+.ib-ss[data-phone] { flex-wrap: wrap; }
+.ib-ss[data-phone] .ib-ss-tog { min-height: 44px; }
+.ib-ss[data-phone][data-open] .ib-ss-tog { background: var(--muted); }
+.ib-ss[data-phone] .ib-ss-band { position: static; flex-basis: 100%; margin-top: 4px; padding: 10px 14px 10px 10px; border-radius: 14px; cursor: default; }
+.ib-ss[data-phone] .ib-ss-list { display: grid; grid-template-columns: var(--ib-mark-20) minmax(0, 1fr); gap: 10px 10px; }
+.ib-ss[data-phone] .ib-ss-item { display: contents; }
+.ib-ss[data-phone] .ib-ss-none { display: block; }
+.ib-ss[data-phone] .ib-ss-nm { max-width: none; }
 
 .pn-inbox .ib-tg-opt:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 

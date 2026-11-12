@@ -18,6 +18,7 @@ import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
+import type { InboxCloudWake } from "./inbox-cloud";
 import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
@@ -433,6 +434,10 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   t3: "T3 Code",
   cline: "Cline",
   openclaw: "OpenClaw",
+  hermes: "Hermes Agent",
+  cloud: "Cloud agent",
+  "cloud-claude": "Claude Code routine",
+  "cloud-grok": "Grok Bot",
 };
 
 /**
@@ -450,7 +455,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "codex", "qwen", "t3"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes", "codex", "qwen", "t3"] as const;
 
 /** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
 export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
@@ -610,6 +615,7 @@ export interface InboxMessage {
    * step 6: older records lack it.
    */
   delivery?: InboxDelivery | null;
+  cloud_wake?: InboxCloudWake | null;
   /**
    * On a person's reply or message not yet delivered: the person pressed
    * Send now in the Inbox, and when. The session's connection then delivers
@@ -638,6 +644,12 @@ export interface InboxMessage {
    * Additive.
    */
   sent_again_to?: string | null;
+  /**
+   * The Inbox's note for a launched session's turn that ended in an error ("<Agent>'s turn ended with an error: …",
+   * Claude Code, Codex and Pi): the window notifies for it ("<project>: <agent> couldn't answer"). Written only by
+   * the Inbox itself, never by an agent's call. Absent otherwise. Additive.
+   */
+  turn_error?: true;
   /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
@@ -2498,6 +2510,7 @@ export type InboxAgentId =
   | "opencode"
   | "dsh"
   | "openclaw"
+  | "hermes"
   | "claude-app";
 
 export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
@@ -2514,6 +2527,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "opencode",
   "dsh",
   "openclaw",
+  "hermes",
   "claude-app",
 ];
 
@@ -2531,6 +2545,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   opencode: "OpenCode",
   dsh: "DeepSeek Harness",
   openclaw: "OpenClaw",
+  hermes: "Hermes Agent",
   "claude-app": "Claude app",
 };
 
@@ -2796,7 +2811,7 @@ export interface InboxAgentsModel {
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw";
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw" | "hermes";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2888,7 +2903,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw" | "hermes";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -3063,9 +3078,17 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * entry, measured with the default tool list (about +120 tokens, estimated);
  * added here, on top of the PRs' numbers (merge of both).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 11745, tokens: 3178 };
+/*
+ * Picture choices and delegated options (INBOX_PICTURES_RULE's new words,
+ * INBOX_DELEGATED_OPTIONS_RULE on `body`, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE on
+ * `attachments`; the owner approved them 2026-11-11): +613 bytes on the entry
+ * as the tool builds it from the default tool list (12,003 → 12,616), so 12,661
+ * with Pi's 45-byte wrapper; Board on 13,720 + 613. Tokens scaled at the
+ * entry's bytes per token (about 3.7), not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 12661, tokens: 3423 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 13720, tokens: 3754 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14333, tokens: 3920 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -3083,6 +3106,7 @@ export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number
   // Cline sends every tool's JSON Schema with each request too; not measured on a real Cline, so Pi's stands in.
   cline: INBOX_TOOL_COST_NOW,
   openclaw: INBOX_TOOL_COST_NOW,
+  hermes: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */

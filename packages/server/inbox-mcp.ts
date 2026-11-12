@@ -23,7 +23,7 @@ import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-che
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
@@ -213,6 +213,7 @@ export const SEND_BODY_DESCRIPTION = [
   "- `Why: <one line>`, on its own line after `Recommended:`: why you recommend it.",
   "- `Reversible: no — <why>`: only when the answer cannot be taken back.",
   INBOX_OPTION_LINES_RULE,
+  INBOX_DELEGATED_OPTIONS_RULE,
   "",
   INBOX_CONTRACT_EXAMPLE,
   "",
@@ -1129,7 +1130,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .array(z.string())
             .optional()
             .describe(
-              `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its frames load from its folder; its images from anywhere on this computer, or the web) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.`,
+              `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its frames load from its folder; its images from anywhere on this computer, or the web) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread; ${INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE}`,
             ),
           // A thread's PRs (approval "inbox-pr-binding"): added to the thread the message lands in. Always on.
           pulls: PULLS_FIELD.optional(),

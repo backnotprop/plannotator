@@ -9,6 +9,7 @@ packages/ui/annotationDraftPersistence.test.tsx
 packages/ui/codeAnnotationDraftPersistence.test.tsx
 packages/ui/utils/richClipboard.test.ts
 packages/ui/components/Viewer.richCopy.test.tsx
+packages/ui/components/Viewer.questionTextComments.test.tsx
 packages/ui/components/html-viewer/htmlRichCopy.test.tsx
 packages/ui/components/html-viewer/srcdoc.test.ts
 packages/ui/components/html-viewer/htmlPinpointProtocol.test.tsx
@@ -178,6 +179,7 @@ packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
+packages/inbox/threadSessionsHeader.test.tsx
 packages/inbox/taterMark.test.tsx
 packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
