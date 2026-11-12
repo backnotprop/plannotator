@@ -14,6 +14,9 @@
  * Pull requests (PR linking's coupled PRs): Open, Draft, Merged, Closed, Has a PR, No PR, several, read through
  * `rowPullStates`. The menu offers the group once a thread in the list has a PR (or a pick of it is remembered).
  *
+ * Read (Unread, Read; both is no narrowing): the row's `unread`, which draws it bold (`rowReadMatches`). Not a Smart
+ * group: a row still waiting on the person is read once its news is seen.
+ *
  * This file holds no routes or server calls, so another host can share the rule.
  */
 import { useSyncExternalStore } from 'react';
@@ -58,6 +61,20 @@ export function rowPullMatches(row: Pick<InboxListRow, 'pulls'>, pick: PullPick)
   return states.includes(pick);
 }
 
+/** The Read group's picks. */
+export type ReadPick = 'unread' | 'read';
+const READ_PICKS: readonly ReadPick[] = ['unread', 'read'];
+/** The menu's words, in order. */
+export const READ_OPTIONS: ReadonlyArray<{ value: ReadPick; label: string }> = [
+  { value: 'unread', label: 'Unread' },
+  { value: 'read', label: 'Read' },
+];
+
+/** The row keeps a Read pick: Unread is a row the list draws bold (`unread`), Read one it does not. */
+export function rowReadMatches(row: Pick<InboxListRow, 'unread'>, pick: ReadPick): boolean {
+  return pick === 'unread' ? row.unread === true : row.unread !== true;
+}
+
 export const LIST_FILTER_COOKIE = 'plannotator-inbox-list-filter';
 
 /** A day as `YYYY-MM-DD`, in the window's own time zone. */
@@ -72,9 +89,11 @@ export interface ListFilter {
   agents: readonly string[];
   /** Pull request picks; empty: every thread. */
   pulls: readonly PullPick[];
+  /** Read picks; empty: every thread. */
+  read: readonly ReadPick[];
 }
 
-export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [] };
+export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [], read: [] };
 
 /** The menu's words for the three set spans, in order; "Custom range…" follows them. */
 export const UPDATED_OPTIONS: ReadonlyArray<{ value: 'today' | '7d' | '30d'; label: string }> = [
@@ -92,7 +111,7 @@ export function appliedFilter(filter: ListFilter, scoped: boolean): ListFilter {
 }
 
 export function pickCount(filter: ListFilter): number {
-  return filter.projects.length + filter.agents.length + (filter.updated ? 1 : 0) + filter.pulls.length;
+  return filter.projects.length + filter.agents.length + (filter.updated ? 1 : 0) + filter.pulls.length + filter.read.length;
 }
 
 /** Midnight of `day` (local), as ms. */
@@ -141,7 +160,7 @@ export function agentHost(row: Pick<InboxListRow, 'participants' | 'author' | 'a
   return hosts.find((host) => !!host && agentName(host) === name) ?? null;
 }
 
-type Group = 'projects' | 'updated' | 'agents' | 'pulls';
+type Group = 'projects' | 'updated' | 'agents' | 'pulls' | 'read';
 
 /** The row is shown under `filter`; `skip` leaves one group out (a menu row's count: the other groups' picks). */
 export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, skip?: Group): boolean {
@@ -153,17 +172,25 @@ export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, s
   }
   if (skip !== 'agents' && filter.agents.length > 0 && !rowAgentNames(row).some((name) => filter.agents.includes(name))) return false;
   if (skip !== 'pulls' && filter.pulls.length > 0 && !filter.pulls.some((pick) => rowPullMatches(row, pick))) return false;
+  if (skip !== 'read' && filter.read.length > 0 && !filter.read.some((pick) => rowReadMatches(row, pick))) return false;
   return true;
 }
 
 /**
  * The sections the list draws under the filter: each group keeps its place and only its matching rows, so Smart
  * groups count the matches and a group left with none is not drawn (InboxList draws only groups with rows).
- * Nothing picked: the same sections, untouched.
+ * Nothing picked: the same sections, untouched. `heldRead`: threads whose rows the Read group leaves where they are
+ * (App.tsx: opened while bold, until the list settles), so opening a row never takes it out of an Unread list.
  */
-export function filterListSections(sections: readonly InboxListSection[], filter: ListFilter, now: number): InboxListSection[] {
+export function filterListSections(sections: readonly InboxListSection[], filter: ListFilter, now: number, heldRead?: ReadonlySet<string>): InboxListSection[] {
   if (pickCount(filter) === 0) return sections as InboxListSection[];
-  return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => rowMatches(row, filter, now)) }));
+  return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => rowMatches(row, filter, now, heldRead?.has(row.thread_id) ? 'read' : undefined)) }));
+}
+
+/** `heldRead` once the list settles: only the thread open then stays held, and only when it was. */
+export function settledHeldRead(held: ReadonlySet<string>, open: string | null): ReadonlySet<string> {
+  const keep = open && held.has(open) ? [open] : [];
+  return keep.length === held.size ? held : new Set(keep);
 }
 
 /** How many rows a menu row would leave: that row's rule with the other groups' picks. */
@@ -189,7 +216,8 @@ export function parseListFilter(raw: string | null): ListFilter {
     const updated: UpdatedPick | null =
       u === 'today' || u === '7d' || u === '30d' ? u : u && typeof u === 'object' && isDay((u as { from?: unknown }).from) && isDay((u as { to?: unknown }).to) ? { from: (u as { from: string }).from, to: (u as { to: string }).to } : null;
     const pulls = strings(value.pulls).filter((p): p is PullPick => (PULL_PICKS as readonly string[]).includes(p));
-    return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls };
+    const read = strings(value.read).filter((p): p is ReadPick => (READ_PICKS as readonly string[]).includes(p));
+    return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls, read };
   } catch {
     return NO_LIST_FILTER;
   }
@@ -212,7 +240,7 @@ function safeGet(): string | null {
 export function writeListFilter(next: ListFilter): void {
   try {
     if (pickCount(next) === 0) storage.removeItem(LIST_FILTER_COOKIE);
-    else storage.setItem(LIST_FILTER_COOKIE, JSON.stringify({ projects: next.projects, updated: next.updated, agents: next.agents, pulls: next.pulls }));
+    else storage.setItem(LIST_FILTER_COOKIE, JSON.stringify({ projects: next.projects, updated: next.updated, agents: next.agents, pulls: next.pulls, read: next.read }));
   } catch {
     // A page with no cookies: the filter holds until it reloads.
   }

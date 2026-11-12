@@ -74,7 +74,7 @@ import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } 
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
-import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
+import { appliedFilter, filterListSections, localDay, pickCount, settledHeldRead, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
@@ -1263,6 +1263,18 @@ function Inbox() {
   }, [thread]);
   const routeRef = useRef(route);
   routeRef.current = route;
+  /**
+   * Threads opened while their row was bold, since the list last settled: the list's Read filter leaves their rows
+   * where they are (listFilter.ts `filterListSections`), as the list holds still while a thread is open (settle.ts),
+   * so the look that unbolds a row never takes it out of an Unread list. A settle keeps only the thread open then.
+   */
+  const [heldRead, setHeldRead] = useState<ReadonlySet<string>>(() => new Set());
+  const settleHeldRead = useCallback(() => setHeldRead((current) => settledHeldRead(current, routeRef.current.thread)), []);
+  useEffect(() => {
+    const open = route.thread;
+    if (!open || !shownRowOf(shownRef.current, open)?.unread) return;
+    setHeldRead((current) => (current.has(open) ? current : new Set(current).add(open)));
+  }, [route.thread]);
   // The full-window review is open (set where it is worked out, below), for the Escape ladder.
   const reviewPaneOpenRef = useRef(false);
   // The review a link on a Shape board opened (approval "review-show-me", q-db7db55f): with Code review on it shows the
@@ -1581,9 +1593,10 @@ function Inbox() {
       snoozeMoved.current.clear();
       const groups = listGroups(next);
       setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
+      settleHeldRead();
       sortedWhole();
     },
-    [armSlide, cancelSettle, sortedWhole],
+    [armSlide, cancelSettle, sortedWhole, settleHeldRead],
   );
   useEffect(() => cancelSettle, [cancelSettle]);
 
@@ -1673,7 +1686,10 @@ function Inbox() {
               : groups
             : refreshHeldRows(current, groups, heldOpen()),
       );
-      if (adopt) sortedWhole(keep);
+      if (adopt) {
+        sortedWhole(keep);
+        settleHeldRead();
+      }
       setLoadError(null);
       return next;
     } catch (cause) {
@@ -1681,7 +1697,7 @@ function Inbox() {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, [armSlide, sortedWhole]);
+  }, [armSlide, sortedWhole, settleHeldRead]);
   /**
    * The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this
    * window's clock). With no thread open only the rows whose snooze changed move (held.ts `snoozeChangedRows`), each
@@ -5249,9 +5265,9 @@ function Inbox() {
   const listFilterApplied = useMemo(() => appliedFilter(listFilterPicks, listFilterScoped), [listFilterPicks, listFilterScoped]);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now()),
+    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay],
+    [filterList, listFilterApplied, listFilterDay, heldRead],
   );
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {
