@@ -354,6 +354,7 @@ packages/ui/components/plan-diff/PlanCleanDiffView.highlightCopy.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.highlightCopy.test.tsx
 packages/review-editor/components/ToolbarHost.highlightCopy.test.tsx
 packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
+packages/inbox/rowLongPress.test.tsx
 packages/review-editor/components/AllFilesCodeView.changeNavigation.test.tsx
 packages/review-editor/components/MarkdownFilePreview.test.tsx
 packages/review-editor/components/guide/overviewDiagram.test.tsx
