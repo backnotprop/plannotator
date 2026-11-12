@@ -34,6 +34,28 @@ describe("refs", () => {
     expect("key" in glUrl && glUrl.key).toBe("gitlab.com/acme/platform/api#61:pull");
   });
 
+  test("a short group/project!n is on the project's own GitLab host; a URL keeps its host, and owner/repo#n stays on github.com", () => {
+    const keyOf = (text: string, host?: string | null) => {
+      const parsed = parseInboxThreadPullRef(text, host);
+      return "key" in parsed ? [parsed.key, parsed.url] : parsed.error;
+    };
+    for (const host of ["gitlab.acme.dev", "GitLab.Acme.Dev:2222", "code.gitlab.acme.dev"]) {
+      const at = host.toLowerCase().replace(/:\d+$/, "");
+      expect(keyOf("acme/platform/api!61", host)).toEqual([`${at}/acme/platform/api#61:pull`, `https://${at}/acme/platform/api/-/merge_requests/61`]);
+    }
+    // gitlab.com's own aliases, a GitHub project, an unknown self-hosted name, no remote: gitlab.com as before.
+    for (const host of [undefined, null, "gitlab.com", "altssh.gitlab.com", "github.com", "github.acme.dev", "git.acme.internal", "work-gl"]) {
+      expect(keyOf("acme/platform/api!61", host)).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
+    }
+    expect(keyOf("https://gitlab.com/acme/platform/api/-/merge_requests/61", "gitlab.acme.dev")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
+    expect(keyOf("https://gitlab.other.dev/a/b/-/merge_requests/2", "gitlab.acme.dev")).toEqual(["gitlab.other.dev/a/b#2:pull", "https://gitlab.other.dev/a/b/-/merge_requests/2"]);
+    expect(keyOf("northwind/billing-svc#412", "gitlab.acme.dev")).toEqual(["github.com/northwind/billing-svc#412", "https://github.com/northwind/billing-svc/pull/412"]);
+    const list = parseInboxThreadPullRefs(["acme/api!3", "https://gitlab.acme.dev/acme/api/-/merge_requests/3"], "add", "gitlab.acme.dev");
+    expect("refs" in list && list.refs.map((ref) => ref.key)).toEqual(["gitlab.acme.dev/acme/api#3:pull"]);
+    // Written back as its URL: the short form would read as gitlab.com in a thread of another project.
+    expect(inboxThreadPullText({ pull: "gitlab.acme.dev/acme/api#3:pull", url: "https://gitlab.acme.dev/acme/api/-/merge_requests/3" })).toBe("https://gitlab.acme.dev/acme/api/-/merge_requests/3");
+  });
+
   test("a bare #123, an issue URL or a repo alone is refused with how to write a full ref", () => {
     for (const text of ["#123", "123", "billing-svc#412", "https://github.com/northwind/billing-svc/issues/9", "northwind/billing-svc"]) {
       const parsed = parseInboxThreadPullRef(text);

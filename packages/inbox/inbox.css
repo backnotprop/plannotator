@@ -3543,6 +3543,12 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
    .pn-inbox; a wide window never gets it, so it is drawn as before. */
 .pn-inbox[data-stack~="thread"] .ib-main { position: relative; }
 .pn-inbox[data-stack~="thread"][data-view="thread"] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
+/* The same for an open PR on the Reviews page (its launchpad, or a stack's page), on the same rule: it covers the list; `‹ Reviews` brings it back. */
+.pn-inbox[data-stack~="thread"] .ib-prlist:has(~ .ib-prpane) { position: absolute; inset: 0; visibility: hidden; }
+/* It then leads with `‹ Reviews` (PullLaunchpad.tsx `PullPaneBack`), set in from the edge as a covering thread's `‹ Inbox`. */
+.ib-pr-bar:has([data-stack-back]) { padding-left: 10px; }
+/* The way back keeps its word whole; the repository's name is what gets cut in a narrow bar. */
+.pn-inbox .ib-pr-bar .ib-pback { flex: none; max-width: none; }
 .pn-inbox[data-stack~="file"][data-view="file"] .ib-pane.ib-withfile { display: none; }
 /* The thread in full screen (App.tsx `data-thread-full`): the list stays drawn under it, hidden as a stacked
    window hides it, so J/K and G I still read its order and its scroll stays. */
@@ -9869,7 +9875,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-pr-checks[data-checks="success"] { color: var(--success); }
 .ib-pr-checks[data-checks="failure"] { color: var(--destructive); }
 .ib-pr-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--ib-fs-12, 12px); font-weight: 600; white-space: nowrap; flex: none; background: var(--muted); color: var(--muted-foreground); }
-.ib-pr-lrow > .ib-pr-pill { margin-top: 1px; }
 .ib-pr-pill[data-tone="next"] { background: color-mix(in oklch, var(--success) 16%, var(--card)); color: color-mix(in oklch, var(--success) 80%, var(--foreground)); }
 .ib-pr-pill[data-tone="you"] { background: color-mix(in oklch, var(--warning) 20%, var(--card)); color: color-mix(in oklch, var(--warning) 45%, var(--foreground)); }
 .ib-pr-pill[data-tone="ok"] { background: color-mix(in oklch, var(--success) 14%, var(--card)); color: color-mix(in oklch, var(--success) 80%, var(--foreground)); }
@@ -10114,6 +10119,12 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-pm-pos[data-phone] .ib-pc-menu .ib-pmi .ib-pmi-n { font-size: var(--ib-fs-14, 14px); }
   .ib-pr-bar { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0 4px; }
   .pn-inbox .ib-pr-bar .ib-iconbtn, .pn-inbox .ib-pr-ext { min-width: 44px; min-height: 44px; justify-content: center; }
+  /* Short of room the bar gives way as a thread's header does (headFit.ts, `data-fit`): `‹ Reviews` tightens, then
+     shows its chevron alone (its name says where); a subject with no room even then is not drawn. */
+  .pn-inbox .ib-pr-bar[data-fit~="tight"] .ib-pback { padding-right: 6px; }
+  .ib-pr-bar[data-fit~="back"] .ib-pback-l { display: none; }
+  .pn-inbox .ib-pr-bar[data-fit~="back"] .ib-pback { width: 44px; padding: 0; justify-content: center; }
+  .ib-pr-bar[data-subject-off] [data-fit-subject] { visibility: hidden; }
   .ib-pr-body { padding: 18px 16px 24px; }
   .ib-pr-h { font-size: var(--ib-fs-22, 22px); }
   .ib-pr-actions .ib-pr-note { flex-basis: 100%; }
@@ -10124,7 +10135,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .pn-inbox .ib-pr-opt { min-height: 52px; }
   .pn-inbox .ib-pr-pick-go .ib-btn { height: 44px; }
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
-  .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
   .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
   /* The foot's words read as two lines beside Next layer, not two narrow columns. */
   .ib-prr-foot:has(> .ib-prr-note) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
@@ -11546,6 +11556,74 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 /* Header: the bar's title leads with the mark. */
 .ib-lm-head { position: relative; display: inline-flex; vertical-align: -5px; margin-right: 8px; }
 .ib-bc-proj { display: inline-flex; }
+/* One PR's launchpad (approval "pr-launchpad", pulls/PullLaunchpad.tsx). Its width decides the grid, not the window's. */
+/* The PR's mark, number and repository: the bar's subject (headFit.ts `[data-fit-subject]`), which takes the room. */
+.ib-lp-id { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.ib-lp-mark { display: inline-flex; flex: none; }
+.ib-lp-num { flex: none; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-lp-repo { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+.pn-inbox .ib-lp-bar .ib-pr-ext { flex: none; white-space: nowrap; margin-left: 0; }
+.ib-lp-body { container: ib-lp / inline-size; padding-top: 26px; }
+.ib-lp-wrap { max-width: 1040px; }
+.ib-lp-meta code { font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-lp-ref { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; max-width: 100%; }
+.ib-lp-ref code { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-lp-head { flex: 0 1 auto; }
+.ib-lp-base { flex: 0 0 auto; max-width: 45%; }
+.ib-lp-size { white-space: nowrap; }
+.ib-lp-checks[data-checks="failure"] { color: var(--destructive); }
+.ib-lp-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.ib-lp-door { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px 16px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.ib-lp-door:focus { outline: none; }
+.ib-lp-door:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-lp-door[data-wide] { grid-column: span 2; }
+/* No empty slot, whatever doors show (Shape and System only while they are on): three doors are the wide Guided review
+   over The diff and Review thread; with four, the last takes the second row's two slots. */
+.ib-lp-grid[data-doors="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ib-lp-grid[data-doors="4"] > .ib-lp-door:last-child { grid-column: span 2; }
+.ib-lp-door[data-soon] { background: transparent; border-style: dashed; }
+.ib-lp-door[data-soon] .ib-lp-door-t, .ib-lp-door[data-soon] .ib-lp-ic { color: var(--muted-foreground); }
+.ib-lp-door-h { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-15, 15px); }
+.ib-lp-door-t { margin: 0; font-size: inherit; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-lp-ic { display: inline-flex; flex: none; color: var(--muted-foreground); }
+.ib-lp-door[data-wide] .ib-lp-ic { color: var(--primary); }
+.ib-lp-soon { margin-left: auto; flex: none; font-size: var(--ib-fs-12, 12px); padding: 1px 8px; border-radius: 99px; background: var(--muted); color: var(--muted-foreground); }
+/* The fixed words show whole; only the agent's words (a thread's last answer) are cut, at two lines. */
+.ib-lp-sub { font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-lp-said { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ib-lp-sub .ib-hmark, .ib-lp-sub svg { vertical-align: -2px; }
+.ib-lp-strong { color: var(--foreground); font-weight: 550; }
+/* A guide's or board's name keeps to one line, so the facts after it (chapters, agent, version, time) always show. */
+.ib-lp-name { display: inline-block; max-width: calc(100% - 1.25em); vertical-align: bottom; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-lp-go { margin-top: auto; padding-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+.pn-inbox .ib-lp-go .ib-btn { height: 34px; max-width: 100%; padding: 0 14px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-lp-door .ib-pr-pick { margin-top: 10px; }
+.ib-lp-h { margin: 30px 0 10px; font-size: var(--ib-fs-16, 16px); font-weight: 600; }
+.ib-lp-details .ib-prd { position: static; width: auto; max-width: none; box-shadow: none; border: 1px solid var(--border); border-radius: 12px; overflow: visible; }
+.ib-lp-details .ib-prd[data-layout="columns"]:has(.ib-prd-side) { width: auto; }
+.dark .ib-lp-details .ib-prd { box-shadow: none; }
+.ib-lp-details .ib-prd[data-headless] .ib-prd-body { padding-top: 20px; }
+.ib-lp-details .ib-prd-main, .ib-lp-details .ib-prd-side, .ib-lp-details .ib-prd-body { overflow: visible; }
+@container ib-lp (max-width: 620px) {
+  .ib-lp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Too narrow for the details' two columns: the reviewers, checks and labels follow the description. */
+  .ib-lp-details .ib-prd-cols { grid-template-columns: minmax(0, 1fr); }
+  .ib-lp-details .ib-prd-side { margin: 0 8px 8px; }
+}
+@container ib-lp (max-width: 460px) {
+  .ib-lp-grid, .ib-lp-grid[data-doors] { grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 18px; }
+  .ib-lp-door[data-wide], .ib-lp-grid[data-doors="4"] > .ib-lp-door:last-child { grid-column: auto; }
+  .ib-lp-door { padding: 14px; }
+  /* One column: the head branch wraps rather than cut (a phone has no tooltip to read it in). */
+  .ib-lp-ref { flex-wrap: wrap; }
+  .ib-lp-ref code { white-space: normal; overflow-wrap: anywhere; }
+  .ib-lp-base { max-width: none; }
+  .ib-lp-h { margin-top: 24px; }
+}
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-lp-body { padding-top: 18px; }
+  .pn-inbox .ib-lp-go .ib-btn { height: 44px; }
+}
 
 /* ---- Others' threads on their lines (pulls/LineThreads.tsx; approval inbox-pr-page, q-530b62e0 and q-7d0a1587). ----
    Flat on the diff's own surface, a hairline above and below: never the raised card of the person's own comment. */
