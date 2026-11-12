@@ -7394,8 +7394,8 @@ function Inbox() {
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}
-            // Pins are this Inbox's own: another machine's thread is pinned on that machine (PLAN Phase 2).
-            onPin={pinsOn && !machineOf(thread.thread_id) ? (next) => setPin(thread, next) : undefined}
+            // A star is this Inbox's own, another machine's thread included (pins.json keeps that machine's id).
+            onPin={pinsOn ? (next) => setPin(thread, next) : undefined}
             onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
             onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
             snoozeBlocked={(() => {

@@ -9,6 +9,10 @@
  * phone relay and search read. A pin writes no line and takes no seq. There
  * is no limit on pins (the owner's decision), and an archived thread stays
  * pinned; a deleted thread leaves the file.
+ *
+ * A star on a linked machine's thread is kept here too, with that machine's
+ * id (`machine`): the star belongs to this computer, the thread to that one.
+ * An Inbox before this field reads such an entry as a missing thread and drops it.
  */
 
 import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -38,11 +42,11 @@ export function readInboxPins(inboxDirPath: string): InboxPin[] {
   const out: InboxPin[] = [];
   const seen = new Set<string>();
   for (const entry of file.pins as unknown[]) {
-    const pin = entry as { thread_id?: unknown; pinned_at?: unknown } | null;
+    const pin = entry as { thread_id?: unknown; pinned_at?: unknown; machine?: unknown } | null;
     if (!pin || typeof pin !== "object" || !isInboxId("msg", pin.thread_id) || typeof pin.pinned_at !== "string") continue;
     if (seen.has(pin.thread_id)) continue;
     seen.add(pin.thread_id);
-    out.push({ thread_id: pin.thread_id, pinned_at: pin.pinned_at });
+    out.push({ thread_id: pin.thread_id, pinned_at: pin.pinned_at, ...(isInboxId("ibx", pin.machine) ? { machine: pin.machine } : {}) });
   }
   return out;
 }
@@ -95,7 +99,7 @@ export function writeInboxPins(inboxDirPath: string, pins: readonly InboxPin[]):
     return;
   }
   const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify({ v: 1, pins: pins.map((pin) => ({ thread_id: pin.thread_id, pinned_at: pin.pinned_at })) })}\n`, { mode: 0o600 });
+  writeFileSync(temp, `${JSON.stringify({ v: 1, pins: pins.map((pin) => ({ thread_id: pin.thread_id, pinned_at: pin.pinned_at, ...(pin.machine ? { machine: pin.machine } : {}) })) })}\n`, { mode: 0o600 });
   // `mode` applies only when the file is created: a temp file a crash left keeps its old mode.
   chmodSync(temp, 0o600);
   renameSync(temp, file);

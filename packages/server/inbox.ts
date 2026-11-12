@@ -1626,6 +1626,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return rest;
   };
 
+  /** A linked machine's row carries this Inbox's star, never the one that machine keeps. */
+  const withStarHere = (row: InboxListRow, pinnedAt: ReadonlyMap<string, string>): InboxListRow => {
+    const { pinned_at: _theirs, ...rest } = row;
+    const here = pinnedAt.get(row.thread_id);
+    return here ? { ...rest, pinned_at: here } : rest;
+  };
+
   /**
    * The list model: one row per thread, placed in the approved sections, with
    * the project as a label and an optional filter (`?project=prj_...`), which
@@ -1679,7 +1686,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
     // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(row), now))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withStarHere(withoutStepsWaiting(row), pinnedAt), now))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
@@ -4437,7 +4444,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.askTimes ? { times: options.askTimes } : {}),
   });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
-  const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json, ownerOf: (threadId) => (machines ? machines.threadOwner(threadId) : null) });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Agent icons' faces (packages/server/inbox-agent-faces.ts).

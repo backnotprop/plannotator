@@ -1141,6 +1141,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     for (const peer of peers.values()) if (peer.list?.projects.some((p) => p.id === projectId)) return peer.id;
     return null;
   };
+  /** The one linked machine whose list holds this thread, or null (none, or two that both claim it). */
+  const threadOwner = (threadId: string): string | null => {
+    const owners = [...peers.values()].filter((peer) => peer.list?.rows.some((row) => row.thread_id === threadId));
+    return owners.length === 1 ? owners[0]!.id : null;
+  };
 
   const start = () => {
     for (const record of links.list()) startPeer(record);
@@ -1172,6 +1177,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     agents,
     sessionNames,
     projectOwner,
+    threadOwner,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
     machineOfDevice: (deviceId: string): { machine: string; name: string } | null => {

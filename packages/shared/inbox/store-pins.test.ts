@@ -119,6 +119,34 @@ describe("pins in the store", () => {
     }
   });
 
+  test("a linked machine's thread: starred with that machine's id, kept by a reload that prunes this store's gone threads", () => {
+    const { dir, store, project } = open();
+    const a = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "One" }).message;
+    const theirs = "msg_01K70000000000000000000077";
+    const machine = "ibx_01K00000000000000000000002";
+    expect(code(() => store.setPinned(theirs, true))).toBe("thread_not_found");
+    store.setPinned(theirs, true, machine);
+    // This store's own thread never takes a machine, whatever the caller says.
+    store.setPinned(a.thread_id, true, machine);
+    expect(store.pins().map((p) => [p.thread_id, p.machine])).toEqual([
+      [theirs, machine],
+      [a.thread_id, undefined],
+    ]);
+    const file = join(dir, "inbox", "pins.json");
+    expect(JSON.parse(readFileSync(file, "utf8")).pins.map((p: { machine?: string }) => p.machine ?? null)).toEqual([machine, null]);
+    // Deleting a thread here reloads and prunes; the other machine's star stays.
+    store.deleteThread(a.thread_id);
+    expect(store.pins().map((p) => p.thread_id)).toEqual([theirs]);
+    expect(InboxStore.open(dir).pins()).toEqual([{ thread_id: theirs, pinned_at: expect.any(String), machine }]);
+    // Unstarred with no machine named (that machine away or unlinked); its Undo needs the machine again.
+    const pinnedAt = store.pins()[0]!.pinned_at;
+    store.setPinned(theirs, false);
+    expect(store.pins()).toEqual([]);
+    expect(code(() => store.restorePin({ thread_id: theirs, index: 0, pinned_at: pinnedAt }))).toBe("thread_not_found");
+    store.restorePin({ thread_id: theirs, index: 0, pinned_at: pinnedAt }, machine);
+    expect(store.pins()).toEqual([{ thread_id: theirs, pinned_at: pinnedAt, machine }]);
+  });
+
   test("a deleted thread leaves the pins, and the listeners hear it", () => {
     const { store, project } = open();
     const a = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "One" }).message;

@@ -3192,6 +3192,8 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
 export interface InboxPin {
   thread_id: string;
   pinned_at: string;
+  /** A linked machine's thread (`ibx_…`): the star is this Inbox's, the thread that machine's. Absent for this Inbox's own. */
+  machine?: string;
 }
 
 /** A row on the Drafts page's "Replies not sent" (`GET /api/inbox/drafts` `replies`). */

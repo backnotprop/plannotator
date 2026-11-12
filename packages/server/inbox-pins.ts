@@ -24,7 +24,9 @@
  * and `POST pins`, each under an `idempotency_key`: inbox-devices.ts, contract
  * 7.65, approval "inbox-starred-pills"), which tell the windows as a window's
  * own write does. A linked machine's forward never carries them (`local` in
- * inbox-outbox.ts): a star stays on the computer that holds it.
+ * inbox-outbox.ts): a star stays on the computer that holds it. A thread only
+ * a linked machine's list holds is starred here too, with that machine's id
+ * (`ownerOf`), so the merged list draws it where this Inbox's stars are.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -40,8 +42,11 @@ export function createInboxPins(options: {
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
+  /** The linked machine whose list holds a thread this store does not, or null. */
+  ownerOf?: (threadId: string) => string | null;
 }) {
   const { store, serverSession, json } = options;
+  const ownerOf = (threadId: string): string | null => (store.message(threadId) ? null : (options.ownerOf?.(threadId) ?? null));
   const wire = (pins: readonly InboxPin[]) => pins.map((pin) => ({ thread_id: pin.thread_id, pinned_at: pin.pinned_at }));
 
   const route = async (req: Request, url: URL): Promise<Response | null> => {
@@ -52,12 +57,13 @@ export function createInboxPins(options: {
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (match) {
       if (typeof body.pinned !== "boolean") throw new InboxError("validation_error", "pinned: a boolean.", { field: "pinned" });
-      return json({ pins: wire(store.setPinned(match[1]!, body.pinned)) });
+      return json({ pins: wire(store.setPinned(match[1]!, body.pinned, ownerOf(match[1]!))) });
     }
     const hasOrder = body.order !== undefined;
     const hasRestore = body.restore !== undefined;
     if (hasOrder === hasRestore) throw new InboxError("validation_error", "Send one of order or restore.", { field: hasOrder ? "restore" : "order" });
-    return json({ pins: wire(hasRestore ? store.restorePin(body.restore) : store.orderPins(body.order)) });
+    const restoring = (body.restore as { thread_id?: unknown } | null)?.thread_id;
+    return json({ pins: wire(hasRestore ? store.restorePin(body.restore, typeof restoring === "string" ? ownerOf(restoring) : null) : store.orderPins(body.order)) });
   };
 
   return { route };

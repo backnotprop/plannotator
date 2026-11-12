@@ -1572,8 +1572,7 @@ export function InboxList(props: InboxListProps) {
       onMarkRead={props.onMarkRead ? markRead : undefined}
       onMarkUnread={props.onMarkUnread ? markUnread : undefined}
       onSendNow={props.onSendNow ? sendNow : undefined}
-      // Pins are this Inbox's own: another machine's thread has no star to press here.
-      onUnstar={props.onUnstar && !(row.machine && props.machines?.names.has(row.machine)) ? unstar : undefined}
+      onUnstar={props.onUnstar ? unstar : undefined}
       day={day}
       menu={menuRow === row.thread_id}
       pinned={props.pinned?.has(row.thread_id) === true}

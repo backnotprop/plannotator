@@ -156,17 +156,15 @@ test.skipIf(!hasDom)('a list with no star draws no star column', () => {
   expect(host!.querySelector('.ib-cpin')).toBeNull();
 });
 
-test.skipIf(!hasDom)("linked machines: this machine's own star unstars; a star on another machine's row is a mark, and a press there opens", () => {
+test.skipIf(!hasDom)("linked machines: a star unstars on this machine's row and on another machine's row alike (the star is this Inbox's)", () => {
   setSystemTime(new Date(clock));
   clock += 10_000;
-  // The merged list stamps this machine's id on its own rows too, so "has a machine" is not "another machine's".
   const { onOpen, onUnstar } = draw([row('mine', SELF), row('theirs', OTHER)], { machines: MACHINES, pinned: ['mine', 'theirs'] });
   pointerClick(star('mine')!);
-  expect(ids(onUnstar)).toEqual(['mine']);
-  expect(star('theirs')!.hasAttribute('data-star-press')).toBe(false);
+  expect(star('theirs')!.hasAttribute('data-star-press')).toBe(true);
   pointerClick(star('theirs')!);
-  expect(ids(onUnstar)).toEqual(['mine']);
-  expect(ids(onOpen)).toEqual(['theirs']);
+  expect(ids(onUnstar)).toEqual(['mine', 'theirs']);
+  expect(onOpen).not.toHaveBeenCalled();
 });
 
 /** The star at x 100..113, y 100..113. */

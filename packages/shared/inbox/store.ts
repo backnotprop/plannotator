@@ -1270,7 +1270,8 @@ export class InboxStore {
   private loadPins(): void {
     const before = this.pinList;
     const read = readInboxPins(this.dir);
-    const kept = read.filter((pin) => this.isThreadRoot(pin.thread_id));
+    // A linked machine's thread is not in this store: its star stays until it is unstarred.
+    const kept = read.filter((pin) => pin.machine !== undefined || this.isThreadRoot(pin.thread_id));
     this.pinList = kept;
     if (kept.length !== read.length) {
       try {
@@ -1304,13 +1305,19 @@ export class InboxStore {
   /**
    * Pin a thread (at the bottom) or unpin it. Any thread may be pinned, an
    * archived one too, with no limit. Pinning a pinned thread, or unpinning one
-   * that is not, changes nothing. Writes no store line.
+   * that is not, changes nothing. Writes no store line. `machine`: the linked
+   * machine whose list holds a thread this store does not (the caller's check).
    */
-  setPinned(threadId: string, pinned: boolean): readonly InboxPin[] {
-    if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const has = this.pinList.some((pin) => pin.thread_id === threadId);
-    if (has === pinned) return this.pinList;
-    return this.commitPins(pinned ? [...this.pinList, { thread_id: threadId, pinned_at: this.now().toISOString() }] : this.pinList.filter((pin) => pin.thread_id !== threadId));
+  setPinned(threadId: string, pinned: boolean, machine: string | null = null): readonly InboxPin[] {
+    const held = this.pinList.find((pin) => pin.thread_id === threadId);
+    const own = this.isThreadRoot(threadId);
+    if (!own && !machine && !held?.machine) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    if (!!held === pinned) return this.pinList;
+    return this.commitPins(
+      pinned
+        ? [...this.pinList, { thread_id: threadId, pinned_at: this.now().toISOString(), ...(own ? {} : { machine: machine! }) }]
+        : this.pinList.filter((pin) => pin.thread_id !== threadId),
+    );
   }
 
   /**
@@ -1337,14 +1344,15 @@ export class InboxStore {
    * Unpin's Undo: pin exactly one thread again at `index` (clamped to the
    * pins as they are now) with the `pinned_at` it had. A thread that is
    * pinned again already (another tab) keeps its place; one that no longer
-   * exists is refused (`thread_not_found`).
+   * exists is refused (`thread_not_found`). `machine`: as for setPinned.
    */
-  restorePin(value: unknown): readonly InboxPin[] {
+  restorePin(value: unknown, machine: string | null = null): readonly InboxPin[] {
     const restore = checkInboxPinRestore(value);
-    if (!this.isThreadRoot(restore.thread_id)) throw new InboxError("thread_not_found", `No thread ${restore.thread_id}.`);
+    const own = this.isThreadRoot(restore.thread_id);
+    if (!own && !machine) throw new InboxError("thread_not_found", `No thread ${restore.thread_id}.`);
     if (this.pinList.some((pin) => pin.thread_id === restore.thread_id)) return this.pinList;
     const next = [...this.pinList];
-    next.splice(Math.min(restore.index, next.length), 0, { thread_id: restore.thread_id, pinned_at: restore.pinned_at });
+    next.splice(Math.min(restore.index, next.length), 0, { thread_id: restore.thread_id, pinned_at: restore.pinned_at, ...(own ? {} : { machine: machine! }) });
     return this.commitPins(next);
   }
 

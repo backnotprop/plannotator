@@ -15,7 +15,9 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow, InboxListSection } from "@plannotator/core/inbox-types";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { InboxLinks } from "./inbox-links";
 
 type Json = Record<string, any>;
 
@@ -389,5 +391,84 @@ describe("pinned threads", () => {
     const cross = await through(`/api/inbox/threads/${sent.thread_id}/pin`, { ...own, Origin: "https://evil.example" }, { serverSession: server.serverSession, pinned: false });
     expect(((await cross.json()) as Json).code).toBe("cross_origin");
     expect(await pinIds(server)).toEqual([sent.thread_id]);
+  });
+
+  test("a linked machine's thread: starred here, never on that machine; drawn in the merged list only; kept across a restart", async () => {
+    setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pins-linked-")));
+    roots.push(root);
+    // The other machine's thread, as its own store lists it, starred there too.
+    const far = InboxStore.open(join(root, "far"));
+    const farProject = far.ensureProject({ name: "billing", root: "/work/billing" });
+    const theirs = far.sendMessage({ project_id: farProject.id, author: { kind: "agent", host: "claude-code", session: "ses_far", name: "Claude Code" }, body: "On the other machine" }).message;
+    far.setPinned(theirs.thread_id, true);
+    const farRow = { ...far.listRow(theirs.thread_id)!, pinned_at: far.pins()[0]!.pinned_at };
+    const FAR = "ibx_01K00000000000000000000002";
+    const posts: string[] = [];
+    const door = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch(req) {
+        const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+        if (req.method === "POST" && /pin/.test(route)) posts.push(route);
+        if (route === "health") return Response.json({ ok: true, inbox_id: FAR, machine_links: 1, version: "0.28.62" });
+        if (route === "threads") return Response.json({ cursor: 1, sections: [{ id: "quiet", threads: [farRow] }], snoozes: true });
+        if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode('event: hello\ndata: {"cursor":1}\n\n')) }), { headers: { "Content-Type": "text/event-stream" } });
+        return Response.json({ code: "device_route_not_found" }, { status: 404 });
+      },
+    });
+    try {
+      const dataDir = join(root, "viewer");
+      mkdirSync(dataDir, { recursive: true });
+      InboxLinks.open(dataDir).put({ id: FAR, name: "Mini", token: "tok", transport: { kind: "tailnet", url: `http://127.0.0.1:${door.port}` }, device_id: null, linked_at: "2026-11-01T00:00:00Z" });
+      const merged = (server: InboxServer) => list(server, "?archived=exclude&snoozed=exclude&machines=1");
+      const listed = async (server: InboxServer) => {
+        for (let i = 0; i < 200; i++) {
+          if ((await merged(server)).sections.some((s) => s.threads.some((r) => r.thread_id === theirs.thread_id))) return;
+          await Bun.sleep(25);
+        }
+        throw new Error("the linked machine's row never reached the merged list");
+      };
+      let { server } = await start(dataDir, { phones: false });
+      await listed(server);
+      // That machine's own star is not this Inbox's.
+      const before = await merged(server);
+      expect(before.pins).toEqual([]);
+      expect(before.sections.flatMap((s) => s.threads).find((r) => r.thread_id === theirs.thread_id)!.pinned_at).toBeUndefined();
+
+      // Star it here: the answer, the merged list's Starred rows and the row's own time; nothing sent to that machine.
+      const starred = await pin(server, theirs.thread_id, true);
+      expect(starred.status).toBe(200);
+      expect(((await starred.json()) as Json).pins).toEqual([{ thread_id: theirs.thread_id, pinned_at: expect.any(String) }]);
+      const after = await merged(server);
+      expect(after.pins!.map((r) => [r.thread_id, r.machine])).toEqual([[theirs.thread_id, FAR]]);
+      expect(after.pins![0]!.pinned_at).not.toBe(farRow.pinned_at);
+      expect(after.sections.flatMap((s) => s.threads).find((r) => r.thread_id === theirs.thread_id)!.pinned_at).toBe(after.pins![0]!.pinned_at);
+      expect(posts).toEqual([]);
+      // This Inbox's own list (a phone's, a linked machine's) never names another machine's thread.
+      expect(await pinIds(server)).toEqual([]);
+      const file = join(server.store.dir, "pins.json");
+      expect(JSON.parse(readFileSync(file, "utf8")).pins).toEqual([{ thread_id: theirs.thread_id, pinned_at: expect.any(String), machine: FAR }]);
+
+      // A restart keeps it (no thread here to prune it against), and the row comes back starred.
+      server.stop();
+      servers.splice(servers.indexOf(server), 1);
+      ({ server } = await start(dataDir, { phones: false }));
+      await listed(server);
+      expect((await merged(server)).pins!.map((r) => r.thread_id)).toEqual([theirs.thread_id]);
+
+      // Unstar, and its Undo puts it back with the time it was first starred.
+      const pinnedAt = (await merged(server)).pins![0]!.pinned_at!;
+      expect((await pin(server, theirs.thread_id, false)).status).toBe(200);
+      expect((await merged(server)).pins).toEqual([]);
+      expect((await post(server, "/api/inbox/pins", { restore: { thread_id: theirs.thread_id, index: 0, pinned_at: pinnedAt } })).status).toBe(200);
+      expect((await merged(server)).pins!.map((r) => [r.thread_id, r.pinned_at])).toEqual([[theirs.thread_id, pinnedAt]]);
+      expect(posts).toEqual([]);
+      // A thread no linked machine lists is still no thread.
+      expect((await pin(server, "msg_01K70000000000000000000099", true)).status).toBe(404);
+    } finally {
+      door.stop(true);
+    }
   });
 });
