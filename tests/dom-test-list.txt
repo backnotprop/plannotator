@@ -231,6 +231,7 @@ packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
 packages/inbox/ask/sideCommand.test.tsx
 packages/inbox/pullToRefresh.test.tsx
+packages/inbox/rowSwipeList.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/openThreadReadsWiring.test.tsx
 packages/inbox/tabCountWindow.test.tsx
