@@ -4169,6 +4169,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.cloudWake?.timeoutMs ? { timeoutMs: options.cloudWake.timeoutMs } : {}),
     devices: () => phones?.agentDevices ?? null,
   });
+  const agentSignalsFor = (line: InboxLine): string[] => {
+    if (line.kind !== "message" || line.record.author.kind !== "person" || line.at !== line.record.created_at) return [];
+    const threadId = line.record.thread_id;
+    return cloudAgents
+      .list()
+      .flatMap((agent) => (agent.device_id && agentDoor.inScopeOf(threadId, agent.device_id) ? [agent.device_id] : []));
+  };
   const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, baseUrl: () => baseUrl, searchIndex: search.index });
   const cloudWake = createInboxCloudWake({
     store,
@@ -5481,7 +5488,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         try {
           if (path === "/api/inbox/cloud-agents") {
-            const paired = cloudAgents.pair(body);
+            const paired = await cloudAgents.pair(body);
             return json({ agent: cloudAgents.view(paired.agent), pairing: paired.pairing, ...cloudView() });
           }
           const match = /^\/api\/inbox\/cloud-agents\/(cloud\.[0-9a-f]{12})\/(test|key|remove)$/.exec(path);
@@ -6866,12 +6873,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       timings: options.machineLinkTimings,
     });
-    if (phonesOn) {
-      // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, the pushes, and the
-      // carriage: store lines down as the event stream writes them, commands up through the door in-process.
-      relay = createInboxRelay({ dataDir, store, devices: devices.devices, payload: eventPayload, apply: devices.asDevice });
-      relay.start();
-    }
+    relay = createInboxRelay({
+      dataDir,
+      store,
+      devices: devices.devices,
+      payload: eventPayload,
+      apply: devices.asDevice,
+      phones: phonesOn,
+      agents: {
+        apply: (deviceId, request, commandId) => agentDoor.asAgent(deviceId, request, commandId),
+        signalsFor: (line) => agentSignalsFor(line),
+      },
+    });
+    relay.start();
     // With Phones off, only while a machine is linked.
     devices.startTailnet();
     if (phonesOn) devices.startLan();

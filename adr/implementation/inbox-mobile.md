@@ -255,15 +255,20 @@ Every route answers JSON. Errors are `{ error, code }`: `400 bad_request`, `401 
 | Route | Who | Request | Answer | Exchange |
 |---|---|---|---|---|
 | `POST /v1/mailboxes` | the Inbox, at its first pairing | `{ secret_sha256 }` | `201 { mailbox_id }`; `mbx_` plus 16 random bytes as base64url | 7.26 |
-| `PUT /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | `{ secret_sha256, cursor }`: `SHA-256(R)` and the store cursor at pairing (the phone read everything before it directly) | `200 { device_id }`; repeating it with the same hash is a no-op; another hash starts the device over (carriage on, the given cursor, no APNs token) | 7.27 |
+| `PUT /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | `{ secret_sha256, cursor }`: `SHA-256(R)` and the store cursor at pairing (the phone read everything before it directly). A cloud agent (section 13) adds `kind: "agent"` and `signal_sha256` | `200 { device_id }`; repeating it with the same hash, kind and signal hash is a no-op; anything else starts the device over (carriage on for a phone, off for an agent, the given cursor, no push token) | 7.27 |
 | `DELETE /v1/mailboxes/:mbx/devices/:dev` | Inbox bearer | | `204`; the device's revoke on the computer | 7.28 |
 | `PUT /v1/mailboxes/:mbx/devices/:dev/carriage` | device bearer | `{ on: false }`, or `{ on: true, cursor }` with the store cursor the phone holds | `204`; the device stays registered either way, and the Inbox's socket gets a `carriage` frame | 7.35 |
 | `PUT /v1/mailboxes/:mbx/devices/:dev/apns` | device bearer | `{ token, environment: "sandbox" or "production" }`; `token: null` removes it | `204` | 7.29 |
 | `POST /v1/mailboxes/:mbx/push` | Inbox bearer | `{ device_id, collapse_id, ciphertext }` | `202 { sent: true }`, or `200 { sent: false, reason: "no_push_token", "apns_gone" or "no_apns_key" }` (`no_push_token`: the device holds no push token, renamed from `no_apns_token` by R3; `no_apns_key`: the relay holds no APNs key yet, written in by R1), or `502 apns_failed`; to a device holding an FCM token, section 10's answers | 7.30 |
 | `GET /v1/mailboxes/:mbx/socket` | Inbox bearer, WebSocket upgrade | frames below | | 7.31 |
 | `GET /v1/mailboxes/:mbx/devices/:dev/items?after=n` | device bearer | | `{ items: [{ n, ciphertext }], inbox_online }`, every held item after `n` in order | 7.32 |
-| `POST /v1/mailboxes/:mbx/devices/:dev/ack` | device bearer | `{ through: n }`, or `{ cursor }` when the phone read the store directly up to that seq | `204`; deletes items up to `n`, or record items whose cursor is at or below `cursor` | 7.33 |
+| `POST /v1/mailboxes/:mbx/devices/:dev/ack` | device bearer | `{ through: n }`, `{ item: n }` (one item, section 13), or `{ cursor }` when the phone read the store directly up to that seq | `204`; deletes items up to `n`, item `n` alone, or record items whose cursor is at or below `cursor` | 7.33 |
 | `POST /v1/mailboxes/:mbx/devices/:dev/commands` | device bearer | `{ id, ciphertext }` | `202 { queued: true, inbox_online }`; an `id` it already holds answers `200 { queued: false, inbox_online }`; a command whose frame to the Inbox would pass Cloudflare's 32 MiB WebSocket message limit answers `413 { error, code: "command_too_large", limit_bytes }` and is not held (it could never be handed over, and would close the Inbox's socket at every `hello`) | 7.34 |
+
+| `POST /v1/mailboxes/:mbx/devices/:dev/signal` | Inbox bearer | | `204`; a cloud agent's signal gets a new random value (section 13); `404 device_not_found` for any other device | 13 |
+| `GET /v1/mailboxes/:mbx/signals/:token` | nobody: the address is the capability | | `200 { signal }`, `Cache-Control: no-store`; `404 not_found` for a token no agent device holds; `429 too_many_requests` with `Retry-After` past 20 reads a minute per signal | 13 |
+
+On an agent device (section 13) the relay refuses `carriage`, `apns` and `fcm` (`403 agent_device`) and a push to it (`403 agent_device`).
 
 `inbox_online` says whether the Inbox's socket is connected now: the phone's "Sent. Waiting for your computer".
 
@@ -279,7 +284,7 @@ Relay to Inbox:
 
 Inbox to relay:
 
-- `{ "type": "item", "device_id", "cursor", "ciphertext" }`: one down item, sent only to a device with carriage on. `cursor` is the record's store seq, or null for a result; the relay keeps the highest so the Inbox resumes from `hello`. The relay drops an item for a device it does not hold or whose carriage is off.
+- `{ "type": "item", "device_id", "cursor", "ciphertext" }`: one down item, sent only to a device with carriage on. `cursor` is the record's store seq, or null for a result; the relay keeps the highest so the Inbox resumes from `hello`. The relay drops an item for a device it does not hold or whose carriage is off. For an agent device it keeps results (`cursor: null`) only and drops every record item, whatever the Inbox sends.
 - `{ "type": "applied", "device_id", "id" }`: the command was applied (or refused); the relay deletes it.
 
 The drain order (written in by R2). The Inbox handles the socket's frames one at a time, in the order they arrive. On `hello` it settles the devices as above, then sends each listed device with carriage on every store line after the `cursor` `hello` gave, in seq order; a device it registers while the socket is open is carried from the cursor it registered with. Then come the held commands, each applied in turn: opened with the device's up key, applied through the door, answered with a result item, then reported `applied`. Store lines written meanwhile, the command's own writes among them, go down as they are written, so a result can follow the records it caused. A command no key here opens (a revoked device, a forged or reflected envelope) is reported `applied` with no result item. `inbox_online` is the socket as the relay last saw it: a computer that went to sleep without closing it reads as online until the connection times out, and its commands wait at the relay all the same.
@@ -1442,9 +1447,13 @@ The person pairs a cloud agent on this computer (`POST /api/inbox/cloud-agents`)
 
 The pair answer carries the **pairing string** once, and no other answer ever does:
 
+    plannotator-pairing-2.<base64url of {"d": "<dev id>", "t": "<tok_ token>", "s": "<pairing secret>", "r": "<relay origin>", "m": "<mbx_ id>"}>
+
+The routine keeps it as `PLANNOTATOR_PAIRING`. `s` is section 4's pairing secret, from which the relay keys come. `r` and `m` say where the relay is: the origin of the mailbox in `inbox/relay.json` (`https:`, or `http:` on a loopback host for a proof) and its id. When the relay cannot be reached at pairing, the string is version 1, without them:
+
     plannotator-pairing-1.<base64url of {"d": "<dev id>", "t": "<tok_ token>", "s": "<pairing secret>"}>
 
-The routine keeps it as `PLANNOTATOR_PAIRING`. `s` is section 4's pairing secret, from which the relay keys come once the relay carries the agent door.
+A version 1 string still works at the door on this computer (`PLANNOTATOR_PAIRING_DOOR`); through the relay it is refused (`pairing_without_relay`: pair again).
 
 Remove (`POST /api/inbox/cloud-agents/:session/remove`) revokes the device at once (the next call is `401 device_revoked`), deletes its secret file and the webhook address and key. Its messages stay in their threads. The window's device list (`GET /api/inbox/devices`) leaves agent devices out; they show under Cloud agents.
 
@@ -1452,9 +1461,9 @@ Remove (`POST /api/inbox/cloud-agents/:session/remove`) revokes the device at on
 
 `POST /api/inbox/agent/call`, `Authorization: Bearer <the pairing's token>`, body `{ "tool": "<name>", "arguments": { … } }`. The checks, in order:
 
-1. This computer only, for now. Through the tailnet's listener: `403 local_only`. A Host that is not loopback, an `X-Forwarded-For` that is not loopback, or a `Forwarded` header: `403 forbidden_host`. Any `Origin`: `403 origin_not_allowed`. The tailnet's and the Wi-Fi's door-only listeners do not serve it, and the relay's commands (section 4) never reach it.
+1. This computer only, or a sealed command through the relay (below). Through the tailnet's listener: `403 local_only`. A Host that is not loopback, an `X-Forwarded-For` that is not loopback, or a `Forwarded` header: `403 forbidden_host`. Any `Origin`: `403 origin_not_allowed`. The tailnet's and the Wi-Fi's door-only listeners do not serve it; a phone's relay commands (section 4) never reach it.
 2. The token. None: `401 device_token_missing`. A phone's or a linked machine's: `403 device_not_an_agent`. Unknown: `401 device_token_invalid`. Revoked, or its cloud agent removed: `401 device_revoked`.
-3. The tool: `send_message`, `read_thread`, `search` or `resolve_message`, run by the same handlers as `/mcp`. Any other name answers the result `tool_not_allowed`.
+3. The tool: `send_message`, `read_thread`, `search` or `resolve_message`, run by the same handlers as `/mcp`, or `whoami` (no fields: the agent's name and its project, the self-test of a routine's setup). Any other name answers the result `tool_not_allowed`.
 4. Who is calling is the Inbox's to say. `send_message` is written as `{ kind: "agent", host: <the kind's host>, session: "cloud.<12 hex>", name: <its name> }`; `read_thread` reads as that session. `agent_session`, `agent_name` or `agent_host` in the arguments: `identity_forced`. `project_path`: `project_forced` (a new thread goes in the project chosen at pairing). A field outside the tool's list below: `validation_error`. No `_meta` reaches the tool: no peek, no working folder, no wake claim from the caller.
 5. Its scope. A thread is the agent's when it wrote in it, the person sent it there (New message, `to`), or the person tagged it there. An id outside its threads answers exactly as one that does not exist (`thread_not_found`, `message_not_found`).
    - `read_thread` (`thread_id`, `message_id`, `limit`, `expand`, `before`, `after`, `include_resolved`): every id must be in its threads. With no thread or message, it lists its own threads only (`asked_by: "me"`).
@@ -1467,7 +1476,19 @@ Answers: `200 { "result": <the tool's result> }`, a refusal from 3 to 6 as `isEr
 
 What it can never do: answer or pick a question, send for the person, 👍, approve a permission prompt, launch or stop a session, read drafts, read another thread or the thread list, read or name a file on this computer, change a setting, pair or unpair, list devices, open the event stream, or get relay carriage or pushes.
 
-At the phone's door (section 2) and through the relay's commands (section 4) an agent device's token is refused: `403 agent_not_accepted_here` (with Phones off, the door's unknown-route 404).
+At the phone's door (section 2) and through the relay's phone commands (section 4) an agent device's token is refused: `403 agent_not_accepted_here` (with Phones off, the door's unknown-route 404).
+
+### Through the relay
+
+The relay runs for cloud agents with Phones on or off. With Phones off it serves agent devices only: no phone is registered, carried, pushed to or answered.
+
+- **Registration.** At pairing the Inbox makes its mailbox if it has none and registers the agent device: `PUT .../devices/:dev { secret_sha256: SHA-256(R), cursor, kind: "agent", signal_sha256: SHA-256(G) }`, where `R` is section 4's relay secret and `G` the signal token below. The device is held with carriage off. `hello` lists it with `"agent": true`; the Inbox registers any live agent device the relay does not list.
+- **No down path.** The Inbox never sends an agent device a record item or a push, and the relay keeps only results for it (section 4). An agent learns what happened only by asking.
+- **A call.** Up command plaintext `{ "v": 1, "type": "agent_call", "id", "tool", "arguments" }`, sealed under `U`, posted as `POST .../commands { id, ciphertext }` with the device bearer `R`. The Inbox opens it with that device's `U`, refuses it when the sealed `id` is not the frame's, and hands `{ tool, arguments }` to the agent door in-process: the same checks from step 2 on, as that device (a revoked device has no secret here, so nothing opens). A phone-shaped command (`method`, `path`) under an agent's key is refused, and so is any envelope that does not open. A refused command is reported `applied` with no result. The answer goes down as section 4's result item under `K`: the door's `{ result }` or `{ error, code }`. The agent reads `GET .../items?after=0`, opens each with `K`, takes the result whose `id` is its own and acknowledges it alone (`ack { item: n }`).
+- **Once.** A `send_message` that names no `idempotency_key` gets `relay.<sealed id>`, so a command the relay hands over again, or a replay of the same envelope, answers the first message and writes nothing.
+- **Asleep.** Commands wait at the relay while the Inbox is not connected (section 4). `plannotator inbox call` reads `inbox_online` first: a read when the computer is away is not posted ("Your computer is asleep or offline; nothing was sent."); a `send_message` or `resolve_message` is posted and waits, and is applied once when the Inbox is back.
+- **The signal.** `G = HKDF-SHA256(ikm = S, salt = UTF-8 bytes of the device id, info = "plannotator-inbox relay signal v1", length = 32)`, base64url. `GET /v1/mailboxes/:mbx/signals/<G>` needs no login and answers only `{ "signal": "<22 random characters>" }`, a value that changes and says nothing else: no thread, no count, no time. The Inbox changes it (`POST .../devices/:dev/signal`) when the person writes a new message in one of that agent's threads, never for any other thread. It is for an agent that can only poll an address; it reads the thread through a call. The relay keeps `SHA-256(G)` and the current value, and answers at most 20 reads a minute per signal. The address is a capability: whoever holds it learns only that something changed. Platform request logs (`wrangler dev`'s, or Cloudflare's if the owner turns request logging on) show it, as they show any URL.
+- **Remove.** Removing the cloud agent revokes the device, deletes its secret and removes it at the relay (`DELETE .../devices/:dev`), which drops its held commands, its results and its signal: the next call answers `404 device_not_found` and `plannotator inbox call` says `pairing_removed`.
 
 ### Waking
 
@@ -1475,4 +1496,4 @@ As before the door: the person's New message to the agent, a reply to its messag
 
 ### Not yet
 
-The relay carrying the door (a sealed `{ tool, arguments }` under U, its result under K), files from the Inbox to the agent, guided reviews (`get_guide_brief`, `submit_guide`), and the Settings screen showing the pairing string with the routine's prompt. Until the relay carries it, `plannotator inbox call` uses the door only when `PLANNOTATOR_PAIRING` holds a pairing string and `PLANNOTATOR_PAIRING_DOOR` is `http://127.0.0.1:<port>`.
+Files from the Inbox to the agent, guided reviews (`get_guide_brief`, `submit_guide`), and the Settings screen showing the pairing string with the routine's prompt. The relay itself is owner-deployed; until it is, pairing gives a version 1 string. `PLANNOTATOR_PAIRING_DOOR` (`http://127.0.0.1:<port>`) still sends `plannotator inbox call` to the door on this computer instead of the relay, for tests and a local stand-in routine.

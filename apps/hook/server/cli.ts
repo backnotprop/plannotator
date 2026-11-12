@@ -519,6 +519,27 @@ export const INBOX_PROJECTS_USAGE = [
 /** What `plannotator inbox call` runs: the Inbox tool's actions. */
 export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
+export const INBOX_PAIRED_CALL_USAGE = [
+  "Usage, as a paired cloud agent (PLANNOTATOR_PAIRING is set):",
+  "  plannotator inbox call <action> [<json> | -]",
+  "",
+  "Talks to the person's Plannotator Inbox as the cloud agent the pairing string names, through",
+  "the Inbox's relay, sealed end to end. You see only the threads you started, were sent or were",
+  "tagged in; you post under your own name. Actions: whoami, read_thread, send_message, search, resolve_message.",
+  "",
+  "  plannotator inbox call whoami        check the setup: who you are, or exactly what is wrong",
+  "  plannotator inbox call read_thread '{\"thread_id\":\"thr_1\"}'",
+  "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"Done: the tests pass.\"}'",
+  "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"The screenshot is below.\",\"attachments\":[\"shot.png\"]}'",
+  "",
+  "A path in attachments is read from this machine and sent as bytes; the Inbox opens no path for you.",
+  "When the person's computer is asleep, a read fails and says so, and send_message waits at the",
+  "relay and is posted once when it is back (stdout then says queued: true; do not send it again).",
+  "whoami also prints signal_url: an address whose value changes when the person writes in one",
+  "of your threads, for a routine that can only poll.",
+  "stdout: the result as one JSON value. A failure: <code>: <message> on stderr, exit 1.",
+].join("\n");
+
 /** `plannotator inbox call …` (inbox-call-command.ts): the Inbox tool from a script. */
 export const INBOX_CALL_USAGE = [
   "Usage:",

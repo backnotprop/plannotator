@@ -22,6 +22,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { sendPush, type ApnsEnvironment } from "./apns";
 import { FcmAuthError, parseServiceAccount, sendFcm } from "./fcm";
+import { SIGNAL_LIMIT, SIGNAL_WINDOW_MS } from "./signal";
 
 export interface Env {
   MAILBOX: DurableObjectNamespace<Mailbox>;
@@ -49,6 +50,9 @@ interface DeviceRow {
   apns_environment: string | null;
   next_n: number;
   fcm_token: string | null;
+  agent: number;
+  signal_sha256: string | null;
+  signal: string | null;
   [key: string]: SqlStorageValue;
 }
 
@@ -85,6 +89,13 @@ const ENVELOPE = /^[A-Za-z0-9_-]+$/;
 const COLLAPSE_ID = /^[\x21-\x7e]{1,64}$/;
 /** A command's id: the phone's idempotency key, or a fresh random id for a read. */
 const COMMAND_ID = /^[A-Za-z0-9_.:-]+$/;
+const SIGNAL_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+
+function signalValue(): string {
+  let binary = "";
+  for (const byte of crypto.getRandomValues(new Uint8Array(16))) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 /** Cloudflare's WebSocket message limit (32 MiB), the platform's: a command whose frame to the Inbox would pass it could never be handed over. */
 const WEBSOCKET_MESSAGE_LIMIT = 32 * 1024 * 1024;
 
@@ -140,6 +151,9 @@ export class Mailbox extends DurableObject<Env> {
     const columns = this.sql.exec<{ name: string }>("PRAGMA table_info(devices)").toArray().map((c) => c.name);
     if (!columns.includes("next_n")) this.sql.exec("ALTER TABLE devices ADD COLUMN next_n INTEGER NOT NULL DEFAULT 1");
     if (!columns.includes("fcm_token")) this.sql.exec("ALTER TABLE devices ADD COLUMN fcm_token TEXT");
+    if (!columns.includes("agent")) this.sql.exec("ALTER TABLE devices ADD COLUMN agent INTEGER NOT NULL DEFAULT 0");
+    if (!columns.includes("signal_sha256")) this.sql.exec("ALTER TABLE devices ADD COLUMN signal_sha256 TEXT");
+    if (!columns.includes("signal")) this.sql.exec("ALTER TABLE devices ADD COLUMN signal TEXT");
     // Down items: `cursor` is the record's store seq, null for a result.
     this.sql.exec("CREATE TABLE IF NOT EXISTS items (device_id TEXT NOT NULL, n INTEGER NOT NULL, part INTEGER NOT NULL, cursor INTEGER, data TEXT NOT NULL, PRIMARY KEY (device_id, n, part))");
     // Commands up, in the order they arrived (`seq`).
@@ -193,7 +207,7 @@ export class Mailbox extends DurableObject<Env> {
     const devices = this.sql.exec<DeviceRow>("SELECT * FROM devices ORDER BY id").toArray();
     return {
       type: "hello",
-      devices: devices.map((d) => ({ device_id: d.id, cursor: d.cursor, carriage: d.carriage === 1, apns: d.apns_token !== null, fcm: d.fcm_token !== null })),
+      devices: devices.map((d) => ({ device_id: d.id, cursor: d.cursor, carriage: d.carriage === 1, apns: d.apns_token !== null, fcm: d.fcm_token !== null, ...(d.agent === 1 ? { agent: true } : {}) })),
     };
   }
 
@@ -216,7 +230,10 @@ export class Mailbox extends DurableObject<Env> {
       return this.push(req);
     }
 
-    const match = /^\/devices\/([^/]+)(?:\/(carriage|apns|fcm|items|ack|commands))?$/.exec(path);
+    const signal = /^\/signals\/([^/]+)$/.exec(path);
+    if (signal && req.method === "GET") return this.readSignal(signal[1]!);
+
+    const match = /^\/devices\/([^/]+)(?:\/(carriage|apns|fcm|items|ack|commands|signal))?$/.exec(path);
     if (!match || !DEVICE_ID.test(match[1]!)) return refuse(404, "not_found");
     const deviceId = match[1]!;
     const sub = match[2];
@@ -230,12 +247,17 @@ export class Mailbox extends DurableObject<Env> {
       this.deleteDevice(deviceId);
       return new Response(null, { status: 204 });
     }
+    if (sub === "signal" && req.method === "POST") {
+      if (!(await inbox())) return refuse(401, "unauthorized");
+      return this.bumpSignal(deviceId);
+    }
     const method = sub === "carriage" || sub === "apns" || sub === "fcm" ? "PUT" : sub === "items" ? "GET" : "POST";
-    if (sub && req.method === method) {
+    if (sub && sub !== "signal" && req.method === method) {
       const device = this.device(deviceId);
       if (!device) return refuse(404, "device_not_found");
       const token = bearer(req);
       if (token === null || (await sha256Hex(token)) !== device.secret_sha256) return refuse(401, "unauthorized");
+      if (device.agent === 1 && (sub === "carriage" || sub === "apns" || sub === "fcm")) return refuse(403, "agent_device", "A cloud agent's device gets answers to its own commands only.");
       if (sub === "carriage") return this.carriage(req, device);
       if (sub === "apns") return this.apns(req, device);
       if (sub === "fcm") return this.fcm(req, device);
@@ -265,14 +287,23 @@ export class Mailbox extends DurableObject<Env> {
     const cursor = input?.cursor;
     if (typeof hash !== "string" || !HASH.test(hash)) return refuse(400, "bad_request", "secret_sha256: 64 lowercase hex.");
     if (!isCursor(cursor)) return refuse(400, "bad_request", "cursor: a store seq.");
+    const kind = input?.kind ?? "phone";
+    if (kind !== "phone" && kind !== "agent") return refuse(400, "bad_request", 'kind: "phone" or "agent".');
+    const signalHash = input?.signal_sha256 ?? null;
+    if (signalHash !== null && (kind !== "agent" || typeof signalHash !== "string" || !HASH.test(signalHash))) return refuse(400, "bad_request", "signal_sha256: 64 lowercase hex, for an agent.");
+    const agent = kind === "agent" ? 1 : 0;
     const existing = this.device(deviceId);
-    if (existing?.secret_sha256 !== hash) {
+    if (existing?.secret_sha256 !== hash || existing.agent !== agent || existing.signal_sha256 !== signalHash) {
       this.deleteDevice(deviceId);
       this.sql.exec(
-        "INSERT INTO devices (id, secret_sha256, carriage, cursor, apns_token, apns_environment, next_n, fcm_token) VALUES (?, ?, 1, ?, NULL, NULL, 1, NULL)",
+        "INSERT INTO devices (id, secret_sha256, carriage, cursor, apns_token, apns_environment, next_n, fcm_token, agent, signal_sha256, signal) VALUES (?, ?, ?, ?, NULL, NULL, 1, NULL, ?, ?, ?)",
         deviceId,
         hash,
+        agent ? 0 : 1,
         cursor,
+        agent,
+        signalHash,
+        signalHash ? signalValue() : null,
       );
     }
     return json({ device_id: deviceId });
@@ -341,8 +372,9 @@ export class Mailbox extends DurableObject<Env> {
   private async ack(req: Request, device: DeviceRow): Promise<Response> {
     const input = await body(req);
     if (isCursor(input?.through)) this.sql.exec("DELETE FROM items WHERE device_id = ? AND n <= ?", device.id, input.through);
+    else if (isCursor(input?.item)) this.sql.exec("DELETE FROM items WHERE device_id = ? AND n = ?", device.id, input.item);
     else if (isCursor(input?.cursor)) this.sql.exec("DELETE FROM items WHERE device_id = ? AND cursor IS NOT NULL AND cursor <= ?", device.id, input.cursor);
-    else return refuse(400, "bad_request", "{ through: n }, or { cursor }.");
+    else return refuse(400, "bad_request", "{ through: n }, { item: n }, or { cursor }.");
     return new Response(null, { status: 204 });
   }
 
@@ -380,6 +412,7 @@ export class Mailbox extends DurableObject<Env> {
     }
     const device = this.device(deviceId);
     if (!device) return refuse(404, "device_not_found");
+    if (device.agent === 1) return refuse(403, "agent_device", "A cloud agent's device gets no pushes.");
     if (device.fcm_token) return this.pushFcm(device, device.fcm_token, collapseId, envelope);
     if (!device.apns_token) return json({ sent: false, reason: "no_push_token" });
     const { APNS_KEY, APNS_KEY_ID, APNS_TEAM_ID } = this.env;
@@ -477,10 +510,36 @@ export class Mailbox extends DurableObject<Env> {
     const cursor = frame.cursor === null ? null : isCursor(frame.cursor) ? frame.cursor : undefined;
     if (cursor === undefined) return;
     const device = this.device(frame.device_id);
-    if (!device || device.carriage !== 1) return;
+    if (!device) return;
+    if (device.agent === 1 ? cursor !== null : device.carriage !== 1) return;
     const n = device.next_n;
     parts(frame.ciphertext).forEach((data, part) => this.sql.exec("INSERT INTO items (device_id, n, part, cursor, data) VALUES (?, ?, ?, ?, ?)", device.id, n, part, cursor, data));
     this.sql.exec("UPDATE devices SET next_n = ?, cursor = MAX(cursor, ?) WHERE id = ?", n + 1, cursor ?? device.cursor, device.id);
+  }
+
+  private readonly signalReads = new Map<string, { since: number; count: number }>();
+
+  private async readSignal(token: string): Promise<Response> {
+    if (!SIGNAL_TOKEN.test(token)) return refuse(404, "not_found");
+    const hash = await sha256Hex(token);
+    const row = this.sql.exec<{ signal: string }>("SELECT signal FROM devices WHERE agent = 1 AND signal_sha256 = ? AND signal IS NOT NULL", hash).toArray()[0];
+    if (!row) return refuse(404, "not_found");
+    const now = Date.now();
+    for (const [key, slot] of this.signalReads) if (now - slot.since >= SIGNAL_WINDOW_MS) this.signalReads.delete(key);
+    const slot = this.signalReads.get(hash) ?? { since: now, count: 0 };
+    slot.count += 1;
+    this.signalReads.set(hash, slot);
+    if (slot.count > SIGNAL_LIMIT) {
+      return json({ error: "too many requests", code: "too_many_requests" }, 429, { "Retry-After": String(Math.max(1, Math.ceil((slot.since + SIGNAL_WINDOW_MS - now) / 1000))) });
+    }
+    return json({ signal: row.signal });
+  }
+
+  private bumpSignal(deviceId: string): Response {
+    const device = this.device(deviceId);
+    if (!device || device.agent !== 1 || !device.signal_sha256) return refuse(404, "device_not_found");
+    this.sql.exec("UPDATE devices SET signal = ? WHERE id = ?", signalValue(), deviceId);
+    return new Response(null, { status: 204 });
   }
 
   async webSocketClose(socket: WebSocket, code: number): Promise<void> {

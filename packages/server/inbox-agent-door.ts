@@ -10,6 +10,7 @@
 
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { inboxCloudHostOf } from "@plannotator/core/inbox-cloud";
+import { INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
 import { inboxSearchTerms, INBOX_SEARCH_LIMIT_MAX, INBOX_SEARCH_QUERY_MAX, type InboxSearchMessageRow } from "@plannotator/core/inbox-search";
 import type { InboxProject } from "@plannotator/core/inbox-types";
 import { inboxStopNoticeReply, INBOX_MAX_REQUEST_BYTES, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
@@ -26,7 +27,7 @@ import { INBOX_AGENT_SEARCH_LIMIT, INBOX_AGENT_SEARCH_BUILD_WAIT_MS, rowOf, sear
 
 export const INBOX_AGENT_DOOR_PATH = "/api/inbox/agent/call";
 
-export const INBOX_AGENT_DOOR_TOOLS = ["send_message", "read_thread", "search", "resolve_message"] as const;
+export const INBOX_AGENT_DOOR_TOOLS = INBOX_AGENT_CALL_ACTIONS;
 type DoorTool = (typeof INBOX_AGENT_DOOR_TOOLS)[number];
 
 /** What one call may upload, all files together: a sealed relay command must fit one 32 MiB frame as base64. */
@@ -37,6 +38,7 @@ const FIELDS: Record<DoorTool, readonly string[]> = {
   read_thread: ["thread_id", "message_id", "limit", "expand", "before", "after", "include_resolved"],
   search: ["query", "limit"],
   resolve_message: ["message_id", "resolved"],
+  whoami: [],
 };
 
 const IDENTITY_FIELDS = ["agent_session", "agent_name", "agent_host"];
@@ -45,6 +47,7 @@ const SEARCH_PAGES_MAX = 20;
 
 export interface InboxAgentDoorDevices {
   byToken: (token: string) => InboxDevice | null;
+  byId: (id: string) => InboxDevice | null;
   isOtherDevice: (token: string) => boolean;
   touch: (id: string) => void;
 }
@@ -217,6 +220,12 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
 
     if (tool === "search") return search(session, args);
 
+    if (tool === "whoami") {
+      const project = projectOf(agent);
+      const projectName = project ? (project.display_name ?? project.name) : null;
+      return okComplete(`You are ${agent.name}, a cloud agent paired with this Inbox.${projectName ? ` Your new threads go in ${projectName}.` : ""} The Inbox answered, so your setup works.`, { name: agent.name, project: projectName });
+    }
+
     if (tool === "resolve_message") {
       const message = ownedMessage(args.message_id, session, "message_id");
       if (message.author.kind !== "agent" || message.author.session !== session) {
@@ -274,15 +283,19 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       if (devices?.isOtherDevice(match[1]!)) return refuse(403, "device_not_an_agent", "A phone's or a linked machine's token opens the device door, not the agent door.");
       return refuse(401, "device_token_invalid", "This pairing does not belong to a paired cloud agent.");
     }
-    const agent = context.agents.byDevice(device.id);
-    if (device.revoked_at !== null || !agent) return refuse(401, "device_revoked", "This cloud agent was removed from the Inbox. Pair it again.");
-    devices!.touch(device.id);
     let request: { tool?: unknown; arguments?: unknown };
     try {
       request = (await req.json()) as typeof request;
     } catch {
-      return refuse(422, "validation_error", "body: expected { tool, arguments }.");
+      request = null as unknown as typeof request;
     }
+    return serve(devices!, device, request, null);
+  };
+
+  const serve = async (devices: InboxAgentDoorDevices, device: InboxDevice, request: { tool?: unknown; arguments?: unknown } | null, commandId: string | null): Promise<Response> => {
+    const agent = context.agents.byDevice(device.id);
+    if (device.revoked_at !== null || !agent) return refuse(401, "device_revoked", "This cloud agent was removed from the Inbox. Pair it again.");
+    devices.touch(device.id);
     if (!request || typeof request !== "object" || Array.isArray(request)) return refuse(422, "validation_error", "body: expected { tool, arguments }.");
     const tool = request.tool;
     if (typeof tool !== "string" || !(INBOX_AGENT_DOOR_TOOLS as readonly string[]).includes(tool)) {
@@ -290,13 +303,26 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     }
     const args = request.arguments ?? {};
     if (typeof args !== "object" || Array.isArray(args) || args === null) return json({ result: fail("validation_error", "arguments: a JSON object.") });
+    const keyed = commandId !== null && tool === "send_message" && !("idempotency_key" in args) ? { ...args, idempotency_key: `relay.${commandId}` } : args;
     try {
-      return json({ result: await call(agent, tool as DoorTool, args as Record<string, unknown>) });
+      return json({ result: await call(agent, tool as DoorTool, keyed as Record<string, unknown>) });
     } catch (error) {
       if (error instanceof DoorRefusal || error instanceof InboxError) return json({ result: fail(error.code, error.message) });
       return json({ result: fail("internal_error", "The Inbox could not run that call.") });
     }
   };
 
-  return { handle };
+  const asAgent = async (deviceId: string, request: { tool: unknown; arguments: unknown }, commandId: string): Promise<Response> => {
+    const devices = context.devices();
+    const device = devices?.byId(deviceId) ?? null;
+    if (!devices || !device) return refuse(401, "device_token_invalid", "This pairing does not belong to a paired cloud agent.");
+    return serve(devices, device, request, commandId);
+  };
+
+  const inScopeOf = (threadId: string, deviceId: string): boolean => {
+    const agent = context.agents.byDevice(deviceId);
+    return agent !== null && inScope(threadId, agent.session);
+  };
+
+  return { handle, asAgent, inScopeOf };
 }

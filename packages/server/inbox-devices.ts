@@ -578,7 +578,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const revoked = devices.revoke(device.id, now().toISOString()) ?? device;
     for (const stream of streams.get(device.id) ?? []) stream.abort();
     streams.delete(device.id);
-    if (device.platform !== MACHINE_PLATFORM && device.platform !== AGENT_PLATFORM) context.relay?.revoked(revoked);
+    if (device.platform !== MACHINE_PLATFORM) context.relay?.revoked(revoked);
     return revoked;
   };
 
@@ -1517,8 +1517,13 @@ export function createInboxDevices(context: InboxDevicesContext) {
       devices.setCarriage(device.id, false, at);
       return { device: devices.get(device.id) ?? device, token, secret };
     },
+    relay: async (device: InboxDevice): Promise<{ url: string; mailbox_id: string } | null> => (await context.relay?.paired(device)) ?? null,
     byToken: (token: string): InboxDevice | null => {
       const device = devices.byToken(token);
+      return device?.platform === AGENT_PLATFORM ? device : null;
+    },
+    byId: (id: string): InboxDevice | null => {
+      const device = devices.get(id);
       return device?.platform === AGENT_PLATFORM ? device : null;
     },
     /** A phone's or a machine's token, which the agent door refuses by name. */

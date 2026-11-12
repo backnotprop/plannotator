@@ -13,6 +13,10 @@ With neither token a push answers `no_push_token`. Pushes are not rate limited: 
 
 The overrides `APNS_ORIGIN`, `FCM_ORIGIN` and `FCM_OAUTH_ORIGIN` exist only for the proof and are honored only when they name a loopback host (`127.0.0.1`, `localhost`, `[::1]`); any other value is ignored, logged once, and the production host is used.
 
+## Cloud agents
+
+A paired cloud agent (contract section 13, "Through the relay") is a device registered with `kind: "agent"`: carriage off for good (`carriage`, `apns`, `fcm` and pushes answer `403 agent_device`), and only results are kept for it, never a record item. It posts sealed commands and reads its own results like a phone, and acknowledges one result at a time (`ack { item }`). Its signal, `GET /v1/mailboxes/:mbx/signals/<token>`, needs no login and answers only `{ signal }`, a random value the Inbox changes (`POST .../devices/:dev/signal`) when the person writes in one of that agent's threads; it is limited to 20 reads a minute per signal (`src/signal.ts`). Removing the device deletes its signal with everything else it held. Cloud agents need no Worker secret: a relay deployed without the Apple and Google keys carries them.
+
 ## Deploy
 
 The owner deploys the relay, never CI. `wrangler.toml` names the custom-domain route `relay.plannotator.ai`; that route and the Worker go live only when the owner runs, from this folder:
@@ -31,4 +35,4 @@ No workflow deploys it, and no workflow holds a Cloudflare, Apple or Google secr
 
 ## The proof
 
-`bun test` from this folder runs the relay under `wrangler dev` (local only, persisted under `.wrangler/proof-*`) against a compiled Inbox when `PLANNOTATOR_INBOX_TEST_BINARY` names one, the CLI from source otherwise. Apple is a local HTTP/2 server; Google's two hosts are local servers the relay reaches through `FCM_ORIGIN` and `FCM_OAUTH_ORIGIN` (proof-only variables), with a service account whose RSA key is made for the run. `RELAY_PROOF_APPLE=1` adds the check against Apple's real hosts; `INBOX_PROOF_DIR` keeps the carriage's transcript and storage dumps. The relay workflow (`.github/workflows/relay.yml`) runs exactly this. The root `bun test` skips this folder.
+`bun test` from this folder runs the relay under `wrangler dev` (`test/wrangler-relay.ts`; `test/cloud-agent.test.ts` is the cloud agent's proof, with a stand-in routine holding only its pairing string) (local only, persisted under `.wrangler/proof-*`) against a compiled Inbox when `PLANNOTATOR_INBOX_TEST_BINARY` names one, the CLI from source otherwise. Apple is a local HTTP/2 server; Google's two hosts are local servers the relay reaches through `FCM_ORIGIN` and `FCM_OAUTH_ORIGIN` (proof-only variables), with a service account whose RSA key is made for the run. `RELAY_PROOF_APPLE=1` adds the check against Apple's real hosts; `INBOX_PROOF_DIR` keeps the carriage's transcript and storage dumps. The relay workflow (`.github/workflows/relay.yml`) runs exactly this. The root `bun test` skips this folder.

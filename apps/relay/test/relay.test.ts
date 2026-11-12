@@ -41,7 +41,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http2 from "node:http2";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { createHmac } from "node:crypto";
 import { decryptWithKey, deriveRelayKeys, encryptWithKey } from "@plannotator/core/crypto";
 import { SimAgent } from "../../../scripts/inbox-sim";
@@ -49,34 +49,11 @@ import { createInboxWorld, destroyInboxWorld, registry, stopInbox, removeStubbed
 import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
 import { apnsBody } from "../../../packages/server/inbox-relay";
 import { fcmMessage } from "../src/fcm";
+import { dumpMailbox, freePort, helloOf, holds, mailboxFiles, readMailbox, sha256, sleep, startRelay, storageBytes, until, type Json, type Relay } from "./wrangler-relay";
 
-type Json = Record<string, any>;
-
-const relayDir = resolve(import.meta.dir, "..");
-const wrangler = join(relayDir, "node_modules", ".bin", "wrangler");
 const TOKEN_OK = "a".repeat(64);
 const TOKEN_GONE = `4100${"0".repeat(60)}`;
 const SUBJECT = "Run the retry tests against the Stripe test clock?";
-
-const sha256 = (value: string) => new Bun.CryptoHasher("sha256").update(value).digest("hex");
-const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
-
-async function until<T>(read: () => T | Promise<T>, ok: (value: T) => boolean, what: string, ms = 15_000): Promise<T> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const value = await read();
-    if (ok(value)) return value;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}: ${JSON.stringify(value)}`);
-    await sleep(100);
-  }
-}
-
-function freePort(): number {
-  const server = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
-  const port = server.port;
-  server.stop(true);
-  return port;
-}
 
 // ── Apple, played locally ──
 
@@ -229,120 +206,6 @@ async function fakeGoogle(publicKey: CryptoKey) {
   };
 }
 
-/** The Inbox's socket at the relay, held for one `hello`: what the relay lists for each device. */
-async function helloOf(relayUrl: string, mailboxId: string, secret: string): Promise<Json> {
-  // Bun's WebSocket takes headers as its second argument.
-  const socket = new WebSocket(`${relayUrl.replace(/^http/, "ws")}/v1/mailboxes/${mailboxId}/socket`, { headers: { Authorization: `Bearer ${secret}` } } as unknown as string[]);
-  try {
-    return await new Promise<Json>((done, fail) => {
-      socket.onmessage = (event) => done(JSON.parse(String(event.data)));
-      socket.onerror = () => fail(new Error("the socket failed"));
-      setTimeout(() => fail(new Error("no hello")), 10_000);
-    });
-  } finally {
-    socket.close();
-  }
-}
-
-// ── The relay under wrangler dev ──
-
-interface Relay {
-  url: string;
-  persist: string;
-  log: () => string;
-  /** Resolves once wrangler has exited, so its storage may be opened. */
-  stop: () => Promise<void>;
-}
-
-async function startRelay(name: string, vars: Record<string, string>, options: { keep?: boolean } = {}): Promise<Relay> {
-  const port = freePort();
-  const persist = join(relayDir, ".wrangler", `proof-${name}`);
-  // `keep`: start again on the storage a stopped relay left (a mailbox made by an older schema).
-  if (!options.keep) rmSync(persist, { recursive: true, force: true });
-  mkdirSync(persist, { recursive: true });
-  // The throwaway key lives in this env file for the run only (.wrangler/ is not committed), never on a command line.
-  const envFile = join(persist, "relay.env");
-  // A value that is not plain (the FCM service account's JSON) goes single-quoted: dotenv reads it literally.
-  writeFileSync(envFile, Object.entries(vars).map(([k, v]) => (/^[\w.:/+=-]*$/.test(v) ? `${k}=${v}\n` : `${k}='${v}'\n`)).join(""), { mode: 0o600 });
-  let output = "";
-  const child = Bun.spawn(
-    [wrangler, "dev", "--local", "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(freePort()), "--persist-to", persist, "--env-file", envFile, "--show-interactive-dev-session=false"],
-    { cwd: relayDir, stdout: "pipe", stderr: "pipe", env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1" } },
-  );
-  for (const stream of [child.stdout, child.stderr]) {
-    void (async () => {
-      for await (const chunk of stream) output += new TextDecoder().decode(chunk);
-    })();
-  }
-  const url = `http://127.0.0.1:${port}`;
-  await until(
-    () => fetch(`${url}/v1/nothing`).then((r) => r.status).catch(() => 0),
-    (status) => status === 404,
-    `wrangler dev for ${name}\n${output}`,
-    60_000,
-  );
-  return {
-    url,
-    persist,
-    log: () => output,
-    stop: async () => {
-      child.kill();
-      rmSync(envFile, { force: true });
-      // The relay's own log, kept beside its storage for whoever reads the run (the workflow uploads it).
-      writeFileSync(join(persist, "wrangler.log"), output);
-      await child.exited;
-    },
-  };
-}
-
-/** The relay's Durable Object storage: the SQLite file of each mailbox. */
-function mailboxFiles(relay: Relay): string[] {
-  const dir = join(relay.persist, "v3", "do", "plannotator-relay-Mailbox");
-  return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".sqlite") && f !== "metadata.sqlite").map((f) => join(dir, f)) : [];
-}
-
-function readMailbox(relay: Relay, mailboxId: string): { mailbox: Json | null; devices: Json[] } {
-  for (const file of mailboxFiles(relay)) {
-    const db = new Database(file, { readonly: true });
-    try {
-      const name = db.query("SELECT name FROM __miniflare_do_name").get() as { name: string } | null;
-      if (name?.name !== mailboxId) continue;
-      const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
-      if (!tables.includes("mailbox")) return { mailbox: null, devices: [] };
-      return { mailbox: db.query("SELECT * FROM mailbox").get() as Json, devices: db.query("SELECT * FROM devices ORDER BY id").all() as Json[] };
-    } finally {
-      db.close();
-    }
-  }
-  return { mailbox: null, devices: [] };
-}
-
-/** The mailbox's tables as they are on disk, for the proof's record: ids, numbers, hashes and envelopes. */
-function dumpMailbox(relay: Relay, mailboxId: string): Json {
-  for (const file of mailboxFiles(relay)) {
-    const db = new Database(file, { readonly: true });
-    try {
-      const name = db.query("SELECT name FROM __miniflare_do_name").get() as { name: string } | null;
-      if (name?.name !== mailboxId) continue;
-      const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite%'").all() as { name: string }[]).map((t) => t.name);
-      return Object.fromEntries(tables.map((t) => [t, db.query(`SELECT * FROM ${t}`).all()]));
-    } finally {
-      db.close();
-    }
-  }
-  return {};
-}
-
-/** Every byte the relay's storage holds, to search for what it must never hold. */
-function storageBytes(relay: Relay): Buffer {
-  const dir = join(relay.persist, "v3", "do", "plannotator-relay-Mailbox");
-  return Buffer.concat(readdirSync(dir).map((f) => readFileSync(join(dir, f))));
-}
-
-function holds(bytes: Buffer, text: string): boolean {
-  return bytes.includes(Buffer.from(text, "utf8")) || bytes.includes(Buffer.from(text, "utf16le"));
-}
-
 // ── The proof ──
 
 describe("the relay with an Inbox, under wrangler dev", () => {
@@ -436,7 +299,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     const stored = readMailbox(relay, kept.mailbox_id);
     expect(stored.mailbox).toEqual({ secret_sha256: sha256(kept.secret) });
     expect(stored.devices).toEqual([
-      { id: phone.id, secret_sha256: sha256(phone.relaySecret), carriage: 1, cursor: expect.any(Number), apns_token: null, apns_environment: null, next_n: expect.any(Number), fcm_token: null },
+      { id: phone.id, secret_sha256: sha256(phone.relaySecret), carriage: 1, cursor: expect.any(Number), apns_token: null, apns_environment: null, next_n: expect.any(Number), fcm_token: null, agent: 0, signal_sha256: null, signal: null },
     ]);
     expect((await device(phone.id)).carriage).toBe(true);
   });
