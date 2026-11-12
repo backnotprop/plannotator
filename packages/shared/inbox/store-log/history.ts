@@ -56,9 +56,13 @@ export function threadNameIndexKey(projectId: string, name: string): string {
   return `${projectId}\0${inboxThreadNameKey(name)}`;
 }
 
+/** A `#` and then a letter or digit: every hashtag starts so, and most bodies (a `## heading` is none) have none. */
+const TAG_START = /#[\p{L}\p{N}]/u;
+
 /** The hashtag keys a message's FIRST line carries (the Board's `#` tags), each once. */
 export function firstLineTagKeys(first: InboxMessage): string[] {
-  if (typeof first.body !== "string" || !first.body.includes("#")) return [];
+  // The parser blanks code and links before it looks, which costs on every message: skipped when no tag can start.
+  if (typeof first.body !== "string" || !TAG_START.test(first.body)) return [];
   return [...new Set(inboxHashtags(first.body).map((tag) => tag.key))].filter((key) => !!key);
 }
 

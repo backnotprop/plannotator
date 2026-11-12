@@ -1,6 +1,6 @@
 /**
  * The SQLite tables hold what the store holds, so the later stages can read them by query instead of
- * replaying the change log: each message's and question's current row is the store's record, each thread's
+ * replaying the change log: each message's and question's current row points at the store's record, each thread's
  * message count and archive time match, the person's answer is one row in the state the question says
  * (picked, sent, withdrawn), a deleted thread is a tombstone with no words left, and the seq floor survives it.
  * The change log keeps each question's history of choices and Sends, with a run of typing kept as one row.
@@ -20,6 +20,9 @@ import { jsonlInboxLog } from "../jsonl-log";
 import { teeLog } from "../tee-log";
 import { writeInboxWorld } from "../world";
 import { INBOX_DB_FILE, sqliteInboxLog } from "./sqlite-log";
+
+/** A current row's record: the change-log line it points at (its kind, id and seq; the last such row). */
+const CURRENT = (kind: string, r: string) => `(SELECT e.data FROM events e WHERE e.kind = '${kind}' AND e.subject_id = ${r}.id AND e.seq = ${r}.seq ORDER BY e.id DESC LIMIT 1) AS record`;
 
 const roots: string[] = [];
 afterAll(() => {
@@ -41,12 +44,12 @@ test("every message, question, answer and thread row matches the store's record;
       const root = store.message(threadId)!;
       expect(db.query("SELECT message_count, resolved_at, deleted_at FROM threads WHERE id = ?").get(threadId)).toEqual({ message_count: ids.length, resolved_at: root.resolved_at, deleted_at: null });
       for (const id of ids) {
-        const row = db.query("SELECT record, thread_id, first_seq FROM messages WHERE id = ?").get(id) as { record: string; thread_id: string; first_seq: number };
+        const row = db.query(`SELECT ${CURRENT("message", "r")}, thread_id, first_seq FROM messages r WHERE id = ?`).get(id) as { record: string; thread_id: string; first_seq: number };
         expect(JSON.parse(row.record)).toEqual(store.message(id));
         expect(row.first_seq).toBe(store.messageCursor(id)!);
         for (const q of store.questionsOf(id)) {
           const record = store.questionRecord(`${id}/${q.key}`)!;
-          const qrow = db.query("SELECT record, thread_id, current_answer_id FROM questions WHERE id = ?").get(record.id) as { record: string; thread_id: string; current_answer_id: string | null };
+          const qrow = db.query(`SELECT ${CURRENT("question", "r")}, thread_id, current_answer_id FROM questions r WHERE id = ?`).get(record.id) as { record: string; thread_id: string; current_answer_id: string | null };
           expect(JSON.parse(qrow.record)).toEqual(record);
           expect(qrow.thread_id).toBe(threadId);
           const answer = db.query("SELECT id, state, answer FROM answers WHERE question_id = ?").get(record.id) as { id: string; state: string; answer: string | null } | null;
