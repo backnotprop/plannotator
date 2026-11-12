@@ -1,4 +1,3 @@
-/** Document headings, not headings in question context, drive Contents. DOM_TESTS=1. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';

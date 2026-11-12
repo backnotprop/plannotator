@@ -1,19 +1,3 @@
-/**
- * Where version-diff comments land in exported feedback.
- *
- * A comment made in the plan/version diff view carries `blockId`
- * `diff-block-N`: N indexes the diff against the selected base, and nothing on
- * the annotation maps it back to a document block. They used to rank -1 and
- * print FIRST in a document's feedback, ahead of comments that come before the
- * changed text.
- *
- * Failures to catch:
- *  - Diff comments sorting ahead of the document's own comments again.
- *  - Diff comments out of diff order (diff-block-10 before diff-block-2).
- *  - The `[In diff content]` label disappearing.
- *  - Any change to the order of a document with NO diff comments (the root
- *    export must stay byte-identical; fuzzed against the pre-fix comparator).
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { exportAnnotations, exportLinkedDocAnnotations, parseMarkdownToBlocks } from './parser';
@@ -79,8 +63,6 @@ describe('version-diff comments in exported feedback', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  // The pre-fix comparator, verbatim: with no diff comments the export must
-  // not move a single entry.
   const preFixSort = (annotations: Annotation[], blocks: Block[]) => {
     const order = new Map<string, number>();
     blocks.forEach((blk, index) => order.set(blk.id, index));
@@ -108,7 +90,6 @@ describe('version-diff comments in exported feedback', () => {
         `TEXT-${round}-${i}`,
         { startOffset: rand(5) },
       ));
-      // Every entry's text is unique, so its position in the output is its rank.
       const out = exportAnnotations(BLOCKS, annotations);
       const expected = preFixSort(annotations, BLOCKS).map((a) => a.text!);
       for (const text of expected) expect(out).toContain(text);

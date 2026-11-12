@@ -1,8 +1,3 @@
-/**
- * "Ask this session" in the shared chat hook: the busy choice and the
- * separate-AI fallback re-ask a question, and the plain wire is unchanged for
- * every other provider.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -98,8 +93,6 @@ describe.if(hasDom)('useAIChat — Ask this session', () => {
     expect(answered.status).toBeUndefined();
   });
 
-  // An "Explain this finding" ask: the chat shows the short line, the session
-  // gets the full prompt, and the busy re-ask keeps both.
   test('a display prompt shows in the chat; the session gets the full prompt, also on the re-ask', async () => {
     const queries: Array<Record<string, unknown>> = [];
     setAITransport({
@@ -122,8 +115,6 @@ describe.if(hasDom)('useAIChat — Ask this session', () => {
     expect(chat.current!.messages[0].question.prompt).toBe('Short');
   });
 
-  // The failure this guards: session_taken_over handled like any error, which
-  // hides the partial answer and raises the panel's error banner.
   test('session_taken_over keeps the streamed answer and records the note, not an error', async () => {
     setAITransport({
       session: async () => Response.json({ sessionId: 's1' }),
@@ -192,7 +183,6 @@ describe.if(hasDom)('useAIChat — onDelivered', () => {
     const chat = await mount();
     await act(async () => { await chat.current!.ask({ prompt: 'q', onDelivered: () => { calls += 1; } }); });
     expect(calls).toBe(0);
-    // The callback never reaches the wire.
     expect(Object.keys(queries[0]!)).not.toContain('onDelivered');
     const busyId = chat.current!.messages[0]!.question.id;
     await act(async () => { await chat.current!.retry(busyId, { busyPolicy: 'wait' }); });

@@ -1,35 +1,13 @@
-/**
- * Builds the clipboard payload that teaches an external agent how to post
- * annotations into a live Plannotator **annotate** session via
- * /api/external-annotations. The annotate twin of `planAgentInstructions.ts`:
- * same endpoint and wire shape (annotate servers run the plan-mode
- * validator, `transformPlanInput` in `@plannotator/core/external-annotation`),
- * but it talks about a document instead of a plan, carries no deny/resubmit
- * loop, and adds one short section for the surface the session is showing.
- *
- * Only document what the validator accepts: POST takes `source`, `type`,
- * `text`, `originalText`, `author`, and a `diagramAnchor`; an element anchor
- * (`htmlAnchor`) is accepted by PATCH only.
- */
-
 export type AnnotateInstructionsSurface =
-  /** Markdown / plain-text file, URL, or converted HTML. */
   | 'markdown'
-  /** Raw HTML file rendered as the page. */
   | 'html'
-  /** A running local app mirrored through the live proxy. */
   | 'live-app'
-  /** A whole-file Mermaid / Graphviz source rendered as one diagram. */
   | 'diagram'
-  /** A folder session (file browser, one document open at a time). */
   | 'folder'
-  /** annotate-last: the agent's own message. */
   | 'message';
 
 interface SurfaceSection {
-  /** The one command that fetches what the user is looking at. */
   read: (origin: string) => string;
-  /** Surface-specific targeting rules, printed after the read command. */
   notes: (origin: string) => string;
 }
 
@@ -145,9 +123,6 @@ curl -s -X DELETE "${origin}/api/external-annotations?source=claude-code"  # rem
 `;
 }
 
-/** Which surface section an annotate session's instructions carry. A folder
- *  session is a folder whatever file type is open (the scoping rule is what
- *  the agent needs to know); a live app wins over its HTML render. */
 export function resolveAnnotateInstructionsSurface(input: {
   liveApp: boolean;
   annotateSource: 'file' | 'message' | 'folder' | null;

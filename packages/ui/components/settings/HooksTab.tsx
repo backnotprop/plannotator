@@ -85,7 +85,6 @@ export const HooksTab: React.FC = () => {
         These hooks inject context into your planning agent before it writes a plan.
       </p>
 
-      {/* PFM Reminder Card */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="flex items-start gap-3">
           <img
@@ -130,7 +129,6 @@ export const HooksTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Compound Improvement Hook Card */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="flex items-start gap-3">
           <img

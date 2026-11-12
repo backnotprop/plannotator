@@ -1,28 +1,3 @@
-/**
- * The Mermaid anchor codec and `findDiagramTarget` over REAL rendered SVGs
- * (test-setup/fixtures/diagrams/*.svg: mermaid's own output captured from a
- * headless Chromium with MERMAID_CONFIG — strict, htmlLabels — and render
- * id "diagram-fixture"; every id shape is byte-identical under 12.0.0, see
- * HANDOFF.md "Mermaid 12"). Nothing here is hand-written; happy-dom parses
- * the svg, so the ids, classes and label text the codec reads are the real
- * ones.
- *
- * What regresses if these fail:
- * - `findDiagramTarget` misses or mis-resolves an id in a real svg: the
- *   flowchart counter suffix (`flowchart-D-1`) is matched whole, an edge id
- *   is split at the wrong underscore, a state pseudo-state (`root_start`)
- *   is offered as a node, a requirement node is missed because its id has
- *   no family prefix, or the label fallback (restore step 2) does not run
- *   when the id is gone;
- * - an edge between underscored node ids (`user_login --> check_auth`,
- *   rendered as `L_user_login_check_auth_0`) is split at the first
- *   underscore, so the wrong `from` and `to` are persisted;
- * - the scrub belt lets a script, a handler attribute or a javascript:
- *   reference through into the app DOM, or keeps an `<a href>` that would
- *   turn a pinpoint click into a navigation.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,7 +24,6 @@ function loadSvg(name: string): SVGSVGElement {
   return svg;
 }
 
-/** Every addressable part the codec describes in a fixture, by element id. */
 function describeAll(svg: Element): Map<string, DiagramTarget> {
   const out = new Map<string, DiagramTarget>();
   for (const el of Array.from(svg.querySelectorAll(DIAGRAM_TARGET_SELECTOR))) {
@@ -82,7 +56,6 @@ describe.if(hasDom)('the flowchart family (06-flowchart-review-decision, 01-flow
       'diagram-fixture-flowchart-R-5',
     );
     expect(findDiagramTarget(svg, { family: 'flowchart', kind: 'node', id: 'Gone', label: 'Nowhere' }, RENDER_ID)).toBeNull();
-    // A wrong render id prefix is never a match.
     expect(findDiagramTarget(svg, { family: 'flowchart', kind: 'node', id: 'M', label: '' }, 'diagram-other')).toBeNull();
   });
 
@@ -97,13 +70,9 @@ describe.if(hasDom)('the flowchart family (06-flowchart-review-decision, 01-flow
   });
 
   test('an edge between underscored node ids reads both ends whole', () => {
-    // The declared node ids decide the split; the first underscore would
-    // persist `from: "user"` for `user_login --> check_auth`.
     const nodeIds = new Set(['user_login', 'check_auth', 'user_home']);
     expect(splitEdgeStem('user_login_check_auth', nodeIds)).toEqual({ from: 'user_login', to: 'check_auth' });
     expect(splitEdgeStem('check_auth_user_home', nodeIds)).toEqual({ from: 'check_auth', to: 'user_home' });
-    // Through the real element walk: a minimal flowchart svg in the
-    // runtime's own id grammar.
     const svg = parseInertSvg(
       '<svg aria-roledescription="flowchart-v2">' +
         '<g class="nodes"><g id="diagram-us-flowchart-user_login-0" class="node"><span class="nodeLabel">Login</span></g>' +
@@ -155,9 +124,6 @@ describe.if(hasDom)('the other id-bearing families', () => {
   });
 
   test('sequence: parts carry classes, not ids, so actors go by name and messages, notes and frames by ordinal', () => {
-    // What regresses: clicking a sequence diagram does nothing (the owner's
-    // report), a bottom actor box is a different target from its top box,
-    // or a message's text and its line are two targets.
     const svg = loadSvg('11-sequence-diagram');
     expect(diagramFamilyOf(svg)).toBe('sequence');
     const top = svg.querySelector('rect.actor-top[name="H"]')!;
@@ -172,7 +138,6 @@ describe.if(hasDom)('the other id-bearing families', () => {
     const texts = Array.from(svg.querySelectorAll('text.messageText'));
     const first: DiagramTarget = { family: 'sequence', kind: 'edge', id: 'msg-1', from: 'CC', to: 'H', label: 'ExitPlanMode' };
     expect(targetFromElement(svg, lines[0]!, RENDER_ID)).toEqual(first);
-    // The message TEXT is the same message: it is what a person clicks.
     expect(targetFromElement(svg, texts[0]!, RENDER_ID)).toEqual(first);
     expect(findDiagramTarget(svg, first, RENDER_ID)).toBe(lines[0]!);
 
@@ -188,13 +153,9 @@ describe.if(hasDom)('the other id-bearing families', () => {
   test('sequence restore: an ordinal that moved is found by its label; an edited label keeps its ordinal', () => {
     const svg = loadSvg('11-sequence-diagram');
     const lines = Array.from(svg.querySelectorAll('.messageLine0, .messageLine1'));
-    // A message was inserted above: the stored ordinal now names another
-    // message, but ONE message carries the stored label.
     expect(findDiagramTarget(svg, { family: 'sequence', kind: 'edge', id: 'msg-1', label: 'open review UI' }, RENDER_ID)).toBe(lines[2]!);
-    // The text was edited in place: nothing carries the label, the ordinal stands.
     expect(findDiagramTarget(svg, { family: 'sequence', kind: 'edge', id: 'msg-2', label: 'a label nobody has' }, RENDER_ID)).toBe(lines[1]!);
     expect(findDiagramTarget(svg, { family: 'sequence', kind: 'edge', id: 'msg-99', label: 'gone' }, RENDER_ID)).toBeNull();
-    // An actor whose name is gone restores by its unique label.
     expect(findDiagramTarget(svg, { family: 'sequence', kind: 'node', id: 'Renamed', label: 'Browser' }, RENDER_ID)).toBe(
       svg.querySelector('rect.actor-top[name="B"]'),
     );
@@ -228,14 +189,10 @@ describe.if(hasDom)('scrubDiagramSvg (the belt over the engine output)', () => {
     expect(markup).not.toContain('onload');
     expect(markup).not.toContain('javascript:');
     expect(markup).not.toContain('data:text/html');
-    // Every anchor loses its target, the fragment link included; the
-    // wrapped node survives.
     expect(svg.querySelector('a[href]')).toBeNull();
     expect(svg.querySelector('#x-flowchart-B-1')).not.toBeNull();
     expect(markup).not.toContain('href="#x-flowchart-A-0"');
     expect(markup).toContain('id="x-flowchart-A-0"');
-    // An http(s) image reference is the one external reference that stays;
-    // the data: one before it lost its href.
     const images = Array.from(svg.querySelectorAll('image'));
     expect(images).toHaveLength(2);
     expect(images[0]!.hasAttribute('href')).toBe(false);
@@ -261,7 +218,6 @@ describe.if(hasDom)('edge labels, duplicate labels, and the hit layer', () => {
     const label = Array.from(svg.querySelectorAll('g.edgeLabel')).find((g) => g.textContent?.includes('Yes'))!;
     expect(label).toBeDefined();
     expect(targetFromElement(svg, label, RENDER_ID)).toEqual({ family: 'flowchart', kind: 'edge', from: 'D', to: 'M', label: 'Yes' });
-    // Restore lands on the edge path, never on the label group.
     expect(findDiagramTarget(svg, { family: 'flowchart', kind: 'edge', from: 'D', to: 'M', label: '' }, RENDER_ID)?.tagName.toLowerCase()).toBe('path');
   });
 
@@ -277,13 +233,10 @@ describe.if(hasDom)('edge labels, duplicate labels, and the hit layer', () => {
   });
 
   test('every edge gets ONE bare hit path in a layer appended last, placed by the ancestors\' transforms', () => {
-    // What regresses: an edge is a 1–2 px target; a sibling clone is covered
-    // by the edge's own label box; a clone that keeps `data-id` makes a
-    // host's `[data-id="L_D_M_0"]` match twice.
     const svg = loadSvg('06-flowchart-review-decision');
     const dataIdBefore = svg.querySelectorAll('[data-id="L_D_M_0"]').length;
     widenEdgeHitAreas(svg);
-    widenEdgeHitAreas(svg); // idempotent
+    widenEdgeHitAreas(svg);
     const layers = svg.querySelectorAll('[data-diagram-hit-layer]');
     expect(layers.length).toBe(1);
     expect(svg.lastElementChild).toBe(layers[0]!);
@@ -328,7 +281,6 @@ describe.if(hasDom)('scopeDiagramCss: a <style> in a diagram may only style that
       '@keyframes dash{to{stroke-dashoffset:0}} @media print{#d1 .node{fill:#000} #victim{display:none}}';
     const kept = scopeDiagramCss(css, 'd1');
     expect(kept).toBe('#d1 .node rect{fill:#123}#d1 .f{filter:url(#drop)}@keyframes dash{to{stroke-dashoffset:0}}@media print{#d1 .node{fill:#000}}');
-    // With no root id nothing can be scoped: only keyframes survive.
     expect(scopeDiagramCss('#d1 .node{fill:red} @keyframes k{to{opacity:1}}', '')).toBe('@keyframes k{to{opacity:1}}');
   });
 

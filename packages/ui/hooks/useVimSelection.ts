@@ -50,16 +50,13 @@ import {
 import { scrollVimTargetIntoView } from '../utils/vimScroll';
 import { useVimDocumentFocus } from './useVimDocumentFocus';
 
-/** Inputs required by the Markdown semantic Vim controller. */
 export interface UseVimSelectionOptions {
   readonly containerRef: RefObject<HTMLElement | null>;
-  /** The element that actually scrolls (ScrollViewportContext value). */
   readonly scrollViewport?: HTMLElement | null;
   readonly enabled: boolean;
   readonly hudEnabled: boolean;
   readonly blocked: boolean;
   readonly activeMode: EditorMode;
-  /** Identity that changes when the rendered document is replaced. */
   readonly contentVersion?: unknown;
   readonly onHighlightRange: (range: Range, modeOverride?: EditorMode) => void;
   readonly onCodeBlockAction: (
@@ -68,11 +65,9 @@ export interface UseVimSelectionOptions {
     modeOverride?: EditorMode,
   ) => void;
   readonly onMathAction: (element: HTMLElement, modeOverride?: EditorMode) => void;
-  /** Clear pointer-owned feedback after a handled keyboard command. */
   readonly onHandledCommand?: () => void;
 }
 
-/** State and event handlers rendered by the Markdown Viewer. */
 export interface UseVimSelectionReturn {
   readonly state: VimSelectionState;
   readonly focused: boolean;
@@ -227,14 +222,6 @@ function applyVisualBlockSelection(
   if (points) applyNativeTextSelection(graph.container, points.cursor, points.anchor);
 }
 
-/**
- * Clear the page selection only when it touches the viewer's own document.
- *
- * A page has ONE selection, so an unconditional `removeAllRanges()` also kills
- * a selection the user just made somewhere else (another panel of a host app,
- * the annotation sidebar). A selection belongs to the viewer when its anchor or
- * focus lies inside the container; with no container nothing is cleared.
- */
 function clearSelectionWithin(container: HTMLElement | null | undefined): void {
   if (!container) return;
   const selection = window.getSelection();
@@ -248,14 +235,6 @@ function clearSelectionWithin(container: HTMLElement | null | undefined): void {
   }
 }
 
-/**
- * Own semantic block navigation and precise text selection while the rendered
- * document has focus.
- *
- * The shortcut listener is attached only to the rendered document element.
- * Disabling the opt-in setting makes it inert, and native controls inside the
- * document retain their own keys.
- */
 export function useVimSelection({
   containerRef,
   scrollViewport,
@@ -282,8 +261,6 @@ export function useVimSelection({
   const pointerFocusRef = useRef(false);
   const restoringFocusRef = useRef(false);
 
-  // Read the live scroll viewport without adding a dependency to every
-  // navigation callback below.
   const scrollViewportRef = useRef(scrollViewport);
   scrollViewportRef.current = scrollViewport;
 
@@ -317,10 +294,6 @@ export function useVimSelection({
     return next;
   }, [containerRef, setState]);
 
-  // Whether vim was on since the last reset. The disabled branch below resets
-  // only when vim actually goes from on to off: on a mount where vim was never
-  // on there is nothing to reset, and `window.getSelection()` in
-  // `clearSelectionWithin` forces a layout on every document open.
   const wasEnabledRef = useRef(enabled);
 
   useEffect(() => {

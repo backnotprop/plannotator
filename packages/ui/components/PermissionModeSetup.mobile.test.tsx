@@ -3,12 +3,6 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { PermissionModeSetup } from './PermissionModeSetup';
 
-/**
- * The chooser is modal and has no dismiss control, so a card taller than the
- * viewport is a trap: on a short landscape phone its options and its Continue
- * button both sat off-screen with nothing scrollable. Pin the bounded shell.
- */
-
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -40,8 +34,6 @@ describe.if(hasDom)('PermissionModeSetup shell', () => {
     );
     expect(scroller).not.toBeUndefined();
 
-    // The confirm control stays inside the card, below the scrolling region,
-    // so it can never be pushed past the viewport edge.
     const confirm = Array.from(card.querySelectorAll('button'))
       .find((button) => button.textContent?.trim() === 'Continue');
     expect(confirm).not.toBeUndefined();

@@ -2,18 +2,8 @@ import React, { useId } from 'react';
 
 interface NewChatButtonProps {
   onNewChat: () => void;
-  /** A question is in flight: a new chat would cut it off, so it waits. */
   busy?: boolean;
-  /**
-   * A busy "Ask this session" answer still offers "Ask when it finishes" /
-   * "Interrupt and ask now": clearing would drop that question unasked.
-   */
   pendingChoice?: boolean;
-  /**
-   * "Ask this session": the agent session that opened Plannotator answers, and
-   * it keeps its own memory, so the button only clears the panel. The label
-   * says so instead of promising fresh context.
-   */
   sessionBridge?: boolean;
 }
 
@@ -29,18 +19,12 @@ export function newChatLabels(sessionBridge: boolean): { label: string; title: s
       };
 }
 
-/** Why the button is unavailable right now; null when it can be used. */
 export function newChatBlockedReason(options: { busy?: boolean; pendingChoice?: boolean }): string | null {
   if (options.busy) return 'Wait for the answer, or stop it, before starting a new chat.';
   if (options.pendingChoice) return 'First choose "Ask when it finishes" or "Interrupt and ask now" for the waiting question.';
   return null;
 }
 
-/**
- * The Ask AI panel's "New chat" row (#1981). While unavailable it stays
- * focusable (`aria-disabled`, clicks ignored) and its reason is its
- * description, so keyboard and screen-reader users learn why.
- */
 export const NewChatButton: React.FC<NewChatButtonProps> = ({
   onNewChat,
   busy = false,

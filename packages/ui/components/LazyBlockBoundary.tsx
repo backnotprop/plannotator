@@ -1,20 +1,5 @@
 import React, { useEffect, useState } from 'react';
 
-/**
- * A part of the page that a code-split build loads as its own chunk (a
- * diagram, an HTML or SVG embed, the diagram popout, the Markdown preview)
- * can fail to arrive: a flaky link, a server that has stopped, or a tab older
- * than the server's build, whose chunk names no longer exist. React.lazy then
- * throws, and without a boundary React unmounts the whole app, taking the
- * user's unsent comments and edits off the screen with it.
- *
- * This boundary keeps the failure in place of that one part. The caller's
- * `fallback` gets a small notice with a Reload action (`LazyLoadNotice`) and
- * draws it beside whatever it can still show, usually the block's source.
- * The rest of the page stays mounted. Nothing reloads by itself.
- *
- * With no error it renders its children and nothing else.
- */
 export class LazyBlockBoundary extends React.Component<
   { fallback: (notice: React.ReactNode) => React.ReactNode; children: React.ReactNode },
   { failed: boolean; error: unknown }
@@ -35,12 +20,6 @@ export class LazyBlockBoundary extends React.Component<
   }
 }
 
-/**
- * The URL of the chunk a failed dynamic import asked for, when the error names
- * one on this page's origin. Chromium and Firefox put it in the message
- * ("Failed to fetch dynamically imported module: http://…/assets/x.js");
- * Safari does not, and then the notice says the general thing.
- */
 export function failedChunkUrl(error: unknown): string | null {
   if (typeof window === 'undefined') return null;
   const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
@@ -54,12 +33,6 @@ export function failedChunkUrl(error: unknown): string | null {
   }
 }
 
-/**
- * One quiet line: why the part is missing, and Reload. A chunk the server
- * answers with 404 is a tab older than the server's build (the server was
- * updated on the same port), so the line says that instead. Finding out costs
- * one HEAD request, made only after a failure.
- */
 export const LazyLoadNotice: React.FC<{ error: unknown }> = ({ error }) => {
   const [updated, setUpdated] = useState(false);
   useEffect(() => {
@@ -84,10 +57,6 @@ export const LazyLoadNotice: React.FC<{ error: unknown }> = ({ error }) => {
       className="mb-1.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground"
     >
       <span>{updated ? 'This page was updated.' : "Couldn't load this view."}</span>
-      {/* The hit area is padding cancelled by a negative margin, so the line
-          looks the same: 24px tall everywhere, 44px on a touch screen. On
-          touch it grows upward into the block's top margin, never down over
-          the source under it. */}
       <button
         type="button"
         onClick={() => window.location.reload()}

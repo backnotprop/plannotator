@@ -1,15 +1,3 @@
-/**
- * Engine contract, no DOM: a fake ModelContext is injected directly.
- *
- * Regressions guarded: a set attaches once and detaches by abort; a
- * StrictMode double attach ends with exactly one live registration; a
- * re-attach with unchanged descriptors swaps the handler without touching
- * registerTool; duplicate names across sets are skipped with a warning and
- * never replace the live tool; a throwing handler, an `undefined` result and
- * an unserializable result all reach the caller as an envelope with nudges
- * (never a rejection); schema problems answer `invalid_input` before the
- * handler runs; activity is recorded only for successful calls.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createToolRegistry, defineTool, fail, ok, runTool, type ToolsetHooks } from './toolset';
 import type { ModelContextLike, ModelContextToolDescriptor } from './modelContext';
@@ -32,7 +20,6 @@ function fakeContext(): FakeContext {
       tools.set(tool.name, tool);
       return new Promise((_resolve, reject) => {
         options?.signal?.addEventListener('abort', () => {
-          // Spec: abort steps unregister synchronously and reject the registration.
           tools.delete(tool.name);
           reject(options.signal!.reason ?? new DOMException('aborted', 'AbortError'));
         }, { once: true });
@@ -114,7 +101,6 @@ describe('createToolRegistry', () => {
     expect(warnings.length).toBe(1);
     expect(ctx.registrations).toBe(1);
     detachB();
-    // Detaching the loser must not take the winner down.
     expect(registry.names()).toEqual(['p.echo']);
   });
 

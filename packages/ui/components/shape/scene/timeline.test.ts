@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import type { ShapeScene, ShapeSceneKey } from '@plannotator/core/shape-scene';
 import { beatAt, colourCss, eased, lookAt, nextBeatTime, places, reducedTime, type Geo } from './timeline';
 
-// A straight wire from (0,0) to (100,0) bent at (100,0) down to (100,100): a point along it is not on the chord.
 const geo: Geo = {
   home: (id) => (id === 'job' ? { x: 5, y: 5 } : id === 'box' ? { x: 50, y: 80 } : null),
   along: (id, p) => (id === 'wire' ? (p <= 0.5 ? { x: 200 * p, y: 0 } : { x: 100, y: 200 * (p - 0.5) }) : null),
@@ -60,7 +59,6 @@ describe('scene timeline', () => {
 
 describe('reduced motion: only beats, never between them', () => {
   const s = { end: 20, beats: [{ at: 0, say: 'a' }, { at: 5, say: 'b' }, { at: 12, say: 'c' }] } as ShapeScene;
-  // What regresses: a drag under reduced motion lands half way through a move, or Play steps past the last beat.
   test('a drag lands on the beat at or before it', () => {
     expect([reducedTime(s, 0), reducedTime(s, 4.9), reducedTime(s, 5), reducedTime(s, 19)]).toEqual([0, 0, 5, 12]);
   });

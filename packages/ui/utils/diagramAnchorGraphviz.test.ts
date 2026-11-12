@@ -1,30 +1,3 @@
-/**
- * The Graphviz entry of the renderer slot over the REAL `@viz-js/viz` 3.30.0
- * engine (the wasm runs under Bun; happy-dom parses the svg it emits, so
- * every id, class and title below is the engine's own), and the Graphviz
- * finder beside the Mermaid codec.
- *
- * What regresses if these fail:
- * - the finder keys on the emitted `nodeN` id, which is a declaration
- *   counter: inserting `A -> Z` before `B -> C` moves C from node3 to node4,
- *   so every comment on C would restore onto Z. The anchor is the DOT name
- *   from the group's `<title>`;
- * - an edge is described without both ends, or a cluster is missed, so the
- *   composer cannot open on them; the label fallback (restore step 2) does
- *   not run when the name is gone;
- * - `graphvizSourceLine` points at the wrong statement;
- * - the Graphviz svg bypasses the scrub: a DOT `URL=` attribute emits
- *   `<a xlink:href>` around the node (a pinpoint click becomes a
- *   navigation) or a `javascript:` URL survives;
- * - the theme pass recolors an author's color, leaves the white page
- *   polygon (an opaque block on the dark canvas), or misses the default
- *   black strokes and text;
- * - a syntax error throws instead of resolving to a value with the line;
- * - `diagramFinder("graphviz")` and the render result's `findTarget`
- *   disagree (two seams).
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { buildDiagramAnchorValue, parseDiagramAnchor } from './diagram-anchor';
@@ -88,8 +61,6 @@ describe.if(hasDom)('the Graphviz renderer entry over the real engine', () => {
     const after = await render(AFTER, 'diagram-gv-after');
     const c = { family: 'graphviz' as const, kind: 'node' as const, id: 'C', label: 'C' };
     expect(graphvizFindTarget(before, c)?.id).toBe('node3');
-    // The insertion moved C: the same anchor now lands on node4, whose
-    // title is C. An id-keyed finder would have returned Z (node3).
     expect(graphvizFindTarget(after, c)?.id).toBe('node4');
     expect(titled(after, 'g.node', 'Z')?.id).toBe('node3');
     const bc = { family: 'graphviz' as const, kind: 'edge' as const, from: 'B', to: 'C', label: '' };

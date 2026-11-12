@@ -1,10 +1,3 @@
-/**
- * Where StartCutPath splits a path (DOM-gated). The last name is the part
- * that never shrinks, so a wrong split cuts the name the reader needs.
- * Failures to catch: a Windows path split at the wrong separator, a folder
- * given with a trailing separator showing an empty name, and a bare name
- * drawing an empty folders part (a blank "…" before it).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

@@ -1,19 +1,3 @@
-/**
- * Seam test: AlertIconRenderer override (setAlertIconRenderer / resetAlertIconRenderer,
- * and the `alertIconRenderer` key on configurePlannotatorUI).
- *
- * Contract: with no renderer registered, an alert whose title line carries
- * `<!-- icon: name -->` renders the type's own icon (today's behavior). After
- * setAlertIconRenderer(fn), the node fn returns takes the icon slot; fn returning
- * null falls back to the type icon; an emoji on the title line wins over the
- * renderer. resetAlertIconRenderer() restores the default.
- *
- * Requires DOM (happy-dom) — runs under bun test (preloaded via bunfig.toml).
- *
- * IMPORTANT: function references are captured at module-load time (top-level)
- * so they remain valid even when configure.test.ts's mock.module() replaces
- * the module exports later during test execution.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';

@@ -1,11 +1,3 @@
-/**
- * Generate `@plannotator/ui/inbox-thread.css` at `prepack` from `packages/inbox/inbox.css`, the only source,
- * in its order. Comments go. A rule on the page itself (`html`, `body`, `#root`, `:root`) goes unless it only
- * sets `--ib-*` tokens. Every other selector is scoped with `:where(.pn-inbox)`, which adds no specificity, and
- * a `@keyframes` name gains the `ib-` prefix with its uses. Anything else (an unknown at-rule, nested CSS,
- * `body > x`, a keyframe name held in a custom property) fails the build. tests/inbox-thread-css.test.ts checks
- * the result from the outside.
- */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,18 +11,15 @@ const VERBATIM_AT_RULES = new Set(["keyframes", "property"]);
 
 export const parseSheet = (css: string): Root => postcss.parse(css);
 
-/** A selector's compounds and combinators, with what is inside `()`, `[]` and strings emptied. `:where(.pn-inbox)` reads `.pn-inbox`. */
 export function topLevel(selector: string): string[] {
   let flat = selector.replaceAll(SCOPE, ".pn-inbox").replace(/\\.|"[^"]*"|'[^']*'/g, "_");
   for (let was = ""; was !== flat; ) {
     was = flat;
-    // `[]` stays: `[a] [b] > svg` is three compounds, and an attribute can be all a compound is.
     flat = flat.replace(/\([^()]*\)|\[[^[\]]*\]/g, (group) => (group[0] === "[" ? "[]" : ""));
   }
   return flat.replace(/\s*([>+~])\s*/g, " $1 ").trim().split(/\s+/);
 }
 
-/** `selector` scoped to `.pn-inbox`, or null when it styles the page itself and has to go. */
 function scopeSelector(selector: string, onlyTokens: boolean): string | null {
   const tokens = topLevel(selector);
   if (tokens.some((token, i) => /\.pn-inbox(?![\w-])/.test(token) && !/^[+~]$/.test(tokens[i + 1] ?? ""))) return selector;
@@ -43,7 +32,6 @@ function scopeSelector(selector: string, onlyTokens: boolean): string | null {
   return [...words.slice(0, lead), SCOPE, ...words.slice(lead)].join(" ");
 }
 
-/** Move `@keyframes` names into `ib-`, with their uses. A name held in a custom property cannot be followed, so it fails. */
 function renameKeyframes(root: Root): Map<string, string> {
   const renamed = new Map<string, string>();
   root.walkAtRules("keyframes", (rule) => {
@@ -62,11 +50,9 @@ function renameKeyframes(root: Root): Map<string, string> {
   return renamed;
 }
 
-/** One line per rule. A `--x: ;` keeps its space, the Soft switches depend on it. */
 const flatten = (text: string) => text.trim().replace(/\s*\n\s*/g, " ");
 const oneSpaced = (text: string) => flatten(text).replace(/\s+/g, " ");
 
-/** What a block holds. The opening brace is past the selector, which may quote one. */
 function inside(node: AtRule | Rule): string {
   const text = node.toString();
   return flatten(text.slice(text.indexOf("{", node.type === "rule" ? node.selector.length : 0) + 1, text.lastIndexOf("}")));
@@ -94,12 +80,10 @@ function render(parent: Container, within: string[], dropped: { selector: string
   return parts.join("");
 }
 
-/** The generated sheet for a source sheet. Pure and deterministic. */
 export function renderInboxThreadCss(source: string) {
   const root = parseSheet(source);
   root.walkComments((comment) => void comment.remove());
   root.walk((node) => {
-    // Text as written keeps its comments: { value, raw } goes for the parsed value, and spacing raws lose theirs.
     const raws = node.raws as Record<string, unknown>;
     for (const [key, raw] of Object.entries(raws)) {
       if (typeof raw === "object") delete raws[key];

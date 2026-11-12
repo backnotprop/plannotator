@@ -1,8 +1,3 @@
-/**
- * `parseSrcset` splits a `srcset` where the browser does. Failure to catch: a
- * comma inside a URL (a `data:` URL, a query string) treated as a separator,
- * so a rewritten `srcset` names URLs the page never wrote.
- */
 import { describe, expect, test } from 'bun:test';
 import { parseSrcset } from './srcset';
 

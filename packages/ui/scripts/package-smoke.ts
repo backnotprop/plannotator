@@ -143,12 +143,6 @@ assert(
   "Bun must keep the exact-version @plannotator/core dependency linked to the local workspace",
 );
 
-// Every "@plannotator/core/<subpath>" the UI source imports must be an export of
-// the core the consumer will install. Two layers: the local core manifest (what
-// WILL be published when core is bumped) and the registry (what IS published when
-// the pinned core version already exists there). ui 0.38.0 shipped importing
-// @plannotator/core/token-hover while the pinned core 0.25.1 on npm had no such
-// export: the consumer below installs core from the local tarball, so it never saw it.
 function coreSubpathsImportedByUi(): string[] {
   const out = run("grep", [
     "-rhoE",
@@ -174,8 +168,6 @@ for (const subpath of importedCoreSubpaths) {
   );
 }
 function publishedCoreExports(version: string): Record<string, string> | null {
-  // Capture both streams: npm reports E404 on stderr (and, with --json, as a
-  // JSON error on stdout), and execFileSync's message carries neither.
   const result = spawnSync("npm", ["view", `@plannotator/core@${version}`, "exports", "--json"], {
     cwd: repoDir,
     encoding: "utf8",
@@ -299,9 +291,6 @@ try {
     )}\n`,
   );
 
-  // bunx pins the pnpm CLI without requiring a second package manager setup
-  // action. The consumer lives under the OS temp directory, outside this repo,
-  // and therefore cannot satisfy @plannotator/core from the Bun workspace.
   run(
     "bunx",
     [

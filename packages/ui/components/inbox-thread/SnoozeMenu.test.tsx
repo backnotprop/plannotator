@@ -1,14 +1,3 @@
-/**
- * Pick a time (approval "inbox-snooze", option E: two scrolling lists, day and
- * half-hour time), the host-neutral part the Inbox and Workspaces both draw.
- * What can regress: the first position (two days out, 3:00 PM), a list the
- * keys cannot walk (arrows, Page, Home, End, Left and Right between the lists,
- * Enter snoozes), a key leaking to the menu around it, a click that does not
- * pick, today's past half hours offered, and a picked time a day lacks
- * sending nothing.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,12 +18,10 @@ afterEach(() => {
   else process.env.TZ = savedTz;
 });
 
-/** Local wall time in the test's zone. */
 const local = (y: number, m: number, d: number, h: number, mi = 0) => new Date(y, m - 1, d, h, mi);
 
 function render(now: Date, outside: (event: KeyboardEvent) => void = () => {}) {
   const picks: string[] = [];
-  // The menu around the picker, above React's root (a listener on the root itself shares React's own).
   const around = document.createElement('div');
   around.addEventListener('keydown', outside);
   host = document.createElement('div');
@@ -66,7 +53,6 @@ test.skipIf(!hasDom)('opens two days out at 3:00 PM; the keys walk both lists an
   key(list('Day'), 'ArrowUp');
   key(list('Day'), 'ArrowUp');
   expect(selected('Day')).toBe('Tomorrow');
-  // Right crosses to the times, Left back.
   list('Day').focus();
   key(list('Day'), 'ArrowRight');
   expect(document.activeElement).toBe(list('Time'));
@@ -80,12 +66,10 @@ test.skipIf(!hasDom)('opens two days out at 3:00 PM; the keys walk both lists an
   expect(selected('Time')).toBe('12:00 AM');
   key(list('Time'), 'End');
   expect(selected('Time')).toBe('11:30 PM');
-  // The list's own keys never reach the menu around it (its arrows, type-ahead, Tab); Escape does.
   expect(outside).toEqual([]);
   key(list('Time'), 'Escape');
   expect(outside).toEqual(['Escape']);
   key(list('Time'), 'Enter');
-  // Tomorrow (Wed Nov 4), 11:30 PM in New York, is 04:30 UTC the next day.
   expect(picks).toEqual(['2026-11-05T04:30:00.000Z']);
   expect(list('Day').getAttribute('aria-activedescendant')).toBe(list('Day').querySelector('[aria-selected="true"]')!.id);
 });
@@ -95,17 +79,14 @@ test.skipIf(!hasDom)("a click picks; today offers only the half hours ahead; a t
   const picks = render(local(2026, 11, 3, 13, 10));
   const today = list('Day').querySelector<HTMLElement>('[role="option"]')!;
   expect(today.textContent).toBe('Today');
-  // 3:00 PM was picked; today has it too, so it stays.
   act(() => today.click());
   expect(selected('Day')).toBe('Today');
   expect(labels('Time')[0]).toBe('1:30 PM');
   expect(labels('Time')).not.toContain('1:00 PM');
   expect(selected('Time')).toBe('3:00 PM');
-  // Pick 11:30 PM tomorrow, then go back to Today at 1:30 PM by mouse.
   act(() => list('Day').querySelectorAll<HTMLElement>('[role="option"]')[1]!.click());
   act(() => [...list('Time').querySelectorAll<HTMLElement>('[role="option"]')].find((el) => el.textContent === '1:00 PM')!.click());
   expect(selected('Time')).toBe('1:00 PM');
-  // Today has no 1:00 PM any more: the time moves on to the next one it has.
   act(() => today.click());
   expect(selected('Time')).toBe('1:30 PM');
   act(() => document.querySelector<HTMLButtonElement>('[data-snooze-go]')!.click());

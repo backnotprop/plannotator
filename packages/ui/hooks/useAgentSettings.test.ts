@@ -28,8 +28,6 @@ describe("effective Codex fast mode", () => {
   };
 
   test("fast is dropped when a retired pick is replaced by a different model", () => {
-    // A retired model saved with fast on must not launch the replacement with
-    // -c service_tier=fast: the choice was made for the old model.
     const model = effectiveModel(codex, "gpt-5.3-codex", "");
     expect(model).toBe("gpt-6-sol");
     expect(effectiveFast(codex, "gpt-5.3-codex", model, true)).toBe(false);

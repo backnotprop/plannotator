@@ -1,13 +1,3 @@
-/**
- * Bridge-protocol contract for HTML pinpoint mode (DOM-gated).
- *
- * The bridge script runs inside a sandboxed iframe rendering arbitrary HTML,
- * so everything it posts must be validated and size-capped before it reaches
- * React state or the annotation model. These tests cover the pinpoint
- * additions: the element-anchor DTO, the pinpoint click-to-pin flow (straight
- * to the comment composer, skipping the toolbar), and anchor propagation onto
- * created annotations.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -21,9 +11,6 @@ const hasDom = typeof document !== 'undefined';
 const hookModule = hasDom ? await import('./useHtmlAnnotation') : null;
 const htmlViewerModule = hasDom ? await import('./HtmlViewer') : null;
 
-// Unmount every root before clearing the DOM: leaving HtmlViewer instances
-// mounted would keep their window message listeners alive and leak into other
-// test files sharing this process.
 const mountedRoots: Array<{ unmount: () => void }> = [];
 
 afterEach(async () => {
@@ -49,10 +36,6 @@ describe.if(hasDom)('parseHtmlElementAnchor (validated DTO)', () => {
   });
 
   test('accepts an empty text snapshot (stable-identity text-less anchors)', () => {
-    // Text-less elements anchor only through a stable-identity selector
-    // (#id / data-* identity attrs) and carry an empty snapshot; the bridge
-    // treats an empty snapshot on a WEAK selector as a rejection at restore
-    // time, so passing it through the DTO is safe.
     expect(hookModule!.parseHtmlElementAnchor({
       selector: 'span[data-testid="close-btn"]',
       tagName: 'span',
@@ -158,7 +141,6 @@ describe.if(hasDom)('parseBridgeMessage selection additions', () => {
     };
     expect(hookModule!.parseBridgeMessage({ ...message, richCopy: true })).toMatchObject({ richCopy: true });
     expect(hookModule!.parseBridgeMessage({ ...message, richCopy: 'yes' })).not.toHaveProperty('richCopy');
-    // Markup on the selection message is ignored: it is built on request only.
     expect(hookModule!.parseBridgeMessage({ ...message, html: '<b>x</b>' })).not.toHaveProperty('html');
 
     const answer = { type: 'plannotator-bridge-rich-copy' as const, id: 'rc-1', html: '<strong>Hello</strong>', text: 'Hello' };
@@ -186,9 +168,6 @@ describe.if(hasDom)('parseBridgeMessage selection additions', () => {
   });
 
   test('truncation never splits a surrogate pair at the cap boundary', () => {
-    // An astral character straddling the cut would leave a lone high
-    // surrogate that turns into U+FFFD once UTF-8-encoded (drafts, feedback,
-    // share URLs) — the cut must back off one unit instead.
     const cap = hookModule!.MAX_SELECTION_TEXT_LENGTH;
     const straddling = 'x'.repeat(cap - 1) + '\u{1F600}' + 'tail';
     const parsed = hookModule!.parseBridgeMessage({
@@ -199,7 +178,6 @@ describe.if(hasDom)('parseBridgeMessage selection additions', () => {
     expect(parsed.text.length).toBe(cap - 1);
     expect(parsed.text.endsWith('x')).toBe(true);
     expect(/[\uD800-\uDBFF]$/.test(parsed.text)).toBe(false);
-    // A pair that fits entirely under the cap is untouched.
     const fitting = 'y'.repeat(cap - 2) + '\u{1F600}';
     const kept = hookModule!.parseBridgeMessage({
       type: 'plannotator-bridge-selection',
@@ -210,9 +188,6 @@ describe.if(hasDom)('parseBridgeMessage selection additions', () => {
   });
 
   test('selection text is truncated at the parse boundary, not rejected', () => {
-    // The page controls element text entirely, so one pinpoint click on a huge
-    // <pre> could otherwise ship an unbounded string into React state, drafts,
-    // exported feedback, and share URLs.
     const cap = hookModule!.MAX_SELECTION_TEXT_LENGTH;
     const parsed = hookModule!.parseBridgeMessage({
       type: 'plannotator-bridge-selection',
@@ -221,7 +196,6 @@ describe.if(hasDom)('parseBridgeMessage selection additions', () => {
     });
     expect(parsed).not.toBeNull();
     expect((parsed as { text: string }).text.length).toBe(cap);
-    // At or under the cap passes through untouched.
     const exact = hookModule!.parseBridgeMessage({
       type: 'plannotator-bridge-selection',
       text: 'y'.repeat(cap),
@@ -329,8 +303,6 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     await typeComment('Comment on the replaced slide');
     await postSelection({ type: 'plannotator-bridge-pin-visibility', visible: false });
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
-    // The bridge found the new element through the anchor: it re-anchors the
-    // composer on it, then reports the draft visible again.
     await postSelection({ type: 'plannotator-bridge-selection-rect', rect: { top: 300, left: 40, width: 120, height: 24 } });
     await postSelection({ type: 'plannotator-bridge-pin-visibility', visible: true });
     expect(document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')?.value)
@@ -349,25 +321,21 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     await act(async () => { document.body.dispatchEvent(escape); });
     expect(escape.defaultPrevented).toBe(true);
-    // Closed, not just hidden: the target coming back shows nothing.
     await postSelection({ type: 'plannotator-bridge-pin-visibility', visible: true });
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
-    // A second Escape is not taken by the closed draft.
     const next = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     await act(async () => { document.body.dispatchEvent(next); });
     expect(next.defaultPrevented).toBe(false);
-    // The draft text is kept: pinning the same element again restores it.
     await postSelection({ ...selectionMessage, pinpoint: true });
     expect(document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')?.value)
       .toBe('Draft kept for later');
-    await typeComment(''); // leave no draft for the next test
+    await typeComment('');
   });
 
   test('the bridge closing the draft while the composer is hidden closes the composer', async () => {
     const { postSelection } = await mountViewer({ mode: 'selection', onAdd: () => {} });
     await postSelection({ ...selectionMessage, pinpoint: true });
     await postSelection({ type: 'plannotator-bridge-pin-visibility', visible: false });
-    // Escape inside the page: the bridge's ladder closes its pin.
     await postSelection({ type: 'plannotator-bridge-selection-clear' });
     await postSelection({ type: 'plannotator-bridge-pin-visibility', visible: true });
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
@@ -380,7 +348,6 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     expect(document.activeElement?.tagName).toBe('TEXTAREA');
     await typeComment('Still here');
     await postSelection({ type: 'plannotator-bridge-pin-visibility', visible: false });
-    // The person works in the page meanwhile.
     const iframe = document.querySelector<HTMLIFrameElement>('iframe')!;
     iframe.focus();
     expect(document.activeElement).toBe(iframe);
@@ -389,10 +356,9 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     const textarea = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea');
     expect(textarea?.value).toBe('Still here');
     expect(document.activeElement).toBe(iframe);
-    // It takes focus when the person goes to it.
     textarea!.focus();
     expect(document.activeElement).toBe(textarea);
-    await typeComment(''); // leave no draft for the next test
+    await typeComment('');
   });
 
   test('a plain drag selection still opens the markup toolbar', async () => {
@@ -404,9 +370,6 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
 
 
   test('the HTML selection toolbar is comment-only plus the restored thumbs-up: no Delete, no label picker', async () => {
-    // The restricted restore: exactly ONE label affordance (the hardcoded
-    // 👍 "Looks good") came back to HTML surfaces. Delete and the Zap
-    // picker staying gone is what preserves the comment-only ruling.
     const { postSelection } = await mountViewer({ mode: 'selection', onAdd: () => {} });
     await postSelection({ ...selectionMessage, anchor: undefined });
     const toolbar = document.querySelector('.annotation-toolbar');
@@ -419,9 +382,6 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
   });
 
   test('the toolbar thumbs-up creates an isQuickLabel comment annotation', async () => {
-    // Guards the restricted handler wiring in HtmlViewer: the 👍 must
-    // produce the same labeled-comment shape the markdown surface produces,
-    // never a DELETION and never a bare comment.
     const added: Annotation[] = [];
     const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann) });
     await postSelection({ ...selectionMessage, anchor: undefined });
@@ -445,10 +405,6 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
   }
 
   test('the pinpoint composer thumbs-up labels the pinned element in one click', async () => {
-    // A pinpoint click opens the composer, never the toolbar, so without
-    // this button an element cannot get a one-click thumbs-up at all. It
-    // must mint the same labeled comment the toolbar 👍 does, on the pinned
-    // element, carrying the anchor and element context a typed comment would.
     const added: Annotation[] = [];
     const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann) });
     await postSelection({
@@ -458,7 +414,6 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     });
     const thumbs = composerThumbsUp();
     if (!thumbs) throw new Error('composer thumbs-up missing');
-    // Emoji only: the "Looks good" name lives in aria-label / tooltip.
     expect(thumbs.textContent).toBe('👍');
     await act(async () => thumbs.click());
     expect(added).toHaveLength(1);
@@ -485,7 +440,6 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
         }));
       });
     };
-    // Empty composer: Mod+Enter is not routed to the thumbs-up.
     await pressModEnter();
     expect(added).toHaveLength(0);
 
@@ -504,14 +458,11 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
       onAdd: (ann) => added.push(ann),
     });
     await postSelection({ ...selectionMessage, pinpoint: true });
-    // No DELETION was created; the comment composer owns the draft.
     expect(added.length).toBe(0);
     expect(document.querySelector('[data-comment-popover]')).not.toBeNull();
   });
 
   test('a bridge-posted modeOverride "redline" cannot force a DELETION (trust-boundary clamp)', async () => {
-    // A hostile page controls modeOverride, so the clamp must sit on the
-    // message path, not just on the host-passed mode.
     const added: Annotation[] = [];
     const { postSelection } = await mountViewer({
       mode: 'selection',
@@ -650,13 +601,6 @@ describe.if(hasDom)('ordered saved-annotation sync (placed-marker numbering)', (
       (m) => m.type === 'plannotator-bridge-sync-annotations',
     );
     expect(syncs.length).toBeGreaterThanOrEqual(1);
-    // Numbered by ARRAY position of the full list INCLUDING globals — the
-    // effective ordering exportAnnotations numbers the feedback with (its
-    // sort keys tie for every raw-HTML annotation, so its stable sort keeps
-    // array order; createdA is deliberately ignored because external
-    // annotations interleave server-stamped timestamps). The global (array
-    // position 1) has no page location and ships no entry: the on-page
-    // numbers start at 2, leaving the gap where the global sits.
     expect(syncs.at(-1)!.annotations).toEqual([
       { id: 'ann-late', number: 2 },
       { id: 'ann-early', number: 3 },
@@ -671,11 +615,6 @@ describe.if(hasDom)('ordered saved-annotation sync (placed-marker numbering)', (
   });
 
   test('the sync feed truncates to 512 entries in export (array) order (m2)', async () => {
-    // The bridge caps its numbering map at 512 entries; the sender ships the
-    // FIRST 512 non-global entries in array order — the same order
-    // exportAnnotations numbers — so both sides keep the same set. createdA
-    // descends here and must NOT reorder anything (external annotations
-    // interleave server-stamped timestamps).
     const annotations = Array.from({ length: 520 }, (_, i) => ann(`bulk-${i}`, 1000 - i));
     const { postReady, postedToIframe } = await mountWithAnnotations(annotations);
     await postReady();
@@ -787,7 +726,6 @@ describe.if(hasDom)('multi-target bridge message validation (trust boundary)', (
       y: 34,
       shift: true,
     })).toEqual({ type: 'plannotator-bridge-pointer', x: 12, y: 34, shift: true });
-    // shift is a strict boolean: absent or truthy-but-not-true reads false.
     expect(hookModule!.parseBridgeMessage({
       type: 'plannotator-bridge-pointer',
       x: 12,
@@ -823,7 +761,6 @@ describe.if(hasDom)('multi-target bridge message validation (trust boundary)', (
       targetLabel: '  a\r\n\tb  ',
     }) as { targetLabel?: string };
     expect(selection.targetLabel).toBe('a b');
-    // Whitespace-only labels vanish instead of becoming empty brackets.
     const blank = hookModule!.parseBridgeMessage({
       type: 'plannotator-bridge-multi-target-added',
       key: 'ht-5',
@@ -884,8 +821,6 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
     });
     const iframe = host.querySelector<HTMLIFrameElement>('iframe');
     if (!iframe?.contentWindow) throw new Error('HTML iframe missing');
-    // Record everything the parent posts INTO the iframe (arm-multi-select,
-    // remove-target echoes, ...) by wrapping contentWindow.postMessage.
     const postedToIframe: Array<Record<string, unknown>> = [];
     const realPost = iframe.contentWindow.postMessage.bind(iframe.contentWindow);
     (iframe.contentWindow as unknown as { postMessage: (data: unknown) => void }).postMessage =
@@ -986,7 +921,6 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
         anchor: { selector: 'span[data-testid="ht-3"]', tagName: 'span', text: 'Cancel' },
       },
     ]);
-    // Draft state cleared with the submit.
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
   });
 
@@ -1007,7 +941,6 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
     await post(addedTarget('ht-2', 'Create'));
     expect(chips().length).toBe(2);
 
-    // Bridge-echoed removal of the primary (shift-click toggle-off).
     await post({ type: 'plannotator-bridge-multi-target-removed', key: 'ht-1' });
     expect(chips().length).toBe(1);
     expect(chips()[0]!.getAttribute('data-target-chip')).toBe('ht-2');
@@ -1016,7 +949,7 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
     await typeComment('Promoted');
     await save();
     expect(added.length).toBe(1);
-    expect(added[0]!.originalText).toBe('Create'); // the promoted target's text
+    expect(added[0]!.originalText).toBe('Create');
     expect(added[0]!.htmlAnchor).toEqual({
       selector: 'span[data-testid="ht-2"]',
       tagName: 'span',
@@ -1062,7 +995,7 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
     for (let i = 0; i < 25; i++) {
       await post(addedTarget(`flood-${i}`, `Target ${i}`));
     }
-    expect(chips().length).toBe(17); // primary + 16
+    expect(chips().length).toBe(17);
 
     await typeComment('Capped');
     await save();
@@ -1070,9 +1003,6 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
   });
 
   test('maxAdditionalTargets lowers the cap end to end: chips, the saved array, and the bridge arm', async () => {
-    // A host with a product cap of 3 must see the cap in the draft (chips
-    // stop growing), in the saved annotation, and in what the bridge is
-    // armed with, so the in-page toggle stops at the same number.
     const added: Annotation[] = [];
     const { post, postedToIframe } = await mountViewer((ann) => added.push(ann), 'selection', { maxAdditionalTargets: 3 });
     await post(primarySelection());
@@ -1084,14 +1014,12 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
     for (let i = 0; i < 8; i++) {
       await post(addedTarget(`host-cap-${i}`, `Target ${i}`));
     }
-    expect(chips().length).toBe(4); // primary + 3
+    expect(chips().length).toBe(4);
 
     await typeComment('Host capped');
     await save();
     expect(added[0]!.htmlAdditionalTargets!.length).toBe(3);
 
-    // The composer's one-click 👍 submits the shift-click targets too, under
-    // the same cap.
     await post(primarySelection({ targetKey: 'ht-2' }));
     for (let i = 0; i < 8; i++) {
       await post(addedTarget(`host-cap-b-${i}`, `Target ${i}`));
@@ -1118,7 +1046,6 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
 
   test('adds are ignored when no pinpoint draft is open (drag selections stay single-target)', async () => {
     const { post, postedToIframe } = await mountViewer(() => {});
-    // Drag selection (no pinpoint flag): opens the toolbar, arms nothing.
     await post({
       type: 'plannotator-bridge-selection',
       text: 'Dragged text',
@@ -1139,11 +1066,6 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
   });
 
   test('quickLabel mode is CLAMPED on HTML surfaces: the pinpoint draft opens the composer and arms like any pinpoint draft', async () => {
-    // Quick labels are a markdown-surface feature. On HTML surfaces the mode
-    // clamps to the plain selection flow, so a pinpoint draft opens the
-    // composer (which mirrors targets) — never the label picker. This also
-    // keeps the D1 invariant vacuously safe: every pinpoint draft that arms
-    // the bridge is mirrored by the composer.
     const quick = await mountViewer(() => {}, 'quickLabel');
     await quick.post(primarySelection());
     expect(document.querySelector('[data-comment-popover]')).not.toBe(null);
@@ -1162,9 +1084,6 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
     await post(addedTarget('ht-2', 'Create'));
     expect(chips().length).toBe(2);
 
-    // Hostile page forges the removal of the primary — the bridge never
-    // performed it. The parent promotes AND echoes remove-target so the
-    // bridge converges on the same promotion (idempotent if it already had).
     await post({ type: 'plannotator-bridge-multi-target-removed', key: 'ht-1' });
     expect(chips().length).toBe(1);
     expect(chips()[0]!.getAttribute('data-target-chip')).toBe('ht-2');
@@ -1182,12 +1101,9 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
     expect(popover.className).toContain('pn-composer-yieldable');
     expect(popover.className).not.toContain('pn-composer-yield-over');
 
-    // Pointer over the composer (happy-dom rects are 0x0 at the origin) with
-    // shift held — relayed FROM THE BRIDGE, no parent keydown involved.
     await post({ type: 'plannotator-bridge-pointer', x: 0, y: 0, shift: true });
     expect(popover.className).toContain('pn-composer-yield-over');
 
-    // Shift released (still reported by the bridge): the composer restores.
     await post({ type: 'plannotator-bridge-pointer', x: 0, y: 0, shift: false });
     expect(popover.className).not.toContain('pn-composer-yield-over');
     expect(popover.className).not.toContain('pn-composer-yield-near');
@@ -1195,10 +1111,6 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
 });
 
 describe.if(hasDom)('readOnly view-only contract', () => {
-  // The promise made to hosts (HANDOFF.md 0.29.0): readOnly disables every
-  // authoring entry point but is NOT blank — committed annotations restore,
-  // markers paint with export-matching numbers, and marker clicks still
-  // navigate. View-only review contexts depend on all three.
   async function mountReadOnly(
     annotations: Annotation[],
     onSelect: (id: string | null) => void = () => {},
@@ -1258,9 +1170,6 @@ describe.if(hasDom)('readOnly view-only contract', () => {
   }
 
   test('scroll-to carries the host scrollBehavior only when one is passed', async () => {
-    // Reduced motion cannot be observed inside the sandbox, so the host
-    // passes it. Absent, the message must be exactly today's shape so the
-    // bridge keeps scrolling smoothly for hosts that never set it.
     if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
     const HtmlViewer = htmlViewerModule.HtmlViewer;
     const mountWith = async (scrollBehavior?: 'smooth' | 'auto') => {
@@ -1317,8 +1226,6 @@ describe.if(hasDom)('readOnly view-only contract', () => {
 
     const restores = postedToIframe.filter((m) => m.type === 'plannotator-bridge-find-and-mark');
     expect(restores.map((m) => m.id)).toEqual(['ro-1', 'ro-2']);
-    // Anchor-first restore must survive readOnly: the anchor is forwarded so
-    // the bridge can pin the marker at the element, not just text-search.
     expect((restores[0]!.anchor as { selector: string }).selector).toBe('p');
 
     const syncs = postedToIframe.filter((m) => m.type === 'plannotator-bridge-sync-annotations');
@@ -1364,8 +1271,6 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
   });
 
   test('out-of-contract reports are rejected whole (forged-message posture)', () => {
-    // The real bridge caps at 512 ids of <=256 chars; anything past that is a
-    // hostile page forging the message, so nothing salvageable is delivered.
     expect(hookModule!.parseBridgeMessage({ type: MSG, ids: 'a' })).toBeNull();
     expect(hookModule!.parseBridgeMessage({ type: MSG })).toBeNull();
     expect(hookModule!.parseBridgeMessage({ type: MSG, ids: [42] })).toBeNull();
@@ -1376,8 +1281,6 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
   });
 
   test('delivery reaches onUnanchoredChange even in readOnly mode', async () => {
-    // View-only surfaces are exactly where silently missing markers would go
-    // unnoticed, so the report must bypass the enabled gate like mark-click.
     if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
     const HtmlViewer = htmlViewerModule.HtmlViewer;
     const received: string[][] = [];
@@ -1469,10 +1372,6 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
   }
 
   test('on ready the viewer asks the bridge for one complete report AFTER its restore batch', async () => {
-    // The bridge only posts when its set changes from empty, so a fresh
-    // document where everything restores would stay silent. The parent asks
-    // for the post-restore set explicitly, after the find-and-marks, so the
-    // answering pass sees every restore.
     const received: string[][] = [];
     const { ready, postedToIframe } = await mountUnion([pageRow('a-1'), pageRow('a-2')], received);
     await ready();
@@ -1482,17 +1381,10 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
     expect(types.lastIndexOf('plannotator-bridge-find-and-mark')).toBeLessThan(
       types.indexOf('plannotator-bridge-report-unanchored'),
     );
-    // Nothing is delivered until the bridge answers.
     expect(received).toEqual([]);
   });
 
   test('textless page rows join the FIRST bridge report; document-level comments do not; nothing is delivered before it', async () => {
-    // A page row with no quoted text and no element anchor is never posted
-    // to the bridge (nothing to find it by), so the bridge can never name
-    // it; the viewer completes the bridge's report with it. Delivery waits
-    // for the bridge's post-restore answer: a host acknowledging "the first
-    // report after a reload" must get the restore set, not a set computed
-    // at mount. A GLOBAL_COMMENT has no page location and is never flagged.
     const received: string[][] = [];
     const { post, ready } = await mountUnion([
       pageRow('anchored-1'),
@@ -1504,7 +1396,6 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
     await post({ type: MSG, ids: [] });
     expect(received).toEqual([['textless-1']]);
 
-    // Later bridge reports union with it, pass-through timing kept.
     await post({ type: MSG, ids: ['anchored-1'] });
     expect(received.at(-1)).toEqual(['anchored-1', 'textless-1']);
     await post({ type: MSG, ids: [] });
@@ -1512,8 +1403,6 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
   });
 
   test('one textless row plus one real orphan: the first delivered report carries the orphan', async () => {
-    // The refresh acknowledgement consumes the first report per reload, so
-    // that report must be the post-restore one, with the orphan in it.
     const received: string[][] = [];
     const { post, ready } = await mountUnion([
       pageRow('textless-1', { originalText: '' }),
@@ -1525,27 +1414,17 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
   });
 
   test('re-anchoring: a document whose restore succeeds reports the empty set once, clearing a prior orphan', async () => {
-    // Delete, refresh: the bridge names the orphan. Restore, refresh: a new
-    // document restores everything; the forced report is the empty set, and
-    // the host clears its chip from it.
     const received: string[][] = [];
     const { post, ready } = await mountUnion([pageRow('a-1')], received);
     await ready();
     await post({ type: MSG, ids: ['a-1'] });
     expect(received).toEqual([['a-1']]);
-    // A new document (srcdoc reload): the bridge starts empty and answers
-    // the parent's request with its complete, empty set.
     await ready();
     await post({ type: MSG, ids: [] });
     expect(received).toEqual([['a-1'], []]);
   });
 
   test('an in-place rawHtml swap drops old-document reports until the new ready, then delivers afresh', async () => {
-    // One instance, new srcdoc: the old document can still emit through the
-    // same contentWindow before the new one is ready. Those reports belong
-    // to a document that no longer exists and must not reach the host; the
-    // new document's first answer is delivered even when it equals the last
-    // set the old document delivered.
     const received: string[][] = [];
     const { render, post, ready } = await mountUnion([pageRow('a-1')], received);
     await ready();
@@ -1553,10 +1432,8 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
     expect(received).toEqual([['a-1']]);
 
     await render([pageRow('a-1')], '<html><body><p>Page v2</p></body></html>');
-    // Stale emission from the old document, before the new ready.
     await post({ type: MSG, ids: [] });
     expect(received).toEqual([['a-1']]);
-    // A prop-side change before the new ready delivers nothing either.
     await render([pageRow('a-1'), pageRow('textless-1', { originalText: '' })], '<html><body><p>Page v2</p></body></html>');
     expect(received).toEqual([['a-1']]);
 
@@ -1566,10 +1443,6 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
   });
 
   test('a locally minted id the host swapped out of annotations never reaches the report', async () => {
-    // The create swap: the composer mints a local id (create-mark), the host
-    // persists the comment under its own id and lists only that one. If the
-    // kept local mark later dies, the bridge names the local id, which the
-    // host holds no card for. The union drops it; the host id passes.
     const received: string[][] = [];
     const { render, post, added } = await mountUnion([], received);
     await post({
@@ -1595,13 +1468,11 @@ describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
     const localId = added[0]?.id;
     if (!localId) throw new Error('no created annotation');
 
-    // Host swapped: its list carries the server row only.
     await render([pageRow('srv-1')]);
     await post({ type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION });
     await post({ type: MSG, ids: [localId, 'srv-1'] });
     expect(received.at(-1)).toEqual(['srv-1']);
 
-    // A minted id the host DOES keep in its list is a real row and passes.
     await render([pageRow('srv-1'), pageRow(localId)]);
     expect(received.at(-1)).toEqual([localId, 'srv-1'].sort());
   });
@@ -1718,19 +1589,14 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
   });
 
   test('a bridge step message (a plain ] or [ in the page) reaches the host only while armed, with the frame focused, at most once per 150 ms', async () => {
-    // The Inbox steps through a thread's attachments on it. The page can post
-    // the message itself, so a page posting in a loop without the person's
-    // focus must not move anything, and a loop with focus is throttled.
     const armed: number[] = [];
     const { post } = await mountModeViewer({ annotateModeActive: true, onStep: (dir) => armed.push(dir) });
     const iframe = document.querySelector<HTMLIFrameElement>('iframe')!;
-    // Not focused: a page posting every 50 ms moves nothing.
     for (let i = 0; i < 5; i++) {
       await post({ type: 'plannotator-bridge-step', dir: 1 });
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     }
     expect(armed).toEqual([]);
-    // Focused: one step, then nothing until 150 ms have passed; only 1 or -1.
     await act(async () => { iframe.focus(); });
     expect(document.activeElement).toBe(iframe);
     await post({ type: 'plannotator-bridge-step', dir: 2 });
@@ -1743,7 +1609,6 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     await post({ type: 'plannotator-bridge-step', dir: -1 });
     expect(armed).toEqual([1, -1]);
 
-    // In Interact the page owns its keys: nothing reaches the host.
     const interact: number[] = [];
     const second = await mountModeViewer({ annotateModeActive: false, onStep: (dir) => interact.push(dir) });
     const frames = document.querySelectorAll<HTMLIFrameElement>('iframe');
@@ -1753,9 +1618,6 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
   });
 
   test('a bridge page-escape (an Escape the page did not use, in Interact) reaches the host only in Interact, with the frame focused, at most once per 150 ms', async () => {
-    // The Inbox leaves full screen on it. The page can post it itself, so it
-    // is honored only for a key the person pressed in the frame, never in
-    // Annotate (whose Escape is annotate-exit), and a loop is throttled.
     const seen: string[] = [];
     const { post } = await mountModeViewer({ annotateModeActive: false, onPageEscape: () => seen.push('escape') });
     const iframe = document.querySelector<HTMLIFrameElement>('iframe')!;
@@ -1779,11 +1641,6 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
 });
 
 describe.if(hasDom)('parseHtmlElementContext (validated DTO)', () => {
-  // Failures to catch: a hostile page's newlines becoming markdown structure
-  // in agent-read feedback, a non-allowlisted attribute (a form value, an
-  // inline handler) surviving the boundary, unknown keys reaching React
-  // state, an oversized context landing in drafts, and a malformed context
-  // taking the whole selection message down with it.
   const parse = () => hookModule!.parseHtmlElementContext;
 
   test('accepts a well-formed context and lowercases the tag', () => {

@@ -1,31 +1,17 @@
-/**
- * The markup for one chunk of a config file's version diff (`renderAs: "code"`):
- * Shiki's colours with the diff's own marks laid over them.
- *
- * Both inputs partition the same strings, so merging them is one walk: the
- * highlighter's runs (`highlightToRuns`) cut the text by colour, and the diff
- * cuts it into unchanged / added / removed. Unchanged and added text take the
- * NEW side's colours, removed text the OLD side's, so a removed `50` is still a
- * number. A struck stretch (a removed line, a removed word) never strikes a
- * line's leading whitespace: an indented YAML key must not start with a dash.
- */
 import type { HighlightRun } from "./codeHighlight";
 import type { InlineDiffToken } from "./planDiffEngine";
 
-/** A stretch of text in one colour (`style` absent: the default text colour). */
 export interface CodePiece {
   text: string;
   style?: string;
 }
 
-/** Pieces drawn the same way: a word-diff mark, struck (a removed line's text), or plain. */
 export interface CodeSegment {
   mark?: "added" | "removed";
   struck?: boolean;
   pieces: CodePiece[];
 }
 
-/** `text.slice(start, end)` cut at the run boundaries, each piece in its run's style. */
 export function slicePieces(text: string, runs: readonly HighlightRun[] | null, start: number, end: number): CodePiece[] {
   if (start >= end) return [];
   if (!runs || runs.length === 0) return [{ text: text.slice(start, end) }];
@@ -46,7 +32,6 @@ export function slicePieces(text: string, runs: readonly HighlightRun[] | null, 
   return pieces;
 }
 
-/** `[start, end)` split so each line's leading spaces and tabs are their own range. */
 export function indentRanges(text: string, start: number, end: number): { start: number; end: number; indent: boolean }[] {
   const out: { start: number; end: number; indent: boolean }[] = [];
   let from = start;
@@ -68,7 +53,6 @@ export function indentRanges(text: string, start: number, end: number): { start:
   return out;
 }
 
-/** A whole chunk: plain, or `struck` (a removed one) with its indentation left unstruck. */
 export function chunkSegments(text: string, runs: readonly HighlightRun[] | null, struck: boolean): CodeSegment[] {
   if (!struck) return [{ pieces: slicePieces(text, runs, 0, text.length) }];
   return indentRanges(text, 0, text.length).map((r) => ({
@@ -77,11 +61,6 @@ export function chunkSegments(text: string, runs: readonly HighlightRun[] | null
   }));
 }
 
-/**
- * A modified block's word diff over both sides' colours. `oldText`/`newText`
- * are the texts `tokens` were computed from (see `computeCodeInlineDiff`).
- * Should a token not match its side's text, that token falls back to plain.
- */
 export function wordDiffSegments(
   oldText: string,
   newText: string,
@@ -116,10 +95,8 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** Struck text keeps the diff view's old strike: `line-through decoration-destructive/30`. */
 const STRUCK_CLASS = "line-through decoration-destructive/30";
 
-/** The segments as `<code>` inner HTML. Styles come from the Shiki theme, text is escaped. */
 export function codeSegmentsToHtml(segments: readonly CodeSegment[]): string {
   let html = "";
   for (const segment of segments) {

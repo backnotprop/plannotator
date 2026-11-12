@@ -1,11 +1,3 @@
-/**
- * MessagesBrowser — Sidebar list of recent assistant messages.
- *
- * Used by annotate-last. Lets the user pick which assistant message to
- * annotate when the newest transcript entry isn't the one they intended
- * (e.g., after `/rewind`).
- */
-
 import React from "react";
 
 export interface PickerMessage {
@@ -21,7 +13,6 @@ interface MessagesBrowserProps {
   annotationCounts?: Map<string, number>;
 }
 
-// Hard cap for browsers where line-clamp is unavailable, and to avoid huge sidebar text nodes.
 const PREVIEW_MAX_CHARS = 140;
 
 function previewText(text: string): string {

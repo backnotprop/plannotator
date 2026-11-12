@@ -1,9 +1,3 @@
-/**
- * Which copy a closed review shows. The failure: a plan review closed because
- * the person left plan mode or ran /reload tells them "Closed by the Agent",
- * blaming an agent that asked for nothing (or an agent close reads as a
- * session end).
- */
 import { describe, expect, test } from "bun:test";
 import {
   AGENT_CLOSED_TITLE,

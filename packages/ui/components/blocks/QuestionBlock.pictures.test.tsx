@@ -1,16 +1,3 @@
-/**
- * Picture choices and the contract lines on the question card (approval
- * "inbox-decision-mode", agent contract lines; onboarding AUDIT finding 10).
- *
- * What regresses if this fails: a picture choice's picture no longer picks it
- * (or picks AND zooms on one click, the old bug), the zoom button picks, a
- * tile has no real radio/checkbox to reach by keyboard, the answer carries
- * raw markdown instead of the label, a host that cannot show images gets
- * broken tiles instead of text rows, or Stakes / Why / Shows / Reversible
- * stop showing.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useState } from 'react';
 import { act } from 'react';
@@ -48,8 +35,6 @@ Which layouts?
 Recommended: Sidebar, a split view
 :::`;
 
-// happy-dom fires `error` for a URL it cannot fetch, which the card reads as a
-// picture that cannot be shown: the default resolver hands it data URLs.
 const loads: ImageResolver = (src) => ({ kind: 'src', src: `data:image/gif;name=${encodeURIComponent(src)};base64,R0lGODlhAQABAAAAACw=` });
 
 let latest: Annotation[] = [];
@@ -122,7 +107,6 @@ describe('picture choices', () => {
     const el = await mount(<Harness markdown={SINGLE} badge={(choice) => (choice.image.src === 'c.png' ? null : 'Mockup · VS Code')} />);
     const badges = [...el.querySelectorAll<HTMLElement>('[data-question-picture-badge]')];
     expect(badges.map((b) => b.textContent)).toEqual(['Mockup · VS Code', 'Mockup · VS Code']);
-    // Over the picture, inside its tile.
     expect(badges[0]!.closest('[data-question-tile]') === tiles(el)[0]).toBe(true);
     await click(tiles(el)[0]!.querySelector('img[data-question-picture]')!);
     expect(answer()?.selected).toEqual(['A · Total on top']);
@@ -161,10 +145,8 @@ describe('picture choices', () => {
     expect(inputs[0].closest('[role="radiogroup"]')).not.toBeNull();
     inputs[2].focus();
     expect(document.activeElement).toBe(inputs[2]);
-    // Space on a focused radio is a click.
     await click(inputs[2]);
     expect(answer()?.selected).toEqual(['C']);
-    // The alt text names the picture; one that only repeats the label is decorative.
     expect(tiles(el)[0].querySelector('img')!.getAttribute('alt')).toBe('Drawer A');
     expect(tiles(el)[2].querySelector('img')!.getAttribute('alt')).toBe('');
   });
@@ -203,7 +185,6 @@ describe('picture choices', () => {
   });
 });
 
-// The size the host recorded for each picture, by the src it was written with (the loads resolver keeps it in the URL).
 const RECORDED: Record<string, { width: number; height: number }> = {
   'drawer-a.png': { width: 1170, height: 2532 },
   'drawer-b.png': { width: 1170, height: 8000 },
@@ -222,7 +203,6 @@ describe('the layout facts a host draws from (approval "picture-choices-layout")
     expect(grid.getAttribute('data-question-tiles-words')).toBe('short');
     expect(grid.hasAttribute('data-question-tiles-bare')).toBe(false);
     expect(tiles(el).map((t) => t.getAttribute('data-question-tile-shape'))).toEqual(['tall', 'scroll', 'square']);
-    // No image has loaded (happy-dom loads nothing): the box's ratio and the natural width are already there.
     const box = tiles(el)[0]!.querySelector<HTMLElement>('[data-question-tile-picture]')!;
     expect(box.style.getPropertyValue('--question-picture-ratio')).toBe('1170 / 2532');
     expect(box.style.getPropertyValue('--question-picture-width')).toBe('1170px');
@@ -281,12 +261,6 @@ describe('the layout facts a host draws from (approval "picture-choices-layout")
   });
 });
 
-/**
- * Move every text node under `el` into its own <mark>, as the annotation
- * highlighter does for a restored comment. React no longer finds those text
- * nodes where it put them; a placeholder that React inserts before one of
- * them throws, and the whole tree unmounts.
- */
 function wrapEveryText(el: HTMLElement) {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const texts: Text[] = [];
@@ -299,9 +273,6 @@ function wrapEveryText(el: HTMLElement) {
 }
 
 describe('a picture that fails to load after the highlighter moved the text beside it', () => {
-  // What regresses if this fails: an image that fails after a restored comment
-  // wrapped the words next to it makes React throw in insertBefore, and the
-  // whole document goes blank (review of #2177).
   test.skipIf(!hasDom)('an inline image: the placeholder shows and the words stay', async () => {
     const el = await mount(<Harness markdown={'![gone](x.png)words after it'} />);
     const img = el.querySelector<HTMLImageElement>('img')!;
@@ -317,9 +288,7 @@ describe('a picture that fails to load after the highlighter moved the text besi
     expect(el.querySelector('mark')!.textContent).toBe('words after it');
     const chip = el.querySelector<HTMLElement>('[data-image-unavailable]')!;
     expect(chip.textContent).toBe('gone');
-    // Never quoted by a text comment.
     expect(chip.classList.contains('annotation-exclude')).toBe(true);
-    // No broken image is drawn: the <img> stays in place, hidden and unnamed.
     expect([...el.querySelectorAll('img')].every((i) => i.hidden && i.alt === '')).toBe(true);
   });
 
@@ -357,7 +326,6 @@ describe('contract lines on the card', () => {
     await click(shows);
     expect(zoomed[0]![1]).toBe('Both drawers');
     expect(answer()).toBeUndefined();
-    // None of the lines is context.
     expect(card.querySelector('[data-question-part="context"]')).toBeNull();
   });
 
@@ -371,7 +339,6 @@ describe('contract lines on the card', () => {
     expect(shows.querySelector('img')).toBeNull();
     expect(shows.querySelector('[data-question-shows-open]')).toBeNull();
     expect(shows.textContent).toContain('Both drawers');
-    // The choices' own pictures still load as tiles.
     expect(tiles(el)).toHaveLength(3);
   });
 

@@ -1,28 +1,3 @@
-/**
- * A selection over two highlights, one inside the other, must paint, not
- * throw (seen while chasing #2594).
- *
- * The gesture: comment on "Stripe answers … still in flight" (it runs through
- * an inline `<code>`), comment on "idempotency key" inside that code, then make
- * a third selection that crosses the code's highlight: the whole span again,
- * from inside the code to the end, or from the start into the code. The second
- * paint leaves the code's highlight wrapper holding three text nodes: an empty
- * one, the words, an empty one (web-highlighter splits the text at both ends).
- * The third selection takes the empty ones along. Wrapping one of them splits
- * that wrapper and puts copies in its place, so the wrapper is out of the page;
- * wrapping the next node in it then calls `replaceChild` on the wrapper's
- * parent, which is null: `Cannot read properties of null (reading
- * 'replaceChild')`, thrown out of the library's own pointer-end listener with
- * half the highlight painted and no toolbar shown. In the built Inbox it
- * reproduced on a Markdown attachment, on desktop and on a phone. All three
- * selections threw before the fix.
- *
- * Each case also reloads: a fresh mount restores the three stored comments
- * from their saved positions, and each paints exactly its own words.
- *
- * Driven through the real library over a real `mouseup`, as its sibling
- * blankSelection test is. DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -31,7 +6,6 @@ import type { Annotation } from '../types';
 
 const hasDom = typeof document !== 'undefined';
 
-// web-highlighter reads `window` at module-eval time; import lazily.
 const mod = hasDom ? await import('./useAnnotationHighlighter') : null;
 const useAnnotationHighlighter =
   mod?.useAnnotationHighlighter as typeof import('./useAnnotationHighlighter')['useAnnotationHighlighter'];
@@ -116,7 +90,6 @@ async function mount(props: Omit<Parameters<typeof Harness>[0], 'hookRef'>): Pro
   return { container: host.firstElementChild as HTMLElement, hook };
 }
 
-/** The text node holding `needle` now (painting replaces text nodes), and where in it. */
 function textAt(container: HTMLElement, needle: string): [Text, number] {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -126,7 +99,6 @@ function textAt(container: HTMLElement, needle: string): [Text, number] {
   throw new Error(`no text "${needle}"`);
 }
 
-/** Select from the start of `from` to the end of `to`, then release the pointer. */
 async function selectAndRelease(container: HTMLElement, from: string, to: string): Promise<void> {
   const [start, startAt] = textAt(container, from);
   const [end, endAt] = textAt(container, to);
@@ -142,7 +114,6 @@ async function selectAndRelease(container: HTMLElement, from: string, to: string
   });
 }
 
-/** The words painted for `id`: every mark naming it, as its own id or under another (the library's getDoms rule). */
 function paintedText(container: HTMLElement, id: string): string {
   return [...container.querySelectorAll<HTMLElement>('mark[data-highlight-id]')]
     .filter((mark) => mark.dataset.highlightId === id || (mark.dataset.highlightIdExtra ?? '').split(';').includes(id))
@@ -150,14 +121,12 @@ function paintedText(container: HTMLElement, id: string): string {
     .join('');
 }
 
-/** The words from the start of `from` to the end of `to`. */
 const quote = (from: string, to: string) => TEXT.slice(TEXT.indexOf(from), TEXT.indexOf(to) + to.length);
 
 const OUTER = quote('Stripe answers', 'in flight');
 
 const THIRD_SELECTIONS: { name: string; from: string; to: string; noEmptyMark: boolean }[] = [
   { name: 'the whole span again', from: 'Stripe answers', to: 'in flight', noEmptyMark: true },
-  // The library still leaves an empty <mark> beside these two (harmless: no text, no throw).
   { name: 'from inside the nested highlight to the end', from: 'key', to: 'in flight', noEmptyMark: false },
   { name: 'from the start into the nested highlight', from: 'Stripe answers', to: 'idempotency', noEmptyMark: false },
 ];
@@ -167,8 +136,6 @@ describe('useAnnotationHighlighter: a selection over a highlight inside a highli
     test.skipIf(!hasDom)(`${third.name}: paints without throwing, and restores after a reload`, async () => {
       const added: Annotation[] = [];
       const { container } = await mount({ onAdd: (ann) => added.push(ann) });
-      // happy-dom reports an exception thrown inside a dispatched listener as an
-      // `error` event on window, as a browser reports the uncaught TypeError.
       const uncaught: string[] = [];
       errorListener = (event: Event) => {
         const e = event as ErrorEvent;
@@ -183,15 +150,12 @@ describe('useAnnotationHighlighter: a selection over a highlight inside a highli
       expect(uncaught).toEqual([]);
       const expected = quote(third.from, third.to);
       expect(added.map((a) => a.originalText)).toEqual([OUTER, CODE, expected]);
-      // Every word of the third selection carries its highlight.
       expect(paintedText(container, added[2]!.id)).toBe(expected);
       if (third.noEmptyMark) {
         expect([...container.querySelectorAll('mark')].filter((m) => m.textContent === '')).toEqual([]);
       }
-      // The text itself is untouched.
       expect(container.textContent).toBe(TEXT);
 
-      // Reload: a fresh document restores the three from their saved positions.
       await unmount();
       const mismatches: string[] = [];
       const reports: Report[] = [];

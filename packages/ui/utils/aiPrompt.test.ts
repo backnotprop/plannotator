@@ -30,8 +30,6 @@ describe("buildReviewContextPreamble", () => {
   });
 
   test("unchanged + command → restates the (short) command", () => {
-    // Command contexts are short and the agent benefits from the reminder of
-    // exactly what to run, so they are restated rather than dropped.
     expect(buildReviewContextPreamble(command, { changed: false })).toContain(
       "git diff main..HEAD",
     );
@@ -73,9 +71,6 @@ describe("buildDefaultPrompt with contextPreamble", () => {
   });
 });
 
-// Failure to catch: an Ask AI question asked from an image pinpoint reaching
-// the model (SDK provider or "Ask this session", which both send this
-// prompt) as a bare "[element: Image]" with nothing that says WHICH image.
 describe("buildDefaultPrompt — pinpointed element identity", () => {
   const imageTarget = {
     text: '[element: Image "Team photo" (team.jpg)]',
@@ -142,9 +137,6 @@ describe("buildDefaultPrompt — pinpointed element identity", () => {
   });
 });
 
-// Failure to catch (#1731): a text selection whose phrase appears more than
-// once in the document reaching the agent as a bare path, so it cannot tell
-// which occurrence the question is about.
 describe("buildDefaultPrompt — source lines of a text selection", () => {
   const scope = { kind: "selection" as const, label: "Selected text", text: "retry the job", sourcePath: "/docs/plan.md" };
 

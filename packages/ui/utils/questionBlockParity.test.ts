@@ -1,12 +1,3 @@
-/**
- * Parity between core's `findQuestionBlocks` (what a server uses to locate and
- * verify a question without the UI) and the blocks this package renders
- * (`parseMarkdownToBlocks` + `indexQuestionBlocks`). Both split the document
- * with the shared `@plannotator/core/markdown-structure` helpers; this test is
- * what fails if the two scans ever disagree about which `:::question` lines
- * open a block, where it ends, or which key (including the `-2` suffix) it
- * gets — the failure that would make a server reject an answer the UI sent.
- */
 import { describe, expect, test } from "bun:test";
 import { findQuestionBlocks, indexQuestionBlocks } from "@plannotator/core/question-block";
 import { parseMarkdownToBlocks } from "./parser";
@@ -45,8 +36,6 @@ const uiView = (markdown: string, frontmatter?: boolean) => {
       key: question.key,
       directiveKind: question.directiveKind,
       startLine: block.startLine,
-      // A closed block ends on the `:::` after its body; an unclosed one ran to
-      // the last line.
       endLine: Math.min(block.startLine + bodyLines + 1, total),
     };
   });
@@ -72,8 +61,6 @@ describe("findQuestionBlocks agrees with the rendered question index", () => {
   });
 
   test("the cases above exercise exclusion, not just inclusion", () => {
-    // Pins that the fixtures still contain blocks the scan must SKIP, so a
-    // scanner that found every `:::question` line could not pass by accident.
     const allOpeners = (md: string) => md.split("\n").filter((l) => /^\s*(?:>\s*)?:::question/.test(l)).length;
     for (const name of ["backtick fence", "nested in another directive", "blockquote marker", "html block spanning blank lines", "display math", "unclosed fence"]) {
       const md = FIXTURES[name];

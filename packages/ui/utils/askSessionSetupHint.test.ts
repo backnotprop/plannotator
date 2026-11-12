@@ -8,7 +8,6 @@ describe('askSessionSetupHint (#1814)', () => {
   test('the CLI run from Oh My Pi (no bridge) names the OMP extension install command', () => {
     const hint = askSessionSetupHint('oh-my-pi', [sdk]);
     expect(hint).toContain(OMP_EXTENSION_INSTALL_COMMAND);
-    // The command is what the user must run; pinned on purpose.
     expect(OMP_EXTENSION_INSTALL_COMMAND).toBe('omp plugin install @plannotator/pi-extension');
   });
 

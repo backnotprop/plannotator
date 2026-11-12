@@ -1,13 +1,3 @@
-/**
- * The agent tool switch in Settings (DOM_TESTS=1), on every Settings surface:
- * plan review, annotate and code review render the same component with a
- * different `mode`, and the row must be in each one's General tab.
- *
- * Regressions guarded: the row disappearing from a surface; a write that
- * fails being shown as saved (the switch must stay put and say why); the
- * PLANNOTATOR_AGENT_TOOL lock being editable; a `@plannotator/ui` host that
- * passes neither prop getting a row.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -21,7 +11,6 @@ let host: HTMLElement | null = null;
 const ROW = '[data-agent-tool-setting]';
 type Mode = 'plan' | 'annotate' | 'review';
 
-/** Holds the setting like the Apps' useAgentToolSetting does. */
 function Harness({ mode, initial, save }: {
   readonly mode: Mode;
   readonly initial: AgentToolSetting | undefined;
@@ -98,7 +87,6 @@ describe('Settings agent tool switch', () => {
       expect(document.querySelector(ROW)).toBeNull();
       await act(async () => root?.unmount());
       root = null;
-      // A @plannotator/ui host that passes the setting but no writer gets nothing either.
       await mount({ mode, initial: PI_OFF });
       expect(document.querySelector(ROW)).toBeNull();
     });
@@ -118,7 +106,6 @@ describe('Settings agent tool switch', () => {
   test.skipIf(!hasDom)('names the cost per host: Claude Code defers the tool, Pi sends it every request', async () => {
     await mount({ mode: 'plan', initial: { host: 'claude-code', enabled: true, configured: false }, save: async () => {} });
     expect(document.querySelector(ROW)?.textContent).not.toContain('800 tokens');
-    // The mod decides once per Claude Code process, so it takes a restart, not a new session.
     expect(document.querySelector(ROW)?.textContent).toContain('next time Claude Code starts');
     await act(async () => root?.unmount());
     root = null;
@@ -126,8 +113,6 @@ describe('Settings agent tool switch', () => {
     expect(document.querySelector(ROW)?.textContent).toContain('800 tokens');
   });
 
-  // Oh My Pi defaults the tool on: the row must show it on and must not
-  // quote Pi's per-request cost, which OMP does not pay.
   test.skipIf(!hasDom)('Oh My Pi: shown on by default, with its own cost and when it applies', async () => {
     await mount({ mode: 'plan', initial: { host: 'oh-my-pi', enabled: true, configured: false }, save: async () => {} });
     expect(document.querySelector(ROW)?.getAttribute('data-agent-tool-setting')).toBe('oh-my-pi');

@@ -1,17 +1,3 @@
-/**
- * Seam test: AITransport override (setAITransport / resetAITransport).
- *
- * Contract:
- *  - After setAITransport(fake), useAIChat.ask() routes the session + query
- *    calls through the fake transport — NOT through /api/ai/*.
- *  - resetAITransport() restores the default.
- *
- * Requires DOM — runs under bun test (preloaded via bunfig.toml).
- *
- * IMPORTANT: function references are captured at module-load time (top-level)
- * so they remain valid even when configure.test.ts's mock.module() replaces
- * the module exports later during test execution.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -20,7 +6,6 @@ import * as useAIChatModule from './useAIChat';
 import type { AITransport } from './useAIChat';
 import type { AIContext } from '@plannotator/core';
 
-// Capture real function references at import time.
 const setAITransport = useAIChatModule.setAITransport;
 const resetAITransport = useAIChatModule.resetAITransport;
 const useAIChat = useAIChatModule.useAIChat;
@@ -155,7 +140,6 @@ describe('AITransport seam', () => {
       await session.result.current!.ask({ prompt: 'What is this plan about?' });
     });
 
-    // Allow SSE reader to drain
     await act(async () => { await new Promise<void>((r) => setTimeout(r, 50)); });
 
     expect(sessionBodies.length).toBeGreaterThanOrEqual(1);
@@ -178,7 +162,6 @@ describe('AITransport seam', () => {
     setAITransport(fake);
     resetAITransport();
 
-    // After reset, the default transport issues a real fetch to /api/ai/session.
     const fetchCalls: string[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -189,16 +172,13 @@ describe('AITransport seam', () => {
     const session = await mountHook(TEST_CONTEXT);
 
     await act(async () => {
-      // Fire-and-forget: we just want to trigger the session creation path.
       session.result.current!.ask({ prompt: 'test' }).catch(() => {});
     });
 
-    // Give the async session call a tick to fire.
     await act(async () => { await new Promise<void>((r) => setTimeout(r, 50)); });
 
     globalThis.fetch = realFetch;
 
-    // Fake was NOT called; the default made a fetch to /api/ai/session.
     expect(fakeCalls).toHaveLength(0);
     expect(fetchCalls.some((u) => u.includes('/api/ai/session'))).toBe(true);
 
@@ -227,8 +207,6 @@ describe('AITransport seam', () => {
       expect(signals).toHaveLength(1);
       await act(async () => { second = session.result.current!.ask({ prompt: 'second' }); });
 
-      // Disconnecting first would reach the server's SSE cancel handler and
-      // stop Pi before it can distinguish supersede from the Stop button.
       expect(signals[0].aborted).toBe(false);
       expect(signals).toHaveLength(1);
       expect(abortBodies).toEqual([{ sessionId: 's1', reason: 'supersede' }]);

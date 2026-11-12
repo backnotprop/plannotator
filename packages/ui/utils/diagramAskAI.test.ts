@@ -8,13 +8,7 @@ import {
   MAX_ASK_AI_DIAGRAM_SOURCE_LINES,
 } from './diagramAskAI';
 
-// Failure to catch: an Ask AI question asked from a diagram comment reaching
-// the model (SDK provider, "Ask this session", the agent terminal: all three
-// send buildDefaultPrompt's output as the user message) without saying WHICH
-// part of WHICH diagram it is about, or flooding the turn with a huge source.
-
 const FENCE_SOURCE = ['flowchart LR', '  U([Reviewer]) --> D{Approve?}', '  D -->|Yes| M[(Merge)]', '  D -->|No| R[Revise]'].join('\n');
-/** The fence's opening line is document line 5, so diagram line 2 is document line 7. */
 const OFFSET = 5;
 const NODE_D: DiagramAnchor = { v: 1, family: 'flowchart', kind: 'node', id: 'D', label: 'Approve?', sourceLine: [7, 7] };
 
@@ -27,10 +21,8 @@ describe('diagramAskAIContext', () => {
     expect(prompt).toContain('Diagram node Approve? (D), line 7');
     expect(prompt).toContain('Mermaid (flowchart)');
     expect(prompt).toContain('Source: /plans/flow.md');
-    // The fence body with its document lines.
     expect(prompt).toContain('document lines 6–9');
     expect(prompt).toContain('D -->|Yes| M[(Merge)]');
-    // The Claude Code mod matches its ask turn by first and last line.
     expect(prompt.slice(prompt.lastIndexOf('\n') + 1)).toBe('Should this be a merge queue?');
   });
 
@@ -60,15 +52,12 @@ describe('diagramAskAIContext', () => {
     expect(body.length).toBeLessThanOrEqual(MAX_ASK_AI_DIAGRAM_SOURCE_CHARS + 40);
   });
 
-  /** The quoted source: the lines between the opening and closing fence. */
   const quotedBody = (detail: string): string => {
     const open = detail.indexOf('````mermaid\n') + '````mermaid\n'.length;
     return detail.slice(open, detail.lastIndexOf('\n````'));
   };
 
   test('long lines: the character cap shrinks the window around the part, never past it', () => {
-    // 100 lines of ~300 chars, part on line 65: the cap must not trim from
-    // the end of a window that started 20 lines above the part.
     const lines = ['flowchart TD'];
     for (let i = 1; i < 100; i += 1) lines.push(`  N${i}[${'x'.repeat(290)}] --> N${i + 1}`);
     const anchor: DiagramAnchor = { v: 1, family: 'flowchart', kind: 'node', id: 'N64', label: 'x', sourceLine: [65, 65] };
@@ -78,11 +67,9 @@ describe('diagramAskAIContext', () => {
     expect(body.length).toBeLessThanOrEqual(MAX_ASK_AI_DIAGRAM_SOURCE_CHARS);
     const range = /document lines (\d+)–(\d+)/.exec(detail)!;
     const [first, last] = [Number(range[1]), Number(range[2])];
-    // Symmetric: the part sits in the middle of what was kept.
     expect(65 - first).toBeGreaterThan(0);
     expect(Math.abs(65 - first - (last - 65))).toBeLessThanOrEqual(1);
 
-    // 30 lines of ~1000 chars, part on line 25.
     const wide = ['flowchart TD'];
     for (let i = 1; i < 30; i += 1) wide.push(`  W${i}[${'y'.repeat(990)}] --> W${i + 1}`);
     const wideAnchor: DiagramAnchor = { v: 1, family: 'flowchart', kind: 'node', id: 'W24', label: 'y', sourceLine: [25, 25] };

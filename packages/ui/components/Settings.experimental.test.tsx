@@ -1,12 +1,3 @@
-/**
- * Settings → Experimental (the owner, 2026-10-27: "its own page on settings"):
- * the experimental settings sit in their own tab, the LAST one, never inside
- * another tab. Code review's "Edit Code to Suggest" lives there and still
- * toggles and persists under the same cookie; the Editor tab no longer holds
- * it; plan review and annotate (which never showed it) get no Experimental tab.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -18,7 +9,6 @@ const hasDom = typeof document !== 'undefined';
 const COOKIE = 'plannotator-experimental-edit-suggestions';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
-/** What Settings saved, by key (the storage seam; the default backend is cookies). */
 const saved = new Map<string, string>();
 
 async function mountSettings(mode: 'plan' | 'annotate' | 'review') {
@@ -30,9 +20,7 @@ async function mountSettings(mode: 'plan' | 'annotate' | 'review') {
   });
 }
 
-/** The desktop sidebar's tabs, in order. */
 const sidebarTabs = () => Array.from(document.querySelectorAll<HTMLButtonElement>('nav.hidden button')).map((b) => b.textContent?.trim() ?? '');
-/** The phone's horizontal tab bar, in order. */
 const phoneTabs = () => Array.from(document.querySelectorAll<HTMLButtonElement>('nav.md\\:hidden button')).map((b) => b.textContent?.trim() ?? '');
 
 async function openTab(label: string) {

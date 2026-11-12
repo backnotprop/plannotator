@@ -23,22 +23,10 @@ interface TableOfContentsProps {
   linkedDocFilepath?: string | null;
   onLinkedDocBack?: () => void;
   backLabel?: string;
-  /**
-   * The element a click scrolls. Default: the `ScrollViewportProvider`
-   * context's viewport (plan review). A host that draws the list outside the
-   * document's scroll area (the Inbox's comments column) names it here.
-   */
   scrollViewport?: HTMLElement | null;
-  /**
-   * The deepest heading level listed. Default 3 (plan review's list); the
-   * contents rail's surface (`DocumentContents`) lists 1 to 4, as the rail does.
-   */
   maxLevel?: number;
 }
 
-// The prototype's TOC is a FLAT list — heading depth is conveyed by indentation
-// + tonal de-emphasis, not an expand/collapse chevron tree. Flatten the built
-// hierarchy (depth-first = document order) into a single ordered list.
 function flattenToc(items: TocItem[]): TocItem[] {
   const out: TocItem[] = [];
   const walk = (list: TocItem[]) => {
@@ -51,9 +39,6 @@ function flattenToc(items: TocItem[]): TocItem[] {
   return out;
 }
 
-// Indentation + tonal de-emphasis by heading level (prototype style):
-// H1 flush + near-full strength, H2/H3 indented and dimmed to muted. Active row
-// is a soft neutral surface tint (not a loud primary fill).
 function itemClasses(level: number, isActive: boolean): string {
   const indent = level <= 1 ? '' : level === 2 ? 'ml-3' : level === 3 ? 'ml-6' : 'ml-9';
   const tone = isActive
@@ -77,31 +62,26 @@ export function TableOfContents({
   scrollViewport: scrollViewportProp,
   maxLevel = 3,
 }: TableOfContentsProps) {
-  // Annotation count per section (kept — production feature).
   const annotationCounts = useMemo(
     () => getAnnotationCountBySection(blocks, annotations),
     [blocks, annotations]
   );
 
-  // Build the hierarchy (filters to heading levels ≤ maxLevel and attaches
-  // counts), then flatten to a plain list.
   const tocItems = useMemo(
     () => flattenToc(buildTocHierarchy(blocks, annotationCounts, maxLevel)),
     [blocks, annotationCounts, maxLevel]
   );
 
-  // The real scroll element is the OverlayScrollArea viewport, not <main>.
   const contextViewport = useScrollViewport();
   const scrollViewport = scrollViewportProp === undefined ? contextViewport : scrollViewportProp;
 
-  // Smooth scroll-to-heading, accounting for the sticky header.
   const handleNavigate = useCallback(
     (blockId: string) => {
       onNavigate(blockId);
       const target = (scrollViewport ?? document).querySelector(`[data-block-id="${blockId}"]`);
       if (target && scrollViewport) {
         const scrollContainer = scrollViewport;
-        const headerOffset = 80; // sticky header (h-12) + breathing room
+        const headerOffset = 80;
         const containerRect = getScrollViewportRect(scrollContainer);
         const targetRect = target.getBoundingClientRect();
         const offsetPosition =
@@ -112,19 +92,12 @@ export function TableOfContents({
     [onNavigate, scrollViewport]
   );
 
-  // A linked document with no headings of its own — most obviously a raw-HTML
-  // one, which is never parsed into blocks — still needs the "Viewing / Back
-  // to …" header, which lives here. Without it, opening such a document from
-  // a link leaves no visible way back.
   if (tocItems.length === 0 && !linkedDocFilepath) {
     return null;
   }
 
   return (
     <nav
-      // Use ?? not || — an explicit empty string from a caller means "I'm
-      // managing my own container styling" (e.g. SidebarContainer wrapping
-      // us in an OverlayScrollArea), which should NOT trigger the default.
       className={className ?? 'bg-card/50 backdrop-blur-sm border-r border-border overflow-y-auto'}
       aria-label="Table of contents"
       style={style}

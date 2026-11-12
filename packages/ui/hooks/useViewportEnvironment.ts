@@ -81,12 +81,6 @@ function rounded(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-/**
- * Converts the visual viewport into application-stage geometry. Pinch zoom is
- * intentionally represented by offsets only: reshaping the app while a user
- * zooms and pans would fight accessibility zoom. At the normal scale, browser
- * chrome and the software keyboard are allowed to reduce the usable stage.
- */
 export function calculateViewportEnvironment({
   layoutWidth,
   layoutHeight,
@@ -135,11 +129,6 @@ export function calculateViewportEnvironment({
   };
 }
 
-/**
- * Converts the observed viewport into usable fixed-position bounds. Padding
- * and safe-area insets are inputs so positioning remains deterministic and
- * testable instead of reading CSS environment variables in every overlay.
- */
 export function calculateVisibleViewportBounds(
   environment: ViewportEnvironment,
   edgePadding = 0,
@@ -183,7 +172,6 @@ export function shouldUseExpandedComposer({
   return coarsePointer || bounds.width < 640 || bounds.height < 420;
 }
 
-/** Returns whether the device's primary pointing input is coarse. */
 export function hasPrimaryCoarsePointer(targetWindow?: Window): boolean {
   const resolvedWindow = targetWindow ?? (typeof window === 'undefined' ? undefined : window);
   if (!resolvedWindow?.matchMedia) return false;
@@ -324,19 +312,10 @@ function subscribeViewportEnvironment(listener: () => void): () => void {
   };
 }
 
-/**
- * Keeps Plannotator's shared viewport CSS properties synchronized without
- * putting high-frequency browser geometry into React state.
- */
 export function useViewportEnvironment(): void {
   useEffect(() => acquireViewportEnvironment(), []);
 }
 
-/**
- * Reactive bounds for fixed overlays. It shares the root observer and its
- * animation-frame coalescing, so composer consumers do not add parallel
- * Visual Viewport listeners.
- */
 export function useVisibleViewportBounds(edgePadding = 0): VisibleViewportBounds {
   const environment = useSyncExternalStore(
     subscribeViewportEnvironment,

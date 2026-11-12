@@ -1,8 +1,3 @@
-/**
- * Feature detection: the only gate between a browser without WebMCP and
- * the whole provider. It must return null for every absent or hostile shape
- * and never throw.
- */
 import { describe, expect, test } from 'bun:test';
 import { resolveModelContext } from './modelContext';
 

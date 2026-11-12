@@ -1,19 +1,3 @@
-/**
- * Mermaid runtime slot (utils/mermaid.ts), sibling of math.test.ts.
- *
- * What regresses if these fail:
- * - a filled slot no longer short-circuits the loader, so a host's eager
- *   entry (which initialized the runtime at module evaluation) would be
- *   followed by a second import and a second initialize;
- * - the empty-slot path stops memoizing, so every diagram on a page imports
- *   the runtime again;
- * - a rejected load stays memoized, so the block's re-attempt and the Retry
- *   button replay the cached rejection instead of issuing a fresh import.
- *
- * No DOM required. The runtime is a stand-in; the real mermaid never loads.
- * Bun shares one process across files, so the slot is emptied before and
- * after every test through the test hook.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Mermaid } from 'mermaid';
 import {

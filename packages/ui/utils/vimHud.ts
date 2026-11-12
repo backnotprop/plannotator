@@ -5,7 +5,6 @@ import {
   type VimSelectionHudContext,
 } from '../shortcuts/plan-review/vimSelection.shortcuts';
 
-/** Semantic label displayed in the Vim key HUD. */
 export type VimHudPhase =
   | 'BLOCK'
   | 'INLINE'
@@ -15,7 +14,6 @@ export type VimHudPhase =
   | 'VISUAL'
   | 'ACTION';
 
-/** One successfully handled Vim command rendered by the key HUD. */
 export interface VimHudCommand {
   readonly sequence: number;
   readonly actionId: VimSelectionActionId;
@@ -24,7 +22,6 @@ export interface VimHudCommand {
   readonly context: VimSelectionHudContext;
 }
 
-/** Stable section identifiers used by the expanded Vim HUD key map. */
 export type VimHudLegendGroupId =
   | 'structure'
   | 'text'
@@ -32,14 +29,12 @@ export type VimHudLegendGroupId =
   | 'annotation'
   | 'control';
 
-/** One registered Vim command projected into the expanded HUD key map. */
 export interface VimHudLegendItem {
   readonly actionId: VimSelectionActionId;
   readonly key: string;
   readonly description: string;
 }
 
-/** One learnable command family rendered in the expanded HUD key map. */
 export interface VimHudLegendGroup {
   readonly id: VimHudLegendGroupId;
   readonly title: string;
@@ -144,9 +139,6 @@ function formatVimLegendKey(
   return binding.length === 1 ? binding.toLowerCase() : binding;
 }
 
-/**
- * Build immutable HUD feedback from a command that the Vim controller handled.
- */
 export function createVimHudCommand(
   sequence: number,
   actionId: VimSelectionActionId,
@@ -162,13 +154,6 @@ export function createVimHudCommand(
   };
 }
 
-/**
- * Project the registered Vim shortcut scope into learnable HUD groups.
- *
- * Movement actions intentionally appear in both Document and Text with
- * contextual descriptions because the same Vim keys change granularity after
- * the user refines into text.
- */
 export function getVimHudLegendGroups(): readonly VimHudLegendGroup[] {
   return VIM_HUD_LEGEND_GROUP_SPECS.map((group) => ({
     id: group.id,
@@ -185,9 +170,6 @@ export function getVimHudLegendGroups(): readonly VimHudLegendGroup[] {
   }));
 }
 
-/**
- * Return whether a legend group represents the HUD's current movement level.
- */
 export function isVimHudLegendGroupActive(
   groupId: VimHudLegendGroupId,
   phase: VimHudPhase,
@@ -207,10 +189,6 @@ export function isVimHudLegendGroupActive(
   }
 }
 
-/**
- * Project live Vim navigation state and the latest motion into the video HUD's
- * semantic phase vocabulary.
- */
 export function getVimHudPhase(
   state: VimSelectionHudContext,
   actionId?: VimSelectionActionId,

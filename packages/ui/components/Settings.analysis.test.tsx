@@ -37,7 +37,6 @@ describe('Settings Analysis tab', () => {
 
     const switches = Array.from(document.querySelectorAll('[role="switch"]'));
     expect(switches.length).toBeGreaterThanOrEqual(2);
-    // Deliberate label locks: these two layer names are maintainer-frozen.
     expect(document.body.textContent).toContain('Semantic changes');
     expect(document.body.textContent).toContain('Call flow');
   });

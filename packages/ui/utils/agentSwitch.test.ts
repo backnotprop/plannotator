@@ -16,10 +16,6 @@ function memoryStorage(initial: Record<string, string> = {}) {
   return { values, backend };
 }
 
-/**
- * A fresh store over a fresh cookie jar, with the server write-back captured.
- * The store is resolved lazily, so the backend must be installed first.
- */
 function freshStore(cookies: Record<string, string> = {}) {
   const jar = memoryStorage(cookies);
   setStorageBackend(jar.backend);
@@ -29,7 +25,6 @@ function freshStore(cookies: Record<string, string> = {}) {
   return { store, jar, posted };
 }
 
-/** Waits out the store's 300 ms write-back debounce. */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 350));
 
 afterEach(() => {
@@ -42,8 +37,6 @@ describe("agent switch settings", () => {
     const settings = getAgentSwitchSettings("review", store);
     expect(settings.switchTo).toBe("disabled");
     expect(getEffectiveAgentName(settings)).toBeUndefined();
-    // Resolving the default must not write a cookie: "never chosen" has to stay
-    // distinguishable from a choice so each surface keeps its own default.
     expect(jar.values.has(SWITCH_COOKIE)).toBe(false);
   });
 
@@ -123,7 +116,6 @@ describe("agent switch settings", () => {
     expect(getEffectiveAgentName(getAgentSwitchSettings("plan", store))).toBe("old-agent");
     saveAgentSwitchSettings({ switchTo: "custom", customName: "" }, store);
     expect(jar.values.has(CUSTOM_COOKIE)).toBe(false);
-    // A later load over the same cookies (a fresh store) switches to nobody.
     const reload = new ConfigStoreForTest();
     expect(getEffectiveAgentName(getAgentSwitchSettings("plan", reload))).toBeUndefined();
   });

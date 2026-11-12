@@ -1,18 +1,3 @@
-/**
- * A restore whose stored positions resolve onto exactly the right text must
- * survive the content verification Viewer turns on.
- *
- * `originalText` is the BROWSER's selection string, and a selection spanning
- * two block elements carries a blank line between them. The painted highlight
- * is the wrapper `<mark>`s concatenated with nothing between them, because
- * sibling blocks are rendered from a `.map()` with no whitespace text node.
- * Comparing the two with whitespace merely collapsed (rather than removed)
- * therefore rejected every correct cross-block restore: the highlight was
- * removed, the text search could not bridge the boundary either, and the
- * annotation came back from a reload with no highlight at all.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -22,8 +7,6 @@ import { parseMarkdownToBlocks } from '../utils/parser';
 
 const hasDom = typeof document !== 'undefined';
 
-// Viewer pulls in web-highlighter, whose UMD bundle reads `window` at
-// module-eval time; import lazily (same pattern as Viewer.driftedRestore).
 const viewerMod = hasDom ? await import('./Viewer') : null;
 const Viewer = viewerMod?.Viewer as typeof import('./Viewer')['Viewer'];
 
@@ -46,9 +29,6 @@ const MARKDOWN = [
   '```',
 ].join('\n');
 
-/** What every real browser puts between two block elements in a selection
- *  string; happy-dom's `innerText` is not layout-aware, so the fixtures spell
- *  it out rather than reading it back off a synthetic selection. */
 const BLOCK_BREAK = '\n\n';
 
 let root: Root | null = null;
@@ -98,7 +78,6 @@ const articleRoot = (): HTMLElement => {
   return article;
 };
 
-/** The element carrying a piece of the document's text, by substring. */
 const elementWith = (tagName: string, needle: string): HTMLElement => {
   const found = Array.from(articleRoot().getElementsByTagName(tagName))
     .find((el) => (el.textContent ?? '').includes(needle));
@@ -106,19 +85,12 @@ const elementWith = (tagName: string, needle: string): HTMLElement => {
   return found as HTMLElement;
 };
 
-/** web-highlighter's stored meta: the element's index among all elements of
- *  its tag under the container, plus the text offset inside it. */
 const metaFor = (el: HTMLElement, textOffset: number) => ({
   parentTagName: el.tagName,
   parentIndex: Array.from(articleRoot().getElementsByTagName(el.tagName)).indexOf(el),
   textOffset,
 });
 
-/**
- * The draft a reviewer wrote by dragging from `start` to the end of `end`:
- * positions that resolve onto exactly those two elements, and the quote the
- * browser handed back, block break included.
- */
 function crossBlockDraft(
   id: string,
   start: HTMLElement,
@@ -128,8 +100,6 @@ function crossBlockDraft(
   const endText = end.textContent ?? '';
   return {
     id,
-    // Keep fixture ids camelCase: Tailwind scans this file, and a hyphenated
-    // id that parses as a utility candidate leaks a rule into every build.
     blockId: 'crossBlock',
     startOffset: 0,
     endOffset: startText.length + endText.length,
@@ -142,10 +112,6 @@ function crossBlockDraft(
   };
 }
 
-/** The same draft after an Edit Mode commit: `applyEditedDocument` strips the
- *  stored positions of every annotation whose quote is not contained in one
- *  block — which is every cross-block annotation — so the restore has nothing
- *  but the quote and the text search is the only path left. */
 const withoutStoredPositions = (draft: Annotation): Annotation =>
   ({ ...draft, blockId: '', startMeta: undefined, endMeta: undefined });
 
@@ -179,12 +145,6 @@ describe('Viewer restore of a selection spanning two blocks', () => {
   });
 
   test.skipIf(!hasDom)('two list items', async () => {
-    // A list item's text lives in a <span> beside its marker, not an <li>, and
-    // the selection crosses the second item's bullet on the way. The marker is
-    // `select-none`, so no browser ever puts the bullet in the selection
-    // string: the stored quote is the two items with a block break between
-    // them and nothing else. The painted highlight has to agree, which is what
-    // `annotation-exclude` on the marker buys.
     const ref = await mount();
     const first = elementWith('span', 'echo');
     const second = elementWith('span', 'foxtrot');
@@ -210,12 +170,6 @@ describe('Viewer restore of a selection spanning two blocks', () => {
     expect(code.querySelector('mark')).not.toBeNull();
   });
 
-  // An Edit Mode commit leaves a cross-block annotation with nothing but its
-  // quote (see `withoutStoredPositions`). Before this, the whitespace-collapsing
-  // search compared a needle carrying the browser's block break against a
-  // haystack that joins block text with nothing at all, so no cross-block quote
-  // could ever be found: every cross-block highlight vanished on the first edit
-  // anywhere in the document.
   test.skipIf(!hasDom)('re-anchors by text alone across a block boundary', async () => {
     const ref = await mount();
     const first = elementWith('p', 'alpha');
@@ -247,8 +201,6 @@ describe('Viewer restore of a selection spanning two blocks', () => {
   });
 
   test.skipIf(!hasDom)('a text-only restore of drifted content still paints nothing', async () => {
-    // The boundary-aware search must not become a fuzzy one: a quote whose
-    // words changed has no match, positions or not.
     const ref = await mount();
     const first = elementWith('p', 'alpha');
     const second = elementWith('p', 'beta');
@@ -260,9 +212,6 @@ describe('Viewer restore of a selection spanning two blocks', () => {
   });
 
   test.skipIf(!hasDom)('a quote whose content really did change is still rejected', async () => {
-    // The guard exists for drift (#1509): whitespace-only differences must
-    // pass, a different word must not. With no text-search rescue possible
-    // either, the annotation paints nothing rather than the wrong line.
     const ref = await mount();
     const first = elementWith('p', 'alpha');
     const second = elementWith('p', 'beta');

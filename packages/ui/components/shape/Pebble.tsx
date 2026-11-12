@@ -1,11 +1,3 @@
-// The Pebble: Shape's mark (the owner's pick: "six uneven lumps; the bottom
-// rests on the table"). Lifted unchanged from the approved Shape prototype,
-// so the outline is the approved one.
-//
-// While Shape mode is on it breathes: the six rim lumps drift and swell in
-// turn, one slow cycle every 7 s, small enough to read as alive, not busy.
-// While the board is being redrawn (`reshaping`) the same cycle runs at 1.6 s.
-// Reduced motion: no morph at all; state shows as fill and colour only.
 import { useEffect, useRef, useState } from 'react';
 
 const RIM: [number, number, number][] = [[-112, 0.42, 0.44], [-48, 0.47, 0.37], [12, 0.45, 0.4], [80, 0.36, 0.42], [150, 0.44, 0.4], [204, 0.47, 0.38]];
@@ -54,14 +46,13 @@ function curve(p: [number, number][]): string {
   return d + 'Z';
 }
 
-pts(0, 0); // measure the fit once, at rest, so the morph never pumps
+pts(0, 0);
 export const PEBBLE_REST = curve(pts(0, 0));
 
 const REDUCE_QUERY = '(prefers-reduced-motion: reduce)';
 
 export const reducedMotion = (): boolean => typeof window !== 'undefined' && !!window.matchMedia?.(REDUCE_QUERY).matches;
 
-/** The person's reduced-motion setting, following it when it changes. */
 export function useReducedMotion(): boolean {
   const [reduce, setReduce] = useState(reducedMotion);
   useEffect(() => {
@@ -75,10 +66,6 @@ export function useReducedMotion(): boolean {
   return reduce;
 }
 
-/**
- * The mark. `alive`: Shape mode is on (slow breathing). `reshaping`: the
- * board is being redrawn (faster, fuller). Both off: the resting outline.
- */
 export function Pebble({ alive, reshaping, size = 20, className = '' }: { alive: boolean; reshaping?: boolean; size?: number; className?: string }) {
   const ref = useRef<SVGPathElement>(null);
   const reduce = useReducedMotion();
@@ -98,7 +85,7 @@ export function Pebble({ alive, reshaping, size = 20, className = '' }: { alive:
       const { alive: on, reshaping: busy } = state.current;
       const period = busy ? 1600 : 7000;
       const targetAmp = busy ? 1 : on ? 0.55 : 0;
-      amp += (targetAmp - amp) * Math.min(1, dt / 420); // ease between states, never jump
+      amp += (targetAmp - amp) * Math.min(1, dt / 420);
       if (amp > 0.002) phase = (phase + dt / period) % 1;
       if (visible && (amp > 0.002 || targetAmp > 0)) el.setAttribute('d', curve(pts(phase, amp)));
       raf = requestAnimationFrame(step);

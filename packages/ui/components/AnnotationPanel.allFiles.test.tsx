@@ -1,18 +1,3 @@
-/**
- * AnnotationPanel cross-file ("All files") view (DOM-gated).
- *
- * Failures to catch:
- *  - The All files view showing only the open document's cards, which is the
- *    bug the whole view exists to fix.
- *  - Edit/Delete on a card that belongs to another document routing to the open
- *    document's mutators — that would delete the wrong comment (or nothing).
- *  - Clicking an other-file card selecting in place instead of asking the host
- *    to navigate, leaving the reviewer on a document that has no such comment.
- *  - A file with no feedback of its own offering no way out of "No annotations
- *    yet" while feedback exists elsewhere.
- *  - The compatibility guard: a host that passes none of the new props must get
- *    the previous panel, legacy "+N in M other files" affordance included.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -130,7 +115,6 @@ describe.if(hasDom)('AnnotationPanel all-files view', () => {
     expect(onDeleteInDocument.mock.calls[0]).toEqual([OTHER_PATH, 'other-1']);
     expect(onDelete).not.toHaveBeenCalled();
 
-    // A card in the open document keeps the incumbent path.
     await act(async () => deleteButtonOf('open-1')!.click());
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(onDeleteInDocument).toHaveBeenCalledTimes(1);
@@ -181,7 +165,6 @@ describe.if(hasDom)('AnnotationPanel all-files view', () => {
     expect(header.getAttribute('aria-expanded')).toBe('true');
     await act(async () => header.click());
     expect(card('other-1')).toBeNull();
-    // The open document is untouched by a collapse elsewhere.
     expect(card('open-1')).not.toBeNull();
   });
 
@@ -204,7 +187,6 @@ describe.if(hasDom)('AnnotationPanel all-files view', () => {
       />,
     );
 
-    // "This file" is the live view: only the open document's card is rendered.
     expect(card('other-1')).toBeNull();
     await act(async () => scopeButton('all')!.click());
     expect(onAnnotationScopeChange.mock.calls).toEqual([['all']]);

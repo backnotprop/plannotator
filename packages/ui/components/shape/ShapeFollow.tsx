@@ -1,25 +1,3 @@
-/**
- * "Follow an example" (approval "trace-it-board", build approved on r5): one
- * control in the board's dock, shown on How it works when the board has
- * examples. Pressed, the drawing lights one example's path through its own
- * parts and arrows (followPainter.ts), and a card above the dock names the
- * example and steps through it. Folded, a step is its number and its plain
- * sentence; open, it is the path (r7): the steps on a rail by their tags, beside
- * what goes in → what happens → what comes out.
- *
- * Motion (r5):
- *  - The card's size changes are FLIPs, transforms only: its skin scales from
- *    its old box with the corners corrected on every keyframe, and its parts
- *    slide. The board makes room on the same curve, in the same frame.
- *  - Forward, the output flies into the next step's input (300 ms) while the
- *    other rows come in 30 ms apart; back is a quick reverse slide; a jump is
- *    a cross-fade. Closing the open card fades its content first (110 ms).
- *  - Every press cancels what is in flight and starts from where things are.
- *  - Reduced motion: 150 ms fades only.
- *
- * Code reads as the Code view shows it: the same highlighter (Pierre's Shiki)
- * and themes (pierre-light, pierre-dark).
- */
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ShapeExample, ShapeExampleCheck, ShapeExampleInput, ShapeExampleSource, ShapeExampleStep } from '@plannotator/core/shape';
 import { animate, FOLLOW_EASE, FollowPainter } from './followPainter';
@@ -41,17 +19,11 @@ import {
 
 const NOTE = 'An example, read from the code. Nothing was run.';
 
-/** The width the dock needs with "Follow an example" in words. */
 const DOCK_ROOM = 920;
-/** The gap an open panel keeps from the board (`.shp-sidep`). */
 const PANEL_GAP = 12;
-/** A mono character, in the card's 12 px code. */
 const CH = 7.25;
-/** The card and the board: one duration. */
 const SIZE_MS = 260;
-/** The document timeline (it follows a slowed-down recording; performance.now does not). */
 const clock = () => Number(document.timeline?.currentTime ?? performance.now());
-/** cubic-bezier(.22, 1, .36, 1) as a function, for the board's frame-by-frame resize. */
 const easeOut = (() => {
   const [x1, y1, x2, y2] = [0.22, 1, 0.36, 1];
   const bez = (t: number, a: number, b: number) => 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3;
@@ -68,8 +40,6 @@ const easeOut = (() => {
 })();
 
 const fileOf = (path: string) => path.split('/').pop() ?? path;
-
-// ───────────────────────── code, as the Code view shows it ─────────────────────────
 
 type Tok = { t: string; s?: React.CSSProperties };
 type Tokenizer = { codeToTokens: (c: string, o: object) => { tokens: { content: string; htmlStyle?: unknown }[][] } };
@@ -100,7 +70,6 @@ function tokenizeInto(h: Tokenizer, code: string) {
   tokCache.set(code, r.tokens.map((line) => line.map((tk) => ({ t: tk.content, s: styleOf(tk) }))));
 }
 
-/** Every snippet an example shows, as the card asks for it (prefix included). */
 function snippetsOf(ex: ShapeExample): string[] {
   const out: string[] = [];
   for (const s of ex.steps) {
@@ -116,11 +85,6 @@ function snippetsOf(ex: ShapeExample): string[] {
   return out;
 }
 
-/**
- * Highlights an example ahead of time, a few snippets per idle moment, so
- * opening the card never waits on the highlighter (loading it and tokenizing
- * everything at once cost one ~100 ms frame).
- */
 function warm(ex: ShapeExample): () => void {
   let stop = false;
   let id = 0;
@@ -164,7 +128,6 @@ function useTokens(code: string): Tok[][] | null {
   return tokCache.get(code) ?? null;
 }
 
-/** Drops the first `n` characters (a prefix that only gave the highlighter its context). */
 function strip(lines: Tok[][], n: number): Tok[][] {
   if (!n) return lines;
   const first: Tok[] = [];
@@ -180,7 +143,6 @@ function strip(lines: Tok[][], n: number): Tok[][] {
   return [first, ...lines.slice(1)];
 }
 
-/** Code that may wrap where a camelCase name's words meet, never mid-word (and it copies clean). */
 const Humped = ({ text }: { text: string }) => (
   <>
     {text.split(/(?<=[a-z0-9])(?=[A-Z])/).map((part, i) => (
@@ -192,7 +154,6 @@ const Humped = ({ text }: { text: string }) => (
   </>
 );
 
-/** TypeScript, highlighted like the Code view; plain until the highlighter is ready (same text, so nothing moves). */
 function Code({ code, pre = '', className, humps }: { code: string; pre?: string; className?: string; humps?: boolean }) {
   const lines = useTokens(pre + code);
   if (!lines)
@@ -215,11 +176,9 @@ function Code({ code, pre = '', className, humps }: { code: string; pre?: string
             <span className="tk" style={tk.s}>
               {humps ? <Humped text={tk.t} /> : tk.t}
             </span>
-            {/* A place to wrap after a dot, so a long name breaks at its parts, never mid-word (and copies clean). */}
             {tk.t.endsWith('.') && <wbr />}
           </React.Fragment>
         ));
-        // A signature's line that wraps hangs under its own start.
         return humps ? (
           <span key={i} className="ln">
             {tokens}
@@ -235,7 +194,6 @@ function Code({ code, pre = '', className, humps }: { code: string; pre?: string
   );
 }
 
-/** A name that may wrap: after a dot, never mid-word, and it copies clean. */
 const Dotted = ({ name }: { name: string }) => (
   <>
     {name.split(/(?<=\.)/).map((part, i) => (
@@ -247,7 +205,6 @@ const Dotted = ({ name }: { name: string }) => (
   </>
 );
 
-/** A value: a literal in its type's colour, anything else as plain code. */
 function Val({ v, hand, out, type }: { v: string; hand?: boolean; out?: boolean; type?: string }) {
   return (
     <span className={`shp-ex-val${hand ? ' hand' : ''}`} data-out={out ? '' : undefined} data-hand={hand ? '' : undefined} title={type}>
@@ -256,9 +213,6 @@ function Val({ v, hand, out, type }: { v: string; hand?: boolean; out?: boolean;
   );
 }
 
-// ───────────────────────── icons ─────────────────────────
-
-/** A route from a ring to a dot: the example's way through the picture. */
 function RouteIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -292,25 +246,19 @@ const Mark = ({ result }: { result: ShapeExampleCheck['result'] }) => (
     <path d={HUGE[result === 'pass' ? 'tick' : result === 'fail' ? 'close' : 'minus']} />
   </svg>
 );
-/** A step's number, drawn as the picture's tag draws it: filled while it is the step on now. */
 const StepN = ({ n, now }: { n: number; now?: boolean }) => <b className={`shp-ex-n${now ? ' now' : ''}`}>{n}</b>;
-
-// ───────────────────────── the card's parts ─────────────────────────
 
 type At = { path: string; line: number };
 
-/** What the three parts need. `chars`: how many mono characters fit in the code's column. */
 interface PartProps {
   step: ShapeExampleStep;
   onCode: (to: At) => void;
   canOpen: (path: string) => boolean;
   onStep: (i: number) => void;
   chars: number;
-  /** How many mono characters fit across the inputs' column. */
   pane: number;
 }
 
-/** Where a value came from. A line in the step's own file is only its number; the file is named once, at the function. */
 function Source({ from, home, room, onCode, canOpen, onStep }: { from: ShapeExampleSource; home: string; room: number; onCode: (to: At) => void; canOpen: (path: string) => boolean; onStep: (i: number) => void }) {
   const src = followSource(from);
   if (src.kind === 'step')
@@ -335,10 +283,8 @@ function Source({ from, home, room, onCode, canOpen, onStep }: { from: ShapeExam
   );
 }
 
-/** What "What happens", its gap and the link's arrow take of the code's column, in characters. */
 const FN_CAPTION = 16;
 
-/** The function's place: a file and a line, opening the code. */
 function FnLink({ step, chars, onCode, canOpen }: Pick<PartProps, 'step' | 'chars' | 'onCode' | 'canOpen'>) {
   const file = fileOf(step.code.path);
   const label = (
@@ -370,11 +316,6 @@ function InputRow({ v, tall, wide, long, home, room, onCode, canOpen, onStep }: 
   );
 }
 
-/**
- * Goes in: name, value, where it came from, with one name column so values read
- * down. A row that cannot fit on one line gives its value the next line; only a
- * file name longer than half the pane is ever cut.
- */
 function Inputs({ step, onCode, canOpen, onStep, pane }: PartProps) {
   if (!step.inputs.length) return <p className="shp-ex-none">Nothing</p>;
   const names = step.inputs.map((v) => v.name.length).filter((n) => n <= pane / 2);
@@ -389,7 +330,6 @@ function Inputs({ step, onCode, canOpen, onStep, pane }: PartProps) {
   };
   const sw = Math.max(...step.inputs.map(labelOf));
   const valueW = (v: ShapeExampleInput) => v.value.length + (v.reading ? v.reading.length + 2 : 0);
-  // The name column is nw + 1 characters; the two gaps are 12 px each, under 4 characters.
   const tall = (v: ShapeExampleInput) => v.name.length > nw || nw + 1 + 4 + labelOf(v) + valueW(v) > pane;
   const wide = (v: ShapeExampleInput) => v.name.length + labelOf(v) + 2 > pane;
   return (
@@ -401,7 +341,6 @@ function Inputs({ step, onCode, canOpen, onStep, pane }: PartProps) {
   );
 }
 
-/** `sheet`: on a phone's sheet, the characters a line holds. A rule keeps its value beside it only where both fit with nothing else to say; otherwise the value and the constant read on the next line, under the rule. */
 function CheckRow({ c, sheet }: { c: ShapeExampleCheck; sheet?: number }) {
   const said = c.result === 'not-reached' ? 'not reached' : (c.saw ?? '');
   const two = sheet !== undefined && (!!c.constant || !!c.decides || c.code.length + said.length + 3 > sheet);
@@ -418,7 +357,6 @@ function CheckRow({ c, sheet }: { c: ShapeExampleCheck; sheet?: number }) {
   );
 }
 
-/** A section's own name, opening the rest of it where it belongs. */
 const Reveal = ({ label, n, open, onClick }: { label: string; n?: number; open: boolean; onClick: () => void }) => (
   <button type="button" className="shp-ex-cap shp-ex-reveal" aria-expanded={open} aria-label={label} onClick={onClick}>
     {label}
@@ -427,7 +365,6 @@ const Reveal = ({ label, n, open, onClick }: { label: string; n?: number; open: 
   </button>
 );
 
-/** Which of a phone's two sections show all they have. */
 type SheetMore = { fn: boolean; in: boolean };
 
 const Signature = ({ step, chars }: Pick<PartProps, 'step' | 'chars'>) => <Code className="shp-ex-sig" code={followSignatureFit(step.signature, chars)} pre="function " humps />;
@@ -446,14 +383,8 @@ function Output({ step }: { step: ShapeExampleStep }) {
   );
 }
 
-/**
- * Two panes: the values, then the code, with the line that decided it lit and
- * what comes out as the code's last line. A long step scrolls its checks; the
- * signature above them stays.
- */
 function StepPanes({ k, cur, withInputs, sheet, onMore, ...p }: PartProps & { k: string; cur: boolean; withInputs: boolean; sheet?: SheetMore; onMore?: (key: keyof SheetMore) => void }) {
   const { step } = p;
-  // A phone's sheet shows the rule that decided it and what comes out; the rest opens where it belongs.
   const allFn = !sheet || sheet.fn || !step.checks.length;
   const checks = allFn ? step.checks : step.checks.filter((c) => c.decides);
   const many = step.inputs.length > 7 ? step.inputs.length : undefined;
@@ -497,13 +428,6 @@ function StepPanes({ k, cur, withInputs, sheet, onMore, ...p }: PartProps & { k:
   );
 }
 
-/**
- * The stack keeps the tallest step's height, so the board never moves as you
- * step. A step much shorter than that shows on a card that ends where it ends:
- * only the surface shrinks (from the bottom, so the arrows and the path stay
- * under the pointer). A huge --ex-cut lets the step and the rail take their own
- * heights to be read; the layout box never changes.
- */
 function fitSurface(card: HTMLElement, phone: boolean) {
   const stack = card.querySelector<HTMLElement>('.shp-ex-ios');
   const cur = stack?.querySelector<HTMLElement>('.shp-ex-io.cur');
@@ -517,12 +441,6 @@ function fitSurface(card: HTMLElement, phone: boolean) {
   card.style.setProperty('--ex-cut', `${cut}px`);
 }
 
-/**
- * A long signature gives way (it scrolls) before the checks lose the line that
- * decided it: their box never goes below that line, or all the checks when they
- * are shorter, so a short step keeps its height. A deciding line taller than
- * CHECKS_FLOOR scrolls in its box.
- */
 function floorChecks(card: HTMLElement) {
   const boxes = card.classList.contains('narrow') ? [] : [...card.querySelectorAll<HTMLElement>('.shp-ex-io .shp-ex-scroll')];
   const floors = boxes.map((box) => {
@@ -536,17 +454,12 @@ function floorChecks(card: HTMLElement) {
 }
 
 const SHEET_CALM: SheetMore = { fn: false, in: false };
-/** Less of the board than this above a phone's sheet is a slice, not context: it hides. */
 const BOARD_MIN = 140;
-/** What a phone's tallest sheet leaves under the title. */
 const SHEET_GAP = 12;
-/** The most the checks hold back from a long signature: four lines. */
 const CHECKS_FLOOR = 88;
-/** The status pill's own bottom, and what it keeps from the top of the surface. */
 const PILL_BOTTOM = { desk: 76, phone: 70 };
 const PILL_ROOM = 44;
 
-/** The card's width when open, read while it is folded too. */
 function openWidth(card: HTMLElement): number {
   const folded = !card.classList.contains('expanded');
   card.classList.add('expanded');
@@ -556,14 +469,8 @@ function openWidth(card: HTMLElement): number {
 }
 
 const nameOf = (el: Element) => el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '';
-/** Where the keys go when a press takes its own button away, best first. */
 const FOCUS_NEXT = ['Next step', 'Previous step', 'Step through', 'Stop following'];
 
-/**
- * A press that hid, disabled or unmounted its own button leaves the keys where
- * they were going, never on the page: the same button where it moved to, else
- * the next thing to press, else (the card is gone) the dock's button.
- */
 function landFocus(card: HTMLElement | null, surface: HTMLElement | null, name: string) {
   const live = (el: Element | null): el is HTMLElement => !!el && el.isConnected && el !== el.ownerDocument.body && !(el as HTMLButtonElement).disabled && !el.closest('[aria-hidden="true"], [inert]');
   if (live(document.activeElement)) return;
@@ -572,7 +479,6 @@ function landFocus(card: HTMLElement | null, surface: HTMLElement | null, name: 
   to?.focus({ preventScroll: true });
 }
 
-/** Moves `box`'s scroll by as little as shows `el`. */
 function keepInView(box: HTMLElement, el: HTMLElement) {
   const a = box.getBoundingClientRect();
   const b = el.getBoundingClientRect();
@@ -582,19 +488,12 @@ function keepInView(box: HTMLElement, el: HTMLElement) {
   else if (b.bottom > a.bottom) box.scrollTop += b.bottom - a.bottom;
 }
 
-/** Rects of the card's moving parts, for a FLIP: where they are on screen now (mid-flight included). */
 function snapshot(card: HTMLElement) {
   const m = new Map<string, DOMRect>();
   for (const el of card.querySelectorAll<HTMLElement>('[data-flip]')) m.set(el.dataset.flip!, el.getBoundingClientRect());
   return m;
 }
 
-/**
- * The board makes room for the card on the card's own curve. The view's
- * padding changes at once; the drawing is then held, frame by frame, at a rect
- * eased from where it was to where its new fit puts it (a transform on its fit
- * box), so it never snaps, whenever the drawing re-fits.
- */
 function useBoardRoom(onFrame: (landed: boolean) => void) {
   const raf = useRef(0);
   const from = useRef<DOMRect | null>(null);
@@ -623,7 +522,6 @@ function useBoardRoom(onFrame: (landed: boolean) => void) {
       cancelAnimationFrame(raf.current);
       from.current = was;
       t0.current = clock();
-      // While it moves, the drawing may sit past its frame's edge for a moment: no clip until it lands.
       const shell = fit.closest<HTMLElement>('.shp-drawn');
       if (shell) shell.style.clipPath = 'none';
       const tick = () => {
@@ -653,35 +551,19 @@ function useBoardRoom(onFrame: (landed: boolean) => void) {
   );
 }
 
-// ───────────────────────── the hook ─────────────────────────
-
 export interface ShapeFollowOptions {
-  /** The How it works view's examples (`views.how.examples`). None: no button, no card. */
   examples: readonly ShapeExample[] | undefined;
-  /** The How it works drawing's `.board` (ShapeDrawn's `onBoard`), or null while it is not drawn. */
   board: HTMLElement | null;
-  /** How it works is the view on now. */
   active: boolean;
   phone: boolean;
   reduce: boolean;
-  /** The board's root (`.shp-root`): the view to make room in, and the surface the card closes over. */
   surface: HTMLElement | null;
-  /** Open a file at a line (the function, a source). */
   onCode: (at: At) => void;
-  /** May this path be opened? A source that cannot is named only. */
   canOpen: (path: string) => boolean;
-  /** A panel is open over the board's right side: the dock has that much less room. */
   panel: boolean;
-  /** The person turned Annotate on: a click on the drawing annotates it, as it does on the board. */
   annotating: boolean;
 }
 
-/**
- * The dock's button and the card, for ShapeSurface to place: the button in
- * the dock after the views, the card in the surface (it sits above the dock).
- * `sheet`: the card is a phone's bottom sheet, and the dock steps aside.
- * `stop`: stops following, while an example is followed (Esc).
- */
 export function useShapeFollow(options: ShapeFollowOptions): { button: React.ReactNode; card: React.ReactNode; sheet: boolean; stop: (() => void) | null } {
   const { board, active, phone, reduce, surface, onCode, canOpen, panel } = options;
   const examples = options.examples ?? [];
@@ -705,11 +587,9 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   const flipping = useRef<Animation[]>([]);
   const stepping = useRef<{ anims: Animation[]; ghost: HTMLElement | null }>({ anims: [], ghost: null });
   const closing = useRef<Animation | null>(null);
-  // Mid-animation only the tags' counter-scale follows the drawing; where they go is worked out once it lands.
   const room = useBoardRoom((landed) => painter.current?.place({ quick: !landed }));
   const viewOf = useCallback(() => surface?.querySelector<HTMLElement>('.shp-view.v-how:not(.leaving)') ?? null, [surface]);
 
-  // Every change of the card's layout goes through here, so its parts can FLIP from where they are.
   const prepare = useCallback(() => {
     const card = cardRef.current;
     if (!card) return;
@@ -732,7 +612,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
       closing.current = null;
       const ios = card?.querySelector<HTMLElement>('.shp-ex-ios');
       if (!open && ios && !reduceRef.current) {
-        // Closing: the content goes first (quickly), then the card closes on its curve.
         const a = animate(ios, [{ opacity: 1 }, { opacity: 0 }], { duration: 110, easing: 'ease-out', fill: 'forwards' });
         if (a) {
           closing.current = a;
@@ -759,8 +638,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     [prepare],
   );
 
-  // The open card's width sets how long a signature's line can be, and when the panes stack. Its height and the
-  // surface's set the room everything else is laid out in, so a window made only shorter lays out again too.
   const cardOn = phase.open && how;
   const expandedNow = expanded;
   useEffect(() => {
@@ -775,7 +652,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     return () => ro.disconnect();
   }, [cardOn, expandedNow, surface]);
 
-  // The dock's seven other buttons keep their words: where all eight would not fit beside an open panel, this one gives its up.
   useLayoutEffect(() => {
     if (!surface) return;
     const measure = () => {
@@ -789,16 +665,13 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     return () => ro.disconnect();
   }, [surface, panel]);
 
-  // A new version with fewer examples (or none): nothing to follow past its end.
   useEffect(() => {
     if (phase.open && !examples[phase.ex]) setPhaseRaw({ open: false });
   }, [phase, examples]);
 
-  // The step on now, and where it was.
   const stepNow = useRef<number | null>(phase.open ? phase.step : null);
   const last = useRef<FollowPhase | null>(phase.open ? phase : null);
 
-  // The example on the picture: built once per example, then only its states change.
   const example = phase.open ? examples[phase.ex] : undefined;
   useEffect(() => (example ? warm(example) : undefined), [example]);
   useEffect(() => {
@@ -807,9 +680,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     painter.current = p;
     p.set(stepNow.current, 'jump', reduceRef.current);
     const root = board.getRootNode() as ShadowRoot | Document;
-    // While an example is followed, a click on the picture jumps to the step of the lit part it lands on, and
-    // does nothing else (no Change it, no link): the picture is the example's now. With Annotate on, the picture
-    // annotates as it does on the board; only the example's own tags still step.
     const onClick = (e: Event) => {
       const path = e.composedPath();
       if (annotatingRef.current && !path.some((t) => t instanceof Element && t.classList.contains('shp-ex-tag'))) return;
@@ -833,7 +703,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     };
   }, [board, example, active, dispatch]);
 
-  // The card's moving parts and the board, on one curve (FLIP: the layout changes at once; transforms ease it in).
   useLayoutEffect(() => {
     const card = cardRef.current;
     const before = flip.current;
@@ -859,7 +728,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
         }
         if (key === 'skin') {
           if (!now.width || !now.height) continue;
-          // The card's surface: scaled from its old box, its corners corrected so they stay round.
           const r = phone ? 18 : 14;
           const frames: Keyframe[] = [];
           for (let i = 0; i <= 12; i++) {
@@ -893,20 +761,16 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
       const ios = card.querySelector<HTMLElement>('[data-flip="ios"]');
       if (ios && !before.get('ios')) animate(ios, [{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'linear' });
     }
-    // The picture makes room: never covered, it fits above the card.
     const shown = !!card && how && phase.open;
     const view = viewOf();
     room(view, shown ? `${Math.round(card!.offsetHeight + (phone ? 20 : 76 + 16))}px` : '', red);
-    // A phone's sheet stops under the title, and never leaves a slice of the board above it.
     const head = surface?.querySelector<HTMLElement>('.shp-head');
-    // Read against the surface, so a scrolled ancestor cannot feed the room back into itself.
     const under = head && surface ? head.getBoundingClientRect().bottom - surface.getBoundingClientRect().top + surface.scrollTop : 0;
     if (card && phone && head) card.style.setProperty('--ex-room', `${Math.max(surface!.clientHeight - under - SHEET_GAP, surface!.clientHeight * 0.6)}px`);
     const covered = shown && phone && !!head && surface!.clientHeight - under - card!.offsetHeight < BOARD_MIN;
     view?.classList.toggle('shp-ex-covered', covered);
     view?.toggleAttribute('inert', covered);
     card?.classList.toggle('over', covered);
-    // The board's status keeps its place above the card: never under it.
     if (shown && surface) {
       const lift = card!.offsetHeight + 8 + (phone ? -PILL_BOTTOM.phone : 0);
       surface.style.setProperty('--ex-lift', `${Math.max(0, phone ? Math.min(lift, surface.clientHeight - PILL_BOTTOM.phone - PILL_ROOM) : lift)}px`);
@@ -916,7 +780,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     if (was !== null) landFocus(card, surface, was);
   });
 
-  // Stepping: the board's light, the card's hand-off, and the way the new step comes in.
   useLayoutEffect(() => {
     const was = last.current;
     const dir: FollowDir = followDir(was, phase);
@@ -927,7 +790,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const red = reduceRef.current;
     if (was?.open && was.ex === now.ex) painter.current?.set(now.step, dir, red);
 
-    // The card: what was on goes; what is on now comes in.
     const st = stepping.current;
     for (const a of st.anims) a.cancel();
     st.ghost?.remove();
@@ -969,7 +831,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
       push(animate(curEl, [{ opacity: 0 }, { opacity: 1 }], { duration: 180, delay: 40, easing: 'ease-out', fill: 'backwards' }));
       return;
     }
-    // Forward: the output just left flies into the new step's inputs, and the rest comes in row by row.
     const from = oldEl.querySelector<HTMLElement>('[data-out]');
     const land = curEl.querySelector<HTMLElement>('[data-handoff] [data-hand]');
     const rows = [...curEl.querySelectorAll<HTMLElement>('.shp-ex-row')].filter((r) => !r.hasAttribute('data-handoff'));
@@ -981,7 +842,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const ghost = from.cloneNode(true) as HTMLElement;
     ghost.classList.add('shp-ex-ghost');
     ghost.removeAttribute('data-out');
-    // In the card's own box (its translate would make `fixed` mean the card anyway).
     Object.assign(ghost.style, { left: `${z.left - c.left}px`, top: `${z.top - c.top}px` });
     const fly = animate(ghost, [{ transform: `translate(${a.left - z.left}px, ${a.top - z.top}px)` }, { transform: 'none' }], { duration: 300, easing: FOLLOW_EASE });
     if (!fly) return;
@@ -998,13 +858,11 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     push(hold);
   }, [phase]);
 
-  // A long step scrolls in its pane: the line that decided it is always in view when you land on it.
   const stepOn = phase.open ? phase.step : null;
   useLayoutEffect(() => {
     if (!expanded || stepOn === null || phone) return;
     const io = cardRef.current?.querySelector<HTMLElement>('.shp-ex-io.cur');
     const line = io?.querySelector<HTMLElement>('.decides');
-    // Two panes scroll the checks; one column scrolls the whole step.
     const sc = cardRef.current?.classList.contains('narrow') ? io : line?.closest<HTMLElement>('.shp-ex-scroll');
     if (!sc || !line) return;
     const a = sc.getBoundingClientRect();
@@ -1012,7 +870,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     if (b.top < a.top || b.bottom > a.bottom) sc.scrollTop += b.top - a.top - (a.height - b.height) / 2;
   }, [expanded, stepOn, phase, phone, box]);
 
-  // The path keeps the step on now in view; a phone's sheet starts each step at its top, and lower only for the rule that decided it.
   useLayoutEffect(() => {
     const card = cardRef.current;
     const on = card?.querySelector<HTMLElement>('.shp-ex-stop.on');
@@ -1027,7 +884,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     if (b.bottom > a.bottom) sc.scrollTop += b.top - a.top - (a.height - b.height) / 2;
   }, [expanded, stepOn, phone, openW]);
 
-  // Closing the card: it fades where it was (React has already let it go).
   const lastCard = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     if (cardRef.current) {
@@ -1046,13 +902,11 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     else gone.remove();
   });
 
-  // A narrow board scrolls: keep the step on now in view, above the sheet.
   useEffect(() => {
     if (!board || !phase.open || phase.step === null || !phone) return;
     const el = painter.current?.elementOf(phase.step) as HTMLElement | null | undefined;
     const view = viewOf();
     if (!el || !view || typeof view.scrollTo !== 'function') return;
-    // Room above the part for its tag; a tag at the part's bottom needs that room below, clear of the sheet.
     const above = example?.steps[phase.step]?.tagAt === 'bottom' ? 20 : 56;
     const top = el.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop - above;
     view.scrollTo({ top: Math.max(0, top), behavior: reduce ? 'auto' : 'smooth' });
@@ -1067,7 +921,6 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   const withRail = showIO && !narrow;
   const withStrip = showIO && narrow;
   const withInputs = !!ex && ex.steps.some((s) => s.inputs.length > 0);
-  // How many mono characters fit in each pane: the rail (232), the main area's padding (28) and the panes' gap (24) go first.
   const width = openW || 1100;
   const panes = width - 284;
   const charsNow = narrow ? Math.max(28, Math.floor((width - 64) / CH)) : Math.floor((withInputs ? (panes * 8) / 14 : width - 260) / CH) - 1;

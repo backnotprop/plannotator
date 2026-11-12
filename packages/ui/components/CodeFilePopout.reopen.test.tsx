@@ -1,17 +1,3 @@
-/**
- * `CodeFileView`'s put-back seams (DOM-gated): a host that kept a line comment
- * being written, or an edit of a saved one, when its file closed puts the words
- * back, and they open in the same composer on the same lines without saving.
- *
- * What regresses: the composer opening before Pierre has drawn the line (no
- * place to anchor), on other lines, empty, more than once for one request, or
- * a save happening without the person; and, with neither prop, anything
- * opening at all. `onComposerLines` tells the host the open composer's lines.
- *
- * Pierre's `File` is replaced by a stub that draws one `[data-line]` row per
- * line (once the test says Pierre has drawn) and the inline comments through
- * `renderAnnotation`, as Pierre does.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -116,7 +102,6 @@ describe.if(hasDom)('CodeFileView put-back seams', () => {
     expect(added).toEqual([]);
     await submitKey(composer()!);
     expect(added.map((a) => [a.lineStart, a.lineEnd, a.text])).toEqual([[2, 3, 'b and c are one thought']]);
-    // The same request object does not open it again.
     await rerender(view({ reopenComment: request }, added, edits));
     await frames();
     expect(composer()).toBeNull();
@@ -134,8 +119,6 @@ describe.if(hasDom)('CodeFileView put-back seams', () => {
     expect(edits).toEqual([['savedOne', { text: 'new words not saved' }]]);
   });
 
-  // What regresses: a host told nothing (or other lines) while a line comment is written, so it cannot keep the words
-  // when the view is taken away; or told lines after the composer closed.
   test('onComposerLines: the lines (and their code) as the composer opens, null as it closes', async () => {
     const added: CodeFileAnnotationInput[] = [];
     const edits: Array<[string, Partial<CodeAnnotation>]> = [];

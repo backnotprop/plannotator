@@ -1,9 +1,3 @@
-/**
- * The one rule every comment composer asks (#1934). Guards: the default
- * (Enter is a new line) drifting, Cmd/Ctrl+Enter lost with the setting on,
- * Shift+Enter or Alt+Enter saving, and an IME Enter saving, in both the DOM
- * event shape and React's synthetic shape (`nativeEvent`).
- */
 import { describe, expect, test } from 'bun:test';
 import { isCommentSubmitKey, isImeCompositionKey } from './commentSubmitKey';
 

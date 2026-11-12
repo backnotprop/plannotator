@@ -1,21 +1,3 @@
-/**
- * The page inserts a plain-text paste itself (pasteInsert.ts), the Chrome 155
- * to 156 macOS workaround: a dictation app's synthetic ⌘V carried the right
- * text in the `paste` event but Chrome inserted nothing.
- *
- * Proved here on the real handler: which pastes it takes (text into a focused
- * textarea or text input) and which it leaves to the browser (already
- * cancelled, files, empty, read-only, disabled, unfocused, mid IME
- * composition, contenteditable, code editors, email and number inputs), and
- * that what it inserts is what the browser would (maxlength, line breaks, the
- * selection replaced); that it runs only on Chromium 155 and 156 on macOS
- * (the gate), only for trusted events, and that a lost compositionend cannot
- * leave it off. happy-dom has no execCommand, so the setRangeText
- * fallback runs; Chromium's execCommand path is proved in
- * tests/e2e/inbox-dictation-paste.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 
 const hasDom = typeof document !== 'undefined';
@@ -24,7 +6,6 @@ const { installPlainTextPaste, plainTextPasteInsertion, chromiumPasteBugAffected
 let uninstall: (() => void) | null = null;
 beforeEach(() => {
   if (!hasDom) return;
-  // On, and taking script-dispatched events: the gate and the isTrusted check are proved apart, below.
   uninstall = installPlainTextPaste(window, { enabled: true, allowUntrusted: true });
 });
 afterEach(() => {
@@ -52,7 +33,6 @@ function pasteEvent(clip: Clip): ClipboardEvent {
   return event;
 }
 
-/** Dispatch a paste on `el`; returns whether the page took it, and counts the `input` events it fired. */
 function paste(el: Element, clip: Clip): { taken: boolean; inputs: number } {
   let inputs = 0;
   const count = () => inputs++;
@@ -78,7 +58,6 @@ test('a text paste into a focused textarea is inserted once by the page, at the 
   expect(paste(box, { text: ', dictated' })).toEqual({ taken: true, inputs: 1 });
   expect(box.value).toBe('Hello, dictated world');
   expect(box.selectionStart).toBe(15);
-  // A second dictation (the one Chrome dropped) lands too.
   expect(paste(box, { text: ' again' }).taken).toBe(true);
   expect(box.value).toBe('Hello, dictated again world');
 });
@@ -111,16 +90,13 @@ test('maxlength cuts the text to the room left, never splitting a surrogate pair
   input.setSelectionRange(2, 2);
   paste(input, { text: 'cdefgh' });
   expect(input.value).toBe('abcde');
-  // Replacing a selection frees its room.
   input.setSelectionRange(0, 5);
   paste(input, { text: 'xy' });
   expect(input.value).toBe('xy');
-  // One unit of room before an emoji (two units): nothing cut in half.
   input.value = 'abcd';
   input.setSelectionRange(4, 4);
   expect(paste(input, { text: '😀z' }).taken).toBe(false);
   expect(input.value).toBe('abcd');
-  // Full: the browser inserts nothing either, so it is left to it.
   input.value = 'abcde';
   input.setSelectionRange(5, 5);
   expect(paste(input, { text: 'more' }).taken).toBe(false);
@@ -132,7 +108,6 @@ test('pastes carrying files are left native: paste-to-attach keeps working', () 
   const box = field<HTMLTextAreaElement>('<textarea></textarea>');
   const image = new File([new Uint8Array([1])], 'image.png', { type: 'image/png' });
   expect(paste(box, { files: [image] })).toEqual({ taken: false, inputs: 0 });
-  // Text beside the file (an image copied from a page): still native, the browser inserts the text.
   expect(paste(box, { files: [image], text: 'caption' })).toEqual({ taken: false, inputs: 0 });
   expect(box.value).toBe('');
 });
@@ -143,7 +118,6 @@ test('an empty paste, a cancelled one, and one mid IME composition are left alon
   expect(paste(box, { text: '' }).taken).toBe(false);
   expect(paste(box, {}).taken).toBe(false);
 
-  // A handler on the page cancelled it (an image paste, for one): nothing inserted.
   const cancel = (e: Event) => e.preventDefault();
   box.addEventListener('paste', cancel);
   expect(paste(box, { text: 'words' }).inputs).toBe(0);
@@ -210,27 +184,22 @@ const hints = (v: number, platform = 'macOS') => ({
 
 test('the gate: Chromium 155 and 156 on macOS only', () => {
   if (!hasDom) return;
-  // Client hints (Chrome, Edge, Brave, Arc all carry the Chromium brand).
   expect(chromiumPasteBugAffected(hints(155))).toBe(true);
   expect(chromiumPasteBugAffected(hints(156))).toBe(true);
   expect(chromiumPasteBugAffected(hints(154))).toBe(false);
   expect(chromiumPasteBugAffected(hints(157))).toBe(false);
   expect(chromiumPasteBugAffected(hints(156, 'Windows'))).toBe(false);
-  // The Chromium brand wins over the UA string.
   expect(chromiumPasteBugAffected({ ...hints(157), userAgent: MAC_CHROME(156) })).toBe(false);
-  // No client hints: the UA string (Edge says Edg/ beside Chrome/).
   expect(chromiumPasteBugAffected({ userAgent: MAC_CHROME(155), platform: 'MacIntel' })).toBe(true);
   expect(chromiumPasteBugAffected({ userAgent: `${MAC_CHROME(156)} Edg/156.0.0.0` })).toBe(true);
   expect(chromiumPasteBugAffected({ userAgent: MAC_CHROME(154) })).toBe(false);
   expect(chromiumPasteBugAffected({ userAgent: MAC_CHROME(157) })).toBe(false);
-  // Not macOS.
   expect(
     chromiumPasteBugAffected({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', platform: 'Win32' }),
   ).toBe(false);
   expect(
     chromiumPasteBugAffected({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', platform: 'Linux x86_64' }),
   ).toBe(false);
-  // Safari, Firefox, Chrome on iOS (WebKit).
   expect(
     chromiumPasteBugAffected({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
@@ -280,7 +249,7 @@ test('a lost compositionend does not leave it off: focus moving or the window bl
   a.focus();
   a.dispatchEvent(new Event('compositionstart', { bubbles: true }));
   expect(paste(a, { text: 'x' }).taken).toBe(false);
-  b.focus(); // focusin, and no compositionend
+  b.focus();
   expect(paste(b, { text: 'y' }).taken).toBe(true);
   b.dispatchEvent(new Event('compositionstart', { bubbles: true }));
   expect(paste(b, { text: 'z' }).taken).toBe(false);

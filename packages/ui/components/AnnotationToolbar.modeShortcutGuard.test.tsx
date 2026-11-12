@@ -4,17 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { useAnnotationModeShortcuts } from '../shortcuts/plan-review/annotationMode.shortcuts';
 
-/**
- * Shift+1..4 vs type-to-comment (DOM-gated, #1244 follow-up).
- *
- * The annotation-mode shortcuts produce printable characters (! @ # $).
- * While the annotation toolbar's type-to-comment listener is active (a
- * selection exists and the toolbar is open), those keys belong to the
- * comment being started: the failure this guards is Shift+3 ("#") silently
- * arming Redline while the user thinks they are typing into the toolbar.
- * With no toolbar open, the shortcuts must keep working.
- */
-
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -95,9 +84,7 @@ describe.if(hasDom)('annotation-mode shortcuts vs type-to-comment', () => {
     await act(async () => {
       pressShiftDigit(1, '!');
     });
-    // The character reached the comment path with its identity intact...
     expect(commentChars).toEqual(['!']);
-    // ...and no mode changed underneath the user.
     expect(modes).toEqual([]);
   });
 
@@ -123,7 +110,6 @@ describe.if(hasDom)('annotation-mode shortcuts vs type-to-comment', () => {
       pressShiftDigit(2, '@');
     });
     expect(modes).toEqual([]);
-    // The toolbar unmounts (selection resolved/dismissed): shortcuts return.
     await act(async () => {
       root?.render(<ModeShortcutHost onMode={(m) => modes.push(m)} />);
     });

@@ -1,15 +1,3 @@
-/**
- * The hover card's body is an issue or PR description: text anyone who can
- * write on the repo controls. No link in it may open without the card's
- * "Open · Cancel" confirm.
- *
- * Failure to catch: a link the renderer writes after the card stripped its
- * links (raw HTML lands in HtmlBlock's passive effect, after the card's layout
- * effect) keeping its `href` and `target=_blank`, so a click, a middle click,
- * a Cmd/Ctrl-click, Enter or the context menu opens it with no confirm.
- *
- * Run with DOM_TESTS=1.
- */
 import React, { act } from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createRoot, type Root } from 'react-dom/client';
@@ -72,7 +60,6 @@ async function mount(): Promise<HTMLElement> {
   await act(async () => {
     root?.render(<RefCardView target={TARGET} href="https://github.com/acme/widgets/pull/12" result={result(BODY)} />);
   });
-  // Let any passive effect and observer callback run.
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -119,7 +106,6 @@ describe.if(hasDom)('ref card body links', () => {
         ['detlink', 'https://evil.example/details'],
       ] as const) {
         const a = link(c, text);
-        // A listener on the link itself (the renderer's, or the browser's default) must not see it.
         let reachedLink = false;
         const onLink = () => {
           reachedLink = true;
@@ -155,14 +141,11 @@ describe.if(hasDom)('ref card body links', () => {
     });
     const shown = c.querySelector('[data-ref-card-confirm-url]') as HTMLElement;
     expect(c.querySelector('[data-ref-card-confirm-host]')?.textContent).toBe(host);
-    // The row never truncates the host away.
     expect(shown.querySelector('.truncate')).toBeNull();
-    // The path is cut in the middle, the host is not.
     const path = c.querySelector('[data-ref-card-confirm-path]')?.textContent ?? '';
     expect(path).toContain('…');
     expect(path).toStartWith('/acme/widgets');
     expect(path).toEndWith('?tab=checks');
-    // A screen reader gets the URL whole; the shortened parts are hidden from it.
     expect(shown.querySelector('.sr-only')?.textContent).toBe(url);
     expect(shown.querySelector('[aria-hidden="true"]')?.textContent).not.toBe(url);
     expect(c.querySelector('[data-ref-card-confirm] a')?.getAttribute('href')).toBe(url);
@@ -176,7 +159,6 @@ describe.if(hasDom)('ref card body links', () => {
     late.target = '_blank';
     late.textContent = 'latelink';
     body.appendChild(late);
-    // Before the observer ran: the capture listener still catches it.
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
     await act(async () => {
       late.dispatchEvent(event);

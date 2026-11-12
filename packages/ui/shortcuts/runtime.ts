@@ -28,11 +28,6 @@ export interface UseShortcutScopeOptions<TScope extends ShortcutScopeDefinition<
   handlers: ShortcutHandlers<TScope>;
   target?: ShortcutEventTarget;
   stopOnMatch?: boolean;
-  /**
-   * Listen in the capture phase: the scope sees a key before the focused
-   * element does (a guard that must run before a component's own handler).
-   * Default false (bubble), so a component that used the key first can say so.
-   */
   capture?: boolean;
 }
 
@@ -60,21 +55,12 @@ function normalizeShortcutHandler(handler: ShortcutHandler): ShortcutHandlerConf
 function getShortcutEntries<TScope extends ShortcutScopeDefinition<any>>(
   scope: TScope,
 ): Array<[ShortcutActionId<TScope>, ShortcutDefinition]> {
-  // SAFETY: ShortcutScopeDefinition constrains every own value in `shortcuts`
-  // to ShortcutDefinition; Object.entries preserves those own keys and values.
   return Object.entries(scope.shortcuts) as Array<[
     ShortcutActionId<TScope>,
     ShortcutDefinition,
   ]>;
 }
 
-// TODO(migration): no cross-scope arbitration. When two scopes bind the
-// same key (e.g. `Escape` in both an outer editor scope and an inner
-// dialog scope), both `useShortcutScope` listeners fire on a single
-// keypress. Add `if (event.defaultPrevented) return false;` at the top
-// of this function once shortcut definitions consistently set
-// `preventDefault: true` (or once we flip the default). Until then,
-// callers must guard with `when` to prevent double-handling.
 export function dispatchShortcutEvent<TScope extends ShortcutScopeDefinition<any>>(
   scope: TScope,
   handlers: ShortcutHandlers<TScope>,
@@ -117,14 +103,6 @@ function getEventTarget(target: ShortcutEventTarget): EventTarget | null {
   return target;
 }
 
-/**
- * Attach a registry scope to a keyboard event target.
- *
- * Ordinary bindings dispatch immediately. Non-modifier sequential bindings
- * advance within a 500 ms window, suppress their prefix keystrokes, and reset
- * after a match, timeout, or unrelated key. Handlers are read through a ref so
- * listener lifetime follows only the scope, target, and dispatch options.
- */
 export function useShortcutScope<TScope extends ShortcutScopeDefinition<any>>({
   scope,
   handlers,
@@ -227,25 +205,6 @@ export function createShortcutScopeHook<TScope extends ShortcutScopeDefinition<a
   };
 }
 
-// --- Multi-press shortcut support ---
-//
-// `useShortcutScope` only dispatches single-press bindings — anything with
-// whitespace (e.g. `"Alt Alt"`) or the `hold` token (e.g. `"Alt hold"`)
-// short-circuits in `matchesShortcutBinding`. Multi-press bindings need a
-// dedicated hook that knows their semantics:
-//
-//   - Double-tap → `useDoubleTapShortcuts` below.
-//   - Hold       → no shared hook yet; wire by hand in the consuming
-//                  component until one is built. The `Alt hold` binding in
-//                  `inputMethodShortcuts` is currently driven by the
-//                  bespoke `useInputMethodSwitch` hook in the plan editor.
-//
-// TODO: when the App.tsx migration starts touching hold semantics, add a
-// `useHoldShortcuts` here paired with a `parseHoldBinding` in core.ts so the
-// registry-driven path actually fires.
-
-// --- Double-tap shortcut support ---
-
 export type DoubleTapHandlers<TScope extends ShortcutScopeDefinition<any>> = Partial<
   Record<ShortcutActionId<TScope>, ShortcutHandler>
 >;
@@ -253,17 +212,9 @@ export type DoubleTapHandlers<TScope extends ShortcutScopeDefinition<any>> = Par
 export interface UseDoubleTapShortcutsOptions<TScope extends ShortcutScopeDefinition<any>> {
   scope: TScope;
   handlers: DoubleTapHandlers<TScope>;
-  /** Max gap between two key releases to count as a double-tap (default: 300ms). */
   window?: number;
 }
 
-/**
- * Hook for handling double-tap shortcuts (bindings like `"Alt Alt"`).
- *
- * Double-tap is detected on keyup: if the same key is released twice
- * within `window` ms, the handler fires. Regular (keydown) bindings
- * in the same scope are ignored — use `useShortcutScope` for those.
- */
 export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any>>({
   scope,
   handlers,
@@ -273,7 +224,6 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
   useEffect(() => { handlersRef.current = handlers; }, [handlers]);
 
   useEffect(() => {
-    // Pre-parse which actions have double-tap bindings
     const doubleTapActions: Array<{ actionId: ShortcutActionId<TScope>; keyName: string; preventDefault: boolean }> = [];
     for (const [actionId, shortcut] of getShortcutEntries(scope)) {
       for (const binding of resolveShortcutBindings(shortcut)) {
@@ -286,13 +236,7 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
 
     if (doubleTapActions.length === 0) return;
 
-    // Track last keyup timestamp per key
     const lastKeyUp = new Map<string, number>();
-    // A tap only counts when the key went down and came up ALONE. Without this,
-    // any two releases of (say) Shift within the window fire the action: typing
-    // two capitalized words, extending a selection with two Shift+Clicks, or
-    // pressing a Mod+Shift+<key> chord twice. cleanPress marks a press as solo
-    // until any other key or pointer interaction intervenes.
     const cleanPress = new Map<string, boolean>();
     const MODIFIER_KEYS = ['Meta', 'Control', 'Alt', 'Shift'];
 
@@ -309,7 +253,6 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
           if (!event.repeat) cleanPress.set(keyName, true);
         }
       }
-      // Any non-tracked keydown breaks both the current press and the sequence.
       if (!tracked) invalidateSequence();
     };
 
@@ -317,8 +260,6 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
       for (const { actionId, keyName, preventDefault } of doubleTapActions) {
         if (!matchesKeyName(event, keyName)) continue;
 
-        // Release with another modifier still held (Mod+Shift+B) or after a
-        // non-solo press: not a tap, and it resets the sequence.
         const otherModifierHeld = MODIFIER_KEYS.some(
           (m) => m !== keyName && event.getModifierState(m),
         );
@@ -327,7 +268,7 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
           cleanPress.delete(keyName);
           continue;
         }
-        cleanPress.delete(keyName); // release consumes the press
+        cleanPress.delete(keyName);
 
         const handler = handlersRef.current[actionId];
         if (!handler) continue;
@@ -340,7 +281,7 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
         if (now - prev < tapWindow) {
           if (preventDefault) event.preventDefault();
           handle(event);
-          lastKeyUp.set(keyName, 0); // reset so triple-tap doesn't re-fire
+          lastKeyUp.set(keyName, 0);
         } else {
           lastKeyUp.set(keyName, now);
         }
@@ -349,7 +290,6 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
 
     window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('keyup', handleKeyUp);
-    // Pointer interaction mid-press (Shift+Click selection) breaks the tap.
     window.addEventListener('mousedown', invalidateSequence, true);
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);

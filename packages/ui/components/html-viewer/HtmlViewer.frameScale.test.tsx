@@ -1,25 +1,3 @@
-/**
- * HtmlViewer `frameScale` and `onContentWidth` (DOM-gated).
- *
- * A host can show the page scaled (the Inbox on a phone, "Desktop size": the
- * page laid out at 1280 px and scaled down to the phone's width). The bridge
- * measures in the page's own pixels, so everything the parent places from a
- * bridge measure has to go through the scale, and every parent distance sent
- * to the bridge has to come back out of it, or a comment lands away from what
- * was tapped.
- *
- * Guards: with a scale, a pin's composer anchor sits on the pinned element as
- * it is drawn on screen (and follows it when the page scrolls); `revealPin`'s
- * `clearBottom` reaches the bridge in page pixels; with no scale (every other
- * host) the numbers are exactly as before. `onContentWidth` gets the bridge's
- * report, also on a read-only page, and a forged or out-of-range report never
- * reaches it. `onPageTap` gets where a tap landed on screen (through the
- * scale) and `onPageScrollUp` a scroll back up, on a read-only page too; a
- * forged tap does not reach it. The bridge reports only when asked: a viewer
- * with none of these callbacks never sends `set-page-reports` (Plannotator's
- * other surfaces and Workspaces are unchanged); one with them asks once the
- * page is ready, with its scale, and asks again when the scale changes.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { createRef } from 'react';
 import { act } from 'react';
@@ -40,7 +18,6 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-/** Where the frame sits on screen (happy-dom lays nothing out). */
 const FRAME = { left: 10, top: 50 };
 
 async function mount(
@@ -111,7 +88,6 @@ async function mount(
 const asks = (sent: Record<string, unknown>[]) => sent.filter((m) => m.type === 'plannotator-bridge-set-page-reports');
 const ready = { type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION };
 
-/** The fixed 1 px anchor the composer is placed on (useHtmlAnnotation's positionAnchor). */
 function anchor(): { top: number; left: number } {
   const found = Array.from(document.body.children).filter(
     (el): el is HTMLElement => el instanceof HTMLElement && el.style.position === 'fixed' && el.style.width === '1px',
@@ -120,7 +96,6 @@ function anchor(): { top: number; left: number } {
   return { top: parseFloat(found[0]!.style.top), left: parseFloat(found[0]!.style.left) };
 }
 
-/** A pin on an element the bridge measured at (200, 100), 40 × 20 page pixels. */
 const pin = {
   type: 'plannotator-bridge-selection',
   text: 'Pinpoint target',
@@ -134,7 +109,6 @@ describe.if(hasDom)('a scaled frame', () => {
     const { post } = await mount({ frameScale: 0.5 });
     await post(pin);
     expect(document.querySelector('[data-comment-popover]')).not.toBeNull();
-    // Top edge 100 page px down, at half size: 50 px under the frame's top. Centre of 200..240 → 220 → 110 px in.
     expect(anchor()).toEqual({ top: FRAME.top + 50, left: FRAME.left + 110 });
 
     await post({ type: 'plannotator-bridge-selection-rect', rect: { top: 40, left: 200, width: 40, height: 20 } });
@@ -195,7 +169,6 @@ describe.if(hasDom)('a tap and a scroll up on the page', () => {
     const taps: number[] = [];
     let ups = 0;
     const { post } = await mount({ readOnly: true, frameScale: 0.5, onPageTap: (y) => taps.push(y), onPageScrollUp: () => ups++ });
-    // 60 page px down, at half size: 30 px under the frame's top.
     await post({ type: 'plannotator-bridge-page-tap', y: 60 });
     await post({ type: 'plannotator-bridge-page-tap', y: '60' });
     await post({ type: 'plannotator-bridge-page-tap', y: Number.NaN });
@@ -222,11 +195,9 @@ describe.if(hasDom)('asking the bridge for its page reports', () => {
     expect(asks(sent)).toEqual([{ type: 'plannotator-bridge-set-page-reports', contentWidth: true, scrollUp: false, tap: true, scale: 1 }]);
     await rerender({ readOnly: true, onPageTap, onContentWidth, frameScale: 0.3 });
     expect(asks(sent).at(-1)).toEqual({ type: 'plannotator-bridge-set-page-reports', contentWidth: true, scrollUp: false, tap: true, scale: 0.3 });
-    // A new callback of the same kind is not a new ask.
     const before = asks(sent).length;
     await rerender({ readOnly: true, onPageTap: () => {}, onContentWidth, frameScale: 0.3 });
     expect(asks(sent).length).toBe(before);
-    // Dropping them all tells the bridge to stop.
     await rerender({ readOnly: true });
     expect(asks(sent).at(-1)).toEqual({ type: 'plannotator-bridge-set-page-reports', contentWidth: false, scrollUp: false, tap: false, scale: 1 });
   });

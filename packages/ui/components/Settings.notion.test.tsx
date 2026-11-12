@@ -1,8 +1,3 @@
-/**
- * Save to Notion acts with the server's NOTION_TOKEN, so Settings shows the
- * Notion tab only when the server offered it (`notion: true` on /api/plan,
- * which it sends only for a local session with the token).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

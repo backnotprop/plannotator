@@ -14,8 +14,6 @@ describe("shareableDocumentMarkdown", () => {
   });
 
   test("a diagram source ships fenced, so the portal's markdown parse renders the diagram", () => {
-    // The portal has no server to tell it `renderAs`, so the shared body has
-    // to carry the fence itself or the diagram arrives as a wall of text.
     const shared = shareableDocumentMarkdown(MERMAID, "mermaid");
     const blocks = parseMarkdownToBlocks(shared);
     expect(blocks).toHaveLength(1);

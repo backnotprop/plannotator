@@ -1,16 +1,7 @@
 import { useCallback, useState } from 'react';
 
-/**
- * The update-notice switch (PLANNOTATOR_UPDATE_CHECK / `updateCheck`) for
- * Settings → General: the server's value from serverConfig, written back
- * with POST /api/config. Deliberately not a settings-registry entry: the
- * registry is bundled into the portable guides.show viewer, whose pinned
- * build must not change for a Plannotator-only setting.
- */
 export interface UpdateCheckSetting {
-  /** The effective value: the env var when it decides, else config.json (default true). */
   on: boolean;
-  /** PLANNOTATOR_UPDATE_CHECK when it overrides the config file: the switch is locked. */
   env?: boolean;
   onChange: (next: boolean) => void;
 }

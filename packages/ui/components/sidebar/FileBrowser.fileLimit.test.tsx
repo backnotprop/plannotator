@@ -1,13 +1,3 @@
-/**
- * The file browser says when the server left files out (DOM_TESTS=1).
- *
- * Guards: an answer with `truncated: true` used to be read by nobody, so the
- * files past PLANNOTATOR_FILE_BROWSER_MAX_FILES vanished from the tree with no
- * hint. The hook must carry `truncated` / `fileLimit` from the answer, and the
- * tree must end with one quiet line naming the cap and the knob; an answer
- * that is not truncated (or a host backend that never sends the field) shows
- * nothing.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -34,8 +24,6 @@ const Harness: React.FC = () => {
   const browser = useFileBrowser();
   React.useEffect(() => {
     browser.fetchAll([DIR]);
-    // fetchAll is stable; run once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
     <FileBrowser

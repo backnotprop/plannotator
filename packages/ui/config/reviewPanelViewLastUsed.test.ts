@@ -19,11 +19,9 @@ function installMemoryBackend(): Map<string, string> {
   return values;
 }
 
-/** Fresh store per test — never the singleton, which lives for the whole
- * bun process and must not be resolved against a throwaway backend. */
 function makeStore() {
   const store = new ConfigStoreForTest();
-  store.setServerSync(() => {}); // no /api/config in tests
+  store.setServerSync(() => {});
   return store;
 }
 
@@ -45,8 +43,6 @@ describe('reviewPanelViewLastUsed setting', () => {
   test('round-trips sections/tree; the null default writes no cookie', () => {
     const values = installMemoryBackend();
 
-    // ensureLoaded seeds unrecorded defaults through toCookie — null must
-    // not materialize a cookie that a later fromCookie would misread.
     SETTINGS.reviewPanelViewLastUsed.toCookie(null);
     expect(values.has('plannotator-review-panel-view-last-used')).toBe(false);
     expect(SETTINGS.reviewPanelViewLastUsed.fromCookie()).toBeUndefined();
@@ -73,10 +69,8 @@ describe('reviewPanelViewLastUsed setting', () => {
     setReviewPanelView('tree', undefined, store);
     setReviewPanelView('sections', { recordLastUsed: false }, store);
 
-    // The pair was repaired...
     expect(store.get('reviewPanelView')).toBe('sections');
     expect(store.get('defaultDiffType')).toBe('since-base');
-    // ...but the user's last-used view survived.
     expect(store.get('reviewPanelViewLastUsed')).toBe('tree');
   });
 
@@ -102,7 +96,6 @@ describe('reviewPanelViewLastUsed setting', () => {
     setReviewDefaultDiffType('merge-base', store);
     setReviewPanelView('sections', undefined, store);
     expect(getProviderReviewDefaultDiffType(jj, store)).toBe('jj-line');
-    // Git stays on its original key only; no copy that could go stale.
     expect(store.get('reviewDefaults').git).toBeUndefined();
   });
 
@@ -119,9 +112,7 @@ describe('reviewPanelViewLastUsed setting', () => {
     const values = installMemoryBackend();
     values.set('plannotator-default-diff-type', 'branch');
     const store = makeStore();
-    // The old cookie, including its retired alias, is still the Git default.
     expect(store.get('defaultDiffType')).toBe('merge-base');
-    // And the old config.json key still wins on load.
     store.init({ diffOptions: { defaultDiffType: 'unstaged' } });
     expect(store.get('defaultDiffType')).toBe('unstaged');
     expect(getProviderReviewDefaultDiffType(jj, store)).toBe('jj-current');
@@ -142,23 +133,15 @@ describe('reviewPanelViewLastUsed setting', () => {
 
 describe('reviewPanelView default', () => {
   test('a profile with no cookie resolves to Tree', () => {
-    // Owner ruling (#1463 / #1474): the first-run "Set up your review view"
-    // chooser is gone, so the registry default IS the opening view for a new
-    // reviewer. Tree is also the view every diff type can render, which is
-    // what makes the coupled (reviewPanelView, defaultDiffType) pair
-    // consistent with no reconciliation.
     installMemoryBackend();
     const store = makeStore();
 
     expect(SETTINGS.reviewPanelView.fromCookie()).toBeUndefined();
     expect(store.get('reviewPanelView')).toBe('tree');
-    // Nothing is snapped: the resolved diff default is untouched by the view.
     expect(store.get('defaultDiffType')).toBe('since-base');
   });
 
   test('an existing Git status cookie still wins over the new default', () => {
-    // Failure caught: the default flip reaching reviewers who already chose
-    // Git status — the one group this change must be invisible to.
     const values = installMemoryBackend();
     values.set('plannotator-review-panel-view', 'sections');
     const store = makeStore();

@@ -1,9 +1,3 @@
-/**
- * The sanitizer really running, with the folder's own allowlist, over the bridges
- * in `tests/helpers/chat-sanitizer-dom.ts`. The spec in
- * `tests/e2e/chat-window.spec.ts` proves the same text in Chromium.
- * Requires DOM (DOM_TESTS=1).
- */
 import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
 import { Lexer } from 'marked';
 import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
@@ -19,7 +13,6 @@ beforeAll(async () => {
   if (!hasDom) return;
   unbridge = bridgeSanitizerDom();
   ({ chatMarkdownHtml, personMarkdownHtml, chatTextRenderer } = await import('./chatMarkdown'));
-  // The sanitizer proves itself on first use, so that has to happen with the walk in place.
   chatMarkdownHtml('first use');
 });
 
@@ -35,8 +28,6 @@ function attributesIn(html: string) {
   return [...parsed(html).querySelectorAll('*')].flatMap((el) => el.getAttributeNames());
 }
 
-/** Run with the clock held still, so the time budget cannot be what a test sees:
- * runtimes differ by a hundred times on this parse. */
 function withStoppedClock<Result>(run: () => Result): Result {
   const clock = spyOn(Date, 'now').mockReturnValue(Date.now());
   try {
@@ -46,7 +37,6 @@ function withStoppedClock<Result>(run: () => Result): Result {
   }
 }
 
-/** Run with every look at the clock a second later, so the budget is gone at once. */
 function withBudgetGone<Result>(run: () => Result): Result {
   let now = 0;
   const clock = spyOn(Date, 'now').mockImplementation(() => (now += 1_000));
@@ -137,7 +127,6 @@ describe.if(hasDom)('raw HTML in an answer', () => {
   const rebuilt = (tag: string, open: number, paragraphs: number) =>
     `<div>${openTags(tag, open)}</div>${'<p>x</p>'.repeat(paragraphs)}`;
 
-  // Each of these builds a huge DOM from a short string, inside the sanitizer.
   test.each([
     ['open formatting tags rebuilt in each paragraph, 27 KB', rebuilt('strong', 300, 3_000)],
     ['the same, 92 KB', rebuilt('strong', 1_000, 10_000)],
@@ -171,7 +160,6 @@ describe.if(hasDom)('raw HTML in an answer', () => {
     expect(view.textContent).toContain('onclick');
   });
 
-  // A tag `marked` cannot read is text to it, and a real tag to a browser.
   const unreadable = (open: number) =>
     Array.from({ length: open }, (_, index) => `<strong !a${index}>`).join('');
   const rawOpeners = ['<code>', '<kbd>', '<pre>', '<script>'];
@@ -249,8 +237,6 @@ describe.if(hasDom)('text that would stop the page', () => {
       bothRoles.map(([who, render]) => [`${name}, from ${who}`, make(size), render] as const),
     );
 
-  // Around where V8's stack gives out. A bigger stack parses these, as empty
-  // quotes where there are no words, so the promise here is only that nothing throws.
   test.each(cases(2_000))('%s, near the limit, does not throw', (_name, text, render) => {
     expect(typeof render(text)).toBe('string');
   });
@@ -276,13 +262,10 @@ describe.if(hasDom)('text that would stop the page', () => {
   const table = (columns: number, rows: number) =>
     `${'| a '.repeat(columns)}|\n${'| - '.repeat(columns)}|\n${'x\n'.repeat(rows)}`;
 
-  // A wide header and many short rows: `marked` pads each row to the header's
-  // width in one call, so nothing inside it can stop this. Small messages, too.
   test.each([
     ['1M cells in 8 KB', table(500, 2_000)],
     ['2M cells in 11 KB', table(800, 2_500)],
     ['72M cells in 70 KB', table(6_000, 12_000)],
-    // Large enough that only the check before `marked` keeps it under the time below.
     ['21M cells split by a lone carriage return', table(3_000, 7_000).replaceAll('\n', '\r')],
     ['rows split by CRLF', table(500, 2_000).replaceAll('\n', '\r\n')],
     ['inside a quote', table(500, 2_000).replaceAll(/^/gm, '> ')],
@@ -415,8 +398,6 @@ describe.if(hasDom)('a long line in an ordinary message', () => {
     expect(view.querySelector('strong')?.textContent).toBe('next');
   });
 
-  // With the clock stopped the budget cannot end these, so only the limit on
-  // the work before the first token can leave them as their own text.
   test.each([
     ['escapes', '\\* '.repeat(85_000), '\\*'],
     ['code spans', '`a` '.repeat(60_000), '`a`'],
@@ -458,7 +439,6 @@ describe.if(hasDom)('a long line in an ordinary message', () => {
 
 describe.if(hasDom)('one block too costly to lay out', () => {
   const mixed = (chars: number) => 'سa'.repeat(chars / 2);
-  /** The most characters past ASCII in any one block of what is drawn. */
   const widestBlock = (html: string) => {
     const view = parsed(html);
     const blocks = [...view.querySelectorAll('p, pre')];
@@ -486,7 +466,6 @@ describe.if(hasDom)('one block too costly to lay out', () => {
     expect(parsed(chatMarkdownHtml(text)).textContent!.replace(/\s/g, '')).toBe(text);
   });
 
-  // WebKit takes minutes over a word with no place to break.
   test.each([
     ['in a paragraph', 'سa'.repeat(2_000), 'p'],
     ['in a code span', `\`${'سa'.repeat(2_000)}\``, 'code'],
@@ -587,7 +566,6 @@ describe.if(hasDom)('a stream that spends its budget', () => {
 
   test.each([
     ['a table too costly to draw on every delta', wideTable, '<th>'],
-    // Few elements and a lot of HTML, because the host's DOM here is not a browser's.
     ['paragraphs too costly to draw on every delta', `${'&'.repeat(7_000)} ${'&'.repeat(7_000)}\n\n`.repeat(5), '</p>\n<p>'],
   ])('%s is held, and drawn in full when the stream ends', (_name, text, drawn) => {
     const render = chatTextRenderer(false);

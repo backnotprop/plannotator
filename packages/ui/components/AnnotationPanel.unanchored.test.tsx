@@ -1,10 +1,3 @@
-/**
- * AnnotationPanel `unanchoredIds` (DOM-gated).
- *
- * Failures to catch: the chip appearing on a card the host did not flag,
- * missing on one it did, and (the compatibility guard) the panel's DOM
- * changing at all when the prop is absent.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

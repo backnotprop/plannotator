@@ -78,7 +78,6 @@ describe('ThemeProvider favicon synchronization', () => {
 
     await mount();
 
-    // The .ico with its three frames, so the tab takes the hand-pixelled 16 or 32.
     const link = getFaviconLink();
     expect(link?.href).toBe(FAVICON_ICO_DATA_URL);
     expect(link?.type).toBe('image/x-icon');
@@ -86,7 +85,6 @@ describe('ThemeProvider favicon synchronization', () => {
   });
 
   test.skipIf(!hasDom)('updates document link[rel="icon"] href, type, and sizes when faviconStyle changes', async () => {
-    // 'totman', the id people stored when the Face icon was the default, still draws the Face icon.
     stored.set('plannotator-favicon', 'totman');
     configStore.loadFromBackend();
 
@@ -130,12 +128,6 @@ describe('ThemeProvider favicon synchronization', () => {
   });
 });
 
-/**
- * The published package installs into host applications with their own
- * branding. Mounting the provider must not repaint a host's tab icon, so favicon
- * ownership is opt-in and these two cases are the contract: the default mount
- * leaves document.head exactly as it found it, the opt-in mount does not.
- */
 describe('ThemeProvider favicon ownership is opt-in', () => {
   beforeEach(() => {
     stored.clear();
@@ -185,7 +177,6 @@ describe('ThemeProvider favicon ownership is opt-in', () => {
     expect(getFaviconLink()?.href).toBe('https://host.example/brand.png');
     expect(getFaviconLink()?.type).toBe('image/png');
 
-    // And a later preference change is still ignored while ownership is off.
     await act(async () => {
       configStore.set('faviconStyle', 'totman');
     });

@@ -1,16 +1,3 @@
-/**
- * The "Star the repo" card (approval "star-ask", 2026-11-06) and the done screen's claim, in the DOM.
- *
- * What regresses: a star without a click, or on a card whose button should be a link; the link not being a real
- * new-tab link (a popup blocker would eat a tab opened after an async call); a thank-you that does not light the art
- * ("starred.", "decided · recorded") or leaves the keyboard nowhere; a failed star claiming thanks with no way to
- * GitHub; Not now not recording or not leaving; the corner staying after a thank-you, or the card leaving without
- * Close; a key that closes it (no new shortcut); the done screen asking with auto-close on, outside a live session, or
- * twice, after the session's server stopped (it must claim while the page is open), showing the card before a decision
- * or when the server said no, or offering a gh star there (no server is left to run it); the done screen using the ask
- * up before the card draws (a reload, a session left without a decision, auto-close turned on during the review: only
- * `shown`, at the decision, stamps it), or drawing the card when `shown` said no.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -63,7 +50,6 @@ describe.skipIf(!hasDom)('the card', () => {
       expect(title.id).not.toBe('');
       expect(region.getAttribute('aria-labelledby')).toBe(title.id);
       expect(el.querySelector('dialog, [role="dialog"]')).toBeNull();
-      // Every surface uses the one short body (the owner's answer, q-bc8be138), never a longer one.
       expect(el.querySelector('.psa-p')?.textContent).toBe(STAR_ASK_WORDS.body);
       expect(el.textContent).not.toContain('only ask once');
       expect(art(el).getAttribute('data-star-ask-art')).toBe('ask');
@@ -192,7 +178,6 @@ describe.skipIf(!hasDom)('the done screen (useStarAskDoneScreen)', () => {
     await settle();
     expect(log).toEqual(['claim', 'shown']);
     expect(el.querySelector('[data-star-ask="card"]')).not.toBeNull();
-    // No gh star from the done screen: the server has stopped, so the button is the real link.
     expect(button(el, 'Star on GitHub')?.tagName).toBe('A');
     await act(async () => button(el, 'Not now')!.click());
     expect(log).toEqual(['claim', 'shown', 'answer:not-now']);

@@ -1,23 +1,9 @@
-/**
- * Seam test: FileTreeBackend override (setFileTreeBackend / resetFileTreeBackend).
- *
- * Contract: after setFileTreeBackend(fake), useFileBrowser.fetchTree() calls
- * fake.loadTree(dirPath) instead of /api/reference/files.
- * resetFileTreeBackend() restores the default.
- *
- * Requires DOM — runs under bun test (preloaded via bunfig.toml).
- *
- * IMPORTANT: function references are captured at module-load time (top-level)
- * so they remain valid even when configure.test.ts's mock.module() replaces
- * the module exports later during test execution.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import * as useFileBrowserModule from './useFileBrowser';
 
-// Capture real function references at import time.
 const setFileTreeBackend = useFileBrowserModule.setFileTreeBackend;
 const resetFileTreeBackend = useFileBrowserModule.resetFileTreeBackend;
 const useFileBrowser = useFileBrowserModule.useFileBrowser;
@@ -63,8 +49,6 @@ async function mountHook(): Promise<{
   };
 }
 
-// Suppress EventSource so the watcher branch doesn't open a live stream
-// and cause interference.
 function suppressEventSource() {
   (globalThis as Record<string, unknown>).EventSource = undefined;
 }
@@ -111,7 +95,6 @@ describe('FileTreeBackend seam', () => {
     setFileTreeBackend(fakeBackend);
     resetFileTreeBackend();
 
-    // After reset, the default backend calls fetch(/api/reference/files...).
     const fetchCalls: string[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -127,7 +110,6 @@ describe('FileTreeBackend seam', () => {
 
     globalThis.fetch = realFetch;
 
-    // The fake was NOT consulted; the default backend hit /api/reference/files.
     expect(fakeCalls).toHaveLength(0);
     expect(fetchCalls.some((u) => u.includes('/api/reference/files'))).toBe(true);
 

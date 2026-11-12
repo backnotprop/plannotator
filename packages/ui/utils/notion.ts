@@ -10,11 +10,6 @@ export interface NotionSettings {
   autoSave: boolean;
 }
 
-/**
- * Whether this server offers Notion (`notion: true` from /api/plan): it has
- * NOTION_TOKEN and the session is only on this computer. Off until the app
- * hears otherwise, so the option stays hidden everywhere else.
- */
 let available = false;
 
 export function setNotionAvailable(value: boolean): void {
@@ -25,7 +20,6 @@ export function isNotionAvailable(): boolean {
   return available;
 }
 
-/** Extract and normalize a Notion page UUID from either an ID or a page URL. */
 export function normalizeNotionPageId(value: string): string | null {
   const match = value.trim().match(/[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/i);
   if (!match) return null;
@@ -47,7 +41,6 @@ export function saveNotionSettings(settings: NotionSettings): void {
   storage.setItem(STORAGE_KEY_AUTOSAVE, String(settings.autoSave));
 }
 
-/** The parent page to save under, or null when Notion is not offered, off, or has no valid page. */
 export function getNotionParentPageId(settings: NotionSettings = getNotionSettings()): string | null {
   if (!available || !settings.enabled) return null;
   return normalizeNotionPageId(settings.parentPageId);

@@ -1,17 +1,5 @@
 import React from 'react';
 
-/**
- * Shared theme-mode icons (Sun / Moon / System).
- *
- * Several components render the same theme picker (PlanHeaderMenu, ThemeTab,
- * historically MobileMenu / ModeToggle). They used to inline these SVGs
- * independently, which meant any tweak to a glyph had to be hunted down
- * across files. Centralizing them here keeps the iconography consistent.
- *
- * Each icon takes an optional `className` so callers control sizing —
- * the dropdown segmented controls use w-3.5, the settings tab uses w-3.
- */
-
 export interface IconProps {
   className?: string;
 }

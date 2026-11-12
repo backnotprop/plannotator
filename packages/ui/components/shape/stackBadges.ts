@@ -1,30 +1,11 @@
-/**
- * Stack badges on a drawn view (approval "stack-show-me", addendum 2026-11-06, take C): each part a stack's PRs
- * changed carries one tag per PR on its bottom-left edge (its top-left edge when an example's step number sits on the
- * bottom one), with the pull request icon and the PR's own colour. Built on the drawing itself (inside ShapeDrawn's
- * shadow root), like Follow an example's layer; the example's dimming leaves this layer alone (`data-shp-overlay`)
- * and each tag fades with its own part instead.
- *
- * Placement follows the drawing: a resize, a scale, the example's tags coming and going. Tags keep their size when
- * the drawing shrinks to fit, like the step numbers. A part with no box (words on a phone) gets its tags after its
- * last word.
- */
 import { scaleOf } from './followPainter';
 
-// The pull request icon (Lucide "git-pull-request", ISC License).
 export const PR_ICON_SVG =
   '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></svg>';
 
-/**
- * A PR's colour from its hue (`--shp-h`, set on the tag, chip or bar: `shapeStackHues` in core): one lightness and
- * chroma for every hue, mixed toward the ink, and a soft fill toward the paper, so light and dark both hold and every
- * PR in a stack, however many, reads at the same contrast (badge text 4.9:1 or more on its fill, the default theme).
- * Shared by the drawing's tags, the board's row and card, and the review's bar.
- */
 export const stackColourVars = (paper: string) =>
   `--c: color-mix(in oklab, oklch(0.56 0.15 var(--shp-h, 186)) 74%, var(--foreground)); --c-soft: color-mix(in oklab, oklch(0.62 0.14 var(--shp-h, 186)) 15%, ${paper});`;
 
-/** The layer's CSS, in the drawing's own scope (a shadow root does not see the page's). */
 export const STACK_DRAWN_CSS = `
 .shp-stk-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 7; pointer-events: none; }
 .shp-stk-g { position: absolute; transform-origin: 0 0; display: flex; gap: 4px; pointer-events: none; white-space: nowrap; transition: opacity .25s ease; }
@@ -47,7 +28,6 @@ export const STACK_DRAWN_CSS = `
 
 const byMark = (id: string) => `[data-mark="${id.replace(/["\\]/g, '\\$&')}"]`;
 
-/** True for a part drawn as a box (a border, a fill, a shadow): its tags go on its edge. Words alone take them after the last word. */
 function boxed(el: HTMLElement): boolean {
   if (typeof getComputedStyle !== 'function') return true;
   const cs = getComputedStyle(el);
@@ -56,18 +36,11 @@ function boxed(el: HTMLElement): boolean {
 }
 
 export interface StackBadgeOptions {
-  /** Part (`data-mark`) to the PRs that changed it, in landing order. */
   badges: ReadonlyMap<string, readonly number[]>;
-  /** A PR's hue (\`shapeStackHue\`). */
   hue: (n: number) => number;
-  /** A tag was clicked (or Enter / Space on it). */
   onOpen: (pr: number, part: string, tag: HTMLElement) => void;
 }
 
-/**
- * The badges on one drawing, for as long as it shows. `setPick` keeps one PR's parts bright and fades the rest
- * (null: all back); `setOpen` marks the tag whose card is open; `destroy` leaves the drawing as it was.
- */
 export class StackBadgeLayer {
   readonly layer: HTMLDivElement;
   private groups: { g: HTMLElement; mark: HTMLElement; part: string; prs: readonly number[] }[] = [];
@@ -116,7 +89,6 @@ export class StackBadgeLayer {
           e.stopPropagation();
           options.onOpen(n, part, tag);
         });
-        // The board's own pointing (Annotate) must not take a tag's press for the part under it.
         tag.addEventListener('pointerdown', (e) => e.stopPropagation());
         g.appendChild(tag);
       }
@@ -133,13 +105,11 @@ export class StackBadgeLayer {
       this.ro.observe(board);
     }
     if (view && typeof view.MutationObserver !== 'undefined') {
-      // The example's light (its dimming, its tags arriving) and the draw-in move what the tags avoid.
       this.mo = new view.MutationObserver((list) => {
         if (list.some((m) => !this.layer.contains(m.target))) this.later();
       });
       this.mo.observe(board, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-ex-dim', 'data-s', 'style', 'class'] });
     }
-    // Parts drawing in (they rise into place) and the example's tags sliding in end where nothing is observed.
     board.addEventListener('animationend', this.settled);
     board.addEventListener('transitionend', this.settled);
   }
@@ -148,7 +118,6 @@ export class StackBadgeLayer {
     if (!(e.target instanceof Node) || !this.layer.contains(e.target)) this.later();
   };
 
-  /** The tags of one part (tests, the host's focus return). */
   tagsOf(part: string): HTMLButtonElement[] {
     const g = this.groups.find((x) => x.part === part)?.g;
     return g ? [...g.querySelectorAll<HTMLButtonElement>('.shp-stk-b')] : [];
@@ -174,7 +143,6 @@ export class StackBadgeLayer {
     });
   }
 
-  /** States: which tags are lit or faded, and which parts fade while a PR is picked. */
   private paint() {
     const pick = this.pick;
     for (const { g, mark, prs } of this.groups) {
@@ -187,8 +155,6 @@ export class StackBadgeLayer {
         tag.setAttribute('aria-expanded', open ? 'true' : 'false');
       }
     }
-    // Picked: every part with none of the PR's changes, in it or inside it, fades (once: not under a faded one).
-    // Only what changes is touched, so the drawing's observers see no churn.
     const next: HTMLElement[] = [];
     if (pick !== null) {
       const bright = this.groups.filter((x) => x.prs.includes(pick)).map((x) => x.mark);
@@ -203,7 +169,6 @@ export class StackBadgeLayer {
     this.faded = next;
   }
 
-  /** Puts each part's tags on its edge, in the drawing's coordinates, counter-scaled to read the same at any fit. */
   place() {
     const { b, k } = scaleOf(this.board);
     if (!k) return;
@@ -219,7 +184,6 @@ export class StackBadgeLayer {
       let left: number;
       let top: number;
       if (!boxed(mark) && typeof document !== 'undefined' && typeof document.createRange === 'function') {
-        // Words with no box: after the last word, or under it when the line has no room.
         const range = document.createRange();
         range.selectNodeContents(mark);
         const lines = typeof range.getClientRects === 'function' ? [...range.getClientRects()] : [];
@@ -234,7 +198,6 @@ export class StackBadgeLayer {
       } else {
         left = x(r.left) + 14 * inv;
         top = y(r.bottom) - h / 2;
-        // A step number anywhere on this part's bottom edge: the tags take the top-left edge.
         const edgeTop = b.top + top * k;
         const edgeBottom = b.top + (top + h) * k;
         if (steps.some((t) => t.width > 0 && t.left < r.right && r.left < t.right && t.top < edgeBottom && edgeTop < t.bottom)) top = y(r.top) - h / 2;

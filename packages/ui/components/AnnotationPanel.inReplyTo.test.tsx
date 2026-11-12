@@ -1,9 +1,3 @@
-/**
- * Panel threading (DOM-gated): a reply renders indented directly under its
- * parent regardless of interleaving timestamps, an orphan reply renders as
- * a top-level card, and a list without replies renders no reply wrapper
- * (the additive-field guarantee).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

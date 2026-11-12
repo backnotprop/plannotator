@@ -1,15 +1,3 @@
-/**
- * CommentPopover multi-target seams (all opt-in, default off):
- *  - target chips render (primary first) with remove + hover handlers
- *  - refocusToken returns focus to the textarea
- *  - captureStrayKeys routes a window-level stray printable keydown into the
- *    textarea so the first keystroke after a shift-click is never lost
- *  - yieldState applies the fade / click-through classes
- *  - with none of the props set, none of the new DOM appears (byte-identical
- *    default composer)
- *
- * Requires DOM — runs under bun test with the happy-dom preload (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -35,24 +23,12 @@ afterEach(async () => {
 
 type PopoverProps = Partial<React.ComponentProps<typeof CommentPopover>>;
 
-/**
- * Who holds focus, as a name: a failed focus assertion then prints one word.
- * Comparing elements printed the whole happy-dom tree and React fibers on a
- * failure (millions of lines, over a minute), which read as a timeout.
- */
 function focusOwner(named: Record<string, Element | null>): string {
   const active = document.activeElement;
   for (const [name, el] of Object.entries(named)) if (el && active === el) return name;
   return active ? `<${active.tagName.toLowerCase()}>` : 'nothing';
 }
 
-/**
- * The composer focuses its textarea from a 0 ms timer after mount. happy-dom
- * runs requestAnimationFrame as setImmediate, ahead of a timer that is not yet
- * due, so on a loaded machine that timer could land in the middle of a test
- * (after a blur, or after the thumbs-up's focus restore) and move focus and
- * the caret. Wait for it to land, so each test starts from the opened state.
- */
 async function settleAutoFocus() {
   const deadline = Date.now() + 4000;
   while (document.activeElement !== document.querySelector('[data-comment-popover] textarea')) {
@@ -139,8 +115,6 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
     await act(async () => {
       chips[1]!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
     });
-    // React attaches mouseenter via its own delegation of mouseout/mouseover;
-    // fall back to mouseover which React maps for onMouseEnter in tests.
     if (hovered.length === 0) {
       await act(async () => {
         chips[1]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
@@ -181,7 +155,6 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
     expect(el.value).toBe('h');
     expect(focusOwner({ textarea: el })).toBe('textarea');
 
-    // A keydown already headed somewhere useful is left alone.
     const focused = new KeyboardEvent('keydown', {
       key: 'i',
       bubbles: true,
@@ -196,7 +169,6 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
   test('stray keys insert at the remembered caret, not end-of-text', async () => {
     await mountPopover({ targetChips: CHIPS, captureStrayKeys: true });
     const el = textarea();
-    // Type 'held' through React, then park the caret between 'he' and 'ld'.
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
     await act(async () => {
       setter?.call(el, 'held');
@@ -218,8 +190,6 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
   });
 
   test('the one-click thumbs-up is opt-in: absent (markdown composers) renders none', async () => {
-    // Only the HTML pinpoint composer passes onQuickLookGood; a markdown or
-    // global composer growing a 👍 would be a regression.
     const thumbs = () => document.querySelectorAll('[data-comment-popover] [data-quick-look-good]');
     await mountPopover();
     expect(thumbs().length).toBe(0);
@@ -231,8 +201,6 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
   });
 
   test('a thumbs-up click returns focus to the opener, like Save', async () => {
-    // Without the restore, focus drops to <body> once the host closes the
-    // composer, and the next keystroke goes nowhere.
     const opener = document.createElement('button');
     document.body.appendChild(opener);
     opener.focus();

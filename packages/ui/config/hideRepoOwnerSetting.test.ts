@@ -1,8 +1,3 @@
-/**
- * `hideRepoOwner` defaults off, so nobody's repository label changes until
- * they hide the owner, and only an explicit `true` / `false` cookie is read:
- * anything else falls back to the default instead of hiding the owner.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 import { SETTINGS } from './settings';

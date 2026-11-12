@@ -1,8 +1,3 @@
-/**
- * The transcript: draws what it is given, holds the answer's place while the
- * reply has nothing to show, and never lets model text into the DOM unwashed.
- * Requires DOM (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -96,12 +91,10 @@ describe.if(hasDom)('holding the answer\'s place', () => {
     expect(pendingRow()).not.toBeNull();
     expect(pendingRow()!.textContent).toContain('Claude');
 
-    // The stream has started and pushed an empty assistant message.
     render({ messages: [...asked, { id: '2', role: 'assistant', parts: [] }], status: 'submitted' });
     expect(pendingRow()).not.toBeNull();
     expect(roles()).toEqual(['user', 'assistant']);
 
-    // Parts that paint nothing keep it up.
     render({
       messages: [...asked, { id: '2', role: 'assistant', parts: [{ type: 'step-start' }, say('', 'assistant', '').parts[0]!] }],
       status: 'streaming',
@@ -144,8 +137,6 @@ describe.if(hasDom)('a person\'s words', () => {
 });
 
 describe.if(hasDom)('a DOM whose sanitizer does nothing', () => {
-  // happy-dom reports DOMPurify supported and lets scripts through, which is the
-  // case the sanitizer's own proof is there for.
   test('agent text reaches the page as text, not as markup', () => {
     const view = render({
       messages: [say('1', 'assistant', '<img src=x onerror="alert(1)"><script>alert(2)</script>\n\n[x](javascript:alert(3))')],

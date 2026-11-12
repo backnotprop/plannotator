@@ -1,11 +1,3 @@
-/**
- * The seams a host reuses the board through (DOM-gated, tests/dom-test-list.txt).
- * What regresses: a code review's click on a part not reaching its diff, the
- * board's own viewer opening over a diff that took the click, a host that says
- * no (a file its diff lacks) leaving the click dead, a host's no handed on to
- * the board's review (a code review's own lines it can't show landing in the
- * review anyway), or the refresh button losing the host's words.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

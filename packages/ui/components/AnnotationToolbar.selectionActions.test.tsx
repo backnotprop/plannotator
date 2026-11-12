@@ -1,19 +1,3 @@
-/**
- * The two host toolbar seams (DOM-gated), both opt-in:
- *
- *   selectionActions — one wand button that opens the package's dropdown and
- *                      hands the host the selection context. The package
- *                      creates no annotation of its own.
- *   quickLabels      — false hides the Zap picker AND the Alt+digit label
- *                      shortcuts on that toolbar.
- *
- * The failure each test catches: a host's actions silently not reaching the
- * toolbar, an action invoked with the wrong selection context (the whole
- * point of the seam is the ctx), a quick-label opt-out that hides the button
- * but leaves the Alt+digit keys live, and — the one that matters most for
- * Plannotator — either prop leaking into the default toolbar, which passes
- * NEITHER and must stay exactly what it was.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -44,13 +28,11 @@ interface MountOptions {
   onQuickLabel?: (label: QuickLabel) => void;
   onClose?: () => void;
   copyText?: string;
-  /** Shorthand: a builder that returns this HTML with copyText. */
   richCopyHtml?: string;
   getRichCopy?: () => RichCopySource | Promise<RichCopySource>;
   hideCopyButton?: boolean;
 }
 
-/** A paragraph inside a data-block-id block, the markdown surface's shape. */
 async function mount(options: MountOptions = {}) {
   block = document.createElement('div');
   block.dataset.blockId = 'block-7';
@@ -117,13 +99,10 @@ async function press(key: string, init: KeyboardEventInit = {}) {
 describe.if(hasDom)('AnnotationToolbar host seams', () => {
   test('with NEITHER prop the toolbar is what it always was: no wand, the Zap present, same order', async () => {
     await mount();
-    // The pin: the exact button set and order Plannotator ships, and no
-    // trace of either seam in the DOM.
     expect(buttonTitles()).toEqual(['Copy', 'Delete', 'Comment', 'Quick label', 'Looks good', 'Cancel']);
     expect(wand()).toBeNull();
     expect(document.querySelectorAll('[data-selection-actions]').length).toBe(0);
     expect(document.querySelectorAll('[data-selection-actions-picker]').length).toBe(0);
-    // No stray attributes on the buttons the seam touched.
     const zap = Array.from(toolbar().querySelectorAll('button')).find((b) => b.title === 'Quick label')!;
     expect(zap.getAttributeNames().sort()).toEqual([
       'class', 'data-pn-touch-target', 'data-pn-touch-target-icon', 'title',
@@ -349,8 +328,6 @@ describe.if(hasDom)('AnnotationToolbar host seams', () => {
   });
 
   test('selectionActionsIcon replaces the glyph inside the wand button and nothing else', async () => {
-    // Sentinel node: the only thing asserted is that the host's node is what
-    // the button contains, and that the package's own svg is gone.
     await mount({
       selectionActions: [{ id: 'a', label: 'A', onSelect: () => {} }],
       selectionActionsIcon: <span data-host-icon="true">W</span>,
@@ -395,7 +372,6 @@ describe.if(hasDom)('AnnotationToolbar host seams', () => {
         b.getAttribute('data-selection-action'),
       ),
     ).toEqual(['first', 'second']);
-    // Nothing is preselected until the first arrow.
     expect(picker!.querySelector('[aria-selected="true"]')).toBeNull();
 
     await press('ArrowDown');
@@ -408,7 +384,6 @@ describe.if(hasDom)('AnnotationToolbar host seams', () => {
     expect(seen[0]!.startOffset).toBe('lead in '.length);
     expect(seen[0]!.endOffset).toBe('lead in '.length + 'SELECTED'.length);
     expect(seen[0]!.element).toBe(anchor);
-    // Selecting an item closes the toolbar, exactly as a quick label does.
     expect(closed).toBe(1);
     expect(document.querySelector('[data-selection-actions-picker]')).toBeNull();
   });
@@ -437,10 +412,6 @@ describe.if(hasDom)('AnnotationToolbar host seams', () => {
   });
 
   test('an actions list that empties while the dropdown is open does not wedge the toolbar', async () => {
-    // The failure this catches: the open flag outliving the button that owns
-    // it. The dropdown (and its Escape handler) unmount with the wand, but a
-    // raw `showSelectionActions` would keep the toolbar's own Escape,
-    // type-to-comment and outside-dismiss listeners stood down forever.
     let closed = 0;
     const anchor = await mount({
       onClose: () => { closed++; },
@@ -449,7 +420,6 @@ describe.if(hasDom)('AnnotationToolbar host seams', () => {
     await click(wand()!);
     expect(document.querySelector('[data-selection-actions-picker]')).not.toBeNull();
 
-    // The host recomputes its actions for this selection and has none.
     await act(async () => {
       root?.render(
         <AnnotationToolbar

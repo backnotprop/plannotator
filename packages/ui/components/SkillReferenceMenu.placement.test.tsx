@@ -1,29 +1,3 @@
-/**
- * Adaptive placement for the skill-reference menu, against the REAL
- * CommentPopover.
- *
- * The bug this file pins down: the menu used to render `bottom-full` with a
- * fixed `max-h-64`, i.e. ALWAYS upward, up to 256px, with no viewport
- * awareness. Annotate near the top of the document, type `$`, and the menu
- * ran off the top of the screen with its upper rows unreachable (nothing
- * clips a z-[110] child of a fixed z-[100] popover).
- *
- * The rule now: measure the space above and below the composer wrapper the
- * way CommentPopover's own computePosition measures the anchor, PREFER above
- * (the shipped direction; keeps the action row and human-only notice
- * visible), flip below when the list fits below but not above, and when
- * neither side fits pick the roomier side and clamp the list height to it.
- * The menu must never extend past a viewport edge.
- *
- * happy-dom does no layout, so each test stubs the wrapper rect and the
- * list's scrollHeight, then derives the menu's on-screen rect from the
- * placement the component committed (direction attribute + clamped
- * max-height) exactly as the CSS would resolve it: `bottom-full mb-1.5`
- * places the menu's bottom 6px above the wrapper's top; `top-full mt-1.5`
- * places its top 6px below the wrapper's bottom.
- *
- * DOM-gated (DOM_TESTS=1), same harness as CommentPopover.skillReferences.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -42,9 +16,6 @@ const popoverMod = hasDom ? await import('./CommentPopover') : null;
 const CommentPopover =
   popoverMod?.CommentPopover as typeof import('./CommentPopover')['CommentPopover'];
 
-// 12 filterable entries: `$` shows all 12 (natural height 480 under the 40px
-// row stub, so the 256px cap engages), `$zeb` narrows to exactly one. `zebra`
-// is human-only: the menu must render (and place) it exactly like the rest.
 const catalog: SkillCatalogEntry[] = [
   ...Array.from({ length: 11 }, (_, i) => ({
     name: `alpha-${String(i).padStart(2, '0')}`,
@@ -54,12 +25,8 @@ const catalog: SkillCatalogEntry[] = [
   { name: 'zebra', root: 'universal', humanOnly: true },
 ];
 
-/** Stubbed per-row height. Layout does not exist in happy-dom; the component
- * only ever reads the total via scrollHeight, which we derive from this. */
 const ROW = 40;
-/** Menu gap (mb-1.5 / mt-1.5) — must match MENU_GAP in SkillReferenceMenu. */
 const GAP = 6;
-/** Viewport margin — must match MENU_VIEWPORT_MARGIN in SkillReferenceMenu. */
 const MARGIN = 8;
 const MAX_LIST = 256;
 
@@ -84,7 +51,7 @@ async function mountPopover(props: Partial<React.ComponentProps<typeof CommentPo
       />,
     );
   });
-  await act(async () => {}); // flush the catalog fetch effect
+  await act(async () => {});
 }
 
 beforeEach(() => {
@@ -169,11 +136,6 @@ function setInnerHeight(value: number) {
   Object.defineProperty(window, 'innerHeight', { configurable: true, value });
 }
 
-/**
- * Stub the geometry the component measures: the composer wrapper's viewport
- * rect and the list's natural content height (rows currently in the DOM, so
- * filtering shrinks it the way real layout would).
- */
 function stubGeometry(wrapper: { top: number; bottom: number }) {
   const wrapperEl = menu().parentElement as HTMLElement;
   wrapperEl.getBoundingClientRect = () => makeRect(wrapper.top, wrapper.bottom);
@@ -190,10 +152,6 @@ async function remeasure() {
   });
 }
 
-/**
- * Derive the menu's on-screen rect from the committed placement, as the CSS
- * would resolve it, and assert it lies fully inside the viewport.
- */
 function assertMenuInsideViewport(): { direction: string; maxListHeight: number } {
   const menuEl = menu();
   const listEl = list();
@@ -204,13 +162,12 @@ function assertMenuInsideViewport(): { direction: string; maxListHeight: number 
   const maxListHeight = parseFloat(listEl.style.maxHeight);
   expect(Number.isFinite(maxListHeight)).toBe(true);
   const natural = listEl.querySelectorAll('[data-skill-item]').length * ROW;
-  const menuHeight = Math.min(natural, maxListHeight); // chrome is 0 in happy-dom
+  const menuHeight = Math.min(natural, maxListHeight);
   const wrapperRect = (menuEl.parentElement as HTMLElement).getBoundingClientRect();
   const top = direction === 'above' ? wrapperRect.top - GAP - menuHeight : wrapperRect.bottom + GAP;
   const bottom = top + menuHeight;
   expect(top).toBeGreaterThanOrEqual(0);
   expect(bottom).toBeLessThanOrEqual(window.innerHeight);
-  // The clamp itself must respect the margin, independent of natural height.
   const available =
     direction === 'above'
       ? wrapperRect.top - GAP - MARGIN
@@ -236,12 +193,11 @@ describe('SkillReferenceMenu adaptive placement', () => {
       await mountPopover({ anchorRect: new DOMRect(100, 10, 60, 20) });
       const el = textarea();
       await type(el, '$');
-      // Popover near the top: ~26px above the wrapper, plenty below.
       stubGeometry({ top: 40, bottom: 200 });
       await remeasure();
       const { direction, maxListHeight } = assertMenuInsideViewport();
       expect(direction).toBe('below');
-      expect(maxListHeight).toBe(MAX_LIST); // full cap fits below
+      expect(maxListHeight).toBe(MAX_LIST);
     },
   );
 
@@ -264,7 +220,6 @@ describe('SkillReferenceMenu adaptive placement', () => {
       await mountPopover();
       const el = textarea();
       await type(el, '$');
-      // 370px above, ~280px below the wrapper: both fit the 256px cap.
       stubGeometry({ top: 370, bottom: 470 });
       await remeasure();
       const { direction } = assertMenuInsideViewport();
@@ -278,11 +233,10 @@ describe('SkillReferenceMenu adaptive placement', () => {
       setInnerHeight(400);
       await mountPopover();
       const el = textarea();
-      await type(el, '$'); // 12 rows, natural 480 > any side
+      await type(el, '$');
       stubGeometry({ top: 150, bottom: 280 });
       await remeasure();
       const { direction, maxListHeight } = assertMenuInsideViewport();
-      // 136px above vs 106px below: above is roomier, clamped to it.
       expect(direction).toBe('above');
       expect(maxListHeight).toBe(150 - GAP - MARGIN);
       expect(maxListHeight).toBeLessThan(MAX_LIST);
@@ -293,9 +247,8 @@ describe('SkillReferenceMenu adaptive placement', () => {
     setInnerHeight(768);
     await mountPopover();
     const el = textarea();
-    await type(el, '$zeb'); // exactly one row: natural 40
+    await type(el, '$zeb');
     expect(document.querySelectorAll('[data-skill-item]').length).toBe(1);
-    // 136px above: too small for the 256 cap, ample for one 40px row.
     stubGeometry({ top: 150, bottom: 280 });
     await remeasure();
     const { direction } = assertMenuInsideViewport();
@@ -309,11 +262,9 @@ describe('SkillReferenceMenu adaptive placement', () => {
       await mountPopover();
       const el = textarea();
       await type(el, '$');
-      // 136px above: the 12-row list cannot fit above but fits below.
       stubGeometry({ top: 150, bottom: 280 });
       await remeasure();
       expect(assertMenuInsideViewport().direction).toBe('below');
-      // Narrow to one row; no window event fires, the re-render recomputes.
       await type(el, '$zeb');
       expect(document.querySelectorAll('[data-skill-item]').length).toBe(1);
       const { direction } = assertMenuInsideViewport();
@@ -328,10 +279,7 @@ describe('SkillReferenceMenu adaptive placement', () => {
     await type(el, '$');
     stubGeometry({ top: 150, bottom: 250 });
     await remeasure();
-    expect(assertMenuInsideViewport().direction).toBe('below'); // 504px below fits the cap
-    // Below the shared 420px keyboard threshold, the entire anchored composer
-    // yields to its existing expanded overlay instead of preserving a tiny,
-    // menu-clamped popover.
+    expect(assertMenuInsideViewport().direction).toBe('below');
     setInnerHeight(320);
     await remeasure();
     await act(async () => new Promise(resolve => requestAnimationFrame(() => resolve(undefined))));
@@ -347,7 +295,6 @@ describe('SkillReferenceMenu adaptive placement', () => {
     stubGeometry({ top: 400, bottom: 500 });
     await remeasure();
     expect(assertMenuInsideViewport().direction).toBe('above');
-    // The document scrolls; the tracked popover follows its anchor to the top.
     stubGeometry({ top: 30, bottom: 130 });
     await act(async () => {
       window.dispatchEvent(new Event('scroll'));
@@ -360,14 +307,11 @@ describe('SkillReferenceMenu adaptive placement', () => {
     'with the popover itself flipped above its anchor, the menu still places on screen',
     async () => {
       setInnerHeight(768);
-      // Anchor near the viewport bottom: spaceBelow < 280 flips the popover.
       await mountPopover({ anchorRect: new DOMRect(100, 700, 60, 20) });
       const popoverEl = document.querySelector<HTMLElement>('[data-comment-popover]');
       expect(popoverEl?.style.transform).toContain('translateY(-100%)');
       const el = textarea();
       await type(el, '$');
-      // The flipped popover sits above the anchor; its composer wrapper ends
-      // near the bottom of the viewport with ample space above.
       stubGeometry({ top: 480, bottom: 690 });
       await remeasure();
       const { direction, maxListHeight } = assertMenuInsideViewport();
@@ -379,16 +323,10 @@ describe('SkillReferenceMenu adaptive placement', () => {
   test.skipIf(!hasDom)(
     'REGRESSION (hover jitter): hovering any row, human-only included, changes neither the menu markup nor its committed placement',
     async () => {
-      // The bug this pins down: hovering a human-only row used to disclose a
-      // warning footer, growing the bottom-anchored menu upward and shrinking
-      // the re-measured list clamp — the hovered row shifted out from under
-      // the pointer, hover ended, the footer collapsed, the row shifted back,
-      // and the cycle repeated every frame. Hover must not change any row's
-      // rendered output or the placement the component commits.
       setInnerHeight(768);
       await mountPopover();
       const el = textarea();
-      await type(el, '$'); // all 12 rows, zebra (human-only) among them
+      await type(el, '$');
       stubGeometry({ top: 560, bottom: 750 });
       await remeasure();
       const menuEl = menu();
@@ -401,11 +339,7 @@ describe('SkillReferenceMenu adaptive placement', () => {
           row.dispatchEvent(new Event('pointerover', { bubbles: true }));
           row.dispatchEvent(new Event('pointerenter', { bubbles: true }));
         });
-        // Byte-identical markup: no class flip, no disclosed footer, no style
-        // change — nothing for the placement effect to re-measure differently.
         expect(menu().outerHTML).toBe(before);
-        // And a forced re-measure with the pointer "resting" on the row still
-        // commits the same placement.
         await remeasure();
         const placementAfter = assertMenuInsideViewport();
         expect(placementAfter.direction).toBe(placementBefore.direction);
@@ -431,8 +365,6 @@ describe('SkillReferenceMenu adaptive placement', () => {
       await remeasure();
       expect(assertMenuInsideViewport().direction).toBe('above');
 
-      // Drag by the header: pointerdown on the handle, then document-level
-      // pointermove past the 3px threshold, then pointerup (useDraggable).
       const popoverEl = document.querySelector<HTMLElement>('[data-comment-popover]')!;
       const header = popoverEl.querySelector<HTMLElement>('div[style*="grab"]');
       if (!header) throw new Error('drag handle did not render');
@@ -447,7 +379,6 @@ describe('SkillReferenceMenu adaptive placement', () => {
           }),
         );
       });
-      // The popover lands near the top edge; the wrapper rect follows it.
       stubGeometry({ top: 20, bottom: 120 });
       await act(async () => {
         document.dispatchEvent(new MouseEvent('pointermove', { clientX: 200, clientY: 30 }));
@@ -460,8 +391,6 @@ describe('SkillReferenceMenu adaptive placement', () => {
 });
 
 describe('computeMenuPlacement with a reading that is not a number', () => {
-  // A host's boundary or cap read mid-rotation can be NaN; NaN never equals itself, so a NaN height
-  // made the equality-guarded setPlacement re-render forever (React error 185: the Inbox went blank).
   test.skipIf(!hasDom)('always yields a finite height', async () => {
     const { computeMenuPlacement } = await import('./SkillReferenceMenu');
     const nanBottom = computeMenuPlacement({ top: 300, bottom: 360 }, 2000, 2, Number.NaN, { boundaryTop: 0 });

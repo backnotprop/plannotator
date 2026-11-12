@@ -1,9 +1,3 @@
-/**
- * What regresses if this fails: an answer edit appends a second annotation
- * instead of replacing the first (the export then reports two answers), an
- * emptied answer lingers as an empty annotation, or a malformed row throws in
- * the Viewer instead of being ignored.
- */
 import { describe, expect, test } from 'bun:test';
 import { indexQuestionBlocks, type QuestionAnswer } from '@plannotator/core/question-block';
 import { AnnotationType, type Annotation } from '../types';
@@ -56,10 +50,6 @@ describe('collectQuestionAnswers', () => {
   });
 });
 
-// The Questions panel rows and the header chip read these. What regresses if
-// they fail: the chip counts a settled or skipped question wrong, jumps to an
-// answered one (or never wraps), or an answer whose prompt was edited drops
-// out of the panel instead of listing as unanchored.
 describe('buildQuestionPanelRows / questionProgress / nextOpenQuestionKey', () => {
   const DOC = `# Plan
 
@@ -110,7 +100,6 @@ Fourth?
       [null, 'answered', 'Yes', false, true],
     ]);
     expect(rows[4].annotationId).toBe(gone.id);
-    // Answered and settled count as done; the orphan does not count.
     expect(questionProgress(rows)).toEqual({ done: 2, total: 4 });
   });
 
@@ -143,7 +132,6 @@ describe("resolveQuestionAnswers", () => {
       expect(out.get(KEY)?.selected).toEqual(["From host"]);
       expect(out.size).toBe(1);
     }
-    // An empty host map is still the host speaking: no answers, not the annotation.
     expect(resolveQuestionAnswers([stored], {}).size).toBe(0);
   });
 

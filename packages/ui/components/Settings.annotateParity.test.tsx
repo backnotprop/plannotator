@@ -1,10 +1,3 @@
-/**
- * Annotate renders the same document viewer as plan review, so Settings must
- * offer the same document-level tabs there (Display, Saving, Labels and the
- * notes-app integrations the Options menu saves to), while the rows that only
- * describe a plan decision stay plan-only. Plan mode is asserted alongside so
- * the parity change cannot quietly strip a plan row.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -14,7 +7,6 @@ const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-/** Flip the Obsidian integration switch (the first switch on its tab). */
 async function setObsidianEnabled(enabled: boolean) {
   const toggle = document.querySelector<HTMLButtonElement>('button[role="switch"]');
   if (toggle && (toggle.getAttribute('aria-checked') === 'true') !== enabled) {
@@ -37,7 +29,6 @@ async function openTab(label: string) {
 async function mountSettings(
   mode: 'plan' | 'annotate',
   origin: 'claude-code' | 'opencode' = 'claude-code',
-  // Plannotator's annotate app always passes annotateParity; a host omits it.
   annotateParity = mode === 'annotate',
 ) {
   host = document.createElement('div');
@@ -75,7 +66,6 @@ describe('Settings annotate/plan parity', () => {
     for (const tab of ['Display', 'Saving', 'Labels', 'Obsidian', 'Bear', 'Octarine']) {
       expect(tabs).not.toContain(tab);
     }
-    // ...and the agent-switch row it always showed.
     expect(Array.from(document.querySelectorAll('option')).some((o) => o.value === 'disabled')).toBe(true);
   });
 
@@ -98,10 +88,8 @@ describe('Settings annotate/plan parity', () => {
 
     await mountSettings('plan');
     await openTab('Saving');
-    // Plan has the "Save Plans" switch; annotate has none on this tab.
     expect(annotateSwitches).toBe(0);
     expect(document.querySelectorAll('button[role="switch"]').length).toBe(1);
-    // Both keep the default save action select.
     expect(annotateSelects).toBe(1);
     expect(document.querySelectorAll('select').length).toBe(1);
   });
@@ -111,8 +99,6 @@ describe('Settings annotate/plan parity', () => {
     await openTab('Obsidian');
     await setObsidianEnabled(true);
     const annotateSwitches = Array.from(document.querySelectorAll('button[role="switch"]'));
-    // Deliberately pinned (owner decision): the switch is shared with plan
-    // review, whose approve auto-saves to the same app, so annotate must say so.
     const annotateCopy = document.body.textContent ?? '';
     expect(annotateCopy).toContain('approved plan');
     expect(annotateCopy).not.toContain('Plans saved to');
@@ -125,7 +111,6 @@ describe('Settings annotate/plan parity', () => {
     await setObsidianEnabled(true);
     const planSwitches = Array.from(document.querySelectorAll('button[role="switch"]'));
     await setObsidianEnabled(false);
-    // enabled + vault browser in annotate; enabled + auto-save + vault browser in plan.
     expect(annotateSwitches.length).toBe(2);
     expect(planSwitches.length).toBe(3);
   });

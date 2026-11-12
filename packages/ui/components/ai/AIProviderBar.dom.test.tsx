@@ -53,7 +53,7 @@ describe.if(hasDom)('AIProviderBar select styling', () => {
     );
 
     const selects = host.querySelectorAll<HTMLSelectElement>('select');
-    expect(selects.length).toBe(3); // provider, model, reasoning effort
+    expect(selects.length).toBe(3);
 
     for (const select of selects) {
       expect(select.className).toContain('[&>option]:bg-card');
@@ -63,8 +63,6 @@ describe.if(hasDom)('AIProviderBar select styling', () => {
 });
 
 describe.if(hasDom)('AIProviderBar with "Ask this session"', () => {
-  // A server with a session bridge offers only the bridge: there is nothing to
-  // choose, so no picker may suggest otherwise (and none can write a cookie).
   test('renders the bridge label and no provider, model or effort picker', async () => {
     const { AIProviderBar } = barModule!;
     host = document.createElement('div');
@@ -116,8 +114,6 @@ describe.if(hasDom)('AIProviderBar setup hint (#1814)', () => {
     return host.querySelector('[data-ai-ask-session-setup-hint]');
   };
 
-  // Sentinel text: what matters is that the line appears in both states and is
-  // absent without a hint, not its wording (askSessionSetupHint owns that).
   test('renders under the provider picker and under the empty state', async () => {
     expect((await render([providerWithEffort], 'HINT-SENTINEL'))?.textContent).toBe('HINT-SENTINEL');
     act(() => root?.unmount());

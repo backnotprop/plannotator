@@ -1,13 +1,6 @@
 import { defineShortcutScope } from '../core';
 import { createShortcutScopeHook } from '../runtime';
 
-/**
- * Moving around the repository in code review (approved design record
- * "review-explorer", step 3). VS Code's own default keys per system, so a
- * reviewer's hands already know them. None of them takes a key code review
- * used before; ⌘P / Ctrl+P is the browser's Print, replaced here in code
- * review only.
- */
 export const reviewExplorerShortcuts = defineShortcutScope({
   id: 'review-explorer',
   title: 'Go to',

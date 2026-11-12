@@ -2,12 +2,11 @@
 import React from 'react';
 import spriteSheet from '../sprite_package_new/sprite.png';
 
-// Sprite: 96x96 native, 12 frames, scaled to 64x64 for display
 const NATIVE_SIZE = 96;
 const DISPLAY_SIZE = 64;
 const FRAMES = 12;
 const SCALE = DISPLAY_SIZE / NATIVE_SIZE;
-const TOTAL_WIDTH = NATIVE_SIZE * FRAMES * SCALE; // 768px at 64px scale
+const TOTAL_WIDTH = NATIVE_SIZE * FRAMES * SCALE;
 
 export const TaterSpriteSitting: React.FC = () => {
   return (

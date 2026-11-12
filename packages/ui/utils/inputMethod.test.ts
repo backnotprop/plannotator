@@ -1,13 +1,3 @@
-/**
- * Pinpoint default resolution for the raw-HTML annotate surface (DOM-gated).
- *
- * Decision under test: HTML sessions keep a SEPARATE input-method preference
- * from markdown sessions. First-ever HTML session defaults to Pinpoint even
- * when a markdown-era "drag" cookie exists; an explicit choice made inside an
- * HTML session persists for later HTML sessions only, and only while the user
- * keeps annotating HTML: a record older than the staleness TTL (or a legacy
- * record with no timestamp) expires back to Pinpoint.
- */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { resetStorageBackend, setStorageBackend, type StorageBackend } from './storage';
 import { STALE_PREFERENCE_TTL_MS } from './preferenceTtl';
@@ -15,8 +5,6 @@ import { STALE_PREFERENCE_TTL_MS } from './preferenceTtl';
 const hasDom = typeof document !== 'undefined';
 const inputMethodModule = hasDom ? await import('./inputMethod') : null;
 
-// In-memory storage so tests don't depend on happy-dom cookie semantics
-// (the codebase-standard pattern for persistence tests).
 const memory = new Map<string, string>();
 const memoryBackend: StorageBackend = {
   getItem: (key) => memory.get(key) ?? null,
@@ -63,7 +51,6 @@ describe.if(hasDom)('resolveInputMethod (pure)', () => {
   test('an HTML choice older than the TTL expires back to pinpoint', () => {
     const stale = fresh('drag', STALE_PREFERENCE_TTL_MS + 1);
     expect(inputMethodModule!.resolveInputMethod('html', null, stale, NOW)).toBe('pinpoint');
-    // Just inside the TTL still honors the choice.
     const inside = fresh('drag', STALE_PREFERENCE_TTL_MS - 1);
     expect(inputMethodModule!.resolveInputMethod('html', null, inside, NOW)).toBe('drag');
   });

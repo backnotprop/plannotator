@@ -1,10 +1,3 @@
-/**
- * Share-URL contract for threaded replies: like element anchors and
- * multi-select targets, `inReplyTo` is deliberately NOT carried by the
- * compact tuple format. A reply shares as a plain comment on the same
- * quote, which is the existing text-restore contract. Documented choice,
- * pinned here so a future "helpful" addition is a deliberate one.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation } from '../types';
 import { fromShareable, toShareable } from './sharing';

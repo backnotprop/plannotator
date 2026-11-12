@@ -1,22 +1,3 @@
-/**
- * Fidelity corpus test for the markdown edit mode (atomic-editor / CM6).
- *
- * The edit-mode contract: loading a document into the editor and reading it
- * back is BYTE-IDENTICAL — rendering is decoration-only, the text is the
- * source of truth. If this ever fails, the diff-of-edits feedback sent to
- * agents would contain phantom changes the user never made.
- *
- * Two layers:
- *  1. Synthetic PFM fixtures (in-repo, deterministic, run everywhere).
- *  2. A runtime sample of real plans from the folder PLANNOTATOR_FIDELITY_CORPUS
- *     names (e.g. a copy of a history/ folder) — skipped when it is unset.
- *     Opt-in, so a test run never reads the person's ~/.plannotator by
- *     itself; real user content deliberately stays OUT of the repo.
- *
- * Requires DOM_TESTS=1 (happy-dom preload). Run:
- *   DOM_TESTS=1 bun test markdownEditorFidelity
- *   DOM_TESTS=1 PLANNOTATOR_FIDELITY_CORPUS=/tmp/plans bun test markdownEditorFidelity
- */
 import { describe, test, expect } from 'bun:test';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -30,8 +11,6 @@ import {
 } from '@plannotator/atomic-editor';
 
 const hasDom = typeof document !== 'undefined';
-// Opt-in only: a test run never reads the person's data dir by itself. Point
-// PLANNOTATOR_FIDELITY_CORPUS at a folder of plans (a copy of a history/ folder).
 const CORPUS_DIR = process.env.PLANNOTATOR_FIDELITY_CORPUS?.trim() || join(tmpdir(), 'plannotator-fidelity-corpus-unset');
 const CORPUS_SAMPLE_SIZE = 150;
 const MAX_FILE_BYTES = 64 * 1024;
@@ -128,7 +107,6 @@ async function mountAndRead(markdown: string): Promise<string> {
   return out;
 }
 
-/** Deterministic sample: stable hash over the path, take the N smallest. */
 function sampleCorpus(): string[] {
   if (!existsSync(CORPUS_DIR)) return [];
   const files: string[] = [];
@@ -146,7 +124,6 @@ function sampleCorpus(): string[] {
         if (st.isDirectory()) walk(full);
         else if (entry.endsWith('.md') && st.size > 0 && st.size <= MAX_FILE_BYTES) files.push(full);
       } catch {
-        /* unreadable entry — skip */
       }
     }
   };
@@ -186,8 +163,6 @@ describe('markdown edit mode fidelity', () => {
       let skippedCrlf = 0;
       for (const file of sample) {
         const content = readFileSync(file, 'utf8');
-        // CM6's Text model joins lines with \n; CRLF input cannot round-trip.
-        // The corpus is verified \r-free today — guard rather than fail noisily.
         if (content.includes('\r')) {
           skippedCrlf++;
           continue;

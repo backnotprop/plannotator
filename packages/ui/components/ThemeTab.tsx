@@ -23,12 +23,6 @@ const SyntaxLinesIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
-/**
- * The favicon style choices. Rendered in both layouts, so it lives in one place.
- * The compact layout drops the visible "Favicon" heading the full layout has, so
- * the group carries its own accessible name and three unlabelled image buttons are
- * never all a screen reader gets.
- */
 const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected }) => (
   <div className="flex gap-1" role="group" aria-label="Favicon style">
     {FAVICON_STYLE_CHOICES.map(({ id, label }) => (
@@ -52,10 +46,8 @@ const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected })
   </div>
 );
 
-// The picker's state lives in hooks/useThemePaletteHalves; re-exported here so existing imports keep working.
 export { useThemePaletteHalves, type ThemePaletteHalves } from '../hooks/useThemePaletteHalves';
 
-/** The five colors a palette tile shows for one half, in ThemeTab's order. */
 export function paletteSwatchColors(theme: ThemeInfo, half: ThemeHalf): string[] {
   const colors = theme.colors[half];
   return [colors.primary, colors.secondary, colors.accent, colors.background, colors.foreground];
@@ -88,7 +80,6 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
 
   return (
     <div className={compact ? '' : 'space-y-5'}>
-      {/* Mode */}
       <div className={compact ? 'flex items-center gap-3 mb-2' : 'space-y-2'}>
         {!compact && <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Mode</label>}
         <div className="flex gap-1">
@@ -129,7 +120,6 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
         )}
       </div>
 
-      {/* Theme pair */}
       <div className={compact ? 'space-y-2' : 'space-y-3'}>
         {!compact && (
           <>
@@ -154,7 +144,6 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
           </>
         )}
 
-        {/* Which half the grid assigns to */}
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-muted-foreground/70">Assigning</span>
           <div className="flex items-center gap-0.5 rounded-lg bg-muted/50 p-0.5">
@@ -188,13 +177,11 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
                     : 'border-border hover:border-muted-foreground/30 hover:bg-muted/30'
                 }`}
               >
-                {/* Syntax highlighting badge */}
                 {theme.syntaxHighlighting && (
                   <div className="absolute top-1 right-1" title="Matched syntax highlighting in diffs">
                     <SyntaxLinesIcon className="w-2.5 h-2.5 text-muted-foreground/50" />
                   </div>
                 )}
-                {/* Color swatches */}
                 <div className="flex gap-1 mb-1.5">
                   {paletteSwatchColors(theme, half).map((color, i) => (
                     <div
@@ -204,7 +191,6 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
                     />
                   ))}
                 </div>
-                {/* Name + checkmark */}
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-foreground truncate">{theme.name}</span>
                   {isSelected && (

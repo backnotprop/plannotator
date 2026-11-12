@@ -1,32 +1,20 @@
 import { copyTextToClipboard } from './clipboard';
 import { restoreClipboardLists } from './richClipboardLists';
 
-/** Cap on markup carried across the HTML-viewer bridge (and on its range text). */
 export const MAX_RICH_CLIPBOARD_HTML_LENGTH = 256 * 1024;
-/** Cap on the sanitized HTML put on the clipboard; past it the copy is plain text. */
 export const MAX_RICH_CLIPBOARD_OUTPUT_LENGTH = 512 * 1024;
 
-/**
- * What the toolbar's Copy button copies when rich copy is on, built when it is
- * pressed: sanitized HTML plus its plain text (`html: ''` when no markup came
- * back), the selection marked too large for rich text, or null when nothing
- * could be built. `truncated` marks `text` as not the whole selection.
- */
 export type RichCopySource =
   | { html: string; text: string; truncated?: boolean }
   | { tooLarge: true; text: string; truncated?: boolean }
   | null;
 
-/** What the button actually put on the clipboard, for its tooltip. */
 export interface RichCopyOutcome {
   copied: 'rich' | 'plain';
-  /** Why plain: no rich clipboard here, too large for rich text, or no markup came back. */
   reason?: 'unavailable' | 'too-large' | 'no-markup';
-  /** Set when the copied text is cut: its length in characters. */
   truncatedTo?: number;
 }
 
-/** The button's tooltip after a copy: says exactly what went on the clipboard. */
 export function richCopyOutcomeLabel(outcome: RichCopyOutcome): string {
   const notes: string[] = [];
   if (outcome.copied === 'plain') {
@@ -70,7 +58,6 @@ function safeIntegerAttribute(element: Element, name: string, minimum: number): 
   return Number.isSafeInteger(number) && number >= minimum ? String(number) : null;
 }
 
-/** A hostname that names this machine, whatever its spelling (URL-parsed). */
 export function isLoopbackHostname(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.$/, '');
   return host === 'localhost'
@@ -79,8 +66,6 @@ export function isLoopbackHostname(hostname: string): boolean {
     || host === '0.0.0.0'
     || host === '[::1]'
     || host === '[::]'
-    // IPv4-mapped and IPv4-compatible loopback, as the URL parser serializes
-    // them ([::ffff:7f00:1], [::7f00:1]).
     || /^\[::(ffff:)?7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(host);
 }
 
@@ -89,10 +74,6 @@ function safeLinkHref(href: string): string | null {
     const baseUrl = new URL(document.baseURI);
     const url = new URL(href, baseUrl);
     if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)) return null;
-    // A link to this session's own server or to this machine is dead once the
-    // session ends, and some carry a per-document access token
-    // (/api/html-assets/<token>/) or a local path: never exported. The link
-    // text stays.
     if (
       (url.protocol === 'http:' || url.protocol === 'https:')
       && (url.origin === baseUrl.origin || isLoopbackHostname(url.hostname))
@@ -158,16 +139,9 @@ function sanitizeFragment(fragment: ParentNode): string {
   return clean.innerHTML;
 }
 
-/**
- * Snapshot selected DOM as safe, theme-free rich clipboard HTML. Null when the
- * selection is too large for rich text (its text or the sanitized HTML past
- * MAX_RICH_CLIPBOARD_OUTPUT_LENGTH).
- */
 export function selectionRangeToHtml(range: Range): string | null {
   if (range.toString().length > MAX_RICH_CLIPBOARD_OUTPUT_LENGTH) return null;
   const fragment = range.cloneContents();
-  // cloneContents omits the common ancestor, including formatting when both
-  // endpoints are inside the same heading, link, or bold text node.
   let ancestor = range.commonAncestorContainer instanceof Element
     ? range.commonAncestorContainer
     : range.commonAncestorContainer.parentElement;
@@ -184,7 +158,6 @@ export function selectionRangeToHtml(range: Range): string | null {
   return html.length <= MAX_RICH_CLIPBOARD_OUTPUT_LENGTH ? html : null;
 }
 
-/** The button's source for a live range, built at press time. Never throws. */
 export function richCopySourceFromRange(range: Range, text: string): RichCopySource {
   try {
     const html = selectionRangeToHtml(range);
@@ -195,7 +168,6 @@ export function richCopySourceFromRange(range: Range, text: string): RichCopySou
   }
 }
 
-/** Sanitize HTML received across the HTML-viewer bridge before clipboard use. */
 export function sanitizeRichHtml(html: string): string | null {
   if (!html || html.length > MAX_RICH_CLIPBOARD_HTML_LENGTH) return null;
   try {
@@ -217,9 +189,6 @@ function copyRichTextWithFallback(html: string, text: string): boolean {
     : [];
   let copied = false;
 
-  // Only this button's own execCommand('copy') passes through here: the
-  // listener exists for that one synchronous call, at window capture, and
-  // stops the event so no page copy handler (Viewer's plain-text one) runs.
   const handleCopy = (event: ClipboardEvent) => {
     event.stopImmediatePropagation();
     const clipboardData = event.clipboardData;
@@ -253,10 +222,8 @@ function copyRichTextWithFallback(html: string, text: string): boolean {
   return copied;
 }
 
-/** 'too-large': plain text was copied because the HTML is past the output cap. */
 export type RichClipboardResult = 'rich' | 'plain' | 'too-large' | false;
 
-/** Prefer both MIME types; report an honest plain fallback when the host is text-only. */
 export async function copyRichTextToClipboard(html: string, text: string): Promise<RichClipboardResult> {
   if (html.length > MAX_RICH_CLIPBOARD_OUTPUT_LENGTH) {
     return await copyTextToClipboard(text) ? 'too-large' : false;
@@ -274,12 +241,10 @@ export async function copyRichTextToClipboard(html: string, text: string): Promi
       return 'rich';
     }
   } catch {
-    // Fall back only if the legacy copy event can set both MIME types.
   }
   try {
     if (copyRichTextWithFallback(html, text)) return 'rich';
   } catch {
-    // Try the host's text-only clipboard below.
   }
   try {
     if (navigator.clipboard?.writeText) {
@@ -287,12 +252,10 @@ export async function copyRichTextToClipboard(html: string, text: string): Promi
       return 'plain';
     }
   } catch {
-    // Clipboard access is unavailable.
   }
   return false;
 }
 
-/** What one copy writes: rich HTML (or none) and the plain text, plus why. */
 interface CopyPlan {
   html: string | null;
   text: string;
@@ -312,8 +275,6 @@ function planCopy(source: RichCopySource, fallbackText: string): CopyPlan {
   return { html: source.html, text, truncatedTo };
 }
 
-/** Plain text as clipboard HTML: escaped, in a <pre>, so the html part of a
- *  promised clipboard item can always resolve. */
 export function plainTextClipboardHtml(text: string): string {
   const escaped = text
     .replace(/&/g, '&amp;')
@@ -335,15 +296,6 @@ async function copyPlanned(plan: CopyPlan): Promise<RichCopyOutcome | false> {
   return false;
 }
 
-/**
- * The toolbar button's copy: builds the rich HTML only now, through `build`
- * (synchronous for the markdown Viewer, a bridge round trip on HTML surfaces).
- * An asynchronous source is handed to the clipboard as ONE item with promised
- * blobs inside the click, so browsers that need the write to start in the
- * gesture (Safari, WKWebView) keep it. Neither promise ever rejects: with no
- * rich markup (too large, none came back, a timeout) the html part is the
- * plain text, escaped, and the outcome says plain.
- */
 export async function copyRichSelection(
   build: () => RichCopySource | Promise<RichCopySource>,
   fallbackText: string,
@@ -373,7 +325,6 @@ export async function copyRichSelection(
         ? { copied: 'rich', truncatedTo: done.truncatedTo }
         : { copied: 'plain', reason: done.reason, truncatedTo: done.truncatedTo };
     } catch {
-      // The write itself was refused: the plain paths below (best effort).
     }
   }
   return copyPlanned(await plan);

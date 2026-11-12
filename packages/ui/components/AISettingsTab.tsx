@@ -38,10 +38,6 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
 
   const handleSelectProvider = (providerId: string) => {
     onProviderChange(providerId);
-    // Persist only the provider choice. Writing the resolved model here would
-    // clobber a saved preference the currently-advertised model list doesn't
-    // include (e.g. before deferred Codex discovery has run) with the static
-    // fallback id — the saved model only changes when the user picks one.
     saveAIProviderSelection({ providerId, model: null, origin });
   };
 
@@ -66,9 +62,6 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
     );
   }
 
-  // "Ask this session": the session that opened Plannotator answers Ask AI and
-  // nothing else is offered. Nothing here writes a preference, so a saved
-  // provider still applies to sessions that have no attached session.
   const sessionBridge = findSessionBridge(providers);
   if (sessionBridge) {
     const meta = getProviderMeta(sessionBridge.name, sessionBridge.label);
@@ -139,7 +132,6 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
                 )}
               </button>
 
-              {/* Model selector — shown for selected provider when models available */}
               {isSelected && models.length > 1 && (
                 <div className="border border-t-0 border-primary bg-primary/5 rounded-b-lg px-3 pb-3 pt-1">
                   <label className="flex items-center gap-2">
@@ -162,7 +154,6 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
                 </div>
               )}
 
-              {/* Show current model as muted text for unselected providers */}
               {!isSelected && models.length > 0 && (
                 <div className="px-3 -mt-0.5">
                   <span className="text-[10px] text-muted-foreground/50">

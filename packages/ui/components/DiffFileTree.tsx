@@ -10,23 +10,10 @@ import { useDiffFileTreeExpansion, type DiffFileTreeDefaultExpanded } from '../h
 export type { DiffFileTreeFile, DiffFileTreeNode, DiffFileTreeStatus } from '../utils/diffFileTree';
 export type { DiffFileTreeDefaultExpanded } from '../hooks/useDiffFileTreeExpansion';
 
-/*
- * The diff file tree's presentational parts: the atoms below (folder row,
- * file-row content, change letter, +/- counts, indentation) for a host's own
- * rows, and the `DiffFileTree` component at the bottom, the read-only,
- * embeddable tree a host drops beside its own diff list. Plannotator's code
- * review shares `ChangeTypeLetter` and `diffFileTreeIndent` (its All files
- * tree) but draws its own Changes rows since its aligned sidebar (see
- * HANDOFF.md § "Diff file tree").
- */
-
-/** Left padding of a row at `depth` (px). */
 export function diffFileTreeIndent(depth: number): number {
   return 4 + depth * 8;
 }
 
-/** Leading change-type letter — A/D/R/U carry weight and color; modified gets
- * a whisper-quiet M so the column has no holes. Fixed slot keeps names aligned. */
 export const ChangeTypeLetter: React.FC<{
   status: DiffFileTreeStatus;
   oldPath?: string;
@@ -49,9 +36,6 @@ export const ChangeTypeLetter: React.FC<{
   </span>
 );
 
-/** Right-anchored +/- pair — one fixed-width block so the numbers always end
- * flush at the row edge, stay tight together, and add-only rows leave no
- * phantom gap. */
 export const DiffCounts: React.FC<{ additions: number; deletions: number }> = ({ additions, deletions }) => (
   <span className="min-w-[7ch] text-right whitespace-nowrap flex-shrink-0 text-[10px] tabular-nums">
     {additions > 0 && <span className="additions">+{additions}</span>}
@@ -67,7 +51,6 @@ type FolderRowProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onCli
   ref?: React.Ref<HTMLButtonElement>;
 };
 
-/** A folder row: chevron, (possibly merged) folder name, summed +/- counts. */
 export const DiffFileTreeFolderRow: React.FC<FolderRowProps> = ({ node, isExpanded, onToggle, ...buttonProps }) => (
   <button
     {...buttonProps}
@@ -98,12 +81,6 @@ export const DiffFileTreeFolderRow: React.FC<FolderRowProps> = ({ node, isExpand
   </button>
 );
 
-/**
- * The inside of a file row (render it in a `file-tree-item` row element):
- * `[leading][letter][name][afterName]` then the right-anchored counts.
- * `leading` and `afterName` are where the review puts its viewed/stage
- * controls and annotation badge.
- */
 export const DiffFileTreeFileRowContent: React.FC<{
   file: Pick<DiffFileTreeFile, 'status' | 'oldPath' | 'additions' | 'deletions'>;
   name: string;
@@ -122,18 +99,11 @@ export const DiffFileTreeFileRowContent: React.FC<{
   </>
 );
 
-// --- Embeddable read-only tree ---
-
 export interface DiffFileTreeProps {
-  /** The changed files. Order does not matter; the tree sorts. */
   files: readonly DiffFileTreeFile[];
-  /** Path of the selected file (controlled), or null. */
   selectedPath: string | null;
-  /** Called with a file's `path` on click, Enter/Space, or arrow/j/k/Home/End. */
   onSelect: (path: string) => void;
-  /** Which folders start open; re-applied when the set of files changes. Default 'all'. */
   defaultExpanded?: DiffFileTreeDefaultExpanded;
-  /** Accessible name of the tree. Default "Changed files". */
   label?: string;
   className?: string;
 }
@@ -164,7 +134,6 @@ function collectVisibleRows(
   return out;
 }
 
-/** File paths in the order the tree renders them (collapse state ignored). */
 function visualFilePaths(nodes: DiffFileTreeNode[], out: string[] = []): string[] {
   for (const node of nodes) {
     if (node.type === 'file') out.push(node.path);
@@ -173,21 +142,10 @@ function visualFilePaths(nodes: DiffFileTreeNode[], out: string[] = []): string[
   return out;
 }
 
-/** Content signature, so a host that rebuilds an equal `files` array each
- * render does not reset the folders it opened or closed. */
 function filesSignature(files: readonly DiffFileTreeFile[]): string {
   return files.map((f) => `${f.path}\u0000${f.oldPath ?? ''}\u0000${f.status}\u0000${f.additions}\u0000${f.deletions}`).join('\u0001');
 }
 
-/**
- * Read-only diff file tree: the same folder collapsing, change letters, +/-
- * counts, icons and indentation as Plannotator's code-review tree, with WAI-ARIA
- * tree semantics. Keyboard (while focus is in the tree, never window-wide):
- * ArrowDown/`j` and ArrowUp/`k` select the next/previous file in tree order,
- * Home/End the first/last (the review's keys); ArrowRight/ArrowLeft open/close
- * a focused folder, and ArrowLeft from a file moves focus to its folder.
- * Theme comes from the ThemeProvider tokens via `@plannotator/ui/styles.css`.
- */
 export const DiffFileTree: React.FC<DiffFileTreeProps> = ({
   files,
   selectedPath,
@@ -197,7 +155,6 @@ export const DiffFileTree: React.FC<DiffFileTreeProps> = ({
   className,
 }) => {
   const signature = filesSignature(files);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on content, not identity
   const tree = useMemo(() => buildDiffFileTree(files), [signature]);
   const filesInOrder = useMemo(() => visualFilePaths(tree), [tree]);
 
@@ -217,8 +174,6 @@ export const DiffFileTree: React.FC<DiffFileTreeProps> = ({
         ? selectedKey
         : rows[0]?.key ?? null;
 
-  // Move DOM focus once the target row exists (selecting a file inside a
-  // collapsed folder opens the folder first, one render later).
   useEffect(() => {
     const key = pendingFocus.current;
     if (!key) return;

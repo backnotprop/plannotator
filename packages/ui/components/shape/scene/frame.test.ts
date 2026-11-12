@@ -2,8 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { sceneFrameFromHash } from './frame';
 
 describe('the frame address', () => {
-  // What regresses: `plannotator shape frame` opens the page and the scene plays from 0 instead of
-  // standing at the moment asked for, or a page opened by a person freezes its scenes.
   test('reads frame and at, and nothing without both', () => {
     expect(sceneFrameFromHash('#shape=shp_1&view=how&frame=pool&at=12.5')).toEqual({ scene: 'pool', at: 12.5 });
     expect(sceneFrameFromHash('#shape=shp_1&frame=pool&at=0')).toEqual({ scene: 'pool', at: 0 });

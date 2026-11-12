@@ -1,8 +1,3 @@
-/**
- * A code file opened from a document on Windows arrives as `C:\repo\src\big.ts`.
- * The popout names it by its last segments (`src/big.ts`), as it does a POSIX
- * path; split on `/` alone, the whole drive path filled the header.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

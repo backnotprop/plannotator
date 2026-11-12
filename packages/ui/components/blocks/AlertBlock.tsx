@@ -26,13 +26,6 @@ const TITLE: Record<AlertKind, string> = {
   important: 'Important',
 };
 
-/**
- * Host seam: resolve a named icon from a title line's `<!-- icon: name -->`
- * comment to a React node. Default: null for every name, so the alert keeps
- * the type's own icon exactly as today. A host that ships an icon set (the
- * package deliberately bundles none) registers a renderer once at startup.
- * Returning null for an unknown name falls back to the type's icon.
- */
 export type AlertIconRenderer = (name: string) => React.ReactNode | null;
 
 let alertIconRenderer: AlertIconRenderer | null = null;
@@ -66,25 +59,14 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
 }) => {
   const proseProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, githubRepo, repoHost };
 
-  // A bold-only first line (optionally led by one emoji, optionally trailed by
-  // an `<!-- icon: name -->` comment) is the alert's title and rides the icon
-  // row in place of the type word; the emoji, or a host-resolved named icon,
-  // takes the icon slot. See utils/alertTitle for the exact grammar. A body
-  // with no such line renders exactly as before.
   const titleLine = parseAlertTitleLine(body);
   const bodyText = titleLine ? titleLine.rest : body;
-  // A callout nests through the quote layout, so it stops where quotes stop:
-  // past the cap its body renders as prose text, inner markers included.
   const atCap = useAtQuoteDepthCap();
   const inner = React.useMemo(() => (atCap ? [] : parseQuoteBody(bodyText)), [atCap, bodyText]);
-  // Paragraphs and lists render as they always have; a fence, a table, a heading
-  // or a nested quote needs the block layout a plain quote gets.
   const renderBody = () =>
     calloutNeedsBlocks(inner)
       ? <CalloutBlocks inner={inner} className="text-[15px] leading-relaxed text-foreground/90" {...proseProps} />
       : renderProseBody({ body: bodyText, ...proseProps });
-  // The emoji wins outright: the host renderer is consulted only for a title
-  // line that carries an icon comment and no emoji (the seam contract).
   const icon = titleLine?.emoji
     ? <span aria-hidden="true" className="alert-emoji text-base leading-none">{titleLine.emoji}</span>
     : (titleLine?.icon && alertIconRenderer ? alertIconRenderer(titleLine.icon) : null) ?? <Icon kind={kind} />;
@@ -102,14 +84,6 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
           {titleLine?.title
             ? (
               <>
-                {/* The type word stays part of the accessible name. A visually
-                    hidden span is read by every engine; an aria-label on this
-                    generic div is prohibited by ARIA and dropped by WebKit.
-                    `annotation-exclude` keeps it out of the annotation text
-                    stream: without it a drag that starts on the icon quotes
-                    the invisible word ("Warning:Named icon title"), which is
-                    what the panel shows, what the agent is handed, and a quote
-                    no share-link restore can find again. */}
                 <span className="sr-only annotation-exclude">{TITLE[kind]}: </span>
                 <InlineMarkdown text={titleLine.title} {...proseProps} />
               </>
@@ -119,8 +93,6 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
       </div>
       {titleLine
         ? (titleLine.rest.trim()
-            // Indent the body by the icon's width plus the row gap so it starts
-            // at the title's left edge (16px icon + 8px gap = pl-6).
             ? <div className="alert-body pl-6">{renderBody()}</div>
             : null)
         : renderBody()}

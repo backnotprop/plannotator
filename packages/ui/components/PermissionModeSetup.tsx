@@ -25,11 +25,6 @@ export const PermissionModeSetup: React.FC<PermissionModeSetupProps> = ({
   };
 
   return createPortal(
-    // Same bounded shell as the sibling one-time dialogs (see
-    // LookAndFeelAnnouncementDialog): safe-area padding, a card capped to the
-    // visible viewport, and the option list as the only scrolling region. The
-    // hand-rolled unbounded card used to overflow both edges of a short
-    // landscape phone with nothing left to tap.
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-background/90 backdrop-blur-sm"
       style={{
@@ -46,7 +41,6 @@ export const PermissionModeSetup: React.FC<PermissionModeSetupProps> = ({
             'calc(var(--pn-viewport-height, 100vh) - max(1rem, var(--pn-safe-top, 0px)) - max(1rem, var(--pn-safe-bottom, 0px)))',
         }}
       >
-        {/* Header */}
         <div className="p-5 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-1.5 rounded-lg bg-primary/15">
@@ -65,7 +59,6 @@ export const PermissionModeSetup: React.FC<PermissionModeSetupProps> = ({
           </p>
         </div>
 
-        {/* Options */}
         <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
           {PERMISSION_MODE_OPTIONS.map((option) => (
             <label
@@ -92,7 +85,6 @@ export const PermissionModeSetup: React.FC<PermissionModeSetupProps> = ({
           ))}
         </div>
 
-        {/* Footer */}
         <div className="p-4 border-t border-border flex flex-shrink-0 flex-wrap gap-2 justify-between items-center">
           <p className="text-xs text-muted-foreground">
             You can change this later in Settings.

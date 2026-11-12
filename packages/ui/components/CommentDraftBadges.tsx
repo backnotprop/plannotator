@@ -1,18 +1,8 @@
-/**
- * Visible comment drafts (opt-in, `configurePlannotatorUI({ visibleCommentDrafts })`): a floating "Draft" badge just
- * under the end of each set of words whose comment was closed with words in it. The badge sits on top of the text,
- * never in it: it is absolutely placed in the document's column, so no line moves, and it stays inside the column.
- * A press opens the comment again with its words.
- *
- * The word is drawn by CSS (`content: attr(data-label)`), so the badge adds no text to the document: a text search,
- * a copy or a restore never meets it. Styles: `comment-card.css`.
- */
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type Highlighter from '@plannotator/web-highlighter';
 import type { CommentPopoverState } from '../hooks/useAnnotationHighlighter';
 import { Icon } from './inbox-thread/icons';
 
-/** How far the badge's start sits back from the words' end, and how far it rises into the line gap. */
 const BACK = 10;
 const RISE = 3;
 const FALLBACK_WIDTH = 56;
@@ -38,7 +28,6 @@ export function CommentDraftBadges({
   const [placed, setPlaced] = useState<Placed[]>([]);
   const widthRef = useRef<number>(FALLBACK_WIDTH);
   const layerRef = useRef<HTMLSpanElement | null>(null);
-  /** The badge that opened the comment now open: when it closes again with its words, focus comes back to it. */
   const openedFrom = useRef<string | null>(null);
 
   const place = useCallback(() => {
@@ -63,7 +52,6 @@ export function CommentDraftBadges({
       try { doms = (highlighter.getDoms(id) as HTMLElement[] | undefined) ?? []; } catch { doms = []; }
       const rects = doms.filter((el) => el.isConnected).flatMap((el) => [...el.getClientRects()]).filter((r) => r.width > 0);
       if (!rects.length) continue;
-      // The end of the words: the lowest line's rightmost piece.
       const bottom = Math.max(...rects.map((r) => r.bottom));
       const last = rects.filter((r) => r.bottom >= bottom - 2).reduce((a, b) => (b.right > a.right ? b : a));
       const left = Math.max(colLeft, Math.min(last.right - box.left - BACK, colRight - width));
@@ -85,13 +73,10 @@ export function CommentDraftBadges({
       observer?.disconnect();
     };
   }, [containerRef, place]);
-  // Measured once drawn: the real width keeps a badge at a line's end inside the column.
   useLayoutEffect(() => {
     const measured = layerRef.current?.querySelector<HTMLElement>('[data-comment-draft-badge]')?.offsetWidth;
     if (measured && measured !== widthRef.current) place();
   }, [placed, place]);
-  // Back from the comment a badge opened (Escape, the chevron): its badge is drawn anew, and focus, left on the page
-  // as the box went, goes to it. Focus the person put somewhere else stays there.
   useLayoutEffect(() => {
     const id = openedFrom.current;
     if (!id || !placed.some((p) => p.id === id)) return;

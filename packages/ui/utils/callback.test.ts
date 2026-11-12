@@ -1,8 +1,6 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { getCallbackConfig, executeCallback, CallbackAction } from "./callback";
 
-// --- getCallbackConfig ---
-
 function loc(url: string): { search: string; hash: string } {
   const parsed = new URL(url);
   return { search: parsed.search, hash: parsed.hash };
@@ -86,8 +84,6 @@ describe("getCallbackConfig", () => {
     expect(getCallbackConfig(loc(`https://share.plannotator.ai/?cb=not-a-url&ct=tok`))).toBeNull();
   });
 });
-
-// --- executeCallback ---
 
 const mockConfig = { callbackUrl: "https://localhost:9456/plannotator-cb", token: "tok-test" };
 const mockAnnotatedUrl = "https://share.plannotator.ai/#abc123";

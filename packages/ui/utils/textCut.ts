@@ -1,13 +1,3 @@
-/**
- * Is this element's text cut (its own overflow with "…", or a line clamp)?
- * With `partSelector`, it also counts as cut when its first descendant
- * matching it is (a name drawn in two parts, whose first part shrinks).
- * Rounding can hide a cut of under a pixel (a chip
- * measured a scrollWidth of 104 in a clientWidth of 103 with its ellipsis
- * showing, and another 98 in 98 with the text 0.06 px wider than its box),
- * so any whole pixel counts, and where layout can be read the text's own
- * width (a Range over its contents) is compared with the box's content width.
- */
 export function isTextCut(el: Element | null | undefined, partSelector?: string): boolean {
   if (typeof HTMLElement === 'undefined' || !(el instanceof HTMLElement)) return false;
   const part = partSelector ? el.querySelector<HTMLElement>(partSelector) : null;
@@ -26,7 +16,6 @@ function overflows(el: HTMLElement): boolean {
   if (style.overflowX === 'visible') return false;
   const box = el.getBoundingClientRect().width;
   const inner = box - num(style.paddingLeft) - num(style.paddingRight) - num(style.borderLeftWidth) - num(style.borderRightWidth);
-  // Chrome draws the ellipsis for any overflow (a chip lost 0.06 px): a hundredth of a pixel counts.
   return text > inner + 0.01;
 }
 
@@ -35,7 +24,6 @@ function num(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** No hover on this device (a touch screen): a hover there is a first tap, so a tooltip should not open. */
 export function noHover(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(hover: none)').matches;
 }

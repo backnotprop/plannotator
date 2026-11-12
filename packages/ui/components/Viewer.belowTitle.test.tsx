@@ -1,23 +1,9 @@
-/**
- * `Viewer` `belowTitle`: a host's node drawn right under the document title,
- * driven through the REAL Viewer and web-highlighter (DOM-gated, DOM_TESTS=1).
- *
- * Failures to catch: the prop leaks DOM into a Viewer that does not pass it;
- * the slot lands somewhere other than right after a leading `# title` (or at
- * the top when there is none); the heading changes; the slot's own elements
- * renumber web-highlighter's positional metas, so a comment on the paragraph
- * after the title is stored, or restored, differently with the slot than
- * without it (two identical paragraphs make a shifted index paint the WRONG
- * one silently, since the quote still matches); a selection inside the slot
- * becomes a comment.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { AnnotationType, type Annotation, type EditorMode } from '../types';
 
 const hasDom = typeof document !== 'undefined';
-// web-highlighter's UMD bundle reads `window` at module eval; import lazily.
 const viewerModule = hasDom ? await import('./Viewer') : null;
 const parserModule = hasDom ? await import('../utils/parser') : null;
 
@@ -31,8 +17,6 @@ const TITLED = [
   'Then tag it.',
 ].join('\n');
 
-/** Host content with `<p>`, `<span>` and `<a>`: the tags a comment's parent
- *  element usually has, so a slot that counted would shift their indexes. */
 const SLOT = (
   <div data-testid="refs">
     <p><span>Pull requests</span> <a href="#pr">#12</a></p>
@@ -104,7 +88,6 @@ async function unmount() {
   window.getSelection()?.removeAllRanges();
 }
 
-/** Select `phrase` in the `nth` text node holding it and release the pointer. */
 async function select(scope: HTMLElement, phrase: string, nth = 0) {
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   const hits: Text[] = [];
@@ -148,13 +131,11 @@ describe('Viewer belowTitle: where it renders', () => {
     expect(slot.hasAttribute('data-viewer-below-title')).toBe(true);
     expect(slot.dataset.placement).toBe('below-title');
     expect(slot.querySelector('[data-testid="refs"]')).not.toBeNull();
-    // Outside everything that addresses document text.
     expect(slot.classList.contains('annotation-exclude')).toBe(true);
     expect(slot.hasAttribute('data-pinpoint-ignore')).toBe(true);
     expect(slot.hasAttribute('data-print-hide')).toBe(true);
     expect(slot.hasAttribute('data-block-id')).toBe(false);
     expect(slot.querySelector('[data-block-id]')).toBeNull();
-    // The body goes on right after it.
     expect((slot.nextElementSibling as HTMLElement).textContent).toBe('Ship the same build twice.');
   });
 
@@ -177,21 +158,17 @@ describe('Viewer belowTitle: where it renders', () => {
 describe('Viewer belowTitle: comment positions ignore the slot', () => {
   test.skipIf(!hasDom)('a comment made on the paragraph after the title stores the same metas with and without the slot', async () => {
     const made: Annotation[] = [];
-    // Redline creates the annotation straight from the selection.
     const plain = await mount({ passProp: false, mode: 'redline', onAddAnnotation: (a) => made.push(a) });
     await select(plain.article, 'same build', 1);
     await unmount();
 
     const slotted = await mount({ belowTitle: SLOT, mode: 'redline', onAddAnnotation: (a) => made.push(a) });
-    // nth 2: the slot's own "Depends on" link holds the phrase first.
     await select(slotted.article, 'same build', 2);
     expect(made).toHaveLength(2);
     const [without, withSlot] = made;
     expect(withSlot!.originalText).toBe('same build');
     expect(withSlot!.startMeta).toEqual(without!.startMeta);
     expect(withSlot!.endMeta).toEqual(without!.endMeta);
-    // ...and that is the SECOND paragraph's index without the slot, which a
-    // counted slot (two <p>) would have pushed past.
     expect(without!.startMeta!.parentTagName).toBe('P');
   });
 
@@ -271,9 +248,6 @@ describe('Viewer belowTitle: comment positions ignore the slot', () => {
     ].join('\n');
     const made: Annotation[] = [];
     const { article } = await mount({ markdown, passProp: false, mode: 'redline', onAddAnnotation: (a) => made.push(a) });
-    // A browser's DOMPurify keeps `data-*` (ALLOW_DATA_ATTR), so the author's
-    // div reaches the DOM. DOMPurify does not run under happy-dom (it drops
-    // the div), so put back what a browser renders inside the html block.
     const htmlBlock = article.querySelectorAll<HTMLElement>('[data-block-id]')[1]!;
     if (!htmlBlock.querySelector('[data-viewer-below-title]')) {
       const authored = document.createElement('div');
@@ -286,7 +260,6 @@ describe('Viewer belowTitle: comment positions ignore the slot', () => {
     expect(made).toHaveLength(1);
     const paragraphs: HTMLElement[] = [...article.getElementsByTagName('p')];
     const live = paragraphs.indexOf(paragraphsByText(article, 'Ship the same build twice.')[0]!);
-    // The author's <p> is counted, exactly as web-highlighter counts it.
     expect(made[0]!.startMeta).toEqual({ parentTagName: 'P', parentIndex: live, textOffset: 9 });
     expect(live).toBeGreaterThan(0);
   });

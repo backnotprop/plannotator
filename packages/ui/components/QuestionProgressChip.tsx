@@ -1,17 +1,9 @@
 import React from 'react';
 import { cn } from '../lib/utils';
 
-/**
- * The header "N/M answered" chip for documents with `:::question` blocks
- * (the approved Card mock): a progress ring and the count. It is a button:
- * a click jumps to the next open question. With no open question left it
- * still reads the progress but has nothing to jump to.
- */
 export interface QuestionProgressChipProps {
-  /** Answered or settled questions. */
   done: number;
   total: number;
-  /** Whether a question is still open (not answered, settled or skipped). */
   hasOpen: boolean;
   onJump: () => void;
   className?: string;

@@ -1,18 +1,12 @@
 import { getScrollViewportRect } from '../hooks/useScrollViewport';
 import { getAnnotatableTextNodes } from './domSelection';
 
-/** A durable cursor location measured within one rendered Markdown block. */
 export interface VimTextPosition {
   readonly blockId: string;
   readonly textOffset: number;
-  /**
-   * Resolve an offset shared by adjacent text nodes toward the next or previous
-   * node. Omitted positions preserve the historical backward affinity.
-   */
   readonly affinity?: 'forward' | 'backward';
 }
 
-/** Text movement commands understood by the Markdown Vim adapter. */
 export type VimTextMotion =
   | 'left'
   | 'right'
@@ -26,26 +20,22 @@ export type VimTextMotion =
   | 'document-start'
   | 'document-end';
 
-/** Block-level keyboard navigation with no browser text selection. */
 export interface VimBlockState {
   readonly phase: 'block';
   readonly targetKey: string;
 }
 
-/** A refined semantic child such as inline code, a table row, or a cell. */
 export interface VimInlineState {
   readonly phase: 'inline';
   readonly targetKey: string;
 }
 
-/** A collapsed text cursor inside the current semantic target. */
 export interface VimTextState {
   readonly phase: 'text';
   readonly targetKey: string;
   readonly cursor: VimTextPosition;
 }
 
-/** A characterwise browser selection anchored inside rendered text. */
 export interface VimVisualState {
   readonly phase: 'visual';
   readonly targetKey: string;
@@ -53,14 +43,12 @@ export interface VimVisualState {
   readonly anchor: VimTextPosition;
 }
 
-/** A whole-block selection extending through block-navigation order. */
 export interface VimVisualBlockState {
   readonly phase: 'visual-block';
   readonly targetKey: string;
   readonly anchorTargetKey: string;
 }
 
-/** Any Vim state that can be restored after an annotation UI closes. */
 export type VimRestorableState =
   | VimBlockState
   | VimInlineState
@@ -68,24 +56,16 @@ export type VimRestorableState =
   | VimVisualState
   | VimVisualBlockState;
 
-/** Annotation UI owns the keyboard while this state is active. */
 export interface VimActionState {
   readonly phase: 'action';
   readonly returnTo: VimRestorableState;
 }
 
-/**
- * Complete Vim navigation state.
- *
- * The discriminated union prevents semantic focus, text cursors, and visual
- * anchors from existing in contradictory combinations.
- */
 export type VimSelectionState =
   | { readonly phase: 'inactive' }
   | VimRestorableState
   | VimActionState;
 
-/** Return a fresh state with no semantic or text target. */
 export function createInitialVimSelectionState(): { readonly phase: 'inactive' } {
   return { phase: 'inactive' };
 }
@@ -139,7 +119,6 @@ function getViewportCenterY(
   return rect.top + rect.height / 2;
 }
 
-/** Pick the first text cursor nearest the visible center of the document. */
 export function findInitialTextPosition(
   container: HTMLElement,
   scrollViewport?: HTMLElement | null,
@@ -162,7 +141,6 @@ export function findInitialTextPosition(
   return candidates[0]?.position ?? null;
 }
 
-/** Resolve a logical Vim position into a live text-node DOM point. */
 export function resolveTextPosition(
   container: HTMLElement,
   position: VimTextPosition,
@@ -201,9 +179,6 @@ function normalizeDomPoint(
   }
   if (!(node instanceof Element)) return null;
 
-  // A DOM point whose offset equals `childNodes.length` sits after the final
-  // child. Treating it as the start of that child moves a line/document-end
-  // cursor backward when Selection.modify() returns an element endpoint.
   const childAtOffset = offset < node.childNodes.length
     ? node.childNodes[Math.max(0, offset)]
     : undefined;
@@ -227,7 +202,6 @@ function normalizeDomPoint(
   return previousText ? { node: previousText, offset: previousText.length } : null;
 }
 
-/** Serialize a live DOM selection point back into a durable block-relative position. */
 export function serializeTextPosition(
   container: HTMLElement,
   node: Node,
@@ -265,7 +239,6 @@ function compareTextPositions(
   return leftIndex - rightIndex;
 }
 
-/** Build a live range between two logical positions regardless of selection direction. */
 export function createRangeBetweenTextPositions(
   container: HTMLElement,
   anchor: VimTextPosition,
@@ -284,11 +257,6 @@ export function createRangeBetweenTextPositions(
   return range;
 }
 
-/**
- * Return durable text bounds for a semantic target element.
- *
- * Bounds may span multiple Markdown blocks for group targets.
- */
 export function getTextElementBounds(
   container: HTMLElement,
   element: HTMLElement,
@@ -307,7 +275,6 @@ export function getTextElementBounds(
     : null;
 }
 
-/** Show a logical cursor or visual range through the browser Selection API. */
 export function applyNativeTextSelection(
   container: HTMLElement,
   cursor: VimTextPosition,
@@ -381,7 +348,6 @@ function moveWithinBlock(
   return null;
 }
 
-/** Move a logical text cursor without retaining stale DOM-node references. */
 export function moveTextPosition(
   container: HTMLElement,
   position: VimTextPosition,

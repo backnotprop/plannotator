@@ -1,17 +1,3 @@
-/**
- * The semantic target graph over REAL rendered blocks (BlockRenderer), not
- * hand-written fixtures.
- *
- * What regresses if this fails:
- * - a real list item stops targeting its text (the marker heuristic broke);
- * - a callout or alert (a title, then a body that may hold a list) is
- *   mistaken for a list item and targets only one of its children;
- * - a question card targets its prompt for every pointer position (its first
- *   child is a `select-none` eyebrow), or Vim can no longer step into and out
- *   of the card's parts.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -103,7 +89,6 @@ describe.if(hasDom)('semantic target graph over rendered blocks', () => {
     expect(marker.matches('.select-none')).toBe(true);
     expect(resolveSemanticTargetAtPoint(graph, marker)?.key).toBe(target.key);
 
-    // A task item's marker is a checkbox; the same rule applies.
     const task = Array.from(el.querySelectorAll<HTMLElement>('[data-block-id]'))
       .find((b) => b.textContent?.includes('A task item'))!;
     const taskTarget = graph.byKey.get(`${task.dataset.blockId}:block`)!;
@@ -137,14 +122,11 @@ describe.if(hasDom)('semantic target graph over rendered blocks', () => {
     const parts = getSemanticTargetChildren(graph, cardTarget).map((t) => t.element.textContent);
     expect(parts).toEqual(['Where should conflicts live?', 'Local only', 'Server-side']);
 
-    // Pointer: each choice row (its padding and radio included) is that choice.
     const rows = card.querySelectorAll<HTMLElement>('label[data-question-option]');
     expect(resolveSemanticTargetAtPoint(graph, rows[0])?.element.textContent).toBe('Local only');
     expect(resolveSemanticTargetAtPoint(graph, rows[1].querySelector('input')!)?.element.textContent).toBe('Server-side');
-    // The eyebrow is never a target.
     expect(resolveSemanticTargetAtPoint(graph, card.firstElementChild as HTMLElement)).toBeNull();
 
-    // Vim: into the card, across its parts, back out, and on to the next block.
     const prompt = moveSemanticTarget(graph, cardTarget, 'child');
     expect(prompt.element.textContent).toBe('Where should conflicts live?');
     const first = moveSemanticTarget(graph, prompt, 'next-sibling');
@@ -155,14 +137,10 @@ describe.if(hasDom)('semantic target graph over rendered blocks', () => {
     expect(moveSemanticTarget(graph, next, 'previous-block').key).toBe(cardTarget.key);
   });
 
-  // A card whose context holds a table and a code fence: before the card was
-  // checked first, the graph took the whole card for a table (or a code
-  // block) because it now contains one.
   test('a question card whose context holds a table or code is still one card of parts', async () => {
     const { buildSemanticTargetGraph, resolveSemanticTargetAtPoint, getSemanticTargetChildren } = targeting!;
     const el = await mount(`:::question\nSet the numbers?\n\n| Limit | Proposed |\n| --- | --- |\n| Agents | 3 |\n\n\`\`\`sh\nrun it\n\`\`\`\n\n- [ ] OK\n- [ ] Change\n:::\n\nAfter.\n`);
     const card = el.querySelector<HTMLElement>('fieldset.question-block')!;
-    // The context's blocks carry no block id of their own.
     expect(card.querySelectorAll('[data-block-id]').length).toBe(0);
     const graph = buildSemanticTargetGraph(el);
     const cardTarget = graph.byKey.get(`${card.dataset.blockId}:block`)!;
@@ -171,7 +149,6 @@ describe.if(hasDom)('semantic target graph over rendered blocks', () => {
     expect(graph.byKey.has(`${card.dataset.blockId}:code`)).toBe(false);
     const context = card.querySelector<HTMLElement>('[data-question-part="context"]')!;
     expect(getSemanticTargetChildren(graph, cardTarget).map((t) => t.element)).toContain(context);
-    // A table cell and a code line in the context resolve to the context part.
     const cell = card.querySelector<HTMLElement>('td')!;
     expect(resolveSemanticTargetAtPoint(graph, cell, { clientX: 0, clientY: 0 })?.element).toBe(context);
     expect(resolveSemanticTargetAtPoint(graph, card.querySelector<HTMLElement>('pre code')!)?.element).toBe(context);

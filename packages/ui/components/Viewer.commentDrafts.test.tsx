@@ -1,18 +1,3 @@
-/**
- * Visible comment drafts (`configurePlannotatorUI({ visibleCommentDrafts })`), through the REAL Viewer and
- * web-highlighter (DOM_TESTS=1). Approval "inbox-comment-box": a floating "Draft" badge under the words.
- *
- * Failures to catch:
- * - a comment closed with words leaves no trace on the page (the words only come back on the exact same selection);
- * - the badge does not open the box again with the words, or stays after it opened;
- * - a box closed empty leaves a mark or a badge behind;
- * - a draft is gone once its document is taken off screen and shown again (another thread and back, a file closed);
- * - selecting other words while a box holds words throws its words' mark away with no badge;
- * - the same words picked again by hand make a second badge, one left over after the comment went;
- * - focus is lost (on the page) after a badge opened the box and Escape closed it again;
- * - the badge adds text to the document (a copy, a text search or a restore would meet "Draft");
- * - a host that does not opt in gets a mark or a badge (it must close exactly as before: highlight gone).
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -34,7 +19,6 @@ const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20
 
 beforeEach(() => {
   if (!hasDom) return;
-  // happy-dom lays nothing out: a highlight's pieces report one line, so the badge has an end to hang under.
   originalRects = HTMLElement.prototype.getClientRects;
   HTMLElement.prototype.getClientRects = function (this: HTMLElement) {
     if (this.tagName === 'MARK') return [new DOMRect(120, 40, 140, 20)] as unknown as DOMRectList;
@@ -55,7 +39,6 @@ afterEach(async () => {
   }
 });
 
-// Each test its own document path: the composer keeps words per path and selection for the whole run.
 let docs = 0;
 async function mountViewer(again = false): Promise<HTMLElement> {
   if (!again) docs += 1;
@@ -155,7 +138,6 @@ describe.if(hasDom)('Viewer: visible comment drafts (the Inbox opts in)', () => 
     expect(b).not.toBeNull();
     expect(b!.getAttribute('data-label')).toBe('Draft');
     expect(b!.getAttribute('aria-label')).toContain(PHRASE);
-    // Placed under the words' end, in the column; and no text of its own in the document.
     expect(b!.closest('article')).not.toBeNull();
     expect(b!.textContent).toBe('');
     expect(container.querySelector('article')!.textContent).not.toContain('Draft');

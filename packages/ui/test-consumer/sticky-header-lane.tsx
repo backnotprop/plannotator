@@ -4,7 +4,6 @@ import {
   type StickyHeaderLaneVisibility,
 } from '@plannotator/ui/components/StickyHeaderLane';
 
-/** Compile-only proof that the published subpath exposes both host seams. */
 export function PublishedStickyHeaderLaneConsumer(
   props: Omit<StickyHeaderLaneProps, 'visibility' | 'sticky'>,
 ) {

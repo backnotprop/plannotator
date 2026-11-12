@@ -1,10 +1,3 @@
-/**
- * The unanchored union is what a host renders its "Unanchored" chip from,
- * so the failures to catch are: a textless page row going unreported, a
- * document-level comment being flagged, a swapped-out local id leaking into
- * the host's set, and (the byte-identity guard for existing consumers) the
- * union NOT equalling the bridge list when nothing needs completing.
- */
 import { describe, expect, test } from "bun:test";
 import { AnnotationType, type Annotation } from "../../types";
 import { isTextlessPageAnnotation, mergeUnanchoredIds } from "./unanchored";
@@ -42,8 +35,6 @@ describe("mergeUnanchoredIds", () => {
     const bridgeIds = ["a-1", "b-2"];
     const result = mergeUnanchoredIds({ bridgeIds, annotations: [row("a-1"), row("b-2"), row("c-3")], createdIds: none });
     expect(result).toEqual(bridgeIds);
-    // Ids the host never listed still pass through: hosts painting through
-    // the imperative handle keep today's raw delivery.
     expect(mergeUnanchoredIds({ bridgeIds: ["lost-1"], annotations: [], createdIds: none })).toEqual(["lost-1"]);
   });
 

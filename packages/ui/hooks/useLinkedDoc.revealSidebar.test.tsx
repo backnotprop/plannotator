@@ -1,13 +1,3 @@
-/**
- * Opening a linked document reveals the sidebar, because the sidebar's
- * "Viewing / Back to …" header is the markdown surface's only way back.
- * A raw-HTML surface is the exception: it hands the page the whole viewport
- * and carries its own Back control in the header, so a link click there must
- * leave the sidebar exactly as the user had it — closed stays closed.
- *
- * The failure this guards: the sidebar popping open (on the Contents tab, over
- * a full-screen HTML document) every time the reviewer follows a link.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -108,7 +98,6 @@ describe.if(hasDom)('useLinkedDoc sidebar reveal', () => {
       );
     });
     expect(opens).toEqual([]);
-    // The navigation itself still happened — only the sidebar was left alone.
     expect(get().filepath).toBe('/site/01-entry-point.html');
     expect(get().isActive).toBe(true);
   });

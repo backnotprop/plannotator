@@ -19,8 +19,6 @@ interface TablePopoutProps {
   block: Block;
   open: boolean;
   onClose: () => void;
-  /** Portal target — pass Viewer's annotation containerRef so annotation
-   *  hooks can walk into the popout's text nodes. Null falls back to body. */
   container?: HTMLElement | null;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
@@ -251,13 +249,6 @@ const TablePopoutImpl: React.FC<TablePopoutProps> = ({
   );
 };
 
-// Memoize on meaningful props (block identity, content, open, container).
-// Upstream Viewer re-renders (annotation toolbar opening, selection change,
-// hover state shuffling) keep firing while the popout is mounted. Without
-// this memo, TanStack's flexRender re-evaluates every cell on every parent
-// re-render, which conflicts with web-highlighter's DOM mutations (the
-// library inserts <mark> tags into the live DOM) and React's reconciler
-// throws NotFoundError trying to remove nodes it doesn't own.
 export const TablePopout = React.memo(
   TablePopoutImpl,
   (prev, next) =>

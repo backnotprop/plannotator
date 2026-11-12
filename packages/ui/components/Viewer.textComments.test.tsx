@@ -1,15 +1,3 @@
-/**
- * `Viewer` `textComments` with `answerOnly` (a host that shows a message whose
- * words take comments, the Plannotator Inbox), driven through the REAL Viewer
- * and web-highlighter (DOM-gated, DOM_TESTS=1).
- *
- * Failures to catch: the seam leaks into plain `answerOnly` (a selection
- * there opens a toolbar, a click on a diagram part opens a composer), the
- * toolbar offers Delete or the label picker on a surface that only takes
- * comments, the words of a question card open a toolbar, a diagram part stays
- * read-only under `textComments`, or `readOnly` stops winning. The diagram is
- * the captured Chromium svg of DiagramBlock.askAI.test.tsx's fixture.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -30,7 +18,6 @@ const GEOMETRY = JSON.parse(readFileSync(join(FIXTURES, '06-flowchart-review-dec
   elements: Record<string, { bbox: { x: number; y: number; width: number; height: number }; ctm: DOMMatrix }>;
 };
 const CAPTURED = Object.entries(GEOMETRY.elements).map(([id, entry]) => [id.slice(CAPTURE_ID.length), entry] as const);
-/** `D` is declared on line 3 of the document. */
 const DIAGRAM = ['```mermaid', 'flowchart LR', '  U([Reviewer]) --> D{Approve?}', '  D -->|Yes| M[(Merge)]', '  D -->|No| R[Revise]', '```', ''].join('\n');
 
 const svgProto = (hasDom ? ((globalThis as { SVGGraphicsElement?: typeof SVGElement }).SVGGraphicsElement ?? SVGElement).prototype : {}) as unknown as Record<string, unknown>;
@@ -128,7 +115,6 @@ async function mount({ markdown = MARKDOWN, ...props }: { markdown?: string; tex
   return host!;
 }
 
-/** Select `phrase` (inside `scope`) and let the viewer hear the pointer go up. */
 async function select(scope: HTMLElement, phrase: string) {
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   let node: Text | null = null;
@@ -147,7 +133,6 @@ async function select(scope: HTMLElement, phrase: string) {
 
 const toolbarNames = () => [...document.querySelectorAll<HTMLButtonElement>('.annotation-toolbar button')].map((b) => b.getAttribute('aria-label') ?? b.title);
 
-/** Press and release on node D of the captured diagram; the composer shows if a part takes comments here. */
 async function clickDiagramNode(el: HTMLElement): Promise<void> {
   const node = await until(() => el.querySelector('[id$="-flowchart-D-1"]'), 'the rendered diagram');
   const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
@@ -208,7 +193,6 @@ test.skipIf(!hasDom)('with textComments: the comment-only toolbar (Comment and ð
   expect(names).toContain('Looks good');
   expect(names).not.toContain('Delete');
   expect(names).not.toContain('Quick label');
-  // Still answer-only: no Global comment or Copy.
   expect([...el.querySelectorAll('button')].some((b) => /Global comment|Copy/.test(b.textContent ?? ''))).toBe(false);
 
   await act(async () => document.querySelector<HTMLButtonElement>('.annotation-toolbar button[aria-label="Cancel"], .annotation-toolbar button[title="Cancel"]')?.click());
@@ -230,7 +214,6 @@ test.skipIf(!hasDom)('with textDeletions too: Delete comes back before Comment, 
   expect(added).toHaveLength(1);
   expect(added[0]).toMatchObject({ type: 'DELETION', originalText: 'two, four and eight' });
   expect(toolbarNames()).toEqual([]);
-  // Struck through as plan review draws a deletion.
   expect(el.querySelector('mark.annotation-highlight.deletion')?.textContent).toBe('two, four and eight');
 });
 
@@ -240,7 +223,6 @@ test.skipIf(!hasDom)('textDeletions without textComments brings no toolbar to an
   expect(toolbarNames()).toEqual([]);
 });
 
-/** A host's card in place of a `:::action` block (the Inbox's action items): its words are the person's to select and copy. */
 const hostCard = (block: { directiveKind?: string }) =>
   block.directiveKind === 'action' ? <p data-host-card="">Run npm publish dist/core.tgz in the repo root</p> : undefined;
 
@@ -256,7 +238,6 @@ test.skipIf(!hasDom)('with textComments: a selection inside a question card or a
   await select(action, 'npm publish dist/core.tgz');
   expect(window.getSelection()!.toString()).toBe('npm publish dist/core.tgz');
   expect(toolbarNames()).toEqual([]);
-  // Copy takes the live selection, not a toolbar's text.
   const copied = new Map<string, string>();
   const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
   Object.defineProperty(event, 'clipboardData', { value: { setData: (k: string, v: string) => copied.set(k, v) } });
@@ -264,7 +245,6 @@ test.skipIf(!hasDom)('with textComments: a selection inside a question card or a
   expect(event.defaultPrevented).toBe(false);
   expect(copied.size).toBe(0);
 
-  // The library listens again: the next selection in the text opens the comment toolbar.
   await select(el, 'two, four and eight');
   expect(toolbarNames()).toContain('Comment');
 });

@@ -1,16 +1,3 @@
-/**
- * Builds the clipboard payload that teaches an external agent (Claude Code,
- * Codex, custom scripts, etc.) how to post annotations into a live Plannotator
- * **code-review** session via the /api/external-annotations HTTP API.
- *
- * The body is intentionally short so an agent can read it top-to-bottom and
- * start posting in under a minute. Edit freely — this file is the single source
- * of truth for the review agent-facing contract surface.
- *
- * The only dynamic value is `origin`, which is interpolated at click time from
- * `window.location.origin` so the agent gets the correct base URL whether the
- * server is running on a random local port or the fixed remote port (19432).
- */
 export function buildReviewAgentInstructions(origin: string): string {
   return `# Plannotator — External Review Comments
 

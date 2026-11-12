@@ -2,11 +2,6 @@ import React, { useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-// --- Launch-control primitives (ported from the prototype's sidebar) ---
-
-// A labelled config row. Inline (label left, control right) by default; pass
-// `stacked` to put a full-width control under the label — used for the model
-// dropdown and the effort/reasoning segmented pickers, which need the room.
 export function ConfigRow({ label, stacked, children }: { label: string; stacked?: boolean; children: React.ReactNode }) {
   if (stacked) {
     return (
@@ -24,7 +19,6 @@ export function ConfigRow({ label, stacked, children }: { label: string; stacked
   );
 }
 
-// Pill selector for small option sets (effort, reasoning, tour engine).
 export function SegmentedPicker({ options, value, onChange }: { options: Array<{ value: string; label: string }>; value: string; onChange: (v: string) => void }) {
   return (
     <div className="flex items-center gap-px rounded-lg bg-surface-1/50 p-0.5">
@@ -47,7 +41,6 @@ export function SegmentedPicker({ options, value, onChange }: { options: Array<{
   );
 }
 
-// Animated on/off switch (fast mode).
 export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
@@ -65,22 +58,13 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
   );
 }
 
-// Lists longer than this get a type-to-filter input and provider grouping —
-// marker-engine catalogs (Cursor ~150, Pi ~59, OpenCode ~25) are unusable as a
-// flat list; the classic Claude/Codex catalogs (7–11) stay a plain menu.
-// Exported so other pickers over the same catalogs (e.g. GuideEmptyState's
-// InlinePicker in review-editor) share this one threshold instead of hardcoding it.
 export const SEARCHABLE_THRESHOLD = 12;
 
 export interface SelectOptionGroup {
-  /** null = ungrouped (single flat list). */
   label: string | null;
   options: Array<{ value: string; label: string }>;
 }
 
-/** Group `provider/model`-shaped option lists by their provider prefix.
- *  Returns one ungrouped bucket when the list is small or ids aren't
- *  provider-prefixed (Claude aliases, Codex models, Cursor ids). */
 export function groupModelOptions(options: Array<{ value: string; label: string }>): SelectOptionGroup[] {
   const slashed = options.filter((o) => o.value.includes('/')).length;
   if (options.length <= SEARCHABLE_THRESHOLD || slashed < options.length / 2) {
@@ -96,17 +80,11 @@ export function groupModelOptions(options: Array<{ value: string; label: string 
   return [...groups.entries()].map(([label, opts]) => ({ label, options: opts }));
 }
 
-/** Strip a redundant `group/` prefix from an option label rendered under its
- *  group header (e.g. "anthropic/claude-sonnet-4-6" under "anthropic"). */
 export function labelWithinGroup(label: string, group: string | null): string {
   if (group && label.startsWith(`${group}/`)) return label.slice(group.length + 1);
   return label;
 }
 
-// Dropdown button + downward popover. Reused for the provider selector and the
-// model picker (whose 7–9 options rule out a segmented control). The popover
-// opens downward (`top-full`) because the launch panel is pinned to the top of
-// the tab. Long catalogs automatically gain a filter input + provider grouping.
 export function SelectMenu({ value, options, onChange, icon, placeholder, footerAction }: { value: string; options: Array<{ value: string; label: string }>; onChange: (v: string) => void; icon?: React.ReactNode; placeholder?: string; footerAction?: { label: string; onClick: () => void } }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');

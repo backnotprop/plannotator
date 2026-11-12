@@ -1,12 +1,3 @@
-/**
- * PlanCleanDiffView's optional seams (`renderBlock`, `lineGutter`,
- * `foldUnchanged`, `unchangedClassName`) for code review's rendered Markdown
- * diff. Plan review passes none of them and must render exactly as before:
- * no gutter, no fold rows, and the old unchanged-block dimming.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -51,12 +42,10 @@ describe.if(hasDom)('PlanCleanDiffView seams (DOM)', () => {
     expect(el.querySelector('[data-plan-diff-fold]')).toBeNull();
     const unchanged = el.querySelector('.plan-diff-unchanged')!;
     expect(unchanged.className).toBe('plan-diff-unchanged opacity-60 hover:opacity-100 transition-opacity');
-    // Every block renders directly under the list (no gutter wrappers).
     const root = el.firstElementChild!;
     expect(root.className).toBe('space-y-1');
     expect(Array.from(root.children).every((child) => !child.querySelector(':scope > [data-plan-diff-gutter]'))).toBe(true);
     expect(root.children.length).toBe(blocks.length);
-    // All five sections are on screen.
     expect(el.textContent).toContain('Section 1');
     expect(el.textContent).toContain('Section 5');
   });
@@ -77,12 +66,10 @@ describe.if(hasDom)('PlanCleanDiffView seams (DOM)', () => {
     const labels = Array.from(el.querySelectorAll('[data-plan-diff-gutter]')).map((g) =>
       Array.from(g.children).map((line) => line.textContent),
     );
-    // Intro (1), modified block (new 3–7 over old 3–5): what diffLines paired.
     expect(labels[0]).toEqual(['1']);
     expect(labels.some((l) => l.some((line) => line?.startsWith('old ')))).toBe(true);
     const gutter = el.querySelector('[data-plan-diff-gutter]')!;
     expect(gutter.getAttribute('aria-hidden')).toBe('true');
-    // Excluded from annotation quotes and never selectable.
     expect(gutter.classList.contains('annotation-exclude')).toBe(true);
     expect(gutter.classList.contains('select-none')).toBe(true);
   });
@@ -104,7 +91,6 @@ describe.if(hasDom)('PlanCleanDiffView seams (DOM)', () => {
     expect(row.textContent).toContain('Section 1 · Section 2 · Section 3');
     expect(row.textContent).toContain('Show');
     expect(el.textContent).not.toContain('Text 1.');
-    // Context next to the change stays visible.
     expect(el.textContent).toContain('Text 5.');
 
     await act(async () => row.click());

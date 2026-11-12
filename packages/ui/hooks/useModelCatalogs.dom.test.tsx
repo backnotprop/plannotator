@@ -34,8 +34,6 @@ afterEach(() => {
 
 describe.if(hasDom)('useModelCatalogs', () => {
   test('fetches only the catalog of the engine a surface asks for', async () => {
-    // Every catalog fetch spawns that CLI server-side, so a Claude launcher
-    // must never start `codex app-server` (or the other way round).
     const urls: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       urls.push(String(input));
@@ -68,7 +66,6 @@ describe.if(hasDom)('useModelCatalogs', () => {
     expect(codex.settled).toBe(true);
     expect(codex.modelsSource).toBe('discovered');
     expect(codex.toolVersion).toBe('0.155.1');
-    // Claude was never loaded: no source claimed for it.
     expect(seen[seen.length - 1].claude.toolVersion).toBeUndefined();
   });
 });

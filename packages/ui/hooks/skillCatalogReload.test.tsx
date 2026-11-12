@@ -1,11 +1,3 @@
-/**
- * A composer that is already open follows a catalog change at its source
- * (`reloadSkillCatalog`, the Inbox's Code review switch saved in another
- * window): a skill that is gone stops being painted, one that came is
- * painted, without the composer remounting.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

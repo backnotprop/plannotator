@@ -23,10 +23,6 @@ function stubFetch(impl: () => Promise<Response> | Response) {
   return () => calls;
 }
 
-// Reset BEFORE each test as well as after: other suites in the same process
-// (e.g. packages/editor mounting App, which primes the catalog) may leave a
-// cached value or an outstanding request behind. The reset invalidates both,
-// so these tests hold in any file order.
 beforeEach(() => {
   resetSkillCatalogCache();
   resetSkillCatalogTransport();
@@ -35,7 +31,6 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  // Host configuration, not cache: the reset leaves it alone, so a test that turns it off puts it back.
   setSkillCatalogExportRegistration(true);
   resetSkillCatalogCache();
   resetSkillCatalogTransport();
@@ -49,8 +44,8 @@ describe('fetchSkillCatalog', () => {
         skills: [
           { name: 'write-better', root: 'claude', description: 'Improve prose', humanOnly: false },
           { name: 'plannotator-review', root: 'claude', humanOnly: true },
-          { name: '', root: 'claude', humanOnly: false }, // dropped: no name
-          { name: 'weird-root', root: 'somewhere', humanOnly: false }, // root falls back
+          { name: '', root: 'claude', humanOnly: false },
+          { name: 'weird-root', root: 'somewhere', humanOnly: false },
         ],
       }),
     );
@@ -59,7 +54,6 @@ describe('fetchSkillCatalog', () => {
     expect(skills.map((s) => s.name)).toEqual(['write-better', 'plannotator-review', 'weird-root']);
     expect(skills[2].root).toBe('universal');
 
-    // The export seam sees the same catalog.
     expect(skillReferenceExportBlock('use $write-better')).toContain('`write-better`');
   });
 
@@ -90,7 +84,6 @@ describe('fetchSkillCatalog', () => {
 
 describe('resetSkillCatalogCache', () => {
   test('invalidates an outstanding request: the next fetch consults the new backend', async () => {
-    // A request is left inflight (as App.tsx's primeSkillCatalog does)…
     let resolveOld!: (r: Response) => void;
     globalThis.fetch = (() =>
       new Promise<Response>((resolve) => {
@@ -98,15 +91,12 @@ describe('resetSkillCatalogCache', () => {
       })) as unknown as typeof fetch;
     const oldPromise = fetchSkillCatalog();
 
-    // …then the cache is reset and a different backend is stubbed.
     resetSkillCatalogCache();
     stubFetch(() => Response.json({ skills: [{ name: 'fresh', root: 'claude' }] }));
 
     const skills = await fetchSkillCatalog();
     expect(skills.map((s) => s.name)).toEqual(['fresh']);
 
-    // The old request finally lands: it must not overwrite the newer value
-    // or the export registry.
     resolveOld(Response.json({ skills: [{ name: 'stale', root: 'claude' }] }));
     await oldPromise;
     expect(getCachedSkillCatalog().map((s) => s.name)).toEqual(['fresh']);
@@ -136,12 +126,12 @@ describe('skillCatalogTransport seam', () => {
     const calls = stubFetch(() => Response.json({ skills: [{ name: 'via-fetch', root: 'claude' }] }));
     setSkillCatalogTransport(async () => [
       { name: 'host-skill', root: 'claude', humanOnly: false },
-      { name: '', root: 'claude', humanOnly: false } as SkillCatalogEntry, // dropped
+      { name: '', root: 'claude', humanOnly: false } as SkillCatalogEntry,
     ]);
 
     const skills = await fetchSkillCatalog();
     expect(skills.map((s) => s.name)).toEqual(['host-skill']);
-    expect(calls()).toBe(0); // fetch never consulted
+    expect(calls()).toBe(0);
 
     resetSkillCatalogTransport();
     resetSkillCatalogCache();
@@ -190,7 +180,6 @@ describe('primeSkillContentsForExport', () => {
       'plain comment',
     ]);
     expect(changed).toBe(true);
-    // Lazy: the model-invocable skill is never fetched.
     expect(requested).toEqual(['plannotator-review']);
 
     const block = skillReferenceExportBlock('Run $plannotator-review.');
@@ -209,9 +198,6 @@ describe('primeSkillContentsForExport', () => {
   test('edge-triggered: a re-prime with already-registered content resolves false', async () => {
     stubCatalogAndContent();
     expect(await primeSkillContentsForExport(['$plannotator-review'])).toBe(true);
-    // The content stays registered — but it is no longer news, so re-priming
-    // must not signal "changed" again (a level-triggered true here re-render
-    // looped App.tsx's generation-bump effect).
     expect(await primeSkillContentsForExport(['$plannotator-review'])).toBe(false);
     expect(await primeSkillContentsForExport(['$plannotator-review again'])).toBe(false);
 
@@ -235,7 +221,6 @@ describe('primeSkillContentsForExport', () => {
 
     expect(await primeSkillContentsForExport(['$alpha'])).toBe(true);
     expect(await primeSkillContentsForExport(['$alpha'])).toBe(false);
-    // beta's content landing is one new edge; alpha stays silent.
     expect(await primeSkillContentsForExport(['$alpha and $beta'])).toBe(true);
     expect(await primeSkillContentsForExport(['$alpha and $beta'])).toBe(false);
   });
@@ -283,7 +268,6 @@ describe('primeSkillContentsForExport', () => {
         }),
     );
     const pending = primeSkillContentsForExport(['$plannotator-review']);
-    // The content request starts after the (async) catalog fetch resolves.
     while (!resolveContent) await Bun.sleep(0);
 
     resetSkillCatalogCache();
@@ -296,11 +280,8 @@ describe('primeSkillContentsForExport', () => {
     });
     await pending;
 
-    // The reset cleared the export catalog, so the block is empty…
     expect(skillReferenceExportBlock('$plannotator-review')).toBe('');
 
-    // …and after the catalog comes back, the dead request's body must NOT
-    // have been revived into the content registry.
     await fetchSkillCatalog();
     const block = skillReferenceExportBlock('$plannotator-review');
     expect(block).not.toContain('# ghost');
@@ -314,7 +295,6 @@ describe('setSkillCatalogExportRegistration (a host that composes one block per 
     setSkillCatalogTransport(async () => [{ name: 'write-better', root: 'claude', humanOnly: false }]);
     expect((await fetchSkillCatalog()).map((s) => s.name)).toEqual(['write-better']);
     expect(skillReferenceExportBlock('use $write-better')).toBe('');
-    // A cache reset is not a reconfiguration: the host's choice stands.
     resetSkillCatalogCache();
     await fetchSkillCatalog();
     expect(skillReferenceExportBlock('use $write-better')).toBe('');

@@ -4,13 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { usePlanDiff, type PlanDiffFetchers, type UsePlanDiffReturn, type VersionInfo } from './usePlanDiff';
 
-// usePlanDiff had no test coverage before this feature. These cover the
-// per-document seam added for annotate folder sessions: the `docKey` reset
-// (so switching documents doesn't inherit the previous document's diff
-// base), that a stable docKey survives a reconcile-style text update without
-// losing its baseline, and that per-document `fetchers` are actually used
-// instead of the bare-endpoint defaults.
-
 const hasDom = typeof document !== 'undefined';
 
 interface HarnessProps {
@@ -24,10 +17,6 @@ interface HarnessProps {
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-// A stable component identity is required across mount + update renders —
-// re-declaring the component function per call (as react-dom would treat as
-// a type change) would remount the hook and lose its state instead of
-// re-rendering it, defeating the point of these tests.
 function HarnessHolder(props: HarnessProps & { onLatest?: (v: UsePlanDiffReturn) => void }) {
   const v = usePlanDiff(props.currentPlan, props.initialPreviousPlan, props.versionInfo, props.fetchers, props.docKey);
   props.onLatest?.(v);
@@ -82,7 +71,6 @@ describe('usePlanDiff — per-document docKey reset', () => {
     expect(session.current().diffBaseVersion).toBe(1);
     expect(session.current().hasPreviousVersion).toBe(true);
 
-    // Switch to a different document with no history at all.
     await session.update({
       currentPlan: 'doc B text',
       initialPreviousPlan: null,
@@ -119,8 +107,6 @@ describe('usePlanDiff — per-document docKey reset', () => {
   });
 
   test.skipIf(!hasDom)('an undefined/stable docKey (the root document) keeps today\'s one-time-hydration behavior', async () => {
-    // The root document (single-file annotate, plan, review) never passes a
-    // docKey — this reproduces its call shape exactly.
     const session = await mountHolder({
       currentPlan: 'root plan text',
       initialPreviousPlan: null,
@@ -128,8 +114,6 @@ describe('usePlanDiff — per-document docKey reset', () => {
     });
     expect(session.current().diffBasePlan).toBeNull();
 
-    // /api/plan resolves asynchronously after mount and previousPlan/versionInfo
-    // arrive — the one-time sync effect should hydrate diffBasePlan.
     const versionInfo: VersionInfo = { version: 2, totalVersions: 2, project: 'demo' };
     await session.update({
       currentPlan: 'root plan text',
@@ -138,9 +122,6 @@ describe('usePlanDiff — per-document docKey reset', () => {
     });
     expect(session.current().diffBasePlan).toBe('root previous plan');
 
-    // A later change to initialPreviousPlan must NOT overwrite an
-    // already-hydrated diffBasePlan — this is the pre-existing "only sync
-    // once" behavior the docKey seam must not disturb for the root document.
     await session.update({
       currentPlan: 'root plan text',
       initialPreviousPlan: 'a different previous plan',
@@ -166,19 +147,15 @@ describe('usePlanDiff — per-docKey base-selection memory', () => {
       fetchers,
     });
 
-    // Sanity: the auto-selected default base is version - 1 (v2), not v1.
     expect(session.current().diffBaseVersion).toBe(2);
     expect(session.current().diffBasePlan).toBe('root v2 text');
 
-    // User manually picks an earlier, non-default version via the injected fetcher.
     await act(async () => {
       await session.current().selectBaseVersion(1);
     });
     expect(session.current().diffBaseVersion).toBe(1);
     expect(session.current().diffBasePlan).toBe('fetched plan v1');
 
-    // Detour: navigate to a different document (e.g. a linked doc opened
-    // from root). Its own default base applies — nothing carries over.
     await session.update({
       currentPlan: 'docA current text',
       initialPreviousPlan: 'docA previous text',
@@ -189,7 +166,6 @@ describe('usePlanDiff — per-docKey base-selection memory', () => {
     expect(session.current().diffBaseVersion).toBe(4);
     expect(session.current().diffBasePlan).toBe('docA previous text');
 
-    // Navigate back to root (docKey null) with the same original props.
     await session.update({
       currentPlan: 'root current text',
       initialPreviousPlan: 'root v2 text',
@@ -198,8 +174,6 @@ describe('usePlanDiff — per-docKey base-selection memory', () => {
       fetchers,
     });
 
-    // The manual selection from before the detour is restored — NOT the
-    // auto-computed default (v2) that a plain reset would re-seed.
     expect(session.current().diffBaseVersion).toBe(1);
     expect(session.current().diffBasePlan).toBe('fetched plan v1');
   });
@@ -237,7 +211,6 @@ describe('usePlanDiff — per-docKey base-selection memory', () => {
     expect(session.current().diffBaseVersion).toBe(2);
     expect(session.current().diffBasePlan).toBe('fetched plan v2');
 
-    // Back to docA: its own selection (v1) — not docB's (v2).
     await session.update({
       currentPlan: 'docA current',
       initialPreviousPlan: 'docA previous',
@@ -248,8 +221,6 @@ describe('usePlanDiff — per-docKey base-selection memory', () => {
     expect(session.current().diffBaseVersion).toBe(1);
     expect(session.current().diffBasePlan).toBe('fetched plan v1');
 
-    // Back to docB: its own selection (v2) — confirms docA's visit above
-    // didn't clobber it either.
     await session.update({
       currentPlan: 'docB current',
       initialPreviousPlan: 'docB previous',
@@ -276,8 +247,6 @@ describe('usePlanDiff — baseline survives a live-reload-style text update', ()
     const firstStats = session.current().diffStats;
     expect(firstStats).not.toBeNull();
 
-    // Simulate a reconcile-triggered disk update: only currentPlan changes,
-    // docKey (the active document's identity) stays the same.
     await session.update({
       currentPlan: '# Doc\n\nreloaded text from disk\n',
       initialPreviousPlan: '# Doc\n\nprevious text\n',
@@ -285,10 +254,7 @@ describe('usePlanDiff — baseline survives a live-reload-style text update', ()
       docKey: 'docA',
     });
 
-    // Baseline is unchanged — the diff is still against the ORIGINAL previous
-    // version, not reset just because the current text moved.
     expect(session.current().diffBasePlan).toBe('# Doc\n\nprevious text\n');
-    // But the diff itself recomputed against the new current text.
     expect(session.current().diffBlocks).not.toBeNull();
     const blocks = session.current().diffBlocks!;
     const hasReloadedText = blocks.some((b) =>

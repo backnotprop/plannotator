@@ -1,14 +1,3 @@
-// The technical look (opt-in, scenes only): the drawing reads as a precise
-// engineering diagram whatever the drawer's defaults were. Hairline strokes,
-// small corners, one type system (a clean sans for names, a monospace for
-// labels and numbers, a few fixed steps), quiet fills, no shadows. It never
-// touches a board without scenes, and everything it sets is put back.
-//
-// Two halves: CSS scoped to the slot (`[data-scene-look=technical]`: the zone
-// fills and hues turned down, shadows off), and per-element styles that need
-// the drawing's scale (strokes and corners in screen pixels, type steps from
-// the drawing's own median size).
-
 export const LOOK_CSS = `
 [data-scene-look=technical] {
   --blue-soft: color-mix(in oklab, #2f6fb0 6%, var(--paper));
@@ -32,7 +21,6 @@ export const LOOK_CSS = `
 }
 `;
 
-/** A lit piece in the technical look: a crisp thin outline in the accent, not a glow. */
 export const LIT_TECHNICAL = 'drop-shadow(0 0 .6px var(--mark)) drop-shadow(0 0 .6px var(--mark)) drop-shadow(0 0 .6px var(--mark))';
 
 type Saved = { el: SVGElement; props: [string, string][] };
@@ -42,15 +30,13 @@ function set(saved: Saved[], el: SVGElement, props: Record<string, string>) {
   for (const [p, v] of Object.entries(props)) el.style.setProperty(p, v);
 }
 
-/** Apply the per-element half to the scene's SVG; returns a function that puts it all back. */
 export function applyTechnicalLook(svg: SVGSVGElement): () => void {
   const saved: Saved[] = [];
   const m = svg.getScreenCTM();
-  const s = m ? Math.hypot(m.a, m.b) : 1; // screen px per drawing unit
+  const s = m ? Math.hypot(m.a, m.b) : 1;
   if (!(s > 0.01)) return () => {};
   const px = (n: number) => `${(n / s).toFixed(3)}px`;
 
-  // Strokes: hairlines. Thick strokes that are really bars (wider than 6 px on screen) keep their weight.
   for (const el of svg.querySelectorAll<SVGElement>('path, line, polyline, polygon, circle, ellipse, rect')) {
     if (el.closest('[data-icon], [data-logo]')) continue;
     const cs = getComputedStyle(el);
@@ -60,7 +46,6 @@ export function applyTechnicalLook(svg: SVGSVGElement): () => void {
     set(saved, el, { 'stroke-width': px(ws > 3.2 ? 1.5 : 1) });
   }
 
-  // Corners: at most 3 px on screen. A rect small enough to be a dot keeps its round.
   for (const el of svg.querySelectorAll<SVGRectElement>('rect')) {
     if (el.closest('[data-icon], [data-logo]')) continue;
     const rx = parseFloat(getComputedStyle(el).rx as string) || parseFloat(el.getAttribute('rx') ?? '') || 0;
@@ -76,7 +61,6 @@ export function applyTechnicalLook(svg: SVGSVGElement): () => void {
     set(saved, el, { rx: px(cap), ry: px(cap) });
   }
 
-  // Type: four steps from the drawing's own median size, so it scales with the drawing (a phone keeps its proportions).
   const texts = [...svg.querySelectorAll<SVGTextElement>('text')].filter((t) => !t.closest('[data-icon], [data-logo]'));
   const widthOf = (t: SVGTextElement) => {
     try {
@@ -92,8 +76,6 @@ export function applyTechnicalLook(svg: SVGSVGElement): () => void {
   if (info.length) {
     const sizes = info.map((i) => i.size).sort((a, b) => a - b);
     const med = sizes[Math.floor(sizes.length / 2)]!;
-    // The label step is the drawing's own median size, never shrunk; only a blown-up drawing (a wide screen) is
-    // brought down, to 12.5 px. Names, small notes and the odd big figure are fixed steps from it.
     const L = Math.min(med, 12.5 / s);
     const mono = 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)';
     const sans = 'var(--font-sans, ui-sans-serif, system-ui, sans-serif)';
@@ -104,10 +86,7 @@ export function applyTechnicalLook(svg: SVGSVGElement): () => void {
       else if (size <= med * 0.85) props = { 'font-family': mono, 'font-weight': '400', 'font-size': `${(L * 0.88).toFixed(3)}px`, 'letter-spacing': '0' };
       else props = { 'font-family': mono, 'font-weight': '400', 'font-size': `${L.toFixed(3)}px`, 'letter-spacing': '0' };
       set(saved, t, props);
-      // tspans with their own sizes or weights follow the text's step.
       for (const sp of t.querySelectorAll<SVGElement>('tspan')) set(saved, sp, { 'font-size': 'inherit', 'font-weight': 'inherit', 'font-family': 'inherit' });
-      // Never wider than the drawer laid it out: a monospace or a larger step would run a label into its
-      // neighbour or out of its box. Such a label steps down until it fits its old width (to 70% at most).
       const now = widthOf(t);
       if (width > 0 && now > width * 1.02) t.style.setProperty('font-size', `${(parseFloat(props['font-size']!) * Math.max(0.7, width / now)).toFixed(3)}px`);
     }

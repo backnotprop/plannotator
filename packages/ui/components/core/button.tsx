@@ -13,12 +13,6 @@ function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');
 }
 
-/**
- * Legacy shared button primitive.
- *
- * The visual sizes remain compact, while the shared touch marker expands the
- * physical target only when a coarse pointer is present.
- */
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(({
   className,
   variant = 'outline',

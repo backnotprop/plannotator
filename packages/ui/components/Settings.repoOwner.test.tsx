@@ -1,9 +1,3 @@
-/**
- * Settings → General → "Hide the repository owner": the switch reaches the
- * repository chip beside the document while both are on the page, the chip's
- * hover keeps the full owner/repo either way, and a host that passes
- * `hideRepoOwnerSetting` shows no row.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

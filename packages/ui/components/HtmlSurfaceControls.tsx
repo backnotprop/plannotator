@@ -1,44 +1,9 @@
-/**
- * Header controls for a raw-HTML or live-app annotation surface: the optional
- * back (leave a linked document), the eye (show/hide the floating tools over
- * the page), the optional refresh, and the pen (Annotate/Interact toggle).
- * Presentation only; every state lives in the host. Each control renders only
- * when its handler is passed, so a read-only document can show the eye
- * without a pen.
- *
- * Back exists because the sidebar's "Viewing / Back to …" header is not a
- * dependable way out of a raw-HTML linked document: an HTML surface opens
- * with the sidebar closed and navigating between HTML documents deliberately
- * leaves it closed, so the way back has to live in the header. It carries no
- * keyboard shortcut — `Alt`+`Left` and the browser's own Back are the user's,
- * not ours.
- *
- * The markup, data attributes (`data-html-back`, `data-html-tools-toggle`,
- * `data-html-refresh`, `data-html-annotate-toggle`), aria state and the pixel-stable pen border
- * are the exact ones Plannotator's header shipped with; hosts get the same
- * control, and `labels` overrides the strings without touching the DOM.
- *
- * Each control's description rides the app's `Tooltip` (hover AND
- * focus-visible, theme tokens, portal) instead of a native `title`, with the
- * control's keyboard shortcut rendered under it as keycaps through the
- * shortcut registry's platform-aware formatter — never a hardcoded "Cmd".
- * The strings are the same `labels` values the titles used, so a host's
- * overrides keep working; because `title` no longer supplies the accessible
- * name, each button carries it explicitly (the pen an `aria-label`, the eye
- * its sr-only text, the refresh its existing `aria-label`), and the shortcut
- * is also attached as a persistent `aria-describedby` so it is announced
- * rather than only drawn.
- */
 import React from 'react';
 import { Tooltip } from './Tooltip';
 import { modKey } from '../utils/platform';
 import { formatShortcutBindingText, formatShortcutBindingTokens } from '../shortcuts/core';
 import { htmlAnnotateShortcuts } from '../shortcuts/plan-review/htmlAnnotate.shortcuts';
 
-/** Binding overrides, in the registry's normalized syntax (`Mod+Shift+X`).
- *  `null` renders no shortcut row for that control. Defaults come from the
- *  `html-annotate` scope, so the tooltips can never drift from the chords the
- *  app actually dispatches; `refresh` has no chord and defaults to none. */
 export interface HtmlSurfaceControlShortcuts {
   annotate?: string | null;
   tools?: string | null;
@@ -50,12 +15,9 @@ const DEFAULT_HTML_SURFACE_CONTROL_SHORTCUTS: Required<HtmlSurfaceControlShortcu
   annotate: htmlAnnotateShortcuts.shortcuts.toggleAnnotateMode.bindings[0] ?? null,
   tools: htmlAnnotateShortcuts.shortcuts.toggleTools.bindings[0] ?? null,
   refresh: null,
-  // Deliberately none: Alt+Left and the browser's Back belong to the user.
   back: null,
 };
 
-/** Description + keycaps. Two lines, so the tooltip answers both "what does
- *  this do" and "what do I press" without a second hover. */
 function ControlTooltip({
   description,
   binding,
@@ -93,8 +55,6 @@ function ControlTooltip({
   );
 }
 
-/** The shortcut as prose for assistive tech ("Cmd+Shift+X"), which keycaps
- *  alone would not announce. */
 function ShortcutDescription({ id, binding }: { id: string; binding: string | null }) {
   if (!binding) return null;
   return (
@@ -104,32 +64,18 @@ function ShortcutDescription({ id, binding }: { id: string; binding: string | nu
   );
 }
 
-/** String overrides. Every key optional; defaults are Plannotator's strings. */
 export interface HtmlSurfaceControlLabels {
-  /** Pen tooltip description while Annotate is armed. */
   annotateTitle?: string;
-  /** Pen tooltip description while in Interact mode. */
   interactTitle?: string;
-  /** Pen aria-label while armed. Default: the armed description. */
   annotateLabel?: string;
-  /** Pen aria-label while in Interact mode. Default: the interact description. */
   interactLabel?: string;
-  /** Eye tooltip description and screen-reader text while the tools are visible. */
   hideTools?: string;
-  /** Eye tooltip description and screen-reader text while the tools are hidden. */
   showTools?: string;
-  /** Refresh visible text while idle. */
   refresh?: string;
-  /** Refresh visible text while a refresh is in flight. */
   refreshing?: string;
-  /** Refresh tooltip description and aria-label while idle. */
   refreshTitle?: string;
-  /** Refresh tooltip description and aria-label while a refresh is in flight. */
   refreshingTitle?: string;
-  /** Back visible text. */
   back?: string;
-  /** Back tooltip description and aria-label. `backDescription` overrides it
-   *  per render, which is how a host names the document Back returns to. */
   backTitle?: string;
 }
 
@@ -148,36 +94,23 @@ export const DEFAULT_HTML_SURFACE_CONTROL_LABELS: Required<
   backTitle: 'Back to the document this one was opened from',
 };
 
-// Stable ids: one HTML surface renders at most one of each control.
 const ANNOTATE_SHORTCUT_ID = 'pn-html-annotate-shortcut';
 const TOOLS_SHORTCUT_ID = 'pn-html-tools-shortcut';
 const REFRESH_SHORTCUT_ID = 'pn-html-refresh-shortcut';
 const BACK_SHORTCUT_ID = 'pn-html-back-shortcut';
 
 export interface HtmlSurfaceControlsProps {
-  /** Whether Annotate is armed (pen pressed). */
   armed: boolean;
-  /** Flip Annotate/Interact. The pen renders only when provided. */
   onToggleArmed?: () => void;
-  /** Whether the floating tools over the page are hidden (eye-off). */
   toolsHidden?: boolean;
-  /** Flip the tools. The eye renders only when provided. */
   onToggleTools?: () => void;
-  /** Whether a refresh is offered for this document. The refresh renders
-   *  whenever this is true and `onRefresh` is passed, with or without the eye. */
   canRefresh?: boolean;
   onRefresh?: () => void;
   isRefreshing?: boolean;
-  /** Leave the linked document for the one the session opened from. The back
-   *  control renders only when provided — i.e. while a linked document is open. */
   onBack?: () => void;
-  /** Tooltip description and aria-label for back, e.g. "Back to index.html".
-   *  Default: `labels.backTitle`. */
   backDescription?: string;
-  /** Compact touch shells put these actions in a menu instead: render nothing. */
   compact?: boolean;
   labels?: HtmlSurfaceControlLabels;
-  /** Per-control keyboard shortcuts shown in the tooltips. */
   shortcuts?: HtmlSurfaceControlShortcuts;
 }
 
@@ -199,8 +132,6 @@ export function HtmlSurfaceControls({
   const text = { ...DEFAULT_HTML_SURFACE_CONTROL_LABELS, ...labels };
   const keys = { ...DEFAULT_HTML_SURFACE_CONTROL_SHORTCUTS, ...shortcuts };
   const penDescription = armed ? text.annotateTitle : text.interactTitle;
-  // `title` used to carry the pen's accessible name; with the tooltip in its
-  // place the name has to be stated, or the pen becomes an unnamed button.
   const penLabel = (armed ? labels?.annotateLabel : labels?.interactLabel) ?? penDescription;
   const toolsDescription = toolsHidden ? text.showTools : text.hideTools;
   const refreshDescription = isRefreshing ? text.refreshingTitle : text.refreshTitle;
@@ -208,8 +139,6 @@ export function HtmlSurfaceControls({
   const backLabel = backDescription ?? text.backTitle;
   return (
     <>
-      {/* Back, leftmost: the way out of a linked document that does not
-          depend on the sidebar being open. */}
       {onBack && (
         <>
           <ControlTooltip description={backLabel} binding={keys.back}>
@@ -240,16 +169,6 @@ export function HtmlSurfaceControls({
         </>
       )}
 
-      {/* The refresh and the eye share one group, left of the pen and right
-          of back. Each
-          renders on its own terms: the refresh whenever it is offered
-          (canRefresh + onRefresh), the eye whenever onToggleTools is passed,
-          so a host without the tools toggle still gets its refresh.
-
-          Show/hide tools: removes ALL floating chrome (sidebar tongue tabs +
-          the comment/attachments cluster) from the DOM, leaving nothing over
-          the page. This button is the only way back, so it never hides
-          itself. Eye = tools visible, eye-off = hidden. */}
       {(showRefresh || onToggleTools) && (
         <div className="ml-1 flex items-center gap-0.5">
           {showRefresh && (
@@ -257,9 +176,6 @@ export function HtmlSurfaceControls({
             <button
               type="button"
               data-html-refresh
-              // aria-disabled rather than disabled: a disabled control drops
-              // keyboard focus to body when activated. useHtmlRefresh already
-              // dedups in-flight requests, so an extra click is harmless.
               onClick={isRefreshing ? undefined : onRefresh}
               aria-disabled={isRefreshing}
               {...(keys.refresh ? { 'aria-describedby': REFRESH_SHORTCUT_ID } : {})}
@@ -312,12 +228,6 @@ export function HtmlSurfaceControls({
         </div>
       )}
 
-      {/* Interact/Annotate toggle. A PEN icon (deliberately not a speech
-          bubble: an annotations-panel bubble beside it must stay
-          distinguishable at a glance, and so must AI sparkles). Always the
-          same icon: armed shows the accent color plus a visible border;
-          unarmed is muted with a TRANSPARENT border of the same width, so
-          the button's box is pixel-identical in both states. */}
       {onToggleArmed && (
         <ControlTooltip description={penDescription} binding={keys.annotate}>
         <button

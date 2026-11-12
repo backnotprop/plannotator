@@ -100,10 +100,6 @@ describe('AI provider origin defaults', () => {
   });
 
   it('leaves the saved preferred model untouched when no model is passed', () => {
-    // A provider switch (or any non-model change) persists without a model:
-    // a resolver-derived fallback must never overwrite a saved preference
-    // that the currently-advertised model list happens not to include (e.g.
-    // before deferred Codex discovery has run).
     const next = applyAIProviderSelection(
       settings({ preferredModels: { 'codex-local': 'gpt-5.3-codex' } }),
       { providerId: 'codex-local', model: null, origin: 'codex' },
@@ -138,7 +134,6 @@ describe('Ask AI saved model resolution', () => {
       providers: claude,
       settings: settings({ preferredModels: { 'claude-agent-sdk': saved } }),
     }).model;
-    // Previously any id missing from the list fell to the default (sonnet).
     expect(pick('claude-opus-5')).toBe('opus');
     expect(pick('claude-sonnet-5')).toBe('sonnet');
   });

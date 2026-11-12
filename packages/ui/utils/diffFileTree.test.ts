@@ -16,7 +16,6 @@ const f = (path: string, overrides: Partial<DiffFileTreeFile> = {}): DiffFileTre
   ...overrides,
 });
 
-/** Compact "depth:type:name" outline so a shape regression shows as one diff. */
 function outline(nodes: DiffFileTreeNode[], out: string[] = []): string[] {
   for (const n of nodes) {
     out.push(`${n.depth}:${n.type === 'folder' ? 'd' : 'f'}:${n.name}`);
@@ -42,7 +41,6 @@ describe('buildDiffFileTree', () => {
       '1:f:index.ts',
       '0:f:README.md',
     ]);
-    // A merged folder keeps its full path, which is what expansion state keys on.
     expect(tree[0].path).toBe('packages/app/src');
     expect(tree[0].children![0].children![0].path).toBe('packages/app/src/components/deep/nested');
   });
@@ -54,7 +52,6 @@ describe('buildDiffFileTree', () => {
 
   test('unwraps a lone root folder that holds only files', () => {
     expect(outline(buildDiffFileTree([f('src/lib/a.ts'), f('src/lib/b.ts')]))).toEqual(['0:f:a.ts', '0:f:b.ts']);
-    // ...but not when that folder also holds a folder.
     expect(outline(buildDiffFileTree([f('src/a.ts'), f('src/sub/b.ts')]))).toEqual([
       '0:d:src',
       '1:d:sub',

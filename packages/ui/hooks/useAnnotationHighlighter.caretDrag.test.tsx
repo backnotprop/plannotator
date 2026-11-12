@@ -1,19 +1,3 @@
-/**
- * A press-and-drag the browser leaves as a moving caret still selects.
- *
- * Chromium, after a press at some fractional x positions (what a trackpad and
- * a Retina screen give), moves a caret with the pointer instead of extending a
- * selection: on a page with one <p> and no script, 3 to 8 of 52 such presses.
- * At the release the library reads a collapsed selection and makes nothing, so
- * the drag "did not work". The hook now notices a real drag whose selection is
- * still a caret while the pointer is over other text, and sets the selection
- * from the press to the pointer itself; the release then commits as always.
- *
- * happy-dom has no layout, so the text position under a point is stubbed: x
- * is ten pixels per character of the first paragraph.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -74,7 +58,6 @@ async function mount() {
   const first = container.children[0] as HTMLElement;
   const second = container.children[1] as HTMLElement;
 
-  // The text position under a point: ten pixels per character of the first paragraph.
   const doc = document as unknown as CaretDoc;
   savedCaretRange = doc.caretRangeFromPoint;
   savedCaretPosition = doc.caretPositionFromPoint;
@@ -96,7 +79,6 @@ async function mount() {
 const mouse = (type: string, x: number, init: MouseEventInit = {}) =>
   new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1, clientX: x, clientY: 5, detail: 1, ...init });
 
-/** What Chromium leaves after such a press: a caret, however far the pointer goes. */
 const caretOnly = (node: Node, offset: number) => {
   const selection = window.getSelection()!;
   selection.removeAllRanges();
@@ -121,7 +103,6 @@ describe('useAnnotationHighlighter: a drag the browser leaves as a caret', () =>
     const last = mouse('mousemove', 150);
     first.dispatchEvent(last);
 
-    // The hook drives now, and keeps the browser from moving its caret again.
     expect(window.getSelection()!.toString()).toBe('paragraph');
     expect(last.defaultPrevented).toBe(true);
 
@@ -194,7 +175,6 @@ describe('useAnnotationHighlighter: what the caret repair must leave alone', () 
 
     first.dispatchEvent(mouse('mousedown', 60));
     for (const x of [90, 120, 150]) {
-      // The browser's own selection, deliberately not where the stub points.
       const range = document.createRange();
       range.setStart(text, 0);
       range.setEnd(text, 5);

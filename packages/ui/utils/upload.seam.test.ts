@@ -1,13 +1,3 @@
-/**
- * Seam test: UploadTransport override (setUploadTransport / resetUploadTransport).
- *
- * Contract: after setUploadTransport(fake), getUploadTransport().upload routes
- * through the fake — NOT through `fetch('/api/upload')`. resetUploadTransport()
- * restores the default `/api/upload` transport.
- *
- * Function references are captured at module-load time so they remain valid even
- * when configure.test.ts's mock.module() replaces the module exports later.
- */
 import { afterEach, describe, expect, it } from 'bun:test';
 import * as uploadModule from './upload';
 
@@ -51,8 +41,6 @@ describe('UploadTransport seam', () => {
     });
     resetUploadTransport();
 
-    // The default transport calls fetch('/api/upload'); stub fetch so the default
-    // path is exercised without a real server, and assert the fake is gone.
     const originalFetch = globalThis.fetch;
     let hitUrl: string | undefined;
     // @ts-expect-error minimal fetch stub for the test

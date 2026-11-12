@@ -9,7 +9,6 @@ const storage = hasDom ? await import('../utils/storage') : null;
 
 type Settings = ReturnType<NonNullable<typeof hookModule>['useAgentSettings']>;
 
-// A settled Codex catalog that no longer offers the saved model.
 const catalogs: ModelCatalogs = {
   claude: { models: [], settled: false },
   codex: {
@@ -35,7 +34,6 @@ afterEach(() => {
 
 describe.if(hasDom)('useAgentSettings Codex setters', () => {
   test('the Fast toggle applies when the saved model was replaced by the catalog default', async () => {
-    // Saved pick is a model the catalog dropped; the picker shows gpt-6-sol.
     const memory = new Map<string, string>();
     storage!.setStorageBackend({
       getItem: (k) => memory.get(k) ?? null,
@@ -55,7 +53,6 @@ describe.if(hasDom)('useAgentSettings Codex setters', () => {
     expect(latest!.codexFast).toBe(false);
 
     await act(async () => latest!.setCodexFast(true));
-    // Before the fix the toggle wrote perModel['gpt-5.3-codex'] and did nothing.
     expect(latest!.codexFast).toBe(true);
     expect(latest!.codexModel).toBe('gpt-6-sol');
 

@@ -33,68 +33,41 @@ import { modKey, modKeySpoken } from '../utils/platform';
 
 export type { FitAxis, NaturalBox } from './imageZoom';
 
-/**
- * Whether the "Use ⌘ + scroll to zoom" hint (#2127) was shown already. A host
- * holds one for the life of its viewer (the lightbox while it is open, the
- * Inbox's file pane) and hands it to every stage it mounts, so the hint shows
- * once per viewer open, not once per image. Without one a stage keeps its own.
- */
 export interface WheelHintGate {
   shown: boolean;
 }
 
-/** The hint stays this long after the last wheel event that panned. */
 export const WHEEL_HINT_HOLD_MS = 2000;
-/** The hint's fade out (none under reduced motion). */
 export const WHEEL_HINT_FADE_MS = 300;
 
-/** What the hint says, on screen and to a screen reader. */
 export const wheelHintText = {
   visible: { before: 'Use', key: modKey, after: '+ scroll to zoom' },
   spoken: `Scrolling moves the image. To zoom, hold ${modKeySpoken} and scroll.`,
 };
 
-/** A device with a mouse or trackpad (a touch-only one never sends a wheel, and gets no hint). */
 function hasFinePointer(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
   return window.matchMedia('(any-pointer: fine)').matches;
 }
 
-/** A box being drawn in Region mode (#2100), in the image's own pixels. */
 export interface ZoomDraw {
-  /** The box so far (`move`), the box drawn (`end`), or null on `cancel`. */
   box: NaturalBox | null;
   phase: 'move' | 'end' | 'cancel';
 }
 
-/** Fit (the whole image), Actual size (its own pixels), or anything a gesture left. */
 export type ZoomMode = 'fit' | 'actual' | 'zoom';
 
-/** What the host's capture-phase key handler reaches the stage through. */
 export interface ImageZoomStageHandle {
-  /** The focusable stage, to tell whether a key was aimed at it. */
   element: HTMLDivElement | null;
-  /**
-   * The browser's own scroll keys while the stage has focus (it stood in for
-   * an overflow-auto scroller): ↑ ↓, Page Up / Page Down, Home / End, Space
-   * and Shift+Space; ← → too when `arrowsSideways`. Answers whether the key
-   * was one of them (the host then prevents its default).
-   */
   scrollKey(key: string, shiftKey: boolean, arrowsSideways: boolean): boolean;
-  /** Show a box (in the image's own pixels) large and centred (#2100). */
   zoomTo(box: NaturalBox, animate?: boolean): void;
-  /** The part of the image on screen now, in its own pixels; null before it loads. */
   visibleBox(): NaturalBox | null;
 }
 
-/** One arrow key's travel, as a browser scrolls a page by a line. */
 export const KEY_SCROLL_PX = 40;
-/** Page Up / Page Down / Space: most of the stage, as a browser pages. */
 export const KEY_PAGE_SHARE = 0.875;
-/** A synthesized click this long after the tap that asked for it still closes. */
 const CLICK_AFTER_TAP_MS = 800;
 
-/** Safari's GestureEvent (trackpad pinch on macOS, two fingers on iOS). */
 interface GestureLike extends Event {
   scale: number;
   clientX: number;
@@ -114,115 +87,39 @@ interface Press {
   lastY: number;
   slop: number;
   moved: boolean;
-  /** Region mode: this press draws a box instead of panning. */
   draw?: boolean;
 }
 
-/** A drawn box smaller than this on screen (either side) is a tap, not a box. */
 export const MIN_DRAW_SCREEN_PX = 6;
 
 function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-/**
- * The lightbox's image, zoomable (#2067). The image is drawn at its own size
- * and moved with a transform only (translate + scale), so a gesture never
- * lays anything out.
- *
- * - Ctrl/⌘ + wheel, and a trackpad pinch (which the browser sends as a wheel
- *   with ctrlKey), zoom about the pointer.
- * - A plain wheel scrolls the image when it is larger than the stage (as a
- *   page scrolls, Shift or a sideways swipe for the other axis), and zooms
- *   about the pointer when the whole image is on screen, where there is
- *   nothing to scroll. One wheel gesture keeps the meaning it started with.
- * - The first time a plain wheel scrolls the image (once per `wheelHint`
- *   gate: per viewer open), a pill in the middle of the stage says
- *   "Use ⌘ + scroll to zoom" ("Ctrl" off macOS) and a polite live region says
- *   it once (#2127). It takes no pointer, stays while the wheel keeps
- *   scrolling and 2 s after, then fades (no fade under reduced motion); a
- *   Ctrl/⌘ + wheel, a pinch or a press hides it at once. Never on a
- *   touch-only device, never for Ctrl/⌘ + wheel or a pinch.
- * - Mouse or one-finger drag pans when there is something to pan; two
- *   fingers pinch-zoom about their midpoint and pan with it.
- * - Double click (or double tap) on the image zooms to twice the Fit scale
- *   about that point, and back to Fit.
- * - Limits: Fit (never above 1) to 800%.
- * - Safari's gesture events (its trackpad pinch) zoom too, and are prevented.
- * - The stage takes focus (it replaced an overflow-auto scroller) and pans
- *   with the browser's scroll keys through `scrollKey`, which the host's
- *   capture-phase key handler calls.
- * - A tap beside the image calls `onBackgroundTap` from the click that
- *   follows it, so the overlay is still there to take a touch's synthesized
- *   click instead of the page beneath.
- *
- * `mode` is the host's (its Fit / Actual size control); a gesture reports
- * `zoom` (or `fit` when it lands back on the Fit scale) through
- * `onModeChange`. The host keys the stage by the image, so stepping to
- * another image starts at Fit. Discrete jumps (the control, a double click)
- * ease over 180 ms unless the reader prefers reduced motion; gestures never
- * animate.
- *
- * Host seams (all optional; the lightbox passes none of them): `fitAxis`
- * (Fit fills the width or height, the smallest scale stays the whole
- * image), `padding` (Fit leaves that many pixels on every side), `overlay`
- * (drawn over the image in the same transform, e.g. a marked-up copy, so it
- * stays aligned at any zoom), `clear` (rows the host floats things over: Fit
- * and the pan's limits work between them, the image still slides under them
- * when zoomed, and those rows still take the fingers), and `onImageLoad` /
- * `onImageError`. `clear` and Region mode do not go together: `children` and
- * `onViewChange` speak of the stage without it.
- *
- * Region comments (#2100) add three more, also optional: `drawing` (a
- * primary press and drag draws a box, reported through `onDraw` in the
- * image's own pixels, instead of panning; two fingers still pinch and pan,
- * and a second finger cancels the box), `onViewChange` (every viewport, so a
- * host can draw boxes in stage pixels at a constant stroke), and `children`
- * (drawn over the stage, untransformed). The handle's `zoomTo` shows a box
- * large and centred, and `visibleBox` is the part of the image on screen.
- */
 export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
   src: string;
   alt: string;
   mode: ZoomMode;
   onModeChange: (mode: ZoomMode) => void;
-  /** The current scale (1 = Actual size), on every change. */
   onScaleChange?: (scale: number) => void;
-  /** The share of the stage Fit may fill on each axis. */
   inset?: ZoomInset;
-  /** Fit leaves this many CSS pixels on every side (wins over `inset`). */
   padding?: number;
-  /** Which way Fit fits (default: the whole image). */
   fitAxis?: FitAxis;
-  /** Rows at the stage's top and bottom that the host floats things over (default: none). */
   clear?: ZoomClear;
-  /** Drawn over the image at its own size, in the image's transform. */
   overlay?: React.ReactNode;
-  /** The image's own size, once it has loaded. */
   onImageLoad?: (size: ZoomSize) => void;
-  /** The image failed to load; the host shows its own message (the stage then shows none). */
   onImageError?: () => void;
-  /** A tap (a click that did not pan) beside the image, e.g. to close. */
   onBackgroundTap?: () => void;
-  /** The stage's box, its position included (`relative` when absent). */
   className?: string;
   imageClassName?: string;
-  /** The image's corner radius at Actual size; kept constant on screen at every scale. */
   radius?: number;
   stageAttributes?: Record<string, string>;
-  /** The stage's accessible name (it takes focus, as a scroller would). */
   label: string;
-  /** A longer description of the stage (its `aria-describedby` text), e.g. how Region mode draws. */
   description?: string;
-  /** Region mode: a primary drag draws a box (`onDraw`) instead of panning. */
   drawing?: boolean;
-  /** The box being drawn, its end, or its cancel (Region mode). */
   onDraw?: (draw: ZoomDraw) => void;
-  /** Every viewport the image takes, with the stage's size; `eased` when the image moves there over 180 ms (draw boxes the same way). */
   onViewChange?: (view: ZoomViewport, stage: ZoomSize, eased: boolean) => void;
-  /** Drawn over the stage, untransformed, in stage pixels (after the image). */
   children?: React.ReactNode;
-  /** The "⌘ + scroll to zoom" hint's gate, shared across the viewer's stages; `false` turns the hint off. Absent: once per stage. */
   wheelHint?: WheelHintGate | false;
 }>(function ImageZoomStage({ src, alt, mode, onModeChange, onScaleChange, inset, padding, fitAxis, clear, overlay, onImageLoad, onImageError, onBackgroundTap, className, imageClassName, radius = 6, stageAttributes, label, description, drawing = false, onDraw, onViewChange, children, wheelHint }, ref) {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -258,17 +155,12 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
   const pinch = useRef<{ dist: number; midX: number; midY: number } | null>(null);
   const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
   const latch = useRef<{ kind: 'zoom' | 'pan'; until: number } | null>(null);
-  // A background tap closes from the click that follows it, never from the
-  // pointerup: closing on pointerup unmounted the overlay before a touch's
-  // synthesized click, which then landed on whatever lay underneath.
   const closeArmed = useRef(0);
   const safariGesture = useRef<{ scale: number } | null>(null);
 
-  // The "⌘ + scroll to zoom" hint (#2127).
   const ownGate = useRef<WheelHintGate>({ shown: false });
   const gateRef = useRef<WheelHintGate | false>(wheelHint ?? ownGate.current);
   gateRef.current = wheelHint ?? ownGate.current;
-  /** Mounted once shown; `visible` drives its opacity. */
   const [hint, setHint] = useState<{ visible: boolean } | null>(null);
   const [hintSpoken, setHintSpoken] = useState('');
   const hintVisible = useRef(false);
@@ -279,10 +171,8 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     if (!hintVisible.current) return;
     hintVisible.current = false;
     setHint({ visible: false });
-    // Said once already; an empty region is not read again as part of the stage.
     setHintSpoken('');
   }, []);
-  /** A plain wheel scrolled the image: show the hint the first time, keep it while the wheel keeps scrolling. */
   const wheelPanned = useCallback(() => {
     const gate = gateRef.current;
     if (!hintVisible.current) {
@@ -303,7 +193,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     const stage = stageRef.current;
     if (!stage) return null;
     const r = stage.getBoundingClientRect();
-    // The box every viewport is worked out in: the stage between the clear rows, its corner where the viewport's 0, 0 is drawn (`paint`).
     const { top, bottom } = clearRef.current;
     boxRef.current = { width: r.width, height: r.height - top - bottom, left: r.left, top: r.top + top };
     return boxRef.current;
@@ -311,7 +200,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
 
   const insetNow = (): ZoomInset | undefined => (paddingRef.current !== undefined && boxRef.current ? paddingInset(boxRef.current, paddingRef.current) : insetRef.current);
   const limits = () => zoomLimits(dimsRef.current!, boxRef.current!, insetNow());
-  /** The Fit scale (the whole image, or its width or height). */
   const fitNow = () => fitScale(dimsRef.current!, boxRef.current!, insetNow(), axisRef.current);
   const ready = () => !!dimsRef.current && !!boxRef.current && boxRef.current.width > 0 && boxRef.current.height > 0;
 
@@ -324,8 +212,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     [radius],
   );
 
-  // The overlay mounts and unmounts on its own (a comment's drawing shown or
-  // not): it takes the image's transform the moment it is attached.
   const attachOverlay = useCallback(
     (el: HTMLDivElement | null) => {
       overlayRef.current = el;
@@ -346,7 +232,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     [paint],
   );
 
-  /** A gesture moved the image: report Fit when it is back at the Fit scale, else zoom. */
   const gesture = (view: ZoomViewport) => {
     apply(view);
     const next: ZoomMode = atFit(view, fitNow()) ? 'fit' : 'zoom';
@@ -366,11 +251,9 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
       else if (next === 'actual') apply(actualViewport(image, box, insetNow()), animate);
       else if (viewRef.current) apply(clampViewport(viewRef.current, image, box, limits()), animate);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [apply],
   );
 
-  // The host's control: Fit or Actual size (a mode we reported ourselves is already on screen).
   useLayoutEffect(() => {
     modeRef.current = mode;
     if (mode === reportedRef.current) return;
@@ -378,7 +261,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     applyMode(mode, true);
   }, [mode, applyMode]);
 
-  // The host changed how Fit fits (its padding, the fit axis): Fit refits, anything else stays within the new limits.
   const fitShape = useRef({ padding, fitAxis });
   useLayoutEffect(() => {
     if (fitShape.current.padding === padding && fitShape.current.fitAxis === fitAxis) return;
@@ -387,16 +269,13 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     if (!ready() || !viewRef.current) return;
     if (modeRef.current === 'fit') applyMode('fit', false);
     else apply(clampViewport(viewRef.current, dimsRef.current!, boxRef.current!, limits()));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [padding, fitAxis, measure, applyMode, apply]);
 
-  // The host's clear rows changed (what floats came or went): a picture resting at Fit eases to the new space, anything else (zoomed, or panned at Fit) stays where it is on screen, within it.
   const clearShape = useRef({ top: clearTop, bottom: clearBottom });
   useLayoutEffect(() => {
     const movedBy = clearShape.current.top - clearTop;
     if (movedBy === 0 && clearShape.current.bottom === clearBottom) return;
     clearShape.current = { top: clearTop, bottom: clearBottom };
-    // Resting at Fit (not panned or nudged since it was fitted): Fit eases to the new space. A picture panned at Fit stays where it is on screen.
     const resting =
       modeRef.current === 'fit' && ready() && !!viewRef.current && sameViewport(viewRef.current, fitViewport(dimsRef.current!, boxRef.current!, insetNow(), axisRef.current));
     measure();
@@ -405,10 +284,8 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     const kept = clampViewport({ ...viewRef.current, y: viewRef.current.y + movedBy }, dimsRef.current!, boxRef.current!, limits());
     if (modeRef.current === 'zoom') gesture(kept);
     else apply(kept);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearTop, clearBottom, measure, applyMode, apply]);
 
-  // The image's own size, once it has loaded (or at once when it was cached).
   useEffect(() => {
     const img = imgRef.current;
     if (img && img.complete && img.naturalWidth > 0) {
@@ -425,7 +302,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     applyMode(modeRef.current === 'zoom' ? 'fit' : modeRef.current, false);
   }, [dims, measure, applyMode]);
 
-  // The stage resized (the window, a phone turned): Fit refits, anything else keeps its scale within the new limits.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || typeof ResizeObserver === 'undefined') return;
@@ -438,11 +314,8 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     });
     observer.observe(stage);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [measure, applyMode, apply]);
 
-  // Wheel and trackpad pinch. A non-passive listener, so preventDefault keeps
-  // the browser from zooming the page (Ctrl+wheel, pinch) or swiping back.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -450,7 +323,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
       event.preventDefault();
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const latched = latch.current && now < latch.current.until ? latch.current : null;
-      // One layout read at the start of a gesture, never between writes.
       if (!latched || !boxRef.current) measure();
       if (!ready() || !viewRef.current) return;
       const image = dimsRef.current!;
@@ -472,19 +344,13 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
         gesture(panBy(viewRef.current, -dx, -dy, image, box, limits()));
         wheelPanned();
       } else if (Math.abs(dy) > Math.abs(dx)) {
-        // A sideways swipe over a fitted image is not a zoom.
         gesture(zoomAt(viewRef.current, wheelZoomFactor(dy), px, py, image, box, limits()));
       }
     };
     stage.addEventListener('wheel', onWheel, { passive: false });
     return () => stage.removeEventListener('wheel', onWheel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [measure, hideHint, wheelPanned]);
 
-  // Safari sends a trackpad pinch (and, on iOS, two fingers) as gesture
-  // events, not Ctrl + wheel, and zooms the page with them unless they are
-  // prevented. On iOS the same fingers also arrive as pointers, which the
-  // pinch below already follows, so a gesture then only prevents the page zoom.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -518,7 +384,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
       stage.removeEventListener('gesturechange', onChange);
       stage.removeEventListener('gestureend', onEnd);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [measure, hideHint]);
 
   useImperativeHandle(
@@ -565,7 +430,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
         return visibleNaturalBox(viewRef.current, dimsRef.current!, boxRef.current!);
       },
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [measure],
   );
 
@@ -630,13 +494,11 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {
-        // A synthetic pointer (tests) has nothing to capture.
       }
     }
     if (pointers.current.size === 2) {
       pinch.current = pinchState();
       if (press.current) {
-        // A second finger turns a box being drawn into a pinch.
         if (press.current.draw) {
           press.current.draw = false;
           callbacks.current.onDraw?.({ box: null, phase: 'cancel' });
@@ -658,7 +520,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     };
   };
 
-  /** The box a draw press spans now, in the image's own pixels (null off the image or too small). */
   const drawnBox = (p: Press, clientX: number, clientY: number): NaturalBox | null => {
     const box = boxRef.current;
     const view = viewRef.current;
@@ -706,7 +567,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     pointers.current.delete(event.pointerId);
     if (pinch.current) {
       if (pointers.current.size < 2) pinch.current = null;
-      // The finger left behind carries on panning from where it is, never as a tap.
       const [rest] = [...pointers.current.entries()];
       if (rest) {
         const [id, at] = rest;
@@ -732,7 +592,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     const armed = closeArmed.current;
     closeArmed.current = 0;
     if (!armed || Date.now() - armed > CLICK_AFTER_TAP_MS || !callbacks.current.onBackgroundTap) return;
-    // The overlay goes away with this click, so nothing beneath receives it.
     event.preventDefault();
     event.stopPropagation();
     callbacks.current.onBackgroundTap();
@@ -783,7 +642,6 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
           height: dims ? `${dims.height}px` : undefined,
           transformOrigin: '0 0',
           opacity: dims ? 1 : 0,
-          // Beside the image a click closes (zoom-out); on it, a click does nothing.
           cursor: drawing ? 'crosshair' : onBackgroundTap && !overflowing ? 'default' : undefined,
         }}
         data-lightbox-image=""

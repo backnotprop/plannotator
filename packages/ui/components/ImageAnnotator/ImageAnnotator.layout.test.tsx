@@ -69,7 +69,6 @@ describe.if(hasDom)('ImageAnnotator compact toolbar layout', () => {
     });
     const buttons = [...host.querySelectorAll<HTMLButtonElement>('[data-pn-image-annotator-toolbar] button')];
     expect(buttons.length).toBeGreaterThan(10);
-    // Icon and swatch buttons have no words of their own: each needs aria-label.
     expect(buttons.filter((button) => !button.getAttribute('aria-label')?.trim()).map((button) => button.outerHTML.slice(0, 80))).toEqual([]);
     const pressed = buttons.filter((button) => button.getAttribute('aria-pressed') === 'true').map((button) => button.getAttribute('aria-label'));
     expect(pressed).toEqual(['Pen (1)', 'Colour: Red']);

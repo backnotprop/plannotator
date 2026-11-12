@@ -1,11 +1,3 @@
-/**
- * The "Star the repo" ask's styles (approval "star-ask"; ported from the approved harness, `?style=type&star=center3`).
- * The art band is an illustration in the brand kit's Type Only palette, the same in light and dark: bone ground, faint
- * grid, corner ticks, an ink rule, the small mono row and one giant line, with a warm yellow star (#F3D45E) behind it
- * that fills #FFC926 once starred, in one frame (nothing moves, so reduced motion shows the same). Everything else is
- * the host's own tokens: colours, radius, focus ring, and font sizes (the Inbox's `--ib-fs-N`, Tailwind's `--text-*`
- * on plan and code review). Rendered once per card in a `<style>`, so no host has to import a stylesheet.
- */
 import { STAR_ASK_DISPLAY_FONT, STAR_ASK_FONT_FACES, STAR_ASK_MONO_FONT } from './starAskFonts';
 
 export const STAR_ASK_CSS = `${STAR_ASK_FONT_FACES}

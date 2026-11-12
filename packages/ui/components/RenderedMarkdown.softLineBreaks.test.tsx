@@ -1,10 +1,3 @@
-/**
- * `softLineBreaks` (set by the Inbox ref preview card) draws a bare newline in
- * forge text as a line break, as GitHub does. Off by default: files and plans
- * keep the CommonMark soft break. Code blocks are never touched.
- *
- * DOM-gated (DOM_TESTS=1), listed in tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';

@@ -1,8 +1,3 @@
-/**
- * The box's opt-in third action (DOM_TESTS=1): Shape's Show me lives here so every way into the box has it. What
- * regresses if these fail: it needs words it shouldn't, it keeps the words after they were sent, the box everyone
- * else uses grows a button or a wrapping footer, or Tab skips past Change it to Show me.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

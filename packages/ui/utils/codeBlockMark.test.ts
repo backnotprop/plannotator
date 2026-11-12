@@ -9,7 +9,6 @@ describe('code block mark class', () => {
   test('carries the annotation kind the stylesheet keys on', () => {
     expect(codeBlockMarkClassName(AnnotationType.DELETION)).toBe('annotation-highlight deletion');
     expect(codeBlockMarkClassName(AnnotationType.COMMENT)).toBe('annotation-highlight comment');
-    // Global comments never wrap a block, so there is no modifier to add.
     expect(codeBlockMarkClassName(AnnotationType.GLOBAL_COMMENT)).toBe('annotation-highlight');
   });
 });
@@ -30,8 +29,6 @@ describe.if(hasDom)('paintCodeBlockMark', () => {
     expect(mark.tagName).toBe('MARK');
     expect(mark.dataset.bindId).toBe('ann-1');
     expect(mark.className).toBe('annotation-highlight deletion');
-    // The point of moving children instead of flattening: the palette's
-    // colours survive being annotated (and being re-themed).
     expect(mark.querySelector('span[style*="#79c0ff"]')).not.toBeNull();
     expect(code.textContent).toBe('const x = 1');
   });

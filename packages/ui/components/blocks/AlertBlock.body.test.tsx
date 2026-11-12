@@ -1,14 +1,3 @@
-/**
- * A callout's body is markdown with block structure, like a quote's: a fence,
- * a table or a nested quote inside `> [!NOTE]` renders as that block, not as
- * a paragraph showing its fence characters. What regresses: a fence in a
- * callout drawn as inline text; the inner blocks taking `data-block-id`s of
- * their own (the callout must stay one annotatable block); a prose callout
- * leaving its old path; a comment on a callout's words no longer anchoring;
- * callouts nested in callouts recursing past the quote depth cap.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -17,7 +6,6 @@ import type { Annotation } from '../../types';
 
 const hasDom = typeof document !== 'undefined';
 
-// web-highlighter reads `window` at module-eval time; import lazily.
 const hookMod = hasDom ? await import('../../hooks/useAnnotationHighlighter') : null;
 const useAnnotationHighlighter =
   hookMod?.useAnnotationHighlighter as typeof import('../../hooks/useAnnotationHighlighter')['useAnnotationHighlighter'];
@@ -109,8 +97,6 @@ describe('a callout body with block structure', () => {
   });
 
   test.skipIf(!hasDom)('callouts nested hundreds deep stop at MAX_QUOTE_DEPTH, as quotes do', async () => {
-    // The outer callout's body: a callout in a quote, holding a callout in a
-    // quote, and so on.
     const levels = 300;
     const body = Array.from({ length: levels }, (_, i) => `${'> '.repeat(i + 1)}[!NOTE]`)
       .concat(`${'> '.repeat(levels + 1)}deepest`)
@@ -118,7 +104,6 @@ describe('a callout body with block structure', () => {
     await mount(body);
     const alerts = document.querySelectorAll('[data-block-type="alert"]');
     expect(alerts.length).toBe(MAX_QUOTE_DEPTH);
-    // The innermost callout shows the rest as text, its markers included.
     expect(alerts[alerts.length - 1]!.textContent).toContain('[!NOTE]');
     expect(alerts[alerts.length - 1]!.textContent).toContain('deepest');
   });

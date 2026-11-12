@@ -1,13 +1,3 @@
-/**
- * What a link click inside a raw-HTML annotate document resolves to.
- *
- * The failure this guards: a srcdoc document's base URL is the PARENT page's,
- * so every unhandled link resolves onto the Plannotator server and the
- * catch-all answers with the app itself — the editor rendered inside the
- * annotated frame. The resolver is what turns each href into "open this local
- * document", "new tab", or "nothing", so a regression here puts the app back
- * inside the frame or starts fetching paths the session never authorized.
- */
 import { describe, expect, test } from "bun:test";
 import { HTML_ASSET_ROUTE_PREFIX as SERVER_HTML_ASSET_ROUTE_PREFIX } from "../../shared/html-assets";
 import {
@@ -35,7 +25,6 @@ describe("resolveHtmlLinkIntent — local documents", () => {
 	});
 
 	test("`../` climbs out of the current document's directory", () => {
-		// The owner's reported shape: sub/02-detail.html linking back up.
 		expect(resolveHtmlLinkIntent("../index.html", CTX)).toMatchObject({
 			kind: "document",
 			path: "/site/index.html",
@@ -88,9 +77,6 @@ describe("resolveHtmlLinkIntent — local documents", () => {
 
 describe("resolveHtmlLinkIntent — absolute URLs", () => {
 	test("this server's own origin is treated as a root-relative site path", () => {
-		// The owner's example: an author writing http://localhost:<port>/x.html
-		// means "x.html of this site". Left as a navigation it hits the
-		// catch-all and loads the app into the frame.
 		expect(
 			resolveHtmlLinkIntent("http://localhost:19601/01-entry-point.html", CTX),
 		).toMatchObject({ kind: "document", path: "/site/01-entry-point.html" });
@@ -162,7 +148,6 @@ describe("resolveHtmlLinkIntent — refused", () => {
 	test("control characters anywhere in the href are a rejection", () => {
 		expect(resolveHtmlLinkIntent("a\u0000.html", CTX)).toMatchObject({ kind: "ignored" });
 		expect(resolveHtmlLinkIntent("a\n.html", CTX)).toMatchObject({ kind: "ignored" });
-		// …including ones that only appear after decoding.
 		expect(resolveHtmlLinkIntent("a%00b.html", CTX)).toEqual({
 			kind: "ignored",
 			reason: "invalid",
@@ -188,7 +173,6 @@ describe("resolveHtmlLinkIntent — refused", () => {
 			kind: "ignored",
 			reason: "no-base",
 		});
-		// …but another origin still opens: it needs no local directory.
 		expect(resolveHtmlLinkIntent("https://example.com", noBase)).toMatchObject({
 			kind: "external",
 		});
@@ -196,10 +180,6 @@ describe("resolveHtmlLinkIntent — refused", () => {
 });
 
 describe("resolveHtmlLinkIntent — which surface the target opens on", () => {
-	// `rendersHtml` is what decides whether the sidebar is revealed on
-	// navigation: an HTML target keeps the sidebar exactly as the user left it
-	// (the header carries its own Back), a markdown target follows the markdown
-	// convention and opens the TOC, where its only way back lives.
 	test("an .html/.htm target renders as another HTML surface", () => {
 		expect(resolveHtmlLinkIntent("a.html", CTX)).toMatchObject({ rendersHtml: true });
 		expect(resolveHtmlLinkIntent("../b.HTM", CTX)).toMatchObject({ rendersHtml: true });
@@ -217,10 +197,6 @@ describe("resolveHtmlLinkIntent — which surface the target opens on", () => {
 			.toMatchObject({ rendersHtml: false });
 	});
 
-	// The annotations panel's cross-file jump asks the same question of an
-	// absolute path it never routed through link resolution, and must get the
-	// same answer — two spellings of the rule would let a jump pop the sidebar
-	// on exactly the surface a link click leaves alone.
 	test("documentRendersHtml answers for a bare path the way link resolution does", () => {
 		expect(documentRendersHtml("/site/a.html")).toBe(true);
 		expect(documentRendersHtml("/site/B.HTM")).toBe(true);
@@ -236,9 +212,6 @@ describe("resolveHtmlLinkIntent — which surface the target opens on", () => {
 });
 
 describe("resolveHtmlLinkIntent — local images open in the lightbox", () => {
-	// The failure: a thumbnail linking to its full-size render toasted
-	// "Can't open", or (worse) the lightbox read a path the page's own asset
-	// route would never serve.
 	const IMG_CTX = {
 		...CTX,
 		assetRoot: { dir: "/site/sub", url: "/api/html-assets/abc123/" },
@@ -268,21 +241,16 @@ describe("resolveHtmlLinkIntent — local images open in the lightbox", () => {
 	});
 
 	test("an image outside the page's folder is refused, never routed", () => {
-		// The asset route refuses `..`; containment is the rule that keeps the
-		// lightbox from asking for anything the page could not load itself.
 		expect(resolveHtmlLinkIntent("../cover.png", IMG_CTX)).toEqual({
 			kind: "unsupported",
 			path: "/site/cover.png",
 			label: "cover.png",
 			reason: "outside-asset-root",
 		});
-		// A root-relative link resolves against the session root (/site), which
-		// is outside this linked page's folder.
 		expect(resolveHtmlLinkIntent("/cover.png", IMG_CTX)).toMatchObject({
 			kind: "unsupported",
 			reason: "outside-asset-root",
 		});
-		// A sibling directory sharing the folder's name as a prefix is outside too.
 		expect(
 			resolveHtmlLinkIntent("../sub-other/x.png", IMG_CTX),
 		).toMatchObject({ kind: "unsupported", reason: "outside-asset-root" });
@@ -296,7 +264,6 @@ describe("resolveHtmlLinkIntent — local images open in the lightbox", () => {
 				reason: "outside-asset-root",
 			});
 		}
-		// Characters that would end the path in a URL are re-encoded, not trusted.
 		expect(resolveHtmlLinkIntent("a%23b%3F.png", IMG_CTX)).toMatchObject({
 			kind: "image",
 			url: "/api/html-assets/abc123/a%23b%3F.png",
@@ -331,7 +298,6 @@ describe("htmlAssetRouteFromDocument", () => {
 		expect(
 			htmlAssetRouteFromDocument('<html><head><base href="/api/html-assets/0f1e2d3c4b5a6978/"><title>x</title>'),
 		).toBe("/api/html-assets/0f1e2d3c4b5a6978/");
-		// A relative author base re-anchored under the token keeps the token root.
 		expect(
 			htmlAssetRouteFromDocument('<base href="/api/html-assets/abc/assets/">'),
 		).toBe("/api/html-assets/abc/");
@@ -341,21 +307,17 @@ describe("htmlAssetRouteFromDocument", () => {
 		expect(htmlAssetRouteFromDocument('<base href="https://example.com/">')).toBeNull();
 		expect(htmlAssetRouteFromDocument('<base href="about:blank">')).toBeNull();
 		expect(htmlAssetRouteFromDocument("")).toBeNull();
-		// The route named in body text is not a base.
 		expect(htmlAssetRouteFromDocument("<p>/api/html-assets/abc/</p>")).toBeNull();
 	});
 
 	test("only the first real <base> counts, so a page cannot name another token", () => {
 		const served = '<base href="/api/html-assets/real/"><title>x</title>';
-		// A token named in a comment ahead of the served base is ignored.
 		expect(
 			htmlAssetRouteFromDocument(`<!-- <base href="/api/html-assets/other/"> -->${served}`),
 		).toBe("/api/html-assets/real/");
-		// A second base tag later in the page has no effect in the browser either.
 		expect(
 			htmlAssetRouteFromDocument(`${served}<body><base href="/api/html-assets/other/">`),
 		).toBe("/api/html-assets/real/");
-		// An author's absolute base wins in the browser, so there is no asset route.
 		expect(
 			htmlAssetRouteFromDocument('<base href="https://cdn.example/"><base href="/api/html-assets/other/">'),
 		).toBeNull();

@@ -1,24 +1,3 @@
-/**
- * A multi-paragraph quote renders as ONE quote: one `<blockquote>`, one bar,
- * the block id on it alone, and the quote's own markdown inside (a code fence
- * as a real code block, a list as a list, a nested quote as a quote).
- *
- * What regresses if this fails:
- * - a quote with a code fence splits into one bar segment per line, the
- *   fence shows as literal backticks and `@scope/pkg` in the command links as
- *   a mention (the reported Inbox question card);
- * - an inner block gets a `data-block-id` of its own, so a selection inside
- *   the quote resolves to an id no document block has;
- * - a comment on text inside the quote no longer restores, or the quote
- *   becomes a code-block pinpoint target (a click would annotate the fence
- *   alone);
- * - a plain prose quote stops rendering as one `<p>` per paragraph.
- *
- * Block ids are read from the parsed blocks, never written as literals:
- * Tailwind scans this package.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -28,7 +7,6 @@ import type { AnnotationRestoreReport } from '../../hooks/useAnnotationHighlight
 
 const hasDom = typeof document !== 'undefined';
 
-// Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const viewerMod = hasDom ? await import('../Viewer') : null;
 const Viewer = viewerMod?.Viewer as typeof import('../Viewer')['Viewer'];
 const contextMod = hasDom ? await import('./QuestionContext') : null;
@@ -103,13 +81,11 @@ describe.skipIf(!hasDom)('BlockquoteBlock in the Viewer', () => {
     expect(quotes).toHaveLength(1);
     const quote = quotes[0]!;
     expect(quote.getAttribute('data-block-id')).toBe(quoteBlockId(DOC));
-    // Nothing inside claims a block id of its own.
     expect(quote.querySelectorAll('[data-block-id]')).toHaveLength(0);
 
     const pre = quote.querySelectorAll('pre');
     expect(pre).toHaveLength(1);
     expect(pre[0]!.textContent).toContain('omp plugin install @plannotator/pi-extension');
-    // Code is code: no fence markers and no mention link inside it.
     expect(quote.textContent).not.toContain('```');
     expect(pre[0]!.querySelector('a')).toBeNull();
 
@@ -219,7 +195,6 @@ describe.skipIf(!hasDom)('issue refs, nesting depth and display math', () => {
     const { host } = await mountViewer(markdown);
     const quotes = host.querySelectorAll('blockquote');
     expect(quotes.length).toBe(blockquoteMod!.MAX_QUOTE_DEPTH);
-    // The innermost quote shows the rest as text, its markers included.
     expect(quotes[quotes.length - 1]!.textContent).toContain('> deepest');
   });
 

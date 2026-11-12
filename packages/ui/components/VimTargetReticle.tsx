@@ -33,7 +33,6 @@ interface ReticlePosition {
   readonly labelTop: number;
 }
 
-/** Live document geometry and command context required by the Vim target reticle. */
 export interface VimTargetReticleProps {
   readonly containerRef: RefObject<HTMLElement | null>;
   readonly state: VimSelectionState;
@@ -159,12 +158,6 @@ function relativePosition(
   };
 }
 
-/**
- * Draw the video HUD's targeting treatment on top of the real Vim target.
- *
- * Geometry always comes from the live semantic element, caret, or browser
- * selection. The overlay never owns focus and never participates in layout.
- */
 export function VimTargetReticle({
   containerRef,
   state,

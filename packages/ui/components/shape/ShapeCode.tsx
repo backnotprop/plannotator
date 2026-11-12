@@ -1,7 +1,3 @@
-// The Code view: the board's Guided Review (the host's guide component), and
-// over it the whole-file viewer ("Open at line N", a requirement's file:line,
-// a `code:` link): the real CodeFileView (Pierre), with code review's hover
-// insights on tokens and line comments that go to the agent as Change it / Ask.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
 import type { CodeAnnotation } from '../../types';
@@ -20,13 +16,11 @@ export interface ShapeFileTarget {
   token: number;
 }
 
-/** One file's hunks, in Pierre's PatchDiff, in the app's theme. */
 export function ShapePatch({ patch }: { patch: string }) {
   const dark = useTheme().resolvedMode === 'dark';
   return <PatchDiff patch={patch} options={{ themeType: dark ? 'dark' : 'light', diffStyle: 'unified', overflow: 'scroll' }} />;
 }
 
-/** Without the guide chain: the steps as text, so the view still says what the code does. */
 function GuideFallback({ code }: { code: Code }) {
   return (
     <div className="shp-guide-fallback">
@@ -65,7 +59,6 @@ export function ShapeCode({
   code: Code;
   CodeGuide?: React.ComponentType<ShapeCodeGuideProps>;
   CodeHoverCard?: React.ComponentType<ShapeCodeHoverCardProps>;
-  /** The file open over the guide, or null. */
   file: ShapeFileTarget | null;
   onOpenFile: (path: string, line: number) => void;
   onCloseFile: () => void;
@@ -74,18 +67,15 @@ export function ShapeCode({
   annotations: CodeAnnotation[];
   onComment: (input: CodeFileAnnotationInput) => void;
   onAsk: (input: CodeFileAnnotationInput) => void;
-  /** The box's third action on these lines (Show me). */
   lineAction?: (lines: { filePath: string; lineStart: number; lineEnd: number }) => CommentExtraAction | undefined;
-  /** The Code view's own "Global comment" (on the whole guide). */
   generalComment: React.ReactNode;
   phone: boolean;
-  /** The host's control beside a file. */
   fileAction?: (file: { path: string; line?: number }) => React.ReactNode;
 }) {
   const openable = new Map((code.files ?? []).map((f) => [f.path, f.line ?? 1]));
-  const openLine = useCallback((path: string) => (readFile && openable.has(path) ? openable.get(path)! : null), [readFile, code.files]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openLine = useCallback((path: string) => (readFile && openable.has(path) ? openable.get(path)! : null), [readFile, code.files]);
   const renderDiff = useCallback((f: { path: string; patch: string }) => <ShapePatch patch={f.patch} />, []);
-  const guideFileAction = useCallback((path: string) => fileAction?.({ path, line: openable.get(path) }) ?? null, [fileAction, code.files]); // eslint-disable-line react-hooks/exhaustive-deps
+  const guideFileAction = useCallback((path: string) => fileAction?.({ path, line: openable.get(path) }) ?? null, [fileAction, code.files]);
 
   return (
     <>

@@ -611,7 +611,6 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
   },
 ];
 
-/** Return the explicit mode a palette cannot render, if any. */
 export function getUnsupportedMode(themeId: string): 'light' | 'dark' | null {
   const theme = BUILT_IN_THEMES.find(({ id }) => id === themeId);
   if (theme?.modeSupport === 'dark-only') return 'light';
@@ -619,32 +618,16 @@ export function getUnsupportedMode(themeId: string): 'light' | 'dark' | null {
   return null;
 }
 
-/**
- * Return whether a palette can honor a mode choice without coercion.
- *
- * @deprecated Every mode is always selectable now that a palette is assigned to
- * one half of a light/dark pair: a palette that cannot render a mode simply
- * never occupies that half. Use {@link themeSupportsHalf} to ask whether a
- * palette may be ASSIGNED to a half. Kept for published consumers.
- */
 export function isThemeModeAvailable(themeId: string, mode: Mode): boolean {
   return mode === 'system' || getUnsupportedMode(themeId) !== mode;
 }
 
-/**
- * Keep System intact while coercing an unsupported explicit mode.
- *
- * @deprecated Modes are no longer coerced. Assign the palette to the half it
- * supports ({@link themeSupportsHalf}) and let {@link resolveThemeMode} handle
- * rendering. Kept for published consumers.
- */
 export function normalizeThemeMode(themeId: string, mode: Mode): Mode {
   const unsupportedMode = getUnsupportedMode(themeId);
   if (mode === 'system' || mode !== unsupportedMode) return mode;
   return unsupportedMode === 'light' ? 'dark' : 'light';
 }
 
-/** Resolve the mode a palette actually renders. */
 export function resolveThemeMode(
   themeId: string,
   preferredMode: 'light' | 'dark',
@@ -654,25 +637,14 @@ export function resolveThemeMode(
   return unsupportedMode === 'light' ? 'dark' : 'light';
 }
 
-// --- Light/dark theme pairs -------------------------------------------------
-//
-// A user assigns one palette to the light half and one to the dark half. The
-// active palette is pair[preferredMode], so System mode flips between the two
-// (Kanagawa Lotus by day, Kanagawa Wave at night). Mode-restricted palettes are
-// only ever offered for the half they can render, which is why no mode needs to
-// be coerced any more.
-
-/** Which half of a light/dark pair a palette is assigned to. */
 export type ThemeHalf = 'light' | 'dark';
 
-/** A user's full appearance choice: which mode, and a palette for each half. */
 export interface ThemePair {
   mode: Mode;
   light: string;
   dark: string;
 }
 
-/** The palette every fresh install starts on, in both halves. */
 export const DEFAULT_COLOR_THEME = 'plannotator';
 
 export const DEFAULT_THEME_PAIR: ThemePair = {
@@ -681,26 +653,18 @@ export const DEFAULT_THEME_PAIR: ThemePair = {
   dark: DEFAULT_COLOR_THEME,
 };
 
-/** Return whether a palette is registered. */
 export function isKnownTheme(themeId: unknown): themeId is string {
   return typeof themeId === 'string' && BUILT_IN_THEMES.some(({ id }) => id === themeId);
 }
 
-/** Return whether a palette can occupy one half of the pair. */
 export function themeSupportsHalf(themeId: string, half: ThemeHalf): boolean {
   return getUnsupportedMode(themeId) !== half;
 }
 
-/** The palettes assignable to one half — `both` palettes appear in each. */
 export function themesForHalf(themes: ThemeInfo[], half: ThemeHalf): ThemeInfo[] {
   return themes.filter(({ id }) => themeSupportsHalf(id, half));
 }
 
-/**
- * Seed a pair from the single palette older versions persisted. A `both`
- * palette takes over both halves; a mode-restricted one takes the half it
- * supports and the other half falls back to the default palette.
- */
 export function seedThemePair(colorThemeId: unknown, mode: Mode): ThemePair {
   const id = isKnownTheme(colorThemeId) ? colorThemeId : DEFAULT_COLOR_THEME;
   return {
@@ -710,10 +674,6 @@ export function seedThemePair(colorThemeId: unknown, mode: Mode): ThemePair {
   };
 }
 
-/**
- * Repair an untrusted pair (cookie, config.json, or an older release) so every
- * half holds a registered palette that can actually render it.
- */
 export function normalizeThemePair(
   input: Partial<Record<keyof ThemePair, unknown>> | undefined,
   fallback: ThemePair = DEFAULT_THEME_PAIR,
@@ -730,14 +690,10 @@ export function normalizeThemePair(
   };
 }
 
-/** The palette a pair renders for the mode the user is actually seeing. */
 export function resolvePairTheme(pair: ThemePair, preferredMode: ThemeHalf): string {
   return pair[preferredMode];
 }
 
-/* The pair a fresh install starts from. ThemeProvider installs its own props
-   here before the config store resolves, so a host embedding @plannotator/ui
-   keeps its `defaultTheme` / `defaultColorTheme` defaults. */
 let defaultThemePair: ThemePair = DEFAULT_THEME_PAIR;
 
 export function setDefaultThemePair(pair: ThemePair): void {

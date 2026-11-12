@@ -1,11 +1,3 @@
-/**
- * Settings → Review: the old Git tab, now holding a Git section and a
- * Jujutsu section, each with its own saved default diff. Picking one must
- * never change the other (a jj user's choice would otherwise reopen their
- * Git reviews on a jj mode, or the reverse).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -75,7 +67,6 @@ describe.if(hasDom)('Settings → Review', () => {
     await openTab('Review');
     expect(section('git')).not.toBeNull();
     expect(section('jj')).not.toBeNull();
-    // A jj user who never chose opens on Current change.
     expect(checkedLabel('jj')).toBe('Current change');
     expect(checkedLabel('git')).toBe('All Changes (Recommended)');
   });

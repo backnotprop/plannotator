@@ -1,10 +1,8 @@
-/** A position in the document's text. */
 export interface CaretPosition {
   node: Node;
   offset: number;
 }
 
-/** The caret position under a screen point (the standard API first, then the older WebKit and Blink one). */
 export function caretAtPoint(x: number, y: number): CaretPosition | null {
   const doc = document as Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;

@@ -33,16 +33,11 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
   disabled = false,
   isLoading = false,
 }) => {
-  // Read reactively: config.json's value lands through configStore.init()
-  // once /api/plan answers, which may be after this mounts (#1390).
   const stored = useConfigValue('agentSwitch');
   const setting: AgentSwitchSettings = stored ?? getAgentSwitchDefaults('plan');
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Shared dismissal (outside pointerdown + Escape), active only while open —
-  // the old always-on listeners were no-ops when closed. The hook consumes the
-  // dismissing Escape so it cannot double as a host-ladder Escape.
   const dismiss = useCallback(() => setIsOpen(false), []);
   useDismissablePopover({
     enabled: isOpen,
@@ -72,7 +67,6 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
 
   return (
     <div className="relative" ref={dropdownRef}>
-      {/* Mobile: simple button */}
       <button
         onClick={handleApproveClick}
         disabled={disabled}
@@ -81,7 +75,6 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
         {isLoading ? '...' : 'OK'}
       </button>
 
-      {/* Desktop: split button */}
       <div className="hidden md:flex items-stretch">
         <button
           onClick={handleApproveClick}
@@ -110,7 +103,6 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
         </button>
       </div>
 
-      {/* Dropdown */}
       {isOpen && (
         <div
           data-pn-dismissable-popover="true"

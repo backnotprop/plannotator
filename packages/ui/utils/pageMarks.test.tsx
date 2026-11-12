@@ -1,12 +1,3 @@
-/**
- * Page marks (`configurePlannotatorUI({ pageMarks: true })`): the attributes a host keys its stylesheet on in place
- * of theme.css's `body:has([data-popout="true"])` (the Plannotator Inbox, build/inbox-page-marks.ts). What regresses
- * if these fail: with the mark gone too early or never set, a popout's page no longer lowers the annotation panel
- * under the dialog; with it left behind, the panel stays lowered after the dialog closed; with two holders, the
- * first to go takes the mark from the other. Off, no host sees an attribute it never asked for.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -68,7 +59,6 @@ describe.skipIf(!hasDom)('page marks', () => {
     expect(dialogs()).toBe(1);
     expect(document.body.hasAttribute('data-pn-popout')).toBe(true);
     mount(false);
-    // Closing, the dialog stays for its exit; the mark stays with it, then goes with it.
     for (let i = 0; i < 40 && dialogs() > 0; i++) {
       expect(document.body.hasAttribute('data-pn-popout')).toBe(true);
       await act(() => new Promise((done) => setTimeout(done, 50)));

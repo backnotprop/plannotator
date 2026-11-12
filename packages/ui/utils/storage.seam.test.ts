@@ -1,22 +1,6 @@
-/**
- * Seam test: StorageBackend override (setStorageBackend / resetStorageBackend).
- *
- * Contract: after setStorageBackend(fake), getItem/setItem route through the
- * fake backend — NOT through document.cookie. resetStorageBackend() restores
- * the cookie backend.
- *
- * No DOM required (the test never touches document.cookie).
- *
- * IMPORTANT: function references are captured at module-load time (top-level)
- * so they remain valid even when configure.test.ts's mock.module() replaces
- * the module exports later during test execution.
- */
 import { afterEach, describe, expect, it } from 'bun:test';
 import * as storageModule from './storage';
 
-// Capture real function references at import time (before configure.test.ts's
-// mock.module() runs and replaces setStorageBackend/resetStorageBackend exports
-// with no-op spies).
 const setStorageBackend = storageModule.setStorageBackend;
 const resetStorageBackend = storageModule.resetStorageBackend;
 const getItem = storageModule.getItem;
@@ -57,7 +41,6 @@ describe('StorageBackend seam', () => {
 
     expect(written).toHaveLength(1);
     expect(written[0]).toEqual({ key: 'seam-key', value: 'seam-value' });
-    // Confirm read-back goes through the same fake
     expect(getItem('seam-key')).toBe('seam-value');
   });
 
@@ -87,10 +70,6 @@ describe('StorageBackend seam', () => {
     setStorageBackend(fake);
     resetStorageBackend();
 
-    // After reset, reads go to cookies — in this env cookies return null for
-    // unknown keys (no cookie jar in the non-DOM test environment).
-    // The key point is that the fake is no longer consulted: if getItem
-    // returned 'should-not-see-this' the reset did not work.
     const result = getItem('any-key');
     expect(result).not.toBe('should-not-see-this');
   });

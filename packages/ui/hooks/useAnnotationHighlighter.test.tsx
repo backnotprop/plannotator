@@ -6,10 +6,6 @@ import { AnnotationType, type Annotation } from '../types';
 
 const hasDom = typeof document !== 'undefined';
 
-// The hook pulls in @plannotator/web-highlighter, whose UMD bundle reads
-// `window` at module-eval time and throws under the default DOM-less
-// `bun test`. Import it lazily so this file loads cleanly when the DOM tests
-// are skipped (CI); DOM_TESTS=1 supplies a real DOM and the real module.
 const mod = hasDom ? await import('./useAnnotationHighlighter') : null;
 const useAnnotationHighlighter =
   mod?.useAnnotationHighlighter as typeof import('./useAnnotationHighlighter')['useAnnotationHighlighter'];
@@ -251,9 +247,6 @@ describe('useAnnotationHighlighter math annotations', () => {
   });
 
   test.skipIf(!hasDom)('drag-selecting an inline formula annotates it even when the selection spills into the next text node', async () => {
-    // Regression: browsers normalize the focus of an inline drag-select to
-    // offset 0 of the following text node. The math handler must still treat
-    // this as a pure-formula selection rather than bailing to web-highlighter.
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -268,7 +261,6 @@ describe('useAnnotationHighlighter math annotations', () => {
     expect(math).toBeTruthy();
     expect(after).toBeTruthy();
 
-    // Anchor inside the formula, focus spilled to the start of the trailing prose.
     const range = document.createRange();
     range.setStart(math!.firstChild!, 0);
     range.setEnd(after!.firstChild!, 0);
@@ -285,14 +277,11 @@ describe('useAnnotationHighlighter math annotations', () => {
       }));
     });
 
-    // Handler claimed the event (did not fall through to web-highlighter)…
     expect(defaultPrevented).toBe(true);
 
-    // …and painted a preview highlight before the comment is even submitted.
     expect(math!.classList.contains('annotation-highlight')).toBe(true);
     expect(math!.classList.contains('comment')).toBe(true);
 
-    // …and offered a comment popover; submitting it styles the whole formula.
     const submit = host.querySelector<HTMLButtonElement>('[data-testid="submit-comment"]');
     expect(submit).toBeTruthy();
     await act(async () => {

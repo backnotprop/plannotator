@@ -1,35 +1,8 @@
-/**
- * The contents rail's scroll-spy: which heading is being read, from the
- * headings' cached tops and the scroll position, on every scroll frame.
- *
- * Moved as it was from the Workspaces app's
- * `apps/web/src/plannotator/MarkdownContentsRail.tsx` (approved 2026-10-03):
- * `topInsideViewport`, `currentBinding` (the binary search) and the rule that
- * the last heading is the current one at the document's end. One change: the
- * activation line is 80 px below the top (it was 52), plan review's
- * `TableOfContents` scroll offset, so a pick lands where plan review's does.
- *
- * Plan review's own list uses `hooks/useActiveSection` (live heading
- * positions at the same activation line). One mechanism per surface: the rail, and a
- * Contents list on the rail's surface (`DocumentContents`), use this one.
- */
-
-/** How far below the scroll element's top a heading becomes the current one. */
 export const CONTENTS_ACTIVATION_OFFSET = 80;
 
-/**
- * How far below the activation line a heading still counts as reached. A pick
- * scrolls to the heading's top less the offset, and that top is often
- * fractional (1522.22 px); the browser snaps the scroll offset to a whole
- * device pixel (1442, not 1442.22), so the picked heading can end up a fraction
- * of a pixel below the line and the heading above it would be marked. One
- * pixel covers the snap, as the document's end does below.
- */
 export const CONTENTS_SNAP_TOLERANCE = 1;
 
-/** A heading drawn in the scroll element, with its top inside the scrolled content. */
 export interface HeadingBinding {
-  /** The heading's index in the caller's own list. */
   readonly itemIndex: number;
   readonly node: HTMLElement;
   readonly top: number;
@@ -40,12 +13,6 @@ export function topInsideViewport(node: HTMLElement, viewport: HTMLElement): num
   return node.getBoundingClientRect().top - viewportRect.top + viewport.scrollTop;
 }
 
-/**
- * Bind each listed heading id to its drawn heading (`[data-block-type="heading"]`
- * with that `data-block-id`), sorted by top. Only the caller's own ids are
- * bound, so a heading of an embedded document (its ids are namespaced) is never
- * read; when an id is drawn twice, the first one in document order is.
- */
 export function bindHeadings(
   viewport: HTMLElement,
   blockIds: readonly string[],
@@ -63,7 +30,6 @@ export function bindHeadings(
   return bindings;
 }
 
-/** The last binding whose top is at or above `activationTop`, else the first. */
 export function currentBinding(
   bindings: readonly HeadingBinding[],
   activationTop: number,
@@ -84,11 +50,6 @@ export function currentBinding(
   return result;
 }
 
-/**
- * The heading being read: the last one at or above the activation line (or
- * within `CONTENTS_SNAP_TOLERANCE` below it), or the last heading once the
- * document is scrolled to its end. `null` with no bindings.
- */
 export function activeHeadingBinding(
   bindings: readonly HeadingBinding[],
   viewport: HTMLElement,

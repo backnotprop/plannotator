@@ -1,15 +1,6 @@
 import { useCallback, useState } from 'react';
 import { storage } from '../utils/storage';
 
-/**
- * The Tree view's Changes | All files switch (approved design record
- * "review-explorer", answer 1): a review opens on Changes, as before; once
- * someone picks All files it is remembered for this browser. Cookie-only on
- * purpose, like `plannotator-review-group-by-kind`: the settings registry is
- * bundled into the pinned guides.show viewer. Here in ui, not review-editor, so
- * the Inbox window's PR page reads the same switch without a static import of
- * the review app (tests/entry-assets.test.ts).
- */
 export type TreeScope = 'changes' | 'all';
 
 export const TREE_SCOPE_COOKIE = 'plannotator-review-tree-scope';
@@ -21,7 +12,6 @@ export function readTreeScope(): TreeScope {
 export function useTreeScope(): [TreeScope, (scope: TreeScope) => void] {
   const [scope, setScopeState] = useState<TreeScope>(readTreeScope);
   const setScope = useCallback((next: TreeScope) => {
-    // Changes, the default, is the absence of the cookie.
     if (next === 'all') storage.setItem(TREE_SCOPE_COOKIE, 'all');
     else storage.removeItem(TREE_SCOPE_COOKIE);
     setScopeState(next);

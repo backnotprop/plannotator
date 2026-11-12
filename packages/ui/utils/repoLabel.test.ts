@@ -1,9 +1,3 @@
-/**
- * The repository label with the owner hidden. Guards the shapes
- * `parseRemoteUrl` hands over: a cut at the first slash would show a GitLab
- * subgroup instead of the project, and the folder-name fallback (no remote)
- * must never be emptied or cut.
- */
 import { describe, expect, test } from 'bun:test';
 import { repoLabel } from './repoLabel';
 

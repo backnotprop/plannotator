@@ -1,18 +1,3 @@
-/**
- * Sharp's lines in every shipped palette (sharpContrast.ts; approvals "shape-board-style-switch", "shape-board-sharp-only").
- *
- * What regresses if these fail:
- * - a 1 px box border falls under 3:1, a connector (and its filled head) under 5:1, or a zone's edge under 3:1 on
- *   the paper or its own fill, in some palette (a fixed CSS mix holds on the default palette and not on a soft
- *   dark one or a light one with a grey ink: the fixes must cover each);
- * - the default palette stops drawing exactly the look the owner approved (no fix there, the frame's own mixes);
- * - Sharp's quieter zone fills cost a word: every word colour must read on a Sharp zone at least as well as on the
- *   palette's own zone fill (the frame's `--*-soft`), or at 4.5:1.
- *
- * No DOM: the board's colours are worked out from `SHAPE_FRAME_CSS` as written (its `.board` rule and the Sharp rule; their
- * `color-mix()` and `var()` chains), over each palette's tokens read from `packages/ui/themes` as text, so a change
- * to either stylesheet or a new palette is swept too.
- */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,7 +18,6 @@ const themesDir = join(import.meta.dir, '..', '..', 'themes');
 const themeFiles = readdirSync(themesDir).filter((f) => f.endsWith('.css')).sort();
 expect(themeFiles.length).toBeGreaterThan(30);
 
-/** The custom properties a rule whose selector is exactly `selector` declares. */
 function declarations(css: string, selector: string): Record<string, string> {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
   for (const rule of stripped.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
@@ -45,11 +29,9 @@ function declarations(css: string, selector: string): Record<string, string> {
   return {};
 }
 
-/** The frame's own colours (the palette's zone fills), and Sharp's over them. */
 const FRAME = declarations(SHAPE_FRAME_CSS, '.board');
 const SHARP = { ...FRAME, ...declarations(SHAPE_FRAME_CSS, '.board[data-shp-style="sharp"]') };
 
-/** Split on the commas at the top level of `s`. */
 function args(s: string): string[] {
   const out: string[] = [];
   let depth = 0;
@@ -66,7 +48,6 @@ function args(s: string): string[] {
   return out;
 }
 
-/** A value the frame writes, as the page resolves it: `var()` through the frame, then the palette; `color-mix(in oklab, …)`. */
 function resolver(frame: Record<string, string>, theme: Record<string, string>) {
   const resolve = (value: string): RgbColor => {
     const v = value.trim();

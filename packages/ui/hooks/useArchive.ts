@@ -1,10 +1,3 @@
-/**
- * Archive Hook
- *
- * Manages state and handlers for the archive browser — both standalone
- * archive mode and in-session browsing via the sidebar tab.
- */
-
 import { useState, useRef, useMemo, useCallback } from "react";
 import type { ArchivedPlan } from "@plannotator/core/storage-types";
 import type { UseLinkedDocReturn } from "./useLinkedDoc";
@@ -24,27 +17,16 @@ export interface UseArchiveOptions {
 }
 
 export interface UseArchiveReturn {
-  /** Whether running in standalone archive mode */
   archiveMode: boolean;
-  /** List of archived plans */
   plans: ArchivedPlan[];
-  /** Currently selected archive filename */
   selectedFile: string | null;
-  /** Whether the plan list is loading */
   isLoading: boolean;
-  /** Info about the currently selected archive plan */
   currentInfo: { status: ArchivedPlan["status"]; timestamp: string; title: string } | null;
-  /** Initialize archive state from /api/plan response */
   init: (plans: ArchivedPlan[]) => void;
-  /** Select an archive plan to view */
   select: (filename: string) => Promise<void>;
-  /** Lazy-fetch the plan list (for in-session mode) */
   fetchPlans: () => Promise<void>;
-  /** Close the archive browser */
   done: () => Promise<void>;
-  /** Copy plan content to clipboard (strips annotations) */
   copy: () => void;
-  /** Clear the selected file (used by linked doc back) */
   clearSelection: () => void;
 }
 
@@ -90,14 +72,12 @@ export function useArchive(options: UseArchiveOptions): UseArchiveReturn {
       const data = await res.json() as { markdown: string; filepath: string };
 
       if (archiveMode) {
-        // Standalone: direct swap
         viewerRef.current?.clearAllHighlights();
         setMarkdown(data.markdown);
         setAnnotations([]);
         setSelectedAnnotationId(null);
         setSelectedFile(filename);
       } else {
-        // In-session: use linked doc overlay
         const buildUrl = (f: string) => {
           const p = new URLSearchParams({ filename: f });
           if (customPath) p.set("customPath", customPath);
@@ -106,7 +86,7 @@ export function useArchive(options: UseArchiveOptions): UseArchiveReturn {
         linkedDocHook.open(filename, buildUrl, "archive");
         setSelectedFile(filename);
       }
-    } catch { /* ignore */ }
+    } catch { }
   }, [archiveMode, customPath, viewerRef, setMarkdown, setAnnotations, setSelectedAnnotationId, linkedDocHook]);
 
   const fetchPlans = useCallback(async () => {
@@ -121,8 +101,6 @@ export function useArchive(options: UseArchiveOptions): UseArchiveReturn {
       if (!res.ok) return;
       const data = await res.json() as { plans: ArchivedPlan[] };
       setPlans(data.plans);
-      // In standalone archive mode, auto-select and load the first plan
-      // so the viewer reflects the customPath results, not stale server data
       if (archiveMode && data.plans.length > 0) {
         const first = data.plans[0].filename;
         setSelectedFile(first);
@@ -145,7 +123,7 @@ export function useArchive(options: UseArchiveOptions): UseArchiveReturn {
     try {
       await fetch("/api/done", { method: "POST" });
       setSubmitted("approved");
-    } catch { /* ignore */ }
+    } catch { }
   }, [setSubmitted]);
 
   const copy = useCallback(() => {

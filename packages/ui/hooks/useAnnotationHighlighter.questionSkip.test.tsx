@@ -1,13 +1,3 @@
-/**
- * An answer to a `:::question` block quotes the prompt but is not a text
- * selection; the question card draws it. The highlighter must leave it alone.
- *
- * What regresses if this fails: every restored answer paints a highlight over
- * its own prompt (or the first prose match of it), and a draft restore raises
- * an "Unanchored" chip on answers whose prompt was reworded.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -82,9 +72,6 @@ describe('useAnnotationHighlighter: question answers', () => {
     host.remove();
   });
 
-  // PR 1 review: the text-search restore walked into the typed answer. A
-  // restored comment whose quote only matches what the reviewer typed into a
-  // question's text box must not be painted inside that box.
   test.skipIf(!hasDom)('typed answer and note text is not matched by text-search restore', async () => {
     const md = ':::question-text\nDescribe the test.\n:::\n';
     const blocks = parseMarkdownToBlocks(md);

@@ -9,7 +9,6 @@ interface AnalysisLayerToggleProps {
   readonly className?: string;
 }
 
-/** Full-row switch shared by Settings and the code-review analysis welcome. */
 export function AnalysisLayerToggle({
   checked,
   onChange,

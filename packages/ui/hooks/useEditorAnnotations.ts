@@ -9,13 +9,6 @@ interface UseEditorAnnotationsReturn {
   deleteEditorAnnotation: (id: string) => void;
 }
 
-/**
- * Polls the server for editor annotations created by the VS Code extension.
- *
- * Only activates when running inside a VS Code webview (detected via
- * window.__PLANNOTATOR_VSCODE set by the theme bridge). In browser/shared URL
- * contexts, returns an empty array with zero network cost.
- */
 export function useEditorAnnotations(): UseEditorAnnotationsReturn {
   const [annotations, setAnnotations] = useState<EditorAnnotation[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -31,14 +24,12 @@ export function useEditorAnnotations(): UseEditorAnnotationsReturn {
         return incoming;
       });
     } catch {
-      // Silently fail — next poll will retry
     }
   }, []);
 
   useEffect(() => {
     if (!IS_VSCODE) return;
 
-    // Initial fetch + start polling
     fetchAnnotations();
     intervalRef.current = setInterval(fetchAnnotations, POLL_INTERVAL);
 
@@ -56,7 +47,6 @@ export function useEditorAnnotations(): UseEditorAnnotationsReturn {
       await fetch(`/api/editor-annotation?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       setAnnotations((prev) => prev.filter((a) => a.id !== id));
     } catch {
-      // Silently fail — next poll will reconcile
     }
   }, []);
 

@@ -60,7 +60,6 @@ describe.if(hasDom)('Ask this session notices in the document chat panel', () =>
   });
 
   test('the capability decides, not the host name: without interruptible:false the interrupt choice and Stop generating stay', () => {
-    // What regresses: an older server (no field) or any other host losing "Interrupt and ask now".
     const { interruptible: _dropped, ...advert } = listenOnlyProviders[0].sessionBridge;
     const el = render({ messages: [entry({ error: 'busy', errorCode: 'agent_busy' })], onSessionAskAction: mock(() => {}),
       aiProviders: [{ ...listenOnlyProviders[0], sessionBridge: advert }], onAskGeneral: mock(() => {}), isStreaming: true, onStop: mock(() => {}) });
@@ -75,15 +74,12 @@ describe.if(hasDom)('Ask this session notices in the document chat panel', () =>
       onSessionAskAction,
     });
     const buttons = buttonsIn(el, '[data-session-ask-actions="busy"]');
-    // Action labels are deliberate (owner decision 4), so they are pinned here.
     expect(buttons.map((b) => b.textContent)).toEqual(['Ask when it finishes', 'Interrupt and ask now']);
     act(() => buttons[0].click());
     act(() => buttons[1].click());
     expect(onSessionAskAction.mock.calls).toEqual([['q1', 'wait'], ['q1', 'interrupt']]);
   });
 
-  // While a session is attached Ask AI has no other provider, so a gone or
-  // blocked session must not offer a switch: only a note, and no buttons.
   test('gone and blocked: a note that the session cannot be reached, no fallback button', () => {
     const onSessionAskAction = mock((_questionId: string, _action: string) => {});
     for (const [errorCode, kind] of [['session_gone', 'gone'], ['session_blocked', 'blocked']] as const) {
@@ -104,8 +100,6 @@ describe.if(hasDom)('Ask this session notices in the document chat panel', () =>
     expect(el.querySelector('[data-session-ask-actions]')).toBeNull();
   });
 
-  // The failure this guards: a taken-over answer rendered as an error, which
-  // replaces the partial answer the reviewer already read.
   test('taken over: the partial answer stays, with the note under it', () => {
     const el = render({ messages: [entry({ text: 'Because of X', notice: 'NOTE-SENTINEL' })] });
     expect(el.textContent).toContain('Because of X');

@@ -1,21 +1,3 @@
-/**
- * Cross-file annotation mutations from the panel's "All files" view (DOM-gated).
- *
- * This wires the real pieces the app wires — useLinkedDoc's per-document store,
- * groupAnnotationsByDocument, and AnnotationPanel — because the interesting
- * behaviour only exists at their seam.
- *
- * Failures to catch:
- *  - Deleting a card that belongs to another document mutating the OPEN
- *    document's live annotations (the same id can be absent there, so the
- *    delete silently does nothing and the comment still ships in the export).
- *  - The mutation not reaching `getDocAnnotations()`, which is what the export
- *    and the feedback payload read: a delete the user saw but the agent still
- *    receives.
- *  - The session total the decision control runs on (`annotations.length +
- *    docAnnotationCount`) moving when the reviewer only changed which
- *    documents the panel shows.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -93,7 +75,6 @@ const Harness: React.FC = () => {
     ['/repo'],
   );
 
-  // What App feeds the decision control: the session, not the view.
   const sessionTotal = annotations.length + linkedDoc.docAnnotationCount;
   api = { linkedDoc, setAnnotations, sessionTotal, setScope };
 
@@ -132,7 +113,6 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
 });
 
-/** Root document has a1; after this the other document is open with b1, b2. */
 async function mountWithTwoAnnotatedDocuments(): Promise<void> {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -172,9 +152,7 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
 
     await act(async () => deleteButtonOf('a1')!.click());
 
-    // The stored document lost it — this map is what the export reads.
     expect(api!.linkedDoc.getDocAnnotations().get(ROOT_PATH)?.annotations).toEqual([]);
-    // The open document is untouched.
     expect(api!.linkedDoc.getDocAnnotations().get(OTHER_PATH)?.annotations.map((a) => a.id)).toEqual(['b1', 'b2']);
     expect(document.querySelector('[data-annotation-id="a1"]')).toBeNull();
     expect(document.querySelector('[data-annotation-id="b1"]')).not.toBeNull();
@@ -194,11 +172,6 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
   });
 
   test('a stored document is reached by its normalized spelling (Windows cache keys)', async () => {
-    // The cache is keyed by the RAW path the server sent; the panel addresses
-    // documents by the normalized path `groupAnnotationsByDocument` emits. On
-    // Windows those differ (`C:\\repo\\win.md` vs `C:/repo/win.md`), and the
-    // raw lookup missed every time: Edit and Delete on a cross-file card were
-    // silent no-ops and the comment still shipped in the export.
     const WIN_RAW = 'C:\\repo\\docs\\win.md';
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -206,8 +179,6 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
       root = createRoot(host!);
       root.render(<Harness />);
     });
-    // Open the Windows-spelled document, annotate it, then leave it: that is
-    // what puts it in the cache under its raw key.
     await act(async () => { api!.linkedDoc.openLoaded({ filepath: WIN_RAW, markdown: '# win' }); });
     await act(async () => { api!.setAnnotations([row('w1'), row('w2')]); });
     await act(async () => { api!.linkedDoc.openLoaded({ filepath: OTHER_PATH, markdown: '# b' }); });
@@ -229,7 +200,6 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
 
     let accepted = false;
     await act(async () => {
-      // Same path as ROOT_PATH, differently spelled.
       accepted = api!.linkedDoc.updateStoredAnnotations('/repo//a.md', () => []);
     });
 
@@ -237,10 +207,6 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
     expect(api!.linkedDoc.getDocAnnotations().get(ROOT_PATH)?.annotations).toEqual([]);
   });
 
-  // getDocAnnotations() deliberately carries the OPEN document too (panel,
-  // counts); an export that read it beside the host's live state printed the
-  // open document twice. getFeedbackDocuments() is the export's split: each
-  // document once, the root apart from the others.
   test('the feedback split holds the root once and every other document once', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -248,7 +214,6 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
       root = createRoot(host!);
       root.render(<Harness />);
     });
-    // Root active: its annotations are the host's live state, so no root entry.
     let split = api!.linkedDoc.getFeedbackDocuments();
     expect(split.root).toBeNull();
     expect([...split.documents.keys()]).toEqual([]);
@@ -261,17 +226,12 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
     expect([...split.documents.keys()]).toEqual([OTHER_PATH]);
     expect(split.documents.get(OTHER_PATH)?.annotations.map((a) => a.id)).toEqual(['b1', 'b2']);
 
-    // Back on the root: the visited document is stored, the root is live again.
     await act(async () => { api!.linkedDoc.back(); });
     split = api!.linkedDoc.getFeedbackDocuments();
     expect(split.root).toBeNull();
     expect([...split.documents.keys()]).toEqual([OTHER_PATH]);
   });
 
-  // Opening the root's own path FROM the root (an HTML "Home" link, or
-  // index.html#intro from index.html) is not a backlink: no linked doc is
-  // open yet, so it becomes a separate copy with its own comments. Those
-  // must reach the export, matching the count the decision control shows.
   test('comments on a self-opened copy of the root are exported, not dropped', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -293,8 +253,6 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
 
   test('the active document is never written through the stored-document path', async () => {
     await mountWithTwoAnnotatedDocuments();
-    // App routes open-document cards to its own handlers; the store refuses the
-    // active document outright so a mis-route cannot write a doomed copy.
     let accepted = true;
     await act(async () => {
       accepted = api!.linkedDoc.updateStoredAnnotations(OTHER_PATH, () => []);

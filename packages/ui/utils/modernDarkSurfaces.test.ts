@@ -1,16 +1,8 @@
-/**
- * Plannotator Modern dark's quiet surfaces stand off its card at least as far as Plannotator's own dark ones do.
- * The Inbox and the review UIs draw them all from --muted over --card (the list's section bands, quiet and foot
- * buttons, row hovers, chips, inline code, table rows), lines from --border, menus on --popover. Modern dark took
- * PaulMillr's palette, whose muted and popover are its card's grey, and every one of those surfaces vanished.
- * What regresses if this fails: a section band, the Reply button or a menu that no longer shows on Modern dark.
- */
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compositeOver, mixOklab, parseCssColor, rgbToOklab, type RgbColor } from './cssColor';
 
-/** The tokens of the rule whose selector list names `selector`. */
 function tokens(file: string, selector: string): Record<string, string> {
   const css = readFileSync(join(import.meta.dir, '..', 'themes', file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -29,7 +21,6 @@ const color = (t: Record<string, string>, name: string): RgbColor => {
 };
 const alpha = (c: RgbColor, a: number): RgbColor => ({ ...c, a });
 
-/** Each surface as the window paints it on the card (packages/inbox/inbox.css), and its lightness step from the card. */
 function steps(t: Record<string, string>): Record<string, number> {
   const card = color(t, '--card');
   const muted = color(t, '--muted');

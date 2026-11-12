@@ -1,10 +1,3 @@
-/**
- * The raw-HTML viewer's global comment keeps the words typed (DOM-gated).
- *
- * What regresses: Escape (or X) on the global composer throwing the words
- * away, so reopening it shows an empty box; one page's kept words showing up
- * in another page's global comment; Save leaving the words behind.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -82,12 +75,10 @@ describe.if(hasDom)('HtmlViewer global comment draft', () => {
     await press(document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!, 'Escape');
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
 
-    // Another page's global comment starts empty.
     await mountViewer(PAGE_B, added);
     expect((await openGlobalComposer()).value).toBe('');
     await press(document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!, 'Escape');
 
-    // Back on the first page the words come back.
     await mountViewer(PAGE_A, added);
     const restored = await openGlobalComposer();
     expect(restored.value).toBe('the header is too loud');
@@ -96,7 +87,6 @@ describe.if(hasDom)('HtmlViewer global comment draft', () => {
     expect(added).toHaveLength(1);
     expect(added[0]?.text).toBe('the header is too loud');
 
-    // Saved words never come back as a draft.
     expect((await openGlobalComposer()).value).toBe('');
   });
 });

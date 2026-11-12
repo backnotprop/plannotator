@@ -1,13 +1,3 @@
-// The scene player: plays a scene the agent drew (`@plannotator/core/shape-scene`).
-// The drawing is the agent's own SVG in the slot, above this player; this
-// player adds the caption, the code line, a colour key and the controls under
-// it, and moves the drawing's `data-part` pieces through `SceneDom`.
-// Play, drag through time, ½× 1× 2×, Back and Next between beats. Under
-// reduced motion nothing moves by itself or between beats: it opens at the
-// first beat, and Play and Next show one beat at a time, each drawn in place.
-// No other controls (no swimlanes, bars or step-through views: a ready-made
-// view would bias the drawing), no Tailwind classes, and no keyboard shortcut
-// (the slider's arrow keys are the browser's own).
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ShapeScene } from '@plannotator/core/shape-scene';
 import { SceneDom } from './dom';
@@ -67,10 +57,8 @@ const CSS = `
 `;
 
 const SPEEDS = [0.5, 1, 2] as const;
-/** Under reduced motion, Play shows a beat this long (at 1×). */
 const BEAT_HOLD_MS = 1800;
 
-/** The element a player sits in: the drawing's slot around the shadow host it was given. */
 function slotOf(root: HTMLElement): HTMLElement | null {
   const host = (root.getRootNode() as ShadowRoot).host as HTMLElement | undefined;
   return host?.parentElement ?? root.parentElement ?? null;
@@ -95,11 +83,8 @@ function codeLine(line: string, lang?: string): React.ReactNode {
 export interface ScenePlayerProps {
   scene: ShapeScene;
   reduce?: boolean;
-  /** Open at this time, paused, scrolled into view (`plannotator shape frame`, tests); no autoplay. */
   at?: number;
-  /** Scale the drawing down so it and the controls fit the visible height (default on). */
   fitView?: boolean;
-  /** 'technical': the drawing and the controls take the technical look (look.ts). Absent: the drawing as drawn. */
   look?: 'technical';
 }
 
@@ -107,7 +92,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   const rootRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLDivElement>(null);
   const domRef = useRef<SceneDom | null>(null);
-  // Reduced motion opens on the first beat, even when it comes after 0 (a frame's `at` is kept exact).
   const [t, setT] = useState(() => {
     const t0 = Math.max(0, Math.min(scene.end, at ?? 0));
     return reduce && at === undefined ? reducedTime(scene, t0) : t0;
@@ -118,7 +102,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   const [u, setU] = useState(1);
   const [missing, setMissing] = useState<string[]>([]);
   const [srLine, setSrLine] = useState('');
-  /** Next is moving to this time (a short tween), or null. */
   const goal = useRef<number | null>(null);
   const beats = scene.beats;
   const bi = beatAt(scene, t);
@@ -131,14 +114,12 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     domRef.current?.apply(c);
   }, [scene.end]);
 
-  // Find the pieces; measure again when the board resizes, and once the board's own entrance has settled.
   useLayoutEffect(() => {
     const root = rootRef.current;
     const slot = root ? slotOf(root) : null;
     if (!root || !slot) return;
     const dom = look === 'technical' ? new SceneDom(slot, scene, LIT_TECHNICAL, true) : new SceneDom(slot, scene);
     domRef.current = dom;
-    // Fit the drawing and the player into the height the person can see (fit.ts).
     let unfit: (() => void) | null = null;
     let unlook: (() => void) | null = null;
     let lookStyle: HTMLStyleElement | null = null;
@@ -166,7 +147,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
       setMissing(dom.missing);
     };
     measure();
-    // A still of one moment: the scene in view, whatever is above it on the board.
     if (at !== undefined) slot.scrollIntoView?.({ block: 'nearest' });
     const later = setTimeout(measure, 1400);
     let ro: ResizeObserver | undefined;
@@ -197,11 +177,8 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
       dom.restore();
       domRef.current = null;
     };
-    // `at` is read once, when the player opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, fitView, look]);
 
-  // Play once when it first comes into view (never under reduced motion, or when opened at a time).
   useEffect(() => {
     const root = rootRef.current;
     if (reduce || at !== undefined || !root || typeof IntersectionObserver === 'undefined') return;
@@ -216,7 +193,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     return () => io.disconnect();
   }, [reduce, at]);
 
-  // Smooth play: time runs at end / playMs per ms, times the speed. Next's short tween runs here too.
   useEffect(() => {
     if (reduce || (!playing && goal.current === null)) return;
     let raf = 0, last = performance.now();
@@ -226,7 +202,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
       last = now;
       const g = goal.current;
       if (g !== null) {
-        // Next: get to the next beat in about half a second whatever the gap.
         const step = Math.max(rate * dt * speed, (Math.abs(g - tRef.current) + 1e-6) * Math.min(1, dt / 160));
         const v = tRef.current + Math.sign(g - tRef.current) * Math.min(step, Math.abs(g - tRef.current));
         show(v);
@@ -249,7 +224,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     return () => cancelAnimationFrame(raf);
   }, [playing, reduce, speed, scene, show]);
 
-  // Reduced motion: Play shows one beat at a time, each drawn in place.
   useEffect(() => {
     if (!reduce || !playing) return;
     const next = nextBeatTime(scene, tRef.current);
@@ -261,7 +235,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     return () => clearTimeout(id);
   }, [reduce, playing, t, speed, scene, show]);
 
-  // Keep the lit code line in view, inside the code pane only.
   useEffect(() => {
     const pane = codeRef.current;
     const li = pane?.querySelector<HTMLElement>('li[aria-current=step]');
@@ -273,7 +246,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   const words = (i: number) => `Beat ${beatCount(scene, beats[i]!.at)}: ${beats[i]!.say}`;
   const play = (on: boolean) => {
     goal.current = null;
-    // From the end (or, under reduced motion, from the last beat) Play starts again at the first beat.
     if (on && (tRef.current >= scene.end - 1e-9 || (reduce && nextBeatTime(scene, tRef.current) === null))) show(reduce ? beats[0]!.at : 0);
     setPlaying(on);
     if (!on) setSrLine(words(beatAt(scene, tRef.current)));
@@ -290,7 +262,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     setPlaying(false);
     show(beats[n]!.at);
   };
-  // Back: the start of this beat if we are past it, else the beat before.
   const back = () => toBeat(t > beat.at + 1e-6 ? bi : bi - 1, false);
   const nextIdx = beats.findIndex((b) => b.at > t + 1e-9);
   const atStart = t <= beats[0]!.at + 1e-9 && bi === 0;
@@ -298,10 +269,8 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   const scrub = (v: number) => {
     goal.current = null;
     setPlaying(false);
-    // Reduced motion: the slider lands on beats only, so nothing is ever shown half way.
     show(reduce ? reducedTime(scene, v) : v);
   };
-  // Reduced motion: the slider's keys step by beats (an arrow's 1% would snap back to the same beat).
   const beatKeys = (e: React.KeyboardEvent<HTMLInputElement>) => {
     const to = { ArrowRight: bi + 1, ArrowUp: bi + 1, PageUp: bi + 1, ArrowLeft: bi - 1, ArrowDown: bi - 1, PageDown: bi - 1, Home: 0, End: beats.length - 1 }[e.key];
     if (to === undefined) return;
@@ -313,7 +282,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   return (
     <div className={`ssc${reduce ? ' reduce' : ''}${look === 'technical' ? ' tech' : ''}`} ref={rootRef} style={{ ['--u' as string]: String(u) }} role="group" aria-label={`Animation: ${scene.title}`}>
       <style>{CSS}</style>
-      {/* One count on screen: the beat number lives by the time slider (beatCount), not here too. */}
       <p className="ssc-cap" aria-hidden="true">
         {beat.say}
       </p>
@@ -345,7 +313,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
       )}
       {missing.length > 0 && <p className="ssc-warn">Not in the drawing: {missing.map((m) => `data-part="${m}"`).join(', ')}</p>}
       <div className="ssc-bar">
-        {/* At an end the button stays focusable (aria-disabled), so a keyboard user's focus is not dropped to the page. */}
         <button type="button" className="icon" onClick={() => !atStart && back()} aria-disabled={atStart} aria-label="Back one beat">
           <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 2v10M11.5 2.6v8.8a.5.5 0 0 1-.8.4L5 7.4a.5.5 0 0 1 0-.8l5.7-4.4a.5.5 0 0 1 .8.4Z" fill="currentColor" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         </button>

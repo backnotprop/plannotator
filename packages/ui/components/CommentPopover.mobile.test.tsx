@@ -155,7 +155,6 @@ describe('CommentPopover mobile composition', () => {
   });
 
   test.skipIf(!hasDom)('keeps focus on a newly tapped outside target', async () => {
-    // SAFETY: The test double implements the MediaQueryList surface consumed by the component.
     window.matchMedia = ((query: string): MediaQueryList => ({
       ...coarseMatchMedia(query),
       matches: false,

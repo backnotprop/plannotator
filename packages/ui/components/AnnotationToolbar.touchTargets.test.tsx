@@ -4,14 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { AnnotationType } from '../types';
 
-/**
- * The selection toolbar is the primary annotate control on a phone, but its
- * buttons never got the touch-target markers the rest of the stack uses, so
- * they stayed 28x28 inside the compact scope. theme.css sizes marked controls
- * to var(--pn-touch-target) there and the markers are inert everywhere else,
- * so this pins the markup contract the stylesheet depends on.
- */
-
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -59,7 +51,6 @@ describe.if(hasDom)('AnnotationToolbar touch targets', () => {
       expect(button.getAttribute('data-pn-touch-target-icon')).toBe('true');
     }
 
-    // The row the compact-scoped gap rule keys on.
     expect(toolbar.querySelector('[data-pn-annotation-toolbar-row]')).not.toBeNull();
   });
 

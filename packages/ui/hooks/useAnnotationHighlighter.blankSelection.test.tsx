@@ -1,27 +1,3 @@
-/**
- * A selection with nothing in it must not become an annotation (#881).
- *
- * Two failures this pins, both from ONE user gesture — a double-click at a
- * block boundary, which every browser answers with a non-collapsed selection
- * whose string is the break between the two blocks:
- *
- *  1. The quote is whitespace. web-highlighter paints an invisible highlight,
- *     the toolbar/composer opens on it, and acting on it stores an annotation
- *     with `originalText: "\n"` that no reload can re-anchor and that is still
- *     counted and exported. (Reproduced in Chromium against the annotate
- *     server; see the PR body.)
- *  2. The end boundary is an element with `endOffset === childNodes.length`.
- *     The library resolves that to `childNodes[offset]` — `undefined` — and
- *     `Cannot read properties of undefined (reading 'parentNode')` escapes its
- *     own pointer-end listener as an uncaught error.
- *
- * Both shapes reproduce in happy-dom, which is why this file drives the real
- * library over a real `mouseup` rather than asserting on the guard helpers.
- * The browser script that produced the same two symptoms through real mouse
- * gestures is kept out of the tree (scratchpad `881/repro5.mjs`).
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -30,8 +6,6 @@ import { AnnotationType, type Annotation } from '../types';
 
 const hasDom = typeof document !== 'undefined';
 
-// web-highlighter reads `window` at module-eval time; import lazily (the same
-// pattern every DOM-gated sibling of this hook uses).
 const mod = hasDom ? await import('./useAnnotationHighlighter') : null;
 const useAnnotationHighlighter =
   mod?.useAnnotationHighlighter as typeof import('./useAnnotationHighlighter')['useAnnotationHighlighter'];
@@ -124,9 +98,6 @@ async function mount(mode: 'redline' | 'selection' | 'comment', annotations: Ann
   });
   await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
-  // happy-dom reports an exception thrown inside a dispatched listener as an
-  // `error` event on window rather than rethrowing to the dispatcher, which is
-  // exactly how a browser surfaces the uncaught TypeError this file is about.
   const uncaught: string[] = [];
   errorListener = (event: Event) => {
     const e = event as ErrorEvent;
@@ -164,9 +135,6 @@ describe('useAnnotationHighlighter: a selection with nothing to quote (#881)', (
     const { container, added, uncaught, hook } = await mount('comment');
     const { first, second } = paragraphs(container);
 
-    // What a double-click just past the end of a block leaves behind: a
-    // non-collapsed selection that starts at the end of one block's text and
-    // ends at the start of the next one's, carrying only the break between.
     const selection = select(first.firstChild!, FIRST.length, second.firstChild!, 0);
     expect(selection.isCollapsed).toBe(false);
     expect(selection.toString().trim()).toBe('');
@@ -177,14 +145,11 @@ describe('useAnnotationHighlighter: a selection with nothing to quote (#881)', (
     expect(hook.current!.commentPopover).toBeNull();
     expect(hook.current!.toolbarState).toBeNull();
     expect(hook.current!.quickLabelPicker).toBeNull();
-    // Before the guard the library painted one empty <mark> per block.
     expect(container.querySelectorAll('mark').length).toBe(0);
     expect(uncaught).toEqual([]);
   });
 
   test.skipIf(!hasDom)('a whitespace-only selection in redline mode creates no annotation', async () => {
-    // Redline commits on the spot, with no toolbar in between: the shortest
-    // path from the boundary gesture to a stored `originalText: "\n"`.
     const { container, added, uncaught } = await mount('redline');
     const { first, second } = paragraphs(container);
     select(first.firstChild!, FIRST.length, second.firstChild!, 0);
@@ -200,8 +165,6 @@ describe('useAnnotationHighlighter: a selection with nothing to quote (#881)', (
     const { container, added, uncaught } = await mount('selection');
     const { first } = paragraphs(container);
 
-    // `endOffset === childNodes.length` is legal in the DOM and is what a
-    // browser reports for a double-click at the end of the last block.
     const selection = select(first.firstChild!, 0, first, first.childNodes.length);
     expect(selection.isCollapsed).toBe(false);
 
@@ -212,12 +175,6 @@ describe('useAnnotationHighlighter: a selection with nothing to quote (#881)', (
   });
 
   test.skipIf(!hasDom)('a selection running past the document into its scroll wrapper does not throw', async () => {
-    // The shape a double-click past the end of the LAST block really produces
-    // in Chromium: the selection ends in an empty element OUTSIDE the
-    // annotation container (the scroll wrapper), so its common ancestor is
-    // outside too. The library's own listener does not check containment
-    // before serializing, so neither may the guard — this is the case a
-    // containment bail used to hand straight to the serializer.
     const { container, added, uncaught } = await mount('selection');
     const { second } = paragraphs(container);
     const outside = document.createElement('div');
@@ -233,9 +190,6 @@ describe('useAnnotationHighlighter: a selection with nothing to quote (#881)', (
   });
 
   test.skipIf(!hasDom)('a real selection still anchors exactly as it did', async () => {
-    // The regression pin: the guards must be invisible to every selection that
-    // has something in it. These values are web-highlighter's own serialization
-    // of a whole-paragraph selection, unchanged by this fix.
     const { container, added, uncaught } = await mount('redline');
     const { first } = paragraphs(container);
     select(first.firstChild!, 0, first.firstChild!, FIRST.length);
@@ -256,17 +210,10 @@ describe('useAnnotationHighlighter: a selection with nothing to quote (#881)', (
   });
 
   test.skipIf(!hasDom)('a selection ending on an in-range element boundary still anchors', async () => {
-    // The other half of the serializability rule, and the reason it is a
-    // bounds check rather than "text boundaries only": Chromium ends an
-    // ordinary multi-block drag (and a triple-click) on an ELEMENT boundary
-    // whose offset is inside `childNodes`, which the library resolves and
-    // serializes fine. Narrowing the predicate to text nodes would silently
-    // drop those everyday selections.
     const { container, added, uncaught } = await mount('redline');
     const { first, second } = paragraphs(container);
     const selection = select(first.firstChild!, 0, second, 0);
     expect(selection.isCollapsed).toBe(false);
-    // Read before the gesture: committing in redline mode clears the selection.
     const quote = selection.toString();
     expect(quote.trim()).not.toBe('');
 
@@ -278,7 +225,6 @@ describe('useAnnotationHighlighter: a selection with nothing to quote (#881)', (
   });
 });
 
-/** A draft written before the guard existed, or by any other producer. */
 const BLANK_ROW: Annotation = {
   id: 'blank1',
   blockId: 'block-1',
@@ -317,7 +263,6 @@ describe('useAnnotationHighlighter: restoring a stored blank quote (#881)', () =
     expect(last!.attempted).not.toContain(BLANK_ROW.id);
     expect(last!.unanchored).not.toContain(BLANK_ROW.id);
     expect(container.querySelector(`[data-bind-id="${BLANK_ROW.id}"]`)).toBeNull();
-    // The valid row beside it is untouched by the skip.
     expect(last!.attempted).toContain(REAL_ROW.id);
     expect(last!.unanchored).not.toContain(REAL_ROW.id);
     expect(container.querySelector(`[data-bind-id="${REAL_ROW.id}"]`)?.textContent).toBe(SECOND);

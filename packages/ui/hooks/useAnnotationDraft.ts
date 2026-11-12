@@ -1,19 +1,3 @@
-/**
- * Auto-save annotation drafts to the server.
- *
- * Stores full Annotation[] objects directly (preserving all fields
- * including `source`, `id`, offsets, and meta). On mount, checks for
- * an existing draft and exposes banner state for the UI to offer restoration.
- *
- * Direct edits persist alongside annotations: the host supplies a
- * `getEditedMarkdown` getter (the live editor buffer or last committed edit,
- * null when none) and calls `scheduleDraftSave()` on edit activity. The
- * getter is read at save time, not reactively, so per-keystroke saves don't
- * require pushing the full document through React state.
- *
- * Backward compatible: loads old tuple-serialized drafts via fromShareable().
- */
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SourceSaveCapability } from '@plannotator/core/source-save';
 import type { Annotation, CodeAnnotation, ImageAttachment } from '../types';
@@ -22,54 +6,16 @@ import type { ShareableAnnotation } from '../utils/sharing';
 
 const DEBOUNCE_MS = 500;
 
-/**
- * Transport for persisting annotation/edit drafts. The default reproduces
- * Plannotator's `/api/draft` server protocol verbatim. A host (e.g. Workspaces)
- * may override it to persist drafts through its own backend.
- *
- * CONTRACT — a host overriding this MUST preserve the 3-party generation
- * protocol or ghost drafts resurrect:
- *  - `save` must be best-effort on page close (the default uses `keepalive`
- *    with a retry-without-keepalive on failure, gated by a generation match).
- *  - `remove(generation)` is a generation-gated TOMBSTONE: the host's store
- *    must reject any later `save` whose `draftGeneration` is <= the deleted
- *    generation (delete-on-submit + tombstoning). The hook pre-increments
- *    `draftGeneration` and threads `getDraftGeneration()` out to the host,
- *    which sends it on approve/deny/feedback/exit so the server deletes the
- *    draft with the right generation. Drop this and a debounced save landing
- *    after submit re-creates a draft the server just deleted.
- *  - `load` returns the raw stored body (or null) plus the generation the
- *    store reports when there is NO draft (the default reads `draftGeneration`
- *    from the 404 body) so the client can resume past a tombstone.
- *  - `save` MAY resolve `{ staleGeneration }` when the store refused the body
- *    as stale (the default reads it from a `409 { draftGeneration }` that is
- *    not marked `decided: true`, which
- *    annotate servers answer when the file's path copy was deleted or moved
- *    ahead by another session). The hook then raises its counter above that
- *    generation and saves again, once. Resolving nothing keeps the old
- *    behavior, so a host transport that never refuses needs no change.
- */
 export interface DraftTransport {
-  /** GET the draft. `data` is the raw stored body (null if none). `generation`
-      is the store's reported generation when there is no draft (null otherwise). */
   load(): Promise<{ data: unknown | null; generation: number | null }>;
-  /** Persist the draft body. `keepalive` requests best-effort delivery on close.
-      Resolves `{ staleGeneration }` when the store refused the body as stale. */
   save(body: object, opts: { keepalive: boolean }): Promise<void | DraftSaveRefused>;
-  /** Generation-gated tombstone delete. */
   remove(generation: number, opts: { keepalive: boolean }): Promise<void>;
 }
 
-/** A save the store refused as stale: the highest generation it knows. */
 export interface DraftSaveRefused {
   staleGeneration: number;
 }
 
-/**
- * Default transport — Plannotator's `/api/draft` fetches, moved verbatim.
- * `save` rejects on failure (the keepalive retry stays in the hook so its
- * generation-match gate is preserved); `remove` always resolves.
- */
 const defaultDraftTransport: DraftTransport = {
   async load() {
     const res = await fetch('/api/draft');
@@ -89,8 +35,6 @@ const defaultDraftTransport: DraftTransport = {
       async (res): Promise<void | DraftSaveRefused> => {
         if (res.status !== 409) return;
         const data = (await res.json().catch(() => null)) as (MissingDraftData & { decided?: boolean }) | null;
-        // The review was decided: saving again would put back comments that
-        // were just sent, so a decided refusal is never retried.
         if (data?.decided === true) return;
         const staleGeneration = readDraftGeneration(data?.draftGeneration);
         return staleGeneration !== null ? { staleGeneration } : undefined;
@@ -107,17 +51,14 @@ const defaultDraftTransport: DraftTransport = {
 
 let draftTransport: DraftTransport = defaultDraftTransport;
 
-/** Read the active draft transport at call time (so a late override is honored). */
 export function getDraftTransport(): DraftTransport {
   return draftTransport;
 }
 
-/** Override the draft transport. Call once at app startup. */
 export function setDraftTransport(t: DraftTransport): void {
   draftTransport = t;
 }
 
-/** Reset to the default `/api/draft` transport. Mainly for tests. */
 export function resetDraftTransport(): void {
   draftTransport = defaultDraftTransport;
 }
@@ -144,34 +85,20 @@ export interface DraftSavedFileChange {
   sourceSave: DraftSourceSaveCapability;
 }
 
-/**
- * A linked document's saved comments, offered with the session draft. The
- * server writes this list (`documents` on GET /api/draft, plan review and
- * annotate sessions on a URL or the last message: packages/shared/annotate-draft.ts);
- * the hook never sends it. Each entry belongs to the document at `path`, not
- * to the session's root.
- */
 export interface DraftDocumentCopy {
   path: string;
   annotations: Annotation[];
   globalAttachments: ImageAttachment[];
 }
 
-/** New format: full objects. */
 interface DraftData {
   annotations: Annotation[];
   codeAnnotations?: CodeAnnotation[];
   globalAttachments: ImageAttachment[];
-  /** Direct-edit document text. Present only when it differs from the
-      as-submitted baseline ('' is a real value: a committed emptied doc). */
   editedMarkdown?: string;
-  /** Source-backed direct edits for folder/single-file annotate sessions. */
   editedDocuments?: DraftEditedDocument[];
-  /** Source-backed edits that were already saved to disk but not sent yet. */
   savedFileChanges?: DraftSavedFileChange[];
-  /** Client-side generation used to ignore stale saves after a draft delete. */
   draftGeneration?: number;
-  /** Server-written on load only: other documents' saved comments. */
   documents?: unknown;
   ts: number;
 }
@@ -181,7 +108,6 @@ interface MissingDraftData {
   draftGeneration?: number;
 }
 
-/** Old format: compact tuples (for backward compat on load). */
 interface LegacyDraftData {
   a: ShareableAnnotation[];
   g?: unknown[];
@@ -268,7 +194,6 @@ function isDraftSourceSaveCapability(value: unknown): value is DraftSourceSaveCa
   );
 }
 
-/** The server's `documents` list: entries with a path and at least one comment or attachment. */
 function parseDraftDocuments(value: unknown): DraftDocumentCopy[] {
   if (!Array.isArray(value)) return [];
   const documents: DraftDocumentCopy[] = [];
@@ -309,12 +234,8 @@ interface UseAnnotationDraftOptions {
   annotations: Annotation[];
   codeAnnotations?: CodeAnnotation[];
   globalAttachments: ImageAttachment[];
-  /** Current direct-edit text (live buffer or last commit), or null when the
-      document matches the as-submitted baseline. Read at save time. */
   getEditedMarkdown?: () => string | null;
-  /** Current dirty source-backed documents. Read at save time. */
   getEditedDocuments?: () => DraftEditedDocument[];
-  /** Current saved source-backed edits. Read at save time. */
   getSavedFileChanges?: () => DraftSavedFileChange[];
   isApiMode: boolean;
   isSharedSession: boolean;
@@ -328,40 +249,24 @@ interface RestoredDraft {
   editedMarkdown: string | null;
   editedDocuments: DraftEditedDocument[];
   savedFileChanges: DraftSavedFileChange[];
-  /** Other documents' saved comments, each for the document at its path.
-      `annotations` / `globalAttachments` above are the root document's. */
   documents: DraftDocumentCopy[];
 }
 
-/** What the Draft Recovered banner says it found. */
 export interface DraftBanner {
   count: number;
   timeAgo: string;
   hasEdits: boolean;
-  /** How many other documents hold comments (absent: the root's alone). */
   documents?: number;
-  /** How many of `count` are on those other documents. */
   documentComments?: number;
 }
 
 interface UseAnnotationDraftResult {
-  /** `count` includes the other documents' comments; `documents` is how many
-      other documents hold some and `documentComments` how many of `count`
-      they hold (both absent when the draft is the root's alone). */
   draftBanner: DraftBanner | null;
   restoreDraft: () => RestoredDraft;
-  /** Debounced save trigger for changes the reactive deps can't see
-      (editor keystrokes, edit commit/discard). Stable identity. */
   scheduleDraftSave: () => void;
   scheduleDraftSaveAfterSubmitFailure: () => void;
   getDraftGeneration: () => number;
-  /** Discard the offered draft. Returns the other documents' comments that
-      were offered with it (empty for a root-only draft), so the host can
-      discard their copies too. */
   dismissDraft: () => DraftDocumentCopy[];
-  /** Send a pending (debounced) save now, if there is one. For a session
-      that ends WITHOUT a decision body (the agent closed it): the comment
-      typed just before must still reach the kept draft. */
   flushPendingSave: () => void;
 }
 
@@ -382,15 +287,12 @@ export function useAnnotationDraft({
   const hasMountedRef = useRef(false);
   const draftGenerationRef = useRef(0);
 
-  // Latest-values ref so the stable scheduleDraftSave reads current data when
-  // the debounce fires, without re-creating callbacks per keystroke.
   const latestRef = useRef({ annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments, getSavedFileChanges });
   latestRef.current = { annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments, getSavedFileChanges };
   const canPersist = isApiMode && !isSharedSession && !submitted;
   const canPersistRef = useRef(canPersist);
   canPersistRef.current = canPersist;
 
-  // Load draft on mount
   useEffect(() => {
     if (!isApiMode || isSharedSession) return;
 
@@ -412,11 +314,9 @@ export function useAnnotationDraft({
         let restoredGlobal: ImageAttachment[];
 
         if (isLegacyDraft(data)) {
-          // Old tuple format — deserialize via fromShareable
           restoredAnnotations = data.a.length > 0 ? fromShareable(data.a, data.d) : [];
           restoredGlobal = data.g ? (parseShareableImages(data.g as Parameters<typeof parseShareableImages>[0]) ?? []) : [];
         } else if (Array.isArray(data.annotations)) {
-          // New direct-object format
           const generation = readDraftGeneration(data.draftGeneration);
           if (generation !== null) {
             draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
@@ -482,9 +382,6 @@ export function useAnnotationDraft({
   }, [isApiMode, isSharedSession]);
 
   const persistNow = useCallback((keepalive: boolean, retried = false) => {
-    // Re-check: the session may have been submitted while the debounce was
-    // pending — a save landing after submit would resurrect a draft the
-    // server just deleted, ghosting it into the next session for this plan.
     if (!canPersistRef.current) return;
     const { annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments, getSavedFileChanges } = latestRef.current;
     const editedMarkdown = getEditedMarkdown?.() ?? null;
@@ -492,9 +389,6 @@ export function useAnnotationDraft({
     const savedFileChanges = getSavedFileChanges?.() ?? [];
 
     if (annotations.length === 0 && codeAnnotations.length === 0 && globalAttachments.length === 0 && editedMarkdown === null && editedDocuments.length === 0 && savedFileChanges.length === 0) {
-      // Everything was cleared (last annotation removed, edits discarded).
-      // A stale draft left on disk would offer back content the user
-      // explicitly threw away.
       const deletedGeneration = draftGenerationRef.current + 1;
       draftGenerationRef.current = deletedGeneration;
       getDraftTransport().remove(deletedGeneration, { keepalive }).catch(() => {});
@@ -514,14 +408,6 @@ export function useAnnotationDraft({
       ts: Date.now(),
     };
 
-    // The transport moves the POST behind the seam; the keepalive retry-on-failure
-    // gate stays in the hook verbatim so a host transport that resolves/rejects on
-    // failure still won't resurrect a superseded save.
-    // A refused (stale) save means the store moved past this tab's counter:
-    // another session on the same file decided or saved ahead of it. Adopt
-    // the store's generation and save again, so the reviewer's comments are
-    // not silently left unsaved. Only while this is still the latest save,
-    // and only once per save.
     const retryIfRefused = (result: void | DraftSaveRefused) => {
       if (!result || retried) return;
       if (!canPersistRef.current || draftGenerationRef.current !== draftGeneration) return;
@@ -530,12 +416,9 @@ export function useAnnotationDraft({
     };
 
     getDraftTransport().save(payload, { keepalive }).then(retryIfRefused, () => {
-      // Chromium caps keepalive bodies (~64KB); retry without it. Completes
-      // fine when the page was only backgrounded, best-effort on close.
       if (keepalive && canPersistRef.current && draftGenerationRef.current === draftGeneration) {
         getDraftTransport().save(payload, { keepalive: false }).then(retryIfRefused, () => {});
       }
-      // Otherwise silent failure — draft is best-effort.
     });
   }, []);
   const persistNowRef = useRef(persistNow);
@@ -566,10 +449,6 @@ export function useAnnotationDraft({
     persistNow(false);
   }, [persistNow]);
 
-  // Flush a pending save when the page is backgrounded or closed — otherwise
-  // the last debounce window of typing is lost on tab close, and reopening
-  // the (still-running) session would restore a draft missing those
-  // keystrokes. Only fires when a save is actually pending.
   useEffect(() => {
     const flush = () => {
       if (timerRef.current === null) return;
@@ -588,17 +467,12 @@ export function useAnnotationDraft({
     };
   }, [persistNow]);
 
-  // Debounced auto-save on content changes. The submitted/isSubmitting gate is
-  // read inside the effect, but it is deliberately not a trigger: when a submit
-  // attempt finishes and flips the gate back open, we should not recreate a
-  // draft that was just deleted unless the user actually changes feedback again.
   useEffect(() => {
     if (!isApiMode || isSharedSession || submitted) return;
     if (!hasMountedRef.current) return;
     scheduleDraftSave();
   }, [annotations, codeAnnotations, globalAttachments, isApiMode, isSharedSession, scheduleDraftSave]);
 
-  // Clear any pending save on unmount.
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);

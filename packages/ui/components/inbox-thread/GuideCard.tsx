@@ -1,9 +1,3 @@
-/**
- * A guided review at the foot of the message that carries it (the record's
- * 4.1): like any attachment, with its sections, files and line counts, and
- * Open, which takes the window with Plannotator's guide viewer.
- */
-
 import type { InboxGuideRef } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { Icon } from './icons';

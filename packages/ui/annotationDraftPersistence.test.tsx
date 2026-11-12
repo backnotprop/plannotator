@@ -1,17 +1,3 @@
-/**
- * End-to-end draft persistence tests for direct edits (Phase 2a of #887).
- *
- * These run the REAL stack at both ends: the actual useAnnotationDraft hook
- * mounted in React on one side, and the actual saveDraft/loadDraft/deleteDraft
- * disk layer (packages/shared/draft.ts) on the other, joined by a fetch shim
- * that mirrors the servers' /api/draft pass-through handlers. Every test is a
- * full cycle — save → bytes on disk → reload in a fresh mount → restore — so
- * a serialization change, a guard regression, or a wire-format drift fails
- * here, not in a user's browser.
- *
- * Requires DOM_TESTS=1 (happy-dom preload). Run:
- *   DOM_TESTS=1 bun test annotationDraftPersistence
- */
 import { describe, test, expect, beforeAll, afterAll, afterEach } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -25,10 +11,6 @@ import { saveDraft, loadDraft, deleteDraft, contentHash, getDraftGeneration } fr
 
 const hasDom = typeof document !== 'undefined';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
 const PLAN = `# Test Plan
 
 * star bullet
@@ -40,8 +22,6 @@ const a = 1;
 \`\`\`
 `;
 
-// Deliberately gnarly: fence edits, trailing space, unicode, smart quotes.
-// The round trip must be byte-identical or the Direct Edits diff lies.
 const EDITED = `# Test Plan
 
 * star bullet — edited
@@ -92,14 +72,8 @@ const SAVED_FILE_CHANGE: DraftSavedFileChange = {
   sourceSave: SOURCE_SAVE,
 };
 
-// Server-side draft key: contentHash of the as-submitted plan, exactly as
-// packages/server/index.ts computes it.
 const DRAFT_KEY = contentHash(PLAN);
-const DEBOUNCE_WAIT_MS = 650; // hook debounce is 500ms
-
-// ---------------------------------------------------------------------------
-// Real-disk fetch shim (mirrors the /api/draft handlers in all three servers)
-// ---------------------------------------------------------------------------
+const DEBOUNCE_WAIT_MS = 650;
 
 const realFetch = globalThis.fetch;
 let dataDir = '';
@@ -159,10 +133,6 @@ afterEach(() => {
   deleteDraft(DRAFT_KEY);
 });
 
-// ---------------------------------------------------------------------------
-// Hook harness
-// ---------------------------------------------------------------------------
-
 type HookOptions = Parameters<typeof useAnnotationDraft>[0];
 type HookResult = ReturnType<typeof useAnnotationDraft>;
 
@@ -188,7 +158,6 @@ interface Session {
 
 const tick = (ms: number) => act(async () => new Promise((r) => setTimeout(r, ms)));
 
-/** Mounts a fresh hook instance and flushes the on-mount draft GET. */
 async function mountSession(opts: HookOptions): Promise<Session> {
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -198,7 +167,7 @@ async function mountSession(opts: HookOptions): Promise<Session> {
     root = createRoot(host);
     root.render(<Harness opts={opts} resultRef={resultRef} />);
   });
-  await tick(0); // let the GET .then chain settle (sets hasMountedRef)
+  await tick(0);
   return {
     result: resultRef,
     rerender: async (next: HookOptions) => {
@@ -215,13 +184,8 @@ async function mountSession(opts: HookOptions): Promise<Session> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('direct-edit draft persistence', () => {
   test.skipIf(!hasDom)('full lifecycle: edits + annotation persist to disk and survive a reload', async () => {
-    // Session 1: an annotation exists and the user has direct edits.
     const s1 = await mountSession(options({
       annotations: [ANNOTATION],
       getEditedMarkdown: () => EDITED,
@@ -230,14 +194,12 @@ describe('direct-edit draft persistence', () => {
     await tick(DEBOUNCE_WAIT_MS);
     await s1.unmount();
 
-    // The bytes on disk are the contract between sessions.
     const onDisk = loadDraft(DRAFT_KEY) as Record<string, unknown> | null;
     expect(onDisk).not.toBeNull();
     expect(onDisk!.annotations).toEqual([ANNOTATION]);
     expect(onDisk!.editedMarkdown).toBe(EDITED);
     expect(typeof onDisk!.ts).toBe('number');
 
-    // Session 2: fresh page — no in-memory state, only the draft on disk.
     const s2 = await mountSession(options());
     expect(s2.result.current!.draftBanner).toEqual({
       count: 1,
@@ -250,13 +212,12 @@ describe('direct-edit draft persistence', () => {
       restored = s2.result.current!.restoreDraft();
     });
     expect(restored!.annotations).toEqual([ANNOTATION]);
-    expect(restored!.editedMarkdown).toBe(EDITED); // byte-identical
+    expect(restored!.editedMarkdown).toBe(EDITED);
     expect(s2.result.current!.draftBanner).toBeNull();
     await s2.unmount();
   });
 
   test.skipIf(!hasDom)('edits-only draft saves despite zero annotations and banners as edits', async () => {
-    // Regression trap: the old all-empty skip guard would have dropped this.
     const s1 = await mountSession(options({ getEditedMarkdown: () => EDITED }));
     act(() => s1.result.current!.scheduleDraftSave());
     await tick(DEBOUNCE_WAIT_MS);
@@ -410,16 +371,14 @@ describe('direct-edit draft persistence', () => {
   });
 
   test.skipIf(!hasDom)('discarding everything deletes the draft from disk', async () => {
-    // The user committed edits, then discarded them (no annotations either).
-    // A stale draft must not resurrect the discarded content on refresh.
     const edits: { value: string | null } = { value: EDITED };
     const session = await mountSession(options({ getEditedMarkdown: () => edits.value }));
     act(() => session.result.current!.scheduleDraftSave());
     await tick(DEBOUNCE_WAIT_MS);
     expect(loadDraft(DRAFT_KEY)).not.toBeNull();
 
-    edits.value = null; // discard (App's handleDiscardEdits nulls the ref…)
-    act(() => session.result.current!.scheduleDraftSave()); // …then schedules
+    edits.value = null;
+    act(() => session.result.current!.scheduleDraftSave());
     await tick(DEBOUNCE_WAIT_MS);
     expect(loadDraft(DRAFT_KEY)).toBeNull();
     await session.unmount();
@@ -465,18 +424,16 @@ describe('direct-edit draft persistence', () => {
   });
 
   test.skipIf(!hasDom)('closing the page flushes a pending save — no lost debounce window', async () => {
-    // Tab close inside the 500ms debounce would silently drop the last
-    // keystrokes; pagehide/visibilitychange must flush the pending save.
     const session = await mountSession(options({
       annotations: [ANNOTATION],
       getEditedMarkdown: () => EDITED,
     }));
     act(() => session.result.current!.scheduleDraftSave());
-    expect(loadDraft(DRAFT_KEY)).toBeNull(); // debounce hasn't elapsed
+    expect(loadDraft(DRAFT_KEY)).toBeNull();
     await act(async () => {
       window.dispatchEvent(new Event('pagehide'));
     });
-    await tick(0); // immediate — far inside the 500ms window
+    await tick(0);
     const onDisk = loadDraft(DRAFT_KEY) as Record<string, unknown> | null;
     expect(onDisk).not.toBeNull();
     expect(onDisk!.editedMarkdown).toBe(EDITED);
@@ -484,15 +441,11 @@ describe('direct-edit draft persistence', () => {
   });
 
   test.skipIf(!hasDom)('submitting cancels a pending save — no ghost draft after approve', async () => {
-    // The server deletes the draft when handling approve/deny. A debounced
-    // save landing after that would re-create it and ghost a "Draft
-    // Recovered" banner into the NEXT session for this same plan.
     const session = await mountSession(options({
       annotations: [ANNOTATION],
       getEditedMarkdown: () => EDITED,
     }));
     act(() => session.result.current!.scheduleDraftSave());
-    // Submit lands inside the debounce window.
     await session.rerender(options({
       annotations: [ANNOTATION],
       getEditedMarkdown: () => EDITED,

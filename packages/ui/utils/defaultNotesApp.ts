@@ -1,10 +1,3 @@
-/**
- * Default Notes App Preference
- *
- * Stores the user's preferred notes app for the Cmd/Ctrl+S shortcut.
- * Uses cookies (not localStorage) because each hook invocation runs on a random port.
- */
-
 import { storage } from './storage';
 
 const STORAGE_KEY = 'plannotator-default-notes-app';

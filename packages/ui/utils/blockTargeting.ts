@@ -1,13 +1,6 @@
 import { getScrollViewportRect } from '../hooks/useScrollViewport';
 import { createTextRange } from './domSelection';
 
-/**
- * Semantic document targeting shared by pointer Pinpoint and Vim navigation.
- *
- * The graph is rebuilt from the live rendered document whenever a consumer
- * needs it. Callers persist stable keys, never DOM nodes, across renders.
- */
-/** Elements that never participate in document targeting. */
 const SKIP_SELECTORS = [
   '.annotation-toolbar',
   '.annotation-highlight',
@@ -17,13 +10,10 @@ const SKIP_SELECTORS = [
 ].join(',');
 
 const INLINE_TARGET_SELECTOR = 'strong,em,a,code:not(.pn-code)';
-/** A `:::question` card (`QuestionBlock`): one block whose text is in parts. */
 const QUESTION_CARD_SELECTOR = 'fieldset.question-block';
-/** The card's text parts: the prompt, the context, and each choice's text. */
 const QUESTION_PART_SELECTOR = '[data-question-part]';
 const TABLE_EDGE_ZONE = 22;
 
-/** The semantic kind of a document target. */
 export type SemanticTargetKind =
   | 'group'
   | 'block'
@@ -34,7 +24,6 @@ export type SemanticTargetKind =
   | 'code'
   | 'math';
 
-/** A stable semantic target resolved to its current live DOM element. */
 export interface SemanticTarget {
   readonly key: string;
   readonly blockId: string;
@@ -46,20 +35,14 @@ export interface SemanticTarget {
   readonly columnIndex?: number;
 }
 
-/**
- * One projection of the rendered document used by pointer hit-testing,
- * keyboard traversal, hierarchy refinement, overlays, and annotation actions.
- */
 export interface SemanticTargetGraph {
   readonly container: HTMLElement;
   readonly targets: readonly SemanticTarget[];
   readonly byKey: ReadonlyMap<string, SemanticTarget>;
   readonly byElement: ReadonlyMap<HTMLElement, SemanticTarget>;
-  /** One entry per rendered Markdown block, in document order. */
   readonly blockKeys: readonly string[];
 }
 
-/** Motions available while navigating the semantic target graph. */
 export type SemanticTargetMotion =
   | 'previous-block'
   | 'next-block'
@@ -70,7 +53,6 @@ export type SemanticTargetMotion =
   | 'first-block'
   | 'last-block';
 
-/** Pointer coordinates used for table edge-zone targeting. */
 export interface SemanticPointerPosition {
   readonly clientX: number;
   readonly clientY: number;
@@ -137,9 +119,6 @@ function groupLabel(group: HTMLElement): string {
 }
 
 function listContentElement(block: HTMLElement): HTMLElement | null {
-  // A question card also starts with a `select-none` child (its eyebrow), so
-  // without this its second child, the prompt, stood in for the whole card:
-  // every pinpoint hover or click inside it resolved to the prompt.
   if (block.matches(QUESTION_CARD_SELECTOR)) return null;
   if (!block.querySelector('.select-none')) return null;
   return block.children[1] instanceof HTMLElement ? block.children[1] : null;
@@ -182,12 +161,6 @@ function addInlineTargets(
   });
 }
 
-/**
- * Build the canonical semantic target graph for a rendered Markdown document.
- *
- * Each `[data-block-id]` contributes exactly one block-navigation entry.
- * Groups, table rows/cells, and inline formatting become hierarchy nodes.
- */
 export function buildSemanticTargetGraph(container: HTMLElement): SemanticTargetGraph {
   const targets: SemanticTarget[] = [];
   const byElement = new Map<HTMLElement, SemanticTarget>();
@@ -216,8 +189,6 @@ export function buildSemanticTargetGraph(container: HTMLElement): SemanticTarget
     const group = block.closest<HTMLElement>('[data-pinpoint-group]');
     const parentKey = group ? groupTargets.get(group)?.key ?? null : null;
 
-    // First: a card's context can hold a table, a code fence or a formula,
-    // and the card is still one question block made of its parts.
     if (block.matches(QUESTION_CARD_SELECTOR)) {
       const prompt = block.querySelector<HTMLElement>('[data-question-part="prompt"]');
       const cardTarget: SemanticTarget = {
@@ -247,14 +218,8 @@ export function buildSemanticTargetGraph(container: HTMLElement): SemanticTarget
       continue;
     }
 
-    // A quote is one text block even when it holds a code fence or a table:
-    // its fence is not a code-block target (whose click would annotate only
-    // the fence), and its table rows are not cells of the quote.
     const isQuote = block.tagName === 'BLOCKQUOTE';
     const codeElement = isQuote ? null : block.querySelector<HTMLElement>('pre > code.pn-code');
-    // Inline math in a quote keeps the paragraph rule (the quote targets the
-    // formula, as a paragraph with inline math does); a display-math block
-    // inside a quote is not the quote.
     const mathElement = block.matches('.math-annotatable,[data-math-tex]')
       ? block
       : block.querySelector<HTMLElement>(
@@ -371,7 +336,6 @@ export function buildSemanticTargetGraph(container: HTMLElement): SemanticTarget
   };
 }
 
-/** Resolve a stable target key against a freshly built graph. */
 export function resolveSemanticTarget(
   graph: SemanticTargetGraph,
   key: string | null,
@@ -379,19 +343,12 @@ export function resolveSemanticTarget(
   return key ? graph.byKey.get(key) ?? null : null;
 }
 
-/**
- * Create the annotation range owned by a semantic target.
- *
- * Code and math targets use their existing specialized annotation paths;
- * every text-bearing graph node resolves through this one range seam.
- */
 export function createSemanticTargetRange(target: SemanticTarget): Range | null {
   return target.kind === 'code' || target.kind === 'math'
     ? null
     : createTextRange(target.element);
 }
 
-/** Return the direct semantic children of a target in document order. */
 export function getSemanticTargetChildren(
   graph: SemanticTargetGraph,
   target: SemanticTarget,
@@ -399,7 +356,6 @@ export function getSemanticTargetChildren(
   return graph.targets.filter((candidate) => candidate.parentKey === target.key);
 }
 
-/** Return the block-navigation target that owns a nested semantic target. */
 export function getOwningBlockTarget(
   graph: SemanticTargetGraph,
   target: SemanticTarget,
@@ -417,7 +373,6 @@ export function getOwningBlockTarget(
     ?? target;
 }
 
-/** Pick the block nearest the visible center of the document viewport. */
 export function findInitialSemanticTarget(
   graph: SemanticTargetGraph,
   scrollViewport?: HTMLElement | null,
@@ -437,9 +392,6 @@ export function findInitialSemanticTarget(
     })[0] ?? null;
 }
 
-/**
- * Move through block order, sibling order, or one hierarchy level.
- */
 export function moveSemanticTarget(
   graph: SemanticTargetGraph,
   current: SemanticTarget,
@@ -493,10 +445,6 @@ function rowAtY(table: HTMLTableElement, clientY: number): HTMLTableRowElement |
   }) ?? null;
 }
 
-/**
- * Resolve the pointer's semantic target from the same graph used by keyboard
- * navigation. Table edge zones select table/row scope; content selects cells.
- */
 export function resolveSemanticTargetAtPoint(
   graph: SemanticTargetGraph,
   pointerTarget: HTMLElement,
@@ -514,8 +462,6 @@ export function resolveSemanticTargetAtPoint(
   if (!block || !graph.container.contains(block) || block.tagName === 'HR') return null;
   const blockTarget = targetForBlock(graph, block);
   if (!blockTarget) return null;
-  // A question card's code fences and tables live in its context part; the
-  // part lookup below resolves them.
   const card = block.matches(QUESTION_CARD_SELECTOR);
 
   const code = card ? null : block.querySelector<HTMLElement>('pre > code.pn-code');
@@ -546,8 +492,6 @@ export function resolveSemanticTargetAtPoint(
     if (inlineTarget) return inlineTarget;
   }
 
-  // Inside a question card: the part under the pointer. A choice row's
-  // padding and marker belong to that choice's text.
   const part = pointerTarget.closest<HTMLElement>(QUESTION_PART_SELECTOR)
     ?? pointerTarget.closest<HTMLElement>('[data-question-option]')?.querySelector<HTMLElement>(QUESTION_PART_SELECTOR);
   if (part && block.contains(part)) {
@@ -562,12 +506,6 @@ export function resolveSemanticTargetAtPoint(
   return blockTarget;
 }
 
-/**
- * Backward-compatible pointer result used by existing Pinpoint consumers.
- *
- * New code should retain the semantic target itself so pointer and keyboard
- * paths share its stable key and hierarchy.
- */
 export interface PinpointTarget {
   readonly element: HTMLElement;
   readonly blockId: string;
@@ -575,7 +513,6 @@ export interface PinpointTarget {
   readonly isCodeBlock: boolean;
 }
 
-/** Resolve a pointer target through the canonical semantic graph. */
 export function resolvePinpointTarget(
   target: HTMLElement,
   container: HTMLElement,
