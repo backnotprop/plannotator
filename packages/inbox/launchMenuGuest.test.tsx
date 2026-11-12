@@ -1,10 +1,11 @@
 /**
- * A launched thread on a tailnet guest's page: no Stop and no Delete in its ⋯,
- * and no Stop or Try again on its run line, as the server answers all of them
- * `owner_only` (inbox-tailnet-owner.test.ts). The owner keeps every one.
+ * A launched thread on a tailnet guest's page: Stop and Delete in its ⋯ and
+ * Stop on its run line, as on the owner's (owner ruling 2026-11-11); only Try
+ * again, which starts an agent, stays the owner's (the server answers it
+ * `owner_only`, inbox-tailnet-owner.test.ts).
  *
- * The failure this catches: a guest pressing one only to get an error, or the
- * owner losing one.
+ * The failure this catches: a guest losing Stop or Delete again, a guest
+ * offered Try again only to get an error, or the owner losing one.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -126,9 +127,9 @@ async function launchItems(guest: boolean): Promise<string[]> {
   return items;
 }
 
-test.skipIf(!hasDom)("a tailnet guest's ⋯ has no Stop or Delete for a launched agent; the owner's over the tailnet keeps both", async () => {
+test.skipIf(!hasDom)("a tailnet guest's ⋯ has Stop and Delete for a launched agent, as the owner's over the tailnet does", async () => {
   expect(await launchItems(false)).toEqual(['stop', 'delete']);
-  expect(await launchItems(true)).toEqual([]);
+  expect(await launchItems(true)).toEqual(['stop', 'delete']);
 });
 
 const runOf = (over: Partial<InboxRun>): InboxRun =>
@@ -143,15 +144,15 @@ async function runButtons(guest: boolean, run: InboxRun): Promise<string[]> {
   return buttons;
 }
 
-test.skipIf(!hasDom)("a tailnet guest's run line has no Stop (working, or waiting on a prompt) and no Try again (failed); the owner's keeps them", async () => {
+test.skipIf(!hasDom)("a tailnet guest's run line has Stop (working, or waiting on a prompt) and no Try again (failed); the owner's has both", async () => {
   const working = runOf({ state: 'working' });
   const waiting = runOf({ state: 'waiting_terminal' });
   const failed = runOf({ state: 'failed', cause: 'Claude Code exited.' });
   expect(await runButtons(false, working)).toEqual(['stop']);
   expect(await runButtons(false, waiting)).toEqual(['stop']);
   expect(await runButtons(false, failed)).toEqual(['retry']);
-  expect(await runButtons(true, working)).toEqual([]);
-  expect(await runButtons(true, waiting)).toEqual([]);
+  expect(await runButtons(true, working)).toEqual(['stop']);
+  expect(await runButtons(true, waiting)).toEqual(['stop']);
   expect(await runButtons(true, failed)).toEqual([]);
 });
 
@@ -164,8 +165,7 @@ async function stoppedLine(guest: boolean): Promise<string> {
   return text;
 }
 
-test.skipIf(!hasDom)("a stopped session: the owner's line says their reply starts it again; a guest's never does, nor that the guest stopped it", async () => {
+test.skipIf(!hasDom)("a stopped session: every page's line says a reply starts it again, as the server does for anyone's reply", async () => {
   expect(await stoppedLine(false)).toContain('Your reply starts it again.');
-  const guests = await stoppedLine(true);
-  expect(guests).toBe('Claude Code stopped. Your reply waits for it.');
+  expect(await stoppedLine(true)).toContain('Your reply starts it again.');
 });

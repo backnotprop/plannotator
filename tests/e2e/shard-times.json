@@ -41,6 +41,7 @@
   "inbox-choice-labels.spec.ts": 9,
   "inbox-choice-pill.spec.ts": 2,
   "inbox-code-review.spec.ts": 66,
+  "inbox-comment-pictures.spec.ts": 4,
   "inbox-comments-list-webkit.spec.ts": 10,
   "inbox-comments-list.spec.ts": 26,
   "inbox-compose-skill-picker.spec.ts": 10,

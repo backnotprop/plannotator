@@ -12,8 +12,8 @@
  *    code, a phone after expiry, the pairing itself), never its secret or
  *    code.
  *
- * Both answer only this computer's own page: through the tailnet they are
- * `local_only`, and another site's read is `cross_origin`.
+ * Both answer this computer's own page and its owner's over the tailnet; another
+ * allowed tailnet login gets `local_only`, and another site's read is `cross_origin`.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -442,15 +442,17 @@ describe("only this computer's own page reads them", () => {
     }
   });
 
-  test("through the tailnet both are local_only, even for the owner", async () => {
-    const dataDir = world();
+  test("through the tailnet the owner reads both as on the computer; another allowed login is local_only", async () => {
+    const dataDir = world({ inboxTailscaleAllow: ["guest@example.com"] });
     const ts = fakeTailscale();
     const inbox = await start(dataDir, ts.run, { pairingProbes: probes(), publishTailnet: true });
     const listener = inbox.tailscale.listenerPort();
     expect(listener).not.toBeNull();
     for (const path of ["/api/inbox/pairing", "/api/inbox/pairing/checks"]) {
-      const response = await fetch(`http://127.0.0.1:${listener}${path}`, { headers: { Host: `${MAGIC}:${inbox.port}`, "Tailscale-User-Login": OWNER } });
-      expect([path, response.status, ((await response.json()) as Json).code]).toEqual([path, 403, "local_only"]);
+      const as = (login: string) => fetch(`http://127.0.0.1:${listener}${path}`, { headers: { Host: `${MAGIC}:${inbox.port}`, "Tailscale-User-Login": login } });
+      expect([path, (await as(OWNER)).status]).toEqual([path, 200]);
+      const guest = await as("guest@example.com");
+      expect([path, guest.status, ((await guest.json()) as Json).code]).toEqual([path, 403, "local_only"]);
     }
   });
 });

@@ -1,4 +1,5 @@
-import type { Server as HttpServer } from "node:http";
+import type { IncomingMessage, Server as HttpServer } from "node:http";
+import type { Duplex } from "node:stream";
 import { randomBytes } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
@@ -8,7 +9,8 @@ import {
 	type AgentTerminalAgent,
 	type AgentTerminalCapability,
 } from "../generated/agent-terminal.ts";
-import { isRemoteSession } from "./network.ts";
+import { isRemoteSession, isSshDetectedRemote } from "./network.ts";
+import { isSshTunnelRequest } from "./this-machine.ts";
 import type { PtyBackend, PtyExit, PtySession, PtySpawnOptions, Unsubscribe } from "@plannotator/webtui/core";
 
 type WebTuiCore = typeof import("@plannotator/webtui/core");
@@ -17,7 +19,16 @@ type BuildAgentLaunchPlan = WebTuiCore["buildAgentLaunchPlan"];
 
 export type NodeAgentTerminalBridge = {
 	capability: AgentTerminalCapability;
+	/** What /api/plan tells this request: in a remote session only SSH turned on, the terminal for its own tunnel only. */
+	capabilityFor(req: IncomingMessage): AgentTerminalCapability;
 	dispose(): void;
+};
+
+/** What a request that is not an SSH session's own tunnel is told: the terminal is off, as in remote mode. */
+const REMOTE_DISABLED_CAPABILITY: AgentTerminalCapability = {
+	enabled: false,
+	reason: "remote-disabled",
+	message: "Agent terminal is disabled in remote mode. Set PLANNOTATOR_AGENT_TERMINAL_REMOTE=1 to enable it.",
 };
 
 export async function createNodeAgentTerminalBridge(args: {
@@ -32,7 +43,11 @@ export async function createNodeAgentTerminalBridge(args: {
 		});
 	}
 
-	if (isRemoteSession() && !isAgentTerminalRemoteEnabled()) {
+	// A remote session only SSH turned on keeps the terminal for its own tunnel
+	// (a loopback peer, isSshTunnelRequest): /api/plan offers it there, and an
+	// upgrade from any other address is refused before the WebSocket server sees it.
+	const tunnelOnly = isRemoteSession() && !isAgentTerminalRemoteEnabled() && isSshDetectedRemote();
+	if (isRemoteSession() && !isAgentTerminalRemoteEnabled() && !tunnelOnly) {
 		return createDisabledBridge({
 			enabled: false,
 			reason: "remote-disabled",
@@ -88,20 +103,33 @@ export async function createNodeAgentTerminalBridge(args: {
 			}
 		},
 	};
+	const refuseOtherPeers = (req: IncomingMessage, socket: Duplex) => {
+		if (!tunnelOnly || isSshTunnelRequest(req)) return;
+		if (new URL(req.url ?? "/", "http://localhost").pathname !== wsPath) return;
+		socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+		socket.destroy();
+	};
+	// First, so `ws` (which skips a destroyed socket) never upgrades it.
+	if (tunnelOnly) args.server.prependListener("upgrade", refuseOtherPeers);
 	const ptyServer = serverModule.createNodePtyWebSocketServer({
 		server: args.server,
 		path: wsPath,
 		backend,
 	});
 
+	const capability: AgentTerminalCapability = {
+		enabled: true,
+		cwd: args.cwd,
+		wsPath,
+		agents: listAgents(core),
+	};
 	return {
-		capability: {
-			enabled: true,
-			cwd: args.cwd,
-			wsPath,
-			agents: listAgents(core),
+		capability,
+		capabilityFor(req) {
+			return tunnelOnly && !isSshTunnelRequest(req) ? REMOTE_DISABLED_CAPABILITY : capability;
 		},
 		dispose() {
+			if (tunnelOnly) args.server.removeListener("upgrade", refuseOtherPeers);
 			for (const session of sessions) session.kill();
 			sessions.clear();
 			void ptyServer.close().catch(() => {});
@@ -114,6 +142,9 @@ function createDisabledBridge(
 ): NodeAgentTerminalBridge {
 	return {
 		capability,
+		capabilityFor() {
+			return capability;
+		},
 		dispose() {},
 	};
 }
