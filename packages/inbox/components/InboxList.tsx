@@ -1742,6 +1742,7 @@ export function InboxList(props: InboxListProps) {
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
+          phone={props.phone === true}
         >
           {props.stale}
           {props.ask}
