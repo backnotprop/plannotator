@@ -120,6 +120,14 @@
 .ib-cp-startlineb > :is(bdi, s, .ib-cp-on) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-cp-startlineb > svg { flex: none; }
 .ib-cp-startlineb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* Wraps whole onto the next line rather than shrink to its chevron. */
+.ib-cp-startline:has(> .ib-cp-lchbtn) { flex-wrap: wrap; row-gap: 0; }
+.ib-cp-startlineb.ib-cp-lchbtn { flex: none; background: transparent; color: var(--muted-foreground); font-weight: 400; }
+.ib-cp-picker[data-phone].ib-cp-lch { right: 0; }
+.ib-cp-picker[data-phone] .ib-cp-lchcols { grid-auto-flow: row; overflow-y: auto; }
+.ib-cp-picker[data-phone] .ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 0; border-top: 1px solid var(--ib-line); }
+.ib-cp-picker[data-phone] .ib-cp-lchcol { display: grid; }
+.ib-cp-picker[data-phone] .ib-cp-opt.ib-cp-lchopt { display: flex; justify-content: space-between; padding: 0 10px; }
 .ib-cp-hint { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 /* The Launch tip over the row, its arrow pointing down at To. */
 .ib-ctip-arrow[data-side="down"] { top: auto; bottom: -5px; box-shadow: 1px 1px 0 0 var(--ib-ctip-ring); }
@@ -214,3 +222,4 @@
   /* The Launch tip stands over the row, edge to edge in the card. */
   .ib-tour-coach.ib-ctip[data-side="above"] { top: auto; }
 }
+.ib-cp-picker[data-phone] .ib-cp-lchopt .ib-cp-op { color: var(--foreground); font-size: inherit; }

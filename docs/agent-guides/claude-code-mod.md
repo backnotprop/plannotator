@@ -409,7 +409,9 @@ the user's core skills hold the names (Claude Code refuses
 answers the skill's command itself, so the skill's blocking bang line never
 runs; a name nobody holds is registered (`immediate: true`). Arguments are split
 like the skill's shell line (`splitShellWords`: quotes and backslashes, no
-expansion) and passed to the same CLI parsers (`review`, `annotate`; `last`
+expansion; on Windows a backslash and a single quote are plain characters and
+only double quotes group, so `C:\Users\me\O'Brien\plan.md` stays one word, the
+same argv under Git Bash and PowerShell) and passed to the same CLI parsers (`review`, `annotate`; `last`
 runs `annotate-last --stdin`, see the next paragraph). The command returns
 "Opened <subject> in Plannotator · <url>" once the ready file appears (up to
 45 s for review, 15 s otherwise), or the CLI's own startup error. Under the mod
