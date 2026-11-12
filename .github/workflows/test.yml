@@ -305,7 +305,7 @@ jobs:
              && base=$(git rev-parse --verify --quiet 'HEAD^1') \
              && git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
             changed=$(git diff --name-only "$base" HEAD)
-            if grep -Eq '^(apps/guides-show/|packages/(guide-viewer|ui|review-editor|core)/)' <<< "$changed"; then
+            if grep -Eq '^(apps/guides-show/|build/|packages/(guide-viewer|ui|review-editor|core|shared)/)' <<< "$changed"; then
               run=true
             else
               run=false
