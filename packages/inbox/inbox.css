@@ -620,6 +620,17 @@ button.ib-mut { border-radius: 6px; }
 .ib-pinrow:hover .ib-pin, .ib-pinrow:has(:focus-visible) .ib-pin, .ib-pinrow[data-menu] .ib-pin { padding-right: 32px; }
 .ib-pinrow:hover .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow:has(:focus-visible) .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow[data-menu] .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch) { visibility: hidden; position: absolute; }
 .ib-pinrow[data-menu] .ib-pmore { color: var(--foreground); }
+/* A screen that cannot hover (an iPad with no trackpad): ⋯ and "+" are always shown, muted, after the count or the
+   state, which stay (as on a phone, whose rules below take over at its size). A tap's hover then shows nothing new,
+   so iPadOS never takes the row's first tap as a hover. A long name gives way: it ends in "…" before them. */
+@media (hover: none) {
+  .pn-inbox :is(.ib-projrow, .ib-pinrow) .ib-pmore, .pn-inbox .ib-projrow .ib-pplus { opacity: 1; }
+  .ib-projrow > .ib-proj, .ib-projrow:hover > .ib-proj, .ib-projrow:has(:focus-visible) > .ib-proj, .ib-projrow[data-menu] > .ib-proj { padding-right: 32px; }
+  .ib-projrow[data-plus] > .ib-proj, .ib-projrow[data-plus]:hover > .ib-proj, .ib-projrow[data-plus]:has(:focus-visible) > .ib-proj, .ib-projrow[data-plus][data-menu] > .ib-proj { padding-right: 58px; }
+  .ib-projrow .ib-proj .ib-n, .ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { position: static; width: auto; height: auto; margin: 0 0 0 auto; overflow: visible; clip-path: none; }
+  .ib-pinrow > .ib-pin, .ib-pinrow:hover > .ib-pin, .ib-pinrow:has(:focus-visible) > .ib-pin, .ib-pinrow[data-menu] > .ib-pin { padding-right: 32px; }
+  .ib-pinrow:hover .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow:has(:focus-visible) .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow[data-menu] .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch) { visibility: visible; position: static; }
+}
 /* A pinned thread's row in the list: a small pin always on the right, beside the counts (the owner, 2026-10-31).
    On line 3 of three-line and phone rows its auto margin pushes it before the badge and the counts whether the
    preview before it is short or cut (a phone row with nothing else for line 3 keeps it on line 1, before the time).
@@ -1355,6 +1366,10 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-rw[data-menu] :is(.ib-row, .ib-nrow)::before { background: var(--ib-hover) !important; }
 .ib-rw[data-menu] :is(.ib-row, .ib-nrow).ib-sel::before { background: var(--ib-sel-hover) !important; }
 .ib-mrow[data-menu] { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 50%, transparent)); }
+/* A finger held on a row opens its menu (RowMenu.tsx, `longPress`): no iOS callout and no text selection under it.
+   Touch only: a touch screen, or iOS and iPadOS WebKit (a trackpad iPad's primary pointer is fine). */
+@media (pointer: coarse) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@supports (-webkit-touch-callout: none) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
 /* Rows that wait on nobody (Sent, Quiet): the title steps back. Off, a wide row's title takes its row's colour and
    a three-line row's is quiet text. */
 .ib-row[data-section="quiet"] .ib-title { color: var(--ib-quiet-dim, currentcolor); }
@@ -3311,14 +3326,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-phsubj[data-on] { opacity: 1; }
 /* The title's words, as wide as they are (at most the box): its tooltip's anchor, so the tip opens under the words. */
 .ib-phsubj-t { display: inline-block; max-width: 100%; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The read button, an icon (approval "inbox-thread-header"): pressed while the thread is marked read, as Artifacts is
-   pressed over its grid; dimmed when nothing here waits on the person. */
-.pn-inbox .ib-iconbtn.ib-readbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
-.pn-inbox .ib-iconbtn.ib-readbtn:disabled { opacity: 0.45; background: none; }
 .pn-inbox .ib-ptool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
 .pn-inbox .ib-ptool:hover { background: var(--muted); color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
-  .pn-inbox .ib-npill, .ib-phsubj { transition: none; }
+  .pn-inbox .ib-npill, .ib-phsubj, .ib-phead .ib-vsep { transition: none; }
 }
 /* The same pill at the list's edge (ListNewPill.tsx): news came while the list's "N new" line is out of view. Its
    box sits between the header and the rows and takes no room. The pill is 12 px inside the edge the row will land
@@ -3384,6 +3395,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 /* ── Mark read, the skip chip and the toast (design record "inbox-mark-read", 2026-10-11) ── */
 /* The header: Archive (icon) | Mark read (labelled), then the thread's own tools. */
 .ib-phead .ib-vsep { width: 1px; height: 18px; background: var(--ib-line); margin: 0 4px; flex: none; }
+/* The divider after the way back shows only with something after it (the owner, 2026-11-11): it fades in and out
+   with the bar's title, and stays hidden when no title follows. No layout shift: it keeps its room. */
+.ib-phead .ib-vsep:has(+ .ib-sp), .ib-phead .ib-vsep:has(+ .ib-phsubj:not([data-on])) { opacity: 0; }
+.ib-phead .ib-vsep:has(+ .ib-phsubj) { transition: opacity 120ms ease-out; }
 .ib-kbd { font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; line-height: 16px; font-weight: 500; }
 /* The line under the subject while the thread is marked read. */
 .ib-readline { display: flex; align-items: flex-start; gap: 9px; margin: -4px 0 14px; padding: 9px 12px; border-radius: 8px; background: var(--ib-band); font-size: var(--ib-fs-13, 13px); line-height: 1.5; }
@@ -3410,19 +3425,30 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .pn-inbox .ib-ract { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: none; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border-radius: var(--ib-pill-s, 7px); border: 1px solid var(--ib-float-line-s, var(--border)); background: var(--card); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); box-shadow: var(--ib-float-s, 0 4px 12px -6px rgba(0, 0, 0, 0.3)); }
 .pn-inbox .ib-ract:hover { background: var(--ib-ract-hover-s, color-mix(in oklch, var(--muted) 60%, var(--card))); }
 .pn-inbox, .ib-lightscope { --ib-ract-hover-s: var(--ib-soft-hover) color-mix(in oklch, var(--muted) 40%, var(--card)); }
-.ib-rw:hover .ib-ract, .ib-rw:has(:focus-visible) .ib-ract, .ib-rw[data-action-focus] .ib-ract { display: inline-flex; }
+/* The hover half of each rule sits in `@media (hover: hover)`: on a touch screen (iPadOS Safari reports `hover: none`
+   with no trackpad) a tap first applies `:hover`, and a button that appears then turns that tap into a hover, so
+   the row would need a second tap to open. A touch user has Mark read, Mark unread and Send now in the thread. */
+.ib-rw:has(:focus-visible) .ib-ract, .ib-rw[data-action-focus] .ib-ract { display: inline-flex; }
 /* The action covers a one-line row's time and `?N` columns only: the words, the marks and the badge stay. */
-.ib-rw:hover:has(.ib-ract) .ib-row :is(.ib-t, .ib-cq), .ib-rw:has(:focus-visible):has(.ib-ract) .ib-row :is(.ib-t, .ib-cq) { visibility: hidden; }
+.ib-rw:has(:focus-visible):has(.ib-ract) .ib-row :is(.ib-t, .ib-cq) { visibility: hidden; }
 /* On a three-line row the action covers line 1's right end, over the hidden time. It holds no width there: line 1
    wraps like text (approval "list-rows-mail-icons"), so a wider time would re-wrap the project and change the row's
    height under the pointer. A long project's end, or its marks, may sit under the action while it shows. */
-.ib-rw:hover:has(.ib-ract) .ib-nrow .ib-l1 .ib-t, .ib-rw:has(:focus-visible):has(.ib-ract) .ib-nrow .ib-l1 .ib-t { visibility: hidden; }
+.ib-rw:has(:focus-visible):has(.ib-ract) .ib-nrow .ib-l1 .ib-t { visibility: hidden; }
 /* The delivery tick (DeliveryTick.tsx) is the one thing in the time cell that stays reachable while the action shows:
    the time hides, the tick moves to the cell's right edge (`row-reverse`), and the action stops short of it, so the pointer
    can reach the tick and its tooltip (since the toggle of #2437 the action also shows on read rows, which carry ticks). */
-.ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-t .ib-tickt { flex-direction: row-reverse; }
-.ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-t .ib-tick { visibility: visible; }
-.pn-inbox .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-tick) > .ib-ract { right: 32px; }
+.ib-rw:is(:has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-t .ib-tickt { flex-direction: row-reverse; }
+.ib-rw:is(:has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-t .ib-tick { visibility: visible; }
+.pn-inbox .ib-rw:is(:has(:focus-visible), [data-action-focus]):has(.ib-tick) > .ib-ract { right: 32px; }
+@media (hover: hover) {
+  .ib-rw:hover .ib-ract { display: inline-flex; }
+  .ib-rw:hover:has(.ib-ract) .ib-row :is(.ib-t, .ib-cq) { visibility: hidden; }
+  .ib-rw:hover:has(.ib-ract) .ib-nrow .ib-l1 .ib-t { visibility: hidden; }
+  .ib-rw:hover:has(.ib-ract) .ib-t .ib-tickt { flex-direction: row-reverse; }
+  .ib-rw:hover:has(.ib-ract) .ib-t .ib-tick { visibility: visible; }
+  .pn-inbox .ib-rw:hover:has(.ib-tick) > .ib-ract { right: 32px; }
+}
 /* Beside a thread the action sits on line 1, no taller than that line (14 px text at its normal leading, plus
    the 6 px between the action's top and the title's), so at any text size it never reaches the title. */
 .pn-inbox .ib-rw .ib-nrow ~ .ib-ract { top: 8px; transform: none; height: min(26px, calc(var(--ib-fs-14, 14px) * 1.2 + 6px)); }
@@ -3962,9 +3988,12 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-secrow { margin-top: 8px; }
   .pn-inbox .ib-proj-sort { opacity: 1; right: 44px; bottom: 0; width: 44px; height: 44px; border-radius: 8px; }
   .ib-proj-sort .ib-ic { width: 18px; height: 18px; }
+  /* A floating sheet (the ⋯ sheet, a thread's PR sheet): its gap to the screen's sides and bottom edge, and how it
+     rises. Both sheets read these, so they cannot drift apart. */
+  :root { --ib-sheet-inset: 8px; --ib-sheet-rise: ib-pm-up 200ms cubic-bezier(0.23, 1, 0.32, 1); }
   .ib-pm-scrim { display: block; position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 0.3); }
-  .ib-pm-pos[data-phone] { position: fixed !important; left: 8px !important; right: 8px !important; top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom)) !important; transform: none !important; width: auto !important; }
-  .ib-pm-pos[data-phone] .ib-pm { min-width: 0; padding: 6px; border-radius: var(--ib-sheet-corner, 12px); animation: ib-pm-up 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+  .ib-pm-pos[data-phone] { position: fixed !important; left: var(--ib-sheet-inset) !important; right: var(--ib-sheet-inset) !important; top: auto !important; bottom: calc(var(--ib-sheet-inset) + env(safe-area-inset-bottom)) !important; transform: none !important; width: auto !important; }
+  .ib-pm-pos[data-phone] .ib-pm { min-width: 0; padding: 6px; border-radius: var(--ib-sheet-corner, 12px); animation: var(--ib-sheet-rise); }
   @keyframes ib-pm-up { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .ib-pm-pos[data-phone] .ib-pm { animation: none; } }
   .ib-pm-pos[data-phone] .ib-pm-title { display: block; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); padding: 6px 10px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -7805,6 +7834,7 @@ dialog.ib-dlg.ib-thc[open] { animation: ib-thc-in 240ms cubic-bezier(0.23, 1, 0.
 /* Settings → Prompts (design of record .product/approved/inbox-prompts-page/, #2194): the Inbox reminder, shared and per agent, then the plan, review and annotate prompts folded, read-only. */
 .pm-shared { padding: 14px 16px; }
 .pm-head { display: flex; align-items: center; gap: 8px; min-height: 28px; margin-bottom: 8px; }
+.pm-head:last-child { margin-bottom: 0; }
 .pm-sp { flex: 1; }
 .pn-inbox .ib-chip.pm-custom { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 .pm-text { margin: 0; font-family: var(--font-sans); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.6; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; border-radius: var(--ib-rl-sm-s, 8px); background: color-mix(in oklch, var(--foreground) 5%, transparent); border: 1px solid transparent; }
@@ -8843,9 +8873,15 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
    look keeps line 1. */
 .pn-inbox .ib-lk-tbelow .ib-rw .ib-nrow ~ .ib-ract { top: auto; bottom: 10px; }
 .ib-nrow .ib-l4-end { display: contents; }
-.ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-l4-end { visibility: hidden; }
-.pn-inbox .ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-tick) > .ib-ract { right: 12px; }
-.ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-l4 .ib-t .ib-tickt { flex-direction: row; }
+.ib-lk-tbelow .ib-rw:is(:has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-l4-end { visibility: hidden; }
+.pn-inbox .ib-lk-tbelow .ib-rw:is(:has(:focus-visible), [data-action-focus]):has(.ib-tick) > .ib-ract { right: 12px; }
+.ib-lk-tbelow .ib-rw:is(:has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-l4 .ib-t .ib-tickt { flex-direction: row; }
+/* Hover only where the pointer can hover (the list's action, above). */
+@media (hover: hover) {
+  .ib-lk-tbelow .ib-rw:hover:has(.ib-ract) .ib-l4-end { visibility: hidden; }
+  .pn-inbox .ib-lk-tbelow .ib-rw:hover:has(.ib-tick) > .ib-ract { right: 12px; }
+  .ib-lk-tbelow .ib-rw:hover:has(.ib-ract) .ib-l4 .ib-t .ib-tickt { flex-direction: row; }
+}
 /* Dividers (.ib-lk-div): a hairline in the theme's border colour between two rows, inset to the row's text on both
    sides. A separator, never a row's outline: it is the next row's background image at its top edge, under the hover
    and selection pill (3 px inside the row), so it moves nothing and the pill never touches it. */
@@ -10115,8 +10151,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-mthing[data-kind='updating'], .pn-inbox .ib-mthing[data-kind='restarting'], .pn-inbox .ib-mthing[data-kind='failed'], .pn-inbox .ib-mthing[data-kind='not_back'], .pn-inbox .ib-mthing[data-kind='updated'] { color: var(--muted-foreground); font-weight: 450; }
 .pn-inbox .ib-mthing .ib-spin { width: 10px; height: 10px; border-width: 1.5px; }
 .ib-zneeds { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
-.pn-inbox .ib-snooze-blocked { opacity: 0.55; }
-.pn-inbox .ib-snooze-blocked:hover { opacity: 1; }
 .ib-dlg h2.ib-mh2 { display: flex; align-items: center; gap: 8px; }
 .ib-mdone { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); }
 /* An older machine's Update dialog: the ask to an agent there, and the commands folded under it as the fallback. */
@@ -11774,8 +11808,23 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prbtn .ib-prc:has(.ib-cnt) { margin-right: 3px; }
 .pn-inbox .ib-iconbtn.ib-prbtn[aria-expanded="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 /* The card: the hover card's surface; a phone's bottom sheet. */
-.ib-prpop-sheet { left: 0; right: 0; bottom: 0; top: auto; border-radius: 12px 12px 0 0; max-height: 78dvh; padding-bottom: env(safe-area-inset-bottom); }
-.ib-prpop-scrim { position: fixed; inset: 0; z-index: 119; background: rgb(0 0 0 / 0.3); }
+/* A phone's sheet floats as the thread's ⋯ sheet does (owner, on #3127): the ⋯ sheet's inset from the sides and the
+   bottom edge above the home bar (--ib-sheet-inset), its corners, surface and rise; above the keyboard while one is
+   up (`--ib-vvh`, phone.ts, as .ib-sheet). The Pull requests page's popover (prs/prs.css, loaded after this file)
+   uses .ib-prpop and some of the same .ib-prpop-* names for its own look, so the sheet's rules are scoped under
+   .ib-prpop-sheet to win over them; the desktop card is left as it is. */
+.ib-prpop.ib-prpop-sheet { z-index: 120; left: var(--ib-sheet-inset); right: var(--ib-sheet-inset); bottom: calc(100% - var(--ib-vvh, 100%) + var(--ib-sheet-inset) + env(safe-area-inset-bottom, 0px)); top: auto; width: auto; max-width: none; max-height: min(78dvh, calc(var(--ib-vvh, 100dvh) - 64px - env(safe-area-inset-top, 0px))); padding: 0; border-width: 0; border-radius: var(--ib-sheet-corner, 12px); box-shadow: var(--ib-float-s); font-size: inherit; animation: var(--ib-sheet-rise); }
+:root[data-ib-keyboard] .ib-prpop.ib-prpop-sheet { bottom: calc(100% - var(--ib-vvh, 100%) + var(--ib-sheet-inset)); }
+@media (prefers-reduced-motion: reduce) { .ib-prpop.ib-prpop-sheet { animation: none; } }
+.ib-prpop-scrim[data-pr-scrim] { position: fixed; inset: 0; z-index: 119; background: rgb(0 0 0 / 0.3); }
+.ib-prpop-sheet .ib-prpop-repo { margin-left: 0; font-size: inherit; }
+.ib-prpop-sheet .ib-prpop-n { font-family: inherit; font-variant-numeric: normal; }
+.ib-prpop-sheet .ib-prpop-title { display: inline; margin: 0; overflow: visible; -webkit-line-clamp: unset; line-clamp: none; }
+.ib-prpop-sheet .ib-prpop-stack, .ib-prpop-sheet .ib-prpop-stack:hover { display: block; width: auto; margin: 0; padding: 0 0 6px; border-radius: 0; background: none; font-size: inherit; cursor: auto; }
+.ib-prpop-sheet .ib-prpop-err { margin: 0; font-size: var(--ib-fs-12, 12px); color: var(--ib-ref-closed); }
+/* Its edit: the field takes the row's width beside Add; Close is the sheet's last row, the width of the sheet. */
+.ib-prpop-sheet .ib-prpop-edit { gap: 8px; padding: 10px 12px 8px; }
+.ib-prpop-sheet .ib-prpop-close { align-self: stretch; text-align: center; }
 .ib-prpop-grab { margin: 8px auto 0; width: 36px; height: 4px; flex: none; border-radius: 999px; background: color-mix(in oklch, var(--muted-foreground) 30%, transparent); }
 .ib-prpop-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 14px 6px; font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); }
 .ib-prpop-repo { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

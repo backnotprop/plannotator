@@ -85,7 +85,7 @@ import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastC
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -100,6 +100,7 @@ import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { pathFoldersOf } from "./env-path";
 import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
@@ -285,9 +286,11 @@ export function createInboxLaunch(options: {
   const readLogin = (): Promise<LaunchEnv> => {
     reading ??= (async () => {
       try {
-        // Windows has no login shell to read (`$SHELL -ilc`): the Inbox's own env stands in, and nothing runs.
-        const login = options.platform === "win32" ? {} : await options.loginEnv();
-        if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
+        // Windows has no login shell to read (`$SHELL -ilc`): the Inbox's own env stands in, through the same filter a
+        // login read gets (`launchPlainEnv`: no PLANNOTATOR_*, no per-session Claude names), and nothing runs. Never `{}`:
+        // a start with an empty env, or the Claude supervisor it starts, has no PATH, no USERPROFILE and no sign-in env.
+        const login = options.platform === "win32" ? launchPlainEnv(options.ownEnv(), [], "win32") : await options.loginEnv();
+        if (login.PATH) loginPath = pathFoldersOf(login.PATH, options.platform);
         const kept: LaunchEnv = {};
         for (const name of hostList.flatMap((host) => host.shellNames)) if (login[name] !== undefined) kept[name] = login[name]!;
         // Only whether these are set (a sign-in token, a cloud provider's switch): never the value.
