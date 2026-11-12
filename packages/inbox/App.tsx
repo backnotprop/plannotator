@@ -212,10 +212,10 @@ import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
-import { sheetLayoutHash, sheetLayoutOf, type SheetLayout } from './prs/tableModel';
 import { sheetModel } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
 import { useSheetPulls } from './prs/useSheetPulls';
+import { sheetLayoutHash, sheetLayoutOf, type SheetLayout } from './prs/tableModel';
 import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
@@ -6850,11 +6850,11 @@ function Inbox() {
           phone={phone}
           view={paneView}
           onView={setPaneView}
-          layout={paneLayout}
-          onLayout={setPaneLayout}
           onOpenPull={(pull, stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' })}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
+          layout={paneLayout}
+          onLayout={setPaneLayout}
         />
       }
     />
