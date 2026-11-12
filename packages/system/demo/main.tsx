@@ -1,4 +1,3 @@
-// The screenshot page. See serve.ts for the addresses.
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { bySheetOrder, formatIssue, gate, loadFiles, parseRevision, type ChangedFile, type ChangeFile, type GateResult, type Revision, type SystemFiles, type SystemModel, type Touch } from '../src/index.ts';
@@ -56,12 +55,10 @@ function View({ model }: { model: SystemModel }) {
 type Fixtures = { prs: Record<string, ChangeFile[]>; before2563: SystemFiles; open2563: string; plan: string; removes: string; touches: { label: string; files: ChangedFile[] }[] };
 type Change = { model: SystemModel; change: Revision | GateResult; files: ChangeFile[]; pr: number; title: string; state: 'open' | 'merged' };
 
-/** The change a shot asks for: a merged PR's committed review, PR 2563 as it was while open, or the gate alone. */
 function pickChange(model: SystemModel, fx: Fixtures): Change {
   const n = q.get('pr') === '2563' || q.get('open') ? 2563 : 2543;
   const files = fx.prs[n]!;
   if (q.get('removes')) {
-    // invented (no real PR removed a part): the grey ink; no files, so no diff links
     const { revision } = parseRevision(model, fx.removes);
     return { model, change: revision!, files: [], pr: 9001, title: revision!.title, state: 'open' };
   }
@@ -80,7 +77,6 @@ const CHAPTERS: Record<number, string[]> = {
   2563: ['T3 Code as a host', 'Finding the thread', 'Sending your reply'],
 };
 
-/** The review card (packages/inbox/components/ReviewCard.tsx on main), with the change picture between the counts and the chapters. */
 function Card({ c }: { c: Change }) {
   const add = c.files.reduce((n, f) => n + (f.additions ?? 0), 0), del = c.files.reduce((n, f) => n + (f.deletions ?? 0), 0);
   return (
@@ -103,7 +99,6 @@ function Card({ c }: { c: Change }) {
   );
 }
 
-/** The full System view of one PR (walkthrough screen 6). */
 function ChangeView({ c }: { c: Change }) {
   const [sheet, setSheet] = useState<string | undefined>(q.get('sheet') ?? undefined);
   const [reading, setReading] = useState<Reading>('full');
@@ -119,7 +114,6 @@ function ChangeView({ c }: { c: Change }) {
   );
 }
 
-/** A plan, drawn dashed (Shape's System (plan) tab, walkthrough screen 7a). */
 function PlanView({ model, plan }: { model: SystemModel; plan: Revision }) {
   const [sheet, setSheet] = useState<string | undefined>(undefined);
   return (
@@ -129,7 +123,6 @@ function PlanView({ model, plan }: { model: SystemModel; plan: Revision }) {
   );
 }
 
-/** The project pane (4a) or its full window (4b): several open PRs on the drawing at rest, each the gate's touched parts. */
 function TouchesView({ model, touches }: { model: SystemModel; touches: Touch[] }) {
   const [sheet, setSheet] = useState<string | undefined>(q.get('sheet') ?? undefined);
   const [reading, setReading] = useState<Reading>('full');
@@ -145,7 +138,6 @@ function TouchesView({ model, touches }: { model: SystemModel; touches: Touch[] 
   );
 }
 
-/** The faces, the default theme, the Inbox's tokens, the drawing's sheet, then the page's frame. */
 const SHEETS = ['/css/inter/index.css', '/css/geist-mono/index.css', '/css/themes/plannotator.css', '/css/inbox/inbox.css', '/css/system/system.css', '/css/demo/demo.css'];
 const linked = () =>
   Promise.all(

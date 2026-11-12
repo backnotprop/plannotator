@@ -5,9 +5,6 @@ import { join } from 'node:path';
 import { install, launchAgentsDir, list, plist, remove, scheduleLabel, SYSTEM_TICK_INTERVAL_SECONDS, type CommandRunner } from '../src/node/index.ts';
 import { tempDir } from './helpers.ts';
 
-// launchctl never runs for real here: every install and remove gets a runner
-// that records the command, and every plist goes to a temp folder.
-
 const cleanups: (() => void)[] = [];
 afterEach(() => cleanups.splice(0).forEach((f) => f()));
 function sandbox() {
@@ -82,7 +79,6 @@ describe('install, list and remove', () => {
     expect(calls).toEqual([['launchctl', 'bootout', 'gui/501/ai.plannotator.system.acme-1a2b3c']]);
     expect(existsSync(file)).toBe(false);
     expect(await list({ agentsDir: s.agentsDir })).toEqual([]);
-    // removing again, or a project never installed, is not an error
     await remove('acme-1a2b3c', { agentsDir: s.agentsDir, run, uid: 501 });
   });
 
@@ -107,7 +103,6 @@ describe('install, list and remove', () => {
     const before = process.env.HOME;
     process.env.HOME = s.dir;
     try {
-      // never reach the real folder
       expect(launchAgentsDir()).toBe(join(s.dir, 'Library', 'LaunchAgents'));
       const { run } = recorder();
       await install({ ...base(s.dataDir), run, uid: 501 });

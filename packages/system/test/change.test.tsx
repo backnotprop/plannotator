@@ -1,25 +1,3 @@
-/**
- * The change on the drawing (step A5): a revision or the gate's result applied
- * to plannotator's own drawing (the fixture), over its two revisions
- * (PR 2543 and PR 2563) and their real files from git history.
- *
- * What is proved, without a DOM: After marks the parts and lines a PR adds
- * green and the ones it changes amber, numbered in the order the parts list
- * reads; Before hides what the PR added; a removed part and its lines are
- * drawn grey and struck in After and plain in Before; Steps lays the
- * revision's one sequence out with each step's ink; an open PR's full entries
- * are placed into the sheet; the gate's result marks touched parts amber only;
- * a plan has no PR; the summary credits a part only with PR files its own
- * cited paths cover, and its counts are those files' counts.
- * Several open PRs at rest (`touches`): each touched part amber and labelled
- * with every PR that touches it, past two the first and how many more.
- *
- * With a DOM (DOM_TESTS=1, happy-dom, from tests/dom-test-list.txt): the view
- * draws those marks, its tally says what changeSummary says, the parts list's
- * "diff" opens a credited file only, Steps and Esc, the plan's dashed class,
- * and the card picture's one control; the touches' labels and hover, a
- * revision beating them, and the leading slot first in the bar.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -41,7 +19,6 @@ const rev = (src: string, m = model): Revision => {
   expect(errors).toEqual([]);
   return revision!;
 };
-/** The three invented open PRs (fixtures/change.ts TOUCHES), each run through the gate. */
 const touchesOf = () => TOUCHES.map((t) => ({ label: t.label, change: gate({ files: t.files, model }) }));
 const gateOf = (n: number): GateResult => gate({ files: pr[n]!.map((f) => ({ ...f, status: f.status ?? 'M' })), model });
 
@@ -54,7 +31,6 @@ beforeAll(async () => {
   pr[2563] = prFiles(2563);
 });
 
-/** The marks a laid-out sheet carries: part id to status (and number), line id to status. */
 function marks(m: SystemModel, code: string) {
   const L = layoutSheet(m, code);
   const parts = Object.fromEntries(Object.entries(L.parts).filter(([, p]) => p.status).map(([id, p]) => [id, p.status]));
@@ -70,7 +46,6 @@ describe('a merged PR on its drawing', () => {
     expect(s.sheet).toBe('L-201');
     const { parts, nums, lines } = marks(applyChange(model, r, 'after', pr[2563]), 'L-201');
     expect(parts).toEqual({ it3: 'added', shim: 'changed', iserver: 'changed' });
-    // the number on the sheet is the row's number in the parts list
     for (const [i, p] of s.parts.entries()) expect([p.id, nums[p.id]]).toEqual([p.id, i + 1]);
     expect(lines).toEqual({ i_t3stdio: 'added', i_wt3: 'added' });
   });
@@ -115,7 +90,6 @@ describe('a merged PR on its drawing', () => {
         }
       }
     }
-    // the release workflow and the tests are in the PR but no part cites them: no part is credited with them
     const all = changeSummary(model, model.revisions['PR-2543']!, pr[2543]).parts.flatMap((p) => p.files);
     expect(all).not.toContain('.github/workflows/release.yml');
     expect(all.filter((f) => /\.test\.tsx?$/.test(f))).toEqual([]);
@@ -139,7 +113,6 @@ test('Steps: the revision\'s sequence as a sheet of its own, each step in its in
     const hops = r.steps!.hops;
     expect(m.sheets[STEPS_CODE]!.hops.length).toBe(hops.length);
     expect(L.title).toBe(r.steps!.title);
-    // step N (s1..) carries the ink the revision gives it, a plain step none: a hop between lanes as its line, a step on one lane as its figure
     const want = Object.fromEntries(hops.map((h, i) => [`${STEPS_CODE}.s${i + 1}`, h.is ?? null]).filter(([, v]) => v));
     const got = Object.fromEntries([
       ...L.edges.filter((e) => e.status).map((e) => [e.id, e.status]),
@@ -171,7 +144,6 @@ test('an open PR\'s full entries are placed: T3 Code joins the agents band in Af
   expect(after.L.parts.it3!.band).toBe('agents');
   expect(after.lines).toEqual({ i_t3stdio: 'added', i_wt3: 'added' });
   expect('it3' in layoutSheet(applyChange(base, r, 'before', pr[2563]), 'L-201').parts).toBe(false);
-  // the counts come from the PR's files: the revision writes none
   expect(changeSummary(base, r, pr[2563]).parts.find((p) => p.id === 'it3')!.lines).toMatch(/\+\d+/);
 });
 
@@ -195,8 +167,6 @@ test('a plan has no PR and marks what it adds and changes', () => {
   expect(changeWords(s)).toBe('2 parts added, 2 changed');
   expect(marks(applyChange(model, r, 'after'), 'L-201').parts).toEqual({ isysview: 'added', ikeeper: 'added', iwindow: 'changed', iserver: 'changed' });
 });
-
-// ---- rendered ----
 
 describe('several open PRs at rest (touches)', () => {
   test('each touched part is amber and labelled with the PRs that touch it, in the order given; the Inbox carries two', () => {
@@ -260,7 +230,6 @@ test.skipIf(!hasDom)('the view draws PR 2563 After with its inks and numbers, th
   expect(el.querySelectorAll('.sys-edge.sys-st-added').length).toBeGreaterThanOrEqual(2);
   const s = changeSummary(model, r, pr[2563]);
   expect(el.querySelector('.sys-tally')!.textContent).toBe(`${s.added} added · ${s.changed} changed`);
-  // the parts list: one row per changed part, in the summary's order; "diff" opens that part's first credited file
   const rows = [...el.querySelectorAll('.sys-plist-row[data-row]')];
   expect(rows.map((r) => r.getAttribute('data-row'))).toEqual(s.parts.map((p) => p.id));
   const diffs = [...el.querySelectorAll<HTMLButtonElement>('.sys-plist-diff')];
@@ -269,7 +238,6 @@ test.skipIf(!hasDom)('the view draws PR 2563 After with its inks and numbers, th
   const paths = new Set(pr[2563]!.map((f) => f.path));
   expect(opened.length).toBe(diffs.length);
   for (const [f, p] of opened) expect([p, f, paths.has(f), s.parts.find((x) => x.id === p)!.files.includes(f)]).toEqual([p, f, true, true]);
-  // a picked row takes the selected fill
   act(() => el.querySelector<HTMLButtonElement>('.sys-plist-row[data-row="shim"] .sys-plist-pick')!.click());
   expect(el.querySelector('.sys-plist-row[aria-current="true"]')!.getAttribute('data-row')).toBe('shim');
 });
@@ -315,7 +283,6 @@ test.skipIf(!hasDom)('an open PR and a gate-only change draw', async () => {
   const st = Object.values(status(el));
   expect(st.length).toBeGreaterThan(0);
   expect(st.filter((v) => v !== 'changed')).toEqual([]);
-  // no Before and no Steps for the gate alone
   expect(el.querySelector('[role="radiogroup"]')).toBe(null);
 });
 
@@ -362,7 +329,6 @@ test.skipIf(!hasDom)('several touches at rest: each touched part amber with its 
   expect(inbox.getAttribute('aria-label')).toContain('changed by PR 102, PR 103');
   expect(el.querySelectorAll('.sys-num').length).toBe(0);
   expect(el.querySelector('.sys-tally')).toBe(null);
-  // the Key says what the amber means
   act(() => [...el.querySelectorAll<HTMLButtonElement>('.sys-zoom button')].find((b) => b.textContent === 'Key')!.click());
   expect(el.querySelector('.sys-keycard')!.textContent).toContain('Open pull requests');
 });
@@ -393,7 +359,6 @@ for (const layout of ['pane', 'window'] as const) {
     expect(first.firstElementChild!.className).toBe('sys-lead');
     expect(first.firstElementChild!.firstElementChild!.textContent).toBe('‹ Reviews');
     expect(first.children[1]!.className).toBe('sys-crumbs');
-    // the first control in the bar, in tab order
     expect(bar.querySelector('button')!.textContent).toBe('‹ Reviews');
     act(() => bar.querySelector<HTMLButtonElement>('.host-back')!.click());
     expect(back).toBe(1);

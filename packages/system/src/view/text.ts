@@ -1,5 +1,3 @@
-// The text setting a drawing measures with, read from the page it is drawn on:
-// the Inbox's body size (--ib-type) and its faces (--font-sans, --font-mono).
 import { useEffect, useLayoutEffect, useState, type RefObject } from 'react';
 import { DEFAULT_TEXT, fontsReady, setText, type TextSetting } from '../layout/measure.ts';
 
@@ -18,11 +16,6 @@ export function readText(el: Element | null): TextSetting {
 
 const same = (a: TextSetting, b: TextSetting) => a.type === b.type && a.sans === b.sans && a.mono === b.mono;
 
-/**
- * The text setting at `ref`, and a counter that moves when the faces finish
- * loading (a layout measured before that used a fallback face). The returned
- * setting is also the one the layout measures with (setText).
- */
 export function useText(ref: RefObject<Element | null>): { text: TextSetting; epoch: number } {
   const [text, setT] = useState<TextSetting>(DEFAULT_TEXT);
   const [epoch, setEpoch] = useState(0);
@@ -41,7 +34,6 @@ export function useText(ref: RefObject<Element | null>): { text: TextSetting; ep
   return { text, epoch };
 }
 
-/** The content box of `ref`, kept current. */
 export function useSize(ref: RefObject<Element | null>): { w: number; h: number } {
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {

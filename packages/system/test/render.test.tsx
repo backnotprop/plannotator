@@ -1,21 +1,3 @@
-/**
- * The drawing at rest, rendered: SystemView and SystemThumb over plannotator's
- * own drawing (the fixture) and the worst-case fixtures, in a real React tree
- * (happy-dom). What is proved: every sheet draws in each reading it has, with
- * a box for every part the layout placed; Simple draws no lines and no
- * letters; Full draws the lines; a window's "N sheets inside" cue dives into
- * the first sheet inside and names it; the Simple / Full switch asks for the
- * other reading and shows only when a sheet has both and the host listens; the
- * crumbs name the drawing and the parts that open each scope, and a crumb above
- * travels up; the chips and keys 1 to 9 turn to a sheet of the scope; Esc
- * climbs, then closes; the zoom group and + - F zoom and fit; Key and N open
- * their cards and Esc closes them first; keys={false} lets those keys pass; a
- * part with sheets inside is a Tab stop and Enter dives. The moves run under
- * reduced motion (a cut), so where each ends is read at once; the motion itself
- * is measured in a real browser by scripts/measure.mjs.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -31,7 +13,6 @@ const R = (hasDom ? await import('../src/react.ts') : {}) as typeof import('../s
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-// Loaded while the file is collected, so each sheet and reading below gets its own test.
 const models: Record<string, SystemModel> = {};
 const loadErrors: Record<string, unknown[]> = {};
 if (hasDom) {
@@ -61,7 +42,6 @@ afterAll(() => {
   if (savedRect) Object.defineProperty(Element.prototype, 'getBoundingClientRect', savedRect);
 });
 
-/** Reduced motion until the test ends: every move cuts, so where a move ends can be read at once. */
 let undoReduce: (() => void) | null = null;
 function reduce() {
   const saved = globalThis.matchMedia;
@@ -80,12 +60,10 @@ afterEach(() => {
   host = null;
 });
 
-/** Renders into a host. happy-dom has no layout, so every box reads as w by h while a test runs (restored after). */
 async function render(node: React.ReactNode): Promise<HTMLElement> {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
-  // async: the faces' load (fontsReady) settles inside act, and the view redraws with it
   await act(async () => root!.render(node));
   return host;
 }
@@ -97,8 +75,6 @@ test.skipIf(!hasDom)('the plannotator fixture and the worst-case fixtures load w
   expect(Object.keys(models)).toEqual(['plannotator', 'worst-case', 'worst-one']);
 });
 
-// One test per drawing, sheet and reading, so each fails on its own.
-// The heaviest, plannotator L-101 full, takes about 1 s locally and CI's DOM runner is about 3x slower, so 10 s keeps 3x headroom.
 const CASE_TIMEOUT_MS = 10_000;
 for (const [name, model] of Object.entries(models)) {
   for (const code of Object.keys(model.sheets)) {
@@ -142,7 +118,6 @@ test.skipIf(!hasDom)('a window at rest says how many sheets are inside, and its 
     const cue = el.querySelector<HTMLButtonElement>(`[data-part="${id}"] button.sys-win-cue`)!;
     const inside = model.byScope[p.opens!]!;
     expect(cue.textContent).toBe(`${inside.length} sheet${inside.length === 1 ? '' : 's'} inside`);
-    // the cue is reached through its part, not by Tab
     expect(cue.tabIndex).toBe(-1);
     act(() => cue.click());
     expect(asked).toEqual([inside[0]!]);
@@ -236,7 +211,6 @@ test.skipIf(!hasDom)('Esc climbs one level and names the sheet; on the landing s
   press(stage, 'Escape');
   const up = el.querySelector('.sys-view')!.getAttribute('data-sheet')!;
   expect(model.sheets[up]!.scope).toBe('root');
-  // the sheet it climbs to is the one that draws the window it climbed out of
   expect(R.restLayout(model, up, {}).parts[model.owner[model.sheets['L-201']!.scope]!]).toBeDefined();
   expect(asked).toEqual([up]);
   expect(closed).toBe(0);
@@ -268,7 +242,6 @@ test.skipIf(!hasDom)('the chips name the sheets of this scope and turn to one; k
   const el = await render(<R.SystemView model={model} sheet="C-001" layout="window" onNavigate={(s) => asked.push(s)} />);
   const chips = () => [...el.querySelectorAll<HTMLButtonElement>('.sys-chips button.sys-chip-b')];
   expect(chips().length).toBe(codes.length);
-  // every chip says its sheet's kind in words, not a code's first letter
   expect(chips().map((c) => c.textContent)).toEqual(codes.map((c) => kindLabel(model.sheets[c]!.kind)));
   expect(chips().filter((c) => c.getAttribute('aria-current') === 'page').length).toBe(1);
   const other = codes.find((c) => c !== 'C-001')!;
@@ -355,11 +328,9 @@ test.skipIf(!hasDom)('with keys off, the Notes button beside Key opens the notes
   expect(btn.getAttribute('aria-expanded')).toBe('true');
   expect(card()!.querySelector('.sys-kc-h')!.textContent).toBe('Notes');
   expect([...card()!.querySelectorAll('.sys-note-row .sys-letter')].map((x) => x.textContent)).toEqual(notes.map((n) => n.l));
-  // the button toggles it shut, as Key toggles its card
   act(() => btn.click());
   expect(card()).toBeNull();
   expect(btn.getAttribute('aria-expanded')).toBe('false');
-  // one card at a time: Key closes the notes, Notes closes the Key
   act(() => btn.click());
   act(() => key.click());
   expect(card()).toBeNull();
@@ -367,13 +338,11 @@ test.skipIf(!hasDom)('with keys off, the Notes button beside Key opens the notes
   act(() => btn.click());
   expect(el.querySelector('[aria-label="Symbols and keys"]')).toBeNull();
   expect(key.getAttribute('aria-expanded')).toBe('false');
-  // the card's own close shuts it and gives the focus back to the button
   const x = card()!.querySelector<HTMLButtonElement>('button[aria-label="Close the notes"]')!;
   expect(x).not.toBeNull();
   act(() => x.click());
   expect(card()).toBeNull();
   expect(document.activeElement).toBe(btn);
-  // Esc with the focus inside the card still closes it, and gives the focus back to the button as the close does
   act(() => btn.click());
   const inCard = card()!.querySelector<HTMLButtonElement>('button')!;
   act(() => inCard.focus());
@@ -398,7 +367,6 @@ test.skipIf(!hasDom)('a turn to a sheet with no notes shuts the notes card: the 
   act(() => chip(without).click());
   expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe(without);
   expect(card()).toBeNull();
-  // Esc is not spent on a card nobody sees: on the landing scope it closes the view
   press(el.querySelector('.sys-stage')!, 'Escape');
   expect(closed).toBe(1);
   act(() => chip(withNotes).click());
@@ -427,6 +395,5 @@ test.skipIf(!hasDom)('a part with sheets inside is a stop for Tab, says so, and 
   act(() => part.focus());
   press(part, 'Enter');
   expect(asked).toEqual([model.byScope[p.opens!]![0]!]);
-  // the focus stays in the drawing, so Esc still reaches it
   expect(el.contains(document.activeElement)).toBe(true);
 });

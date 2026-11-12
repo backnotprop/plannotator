@@ -1,7 +1,3 @@
-// bun run --cwd packages/system check --dir <drawing> --root <repo> [--at <commit>] [--json]
-// Loads a drawing and checks that every path it cites is in the repo at the
-// commit the drawing was drawn from (or at --at). Exit 0 clean, 1 not clean,
-// 2 bad usage.
 import { resolve } from 'node:path';
 import { formatIssue } from '../format/load.ts';
 import { check } from './index.ts';
@@ -28,7 +24,6 @@ for (let i = 0; i < args.length; i++) {
   } else usage(`unknown argument "${a}"`);
 }
 
-// The drawing lives in Plannotator's folder (<data dir>/system/<key>/drawing), not in the repo: name both.
 if (!dir) usage('--dir <drawing folder> is required');
 if (!root) usage('--root <repo root> is required');
 

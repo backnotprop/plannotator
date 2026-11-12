@@ -1,5 +1,3 @@
-// Reading one YAML file of a drawing: parse, join list items a comma split,
-// and lint for coordinates and split brackets.
 import { parse } from 'yaml';
 import { COORDS, NAMED } from './keys.ts';
 import type { LoadIssue } from './types.ts';
@@ -23,15 +21,9 @@ const unbalanced = (t: string) => {
   return d !== 0;
 };
 
-/** Schema lines under request: and response: (and a payload's lines:) are code, one line each: a lone brace is right there. */
 const isCodeLines = (path: string) => /(^|\.)lines$/.test(path);
 const join = (path: string, k: string) => (path ? `${path}.${k}` : k);
 
-/**
- * In a YAML flow sequence, [f(a, b), g()] splits at every comma, brackets or
- * not. A run of items that opens a bracket and closes it later is joined back
- * into one item ("f(a" + "b)" becomes "f(a, b)").
- */
 function rejoin(node: unknown, path = ''): void {
   if (Array.isArray(node)) {
     if (!isCodeLines(path) && node.some((v) => typeof v === 'string' && depthOf(v) !== 0)) {
@@ -82,7 +74,6 @@ function lint(file: string, node: unknown, path: string, errors: LoadIssue[], wa
   }
 }
 
-/** Parse one file. Returns the document (a map), or null after pushing an error. */
 export function readYaml(file: string, text: string, errors: LoadIssue[], warnings: LoadIssue[]): Record<string, unknown> | null {
   let doc: unknown;
   try {

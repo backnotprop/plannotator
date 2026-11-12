@@ -1,30 +1,3 @@
-// Every move of the view, measured frame by frame (a port of the round 4
-// prototype's step 8j measure, so the numbers compare one for one).
-//
-// Two passes per move, each in a fresh page (1600x900, 2x, headless Chromium):
-//
-// 1. Real time (TRIES runs, the median is reported), the page held to 60 Hz.
-//    Every requestAnimationFrame records its timestamp and the world's
-//    transform; a PerformanceObserver collects long tasks. Out: frames, dropped
-//    frames (an interval of n slots drops n - 1), the longest interval, long
-//    tasks over 50 ms, and the camera's step per frame (the largest move of a
-//    corner of the glass, px) with how often it rose over the frame before.
-//
-// 2. Film (Playwright's clock installed and paused, one frame per 16 ms; the
-//    view's Web Animations stamped __born are set to the page's time each
-//    frame). Every frame: a screenshot and the box of every part, zone and line
-//    word on the glass. Out: the step (the largest move of a box edge between
-//    two frames, weighted by its ink), the pixel change, how often a step rose
-//    after the fastest frame, and a filmstrip at 48 ms.
-//
-// Usage, with the demo running (bun demo/serve.ts):
-//   SYSTEM_URL=http://127.0.0.1:<port>/ node scripts/measure.mjs
-//   MOVES=dive-inbox,... (default all)  TRIES=3  MODE=light  OUT=<dir>  NAME=a4
-//   PASS=rt|film|both  SHOTS=0 to skip the strips  CHROMIUM=<executable>
-//   WHO=<px> names the box behind every step over px.
-//   STRICT=1 exits 1 when a check fails (a step that grows, a long task, a flash).
-// The script can also measure another build of the same drawing: import
-// { run } and pass an adapter like PAGE below.
 import { chromium } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -37,7 +10,6 @@ const cue = (id) => async (p, A) => p.locator(A.cue(id)).first().click();
 const key = (k) => async (p) => p.keyboard.press(k);
 const sw = async (p, A) => p.locator(A.sw).first().click();
 
-/** The package demo. A page adapter names where a build keeps each thing. */
 export const PAGE = {
   name: 'a4',
   url: (base, mode, sheet) => `${base}?shot=view&mode=${mode}${sheet ? '&sheet=' + sheet : ''}`,
@@ -55,12 +27,10 @@ export const PAGE = {
   sw: '.sys-seg-o:not([data-on])',
   state: () => {
     const r = document.querySelector('.sys-view');
-    // the crumbs name the window's inside once a door is past half open; the world is still rooted one level up
     const shown = document.querySelector('.sys-crumbs .sys-code')?.textContent;
     return { code: r?.dataset.sheet, depth: document.querySelectorAll('.sys-crumbs .sys-crumb-w').length - (shown && shown !== r?.dataset.sheet ? 1 : 0) };
   },
   windowName: (win) => document.querySelector(`.sys-cur [data-part="${win}"]`)?.getAttribute('aria-label')?.split(',')[0] ?? null,
-  /** The keys act with the drawing in focus: a click on the stage's corner. */
   focus: async (p, A) => { const r = await p.locator(A.stage).boundingBox(); await p.mouse.click(r.x + 6, r.y + 6); },
 };
 
@@ -128,8 +98,6 @@ export async function run({ A = PAGE, base, out, name = A.name, mode = 'light', 
     await p.waitForTimeout(2500);
     if (A.focus) await A.focus(p, A);
     await p.mouse.move(4, 300);
-    // the film's clock stands still between steps: a screenshot takes real time, and a clock that runs on would
-    // put 32 or 48 ms between frames, not 16
     if (clock) { await p.clock.pauseAt(await p.evaluate(() => Date.now() + 100)); await p.clock.runFor(400); }
     const glass = await p.locator(A.stage).first().boundingBox();
     return { ctx, p, glass };
@@ -155,7 +123,7 @@ export async function run({ A = PAGE, base, out, name = A.name, mode = 'light', 
     if (M.wheel) await p.mouse.move(...(await wheelPt(p, M, glass)));
     await p.evaluate(({ world, st }) => {
       window.__rec = []; window.__lt = []; window.__stopRec = false;
-      try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push({ s: e.startTime, d: e.duration }); }).observe({ type: 'longtask' }); } catch { /* none */ }
+      try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push({ s: e.startTime, d: e.duration }); }).observe({ type: 'longtask' }); } catch { }
       const S = eval(st);
       const f = (ts) => {
         window.__rec.push({ ts, xf: document.querySelector(world)?.style.transform || '', code: S().code });
@@ -278,8 +246,6 @@ export async function run({ A = PAGE, base, out, name = A.name, mode = 'light', 
   async function film(nm) {
     const M = MOVES[nm];
     const { ctx, p, glass } = await open(M, true);
-    // in 16 ms steps: one runFor(2000) fires every timer and frame in a burst, before React (on a real message
-    // channel) has rendered what a timer asked for, and a move started then would never get its frames
     if (M.pre) { await M.pre(p, A); for (let i = 0; i < 125; i++) await p.clock.runFor(16); await p.mouse.move(4, 300); }
     const sync = () => p.evaluate(() => { for (const a of document.getAnimations()) if (a.__born != null) { a.pause(); a.currentTime = Math.max(0, performance.now() - a.__born); } });
     const now = () => p.evaluate(() => performance.now());
@@ -360,7 +326,7 @@ export async function run({ A = PAGE, base, out, name = A.name, mode = 'light', 
   }
   const jf = path.join(out, `${name}${mode === 'dark' ? '-dark' : ''}.json`);
   let prev = {};
-  try { prev = JSON.parse(fs.readFileSync(jf, 'utf8')); } catch { /* first run */ }
+  try { prev = JSON.parse(fs.readFileSync(jf, 'utf8')); } catch { }
   for (const [k, v] of Object.entries(results)) prev[k] = { ...(prev[k] || {}), ...v };
   fs.writeFileSync(jf, JSON.stringify(prev, null, 1));
   console.log(jf);

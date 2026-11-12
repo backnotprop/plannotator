@@ -10,11 +10,6 @@ beforeAll(async () => {
   plannotator = (await load(drawingDir)).model!;
 });
 
-/**
- * A merged PR's files, recorded from this repo's history with
- * `git diff --name-status -M <merge>^1 <merge>` (PR 2543: 303b6725f, PR 2563:
- * ab70b560b, PR 2600: 128eb13e9, PR 2644: 2b8ade971).
- */
 function recorded(pr: number): ChangedFile[] {
   return readFileSync(join(fixturesDir, 'prs', `pr-${pr}.txt`), 'utf8').trim().split('\n').map((line) => {
     const [s, a, b] = line.split('\t');
@@ -44,7 +39,6 @@ describe('the gate on real merged plannotator PRs', () => {
     expect(r.touched.flows).toEqual(expect.arrayContaining(['i_t3stdio', 'i_wt3', 'i_shim']));
   });
 
-  // Held out by the round 5 judge: the drawing was never redrawn for it.
   test('PR 2600 (Show me in the code review) adds a command, a store and a layer: wake', () => {
     const r = gate({ files: recorded(2600), model: plannotator });
     expect(r.wake).toBe(true);
@@ -73,7 +67,6 @@ describe('the gate on real merged plannotator PRs', () => {
 });
 
 describe('the gate rules', () => {
-  // src/main.ts and src/api are cited; src/api/index.ts is cited by a line
   const model = loadFiles(edited('system.yaml', (t) => `${t}watch: [deploy/*.toml]\n`)).model!;
   const run = (...files: ChangedFile[]) => gate({ files, model });
 
@@ -149,7 +142,6 @@ describe('gateRepo on a real repo', () => {
     write('src/util.ts', 'export const util = 1;\n');
     write('src/old.ts', 'export const old = 1;\n');
     write('deploy/prod.toml', 'name = "small"\n');
-    // a body long enough that git's rename detection pairs the two paths
     write('src/move-me.ts', Array.from({ length: 40 }, (_, i) => `export const line${i} = ${i};\n`).join(''));
     const base = commit('base');
     const model = loadFiles(edited('system.yaml', (s) => `${s}watch: [deploy/*.toml]\n`)).model!;
@@ -168,7 +160,6 @@ describe('gateRepo on a real repo', () => {
     expect(unwatched).toEqual({ touched: { parts: [], flows: [] }, wake: false, why: [], ignored: [] });
     const cited = await step(() => write('src/api/index.ts', 'export const api = 2;\n'));
     expect(cited).toMatchObject({ touched: { parts: ['api'], flows: ['use'] }, wake: false });
-    // the whole range at once: every reason, in git's path order
     expect((await gateRepo({ root, from: base, to: 'HEAD', model })).why.map((w) => w.reason).sort()).toEqual(['added', 'deleted', 'renamed', 'watched']);
   });
 

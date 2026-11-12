@@ -1,9 +1,7 @@
-// Path geometry for the drawing. Pure functions of points.
 import type { Pt } from '../layout/types.ts';
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
-/** An orthogonal polyline with its corners rounded. */
 export function roundedPath(pts: Pt[] | undefined, r = 7): string {
   if (!pts || pts.length < 2) return '';
   let d = `M${pts[0]![0]},${pts[0]![1]}`;
@@ -28,7 +26,6 @@ export function roundedPath(pts: Pt[] | undefined, r = 7): string {
   return d + ` L${l[0]},${l[1]}`;
 }
 
-/** The arrowhead at the end of a polyline (or at its start). */
 export function arrowHead(pts: Pt[] | undefined, len = 9, wid = 3.6, atStart = false): string {
   if (!pts || pts.length < 2) return '';
   const [p, q] = atStart ? [pts[1]!, pts[0]!] : [pts[pts.length - 2]!, pts[pts.length - 1]!];
@@ -42,7 +39,6 @@ export function arrowHead(pts: Pt[] | undefined, len = 9, wid = 3.6, atStart = f
   return `M${q[0]},${q[1]} L${bx - uy * wid},${by + ux * wid} L${bx + uy * wid},${by - ux * wid} Z`;
 }
 
-/** The polyline with its last point pulled back by d (so a line stops under its arrowhead). */
 export function trimEnd(pts: Pt[], d: number): Pt[] {
   if (!pts || pts.length < 2) return pts;
   const out = pts.map((p) => [p[0], p[1]] as Pt);
@@ -54,7 +50,6 @@ export function trimEnd(pts: Pt[], d: number): Pt[] {
   return out;
 }
 
-/** The middle of a polyline's longest segment. */
 export function midOf(pts: Pt[] | undefined): Pt {
   if (!pts || pts.length < 2) return [0, 0];
   let best = 0;

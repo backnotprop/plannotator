@@ -1,12 +1,3 @@
-// The scheduled check on macOS: one launchd agent per drawn project.
-//
-//   ~/Library/LaunchAgents/ai.plannotator.system.<project key>.plist
-//   label ai.plannotator.system.<project key>
-//   program: <plannotator> system tick --project <root> --key <project key>
-//
-// The Inbox installs one when a first drawing finishes with "An agent on this
-// Mac", and removes every one when System is switched off. launchctl runs
-// through an injectable runner, so tests never load a job.
 import { execFile } from 'node:child_process';
 import { mkdir, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -14,39 +5,28 @@ import { isAbsolute, join } from 'node:path';
 import { SYSTEM_TICK_INTERVAL_SECONDS } from '../agent/command.ts';
 import { checkKey, systemPaths } from './state.ts';
 
-// How often the check runs: in agent/command.ts, beside the command's usage lines, so the help can say it.
 export { SYSTEM_TICK_INTERVAL_SECONDS };
 
 export const LABEL_PREFIX = 'ai.plannotator.system.';
 
-/** The launchd label of a project's job. */
 export const scheduleLabel = (key: string) => `${LABEL_PREFIX}${checkKey(key)}`;
 
-/** Runs one command; the default runs it for real. */
 export type CommandRunner = (argv: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
 
 export type ScheduleOptions = {
-  /** The Inbox's project key. */
   key: string;
-  /** The project's folder (its repo root), absolute. */
   root: string;
-  /** The plannotator binary, absolute. */
   program: string;
-  /** Seconds between ticks; SYSTEM_TICK_INTERVAL_SECONDS unless given. */
   interval?: number;
-  /** The Inbox's data folder, absolute: the job gets it as PLANNOTATOR_DATA_DIR. */
   dataDir: string;
-  /** More environment for the job, PATH above all: launchd starts it with almost none, and the tick runs git, gh and the agent. */
   env?: Record<string, string>;
 };
 
 const xml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
-/** Characters a plist (XML 1.0) cannot carry at all. */
 const NOT_XML = /[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]/;
 
-/** The plist text of a project's job. Pure: nothing is written. */
 export function plist(o: ScheduleOptions): string {
   const label = scheduleLabel(o.key);
   for (const [name, path] of [['root', o.root], ['program', o.program], ['dataDir', o.dataDir]] as const) {
@@ -102,16 +82,10 @@ function launchd(o: { run?: CommandRunner; uid?: number }): { run: CommandRunner
   return { run: o.run ?? realRunner, domain: `gui/${uid}` };
 }
 
-/** The person's launchd agents folder, ~/Library/LaunchAgents. HOME first, so a test's temp HOME is the one used. */
 export const launchAgentsDir = () => join(process.env.HOME || homedir(), 'Library', 'LaunchAgents');
 const agentsDirOf = (o: { agentsDir?: string }) => o.agentsDir ?? launchAgentsDir();
 const plistPath = (dir: string, key: string) => join(dir, `${scheduleLabel(key)}.plist`);
 
-/**
- * Write a project's plist and load it (`launchctl bootstrap gui/<uid>`). A job
- * already loaded under the label is booted out first, so installing again
- * picks up a new root, program or environment.
- */
 export async function install(o: ScheduleOptions & { agentsDir?: string; run?: CommandRunner; uid?: number }): Promise<void> {
   const text = plist(o);
   const { run, domain } = launchd(o);
@@ -127,7 +101,6 @@ export async function install(o: ScheduleOptions & { agentsDir?: string; run?: C
   if (loaded.code !== 0) throw new Error(`launchctl bootstrap: ${(loaded.stderr || loaded.stdout).trim() || `exit ${loaded.code}`}`);
 }
 
-/** Unload a project's job (`launchctl bootout`) and delete its plist. A job that is not there is not an error. */
 export async function remove(key: string, o: { agentsDir?: string; run?: CommandRunner; uid?: number } = {}): Promise<void> {
   const { run, domain } = launchd(o);
   await run(['launchctl', 'bootout', `${domain}/${scheduleLabel(key)}`]);
@@ -136,7 +109,6 @@ export async function remove(key: string, o: { agentsDir?: string; run?: Command
   });
 }
 
-/** The project keys that have a System plist, so the Inbox can find strays from a crash. */
 export async function list(o: { agentsDir?: string } = {}): Promise<string[]> {
   const names = await readdir(agentsDirOf(o)).catch(() => [] as string[]);
   return names

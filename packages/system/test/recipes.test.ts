@@ -61,7 +61,6 @@ describe('the recipes', () => {
         expect(c, `${name}: ${c}`).not.toMatch(/^gh pr (create|edit|merge)(\s|$)/);
       }
     }
-    // the drawing is checked where it lives, against Plannotator's own clone of the code
     expect(recipes.draw).toContain('plannotator system check --dir <drawing folder> --root <source folder>');
     expect(recipes.update).toContain('plannotator system check --dir <drawing folder> --root <source folder>');
   });
@@ -69,7 +68,6 @@ describe('the recipes', () => {
 
 describe('firstDrawPrompt', () => {
   const setup = { repos: ['github.com/acme/api'], docs: ['https://docs.example.com/'] };
-  /** The facts block: everything before the recipe. */
   const facts = (p: string) => p.slice(0, p.indexOf(recipes.draw));
 
   test('the facts (project folder, drawing folder, source folder, repos, doc sites) come first, then the recipe, then the format', () => {

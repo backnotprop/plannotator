@@ -1,6 +1,3 @@
-// The card picture: one sheet at rest, drawn to a width, with no controls.
-// A thread's message and a project card show it; the Inbox draws the card
-// around it (the title line, Open).
 import { useRef } from 'react';
 import type { SystemModel } from '../format/types.ts';
 import type { GateResult } from '../gate/gate.ts';
@@ -13,11 +10,8 @@ import { useText } from './text.ts';
 
 export type SystemThumbProps = {
   model: SystemModel;
-  /** The sheet to draw; the landing sheet when left out. */
   sheet?: string;
-  /** A change to draw on the sheet, After: its inks, numbers and line counts. Without `sheet`, the sheet it touches most. */
   revision?: Revision | GateResult;
-  /** The picture's width in px; its height follows the sheet. */
   width: number;
 };
 

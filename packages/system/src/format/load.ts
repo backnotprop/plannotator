@@ -1,12 +1,3 @@
-// Format 1: reads a drawing's files into a model. system.yaml holds each fact
-// once (parts, lines, the stack); sheets/<CODE>.yaml are views; revisions/
-// are changes. The loader checks every reference, rejects coordinates, unknown
-// keys and the keys format 1 dropped, and refuses any other format number.
-//
-// Every problem is a LoadIssue naming its file and field. system.yaml must
-// load for there to be a model at all; a sheet or a revision with errors is
-// left out of the model on its own, so a half-written sheet in the middle of a
-// draw leaves the rest of the drawing usable.
 import {
   ADDABLE, COORDS, KEYS, KIND_LETTER, KIND_ORDER, MAX_FILE_BYTES, MAX_TOTAL_BYTES, MOVES, REMOVED, RESERVED_IDS, SETTABLE,
   type EntryKind,
@@ -19,7 +10,6 @@ import {
 import { readYaml } from './yaml.ts';
 
 type Obj = Record<string, unknown>;
-/** Where an issue is: a file, and a field inside it. */
 type At = { file: string; field: string };
 type Issues = LoadIssue[];
 
@@ -30,7 +20,6 @@ const str = (v: unknown): string => (v == null ? '' : String(v));
 const strOrNull = (v: unknown): string | null => (v == null || v === '' ? null : String(v));
 const strList = (v: unknown): string[] => asList(v).filter((x) => x != null).map(String);
 const numOrNull = (v: unknown): number | null => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
-/** A map with no prototype: looking up "constructor" or "toString" finds nothing. */
 const dict = <T>(): Record<string, T> => Object.create(null) as Record<string, T>;
 const has = (o: object, k: string) => Object.hasOwn(o, k);
 
@@ -38,11 +27,9 @@ const at = (file: string, field = ''): At => ({ file, field });
 const sub = (a: At, k: string | number): At => ({ file: a.file, field: typeof k === 'number' ? `${a.field}[${k}]` : a.field ? `${a.field}.${k}` : k });
 const err = (issues: Issues, a: At, message: string) => issues.push({ file: a.file, field: a.field, message });
 
-/** One issue as one line: `sheets/L-101.yaml bands[0].x: coordinates are not allowed`. */
 export const formatIssue = (i: LoadIssue) => `${i.file}${i.field ? ` ${i.field}` : ''}: ${i.message}`;
 
 const numberFormat = new Intl.NumberFormat('en-US');
-/** A value from YAML as text: numbers get separators (1284003 reads 1,284,003); a leading run of five or more digits too. */
 export const fmtValue = (v: unknown): string => {
   if (typeof v === 'number') return Number.isFinite(v) ? numberFormat.format(v) : String(v);
   if (v == null) return '';
@@ -57,21 +44,18 @@ function checkKeys(kind: EntryKind, obj: unknown, a: At, issues: Issues): void {
   if (!isObj(obj)) return;
   const allowed = KEYS[kind] as readonly string[];
   for (const k of Object.keys(obj)) {
-    // a coordinate is reported once, by the lint
     if (allowed.includes(k) || COORDS.has(k)) continue;
     if (has(REMOVED, k)) err(issues, sub(a, k), `"${k}" is not in format 1 (${REMOVED[k]})`);
     else err(issues, sub(a, k), `unknown key "${k}" on a ${kind}${obj[k] === null ? ' (an unquoted comma inside { } splits a text; quote it)' : ''}`);
   }
 }
 
-/** False, with an error, for an id every JavaScript object already carries. */
 function okId(id: string, a: At, issues: Issues): boolean {
   if (!RESERVED_IDS.has(id)) return true;
   err(issues, a, `"${id}" is a reserved name; pick another id`);
   return false;
 }
 
-/** Reads `path`, `self:path` or `<alias>:path`. A path is relative to its repo's root. */
 function codeRef(raw: unknown, note: unknown, aliases: Set<string>, a: At, issues: Issues): CodeRef | null {
   let text = str(raw).trim();
   let repo = 'self';
@@ -117,7 +101,6 @@ function normPart(id: string, raw: unknown, aliases: Set<string>, a: At, issues:
   return {
     id,
     in: str(p.in) || 'root',
-    // a part with no name shows its id
     name: str(p.name).trim() === '' ? id : str(p.name),
     kind: str(p.kind) || 'part',
     role: str(p.role),
@@ -153,7 +136,6 @@ function normFlow(id: string, raw: unknown, aliases: Set<string>, a: At, issues:
   };
 }
 
-/** A row token: "api", "api 5", "~", "~ 2", or a nested list (a stack of parts sharing one cell). */
 function parseCell(tok: unknown): Cell | { type: 'bad'; text: string } {
   if (Array.isArray(tok)) {
     const span = tok.find((t) => typeof t === 'number');
@@ -281,7 +263,6 @@ function normSheet(raw: Obj, file: string, issues: Issues): Sheet {
   };
 }
 
-/** Every part a sheet places: its bands, side columns, lanes, landscape columns, endpoint and the parts its steps call. */
 export function sheetParts(s: Sheet): string[] {
   const out: string[] = [];
   s.bands.forEach((b) => b.row.forEach((c) => cellParts(c, out)));
@@ -297,7 +278,6 @@ const rank = (k: string) => {
   const i = KIND_ORDER.indexOf(k);
   return i < 0 ? KIND_ORDER.length : i;
 };
-/** Pivot order: logical first, conceptual last, any other kind after the known ones, then by code. */
 export const bySheetOrder = (sheets: Record<string, Sheet>) => (a: string, b: string) =>
   rank(sheets[a]!.kind) - rank(sheets[b]!.kind) || a.localeCompare(b, 'en', { numeric: true });
 
@@ -331,7 +311,6 @@ type Context = {
   aliases: Set<string>;
 };
 
-/** Reads one revision against a drawing, pushing its issues. */
 function buildRevision(doc: Obj, ctx: Context, file: string, issues: Issues): Revision {
   const top = at(file);
   checkKeys('revision', doc, top, issues);
@@ -498,7 +477,6 @@ function checkFormat(sys: Obj, issues: Issues): boolean {
 
 type SystemPart = Omit<SystemModel, 'sheets' | 'revisions' | 'byScope'>;
 
-/** system.yaml alone: the parts, lines, stack, scopes and sources. Any issue here means no model. */
 function buildSystem(sys: Obj, issues: Issues): SystemPart {
   const top = at('system.yaml');
   checkKeys('system', sys, top, issues);
@@ -522,7 +500,6 @@ function buildSystem(sys: Obj, issues: Issues): SystemPart {
     return { code: str(o.code), kind: str(o.kind), question: str(o.question) };
   });
 
-  // parts, then the stack (each entry a part of kind technology), then lines
   const parts = dict<Part>();
   if (sys.parts != null && !isObj(sys.parts)) err(issues, sub(top, 'parts'), 'should map each part id to the part');
   const rawParts = asObj(sys.parts);
@@ -566,8 +543,6 @@ function buildSystem(sys: Obj, issues: Issues): SystemPart {
     flows[id] = flow;
   }
 
-  // the scope tree: a scope is the inside of the one part that names it with
-  // child:, and its parent is that part's own scope. Any depth; never itself.
   const owner = dict<string>();
   for (const [id, p] of Object.entries(parts)) {
     const a = sub(sub(top, 'parts'), id);
@@ -597,7 +572,6 @@ function buildSystem(sys: Obj, issues: Issues): SystemPart {
   return { format: FORMAT, name, root, scopes, parentOf, owner, parts, flows, wanted, sources, watch };
 }
 
-/** Checks one sheet against system.yaml, pushing its issues. */
 function checkSheet(s: Sheet, sys: SystemPart, file: string, issues: Issues): void {
   const top = at(file);
   const fileCode = file.slice('sheets/'.length, -'.yaml'.length);
@@ -646,7 +620,6 @@ function checkSheet(s: Sheet, sys: SystemPart, file: string, issues: Issues): vo
   }
 }
 
-/** The files that are a drawing's own, and those that should be but are named wrong. */
 function sortFiles(files: SystemFiles, errors: Issues, warnings: Issues) {
   const usable = dict<string>();
   let total = 0;
@@ -676,11 +649,6 @@ function sortFiles(files: SystemFiles, errors: Issues, warnings: Issues) {
   return usable;
 }
 
-/**
- * Load a drawing from its files. No files at all means no drawing: model null
- * and no errors. system.yaml must load for a model; each sheet and revision
- * that does not load is left out, with its errors.
- */
 export function loadFiles(files: SystemFiles): LoadResult {
   const errors: Issues = [];
   const warnings: Issues = [];
@@ -692,14 +660,12 @@ export function loadFiles(files: SystemFiles): LoadResult {
     return { model: null, errors, warnings };
   }
 
-  // system.yaml: any issue here, and there is no model
   const sysIssues: Issues = [];
   const sysDoc = readYaml('system.yaml', usable['system.yaml']!, sysIssues, warnings);
   if (!sysDoc || !checkFormat(sysDoc, sysIssues)) return { model: null, errors: [...errors, ...sysIssues], warnings };
   const sys = buildSystem(sysDoc, sysIssues);
   if (sysIssues.length) return { model: null, errors: [...errors, ...sysIssues], warnings };
 
-  // sheets: each one loads on its own
   const sheets = dict<Sheet>();
   const failed = new Set<string>();
   for (const path of Object.keys(usable).filter((p) => p.startsWith('sheets/'))) {
@@ -708,7 +674,6 @@ export function loadFiles(files: SystemFiles): LoadResult {
     const code = path.slice('sheets/'.length, -'.yaml'.length);
     if (doc) {
       const s = normSheet(doc, path, own);
-      // the code must match the file name, so no sheet is drawn twice
       checkSheet(s, sys, path, own);
       if (!own.length) {
         sheets[s.sheet] = s;
@@ -719,7 +684,6 @@ export function loadFiles(files: SystemFiles): LoadResult {
     errors.push(...own);
   }
 
-  // what system.yaml says about the sheets
   const top = at('system.yaml');
   for (const w of sys.wanted) if (has(sheets, w.code)) warnings.push({ file: 'system.yaml', field: 'wanted', message: `sheet ${w.code} is drawn; take it out of wanted` });
   const stillWanted = sys.wanted.some((w) => !has(sheets, w.code));
@@ -729,9 +693,6 @@ export function loadFiles(files: SystemFiles): LoadResult {
   } else if (sheets[sys.root]!.scope !== 'root') {
     err(errors, sub(top, 'root'), `${sys.root} is a sheet of scope "${sheets[sys.root]!.scope}", not of root`);
   }
-  // lands: the part a line reaches inside a window; leaves: the same for the
-  // from end. That part must be drawn on a sheet of the window's scope or of a
-  // scope inside it. While sheets are still wanted it may not be drawn yet.
   const within = (sc: string, wantTop: string) => {
     for (let q: string | undefined = sc, n = 0; q && n < 64; q = has(sys.parentOf, q) ? sys.parentOf[q] : undefined, n++) if (q === wantTop) return true;
     return false;
@@ -752,7 +713,6 @@ export function loadFiles(files: SystemFiles): LoadResult {
     }
   }
 
-  // revisions: each one loads on its own, against the sheets that loaded
   const ctx: Context = { parts: sys.parts, flows: sys.flows, sheets, scopes: sys.scopes, aliases: new Set(Object.keys(sys.sources?.repos ?? {})) };
   const revisions = dict<Revision>();
   for (const path of Object.keys(usable).filter((p) => p.startsWith('revisions/'))) {
@@ -775,13 +735,11 @@ export function loadFiles(files: SystemFiles): LoadResult {
   return { model: { ...sys, byScope, sheets, revisions }, errors, warnings };
 }
 
-/** Read one revision (a PR's change or a plan) against a loaded drawing. Refused, naming the field, unless it loads clean. */
 export function parseRevision(model: SystemModel, yaml: string): { revision: Revision | null; errors: LoadIssue[] } {
   const errors: Issues = [];
   if (utf8Bytes(yaml) > MAX_FILE_BYTES) {
     return { revision: null, errors: [{ file: 'revision', field: '', message: `is more than ${MAX_FILE_BYTES} bytes` }] };
   }
-  // a split bracket in a revision is drawn as written; only errors refuse it
   const doc = readYaml('revision', yaml, errors, []);
   if (!doc) return { revision: null, errors };
   const ctx: Context = { parts: model.parts, flows: model.flows, sheets: model.sheets, scopes: model.scopes, aliases: new Set(Object.keys(model.sources?.repos ?? {})) };

@@ -1,7 +1,3 @@
-// The Steps view of a change: the revision's one sequence in place of the
-// sheet, its parts as lanes and its steps top to bottom, each step the change
-// adds in green and each it changes in amber (G's Steps.jsx). A still sheet
-// fitted to the width; a long sequence scrolls.
 import { useMemo, useRef } from 'react';
 import type { SystemModel } from '../format/types.ts';
 import { Sheet } from '../draw/Sheet.tsx';
@@ -13,11 +9,10 @@ import { useSize } from './text.ts';
 export function StepsStage({ model, epoch }: { model: SystemModel; epoch: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const size = useSize(ref);
-  const L = useMemo(() => (model.sheets[STEPS_CODE] ? layoutSheet(model, STEPS_CODE) : null), [model, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
+  const L = useMemo(() => (model.sheets[STEPS_CODE] ? layoutSheet(model, STEPS_CODE) : null), [model, epoch]);
   if (!L) return null;
   const n = model.sheets[STEPS_CODE]!.hops.length;
   const kw = size.w ? (size.w - 48) / L.w : 0;
-  // the whole sequence when it fits, else the width, never past 1:1
   const k = Math.min(1, kw, Math.max(size.h ? (size.h - 24) / L.h : kw, kw * 0.7));
   return (
     <div ref={ref} className="sys-steps" role="region" aria-label={`${L.title}: ${plural(n, 'step')}`} tabIndex={0} data-sheet={STEPS_CODE}>

@@ -1,27 +1,10 @@
-// A change on the drawing: a pull request's revision, a plan, or the gate's
-// touched parts (a PR with no revision yet). Each view of it is a model of its
-// own, made once and kept:
-//
-// - After: the drawing with the change applied. A part a revision adds in full
-//   (an open PR, a plan) is placed where it says; a part written `~` (a merged
-//   PR kept in the repo) is already there. Removed parts and lines stay drawn,
-//   struck in grey; a removed line the drawing no longer has is drawn from the
-//   old ends the revision carries. Each touched part shows its line counts.
-// - Before: the drawing as it was. What the change added is not drawn, what it
-//   removed is drawn plain, and nothing is marked.
-// - Steps: the revision's one sequence, laid out as a flow sheet of its own.
-//
-// A gate result has no Before and no Steps: its After marks the touched parts
-// and lines amber and changes nothing else.
 import type { AlgoStep, Cell, Flow, Hop, Part, Revision, Sheet, SystemModel } from '../format/types.ts';
 import type { GateResult } from '../gate/gate.ts';
 import { setMarks, type ChangeMarks } from './marks.ts';
 import { changeSummary, isRevision, type ChangeFile } from './summary.ts';
 
-/** The view of a change: the drawing before it, after it, or its one sequence. */
 export type ChangeView = 'before' | 'after' | 'steps';
 
-/** The Steps view's sheet code. Never a sheet of the drawing: it is in no scope's list. */
 export const STEPS_CODE = '~steps';
 
 const KEPT = new WeakMap<SystemModel, WeakMap<object, Map<string, SystemModel>>>();
@@ -36,12 +19,6 @@ function drawnOn(s: Sheet): Set<string> {
   return out;
 }
 
-/**
- * The drawing with a change on it, in one view. Kept per drawing, change and
- * view (and the files given), so asking again is free and its layouts are kept.
- * `files`: the PR's changed files with their counts, when the host has them;
- * a part's line counts are read from them when the revision does not give any.
- */
 export function applyChange(model: SystemModel, change: Revision | GateResult, view: ChangeView, files?: ChangeFile[]): SystemModel {
   let byChange = KEPT.get(model);
   if (!byChange) KEPT.set(model, (byChange = new WeakMap()));
@@ -55,10 +32,8 @@ export function applyChange(model: SystemModel, change: Revision | GateResult, v
   return out;
 }
 
-/** True when a revision has a sequence to show as Steps. */
 export const hasSteps = (change: Revision | GateResult | null | undefined): boolean => !!change && isRevision(change) && !!change.steps?.hops.length;
 
-// ---------------------------------------------------------------- a gate result
 function gateAfter(model: SystemModel, g: GateResult, files?: ChangeFile[]): SystemModel {
   const sum = changeSummary(model, g, files);
   const parts = { ...model.parts };
@@ -73,28 +48,14 @@ function gateAfter(model: SystemModel, g: GateResult, files?: ChangeFile[]): Sys
   return out;
 }
 
-// ---------------------------------------------------------------- several open PRs at rest
-/** One open PR's touched parts, as the gate found them, and the label it shows by the parts ("PR 2848"). */
 export type Touch = { label: string; change: GateResult };
 
 const TOUCHED = new WeakMap<SystemModel, Map<string, SystemModel>>();
 
-/**
- * The words a touched part carries: every label when one or two PRs touch it
- * ("PR 2848 · PR 2851"), the first and how many more past two ("PR 2848 +2"),
- * so a part's second line stays short and the sheet keeps its shape.
- */
 export function touchWords(labels: string[]): string {
   return labels.length <= 2 ? labels.join(' · ') : `${labels[0]} +${labels.length - 1}`;
 }
 
-/**
- * The drawing at rest with several open PRs' touched parts on it: amber only,
- * as the gate draws one, each touched part labelled with the PRs that touch it
- * (in the order given) in place of its second line. No numbers, no counts.
- * Kept per drawing and per content, so a host's new array of the same touches
- * is the same model. With nothing touched it is the drawing itself.
- */
 export function applyTouches(model: SystemModel, touches: Touch[]): SystemModel {
   const byPart = new Map<string, string[]>();
   const flows = new Set<string>();
@@ -127,28 +88,23 @@ export function applyTouches(model: SystemModel, touches: Touch[]): SystemModel 
   return out;
 }
 
-// ---------------------------------------------------------------- before
 function before(model: SystemModel, r: Revision): SystemModel {
-  // a `~` part or line is in the drawing already (a merged PR): before the PR it was not there
   const parts = { ...model.parts };
   for (const [id, p] of Object.entries(r.add.parts)) if (p == null) delete parts[id];
   const flows = { ...model.flows };
   for (const [id, f] of Object.entries(r.add.flows)) if (f == null) delete flows[id];
-  // a removed line the drawing no longer has is drawn from its old ends
   const gone: string[] = [];
   for (const [id, t] of Object.entries(r.remove)) if (t.flow && !has(flows, id)) { flows[id] = t.flow; gone.push(id); }
   const sheets = withLines(model.sheets, flows, gone, parts);
   return { ...model, parts, flows, sheets };
 }
 
-// ---------------------------------------------------------------- after
 function after(model: SystemModel, r: Revision, files?: ChangeFile[]): SystemModel {
   const parts: Record<string, Part> = { ...model.parts };
   const flows: Record<string, Flow> = { ...model.flows };
   const merged = !!r.merged;
   for (const [id, p] of Object.entries(r.add.parts)) if (p) parts[id] = p;
   for (const [id, f] of Object.entries(r.add.flows)) if (f) flows[id] = f;
-  // an open PR or a plan writes the changed values; a merged PR's drawing already has them
   if (!merged) {
     for (const [id, c] of Object.entries(r.change)) {
       if (!has(parts, id) || !Object.keys(c.set).length) continue;
@@ -172,16 +128,13 @@ function after(model: SystemModel, r: Revision, files?: ChangeFile[]): SystemMod
   const marks: ChangeMarks = { parts: {}, flows: {}, hops: {} };
   sum.parts.forEach((p, i) => {
     marks.parts[p.id] = { is: p.is, n: i + 1, lines: p.is === 'removed' ? null : p.lines ?? null };
-    // the line counts read where the part's second line was
     if (p.is !== 'removed' && p.lines && parts[p.id]) parts[p.id] = { ...parts[p.id]!, sub: p.lines };
   });
   for (const id of Object.keys(r.add.flows)) if (has(flows, id)) marks.flows[id] = 'added';
   for (const id of Object.keys(r.change)) if (!has(parts, id) && has(flows, id)) marks.flows[id] = 'changed';
   for (const id of Object.keys(r.remove)) if (has(flows, id) && !has(model.parts, id)) marks.flows[id] = 'removed';
-  // a line into or out of a removed part goes with it
   for (const f of Object.values(flows)) if ([...f.from, f.to].some((e) => marks.parts[e]?.is === 'removed')) marks.flows[f.id] = 'removed';
 
-  // the sheets: placed parts, the lines the change adds or removes, a sheet's own patch
   const added = Object.entries(r.add.flows).filter(([, f]) => !!f).map(([id]) => id);
   let sheets: Record<string, Sheet> = {};
   for (const [code, s0] of Object.entries(model.sheets)) {
@@ -194,7 +147,6 @@ function after(model: SystemModel, r: Revision, files?: ChangeFile[]): SystemMod
         if (!b) continue;
         const i = b.row.findIndex((c) => c.type === 'part' && c.id === at.after);
         const cell: Cell = { type: 'part', id, span: at.span };
-        // a placed part takes a free gap after its neighbour first, so the others keep their places
         const gap = b.row.findIndex((c, j) => c.type === 'gap' && j > i);
         if (gap >= 0) b.row.splice(gap, 1, cell);
         else b.row.splice(i + 1, 0, cell);
@@ -211,7 +163,6 @@ function after(model: SystemModel, r: Revision, files?: ChangeFile[]): SystemMod
   return out;
 }
 
-/** Shows each of `ids` on every sheet that lists its lines and draws an end of it. */
 function withLines(sheets: Record<string, Sheet>, flows: Record<string, Flow>, ids: string[], parts: Record<string, Part>): Record<string, Sheet> {
   if (!ids.length) return sheets;
   const out: Record<string, Sheet> = {};
@@ -228,7 +179,6 @@ const str = (v: unknown) => (v == null ? '' : String(v));
 const strOrNull = (v: unknown) => (v == null ? null : String(v));
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 
-/** A sheet's own patch: `set` replaces keys; `add` puts hops or steps in, after a named one or at the end, marked added. */
 function patched(code: string, s: Sheet, patch: Revision['sheets'][string], marks: ChangeMarks): Sheet {
   const out = { ...s } as Sheet & Record<string, unknown>;
   for (const [k, v] of Object.entries(patch.set)) out[k] = v;
@@ -265,12 +215,10 @@ function patched(code: string, s: Sheet, patch: Revision['sheets'][string], mark
   return out;
 }
 
-// ---------------------------------------------------------------- steps
 function steps(model: SystemModel, r: Revision): SystemModel {
   const base = after(model, r);
   const st = r.steps;
   if (!st) return base;
-  // the lanes are the parts as they read, without their line counts: the hops carry the change
   const parts = { ...base.parts };
   for (const id of st.lanes) if (has(model.parts, id)) parts[id] = model.parts[id]!;
   const marks: ChangeMarks = { parts: {}, flows: {}, hops: {} };
