@@ -537,6 +537,10 @@ test("6. Mac mini still asleep: \"+\" names it once where its last read is held,
   // The Board's cards are made in this Inbox: New card lists its own projects, and the card is made.
   const on = await fetch(`${base(macbook)}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ board: { on: true } }) });
   expect(on.status).toBe(200);
+  // The Board's first visit opens its intro: not this test's.
+  await fresh.addLocatorHandler(fresh.locator('[data-dialog="board-intro"]'), async (intro) => {
+    await intro.locator('[data-board-intro-close]').click();
+  });
   await fresh.goto(`${macbook.url}#board`);
   await fresh.locator('[data-board-new]').click();
   const card = fresh.locator('.ib-ncd');
