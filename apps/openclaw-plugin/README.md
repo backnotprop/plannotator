@@ -8,7 +8,7 @@ Plannotator for [OpenClaw](https://github.com/openclaw/openclaw). It connects yo
 openclaw plugins install @plannotator/openclaw
 ```
 
-No restart: the running Gateway loads it. It needs OpenClaw 2026.11.3 or newer, on the same computer as the Inbox, and the `plannotator` CLI:
+No restart: the running Gateway loads it. It needs OpenClaw 2026.11.5 or newer (or its betas from 2026.11.5-beta.1), on the same computer as the Inbox, and the `plannotator` CLI:
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash
@@ -28,5 +28,6 @@ Only your own chats, with nothing to set up:
 ## Good to know
 
 - Your reply arrives as a new message in the same chat. If the agent is busy, it waits until the current turn ends. The agent's answer goes where that chat's answers go (your Telegram DM gets it in Telegram).
+- Installing it again after `openclaw plugins uninstall` leaves it disabled (OpenClaw keeps `enabled: false` for it): run `openclaw plugins enable plannotator`.
 - Replies follow the chat, not the conversation: after `/new`, a reply goes into the chat's new conversation.
 - The plugin only connects out to the Inbox on `127.0.0.1`. An OpenClaw on another machine (a VPS) cannot reach it yet.
