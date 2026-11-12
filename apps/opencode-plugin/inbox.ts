@@ -321,12 +321,12 @@ export async function registerInboxOpenCode2(
   v2: V2ContextLike,
   connection: InboxAgentConnection,
   resolveRoot: (sessionID: string) => Promise<{ root: string }>,
-  options: { signal?: AbortSignal; plugin?: () => InboxLoadedPluginReport | null } = {},
+  options: { signal?: AbortSignal; plugin?: () => InboxLoadedPluginReport | null; launch?: { created: boolean; session: string | null } } = {},
 ): Promise<boolean> {
   const transform = toolDomain?.transform;
   const spec = inboxAgentTool(connection.tools, { wakes: typeof v2.session?.prompt === "function" });
   if (typeof transform !== "function" || !spec) return false;
-  const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot, options.plugin ?? openCodePluginReporter()) : null;
+  const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot, options.plugin ?? openCodePluginReporter(), options.launch) : null;
   // `signal` ends the wakes (their event subscription and lease timers): the plugin's lifetime otherwise.
   if (wakes && options.signal) {
     if (options.signal.aborted) wakes.dispose();
@@ -408,7 +408,10 @@ class OpenCode2Wakes {
     private readonly resolveRoot: (sessionID: string) => Promise<{ root: string }>,
     /** What this service loaded and what is on disk now (`plugin` on each poll). */
     private readonly pluginReport: () => InboxLoadedPluginReport | null = () => null,
+    /** A server the Inbox started: its sessions have no turn yet, and the Inbox's first message waits for this wake. */
+    private readonly launch: { created: boolean; session: string | null } = { created: false, session: null },
   ) {
+    if (launch.session) this.watch(launch.session);
     const subscribe = v2.event?.subscribe;
     if (typeof subscribe !== "function") return;
     this.eventsAvailable = true;
@@ -549,6 +552,9 @@ class OpenCode2Wakes {
     const state = this.state(sessionID);
     state.lastEventAt = Date.now();
     switch (type) {
+      case "session.created":
+        if (this.launch.created) this.discover(sessionID);
+        return;
       case "session.execution.started":
         state.running = true;
         this.discover(sessionID);

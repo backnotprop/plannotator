@@ -1055,7 +1055,8 @@ export interface InboxAddressee {
 export type InboxLaunchAgent =
   | "claude-code"
   | "pi"
-  | "codex";
+  | "codex"
+  | "opencode";
 
 /** One Codex usage limit (`account/rateLimits/read`): how much of it is used, its length, and when it resets. */
 export interface InboxCodexLimit {

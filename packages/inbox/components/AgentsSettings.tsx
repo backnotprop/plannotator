@@ -672,8 +672,8 @@ export function AgentsSettings({
     <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
       <Row
         k="Start agents from New message"
-        v="Claude Code, Codex and Pi"
-        sub="New message can start Claude Code, Codex or Pi in a folder you pick. Turn off to only message sessions that are already running."
+        v="Claude Code, Codex, OpenCode and Pi"
+        sub="New message can start Claude Code, Codex, OpenCode or Pi in a folder you pick. Turn off to only message sessions that are already running."
         data={{ 'data-launch-enabled-row': launchState.enabled ? 'on' : 'off' }}
         r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
       />
