@@ -307,7 +307,7 @@ import { replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
-import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale } from "./inbox-tailscale";
+import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
 import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-new-images";
 
@@ -507,6 +507,8 @@ export interface InboxServerOptions {
   unlinkedRefusalKeptMs?: number;
   /** How "Reach from my tailnet" runs the `tailscale` CLI. Default: the CLI on PATH. */
   tailscale?: TailscaleRunner;
+  /** Tests: the clock of "Over your tailnet"'s publish-again retry (inbox-tailscale.ts). Default: unref'd timers. */
+  tailscaleTimers?: InboxTailscaleTimers;
   /** Tests: more agents beside Claude Code (`createInboxLaunch`'s `hosts`), for a sandbox with no CLI to start. */
   launchHosts?: (context: LaunchHostContext) => LaunchHost[];
   /** Tests: how step 1 of Pair a phone reads this computer (packages/server/inbox-pairing-checks.ts). Default: its own tools. */
@@ -1176,6 +1178,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
   const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => void>();
+  /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
+  const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -3597,6 +3601,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
+        // The same state GET /api/inbox/settings answers every window with, so Settings' row follows without a reload.
+        const onTailscale = () => send(`event: tailscale\ndata: ${JSON.stringify({ tailscale: tailscale.state() })}\n\n`);
+        if (windowId) tailscaleListeners.add(onTailscale);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows, and a linked machine that asks
         // (`deliveries=1`), whose copy of this machine's rows would otherwise keep a "Session ended" that is over.
@@ -3636,6 +3643,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
           capabilityListeners.delete(onCapabilities);
+          tailscaleListeners.delete(onTailscale);
           stopShapes?.();
           stopShapes = null;
           deliveryListeners.delete(sendDeliveries);
@@ -6756,6 +6764,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const entry of windowEntryScripts) windowApp.answer(entry, "GET", "br", true).catch(() => {});
     },
     tailscale: options.tailscale,
+    timers: options.tailscaleTimers,
+    // Published by itself after Tailscale came back: every window's Settings row follows at once.
+    onRepublished: () => {
+      for (const listener of tailscaleListeners) listener();
+    },
     flag: options.publishTailnet === true,
     maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
     // A terminal closing a foreground Inbox while published: the clean stop (both tailnet mappings), then exit.

@@ -2480,6 +2480,8 @@ function Inbox() {
           listAfterEvents(80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
+        // "Over your tailnet" published by itself once Tailscale came back: Settings' row shows the address at once.
+        onTailscale: (tailscale) => setSettings((current) => (current ? { ...current, tailscale } : current)),
         // Shape's boards changed (only sent while Shape is on).
         onShapes: (ids) => {
           for (const listener of shapeFrameListeners) listener(ids);
