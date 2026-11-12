@@ -43,6 +43,7 @@ import { sha256Hex, type InboxDevice, type InboxDevices } from "@plannotator/sha
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxLine } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { createInboxAgentRelayApplied } from "./inbox-agent-relay-applied";
 import { AGENT_PLATFORM } from "./inbox-devices";
 
 export const DEFAULT_RELAY_URL = "https://relay.plannotator.ai";
@@ -247,6 +248,7 @@ export function createInboxRelay(context: InboxRelayContext) {
   const { store, devices } = context;
   const phonesOn = context.phones !== false;
   const isAgent = (deviceId: string) => devices.get(deviceId)?.platform === AGENT_PLATFORM;
+  const applied = context.agents ? createInboxAgentRelayApplied(context.dataDir) : null;
   const served = () => devices.list().filter((device) => (device.platform === AGENT_PLATFORM ? context.agents !== undefined : phonesOn));
   let mailbox = readRelayFile(context.dataDir);
   let making: Promise<InboxRelayFile | null> | null = null;
@@ -463,8 +465,18 @@ export function createInboxRelay(context: InboxRelayContext) {
     const keys = secret && context.agents ? await deriveRelayKeys(secret, frame.device_id) : null;
     const opened = keys ? await openAgentCommand(frame, keys.upKey) : null;
     if (keys && opened && opened.id === frame.id) {
-      const answer = await context.agents!.apply(frame.device_id, { tool: opened.tool, arguments: opened.arguments }, opened.id);
-      log(`agent command ${frame.device_id} ${answer.status}`);
+      const repeat = applied?.answerOf(frame.device_id, opened.id) ?? null;
+      let answer: Response;
+      if (repeat) {
+        log(`agent command ${frame.device_id} repeated`);
+        answer = repeat;
+      } else {
+        const first = await context.agents!.apply(frame.device_id, { tool: opened.tool, arguments: opened.arguments }, opened.id);
+        const body = await first.text();
+        applied?.record(frame.device_id, opened.id, first.status, body);
+        log(`agent command ${frame.device_id} ${first.status}`);
+        answer = new Response(body, { status: first.status, headers: { "Content-Type": first.headers.get("content-type") ?? "application/json; charset=utf-8" } });
+      }
       const item = await resultFrame(frame.device_id, opened.id, answer, keys.key);
       if (socket && socket.readyState === WebSocket.OPEN) socket.send(item);
     } else {

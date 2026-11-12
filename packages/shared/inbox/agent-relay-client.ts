@@ -91,6 +91,7 @@ export async function callInboxThroughRelay(
     return unreachable(error);
   }
   if (posted.status === 401 || posted.status === 404) return removed();
+  if (posted.status === 429) return { kind: "refused", code: "too_many_waiting", message: "Too many of your calls are already waiting for the person's computer. Nothing was sent. Try again once it is back." };
   if (posted.status === 413) return { kind: "refused", code: "command_too_large", message: "This call is too large to carry through the relay. Send smaller attachments." };
   if (!posted.ok) return { kind: "refused", code: "relay_error", message: `The Inbox's relay answered ${posted.status}. Nothing was sent. Try again later.` };
   const queued = (await posted.json().catch(() => ({}))) as { inbox_online?: boolean };
