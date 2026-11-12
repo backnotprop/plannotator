@@ -15,6 +15,7 @@ const hasDom = typeof document !== 'undefined';
 const hookModule = hasDom ? await import('./useHtmlAnnotation') : null;
 const htmlViewerModule = hasDom ? await import('./HtmlViewer') : null;
 
+// Unmount every root before clearing the DOM: mounted HtmlViewers keep window message listeners alive across test files.
 const mountedRoots: Array<{ unmount: () => void }> = [];
 
 afterEach(async () => {

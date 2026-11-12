@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import * as identityModule from './identity';
 
+// Captured at import time, before configure.test.ts's mock.module() replaces it with a no-op spy.
 const setIdentityProvider = identityModule.setIdentityProvider;
 const resetIdentityProvider = identityModule.resetIdentityProvider;
 const getIdentity = identityModule.getIdentity;

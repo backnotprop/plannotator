@@ -106,6 +106,7 @@ function crossBlockDraft(
   const endText = end.textContent ?? '';
   return {
     id,
+    // Keep fixture ids camelCase: Tailwind scans this file, and a hyphenated id that parses as a utility leaks a rule into every build.
     blockId: 'crossBlock',
     startOffset: 0,
     endOffset: startText.length + endText.length,

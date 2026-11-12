@@ -6,6 +6,7 @@ import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { MermaidBlock, __setMermaidRuntimeLoaderForTests } from './MermaidBlock';
 import { GraphvizBlock, __setVizLoaderForTests } from './GraphvizBlock';
 
+// happy-dom cannot host DOMPurify: the render slot uses the inert template parse here (the scrub still runs).
 let restoreParser: (() => void) | null = null;
 beforeAll(() => {
   if (hasDom) restoreParser = installInertDiagramSvgParser();

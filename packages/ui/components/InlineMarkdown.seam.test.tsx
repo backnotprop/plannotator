@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import * as InlineMarkdownModule from './InlineMarkdown';
 
+// Captured at import time, before configure.test.ts's mock.module() replaces it with a no-op spy.
 const setDocPreviewFetcher = InlineMarkdownModule.setDocPreviewFetcher;
 const resetDocPreviewFetcher = InlineMarkdownModule.resetDocPreviewFetcher;
 const InlineMarkdown = InlineMarkdownModule.InlineMarkdown;

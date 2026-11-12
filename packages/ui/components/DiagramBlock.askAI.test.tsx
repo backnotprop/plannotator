@@ -38,6 +38,7 @@ const D_DOCUMENT_LINE = 7;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let restoreParser: (() => void) | null = null;
+// happy-dom defines the geometry methods on SVGGraphicsElement, which would shadow a stub on SVGElement.
 const svgProto = (hasDom ? ((globalThis as { SVGGraphicsElement?: typeof SVGElement }).SVGGraphicsElement ?? SVGElement).prototype : {}) as unknown as Record<string, unknown>;
 const elementProto = (hasDom ? Element.prototype : {}) as unknown as Record<string, unknown>;
 const saved = { getBBox: svgProto['getBBox'], getScreenCTM: svgProto['getScreenCTM'] };

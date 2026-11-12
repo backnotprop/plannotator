@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { configStore } from './index';
 import * as storageModule from '../utils/storage';
 
+// Captured at import time, before configure.test.ts's mock.module() replaces it with a no-op spy.
 const setStorageBackend = storageModule.setStorageBackend;
 const resetStorageBackend = storageModule.resetStorageBackend;
 

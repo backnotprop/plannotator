@@ -12,6 +12,7 @@ import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 
 const hasDom = typeof document !== 'undefined';
 
+// happy-dom cannot host DOMPurify: the render slot uses the inert template parse here (the scrub still runs).
 let restoreParser: (() => void) | null = null;
 beforeAll(() => {
   if (hasDom) restoreParser = installInertDiagramSvgParser();

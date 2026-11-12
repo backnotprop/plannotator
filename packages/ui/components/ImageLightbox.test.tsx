@@ -311,6 +311,7 @@ function view(img: HTMLElement) {
   return { x: Number(m[1]), y: Number(m[2]), scale: Number(m[3]) };
 }
 
+// happy-dom's WheelEvent drops some of its init (the pointer, Shift), so they are set on the event.
 function wheelEvent(deltaY: number, init: WheelEventInit = {}) {
   const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...init });
   Object.defineProperty(event, 'clientX', { value: init.clientX ?? 500 });

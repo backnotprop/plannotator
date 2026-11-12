@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as ImageThumbnailModule from './ImageThumbnail';
 
+// Captured at import time, before configure.test.ts's mock.module() replaces it with a no-op spy.
 const setImageSrcResolver = ImageThumbnailModule.setImageSrcResolver;
 const resetImageSrcResolver = ImageThumbnailModule.resetImageSrcResolver;
 const getImageSrc = ImageThumbnailModule.getImageSrc;
