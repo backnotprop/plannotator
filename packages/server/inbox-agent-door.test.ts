@@ -309,4 +309,30 @@ describe("the agent door", () => {
     expect(readFileSync(cloudAgentsPath(w.dataDir), "utf8")).not.toContain(pairing.token);
     expect(files.some((file) => file.path.endsWith("debug.log"))).toBe(true);
   });
+
+  test("an agent with no wake address polls: its read delivers the person's message, which is not unread for it again, and the line goes from Saved to Delivered; one with a wake address keeps the queued line", async () => {
+    const w = await world();
+    const paired = await w.call("/api/inbox/cloud-agents", { name: "Poller", preset: "other" });
+    expect(paired.status).toBe(200);
+    const poller = paired.json.agent as InboxCloudAgentView;
+    expect(poller.wake).toBe(false);
+    const token = decodeInboxAgentPairing(paired.json.pairing)!.token;
+    const sent = await w.call("/api/inbox/messages", { to: { session: poller.session }, body: "Anything new on the export?", idempotency_key: "poll-1" });
+    expect(sent.status).toBe(200);
+    const threadId = sent.json.thread_id as string;
+    const connection = async (session: string) => (await w.call(`/api/inbox/threads/${threadId}/sessions?asker=${encodeURIComponent(session)}`)).json.asker?.connection;
+    const unread = async () => ((await w.door(token, "read_thread")).result!.structuredContent!.threads as { thread_id: string; unread?: boolean }[]).find((row) => row.thread_id === threadId)?.unread === true;
+
+    expect((await connection(poller.session))?.polls).toBe(true);
+    expect((await w.thread(threadId)).messages[0]!.delivery ?? null).toBeNull();
+    expect(await unread()).toBe(true);
+    expect((await w.door(token, "read_thread", { thread_id: threadId })).error).toBeNull();
+    expect(await unread()).toBe(false);
+    expect((await w.thread(threadId)).messages[0]!.delivery?.at).toEqual(expect.any(String));
+
+    const woken = await w.pair("other", "Woken");
+    const toWoken = await w.call("/api/inbox/messages", { to: { session: woken.agent.session }, body: "Run the nightly export.", idempotency_key: "wake-1" });
+    const wokenConnection = (await w.call(`/api/inbox/threads/${toWoken.json.thread_id}/sessions?asker=${encodeURIComponent(woken.agent.session)}`)).json.asker?.connection;
+    expect(wokenConnection?.polls).toBeUndefined();
+  });
 });
