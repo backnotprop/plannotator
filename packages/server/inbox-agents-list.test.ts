@@ -63,6 +63,26 @@ describe("who is listed, and how", () => {
     expect(group.agents[1]).toMatchObject({ host: "claude-code", label: "Fix login redirect", project: { id: "prj_ledger", name: "ledger" }, waiting: 0 });
   });
 
+  test("a live session carries its context window's fill from its latest poll; a bad figure, an older connection or an ended session carries none", async () => {
+    const { live, clock } = liveSessions();
+    await poll(live, "ses-full", { context: 63 });
+    await poll(live, "ses-odd", { context: 140 });
+    await poll(live, "ses-old");
+    let agents = inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents;
+    expect(Object.fromEntries(agents.map((agent) => [agent.id, agent.context]))).toEqual({ "ses-full": 63, "ses-odd": undefined, "ses-old": undefined });
+    // The latest poll stands: one without the field clears it.
+    await poll(live, "ses-full");
+    agents = inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents;
+    expect(agents.find((agent) => agent.id === "ses-full")!.context).toBeUndefined();
+    // Ended: no figure, however fresh its last one was.
+    await poll(live, "ses-full", { context: 91 });
+    clock.t += 60 * 60_000;
+    await poll(live, "ses-other");
+    agents = inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents;
+    expect(agents.find((agent) => agent.id === "ses-full")).toMatchObject({ state: "ended" });
+    expect(agents.find((agent) => agent.id === "ses-full")!.context).toBeUndefined();
+  });
+
   test("a session that ended today is listed as ended and counted; one last heard yesterday is not", async () => {
     const { live, clock } = liveSessions();
     clock.t -= 13 * 60 * 60_000; // Yesterday, 11 PM.
@@ -261,6 +281,13 @@ describe("what tells the windows (`event: deliveries`' `agents`)", () => {
     expect(moved()).toBe(true);
     await poll(live, "ses-a", { busy: false, label: "Renamed" });
     expect(moved()).toBe(false);
+    // The context's fill tells the windows in 5-point steps only: a busy turn's every response moves it a little.
+    await poll(live, "ses-a", { busy: false, label: "Renamed", context: 61 });
+    expect(moved()).toBe(true);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", context: 63 });
+    expect(moved()).toBe(false);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", context: 66 });
+    expect(moved()).toBe(true);
     clock.t += 31_000; // Past the live window: it ended.
     expect(moved()).toBe(true);
     expect(live.agentSessions(since()).map((entry) => [entry.session, entry.live])).toEqual([["ses-a", false]]);

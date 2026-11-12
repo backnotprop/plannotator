@@ -98,6 +98,11 @@ test('the hover card says where and when from what the window has, and leaves ou
   expect(bare.sub).toBe('Claude Code');
   expect(bare.state).toBe('Working');
   expect(bare.rows).toEqual([['Thread', 'Docs pass']]);
+  // A live agent whose connection says how full its context is: one row more. An ended one never shows a figure.
+  const full = agentFacts({ agent: agent('ses_c', { context: 63 }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(full.rows.at(-1)).toEqual(['Context', '63% used']);
+  const gone = agentFacts({ agent: agent('ses_d', { context: 63, live: false, state: 'ended' }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(gone.rows.some(([k]) => k === 'Context')).toBe(false);
   // An asleep machine says so, in place of the agent's state.
   expect(agentFacts({ agent: agent('ses_c'), machine: MAC, name: 'x', thread: null }, view(MAC, 'MacBook', { state: 'offline' }), now).state).toStartWith('MacBook asleep since ');
 });

@@ -322,6 +322,8 @@ export interface SessionInfo {
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
   title?: () => string | Promise<string>
+  /** How full the context window is, read for each Inbox poll (`InboxLinkOptions.contextPercent`). */
+  contextPercent?: () => Promise<number | null>
   /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
   continues?: () => Promise<readonly string[]>
   /**
@@ -420,6 +422,7 @@ export class PlannotatorMod {
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
           ...(session.title ? { title: session.title } : {}),
+          ...(session.contextPercent ? { contextPercent: session.contextPercent } : {}),
           ...(session.continues ? { continues: session.continues } : {}),
           instanceId: this.instanceId,
           turns: this.turns,

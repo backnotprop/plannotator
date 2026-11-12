@@ -187,6 +187,7 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
+  if (agent.live && typeof agent.context === 'number') rows.push(['Context', `${agent.context}% used`]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
   return { title: entry.name, sub, state, rows };
 }

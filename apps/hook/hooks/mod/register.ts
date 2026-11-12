@@ -103,7 +103,9 @@ import {
   claudeTranscriptPaths,
   conversationResumed,
   discoverInboxTools,
+  engineAtLeast,
   engineHasSessionAppend,
+  SESSION_USAGE_MIN_ENGINE,
   inboxFirstPromptContext,
   inboxRegistryPathOf,
   inboxReminderEnvValue,
@@ -195,6 +197,17 @@ function readEngineVersion($: Engine): Promise<string | null> {
     }
   })()
   return engineVersion
+}
+
+/**
+ * How full the context window is, as the status line has it (`$.session.usage()`'s `context.percent`, free to
+ * read), on an engine that has the call (SESSION_USAGE_MIN_ENGINE); null otherwise or before a first response.
+ */
+async function readContextPercent($: Engine): Promise<number | null> {
+  if (!engineAtLeast(await readEngineVersion($), SESSION_USAGE_MIN_ENGINE)) return null
+  const usage = await $.session.usage()
+  const percent = usage?.context?.percent
+  return typeof percent === 'number' && Number.isFinite(percent) ? Math.min(100, Math.max(0, Math.round(percent))) : null
 }
 
 /** Every closure over `$` the logic uses. `debugPath` set: lines go to that file. */
@@ -584,6 +597,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       title: () => title.generatedTitle() ?? '',
+      contextPercent: () => readContextPercent($),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
       ...(options.healed ? { healed: true } : {}),

@@ -1527,6 +1527,14 @@ export const INBOX_CONTINUES_POLL_FIELD = 'continues'
 export const INBOX_TITLE_POLL_FIELD = 'title'
 
 /**
+ * How full the session's context window is, a whole percentage 0 to 100, as
+ * the host reported it for its last response (Claude Code's status line
+ * `used_percentage`). Sent on every poll, so the latest stands; absent when the
+ * host does not say. An older Inbox ignores it.
+ */
+export const INBOX_CONTEXT_POLL_FIELD = 'context'
+
+/**
  * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
  * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
  * An older Inbox ignores it.

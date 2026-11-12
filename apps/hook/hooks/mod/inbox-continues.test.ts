@@ -38,7 +38,7 @@ import {
   transcriptContinuedLineOf,
   transcriptForkedFromOf,
 } from './inbox'
-import { INBOX_BRIDGE_POLL_PATH, INBOX_CONTINUES_POLL_FIELD } from './inbox-contract'
+import { INBOX_BRIDGE_POLL_PATH, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD } from './inbox-contract'
 import { fakeHost } from './testing/fake-host'
 
 const scratch = mkdtempSync(join(tmpdir(), 'plannotator-continues-'))
@@ -291,7 +291,7 @@ describe('what the poll says', () => {
   const DATA = '/data'
   const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
 
-  async function pollsOf(continues?: () => Promise<readonly string[]>) {
+  async function pollsOf(continues?: () => Promise<readonly string[]>, contextPercent?: () => Promise<number | null>) {
     const host = fakeHost()
     host.files.set(inboxRegistryPathOf(DATA), REGISTRY)
     const polls: Record<string, unknown>[] = []
@@ -299,7 +299,7 @@ describe('what the poll says', () => {
       if (url.endsWith(INBOX_BRIDGE_POLL_PATH)) polls.push(body as Record<string, unknown>)
       return { status: 200, ok: true, text: JSON.stringify({ commands: [] }) }
     }
-    const link = new InboxLink({ host, dataDir: DATA, sessionId: NEW, tools: [], isBusy: () => false, instanceId: 'me', ...(continues ? { continues } : {}) })
+    const link = new InboxLink({ host, dataDir: DATA, sessionId: NEW, tools: [], isBusy: () => false, instanceId: 'me', ...(continues ? { continues } : {}), ...(contextPercent ? { contextPercent } : {}) })
     link.start()
     for (let i = 0; i < 4; i += 1) {
       host.clock += 1_000
@@ -319,5 +319,12 @@ describe('what the poll says', () => {
     for (const poll of await pollsOf(async () => [])) expect(INBOX_CONTINUES_POLL_FIELD in poll).toBe(false)
     for (const poll of await pollsOf(async () => Promise.reject(new Error('no shell')))) expect(INBOX_CONTINUES_POLL_FIELD in poll).toBe(false)
     for (const poll of await pollsOf()) expect(INBOX_CONTINUES_POLL_FIELD in poll).toBe(false)
+  })
+
+  // Same rule as `continues`: the latest figure on every poll, none when the host cannot say.
+  test("the context window's fill rides on every poll; none when the engine says nothing or the read fails", async () => {
+    for (const poll of await pollsOf(undefined, async () => 63)) expect(poll[INBOX_CONTEXT_POLL_FIELD]).toBe(63)
+    for (const poll of await pollsOf(undefined, async () => null)) expect(INBOX_CONTEXT_POLL_FIELD in poll).toBe(false)
+    for (const poll of await pollsOf(undefined, async () => Promise.reject(new Error('older engine')))) expect(INBOX_CONTEXT_POLL_FIELD in poll).toBe(false)
   })
 })

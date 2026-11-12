@@ -64,6 +64,7 @@ import {
   INBOX_AUTO_RELOAD_POLL_FIELD,
   INBOX_CONTINUES_POLL_FIELD,
   INBOX_TITLE_POLL_FIELD,
+  INBOX_CONTEXT_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
@@ -109,16 +110,28 @@ import type { TurnTracker } from './turns'
  */
 export const SESSION_APPEND_MIN_ENGINE = '2.1.301'
 
-/** Whether an engine version (`$.session.version()`'s `base`, else `version`) is at least SESSION_APPEND_MIN_ENGINE. */
-export function engineHasSessionAppend(version: string | null | undefined): boolean {
+/**
+ * The first Claude Code whose hooks-module API documents `$.session.usage()`
+ * (the 2.1.322 plugin-authoring types): the oldest engine the context window's
+ * fill is read from. Older or unknown engines report none.
+ */
+export const SESSION_USAGE_MIN_ENGINE = '2.1.322'
+
+/** Whether an engine version (`$.session.version()`'s `base`, else `version`) is at least `min`. */
+export function engineAtLeast(version: string | null | undefined, min: string): boolean {
   const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(typeof version === 'string' ? version.trim() : '')
   if (!parts) return false
-  const min = SESSION_APPEND_MIN_ENGINE.split('.').map(Number)
+  const want = min.split('.').map(Number)
   const have = parts.slice(1, 4).map(Number)
   for (let i = 0; i < 3; i++) {
-    if (have[i]! !== min[i]!) return have[i]! > min[i]!
+    if (have[i]! !== want[i]!) return have[i]! > want[i]!
   }
   return true
+}
+
+/** Whether an engine version is at least SESSION_APPEND_MIN_ENGINE. */
+export function engineHasSessionAppend(version: string | null | undefined): boolean {
+  return engineAtLeast(version, SESSION_APPEND_MIN_ENGINE)
 }
 
 /** plugin.json's `version` (the plugin this process loaded); null when unreadable. */
@@ -989,6 +1002,12 @@ export interface InboxLinkOptions {
   /** Set by the host, never by the model. */
   title?: () => string | Promise<string>
   /**
+   * How full the session's context window is (0 to 100), read for every poll
+   * and sent as INBOX_CONTEXT_POLL_FIELD. Null or a rejection: nothing sent.
+   * Set by the host, never by the model. Absent: never sent.
+   */
+  contextPercent?: () => Promise<number | null>
+  /**
    * The session ids this conversation continues (`TranscriptForkedFrom`), read
    * for every poll and sent as INBOX_CONTINUES_POLL_FIELD when there is one.
    * Set by the host, never by the model. Absent, empty or a rejection: nothing sent.
@@ -1485,6 +1504,7 @@ export class InboxLink {
     const label = await this.labelNow()
     const title = this.options.title ? await Promise.resolve().then(this.options.title).catch(() => '') : null
     const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
+    const context = this.options.contextPercent ? await this.options.contextPercent().catch(() => null) : null
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
       // The session this conversation was branched from: the Inbox hands this one what waits for it once it is gone.
@@ -1493,6 +1513,7 @@ export class InboxLink {
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),
       ...(title === null ? {} : { [INBOX_TITLE_POLL_FIELD]: title }),
+      ...(context === null ? {} : { [INBOX_CONTEXT_POLL_FIELD]: context }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).

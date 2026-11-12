@@ -115,6 +115,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       live: entry.live,
       started_at: iso(entry.startedAt),
       last_seen_at: iso(entry.lastSeen),
+      ...(entry.live && entry.context !== null ? { context: entry.context } : {}),
     });
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { engineHasSessionAppend, SESSION_APPEND_MIN_ENGINE } from './inbox'
+import { engineHasSessionAppend, SESSION_APPEND_MIN_ENGINE, engineAtLeast, SESSION_USAGE_MIN_ENGINE } from './inbox'
 import { INBOX_SEND_NOW_MIN_ENGINE, inboxEngineTooOldForSendNow } from '@plannotator/core/inbox-types'
 
 // Send now is offered only on an engine whose API has `$.session.append`; the
@@ -28,5 +28,17 @@ describe('engineHasSessionAppend', () => {
     expect(inboxEngineTooOldForSendNow('2.1.301')).toBe(false)
     // Unknown is not "too old": the line never assumes.
     expect(inboxEngineTooOldForSendNow('dev')).toBe(false)
+  })
+})
+
+// The context window's fill is read only where `$.session.usage()` exists: an older engine reports none.
+describe('engineAtLeast for $.session.usage', () => {
+  test('2.1.322 and later read it; older, unreadable and unknown versions do not', () => {
+    expect(SESSION_USAGE_MIN_ENGINE).toBe('2.1.322')
+    expect(engineAtLeast('2.1.322', SESSION_USAGE_MIN_ENGINE)).toBe(true)
+    expect(engineAtLeast('2.2.0', SESSION_USAGE_MIN_ENGINE)).toBe(true)
+    expect(engineAtLeast('2.1.321', SESSION_USAGE_MIN_ENGINE)).toBe(false)
+    expect(engineAtLeast('dev', SESSION_USAGE_MIN_ENGINE)).toBe(false)
+    expect(engineAtLeast(null, SESSION_USAGE_MIN_ENGINE)).toBe(false)
   })
 })
