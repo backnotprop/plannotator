@@ -35,7 +35,7 @@ import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
-import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
+import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
 import { noteTarget } from "@plannotator/server/inbox-agent-notes";
@@ -111,6 +111,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       `- \`pulls\`: ${INBOX_PULLS_FIELD_DESCRIPTION}`,
       "- `idempotency_key`: any unique string. Sending again with the same key returns the first message instead of posting twice; the same key with another body, thread, `reply_to`, `supersedes` or `done` is refused.",
       `- Pictures: ${INBOX_PICTURES_RULE}`,
+      `- ${INBOX_DELEGATED_OPTIONS_RULE}`,
       "- Images in `body` (`![alt](path)`, `<img src=\"path\">`) show in the message from anywhere you can read: a path relative to `project_path`, or absolute (`/tmp/shot.png` works). PNG, JPEG, GIF, WebP, SVG, AVIF, BMP and ICO, up to 10 MB and 50 megapixels. Not shown: a dotenv-named file; anything in a hidden folder of a home folder (`~/.ssh`, `~/.config`, `~/.cache`) or of `/` (`/.x`) outside your project and the folder you send from, even when the project is the home folder itself (any other hidden folder shows, `.walkthrough/` or `../.ops/` say, as an attachment from it would); and web images (`https://…`, `//host/…`). The message is still sent, and the result's `images_not_shown` (`[{ ref, reason, not_yet? }]`, at most 10, with `images_not_shown_more` counting the rest, and a line in the text) names each image that will not show; copy it to a plain folder and link that path, or attach it with `attachments`. An image not written yet (`not_yet: true`) shows once the file exists. The person's own replies show images from the project only.",
       "- Fenced blocks in `body` that draw: a block fenced as `mermaid` or `dot` draws as a diagram, and one fenced as `html` draws as a live page in the message (a chart, an SVG drawing, a small mock). The page runs in a sandbox: its scripts run and it may load libraries, data, images and fonts over https, but it cannot reach the Inbox, the person's files or a path beside you (give images as https or data: URLs). Leave its background transparent so it sits in the message, and use the theme's variables: `var(--foreground)`, `var(--muted-foreground)`, `var(--border)`, `var(--chart-1)` to `var(--chart-5)`, `var(--font-sans)`. Let content set its height: do not use vh units or `height:100%` on html or body (the frame takes the page's height, so the page would grow without end). It shows up to 480 px tall, then Show more; the person can open it full screen or read its code. A block fenced as `svg` shows as an image.",
       `- Issue and PR refs in \`body\`: ${INBOX_REF_LINK_RULE}`,
@@ -491,7 +492,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "The first line is the action item; every other line that is not `Where:`, `Run:`, `Stopped:`, `Holds up:`, `Watching:` or `Replaces:` is the why. An action item counts like an open question in the person's list (`Stopped:` puts the thread under \"" + SECTION_LABEL("stopped") + "\"), and its key starts with `a-`.",
     "",
-    "Attach the files a question points to (send_message's `attachments`, here `[\"load-test.html\"]`) and link them from its context, as above: the link opens the file beside the thread. A link to a file you did not attach shows as \"Not attached\". Add a screenshot (`![alt](path)`) when the question is about something visual.",
+    "Attach the files a question points to (send_message's `attachments`, here `[\"load-test.html\"]`) and link them from its context, as above: the link opens the file beside the thread; " + INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE + " A link to a file you did not attach shows as \"Not attached\". Add a screenshot (`![alt](path)`) when the question is about something visual.",
     "",
     "## Connecting other agents",
     "",
