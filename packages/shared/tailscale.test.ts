@@ -1,13 +1,3 @@
-/**
- * Tailscale helper tests — pure parsers and the injectable detection edge.
- *
- * Run: bun test packages/shared/tailscale.test.ts
- *
- * No test here ever spawns the real `tailscale` CLI or touches tailnet state:
- * detection and serve-command construction are exercised through fixtures and
- * an injected runner.
- */
-
 import { describe, expect, test } from "bun:test";
 import {
   buildServeArgs,
@@ -48,7 +38,6 @@ describe("parseTailscaleStatusDnsName", () => {
     expect(parseTailscaleStatusDnsName("{}")).toBeUndefined();
     expect(parseTailscaleStatusDnsName(JSON.stringify({ Self: { DNSName: 42 } }))).toBeUndefined();
     expect(parseTailscaleStatusDnsName(JSON.stringify({ Self: { DNSName: "." } }))).toBeUndefined();
-    // A host with whitespace could forge extra output lines; fail closed.
     expect(
       parseTailscaleStatusDnsName(JSON.stringify({ Self: { DNSName: "bad host.ts.net." } })),
     ).toBeUndefined();
@@ -124,8 +113,6 @@ describe("describeTailscaleFailure", () => {
     );
   });
 
-  // Tailscale's own words (cmd/tailscale/cli isRunningOrStarting, the local
-  // client's connect error, serve's enable prompt) -> the plain next step.
   const failed = (stderr: string, stdout = "") => describeTailscaleFailure({ status: 1, stdout, stderr });
 
   test("Serve off for the tailnet without a link points at the admin console", () => {
@@ -152,10 +139,6 @@ describe("describeTailscaleFailure", () => {
   });
 });
 
-// A Mac with the Tailscale app but without its command-line tool turned on
-// has no `tailscale` on PATH; the app's own program is the CLI when run by its
-// real path. The spawn, the platform and the existence check are injected, so
-// nothing here runs a real tailscale or looks at the real /Applications.
 describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
   const enoent = (): TailscaleRunResult => ({
     error: Object.assign(new Error("spawnSync tailscale ENOENT"), { code: "ENOENT" }),
@@ -179,7 +162,6 @@ describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
     const { calls, spawn } = world(enoent());
     const result = createTailscaleRunner(spawn, mac)(["serve", "status", "--json"], 3_000);
     expect(result).toEqual(ok("1.104.4\n"));
-    // The path is pinned on purpose: the app's program works as the CLI only by this real path (a symlink crashes it).
     expect(calls).toEqual([
       { command: "tailscale", args: ["serve", "status", "--json"], timeoutMs: 3_000 },
       { command: "/Applications/Tailscale.app/Contents/MacOS/Tailscale", args: ["serve", "status", "--json"], timeoutMs: 3_000 },
@@ -213,8 +195,6 @@ describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
     }
   });
 
-  // The app's program acts as a CLI only with SHLVL or a non-empty TERM set;
-  // an Inbox started without a terminal (the Claude app, launchd) has neither.
   test("the app's CLI gets SHLVL when the parent has none; the PATH spawn's env and a parent's own SHLVL are kept", () => {
     const parent = { PATH: "/usr/bin:/bin", HOME: "/Users/someone" };
     const { envs, spawn } = world(enoent());
@@ -245,8 +225,6 @@ describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
 });
 
 describe("serve command construction", () => {
-  // These argv shapes are the contract with the `tailscale` CLI; a drift here
-  // silently breaks publishing or, worse, cleanup.
   test("serve args proxy the exact loopback port and its teardown matches", () => {
     expect(buildServeArgs(19432)).toEqual([
       "serve",
@@ -263,7 +241,6 @@ describe("serve command construction", () => {
 });
 
 describe("serveStatusProxy", () => {
-  // The shape `tailscale serve status --json` printed on a Mac (1.9x) with a 443 mapping and the Inbox's 8443.
   const status = JSON.stringify({
     TCP: { "443": { HTTPS: true }, "8443": { HTTPS: true } },
     Web: {

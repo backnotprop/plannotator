@@ -1,13 +1,3 @@
-/**
- * A Send skips a question only when the person chose to ("Skip them"), and one
- * Send to one agent session is ONE reply, even when its answers are on several
- * of that session's messages (approval "inbox-explicit-skip", 2026-10-21).
- *
- * The owner's case that led to it: one Claude Code session posted 8 messages
- * holding 11 questions; the person answered the newest one and pressed Send;
- * the old rule skipped the other 10, in 8 replies, and the agent acted on the
- * first before it saw the answer. Proved on a real store in a temp dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,7 +26,6 @@ function open() {
   return { store, project };
 }
 
-/** The owner's thread: one session, 8 messages, 11 questions (4 in the first, 1 in each of the others). */
 function ownersThread() {
   const { store, project } = open();
   const root = store.sendMessage({ project_id: project.id, author: A, body: asking("Build #1057 as shown?", "Keep the old toolbar?", "Ship behind a flag?", "Add a setting?") }).message;
@@ -73,7 +62,6 @@ describe("the owner's case", () => {
     const q1 = store.questionsOf(first.id)[2]!;
     const q2 = store.questionsOf(second.id)[0]!;
     const q3 = store.questionsOf(last.id)[0]!;
-    // Saved picks first, as the window does; then one Send naming each message.
     store.savePicks(first.id, [{ key: q1.key, revision: 0, answer: pick(q1, "No") }]);
     store.savePicks(second.id, [{ key: q2.key, revision: 0, answer: pick(q2) }]);
     store.savePicks(last.id, [{ key: q3.key, revision: 0, answer: pick(q3) }]);
@@ -94,7 +82,6 @@ describe("the owner's case", () => {
     expect(parts[1]).toBe("Go.");
     expect(parts[2]).toBe("You have 8 other questions open in this thread. They stay open; the person will answer them in the Inbox. Don't re-ask them.");
     expect(body).toContain("## Answers to your questions");
-    // In thread order, each message by its id, its questions numbered as its cards are.
     const at = [first, second, last].map((m) => body.indexOf(`### Your message ${m.id}`));
     expect(at.every((i) => i > 0)).toBe(true);
     expect([...at].sort((x, y) => x - y)).toEqual(at);
@@ -102,7 +89,6 @@ describe("the owner's case", () => {
     for (const [m, q] of [[first, q1], [second, q2], [last, q3]] as const) {
       expect(store.questionsOf(m.id).find((x) => x.key === q.key)).toMatchObject({ state: "sent", sent_reply_id: result.reply.id });
     }
-    // Replay with the same key: the same reply, nothing new.
     const again = store.sendReply(last.id, { idempotency_key: "k-1", questions: [] });
     expect(again).toMatchObject({ replayed: true, reply: { id: result.reply.id } });
     expect(store.thread(first.id)!.messages.filter((m) => m.author.kind === "person")).toHaveLength(1);

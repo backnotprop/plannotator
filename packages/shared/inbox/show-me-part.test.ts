@@ -1,7 +1,3 @@
-/**
- * Show me from a board: which board a turn made, and what the route takes. What regresses if these fail: the wait
- * never ends, a board opens that the turn didn't make, or the board it was pressed on is taken for the new one.
- */
 import { describe, expect, test } from "bun:test";
 import { checkInboxShowMeInput, showMeShapes, type InboxAskTurn } from "./ask";
 
@@ -31,15 +27,12 @@ describe("showMeShapes for a Show me from a board", () => {
   });
 
   test("with no review: a new board stored with --thread and a --through (as shape --help says) is still the one it made", () => {
-    // The clean room's agents passed the latest message they knew as --through; the board is the thread's all the same.
     const boards = [
       { id: "shp_a", versions: [version(1, 0, null), version(2, 8, "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E1G")] },
       { id: "shp_b", versions: [version(1, 7, "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E1G"), version(2, 8, "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E1G")] },
     ];
-    // While it draws, and once it ended.
     expect(showMeShapes([turn("t1", 5, null, { review: null, part })], boards, "t1").get("t1")).toBe("shp_b");
     expect(showMeShapes([turn("t1", 5, 9, { review: null, part })], boards, null).get("t1")).toBe("shp_b");
-    // Ended with no new board: an update to a board with a --through is not taken for one.
     expect(showMeShapes([turn("t1", 5, 9, { review: null, part })], [boards[0]!], null).has("t1")).toBe(false);
   });
 

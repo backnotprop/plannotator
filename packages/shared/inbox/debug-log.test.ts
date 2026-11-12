@@ -52,7 +52,6 @@ describe('what may enter the debug log', () => {
     const words = { id: 'pthe-layoffs-start-1', page: 'pmy-private-note', error: 'Zebraquartz', protocol: 'zebra/1.1', thread: 'msg_zebraquartz-the-layoffs-start-monday', method: 'ZEBRA' };
     expect(cleanWindowRecord({ t: 1, ev: 'req_fail', ...words })).toEqual({ t: 1, side: 'window', ev: 'req_fail' });
     expect(cleanWindowRecord({ t: 1, ev: 'req_fail', error: 'TypeError', protocol: 'h2', thread: MSG, id: REQUEST })).toEqual({ t: 1, side: 'window', ev: 'req_fail', error: 'TypeError', protocol: 'h2', thread: MSG, id: REQUEST });
-    // A thread is a message id, and only that.
     expect(cleanWindowRecord({ t: 1, ev: 'send_press', thread: 'a-0123abcd-2' })).toEqual({ t: 1, side: 'window', ev: 'send_press' });
   });
 

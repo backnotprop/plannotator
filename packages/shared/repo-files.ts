@@ -1,18 +1,3 @@
-/**
- * The review tree's "All files": the whole repository at the revision the
- * diff's new side reads, and any one file of it (approved design record
- * "review-explorer", step 1).
- *
- * Runtime-neutral, vendored to Pi: both review servers route
- * `GET /api/repo-files` and `GET /api/repo-file` through the handlers here and
- * only say where the current mode lists and reads (a VCS provider, the PR's
- * local checkout, or the platform's tree API). Neither handler writes anything.
- *
- * Big repositories: the whole path list goes to the browser once per snapshot
- * (and again after a live change). Past `REPO_FILES_LAZY_THRESHOLD` paths the
- * list stays on the server and the browser asks for one folder at a time.
- */
-
 import {
   MAX_REVIEW_FILE_CONTENT_BYTES,
   compareRepoPaths,
@@ -30,18 +15,13 @@ export type { RepoFileListing, RepoRevisionInfo } from "./review-core";
 export const REPO_FILES_ENDPOINT = "/api/repo-files";
 export const REPO_FILE_ENDPOINT = "/api/repo-file";
 export const REPO_FILES_STREAM_ENDPOINT = "/api/repo-files/stream";
-/** Go to File's search, for a listing too large to send whole (and for any client that wants it). */
 export const REPO_FILES_SEARCH_ENDPOINT = "/api/repo-files/search";
-/** Most matches one search answers. */
 export const MAX_REPO_FILES_SEARCH_RESULTS = 100;
 
-/** Above this many paths the list stays on the server and folders load one at a time. */
 export const REPO_FILES_LAZY_THRESHOLD = 200_000;
 
-/** The largest file `/api/repo-file` reads (the hunk-expansion cap). */
 export const MAX_REPO_FILE_BYTES = MAX_REVIEW_FILE_CONTENT_BYTES;
 
-/** Why a session offers no All files. */
 export type RepoFilesUnavailableReason =
   | "static-patch"
   | "unsupported"
@@ -53,15 +33,12 @@ export interface RepoFilesUnavailable {
   message: string;
 }
 
-/** A file changed on disk after the diff was taken: added, edited or deleted. */
 export type RepoOnDiskChange = "A" | "M" | "D";
 
-/** One entry of a folder when the list is served a folder at a time. */
 export interface RepoDirEntry {
   name: string;
   path: string;
   type: "file" | "dir";
-  /** Files under a folder, at any depth. */
   files?: number;
 }
 
@@ -70,22 +47,16 @@ export type RepoFilesResponse =
   | {
       available: true;
       revision: RepoRevisionInfo;
-      /** Files in the whole listing. */
       total: number;
-      /** The working tree: the tree follows the disk over the stream endpoint. */
       live: boolean;
       truncated?: boolean;
-      /** The whole sorted list (small repositories). */
       paths?: string[];
-      /** One folder of the list (`dir`, "" for the root) when the list is too big to send. */
       lazy?: true;
       dir?: string;
       entries?: RepoDirEntry[];
-      /** Files changed on disk since the diff was taken (live listings only). */
       onDisk?: Record<string, RepoOnDiskChange>;
     };
 
-/** Why `/api/repo-file` has no text for a path it lists. */
 export type RepoFileNoContentReason = "too-large" | "binary" | "missing" | "unavailable";
 
 export interface RepoFileResponse {
@@ -93,21 +64,14 @@ export interface RepoFileResponse {
   revision: RepoRevisionInfo;
   content: string | null;
   reason?: RepoFileNoContentReason;
-  /** Bytes, when known (too-large). */
   size?: number;
 }
 
-/** What a server's reader returns: bytes from a VCS, or text from a platform API. */
 export type RepoFileRead =
   | FileBytesRead
   | { kind: "text"; content: string | null }
   | { kind: "binary" };
 
-/**
- * Where one listed path is a file on disk, or null when it is read from a VCS
- * object or a platform API. A working-tree listing reads from its root; a
- * multi-repo workspace from the child repository whose folder holds the path.
- */
 export function repoFileDiskLocation(listing: RepoFileListing, path: string): { root: string; path: string } | null {
   if (listing.diskRoots) {
     let best: { prefix: string; root: string } | null = null;
@@ -124,16 +88,9 @@ export interface HandlerResult {
   body: unknown;
 }
 
-// --- Listing cache --------------------------------------------------------
-
-/**
- * One listing per snapshot, loaded once even when several requests race.
- * `invalidate` (a live change on disk) makes the next request list again.
- */
 export interface RepoListingCache {
   get(key: string, load: () => Promise<RepoFileListing | null>): Promise<RepoFileListing | null>;
   invalidate(): void;
-  /** Bumps on every invalidate; part of no key the caller passes. */
   readonly generation: number;
 }
 
@@ -146,7 +103,6 @@ export function createRepoListingCache(): RepoListingCache {
       const value = load().catch(() => null);
       const created = { key, generation, value };
       entry = created;
-      // A failed listing is not kept: the next request tries again.
       void value.then((result) => {
         if (result === null && entry === created) entry = null;
       });
@@ -162,8 +118,6 @@ export function createRepoListingCache(): RepoListingCache {
   };
 }
 
-// --- Pure helpers ---------------------------------------------------------
-
 function lowerBound(sorted: readonly string[], value: string): number {
   let lo = 0;
   let hi = sorted.length;
@@ -175,16 +129,11 @@ function lowerBound(sorted: readonly string[], value: string): number {
   return lo;
 }
 
-/** Whether a sorted listing holds a path. */
 export function repoListingHas(sorted: readonly string[], path: string): boolean {
   const index = lowerBound(sorted, path);
   return index < sorted.length && sorted[index] === path;
 }
 
-/**
- * The direct children of one folder of a sorted listing, folders with how many
- * files they hold. `dir` is "" for the root.
- */
 export function repoDirEntries(sorted: readonly string[], dir: string): RepoDirEntry[] {
   const prefix = dir ? `${dir}/` : "";
   const start = prefix ? lowerBound(sorted, prefix) : 0;
@@ -211,10 +160,8 @@ export function repoDirEntries(sorted: readonly string[], dir: string): RepoDirE
   return [...dirs, ...files];
 }
 
-/** A path from a request: repository-relative, no `..`, no control characters. */
 export function isSafeRepoRequestPath(path: string): boolean {
   if (!path || path.length > 4096) return false;
-  // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(path)) return false;
   if (path.split("/").some((segment) => segment === "")) return false;
   try {
@@ -225,7 +172,6 @@ export function isSafeRepoRequestPath(path: string): boolean {
   return true;
 }
 
-/** Text of a file, or why it has none: NUL in the first 8 KB or invalid UTF-8 reads as binary. */
 export function decodeRepoFileBytes(bytes: Uint8Array): { content: string } | { reason: "binary" } {
   const head = bytes.subarray(0, Math.min(bytes.byteLength, 8192));
   if (head.includes(0)) return { reason: "binary" };
@@ -236,9 +182,6 @@ export function decodeRepoFileBytes(bytes: Uint8Array): { content: string } | { 
   }
 }
 
-// --- Changes on disk since the snapshot -----------------------------------
-
-/** Parse `git status --porcelain=v1 -z`: path -> two-letter code (renames keep the new path). */
 export function parsePorcelainZ(output: string): Map<string, string> {
   const entries = new Map<string, string>();
   const parts = output.split("\0");
@@ -247,29 +190,19 @@ export function parsePorcelainZ(output: string): Map<string, string> {
     if (entry.length < 4) continue;
     const code = entry.slice(0, 2);
     entries.set(entry.slice(3), code);
-    // A rename or copy is followed by its original path.
     if (code[0] === "R" || code[0] === "C") i += 1;
   }
   return entries;
 }
 
-/** The diff's files, keyed by their new path, with whether the diff deletes them. */
 export function diffFileStates(patch: string): Map<string, { deleted: boolean }> {
   const states = new Map<string, { deleted: boolean }>();
   for (const file of parseDiffToFiles(patch)) states.set(file.path, { deleted: file.status === "deleted" });
   return states;
 }
 
-/** Candidates checked for on-disk changes per refresh (a bound, not an expectation). */
 const ON_DISK_CANDIDATE_LIMIT = 5000;
 
-/**
- * Files changed on disk after the diff was taken, for a working-tree listing:
- * the diff's own files and anything `git status` now reports, compared by
- * modification time with when the diff was captured. A diff file that is gone
- * reads as deleted; a file outside the diff reads as added (untracked or
- * newly added) or edited.
- */
 export async function findRepoOnDiskChanges(
   runtime: ReviewGitRuntime,
   root: string,
@@ -303,15 +236,11 @@ export async function findRepoOnDiskChanges(
   return changes;
 }
 
-// --- Handlers ---------------------------------------------------------------
-
 export interface RepoFilesRequestInput {
   params: URLSearchParams;
-  /** Set when this session offers no All files (the response says why). */
   unavailable: RepoFilesUnavailable | null;
   isCurrentSnapshot: (snapshot: string) => boolean;
   loadListing: () => Promise<RepoFileListing | null>;
-  /** On-disk changes for a live listing; omitted where nothing is live. */
   loadOnDisk?: (listing: RepoFileListing) => Promise<Record<string, RepoOnDiskChange> | null>;
   lazyThreshold?: number;
 }
@@ -331,7 +260,6 @@ function onDiskOnce(
   return pending;
 }
 
-/** `GET /api/repo-files?snapshot=<id>[&dir=<folder>]`. */
 export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Promise<HandlerResult> {
   const snapshot = input.params.get("snapshot");
   if (!snapshot) return { status: 400, body: { error: "Missing snapshot", reason: "bad-request" } };
@@ -349,12 +277,9 @@ export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Prom
       body: { available: false, reason: "failed", message: "The repository's files could not be listed." } satisfies RepoFilesResponse,
     };
   }
-  // The snapshot can move while the listing loads.
   if (!input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
 
   const threshold = input.lazyThreshold ?? REPO_FILES_LAZY_THRESHOLD;
-  // What changed on disk since the snapshot: once per listing (a live change
-  // lists again, so a new listing object), and only with the root request.
   const onDisk = listing.live && input.loadOnDisk && dir === "" ? await onDiskOnce(listing, input.loadOnDisk) : null;
   const base = {
     available: true as const,
@@ -378,22 +303,10 @@ export interface RepoFileRequestInput {
   unavailable: RepoFilesUnavailable | null;
   isCurrentSnapshot: (snapshot: string) => boolean;
   loadListing: () => Promise<RepoFileListing | null>;
-  /** Read one listed path at the listing's revision (VCS objects, platform APIs). */
   read: (path: string, maxBytes: number) => Promise<RepoFileRead>;
-  /**
-   * Read one working-tree file from disk. Required so neither runtime can
-   * skip it: both pass `readRepoWorkingTreeFile` (repo-files-node.ts), which
-   * goes through the shared reader in repo-file.ts (links followed like
-   * VS Code, regular files only, the 5 MB cap, no FIFO hang).
-   */
   readWorkingTree: (root: string, path: string, maxBytes: number) => RepoFileRead | Promise<RepoFileRead>;
 }
 
-/**
- * `GET /api/repo-file?path=<path>&snapshot=<id>`: one file of the listing, as
- * text. Only a listed path is read, so nothing `.gitignore` hides (an `.env`)
- * and no `..` path is reachable.
- */
 export async function handleRepoFileRequest(input: RepoFileRequestInput): Promise<HandlerResult> {
   const snapshot = input.params.get("snapshot");
   const path = input.params.get("path") ?? "";
@@ -444,12 +357,9 @@ export interface RepoFilesSearchRequestInput {
   unavailable: RepoFilesUnavailable | null;
   isCurrentSnapshot: (snapshot: string) => boolean;
   loadListing: () => Promise<RepoFileListing | null>;
-  /** The diff's changed paths, which win ties. */
   preferred?: ReadonlySet<string>;
 }
 
-// One lowercased copy per listing, so a search per keystroke does not
-// lowercase hundreds of thousands of paths each time.
 const lowerPathsByListing = new WeakMap<readonly string[], string[]>();
 function lowerPathsOf(paths: readonly string[]): string[] {
   let lower = lowerPathsByListing.get(paths);
@@ -460,12 +370,6 @@ function lowerPathsOf(paths: readonly string[]): string[] {
   return lower;
 }
 
-/**
- * `GET /api/repo-files/search?snapshot=<id>&q=<query>[&limit=<n>]`: Go to
- * File over the listed paths, best first (the fuzzy matcher the browser runs
- * on a listing it holds). Answers only listed paths, so it reveals nothing
- * `/api/repo-files` would not.
- */
 export async function handleRepoFilesSearchRequest(input: RepoFilesSearchRequestInput): Promise<HandlerResult> {
   const snapshot = input.params.get("snapshot");
   if (!snapshot) return { status: 400, body: { error: "Missing snapshot", reason: "bad-request" } };
@@ -485,20 +389,10 @@ export async function handleRepoFilesSearchRequest(input: RepoFilesSearchRequest
   return { status: 200, body: { query, total: listing.paths.length, matches } satisfies RepoFilesSearchResponse };
 }
 
-// --- Live watching ----------------------------------------------------------
-
-/**
- * How a live listing follows the disk. `watch`: the file watcher, with git's
- * ignored folders never watched. `poll`: a timer, for listings too large to
- * watch cheaply (past `REPO_FILES_LAZY_THRESHOLD`) and for multi-repo
- * workspaces, whose root is a parent folder of many repositories.
- */
 export type RepoLiveMode = "watch" | "poll";
 export const REPO_LIVE_POLL_MS = 5_000;
-/** A polled listing that keeps finding nothing new backs off to this. */
 export const REPO_LIVE_POLL_MAX_MS = 30_000;
 
-/** The next poll delay: back to the start after a change, else 1.5 times longer up to the cap. */
 export function nextRepoPollDelay(current: number, changed: boolean, start: number = REPO_LIVE_POLL_MS): number {
   if (changed) return start;
   return Math.min(Math.max(start, REPO_LIVE_POLL_MAX_MS), Math.round(current * 1.5));
@@ -509,12 +403,6 @@ export function repoLiveMode(listing: RepoFileListing, options: { workspace?: bo
   return listing.paths.length > (options.lazyThreshold ?? REPO_FILES_LAZY_THRESHOLD) ? "poll" : "watch";
 }
 
-/**
- * What the tree shows of a working tree, as one string: git's status (tracked
- * changes, untracked files, deletions; never ignored files) and the
- * modification time of each path it reports. A write to a gitignored build
- * folder leaves it unchanged, so the tree is not listed again for it.
- */
 export async function gitLiveSignature(runtime: ReviewGitRuntime, root: string): Promise<string | null> {
   const status = await runtime.runGit(
     ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -532,11 +420,6 @@ export async function gitLiveSignature(runtime: ReviewGitRuntime, root: string):
   return parts.join("\n");
 }
 
-/**
- * The folders (with a trailing `/`) and files git ignores in a working tree,
- * for the watcher's ignore rule, so build output (`target/`, `dist/`,
- * `node_modules/`) is never watched.
- */
 export async function gitIgnoredEntries(runtime: ReviewGitRuntime, root: string): Promise<string[]> {
   const result = await runtime.runGit(
     ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"],
@@ -546,7 +429,6 @@ export async function gitIgnoredEntries(runtime: ReviewGitRuntime, root: string)
   return result.stdout.split("\0").filter(Boolean);
 }
 
-/** Whether a repository-relative path is one of `ignored` or inside an ignored folder. */
 export function isUnderIgnoredEntry(relativePath: string, ignored: ReadonlySet<string>): boolean {
   const path = relativePath.split("\\").join("/");
   if (ignored.has(path) || ignored.has(`${path}/`)) return true;
@@ -558,13 +440,7 @@ export function isUnderIgnoredEntry(relativePath: string, ignored: ReadonlySet<s
   return false;
 }
 
-/**
- * Tells the watcher's events (or the poll's ticks) apart from real changes: a
- * change is a new signature. Shared by every page watching one root; each
- * page keeps the version it last saw. Checks are single-flight.
- */
 export interface RepoChangeGate {
-  /** Re-reads the signature; answers the version after it. */
   check(): Promise<number>;
   readonly version: number;
 }
@@ -600,17 +476,10 @@ export function createRepoChangeGate(signature: () => Promise<string | null>): R
       return version;
     },
   };
-  // The baseline: what the disk holds when watching starts.
   void gate.check();
   return gate;
 }
 
-
-/**
- * Folder names whose changes never reach the tree (dependency and cache
- * folders that are always ignored). Tracked output folders (`dist`, `build`,
- * `public`) are deliberately not here: their changes can be real files.
- */
 export const REPO_WATCH_IGNORED_NAMES: ReadonlySet<string> = new Set([
   ".git",
   "node_modules",
@@ -625,7 +494,6 @@ export const REPO_WATCH_IGNORED_NAMES: ReadonlySet<string> = new Set([
   ".output",
 ]);
 
-/** Whether a watcher event under `root` can matter to the listing. */
 export function isRepoWatchIgnored(relativePath: string): boolean {
   return relativePath
     .replace(/\\/g, "/")

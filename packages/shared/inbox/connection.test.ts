@@ -1,8 +1,3 @@
-/**
- * The plannotator_inbox contract's optional project_path: in the agent's
- * schema (optional, never the other filled arguments), and returned apart
- * from the filled working folder so the connection resolves it.
- */
 import { expect, test } from "bun:test";
 import { INBOX_AGENT_PROJECT_PATH_DESCRIPTION, INBOX_REMOVED_ACTION_TEXT, inboxAgentTool, inboxToolCall, parseInboxToolList, type InboxToolInfo } from "./connection";
 
@@ -56,7 +51,6 @@ test("a malformed project_path, or one on a tool that takes none, is refused", (
   }
   const brief = inboxToolCall({ action: "get_guide_brief", project_path: "/work/api" }, tools, filled);
   expect("error" in brief && brief.error).toContain('takes no "project_path"');
-  // The other filled arguments stay the connection's.
   const session = inboxToolCall({ action: "send_message", body: "x", agent_session: "someone" }, tools, filled);
   expect("error" in session && session.error).toContain('takes no "agent_session"');
 });

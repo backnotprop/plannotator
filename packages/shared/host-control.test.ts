@@ -22,9 +22,6 @@ function ask(overrides: Partial<{ method: string; pathname: string; host: string
   );
 }
 
-// The failure each guards: a page on another name (DNS rebinding) or another
-// local server, a browser page, or a process without the launch token reads
-// or closes a review.
 describe("host control guards", () => {
   test("only a loopback Host naming this server's port", () => {
     expect(ask()?.status).toBe(200);
@@ -38,8 +35,6 @@ describe("host control guards", () => {
     expect(ask({ origin: "http://localhost:4321" })?.status).toBe(403);
     expect(ask({ authorization: `Bearer ${"x".repeat(40)}` })?.status).toBe(401);
     expect(ask({ authorization: null })?.status).toBe(401);
-    // Off answers a coded 404, so a host can tell it from a Plannotator that
-    // predates the endpoint (whose process it may TERM) and leave it alone.
     expect(ask({}, route({ token: undefined }))).toMatchObject({ status: 404, body: { code: "host_control_disabled" } });
     expect(ask({ method: "POST", pathname: "/api/host/close" }, route({ token: undefined }))?.body).toMatchObject({ code: "host_control_disabled" });
   });
@@ -58,8 +53,6 @@ describe("countUnsentDraftComments", () => {
     expect(countUnsentDraftComments({ annotations: "x" })).toBe(0);
   });
 
-  // The failure: "N unsent comments" counts a review agent's or linter's
-  // findings as the reviewer's, or misses the reviewer's PR-mode notes.
   test("only the reviewer's own comments: source-tagged entries are skipped, PR notes count", () => {
     expect(
       countUnsentDraftComments({

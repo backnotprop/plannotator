@@ -1,18 +1,3 @@
-/**
- * Plannotator Inbox: snoozed threads (approval "inbox-snooze",
- * .product/approved/inbox-snooze/).
- *
- *   inbox/snoozes.json   { v: 1, snoozes: [{ thread_id, until, at }] }, 0600, written whole (temp, then rename)
- *
- * A file outside the store's JSONL, like pins: a snooze belongs to the person
- * and the window, and must never enter the event log, which agents' cursors,
- * the phone relay and search read. It writes no line and takes no seq, so an
- * agent sees nothing: `read_thread`, sections and cursors are unchanged and a
- * question stays open. An entry outlives its `until` until the person reads
- * the thread, which is what keeps a returned thread's clock across a restart.
- * A deleted thread leaves the file.
- */
-
 import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
@@ -25,14 +10,12 @@ function fileOf(inboxDirPath: string): string {
   return join(inboxDirPath, INBOX_SNOOZES_FILE);
 }
 
-/** Refuses an `until` no snooze can take, in the store's own codes; a linked machine's thread is checked with this before it is sent there. */
 export function refuseInboxSnoozeUntil(until: unknown, now: Date): void {
   const refusal = inboxSnoozeRefusal(until, now);
   if (refusal === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
   if (refusal) throw new InboxError("validation_error", `until: a time within ${INBOX_SNOOZE_MAX_DAYS} days.`, { field: "until" });
 }
 
-/** The snoozes on disk. A file that does not parse reads as none; a bad or repeated entry is skipped. */
 export function readInboxSnoozes(inboxDirPath: string): InboxSnooze[] {
   let value: unknown;
   try {
@@ -55,11 +38,6 @@ export function readInboxSnoozes(inboxDirPath: string): InboxSnooze[] {
   return out;
 }
 
-/**
- * What snoozes.json holds before a write: nothing, a v1 file, a file this
- * Plannotator cannot read, or a newer version's file. readInboxSnoozes reads
- * the last two as no snoozes, so a write must never simply replace them.
- */
 function fileState(inboxDirPath: string): "missing" | "ok" | "bad" | "newer" {
   let raw: string;
   try {
@@ -77,12 +55,6 @@ function fileState(inboxDirPath: string): "missing" | "ok" | "bad" | "newer" {
   }
 }
 
-/**
- * Write the snoozes whole (temp, then rename), 0600. A newer version's file is
- * refused (`snoozes_newer`), never replaced; a file that cannot be read is
- * moved aside first, so nothing of the person's is lost. No snoozes left
- * removes the file.
- */
 export function writeInboxSnoozes(inboxDirPath: string, snoozes: readonly InboxSnooze[]): void {
   const path = fileOf(inboxDirPath);
   const state = fileState(inboxDirPath);
@@ -91,7 +63,6 @@ export function writeInboxSnoozes(inboxDirPath: string, snoozes: readonly InboxS
     try {
       renameSync(path, `${path}.unreadable-${Date.now()}`);
     } catch {
-      // Gone already, or not movable: the write below says which.
     }
   }
   if (snoozes.length === 0) {

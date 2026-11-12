@@ -1,12 +1,7 @@
-/** Options for waiting on a plan-review decision with bounded lifetime signals. */
 export interface PlanReviewWaitOptions<T> {
-  /** The browser decision owned by the running plan server. */
   waitForDecision: () => Promise<T>;
-  /** Optional configured timeout. `null` keeps the review open indefinitely. */
   timeoutMs: number | null;
-  /** Result returned when the configured timeout expires. */
   timeoutResult: T;
-  /** Optional host cancellation signal for the tool invocation. */
   signal?: AbortSignal;
 }
 
@@ -14,12 +9,6 @@ function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException("The operation was aborted", "AbortError");
 }
 
-/**
- * Wait for a plan decision, configured timeout, or host cancellation.
- *
- * The caller retains ownership of the server and must stop it in `finally`.
- * This function owns and removes the timeout and abort listener it creates.
- */
 export async function waitForPlanReviewDecision<T>(
   options: PlanReviewWaitOptions<T>,
 ): Promise<T> {
@@ -53,10 +42,6 @@ export async function waitForPlanReviewDecision<T>(
   }
 }
 
-/**
- * Keep the browser response visible briefly after a decision while still
- * allowing host cancellation to release the server immediately.
- */
 export async function waitForPlanReviewCloseDelay(
   delayMs: number,
   signal?: AbortSignal,

@@ -1,14 +1,3 @@
-/**
- * Questions inside an attached Markdown file (issue #2828): the store keeps
- * each as a question of its message, after the body's, so it waits on the
- * person like one in the body, and the reply carries its answer under the
- * file's own heading, numbered as the file's cards.
- *
- * What regresses if this fails: a file's question is not counted or not
- * answerable, its key collides with a body question (one pick answering two
- * cards), or the agent cannot tell which file and which question an answer
- * is for.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,7 +41,6 @@ const PLAN = [
   ":::",
 ].join("\n");
 
-/** The body asks one question the file also asks: the file's must take another key. */
 const BODY = ["The plan is attached; two questions sit in it, beside their sections.", "", ":::question", "Ship the retry behind a flag?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
 
 function attachment(id: string, name: string): InboxAttachment {
@@ -84,11 +72,9 @@ describe("questions inside an attached file", () => {
     const [body, db, flag] = questions as [InboxQuestion, InboxQuestion, InboxQuestion];
     expect(body.attachment ?? null).toBeNull();
     expect(db.attachment).toEqual({ id: plan.id, name: "plan.md", key: db.key });
-    // The file's flag question has the body's key in the file: the record takes the next free one.
     expect(flag.attachment!.key).toBe(body.key);
     expect(flag.key).toBe(`${body.key}-2`);
     expect(new Set(questions.map((q) => q.key)).size).toBe(3);
-    // Numbered within the file (its cards are Q1 and Q2), with the prompt's line in the file (frontmatter counted).
     expect([db.position, flag.position]).toEqual([0, 1]);
     expect(db.state).toBe("open");
   });
@@ -115,7 +101,6 @@ describe("questions inside an attached file", () => {
     const reply = store.sendReply(sent.id, { idempotency_key: "r1", questions: [{ key: db.key, revision: 1 }, { key: flag.key, revision: 1 }] }).reply;
     const lines = reply.body.split("\n");
     expect(lines[0]).toBe("Answered 2 questions.");
-    // The body's own question is still open, and the reply says so.
     expect(reply.body).toContain("You have 1 other question open in this thread.");
     const heading = lines.indexOf(`### Your file plan.md, attached to message ${sent.id}`);
     expect(heading).toBeGreaterThan(0);
@@ -124,9 +109,7 @@ describe("questions inside an attached file", () => {
     expect(section).toContain("#### Q1. Which database should invoices live in? (line 9)");
     expect(section).toContain("#### Q2. Ship the retry behind a flag? (line 20)");
     expect(section).toMatch(/#### Q1\. Which database[^\n]*\nAnswer: Postgres/);
-    // The window can still tell the person's words from what the store wrote.
     expect(splitInboxReplyBody(reply.body)).toMatchObject({ answers: true, words: "", rest: "" });
-    // Both are sent; the body's stays open.
     expect(store.questionsOf(sent.id).map((q) => q.state)).toEqual(["open", "sent", "sent"]);
   });
 

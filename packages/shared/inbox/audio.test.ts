@@ -1,10 +1,3 @@
-/**
- * Recordings from their bytes (audio.ts) and the kind a send gives them
- * (decideInboxAttachmentKind): MP3, AAC, M4A, WAV, Ogg, FLAC and WebM audio
- * are `audio` with their media type and, where the header holds it, their
- * length; a film, an Ogg holding video and plain binaries are not. The
- * containers are built in the test (tests/helpers/audio-fixtures.ts).
- */
 import { describe, expect, test } from "bun:test";
 import { adts, flac, id3, mp3, ogg, wav, webm } from "../../../tests/helpers/audio-fixtures";
 import { ebml, mp4 } from "../../../tests/helpers/video-fixtures";
@@ -32,13 +25,10 @@ describe("sniffInboxAudio", () => {
   });
 
   test("a film, an Ogg holding video, a lone frame sync and other binaries are not recordings", () => {
-    // A film's brands are the video sniffer's; an audio-only MP4 is decided by its tracks (below).
     expect(sniffInboxAudio(mp4())).toBeNull();
     expect(sniffInboxAudio(webm(["video", "audio"]))).toBeNull();
-    // A WebM whose tracks the head does not reach stays a video.
     expect(sniffInboxAudio(ebml("webm"))).toBeNull();
     expect(sniffInboxAudio(ogg("theora"))).toBeNull();
-    // One MPEG frame header followed by bytes that are not the next frame: not an MP3.
     const lone = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(413, 0), Buffer.from("PK\x03\x04"), Buffer.alloc(200)]);
     expect(sniffInboxAudio(lone)).toBeNull();
     expect(sniffInboxAudio(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]))).toBeNull();
@@ -69,10 +59,8 @@ describe("a recording's length", () => {
     expect(audioDurationMsFromHead(tone, tone.length, "audio/wav")).toBe(2500);
     const lossless = flac({ seconds: 4.25, rate: 48000 });
     expect(audioDurationMsFromHead(lossless, lossless.length, "audio/flac")).toBe(4250);
-    // 100 frames of 1152 samples at 44.1 kHz.
     const vbr = mp3({ xingFrames: 100 });
     expect(audioDurationMsFromHead(vbr, vbr.length, "audio/mpeg")).toBe(Math.round((100 * 1152 * 1000) / 44100));
-    // A constant 128 kbps over the bytes after the tag.
     const cbr = mp3({ frames: 40 });
     expect(audioDurationMsFromHead(cbr, cbr.length, "audio/mpeg")).toBe(Math.round(((40 * 417 * 8) / 128000) * 1000));
     expect(audioDurationMsFromHead(adts(), 1200, "audio/aac")).toBeNull();
@@ -97,7 +85,6 @@ describe("decideInboxAttachmentKind for recordings", () => {
     expect(decideInboxAttachmentKind("/x/a.aac", adts(), false, 1200, null)).toEqual({ kind: "audio", media_type: "audio/aac" });
     expect(decideInboxAttachmentKind("/x/a.flac", flac(), false, 400, null)).toEqual({ kind: "audio", media_type: "audio/flac", duration_ms: 4250 });
     expect(decideInboxAttachmentKind("/x/memo.webm", webm(["audio"]), false, 400, null)).toEqual({ kind: "audio", media_type: "audio/webm" });
-    // An Ogg's length comes from the tail read at send (readInboxVideoMetadata), passed in as the metadata.
     expect(decideInboxAttachmentKind("/x/a.opus", ogg("opus"), false, 3000, { hasVideoTrack: false, duration_ms: 3500 })).toEqual({ kind: "audio", media_type: "audio/ogg", duration_ms: 3500 });
   });
 

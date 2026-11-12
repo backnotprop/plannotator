@@ -1,9 +1,6 @@
 import { describe, test, expect, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
 
-// Imported statically and BEFORE any PLANNOTATOR_DATA_DIR is set: this module's
-// import-time side effects used to freeze the data directory, so a later env
-// change was silently ignored while every other consumer resolved it live.
 import { getHistoryDir, saveToHistory } from "./storage";
 
 import { createTestEnvironment } from "../../tests/helpers/environment";

@@ -17,10 +17,6 @@ const VIEW_JSON = JSON.stringify({
   url: "https://github.com/o/r/pull/123",
 });
 
-/**
- * Mock gh runtime. Routes by subcommand; records every invocation so tests can
- * assert on exactly which commands ran (and which didn't).
- */
 function githubRuntime(opts: {
   prDiff: { stdout?: string; stderr?: string; exitCode: number };
   files?: { stdout?: string; stderr?: string; exitCode: number };
@@ -70,7 +66,6 @@ describe("fetchGhPR", () => {
   });
 
   test("falls back to the paginated files API when gh pr diff fails (oversized PR)", async () => {
-    // Two concatenated pages — the actual shape `gh api --paginate` emits.
     const page1 = JSON.stringify([
       { filename: "src/a.ts", status: "modified", patch: "@@ -1 +1 @@\n-old\n+new" },
     ]);
@@ -89,15 +84,11 @@ describe("fetchGhPR", () => {
     expect(result.rawPatch).toContain("+new");
     expect(result.rawPatch).toContain("diff --git a/src/b.ts b/src/b.ts");
     expect(result.rawPatch).toContain("new file mode 100644");
-    // Every entry carried a patch — nothing is missing, no upgrade needed.
     expect(result.patchIncomplete).toBeFalsy();
-    // Metadata path is unaffected by the fallback.
     expect(result.metadata).toMatchObject({ number: 123, mergeBaseSha: "c".repeat(40) });
   });
 
   test("flags the patch incomplete when GitHub omits content for non-rename entries", async () => {
-    // The real shape from oversized PRs: status added/modified with zeroed
-    // counts and no patch field at all.
     const entries = JSON.stringify([
       { filename: "src/big.rs", status: "added" },
       { filename: "src/also.zig", status: "modified" },
@@ -183,8 +174,8 @@ describe("fetchGhPR", () => {
     const errSpy = spyOn(console, "error").mockImplementation(() => {});
     try {
       const result = await fetchGhPR(runtime, REF);
-      expect(result.rawPatch).toContain("diff --git a/a.ts b/a.ts"); // partial diff still served
-      expect(result.patchIncomplete).toBe(true); // 3000-file cap → upgrade offered
+      expect(result.rawPatch).toContain("diff --git a/a.ts b/a.ts");
+      expect(result.patchIncomplete).toBe(true);
       const warned = errSpy.mock.calls.some((args) => String(args[0]).includes("3500 changed files"));
       expect(warned).toBe(true);
     } finally {
@@ -284,8 +275,6 @@ describe("reconstructGhPatch", () => {
     expect(lines[0]).toBe("diff --git a/before.ts b/after.ts");
     expect(parseDiffGitHeader(lines[0])).toEqual({ oldPath: "before.ts", newPath: "after.ts" });
     expect(parseDiffMetadataPathLines(lines)).toEqual({ oldPath: "before.ts", newPath: "after.ts" });
-    // Pierre's parser classifies renames off the similarity line — a patched
-    // rename must carry a sub-100% score or it renders as a plain change.
     expect(lines[1]).toBe("similarity index 99%");
   });
 
@@ -305,8 +294,6 @@ describe("reconstructGhPatch", () => {
       { filename: "small.ts", status: "modified", patch: "@@ -1 +1 @@\n-a\n+b" },
     ]);
 
-    // Every diff --git header must start at the beginning of its own line —
-    // this is what the UI's file splitter (split on /^diff --git /) relies on.
     const headerLines = patch.split("\n").filter((l) => l.startsWith("diff --git "));
     expect(headerLines).toEqual([
       "diff --git a/huge.json b/huge.json",
@@ -325,9 +312,6 @@ describe("reconstructGhPatch", () => {
   });
 
   test("leaves paths with bare spaces unquoted — git parity, so the header parser round-trips them", () => {
-    // Git only C-quotes paths containing quotes/backslashes/control chars.
-    // Over-quoting (e.g. quoting spaces) breaks parseDiffGitHeader's regex
-    // branch and silently drops files downstream.
     const patch = reconstructGhPatch([
       { filename: "docs/my file.md", status: "modified", patch: "@@ -1 +1 @@\n-a\n+b" },
     ]);
@@ -338,8 +322,6 @@ describe("reconstructGhPatch", () => {
   });
 
   test("pure rename with a space in the new name still yields parseable paths (file must not vanish)", () => {
-    // Regression: GitHub omits `patch` for 100%-similarity renames; if the
-    // header is unparseable the UI's file splitter drops the file silently.
     const patch = reconstructGhPatch([
       { filename: "docs/road map.md", previous_filename: "docs/roadmap.md", status: "renamed" },
     ]);

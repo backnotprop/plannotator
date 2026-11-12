@@ -1,9 +1,3 @@
-/**
- * Replaced questions in the Inbox store: an agent supersedes an earlier
- * question of its thread (send_message's `supersedes`, or a `Replaces:` line
- * in a newer block). The store keeps it append-only: the superseded
- * question's record gains `superseded_by`; its state is derived.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -116,7 +110,6 @@ describe("superseding a question", () => {
     expect(fresh.context ?? "").not.toContain("Replaces");
     expect(fresh.stopped).toBe("the queue change cannot merge without this.");
     expect(store.questionsOf(first.id)[0]!.superseded_by).toEqual({ message_id: sent.message.id, key: fresh.key });
-    // Without the argument the message records no `supersedes` of its own.
     expect(store.message(sent.message.id)!.supersedes).toBeUndefined();
   });
 
@@ -136,7 +129,6 @@ describe("superseding a question", () => {
     const reopened = InboxStore.open(dir);
     expect(reopened.thread(first.thread_id)).toEqual(store.thread(first.thread_id));
     expect(reopened.listSections()).toEqual(store.listSections());
-    // Append-only: the supersede is one more question line, the first one untouched.
     const projects = join(dir, "inbox", "projects");
     const lines = readdirSync(projects).flatMap((key) =>
       readFileSync(join(projects, key, "questions.jsonl"), "utf8")
@@ -184,7 +176,6 @@ describe("refusals: one bad id refuses the whole send and lists the thread's ope
       expect(error.message).toContain(`${first.id}/${q2.key}`);
       expect((error.details.open_questions as { id: string }[]).map((q) => q.id)).toEqual([`${first.id}/${q1.key}`, `${first.id}/${q2.key}`]);
     }
-    // Nothing landed: no message, no question line.
     expect(store.cursor()).toBe(cursor);
     expect(store.thread(first.thread_id)!.messages.length).toBe(1);
   });
@@ -200,7 +191,6 @@ describe("refusals: one bad id refuses the whole send and lists the thread's ope
     const again = refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: queueBlock(`${first.id}/${q1.key}`), reply_to: first.id }));
     expect(again.code).toBe("invalid_supersedes");
     expect(again.message).toContain("is not open (it is superseded)");
-    // The whole message has no open question left.
     expect(refusal(() => store.sendMessage({ project_id: first.project_id, author: AGENT, body: "x", reply_to: first.id, supersedes: [first.id] })).message).toContain(
       "no open question",
     );
@@ -240,7 +230,6 @@ describe("picks and Send on a superseded question", () => {
     expect(pick).toThrow(expect.objectContaining({ code: "question_superseded" }));
     const send = () => store.sendReply(first.id, { idempotency_key: "s1", questions: [{ key: q1.key, revision: old.revision }] });
     expect(send).toThrow(expect.objectContaining({ code: "question_superseded" }));
-    // The other question still goes, and the reply never lists the superseded one, answered or unanswered.
     store.savePicks(first.id, [{ key: q2.key, revision: 0, answer: answerFor(q2, "Yes") }]);
     const reply = store.sendReply(first.id, { idempotency_key: "s2", questions: [{ key: q2.key, revision: 1 }] });
     expect(reply.reply.body).toContain("Ship the retry behind a flag?");
@@ -278,7 +267,6 @@ describe("the list and the subject", () => {
     ]);
     store.markSeen(first.thread_id);
     expect(store.listRow(first.thread_id)!.answered_not_sent).toBe(true);
-    // The agent withdraws the whole message: both picks are dropped, so nothing waits for Send.
     store.sendMessage({ project_id: first.project_id, author: AGENT, body: "Not that one.", reply_to: first.id, supersedes: [first.id] });
     const row = store.listRow(first.thread_id)!;
     expect(row.answered_not_sent).toBe(false);
@@ -326,7 +314,6 @@ describe("the window's thread (windowThread)", () => {
     const later = store.sendMessage({ project_id: first.project_id, author: AGENT, body: "CI is green.", reply_to: first.id }).message;
     const thread = store.windowThread(first.thread_id)!;
     expect(thread.messages.map((m) => m.seq)).toEqual([store.messageCursor(first.id)!, store.messageCursor(reply.id)!, store.messageCursor(later.id)!]);
-    // The look rewrote the root's line (up to the root itself); its seq stays the first line's.
     expect(thread.messages[0]!.person_seen_seq).toBe(thread.messages[0]!.seq);
     expect(thread.messages.map((m) => m.sent_annotations)).toEqual([undefined, 0, undefined]);
     for (const message of store.thread(first.thread_id)!.messages) {

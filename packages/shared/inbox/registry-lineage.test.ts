@@ -1,10 +1,3 @@
-/**
- * The runs a starting Inbox follows (registry.ts `inboxSessionLineage`,
- * `inboxHome`): what lets a window left open across a restart keep writing.
- * Failures to catch: a restart in the same folder that names no earlier run;
- * and a copied or restored folder, or an entry an older Inbox wrote, taken
- * for the same data.
- */
 import { afterEach, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,17 +41,14 @@ test("a copy of the folder, also one put back at the same path, is another folde
   const dir = dataDir();
   const home = inboxHome(dir)!;
   const entry = { serverSession: "a", home };
-  // A data dir copied elsewhere.
   const copy = dataDir();
   rmSync(join(copy, "inbox"), { recursive: true });
   cpSync(join(dir, "inbox"), join(copy, "inbox"), { recursive: true });
   expect(inboxSessionLineage(entry, inboxHome(copy))).toEqual([]);
-  // A restore: the same files in a new folder at the old path.
   cpSync(join(dir, "inbox"), join(dir, "inbox.copy"), { recursive: true });
   rmSync(join(dir, "inbox"), { recursive: true });
   renameSync(join(dir, "inbox.copy"), join(dir, "inbox"));
   expect(inboxSessionLineage(entry, inboxHome(dir))).toEqual([]);
-  // A folder moved whole keeps its identity.
   const moved = dataDir();
   rmSync(join(moved, "inbox"), { recursive: true });
   const kept = inboxHome(dir)!;

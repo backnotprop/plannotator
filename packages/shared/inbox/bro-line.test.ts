@@ -1,11 +1,3 @@
-/**
- * Bro mode's line in the agent tool (approval "bro-mode"): `inboxAgentTool` replaces the running Inbox's long `body`
- * text with its own short words, so the line has to survive that.
- *
- * What regresses: Bro mode off changing a byte of what an agent reads; on, the line missing from the `body` field or
- * reaching any other field or the tool's description (which is near its limit); a stopped Inbox's remembered list
- * giving the line after the person turned it off.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,7 +47,6 @@ describe("a remembered tool list (the Inbox stopped)", () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  /** A data dir whose registry names a closed port, and the list a running Inbox left behind. */
   function stopped(body: string): string {
     const dataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-bro-remembered-")));
     dirs.push(dataDir);

@@ -1,7 +1,3 @@
-/**
- * Code-review image preview (#1598), pure half: the decisions the Bun server
- * and the Pi mirror share. Each block names the regression it guards.
- */
 import { describe, expect, test } from "bun:test";
 import {
   type DiffType,
@@ -56,7 +52,6 @@ describe("sniffImageContentType (content type comes from bytes, never the name)"
     expect(sniffImageContentType(enc("GIF89a\x01\x00\x01\x00"))).toBe("image/gif");
     expect(sniffImageContentType(enc("RIFF\x00\x00\x00\x00WEBPVP8X"))).toBe("image/webp");
     expect(sniffImageContentType(concat(u32be(24), enc("ftypavif"), u32be(0), enc("mif1")))).toBe("image/avif");
-    // A mif1-major AVIF names avif only among its compatible brands.
     expect(sniffImageContentType(concat(u32be(24), enc("ftypmif1"), u32be(0), enc("avif")))).toBe("image/avif");
     expect(sniffImageContentType(concat(enc("BM"), new Uint8Array(30)))).toBe("image/bmp");
     expect(sniffImageContentType(concat(bytes(0, 0, 1, 0, 1, 0), new Uint8Array(20)))).toBe("image/x-icon");
@@ -68,8 +63,6 @@ describe("sniffImageContentType (content type comes from bytes, never the name)"
   });
 
   test("HTML, a zip named .png, an LFS pointer and an empty file are not images", () => {
-    // Serving HTML as image/svg+xml (or at all) from the session origin is the
-    // risk the sniffer exists for.
     expect(sniffImageContentType(enc("<!DOCTYPE html><html><svg></svg></html>"))).toBeNull();
     expect(sniffImageContentType(enc("<html><body><svg/></body></html>"))).toBeNull();
     expect(sniffImageContentType(bytes(0x50, 0x4b, 0x03, 0x04, 0, 0))).toBeNull();
@@ -82,29 +75,24 @@ describe("readImageDimensions (the decode-bomb guard reads real header fields)",
   test("parses width and height per format", () => {
     expect(readImageDimensions(pngHeader(640, 480), "image/png")).toEqual({ width: 640, height: 480 });
     expect(readImageDimensions(concat(enc("GIF89a"), bytes(0x80, 0x02, 0xe0, 0x01)), "image/gif")).toEqual({ width: 640, height: 480 });
-    // JPEG: SOI, an APP0 segment to skip, then SOF0 (height before width).
     const jpeg = concat(
       bytes(0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00),
       bytes(0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0xe0, 0x02, 0x80, 0x03),
     );
     expect(readImageDimensions(jpeg, "image/jpeg")).toEqual({ width: 640, height: 480 });
-    // WebP VP8X: canvas size minus one, 24-bit little endian.
     const vp8x = concat(enc("RIFF\x00\x00\x00\x00WEBPVP8X"), new Uint8Array(8), bytes(0x7f, 0x02, 0x00, 0xdf, 0x01, 0x00));
     expect(readImageDimensions(vp8x, "image/webp")).toEqual({ width: 640, height: 480 });
-    // WebP VP8L: 14-bit fields packed after the 0x2f signature byte.
     const w = 639;
     const h = 479;
     const bits = w | (h << 14);
     const vp8l = concat(enc("RIFF\x00\x00\x00\x00WEBPVP8L"), new Uint8Array(4), bytes(0x2f, bits & 255, (bits >> 8) & 255, (bits >> 16) & 255, (bits >> 24) & 255));
     expect(readImageDimensions(vp8l, "image/webp")).toEqual({ width: 640, height: 480 });
-    // BMP (BITMAPINFOHEADER): a negative height means top-down rows.
     const bmp = new Uint8Array(30);
     bmp.set(enc("BM"), 0);
     new DataView(bmp.buffer).setInt32(14, 40, true);
     new DataView(bmp.buffer).setInt32(18, 640, true);
     new DataView(bmp.buffer).setInt32(22, -480, true);
     expect(readImageDimensions(bmp, "image/bmp")).toEqual({ width: 640, height: 480 });
-    // ICO: a zero byte means 256.
     expect(readImageDimensions(concat(bytes(0, 0, 1, 0, 1, 0, 0, 16), new Uint8Array(14)), "image/x-icon")).toEqual({ width: 256, height: 16 });
   });
 
@@ -172,7 +160,6 @@ describe("isImagePreviewCandidate (client eligibility)", () => {
   test("hunkless image chunks qualify, including a marker-less header-only PR fallback chunk", () => {
     expect(isImagePreviewCandidate("diff --git a/a.PNG b/a.PNG\nBinary files a/a.PNG and b/a.PNG differ\n", "a.PNG")).toBe(true);
     expect(isImagePreviewCandidate("diff --git a/a.webp b/a.webp\n", "a.webp")).toBe(true);
-    // A rename of a deleted-extension file still previews through its old path.
     expect(isImagePreviewCandidate("diff --git a/a.png b/a.bin\n", "a.bin", "a.png")).toBe(true);
   });
 
@@ -360,7 +347,6 @@ describe("PR platform byte fetchers", () => {
   });
 
   test("GitLab: the JSON files API decodes base64 bytes intact", async () => {
-    // 0xff / 0x80 bytes are exactly what a UTF-8 decode of /raw would corrupt.
     const data = concat(pngHeader(1, 1), bytes(0xff, 0x80, 0x00));
     const runtime = fakeRuntime({
       "/repository/files/": JSON.stringify({ size: data.byteLength, encoding: "base64", content: b64(data), blob_id: "b1" }),

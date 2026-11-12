@@ -1,19 +1,7 @@
-/**
- * The Markdown document of a thread's decisions (decision-export.ts's v1 shape), written to read well on GitHub:
- * a marker line, a heading, an index table, one section per decision with task-list boxes for the choices (`[x]` is
- * the chosen one, as in the question grammar), then the short "Skipped" and "Still open" lists. No picture is
- * embedded: a picture is "_(picture: alt)_".
- *
- * Every piece of thread text is untrusted: `<`, `>` and `&` become entities (no HTML, no comment that could pass for
- * the marker), a `![` cannot start an image, a table cell's `|` and line breaks are escaped, and a line that would
- * start a heading, list, quote, fence or table in a multi-line field is escaped at its start.
- */
 import { decisionAnswerLine, decisionExportDates, decisionExportGroups, decisionOtherDetail, type DecisionExportChoice, type DecisionExportItem, type DecisionExportV1 } from "./decision-export";
 
-/** The hidden first line a later step finds its own comment by (brief section 5). */
 export const DECISION_EXPORT_MARKER = (threadId: string) => `<!-- plannotator-decisions v1 thread=${threadId} -->`;
 
-/** Inline text: no HTML, no image, no autolinked angle brackets; one line. */
 export function mdInline(text: string): string {
   return text
     .replace(/\s+/g, " ")
@@ -25,12 +13,10 @@ export function mdInline(text: string): string {
     .replace(/\\$/, "\\\\");
 }
 
-/** A table cell: inline, with its pipes escaped. */
 export function mdCell(text: string): string {
   return mdInline(text).replace(/\|/g, "\\|");
 }
 
-/** A multi-line field: each line inline-escaped, a line that would start a block escaped at its start. */
 export function mdBlock(text: string): string {
   return text
     .split(/\r?\n/)
@@ -101,7 +87,6 @@ function section(item: DecisionExportItem, when: ReturnType<typeof decisionExpor
   return out;
 }
 
-/** The whole document. */
 export function renderDecisionExportMarkdown(doc: DecisionExportV1): string {
   const when = decisionExportDates(doc.tz);
   const head = [doc.thread.project ? `**${mdInline(doc.thread.project)}**` : null, when.range(doc.thread.started_at, doc.thread.last_at) || null, `${doc.counts.decided} decided${doc.others.length > 0 ? `, ${doc.others.length} other ${doc.others.length === 1 ? "question" : "questions"}` : ""}`]

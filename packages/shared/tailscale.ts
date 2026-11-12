@@ -1,39 +1,15 @@
-/**
- * Tailscale helpers for remote-friendly sessions.
- *
- * Two consumers:
- *   - urlHost "auto" (PLANNOTATOR_URL_HOST=auto): detect this machine's
- *     tailnet host so remote sessions advertise a reachable URL without the
- *     user hand-copying their MagicDNS name into config. Display-only, like
- *     every urlHost value — binding stays governed by PLANNOTATOR_REMOTE.
- *   - `--tailscale` (Bun CLI): parse/compose the `tailscale serve` commands
- *     that publish a loopback-bound session over the tailnet with HTTPS.
- *
- * Pure parsers live here so both runtimes (Bun server, Pi extension) share
- * them. The only process-spawning edge is `runTailscale`, which never invokes
- * a shell and is injectable for tests; it and the Inbox's async runner
- * (inbox-pairing-checks.ts) share one lookup, `tailscaleAppFallback`.
- */
-
 import { childEnv } from "./child-env";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isValidUrlHost } from "./config";
 
-/** Detection commands answer from local state; keep the wait short. */
 export const TAILSCALE_CLI_TIMEOUT_MS = 3_000;
-/** Serve config writes talk to the daemon; allow a little more. */
 export const TAILSCALE_SERVE_TIMEOUT_MS = 10_000;
 
-/** The urlHost sentinel that requests tailnet host detection. */
 export function isAutoUrlHost(host: string): boolean {
   return host.toLowerCase() === "auto";
 }
 
-/**
- * Extract this machine's MagicDNS name from `tailscale status --json` output.
- * Tailscale reports it FQDN-style with a trailing dot ("host.tail1234.ts.net.").
- */
 export function parseTailscaleStatusDnsName(stdout: string): string | undefined {
   let parsed: unknown;
   try {
@@ -47,7 +23,6 @@ export function parseTailscaleStatusDnsName(stdout: string): string | undefined 
   return host !== "" && isValidUrlHost(host) ? host : undefined;
 }
 
-/** Strict CGNAT (100.64.0.0/10) IPv4 — the only range Tailscale assigns. */
 export function parseTailscaleIpv4(value: string): string | undefined {
   const parts = value.trim().split(".");
   if (
@@ -61,7 +36,6 @@ export function parseTailscaleIpv4(value: string): string | undefined {
   return octets.join(".");
 }
 
-/** `tailscale ip -4` output must contain exactly one valid tailnet address. */
 export function parseTailscaleIpv4Output(stdout: string): string | undefined {
   const lines = stdout
     .split(/\r?\n/)
@@ -80,29 +54,14 @@ export interface TailscaleRunResult {
 
 export type TailscaleRunner = (args: string[], timeoutMs: number) => TailscaleRunResult;
 
-/**
- * The Mac Tailscale app's own program, which is also its CLI when run by
- * this exact path (Tailscale's "Install CLI" writes a `/usr/local/bin/tailscale`
- * script that runs it). Never through a symlink: invoked under another name
- * it crashes on its bundle identifier.
- */
 export const MAC_TAILSCALE_APP_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 
-/** What the app fallback reads; each part replaceable so tests never look at the real /Applications. */
 export interface TailscaleAppLookup {
   platform?: NodeJS.Platform;
   exists?: (path: string) => boolean;
   env?: Record<string, string | undefined>;
 }
 
-/**
- * The command to try when `tailscale` on PATH was not found (`ENOENT`): on
- * macOS, the Tailscale app's own CLI if the app is installed, so a Mac whose
- * app never had its command-line tool turned on still works. Undefined for
- * any other failure, any other platform, or a test run
- * (`PLANNOTATOR_TEST_SANDBOX`, so no test reaches the real app). PATH always
- * comes first.
- */
 export function tailscaleAppFallback(result: TailscaleRunResult, lookup: TailscaleAppLookup = {}): string | undefined {
   if ((result.error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") return undefined;
   if ((lookup.env ?? process.env).PLANNOTATOR_TEST_SANDBOX) return undefined;
@@ -110,31 +69,20 @@ export function tailscaleAppFallback(result: TailscaleRunResult, lookup: Tailsca
   return (lookup.exists ?? existsSync)(MAC_TAILSCALE_APP_CLI) ? MAC_TAILSCALE_APP_CLI : undefined;
 }
 
-/**
- * The environment for the app's CLI: `env` with `SHLVL=1` when it has none.
- * The app's program acts as a CLI only when its environment looks like a
- * shell's (SHLVL or a non-empty TERM); with neither it tries to start the
- * GUI instead. Tailscale's own `/usr/local/bin/tailscale` wrapper gets SHLVL
- * from `sh`; an Inbox started without a terminal (the Claude app, launchd)
- * has neither. TERM is left alone.
- */
 export function tailscaleAppEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
   return env.SHLVL ? env : { ...env, SHLVL: "1" };
 }
 
-/** What Tailscale's Mac app prints (exit 0) when run as a CLI without a shell-like environment. */
 const APP_GUI_FAILED = /The Tailscale GUI failed to start/;
 
 export const TAILSCALE_APP_NOT_CLI =
   "The Tailscale app did not answer as a command-line tool; turn on Tailscale → Settings → Install CLI, then try again.";
 
-/** The app's CLI answer, with "the GUI failed to start" (which exits 0) turned into a failure callers report in plain words. */
 export function checkTailscaleAppAnswer(result: TailscaleRunResult): TailscaleRunResult {
   if (result.error || !APP_GUI_FAILED.test(`${result.stdout}\n${result.stderr}`)) return result;
   return { ...result, error: new Error(TAILSCALE_APP_NOT_CLI) };
 }
 
-/** Spawn one `tailscale` command (bare name or absolute path) without a shell, in `env`. */
 export type TailscaleSpawn = (command: string, args: string[], timeoutMs: number, env: Record<string, string | undefined>) => TailscaleRunResult;
 
 const spawnTailscale: TailscaleSpawn = (command, args, timeoutMs, env) => {
@@ -152,11 +100,6 @@ const spawnTailscale: TailscaleSpawn = (command, args, timeoutMs, env) => {
   };
 };
 
-/**
- * A runner that tries `tailscale` on PATH, then the app's CLI
- * (`tailscaleAppFallback`) with the same args and timeout, in `tailscaleAppEnv`.
- * `baseEnv` is the child environment (the live `process.env` by default).
- */
 export function createTailscaleRunner(
   spawn: TailscaleSpawn = spawnTailscale,
   lookup: TailscaleAppLookup = {},
@@ -169,23 +112,8 @@ export function createTailscaleRunner(
   };
 }
 
-/** Run the `tailscale` CLI without a shell (PATH first, then the Mac app's CLI). */
 export const runTailscale: TailscaleRunner = createTailscaleRunner();
 
-/**
- * A failure whose cause is Tailscale's own state on this computer or tailnet,
- * in plain words with the next step, from what the CLI printed. Undefined for
- * anything else (the caller shows Tailscale's own text).
- *
- * Serve off for the tailnet (or its HTTPS certificates off): `tailscale serve`
- * prints Tailscale's text ("Serve is not enabled on your tailnet. To enable,
- * visit:") and an admin link on stdout, then either exits 0 or waits for the
- * user to turn it on (we time out). Either way that link is the next step:
- * Tailscale's "Start using Serve" page, where one Enable HTTPS press (HTTPS
- * certificates ticked, Funnel optional) turns it on for the whole tailnet.
- * The rest is `tailscale` refusing to run: stopped, signed out, waiting for
- * approval (cmd/tailscale/cli isRunningOrStarting), or no daemon to talk to.
- */
 export function explainTailscaleSetup(result: TailscaleRunResult): string | undefined {
   const output = `${result.stdout}\n${result.stderr}`;
   const links = output.match(/https:\/\/[^\s"'<>]+/g) ?? [];
@@ -216,7 +144,6 @@ export function explainTailscaleSetup(result: TailscaleRunResult): string | unde
   return undefined;
 }
 
-/** Turn a failed CLI invocation into one actionable sentence. */
 export function describeTailscaleFailure(result: TailscaleRunResult): string {
   const explained = explainTailscaleSetup(result);
   if (explained) return explained;
@@ -236,12 +163,6 @@ export function describeTailscaleFailure(result: TailscaleRunResult): string {
 
 export type TailnetHostDetection = { host: string } | { error: string };
 
-/**
- * Detect this machine's advertised tailnet host: MagicDNS name first
- * (`tailscale status --json` → `Self.DNSName`), single CGNAT IPv4 fallback
- * (`tailscale ip -4`). Never throws — callers surface `{ error }` as a
- * warning and fall back to localhost.
- */
 export function detectTailnetHost(run: TailscaleRunner = runTailscale): TailnetHostDetection {
   const status = run(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
   if (status.error || status.status !== 0) {
@@ -259,32 +180,16 @@ export function detectTailnetHost(run: TailscaleRunner = runTailscale): TailnetH
   };
 }
 
-/**
- * `tailscale serve --bg --https=<httpsPort> http://127.0.0.1:<port>`. The
- * HTTPS port is the local port unless named: the Inbox publishes on a stable
- * 8443 in front of whatever loopback port it has this run.
- */
 export function buildServeArgs(port: number, httpsPort: number = port): string[] {
   return ["serve", "--bg", `--https=${httpsPort}`, `http://127.0.0.1:${port}`];
 }
 
-/** `tailscale serve --https=<port> off` — the matching teardown. */
 export function buildServeOffArgs(port: number): string[] {
   return ["serve", `--https=${port}`, "off"];
 }
 
 export type ServeStatusPortCheck = "free" | "conflict" | "malformed";
 
-/**
- * Inspect `tailscale serve status --json` for an existing route on the given
- * port. Both the top-level background config (`TCP`) and every foreground
- * session (`Foreground.<sessionId>.TCP`) count: Tailscale prefers foreground
- * handlers, so a foreground mapping would silently shadow a background one we
- * install and route our advertised URL to someone else's service.
- *
- * Fails CLOSED: output we cannot recognize returns "malformed" so the caller
- * errors clearly instead of assuming the port is free.
- */
 export function checkServeStatusPort(stdout: string, port: number): ServeStatusPortCheck {
   const trimmed = stdout.trim();
   if (trimmed === "") return "malformed";
@@ -294,7 +199,6 @@ export function checkServeStatusPort(stdout: string, port: number): ServeStatusP
   } catch {
     return "malformed";
   }
-  // `null` is Tailscale's honest "no serve config"; `{}` likewise.
   if (parsed === null) return "free";
   if (typeof parsed !== "object" || Array.isArray(parsed)) return "malformed";
 
@@ -320,14 +224,6 @@ export function checkServeStatusPort(stdout: string, port: number): ServeStatusP
   return "free";
 }
 
-/**
- * Where an existing serve mapping on `port` sends its root handler, so a
- * caller can tell its own mapping (a loopback port it used before) from
- * someone else's. `free` when no mapping holds the port, `malformed` when the
- * output is not recognizable, else the mapping's `/` proxy target ("" when it
- * has none, such as a TCP forward or a file server). Read like
- * checkServeStatusPort: background and foreground configs both count.
- */
 export function serveStatusProxy(stdout: string, port: number): { state: "free" } | { state: "malformed" } | { state: "mapped"; proxy: string } {
   const check = checkServeStatusPort(stdout, port);
   if (check !== "conflict") return { state: check };
@@ -345,12 +241,6 @@ export function serveStatusProxy(stdout: string, port: number): { state: "free" 
   return { state: "mapped", proxy: "" };
 }
 
-/**
- * Every serve route in `tailscale serve status --json`, background and
- * foreground: each web handler's proxy target (`Web["host:port"].Handlers`,
- * every path) and each raw TCP forward (`TCP[port].TCPForward`). Undefined
- * when the output is not recognizable.
- */
 export function serveStatusRoutes(stdout: string): { port: number; target: string }[] | undefined {
   const trimmed = stdout.trim();
   if (trimmed === "") return undefined;
@@ -390,11 +280,6 @@ export function serveStatusRoutes(stdout: string): { port: number; target: strin
   return routes;
 }
 
-/**
- * A serve target that lands on `port` on this machine's loopback:
- * `http://127.0.0.1:<port>`, `http://localhost:<port>/x`, `https+insecure://…`,
- * or a TCP forward `tcp://127.0.0.1:<port>`.
- */
 export function serveTargetIsLoopbackPort(target: string, port: number): boolean {
   let url: URL;
   try {
@@ -407,12 +292,6 @@ export function serveTargetIsLoopbackPort(target: string, port: number): boolean
   return loopback && url.port !== "" && Number(url.port) === port;
 }
 
-/**
- * First https URL in `tailscale serve --bg` output whose port matches the
- * port we asked to publish, sans trailing slash. Serve output is
- * version-dependent, so an https URL for a DIFFERENT port (some other
- * pre-existing mapping echoed in the config dump) must not be advertised.
- */
 export function extractServeHttpsUrl(output: string, expectedPort: number): string | undefined {
   for (const match of output.matchAll(/https:\/\/[^\s|]+/g)) {
     const candidate = match[0].replace(/\/+$/, "");
@@ -428,21 +307,11 @@ export function extractServeHttpsUrl(output: string, expectedPort: number): stri
   return undefined;
 }
 
-/** Who owns this machine on the tailnet, as `tailscale status --json` reports it. */
 export interface TailscaleSelfIdentity {
-  /** The owning user's login (`User[Self.UserID].LoginName`); null for a tagged machine or when Tailscale does not say. */
   login: string | null;
-  /** The machine carries ACL tags: it has no owning user, and serve sends no identity for tagged peers. */
   tagged: boolean;
 }
 
-/**
- * The login that owns this machine: `Self.UserID` looked up in the `User`
- * map (keyed by the id as a string). A tagged machine (`Self.Tags`
- * non-empty) is owned by its tags, not a person, so its login is null even
- * though Tailscale lists a "tagged-devices" pseudo-user for it. Undefined
- * when the output is not a status document.
- */
 export function parseTailscaleSelfIdentity(stdout: string): TailscaleSelfIdentity | undefined {
   let parsed: unknown;
   try {
@@ -465,14 +334,6 @@ export function parseTailscaleSelfIdentity(stdout: string): TailscaleSelfIdentit
   return { login: typeof login === "string" && login.trim() !== "" ? login.trim() : null, tagged: false };
 }
 
-/**
- * A `Tailscale-User-*` header value as serve writes it: ASCII as is, anything
- * else RFC 2047 Q-encoded (`=?utf-8?q?J=C3=BCrgen?=`, Go's
- * `mime.QEncoding.Encode`, as one or more encoded words separated by
- * whitespace, which RFC 2047 drops between adjacent words). Returns the
- * decoded text, or null when an encoded word is malformed or not UTF-8:
- * never a guess, since the caller compares it to a login.
- */
 export function decodeTailscaleHeaderValue(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed.includes("=?")) return trimmed;
@@ -503,20 +364,9 @@ export function decodeTailscaleHeaderValue(value: string): string | null {
       return null;
     }
   }
-  // Serve encodes only non-ASCII values; an all-ASCII encoded word is not
-  // what serve writes, so it is compared as it came, never as a login.
   return /^[\x00-\x7f]*$/.test(out) ? trimmed : out;
 }
 
-/**
- * urlHost "auto": resolve this machine's tailnet host once per process.
- * Detection is display-only like every urlHost value; callers gate on
- * remote-session state before resolving, so a local session never spawns the
- * tailscale CLI. A failed detection warns once and resolves undefined
- * (callers advertise localhost); a display setting must never break a server
- * launch. Shared by the Bun runtime and the Pi mirror (vendored copy), each
- * process holding its own cache.
- */
 let autoHostResolution: { host: string | undefined } | undefined;
 
 export function resolveAutoHostCached(

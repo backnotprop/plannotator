@@ -1,10 +1,3 @@
-/**
- * Parse output of `gh api --paginate` / `glab api --paginate`.
- *
- * Both CLIs concatenate pages as adjacent JSON arrays (`[...][...]`) which is
- * not valid JSON. Walk the output, split it into top-level arrays, and merge
- * them. Single-page output (the common case) round-trips through the same path.
- */
 export function parsePaginatedArray<T>(stdout: string): T[] {
   const trimmed = stdout.trim();
   if (!trimmed) return [];

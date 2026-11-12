@@ -1,39 +1,7 @@
-/**
- * Plannotator Inbox: telling a recording from its bytes, and reading its
- * length from its header without decoding it (the owner's ask, 2026-11-09:
- * "the ability to like annotate an audio file … right now audio file is just
- * download instead of play").
- *
- * Every format is read from its first bytes (the extension is ignored, as for
- * images and videos), after the image, PDF and video checks:
- *
- * - MP3 (`audio/mpeg`): an ID3v2 tag, or two MPEG audio frames in a row (a
- *   frame sync, a valid version, layer, bitrate and sample rate, and the next
- *   frame where the first one's length says).
- * - AAC (`audio/aac`): two ADTS frames in a row.
- * - M4A (`audio/mp4`): an `ftyp` whose MAJOR brand is an audio one (`M4A `,
- *   `M4B `, …). An MP4 whose tracks hold no video (audio named `.mp4`) is a
- *   recording too; the caller knows that from the header walk (video.ts).
- * - WAV (`audio/wav`): `RIFF` … `WAVE`.
- * - Ogg (`audio/ogg`, Vorbis, Opus, FLAC or Speex): `OggS` and the first
- *   packet's codec magic; an Ogg holding Theora is not a recording.
- * - FLAC (`audio/flac`): `fLaC`.
- * - WebM audio (`audio/webm`): a WebM (video.ts) whose Tracks, read from the
- *   head, hold audio and no video (MediaRecorder's voice notes). A WebM whose
- *   tracks the head does not reach stays a video.
- *
- * Lengths come from the head where the format puts them there (WAV's data
- * size and byte rate, FLAC's STREAMINFO, an MP3's Xing/Info/VBRI frame count
- * or its constant bitrate, M4A's `mvhd` through video.ts's walk) and, for an
- * Ogg, from the granule position of the last page in the file's tail. AAC
- * and WebM record no length; the player learns it as it loads.
- */
-
 import { ebmlDocType, ftypBrands, vint } from "./video";
 
 export type InboxAudioMediaType = "audio/mpeg" | "audio/mp4" | "audio/wav" | "audio/ogg" | "audio/flac" | "audio/aac" | "audio/webm";
 
-/** Major brands of an audio-only ISO base media file. */
 const AUDIO_MAJOR_BRANDS: ReadonlySet<string> = new Set(["M4A ", "M4B ", "M4P ", "F4A ", "F4B "]);
 
 function ascii(bytes: Uint8Array, at: number, length: number): string {
@@ -53,7 +21,6 @@ function u16le(b: Uint8Array, at: number): number {
   return b[at]! + (b[at + 1]! << 8);
 }
 
-/** The length of an ID3v2 tag at the start (header, body and footer), or 0. */
 function id3Length(head: Uint8Array): number {
   if (head.length < 10 || ascii(head, 0, 3) !== "ID3") return 0;
   const sizes = [head[6]!, head[7]!, head[8]!, head[9]!];
@@ -76,14 +43,11 @@ interface MpegFrame {
   length: number;
   samples: number;
   sampleRate: number;
-  /** Bits per second. */
   bitrate: number;
-  /** 1, 2 or 25 (MPEG-2.5). */
   version: number;
   mono: boolean;
 }
 
-/** The MPEG audio frame header at `at`, or null when the bytes there are not one. */
 function mpegFrame(b: Uint8Array, at: number): MpegFrame | null {
   if (at + 4 > b.length || b[at] !== 0xff || (b[at + 1]! & 0xe0) !== 0xe0) return null;
   const versionBits = (b[at + 1]! >> 3) & 3;
@@ -104,7 +68,6 @@ function mpegFrame(b: Uint8Array, at: number): MpegFrame | null {
   return { length, samples, sampleRate, bitrate, version, mono: (b[at + 3]! >> 6) === 3 };
 }
 
-/** The ADTS (AAC) frame length at `at`, or 0 when the bytes there are not one. */
 function adtsFrame(b: Uint8Array, at: number): number {
   if (at + 7 > b.length || b[at] !== 0xff || (b[at + 1]! & 0xf6) !== 0xf0) return 0;
   if (((b[at + 2]! >> 2) & 0xf) > 12) return 0;
@@ -112,13 +75,11 @@ function adtsFrame(b: Uint8Array, at: number): number {
   return length >= 7 ? length : 0;
 }
 
-/** Whether a frame of `length` at `at` is followed by another one (or by the end of what the head holds). */
 function chained(b: Uint8Array, at: number, length: number, next: (at: number) => boolean): boolean {
   const following = at + length;
   return following + 4 > b.length || next(following);
 }
 
-/** What the first packet of an Ogg stream holds, or null when the bytes do not start with an Ogg page. */
 function oggCodec(head: Uint8Array): "opus" | "vorbis" | "flac" | "speex" | "other" | null {
   if (head.length < 28 || ascii(head, 0, 4) !== "OggS" || head[4] !== 0) return null;
   const packet = 27 + head[26]!;
@@ -135,9 +96,7 @@ const EBML_TRACK_ENTRY = 0xae;
 const EBML_TRACK_TYPE = 0x83;
 const EBML_CLUSTER = 0x1f43b675;
 
-/** The kinds of track a WebM's Tracks element lists, read from the head; null when the head does not reach it. */
 export function webmTrackKinds(head: Uint8Array): { video: boolean; audio: boolean } | null {
-  // The EBML header, then the Segment (its size may be unknown: a live recording).
   const headerId = vint(head, 0, true);
   if (!headerId) return null;
   const headerSize = vint(head, headerId.length, false);
@@ -190,10 +149,6 @@ export function webmTrackKinds(head: Uint8Array): { video: boolean; audio: boole
   return null;
 }
 
-/**
- * The audio container the first bytes of a file name, or null. Run AFTER
- * image, PDF and video sniffing; a WebM is audio only when its tracks say so.
- */
 export function sniffInboxAudio(head: Uint8Array): InboxAudioMediaType | null {
   if (ascii(head, 0, 4) === "RIFF" && ascii(head, 8, 4) === "WAVE") return "audio/wav";
   if (ascii(head, 0, 4) === "fLaC") return "audio/flac";
@@ -207,7 +162,6 @@ export function sniffInboxAudio(head: Uint8Array): InboxAudioMediaType | null {
   }
   const tag = id3Length(head);
   if (tag > 0 && tag + 4 <= head.length && ascii(head, tag, 4) === "fLaC") return "audio/flac";
-  // Past the tag (and any zero padding after it), the first frame.
   let at = tag;
   while (tag > 0 && at < head.length && head[at] === 0) at++;
   if (at + 4 > head.length) return tag > 0 ? "audio/mpeg" : null;
@@ -215,27 +169,18 @@ export function sniffInboxAudio(head: Uint8Array): InboxAudioMediaType | null {
   if (frame && chained(head, at, frame.length, (next) => mpegFrame(head, next) !== null)) return "audio/mpeg";
   const adts = adtsFrame(head, at);
   if (adts && chained(head, at, adts, (next) => adtsFrame(head, next) > 0)) return "audio/aac";
-  // An ID3v2 tag is an MP3's: a first frame the head does not show plainly (padding, a damaged frame) keeps it one.
   return tag > 0 ? "audio/mpeg" : null;
 }
 
-/**
- * The type a recording's bytes are served as: what `sniffInboxAudio` names,
- * or `audio/mp4` for any other ISO base media file (an MP4 whose tracks hold
- * only sound). The `audio` route and the check that the current file is still
- * a recording use it.
- */
 export function inboxAudioServedType(head: Uint8Array): InboxAudioMediaType | null {
   return sniffInboxAudio(head) ?? (ftypBrands(head) ? "audio/mp4" : null);
 }
 
-/** A length in milliseconds, or null when it is not a usable one. */
 function ms(seconds: number): number | null {
   const value = Math.round(seconds * 1000);
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-/** A WAV's length: its data chunk over its byte rate (a streaming header's unknown size reads to the end of the file). */
 function wavDuration(head: Uint8Array, size: number): number | null {
   let byteRate = 0;
   for (let at = 12, guard = 0; at + 8 <= head.length && guard < 64; guard++) {
@@ -252,7 +197,6 @@ function wavDuration(head: Uint8Array, size: number): number | null {
   return null;
 }
 
-/** A FLAC's length from STREAMINFO: total samples over the sample rate. */
 function flacDuration(head: Uint8Array, at: number): number | null {
   if (ascii(head, at, 4) !== "fLaC" || at + 8 + 18 > head.length || (head[at + 4]! & 0x7f) !== 0) return null;
   const info = at + 8;
@@ -261,7 +205,6 @@ function flacDuration(head: Uint8Array, at: number): number | null {
   return sampleRate > 0 && total > 0 ? ms(total / sampleRate) : null;
 }
 
-/** An MP3's length: the Xing/Info or VBRI frame count when there is one, else its constant bitrate over the bytes. */
 function mpegDuration(head: Uint8Array, size: number): number | null {
   let at = id3Length(head);
   while (at > 0 && at < head.length && head[at] === 0) at++;
@@ -282,7 +225,6 @@ function mpegDuration(head: Uint8Array, size: number): number | null {
   return ms(((size - at) * 8) / frame.bitrate);
 }
 
-/** A recording's length from its head where the format puts it there (WAV, FLAC, MP3), else null. */
 export function audioDurationMsFromHead(head: Uint8Array, size: number, type: InboxAudioMediaType): number | null {
   if (type === "audio/wav") return wavDuration(head, size);
   if (type === "audio/flac") return flacDuration(head, 0) ?? flacDuration(head, id3Length(head));
@@ -290,14 +232,8 @@ export function audioDurationMsFromHead(head: Uint8Array, size: number, type: In
   return null;
 }
 
-/** How many bytes of an Ogg's end its length is read from: a page is at most 64 KiB plus its header. */
 export const OGG_TAIL_BYTES = 70 * 1024;
 
-/**
- * An Ogg recording's length: the last page's granule position (in `tail`, the
- * file's last bytes) over the stream's sample rate, less Opus's pre-skip.
- * Null for a codec without a known rate here, or a tail with no ended page.
- */
 export function oggDurationMs(head: Uint8Array, tail: Uint8Array): number | null {
   const codec = oggCodec(head);
   const packet = 27 + (head[26] ?? 0);
@@ -314,7 +250,6 @@ export function oggDurationMs(head: Uint8Array, tail: Uint8Array): number | null
     if (tail[at] !== 0x4f || ascii(tail, at, 4) !== "OggS") continue;
     const low = u32le(tail, at + 6);
     const high = u32le(tail, at + 10);
-    // -1: no packet ends on this page.
     if (low === 0xffffffff && high === 0xffffffff) continue;
     const granule = high * 2 ** 32 + low;
     return ms((granule - skip) / rate);

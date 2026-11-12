@@ -1,12 +1,3 @@
-/**
- * The window shows the person their own sent reply in their words
- * (`splitInboxReplyBody`, core), while the stored body and what agents get
- * stay as the store wrote them. Proved on replies a real store writes, so a
- * change to `composeInboxReplyBody` that the splitter no longer reads fails
- * here: the first line, the still-open line and the answers section (one
- * message, several messages) come out, the feedback stays after, and the
- * words agree with what the folded line and search read.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,7 +37,6 @@ test("words, answers on one message and feedback: the words alone, the rest afte
     questions: [{ key: ship!.key, revision: 0, answer: pick(ship!) }],
     feedback: "# Feedback on the attached files\n\n## notes.md\n\n> Say which plan.",
   }).reply;
-  // What the agent gets is unchanged: the first line, the still-open line and the answers section.
   expect(reply.body.startsWith("Answered 1 question.\n\n")).toBe(true);
   expect(reply.body).toContain(`## ${QUESTION_ANSWERS_HEADING}`);
   expect(reply.body).toContain("You have 1 other question open in this thread.");
@@ -126,6 +116,5 @@ test("text the store did not shape stays as it is", () => {
     rest: "",
     changed: false,
   });
-  // A first line alone is the store's only when a blank line (or the end) follows it.
   expect(splitInboxReplyBody("Answered 2 questions.\nand then some").changed).toBe(false);
 });

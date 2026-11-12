@@ -1,11 +1,3 @@
-/**
- * The Inbox search text rules the server's index and the window share:
- * tokens (ASCII fast path equal to the segmenter's runs, CJK words without
- * spaces, Arabic as written), folding (case, accents, NFKC, invisible code
- * points), ranges that point into the original text, snippets cut on
- * graphemes with long runs shortened (never CJK, Arabic or Hebrew), and the
- * file name's middle cut.
- */
 import { describe, expect, test } from 'bun:test';
 import fc from 'fast-check';
 import {
@@ -28,7 +20,6 @@ describe('tokens', () => {
   });
 
   test('the ASCII fast path gives the same tokens as the segmenter path', () => {
-    // A trailing non-ASCII word forces the segmenter path on the same text.
     fc.assert(
       fc.property(fc.stringMatching(/^[A-Za-z0-9 .,:;'_\-/()]{0,80}$/), (ascii) => {
         expect(tokens(`${ascii} é`).filter((t) => t !== 'é')).toEqual(tokens(ascii));
@@ -55,7 +46,6 @@ describe('tokens', () => {
     expect(foldInboxSearchText('ＡＵＴＨ')).toBe('auth');
     expect(foldInboxSearchText('re​sume')).toBe('resume');
     expect(foldInboxSearchText('Straße')).toBe('strasse');
-    // Japanese voicing marks are not accents: デ stays デ.
     expect(foldInboxSearchText('デプロイ')).toBe('デプロイ');
   });
 
@@ -103,7 +93,6 @@ describe('snippets', () => {
     const text = `${'👩🏽‍💻'.repeat(30)} the deploy order matters ${'é'.repeat(200)}`;
     const snippet = inboxSearchSnippet(text, inboxSearchRanges(text, ['deploy']));
     expect(marked(snippet)).toEqual(['deploy']);
-    // Every family emoji is whole: the snippet holds only whole ZWJ sequences.
     const emoji = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(snippet.text)].map((g) => g.segment).filter((g) => /\p{Extended_Pictographic}/u.test(g));
     for (const g of emoji) expect(g).toBe('👩🏽‍💻');
   });

@@ -328,21 +328,17 @@ describe("semantic diff runner", () => {
       message: "failed",
     };
 
-    // Within TTL: served from memo — repeated requests must not re-run sem.
     cache.setFailure("k", "patch-a", failure, 60_000);
     expect(cache.get("k", "patch-a")).toBe(failure);
 
-    // Expired TTL: gone — the next request may retry.
     cache.setFailure("k2", "patch-a", failure, -1);
     expect(cache.get("k2", "patch-a")).toBeUndefined();
 
-    // A success overwrites and outlives the failure memo.
     const ok = { status: "ok", changes: [], binaryChanges: [] } as unknown as SemanticDiffResponse;
     cache.setFailure("k3", "patch-a", failure, 60_000);
     cache.set("k3", "patch-a", ok);
     expect(cache.get("k3", "patch-a")).toBe(ok);
 
-    // Patch change clears failure memos too.
     cache.setFailure("k4", "patch-a", failure, 60_000);
     expect(cache.get("k4", "patch-b")).toBeUndefined();
   });

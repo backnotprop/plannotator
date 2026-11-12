@@ -1,37 +1,21 @@
-/**
- * Settings → Activity's read (`GET /api/inbox/activity`): each thread's messages
- * counted by hour over a span. Pure: the store hands it each thread's message
- * times, and nothing here writes or logs (thread names stay in the answer).
- */
 import type { InboxActivityModel, InboxActivityThread } from "@plannotator/core/inbox-types";
 
 export const INBOX_ACTIVITY_HOUR_MS = 3_600_000;
 
-/** One thread as the store sees it. */
 export interface InboxActivitySource {
   thread_id: string;
   project_id: string;
-  /** Read only for a thread that has a message in the span. */
   name: () => string | null;
-  /** Each message's time (ms), in the order they were written. */
   times: readonly number[];
 }
 
 export interface InboxActivitySpan {
   fromMs: number;
   toMs: number;
-  /** Null: every project. */
   projectId: string | null;
-  /** Whether a thread's project counts as the one asked for (combined projects are one). */
   inProject?: (projectId: string) => boolean;
 }
 
-/**
- * Count each thread's messages by hour over `[fromMs, toMs)`. An hour is
- * `floor((t - fromMs) / 1 h)`, so the caller's `fromMs` sets where hours begin.
- * Threads with no message in the span are left out; the rest keep the order
- * they began in (first message, then id).
- */
 export function inboxActivity(threads: Iterable<InboxActivitySource>, span: InboxActivitySpan): InboxActivityModel {
   const { fromMs, toMs, projectId } = span;
   const hourCount = Math.max(0, Math.ceil((toMs - fromMs) / INBOX_ACTIVITY_HOUR_MS));

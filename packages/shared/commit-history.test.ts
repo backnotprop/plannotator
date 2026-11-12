@@ -6,8 +6,6 @@ import { join, resolve as resolvePath } from "node:path";
 import { getCommitDiffInfo, listCommitHistory } from "./commit-history";
 import type { ReviewGitRuntime } from "./review-core";
 
-// Same minimal git harness as review-core.test.ts (per-file test harnesses
-// are this package's style — each suite stays runnable in isolation).
 const tempDirs: string[] = [];
 
 function makeTempDir(prefix: string): string {
@@ -89,7 +87,6 @@ describe("getCommitDiffInfo", () => {
     expect(info!.author).toBe("Review Core");
     expect(info!.authorEmail).toBe("review-core@example.com");
     expect(info!.committedAt).toBeGreaterThan(0);
-    // Non-hex or unresolvable shas fail closed.
     expect(await getCommitDiffInfo(runtime, "HEAD", repoDir)).toBeNull();
     expect(await getCommitDiffInfo(runtime, "deadbeefdeadbeef", repoDir)).toBeNull();
   });
@@ -97,7 +94,6 @@ describe("getCommitDiffInfo", () => {
 });
 
 describe("listCommitHistory", () => {
-  /** Commit an empty marker commit with a given subject and return its sha. */
   function commit(repoDir: string, subject: string): string {
     git(repoDir, ["commit", "--allow-empty", "-m", subject]);
     return git(repoDir, ["rev-parse", "HEAD"]);
@@ -127,13 +123,10 @@ describe("listCommitHistory", () => {
     expect(page!.commits[0].sha).toBe(branch2);
     expect(page!.commits[0].isHead).toBe(true);
     expect(page!.commits[1].isHead).toBe(false);
-    // Divider: branch-local commits above, base history below.
     expect(page!.commits.map((c) => c.isPastBase)).toEqual([false, false, true, true]);
-    // Author name + email ride along (email is the avatar resolver's key).
     expect(page!.commits[0].author).toBe("Someone Else");
     expect(page!.commits[1].author).toBe("Review Core");
     expect(page!.commits[0].authorEmail).toBe("review-core@example.com");
-    // Committer time is a locale-proof epoch (ms) the client formats itself.
     expect(page!.commits[0].committedAt).toBeGreaterThan(0);
     expect(page!.commits[0].committedAt).toBeLessThanOrEqual(Date.now() + 1000);
     expect(branch1).toBe(page!.commits[1].sha);
@@ -163,7 +156,6 @@ describe("listCommitHistory", () => {
     expect(last!.commits.map((c) => c.subject)).toEqual(["initial"]);
     expect(last!.hasMore).toBe(false);
 
-    // Paging past the root commit yields an empty terminal page, not an error.
     const past = await listCommitHistory(runtime, "main", repoDir, {
       limit: 2,
       before: last!.commits[0].sha,
@@ -177,11 +169,8 @@ describe("listCommitHistory", () => {
     for (let i = 2; i <= 4; i++) commit(repoDir, `commit ${i}`);
 
     const first = await listCommitHistory(runtime, "main", repoDir, { limit: 2 });
-    const cursor = first!.commits[1].sha; // commit 3
+    const cursor = first!.commits[1].sha;
 
-    // Rewrite history: drop commits 3-4, add different ones. The cursor still
-    // resolves in the object store but is no longer on the branch — paging
-    // from it must NOT walk the orphaned pre-rewrite chain.
     git(repoDir, ["reset", "--hard", "HEAD~2"]);
     commit(repoDir, "rewritten A");
     commit(repoDir, "rewritten B");

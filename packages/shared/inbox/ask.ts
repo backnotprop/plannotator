@@ -1,28 +1,3 @@
-/**
- * Plannotator Inbox: Ask AI's conversations, the questions a person asked
- * about a thread and what the agent that owns the thread answered.
- *
- *   inbox/ask/<thread id>.json   one per thread, 0600 in a 0700 folder, written whole (temp, then rename)
- *
- * Files, not the store's JSONL, as reply drafts are (reply-drafts.ts): a
- * conversation must never enter the event log, which the window's stream,
- * read_thread's cursor, the phone relay and search read. So agents, the
- * MCP, the list and search never see it, and End deletes it for good.
- *
- * This file is the only copy of the person's words, so only "no such file"
- * means "no conversation". A file that cannot be read now is left as it is and
- * refused. One that does not parse is set aside whole
- * (`<id>.json.<time>.bad`) by the next question, which is refused so the person
- * hears of it, and the question after that starts a new conversation. End and
- * thread delete remove everything of a conversation: the file, a file set
- * aside, and a temp file a crash left.
- *
- * A turn's id comes from the window, so a phone retrying a dropped POST finds
- * the turn it already wrote and cannot write a second one. `seen_at` only
- * moves forward and never past the newest answer: the dot on the round button
- * means an `answered_at` later than it.
- */
-
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
@@ -32,50 +7,26 @@ import { INBOX_DRAFT_BODY_MAX } from "./drafts";
 import { InboxError } from "./schema";
 
 export const INBOX_ASK_DIR = "ask";
-/** The most a question, or the passage it is about, may hold: what a reply draft may. */
 export const INBOX_ASK_TEXT_MAX = INBOX_DRAFT_BODY_MAX;
-/**
- * The most bytes a file may reach by adding a question: every write rewrites it
- * whole on the server's one thread. It has room for many of the largest turns.
- */
 export const INBOX_ASK_FILE_MAX = 32 * 1024 * 1024;
-/** Ends an answer cut to fit, in a turn or in the file. */
 export const INBOX_ASK_CUT_NOTE = "\n\n… (the rest of the answer was cut)";
-/** A turn id: what a window's id generator makes, and nothing a path could misread. */
 const TURN_ID = /^[A-Za-z0-9_-]{8,80}$/;
 
 export interface InboxAskTurn {
-  /** Made by the window: the POST's idempotency key. */
   id: string;
   at: string;
-  /** The agent session that owned the thread when the person asked. */
   session: string;
   host: string | null;
   question: string;
-  /** The text the person selected, when the question is about a passage. */
   passage?: string;
-  /**
-   * Where the words a Side quoted came from (packages/inbox/ask/sideSource.ts), one bracketed line per quote:
-   * the window sends it as the question's `contextPreamble` (useAIChat), which leads the message the agent gets.
-   * The transcript shows only `question`.
-   */
   source?: string;
   answer?: string;
   answered_at?: string;
-  /** The person stopped the answer. */
   stopped?: boolean;
-  /** Why `answer` is only part of one: the session went away, another message took the turn, or it failed. */
   failure?: "gone" | "taken_over" | "failed";
-  /**
-   * Show me (code review in the Inbox, while Code review is on): the question
-   * asks the agent for a Shape (`question` is `inboxShowMeRequest`'s words), about
-   * `show_me`'s review, file and lines. Absent: a plain Ask, words only.
-   */
   kind?: "show_me";
   show_me?: InboxShowMeTarget;
-  /** The board this Show me made. Never stored: the Inbox reads it from the boards when the window reads the conversation (`showMeShapes`). */
   shape?: string;
-  /** Show me again: the board it asks to bring up to date (its request says so). A retry sends it again. */
   again_shape?: string;
 }
 
@@ -106,11 +57,6 @@ function parse(text: string): InboxAskConversation | null {
   }
 }
 
-/**
- * One thread's conversation, or null only when it has no file. A file that
- * cannot be read, or does not parse, throws: taking it for "none" would let the
- * next write replace it.
- */
 export function readInboxAsk(inboxDirPath: string, threadId: string): InboxAskConversation | null {
   if (!isInboxId("msg", threadId)) return null;
   let text: string;
@@ -125,7 +71,6 @@ export function readInboxAsk(inboxDirPath: string, threadId: string): InboxAskCo
   return conversation;
 }
 
-/** The read before a question is added: a damaged file is set aside whole, and the person is told. */
 function readForAsk(inboxDirPath: string, threadId: string): InboxAskConversation | null {
   try {
     return readInboxAsk(inboxDirPath, threadId);
@@ -143,18 +88,16 @@ function writeWhole(inboxDirPath: string, threadId: string, text: string): void 
   const file = fileOf(inboxDirPath, threadId);
   const temp = `${file}.${process.pid}.tmp`;
   writeFileSync(temp, text, { mode: 0o600 });
-  chmodSync(temp, 0o600); // `mode` applies only on create: a left-over temp file keeps its old mode.
+  chmodSync(temp, 0o600);
   renameSync(temp, file);
 }
 
 const serialize = (conversation: InboxAskConversation): string => `${JSON.stringify(conversation)}\n`;
 
-/** Write one conversation whole (owner-only folder and file). */
 export function writeInboxAsk(inboxDirPath: string, conversation: InboxAskConversation): void {
   writeWhole(inboxDirPath, conversation.thread_id, serialize(conversation));
 }
 
-/** The folder's file names, none when there is no folder. */
 function namesIn(inboxDirPath: string): string[] {
   try {
     return readdirSync(dirOf(inboxDirPath));
@@ -163,10 +106,8 @@ function namesIn(inboxDirPath: string): string[] {
   }
 }
 
-/** The thread a file belongs to: `<id>.json`, a crash's `<id>.json.<pid>.tmp`, a set-aside `<id>.json.<time>.bad`. */
 const threadOfFile = (name: string): string => name.split(".", 1)[0]!;
 
-/** What the chat list needs of a conversation: the agent of its last turn, when anything last happened, a new answer. */
 export interface InboxAskSummary {
   host: string | null;
   at: string;
@@ -187,7 +128,6 @@ export function inboxAskSummary(conversation: InboxAskConversation | null): Inbo
   };
 }
 
-/** Each thread's conversation file with what says it changed, without reading it. */
 export function inboxAskFiles(inboxDirPath: string): { threadId: string; mtimeMs: number; size: number }[] {
   return namesIn(inboxDirPath).flatMap((name) => {
     const threadId = threadOfFile(name);
@@ -208,19 +148,16 @@ function removeFiles(inboxDirPath: string, names: string[]): boolean {
       unlinkSync(join(dirOf(inboxDirPath), name));
       removed = true;
     } catch {
-      // Already gone.
     }
   }
   return removed;
 }
 
-/** Remove everything of one conversation; true when there was anything. */
 export function removeInboxAsk(inboxDirPath: string, threadId: string): boolean {
   if (!isInboxId("msg", threadId)) return false;
   return removeFiles(inboxDirPath, namesIn(inboxDirPath).filter((name) => threadOfFile(name) === threadId));
 }
 
-/** Remove everything of each conversation whose thread is gone (after a deletion). */
 export function pruneInboxAsks(inboxDirPath: string, threadExists: (threadId: string) => boolean): void {
   removeFiles(
     inboxDirPath,
@@ -231,32 +168,12 @@ export function pruneInboxAsks(inboxDirPath: string, threadExists: (threadId: st
   );
 }
 
-/** One stored version of a board, as `showMeShapes` reads it. */
 export interface ShowMeBoardVersion {
   n: number;
   at: string;
   through: string | null;
 }
 
-/**
- * The board each Show me made, read from the boards themselves, so an agent
- * stores a board the one way it always does and nothing here can disagree with
- * the store. A turn looks at versions written between its asking and its end
- * (its answer, or the next Show me), so other work on the thread's boards is
- * never taken for it:
- *  - Show me again: only the board it asked to bring up to date.
- *  - A Show me: a new board through its review. Only when the turn has ended
- *    with none does it take another board moved through that review (the agent
- *    chose to update one), or a new one stored with no `--through`.
- *  - A Show me from a board with no review behind it (`review` null): the first
- *    new board of the thread written in the turn, whatever its `--through` (an
- *    agent following `shape --help` adds one); once ended with none, a board it
- *    moved with no `--through`.
- *  - No end kept and not the turn running now (`running`): nothing. A session
- *    that goes away with no words writes nothing at all, so the turn alone can't
- *    say it is over.
- * By turn id; a Show me with no board yet is absent.
- */
 export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { id: string; versions: readonly ShowMeBoardVersion[] }[], running: string | null): Map<string, string> {
   const out = new Map<string, string>();
   const asked = turns.filter((turn) => turn.kind === "show_me");
@@ -283,8 +200,7 @@ export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { 
       turn.again_shape !== undefined
         ? firstOf((board) => board === turn.again_shape)
         : review === null
-          ? // No review behind the board: the thread's first new board in the turn, whatever its `--through` (agents
-            // follow `shape --help` and add one); once ended with none, a board moved with no `--through`.
+          ?
             (firstOf((_, version) => version.n === 1) ?? (hasEnd && !cut ? firstOf((_, version) => version.through === null) : undefined))
           : (firstOf((_, version) => version.n === 1 && version.through === review) ??
             (hasEnd && !cut ? firstOf((_, version) => version.through === review || (version.n === 1 && version.through === null)) : undefined));
@@ -293,7 +209,6 @@ export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { 
   return out;
 }
 
-/** A Show me's input, as the window sends it: `{ kind: "show_me", show_me, again_shape? }`. */
 export interface InboxShowMeInput {
   target: InboxShowMeTarget;
   againShape?: string;
@@ -302,11 +217,6 @@ export interface InboxShowMeInput {
 const SHOW_ME_KEYS = ["review", "file", "lines", "round", "words", "part"];
 const SHOW_ME_PICTURE_RE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
 
-/**
- * The shape of a Show me's input (`kind`, `show_me`, `again_shape`); null
- * for a plain Ask. What it points at is checked by the route, which knows the
- * thread: here only that each field is the right kind of value.
- */
 export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown; again_shape?: unknown }): InboxShowMeInput | null {
   if (input.kind === undefined && input.show_me === undefined && input.again_shape === undefined) return null;
   const bad = (message: string, field: string) => new InboxError("validation_error", message, { field });
@@ -328,7 +238,6 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
   if (s.words !== undefined && (typeof s.words !== "string" || s.words.length > INBOX_ASK_TEXT_MAX)) throw bad(`show_me.words: at most ${INBOX_ASK_TEXT_MAX} characters.`, "show_me");
   const rawPart = s.part as Record<string, unknown> | undefined;
   if (rawPart !== undefined) {
-    // Counted in characters (code points), as the window cuts a part's name: an emoji is one, not two.
     const text = (value: unknown, max: number) => typeof value === "string" && value.trim() !== "" && Array.from(value).length <= max;
     if (!rawPart || typeof rawPart !== "object" || !isShapeId(rawPart.board) || !text(rawPart.name, 600) || (rawPart.code !== undefined && !text(rawPart.code, 1100)) || file !== null) {
       throw bad("show_me.part: { board, name, code? }, with file and lines null.", "show_me");
@@ -366,7 +275,6 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
   };
 }
 
-/** The checks on an ask's input, before anything is written. */
 export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknown; passage?: unknown; source?: unknown }): { id: string; question: string; passage?: string; source?: string } {
   const { turn_id: id, question, passage, source } = input;
   if (typeof id !== "string" || !TURN_ID.test(id)) {
@@ -384,14 +292,12 @@ export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknow
   return { id, question, ...(passage ? { passage } : {}), ...(source ? { source } : {}) };
 }
 
-/** The saved turn with this id, when there is one: what a retried POST answers. */
 export function findInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
   const conversation = readForAsk(inboxDirPath, threadId);
   const turn = conversation?.turns.find((candidate) => candidate.id === turnId);
   return conversation && turn ? { conversation, turn } : null;
 }
 
-/** Add a turn; a turn with that id already there is the one answered, and nothing is written. */
 export function addInboxAskTurn(inboxDirPath: string, threadId: string, turn: InboxAskTurn): { conversation: InboxAskConversation; turn: InboxAskTurn; added: boolean } {
   const conversation = readForAsk(inboxDirPath, threadId) ?? { v: 1 as const, thread_id: threadId, seen_at: null, turns: [] };
   const known = conversation.turns.find((candidate) => candidate.id === turn.id);
@@ -405,7 +311,6 @@ export function addInboxAskTurn(inboxDirPath: string, threadId: string, turn: In
 
 const jsonBytes = (text: string): number => Buffer.byteLength(JSON.stringify(text));
 
-/** The start of `answer` whose JSON is at most `room` bytes, and the note. */
 function cutToFit(answer: string, room: number): string {
   let fits = 0;
   let over = answer.length;
@@ -417,12 +322,6 @@ function cutToFit(answer: string, room: number): string {
   return `${answer.slice(0, fits)}${INBOX_ASK_CUT_NOTE}`;
 }
 
-/**
- * Change a saved turn, only if it is still there: an answer that ends after
- * End or a thread delete writes nothing, so the file cannot come back. An
- * answer takes only the room the file has left, and says so when that cuts it.
- * A file that cannot be read throws, as every read here does.
- */
 export function updateInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string, patch: Partial<Omit<InboxAskTurn, "id" | "question" | "passage" | "source">>): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
   const conversation = readInboxAsk(inboxDirPath, threadId);
   const turn = conversation?.turns.find((candidate) => candidate.id === turnId);
@@ -438,11 +337,6 @@ export function updateInboxAskTurn(inboxDirPath: string, threadId: string, turnI
   return { conversation, turn };
 }
 
-/**
- * The person saw the answers up to `seenAt`. The mark only moves forward and
- * stops at the newest answer, so a wrong time cannot hide a later answer's dot.
- * With no answer there is nothing to see, and nothing changes.
- */
 export function markInboxAskSeen(inboxDirPath: string, threadId: string, seenAt: string): { conversation: InboxAskConversation | null; changed: boolean } {
   const conversation = readInboxAsk(inboxDirPath, threadId);
   if (!conversation) return { conversation: null, changed: false };

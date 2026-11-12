@@ -1,9 +1,3 @@
-/**
- * The grill-me tip's need (grill-me-tip.ts `revealGrillMeGap`): someone who answered 3 question cards or more,
- * whatever the days or threads (the owner, 2026-11-08: "Sooner: after 3 answered questions, whatever the days,
- * once"), and never ran grill-me. What regresses: the tip for someone who answered fewer, whose skips were counted, or
- * who already runs grill-me; or held back for answers in one thread or on one day.
- */
 import { describe, expect, test } from "bun:test";
 import { revealGrillMeGap, type GrillMeTipQuestion, type GrillMeTipUse } from "./grill-me-tip";
 
@@ -22,7 +16,6 @@ const use = (questions: GrillMeTipQuestion[], over: Partial<GrillMeTipUse> = {})
   ...over,
 });
 
-/** Met: 3 answers. */
 const MET = [answered(), answered(), answered()];
 
 describe("the gap", () => {

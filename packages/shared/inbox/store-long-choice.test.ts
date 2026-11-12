@@ -1,10 +1,3 @@
-/**
- * A choice longer than 200 characters is picked as written (the owner's
- * 0.28.17 report: "<the first 200 characters> is not one of the question's
- * choices"). The answer's labels were cut to 200 on validation while the
- * question's own labels were not, so a long task-list choice could never be
- * picked. On a real store in a temp dir; a replay from disk agrees.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,14 +1,3 @@
-/**
- * Export decisions (design brief "export-decisions"): the v1 shape over a real store in a temp folder, and the two
- * documents read back by structure (Markdown through `marked`'s lexer, HTML through Bun's HTMLRewriter), never by
- * wording.
- *
- * What regresses: a question card missing, or in the wrong group for its state; the counts drifting from Decision data's
- * on the same store; an unsent pick passing for a sent one; a session id, a local path or a localhost/tailnet address
- * reaching any output; thread
- * text injecting HTML or Markdown structure; the HTML making a request or losing its embedded JSON or its dark look;
- * the v1 JSON's field names (the wire later sharing reads) changing.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,7 +43,6 @@ function world() {
   return { dir, store, project, send, qs, pick, sendPicks, block, exported, key };
 }
 
-/** One thread holding every fate a question can have while its thread is open. */
 function everyFate() {
   const w = world();
   const root = w.send([w.block("Keep the losing version where?"), w.block("Which apps first?"), w.block("Old retry question?")].join("\n\n"));
@@ -88,7 +76,6 @@ describe("which question goes where", () => {
       [6, "Rename Sync?", "skipped"],
       [7, "Old retry question?", "replaced"],
     ]);
-    // The owner's choice: an unsent pick is shown, marked as a draft not sent; drafts come right after the decisions.
     expect(doc.others[0]!.answer).toMatchObject({ selected: ["A"], sent: false, note: "UNSENT-NOTE-do-not-export" });
     expect(doc.others[1]!.answer).toBeNull();
     expect(doc.others[3]!.replaced_by).toEqual({ id: expect.stringContaining("/q-"), prompt: "How should a failed upload retry?" });
@@ -98,7 +85,6 @@ describe("which question goes where", () => {
     expect(doc.decisions.map((d) => d.recommendation.taken)).toEqual([true, false, true]);
     expect(doc.decisions[0]!.choices.map((c) => c.chosen)).toEqual([true, false]);
 
-    // The same store through Decision data: its fates for this thread, and its page's counts.
     const input = w.store.decisionDataInput();
     const fates = input.questions
       .map((q) => decisionRowOf(q, input.byId, input.headOf, input.closedByArchive))
@@ -220,12 +206,10 @@ describe("the documents", () => {
     expect(table.rows.every((row) => row.length === 4)).toBe(true);
     const headings = tokens.filter((t): t is Tokens.Heading => t.type === "heading").map((t) => t.depth);
     expect(headings).toEqual([2, 3, 3, 3]);
-    // Our own tags only: the marker, <details>/<summary> and <sub>.
     const html = (list: Token[]): string[] => list.flatMap((t) => [...(t.type === "html" ? [t.raw.trim()] : []), ...("tokens" in t && t.tokens ? html(t.tokens) : [])]);
     for (const raw of html(tokens)) expect(raw).toMatch(/^(<!-- plannotator-decisions v1 thread=msg_\w+ -->|<\/?details>(<summary>Context<\/summary>)?|<\/?sub>|<\/?summary>)/);
     const rendered = marked.parse(md) as string;
     expect(rendered).not.toMatch(/<img|<script|<b>/i);
-    // The chosen choice is the checked box.
     const lists = tokens.filter((t): t is Tokens.List => t.type === "list" && t.items.some((i) => i.task));
     expect(lists[0]!.items.map((i) => i.checked)).toEqual([false, true]);
   });
@@ -275,12 +259,10 @@ describe("the documents", () => {
     expect(page.attrs).toContainEqual(["meta", "content", DECISION_EXPORT_HTML_CSP]);
     expect(DECISION_EXPORT_HTML_CSP).toContain("default-src 'none'");
     expect(DECISION_EXPORT_HTML_CSP).toContain("img-src data:");
-    // One script of our own, allowed by its hash; the hostile </script> never opened another.
     expect(page.scripts.length).toBe(1);
     expect(DECISION_EXPORT_HTML_CSP).toContain(`'sha256-${new Bun.CryptoHasher("sha256").update(page.scripts[0]!).digest("base64")}'`);
     const embedded = JSON.parse(page.jsonText) as DecisionExportV1;
     expect(embedded).toEqual({ ...doc, images: {} });
-    // HTMLRewriter hands text over as written: escaped.
     expect(page.text).toContain("&lt;img src=x onerror=alert(1)&gt;");
     expect(html).toContain("prefers-color-scheme:dark");
     expect(html).toContain("@media print");
@@ -298,7 +280,6 @@ describe("the documents", () => {
     doc.images[b!] = "https://evil.example/p.png";
     const page = await walk(renderDecisionExportHtml(doc));
     expect(page.attrs.filter(([, name]) => name === "src").map(([, , v]) => v)).toEqual(["data:image/png;base64,iVBORw0KGgo="]);
-    // The Markdown never embeds a picture.
     expect(renderDecisionExportMarkdown(doc)).not.toContain("](");
   });
 

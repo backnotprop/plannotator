@@ -1,27 +1,3 @@
-/**
- * Plannotator Inbox: files the person uploads from the window for a thread
- * they start (compose, "send a new message to a connected agent") or a reply
- * (pasted into the reply box).
- *
- *   inbox/uploads/pending/<upl_id>.json   an upload not sent yet; a draft may name it
- *   inbox/uploads/<att_id>/<name>         a sent upload: a read-only copy of its blob
- *   inbox/blobs/<sha256>                  the bytes, in the store agents' files use
- *
- * Agents attach paths; the person uploads bytes. Both end as the same
- * `InboxAttachment` record, so the window's tiles, viewers, download route and
- * the phone door carry an upload unchanged. At send each upload becomes a
- * real file with its real name (a copy of the blob, a clone where the
- * filesystem has them, never a hard link), so the agent can open it; it is
- * read-only, so it reads as the version sent.
- *
- * Rules: the name is a plain file name (no path separator, no control
- * character, at most 255 bytes) outside the dotenv family; the body is
- * streamed, never held whole, and at most INBOX_UPLOAD_MAX_BYTES (under the
- * Inbox's 128 MiB request bound: no chunked protocol, owner's "don't
- * overengineer"). The kind is decided by the same rules as an agent's file.
- * An upload no draft names is swept after INBOX_UPLOAD_KEEP_MS.
- */
-
 import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { randomBytes } from "node:crypto";
 import {
@@ -60,29 +36,16 @@ import { InboxError } from "./schema";
 
 export const INBOX_UPLOADS_DIR = "uploads";
 
-/** The name the window gives a long paste it attaches (packages/inbox/compose/pastedText.ts pastedTextName). */
 const PASTED_TEXT_NAME = /^pasted-text-[^/\\]+\.txt$/;
 
-/**
- * The lines an agent reads under a message's words for the files the person
- * attached, each with its path so the agent can open it: `Attached: name (path)`.
- * Empty when it carries none. The wake appends them; read_thread gives the attachment records.
- */
 export function inboxAttachedLines(message: { attachments?: readonly InboxAttachment[] | null }): string {
   return (message.attachments ?? []).map((attachment) => `Attached: ${attachment.name} (${attachment.path})`).join("\n");
 }
 
-/** The longest file name `inboxViewingLine` prints; a longer one is cut. */
 const VIEWING_NAME_MAX = 120;
-/** The longest time `inboxViewingLine` prints. */
 const VIEWING_TIME_MAX = 24;
-/** A time as the window words it (`whenTime`, always en-US): "8:47 PM", "Nov 5, 8:47 PM", "Nov 5, 2025, 8:47 PM". It is the one part of the line outside its quotes. */
 export const INBOX_VIEWING_TIME = /^(?:[A-Z][a-z]{2} \d{1,2}, (?:\d{4}, )?)?\d{1,2}:\d{2} [AP]M$/;
 
-/**
- * A file name or a time for `inboxViewingLine`: text anyone can write (an agent names its files, a page names its links)
- * going into an agent's prompt. One line, no controls or invisible format characters, no backtick to close the quote around it, a sane length.
- */
 export function inboxViewingText(text: string, max = VIEWING_NAME_MAX): string {
   const line = text
     .replace(/\p{Cf}/gu, "")
@@ -93,13 +56,8 @@ export function inboxViewingText(text: string, max = VIEWING_NAME_MAX): string {
   return cutText(line, max);
 }
 
-/**
- * The one line an agent reads for a reply sent from full screen's floating box: what was on screen. It explains itself
- * and is no more than that: never a pick, an annotation or an answer. Empty when the reply has none.
- */
 export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }): string {
   const viewing = message.viewing;
-  // A record of another shape (a newer Inbox wrote it) must not take the session's poll or read_thread down with it.
   if (!viewing || typeof viewing.name !== "string" || typeof viewing.message_id !== "string") return "";
   const name = inboxViewingText(viewing.name) || "a file";
   const page = typeof viewing.page === "string" ? inboxViewingText(viewing.page) : "";
@@ -109,12 +67,6 @@ export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }
   return `(They sent this while viewing ${what}.)`;
 }
 
-/**
- * The words an agent reads for a person's message: its body, then `inboxViewingLine`,
- * then `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
- * the Board request (`inboxBoardRequestBlock`), or on an Ask from Decision data its
- * instructions (`INBOX_DECISION_ASK_BLOCK`). The stored body never holds them.
- */
 export function inboxBodyForAgent(message: {
   body: string;
   thread_id?: string;
@@ -125,7 +77,6 @@ export function inboxBodyForAgent(message: {
   viewing?: InboxReplyViewing | null;
 }): string {
   const after = [inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
-  // A reply of pasted files alone may have no words.
   let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;
   if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
   if (message.decision_ask === true) words = `${words}\n\n${INBOX_DECISION_ASK_BLOCK}`;
@@ -133,14 +84,11 @@ export function inboxBodyForAgent(message: {
   return words;
 }
 const PENDING_DIR = "pending";
-/** Defined in core so the window can name it; re-exported for the servers. */
 export { INBOX_UPLOAD_MAX_BYTES };
-/** An upload no draft names is kept this long, then swept. */
 export const INBOX_UPLOAD_KEEP_MS = 24 * 60 * 60 * 1000;
 export const INBOX_UPLOAD_NAME_MAX_BYTES = 255;
 const ATTACHMENT_DIR_RE = /^att_[0-9A-HJKMNP-TV-Z]{26}$/;
 const UPLOAD_TEMP_RE = /^\.upload\..*\.tmp$/;
-/** How a thread's listing names a big changed file it did not read: `stat:<size>:<mtimeMs>` (`hash: "small"`). */
 const INBOX_STAT_HASH_RE = /^stat:\d+:\d+(\.\d+)?$/;
 
 function uploadsDir(inboxDirPath: string): string {
@@ -155,12 +103,10 @@ function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
 }
 
-/** Why a name cannot be uploaded, or null. */
 export function inboxUploadNameRefusal(name: unknown): string | null {
   if (typeof name !== "string" || name.trim() === "") return "A file needs a name.";
   if (name === "." || name === "..") return "Not a file name.";
   if (/[/\\]/.test(name)) return "A file name cannot hold a path separator.";
-  // The thread-name sets: C0 and C1 controls, line and paragraph separators, bidi controls.
   if (THREAD_NAME_CONTROL.test(name)) return "A file name cannot hold control characters or line breaks.";
   if (THREAD_NAME_BIDI.test(name)) return "A file name cannot hold bidirectional control characters.";
   if (Buffer.byteLength(name, "utf8") > INBOX_UPLOAD_NAME_MAX_BYTES) return `A file name is at most ${INBOX_UPLOAD_NAME_MAX_BYTES} bytes.`;
@@ -179,7 +125,6 @@ function parseUpload(text: string): InboxUpload | null {
   }
 }
 
-/** One upload not sent yet, by id. */
 export function readInboxUpload(inboxDirPath: string, id: unknown): InboxUpload | null {
   if (!isInboxId("upl", id)) return null;
   try {
@@ -189,13 +134,6 @@ export function readInboxUpload(inboxDirPath: string, id: unknown): InboxUpload 
   }
 }
 
-/**
- * The words of one pending long paste (a pasted-text-….txt upload the window
- * attached, approval "inbox-paste-attachment"), so Put back works after a
- * reload or in another window. Null when the id is not a pending pasted text
- * (sent, swept, never was, a text file the person dropped, or another kind of
- * file) or its bytes are gone.
- */
 export function readInboxUploadText(inboxDirPath: string, id: unknown): string | null {
   const upload = readInboxUpload(inboxDirPath, id);
   if (!upload || upload.kind !== "text" || !PASTED_TEXT_NAME.test(upload.name)) return null;
@@ -206,7 +144,6 @@ export function readInboxUploadText(inboxDirPath: string, id: unknown): string |
   }
 }
 
-/** Every upload not sent yet. */
 export function listInboxUploads(inboxDirPath: string): InboxUpload[] {
   let names: string[];
   try {
@@ -223,7 +160,6 @@ export function listInboxUploads(inboxDirPath: string): InboxUpload[] {
   return out;
 }
 
-/** The blobs the uploads not sent yet hold: the store's blob sweep keeps them. */
 export function pendingInboxUploadBlobs(inboxDirPath: string): Set<string> {
   return new Set(listInboxUploads(inboxDirPath).map((upload) => upload.sha256));
 }
@@ -242,18 +178,11 @@ function recordPendingUpload(inboxDirPath: string, upload: InboxUpload): void {
 
 const INBOX_FILE_NOT_ADDED = "The disk is full, so the file could not be added. Free some space and try again.";
 
-/** The error for a write the disk had no room for, or null for any other failure. Every path that writes says the same. */
 export function inboxDiskFullError(error: unknown, words = "The disk is full, so that could not be saved. Free some space and try again."): InboxError | null {
   const code = (error as NodeJS.ErrnoException | null)?.code;
   return code === "ENOSPC" || code === "EDQUOT" ? new InboxError("upload_no_space", words) : null;
 }
 
-/**
- * Take one file the person uploaded: the body streamed to a temp file in the
- * blob store (never held whole), refused past INBOX_UPLOAD_MAX_BYTES, then
- * hashed, renamed to `blobs/<sha256>` and recorded as pending. Nothing is
- * kept when anything fails, the request is aborted included.
- */
 export async function receiveInboxUpload(
   inboxDirPath: string,
   name: unknown,
@@ -309,7 +238,6 @@ export async function receiveInboxUpload(
     try {
       unlinkSync(temp);
     } catch {
-      // Renamed, or never written.
     }
     if (error instanceof InboxError) throw error;
     throw inboxDiskFullError(error, INBOX_FILE_NOT_ADDED) ?? new InboxError("upload_refused", "The file could not be received; try again.", { field: "body" });
@@ -329,24 +257,6 @@ function streamOfFile(handle: FileHandle): ReadableStream<Uint8Array> {
   });
 }
 
-/**
- * A file already in the Inbox, for the message being written (the attachment's
- * reuse button): a pending upload naming the blob the file already has, so no
- * bytes are written. From here it lives as any upload does: a draft keeps it,
- * the sweep ages it, and Send gives it its own record and read-only file. It
- * keeps no thread, message or path of where it came from, so deleting the
- * original touches nothing here.
- *
- * `current` of an agent's file that changed since it was sent has no blob yet:
- * its bytes come in once, through the same door as an upload, and a second add
- * finds the blob. The version is fixed now: the agent changing the file later
- * moves nothing.
- *
- * `sha256` is the version the page showed. A tab that read the thread before the
- * agent changed the file gets what it showed, or a refusal if those bytes have
- * gone, never newer bytes under the same tile. A big changed file is listed by
- * its stat rather than a hash, so only a real hash is held to this.
- */
 export async function inboxUploadFromAttachment(
   inboxDirPath: string,
   attachment: InboxAttachment,
@@ -388,16 +298,6 @@ export async function inboxUploadFromAttachment(
   return upload;
 }
 
-/**
- * The uploads a message carries, as attachment records: each blob copied to
- * `uploads/<att_id>/<name>` (a clone where the filesystem has them, so it
- * costs no space; read-only outside Windows), its realpath the record's path,
- * so the agent opens a real file with its real name. A copy, never a hard
- * link: an agent that writes to its file must not change the stored blob the
- * window shows as the version sent. Every id is checked before anything is
- * written. `removeInboxAttachmentFiles` takes them back when the message is
- * not written after all.
- */
 export async function inboxUploadAttachments(inboxDirPath: string, ids: readonly unknown[], at: string): Promise<InboxAttachment[]> {
   const uploads = ids.map((id, index) => {
     const upload = readInboxUpload(inboxDirPath, id);
@@ -416,20 +316,12 @@ export async function inboxUploadAttachments(inboxDirPath: string, ids: readonly
       const dir = join(uploadsDir(inboxDirPath), id);
       const target = join(dir, upload.name);
       const blob = inboxBlobPath(inboxDirPath, upload.sha256);
-      // A clone where the disk has them, else a full copy. Never a hard link: the read-only mode stops no agent that
-      // chmods the file and writes it in place, and with a link that write would change the blob and every other
-      // message's copy of these bytes, in any project (uploads-reuse.test.ts).
-      // Not the sync call: where a disk has no clones, a big file would stop the whole Inbox while it copies.
-      // Under a temp name the upload sweep knows, so a crash mid-copy leaves nothing in uploads/, which no sweep reads.
       temp = join(blobsDir, `.upload.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`);
       await copyFile(blob, temp, constants.COPYFILE_FICLONE);
-      // Read-only, so the file reads as the version sent. Not on Windows,
-      // where a read-only file cannot be deleted by the sweep.
       if (process.platform !== "win32") {
         try {
           chmodSync(temp, 0o400);
         } catch {
-          // Best effort (a filesystem without modes).
         }
       }
       ensureDir(dir);
@@ -461,10 +353,6 @@ export async function inboxUploadAttachments(inboxDirPath: string, ids: readonly
   }
 }
 
-/**
- * Whether these uploads are still pending after their files were copied. A Send that took them while this one
- * copied has them, so this one refuses, as it would have had the copy not left the event loop.
- */
 export function assertInboxUploadsPending(inboxDirPath: string, ids: readonly unknown[], attachments: readonly InboxAttachment[]): void {
   const gone = ids.findIndex((id) => !readInboxUpload(inboxDirPath, id));
   if (gone < 0) return;
@@ -472,7 +360,6 @@ export function assertInboxUploadsPending(inboxDirPath: string, ids: readonly un
   throw new InboxError("upload_not_found", `uploads[${gone}]: that file was just sent; attach it again.`, { field: `uploads[${gone}]` });
 }
 
-/** Remove the files `inboxUploadAttachments` wrote, for a message that was not written (a replay, a refusal). */
 export function removeInboxAttachmentFiles(inboxDirPath: string, attachments: readonly InboxAttachment[]): void {
   for (const attachment of attachments) {
     if (!ATTACHMENT_DIR_RE.test(attachment.id)) continue;
@@ -480,22 +367,16 @@ export function removeInboxAttachmentFiles(inboxDirPath: string, attachments: re
   }
 }
 
-/** Forget pending uploads (sent, or swept); their blobs go with the store's next blob sweep. */
 export function removeInboxUploads(inboxDirPath: string, ids: readonly string[]): void {
   for (const id of ids) {
     if (!isInboxId("upl", id)) continue;
     try {
       unlinkSync(join(pendingDir(inboxDirPath), `${id}.json`));
     } catch {
-      // Already gone.
     }
   }
 }
 
-/**
- * Remove a sent upload's file once no message carries its attachment (a
- * deleted thread or project). Called by the store after a deletion.
- */
 export function removeUnusedInboxUploadFiles(inboxDirPath: string, attachmentIds: ReadonlySet<string>): void {
   let names: string[];
   try {
@@ -509,12 +390,6 @@ export function removeUnusedInboxUploadFiles(inboxDirPath: string, attachmentIds
   }
 }
 
-/**
- * The periodic sweep: pending uploads older than INBOX_UPLOAD_KEEP_MS that no
- * draft names are forgotten, and the blobs only they held are removed (never
- * a blob a message or another upload uses). Temp files a crash left go too.
- * Returns the ids it forgot.
- */
 export function sweepInboxUploads(
   inboxDirPath: string,
   options: { keep: ReadonlySet<string>; usedBlobs: ReadonlySet<string>; now?: number },
@@ -530,7 +405,6 @@ export function sweepInboxUploads(
     try {
       unlinkSync(inboxBlobPath(inboxDirPath, upload.sha256));
     } catch {
-      // Already gone.
     }
   }
   const blobs = inboxBlobsDir(inboxDirPath);
@@ -541,11 +415,9 @@ export function sweepInboxUploads(
       try {
         if (now - statSync(path).mtimeMs > 10 * 60_000) unlinkSync(path);
       } catch {
-        // Gone already.
       }
     }
   } catch {
-    // No blobs yet.
   }
   return [...staleIds];
 }

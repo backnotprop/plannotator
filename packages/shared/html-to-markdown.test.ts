@@ -51,7 +51,6 @@ describe("htmlToMarkdown", () => {
 
   test("preserves dangerous link hrefs (sanitization is in the renderer, not here)", () => {
     const md = htmlToMarkdown('<a href="javascript:alert(1)">XSS</a>');
-    // Turndown preserves the link — the UI renderer blocks it
     expect(md).toContain("javascript:");
   });
 

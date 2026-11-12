@@ -65,7 +65,6 @@ function statusJson(extraTopBranch = false): string {
       ],
     }],
     mergeBase: { commitId: MERGE_BASE },
-    // Additive current/nightly fields must not break the parser.
     conflictedFiles: [],
   });
 }
@@ -218,9 +217,6 @@ describe("GitButler status contract", () => {
 });
 
 describe("GitButler status JSON flag fallback", () => {
-  // 0.21.x accepts only `--format json` (gitbutlerapp/gitbutler#14061);
-  // 0.22.0+ accepts only `--json` (gitbutlerapp/gitbutler#15026). Each
-  // rejects the other spelling with clap's unexpected-argument error.
   const formatRejected = commandResult(
     "",
     "error: unexpected argument '--format' found\n\nUsage: but [OPTIONS] [COMMAND]\n\nFor more information, try '--help'.\n",
@@ -259,8 +255,6 @@ describe("GitButler status JSON flag fallback", () => {
       ["--json", "status"],
     ]);
 
-    // The accepted spelling is remembered, so the next status call after the
-    // cache TTL does not pay the failed `--format` probe again.
     await Bun.sleep(1_050);
     await getGitButlerContext(fixture.runtime, ROOT);
     expect(fixture.butCalls.filter((args) => args.includes("status"))).toEqual([
@@ -277,8 +271,6 @@ describe("GitButler status JSON flag fallback", () => {
     await expect(getGitButlerContext(failed.runtime, ROOT)).rejects.toThrow(
       "GitButler status (`but --format json status`) failed: database locked",
     );
-    // The fixture's runBut throws for any unexpected invocation, so reaching
-    // this assertion also proves `--json status` was never attempted.
     expect(failed.butCalls.filter((args) => args.includes("status"))).toEqual([
       ["--format", "json", "status"],
     ]);
@@ -394,8 +386,6 @@ describe("GitButler detection and context", () => {
     expect(getGitButlerContextRevision(await getGitButlerContext(rewritten.runtime, ROOT)))
       .not.toBe(getGitButlerContextRevision(context));
     await runGitButlerDiff(fixture.runtime, GITBUTLER_WORKSPACE_DIFF, ROOT);
-    // Context, initial patch, immediate fingerprint/file requests share one
-    // validated status snapshot instead of spawning `but status` per request.
     expect(fixture.butCalls.filter((args) => args.includes("status"))).toHaveLength(1);
   });
 

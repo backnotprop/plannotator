@@ -1,12 +1,3 @@
-/**
- * `stopInbox` (packages/shared/inbox/registry.ts) against stand-ins this test
- * spawns itself: an Inbox-shaped process that serves the health route and
- * ignores its stop route and SIGTERM, and processes that only hold the pid a
- * record names. Each stand-in is this test's own child in a scratch folder,
- * never an Inbox anyone runs. What is guarded: a stop escalates only on a pid
- * proven to be the record's Inbox, before every signal; anything else is
- * never signalled.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,12 +20,6 @@ function scratch(): string {
   return root;
 }
 
-/**
- * A stand-in run as `bun <root>/fake/index.ts inbox --no-open` (an Inbox's
- * command line). With `serve`, it answers the health route with `session`
- * and its own pid, takes its stop route without stopping (or with `refuse`
- * refuses it as another data dir's Inbox, 409 not_ours), and ignores SIGTERM.
- */
 const STAND_IN = `
 const session = process.env.FAKE_SESSION;
 if (process.env.FAKE_IGNORE_TERM === "1") process.on("SIGTERM", () => {});
@@ -78,7 +63,6 @@ async function standIn(root: string, options: { serve?: boolean; ignoreTerm?: bo
   });
   children.push(proc);
   if (!options.serve) {
-    // Let it get past its start, so `ps` reads its command line and its start time.
     await Bun.sleep(300);
     return { pid: proc.pid, port: null };
   }
@@ -115,7 +99,6 @@ describe("stopInbox escalates only on a proven Inbox", () => {
     const dataDir = join(root, "data");
     record(dataDir, { pid: fake.pid, port: fake.port!, serverSession: session });
 
-    // uninstall --purge (no escalate): SIGTERM only, so it survives and is reported.
     const careful = await stopInbox(dataDir, { timeoutMs: 400 });
     expect(careful).toEqual({ state: "still_running", pid: fake.pid, reason: "survived" });
     expect(isPidAlive(fake.pid)).toBe(true);
@@ -128,7 +111,6 @@ describe("stopInbox escalates only on a proven Inbox", () => {
   test("an Inbox that refuses the stop as another data dir's (a copied record) is never signalled", async () => {
     const root = scratch();
     const session = "c".repeat(32);
-    // It would die of SIGTERM: only the refusal keeps it running.
     const original = await standIn(root, { serve: true, refuse: true, session });
     const dataDir = join(root, "data");
     record(dataDir, { pid: original.pid, port: original.port!, serverSession: session });
@@ -142,7 +124,6 @@ describe("stopInbox escalates only on a proven Inbox", () => {
   test("a port answering with the record's serverSession under another pid: the record's pid is never signalled", async () => {
     const root = scratch();
     const session = "b".repeat(32);
-    // Something answers the health route as the record's Inbox, but with its own pid; the record names another process.
     const answering = await standIn(join(root, "a"), { serve: true, session });
     const other = Bun.spawn(["sleep", "60"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
     children.push(other);
@@ -156,20 +137,17 @@ describe("stopInbox escalates only on a proven Inbox", () => {
 
   test.skipIf(process.platform === "win32")("by its process: an Inbox command line is signalled only when it started before the record was written", async () => {
     const root = scratch();
-    // Started after the record: a pid reused by something that merely looks like an Inbox. Left alone.
     const reused = await standIn(join(root, "reused"));
     const reusedDir = join(root, "reused-data");
     record(reusedDir, { pid: reused.pid, port: deadPort(), startedAt: new Date(Date.now() - 3_600_000).toISOString() });
     expect(await stopInbox(reusedDir, { timeoutMs: 300, escalate: true })).toEqual({ state: "not_running", stale: { pid: reused.pid, reason: "no_answer" } });
     expect(isPidAlive(reused.pid)).toBe(true);
 
-    // Started before the record, its listener gone (hung on the way out): this Inbox. SIGTERM ends it.
     const hung = await standIn(join(root, "hung"));
     const hungDir = join(root, "hung-data");
     record(hungDir, { pid: hung.pid, port: deadPort(), startedAt: new Date().toISOString() });
     expect(await stopInbox(hungDir, { timeoutMs: 300, escalate: true })).toMatchObject({ state: "stopped", pid: hung.pid, by: "SIGTERM" });
     expect(isPidAlive(hung.pid)).toBe(false);
-    // uninstall's stop never proves by process: the same case is left as "not ours".
     const again = await standIn(join(root, "again"));
     const againDir = join(root, "again-data");
     record(againDir, { pid: again.pid, port: deadPort(), startedAt: new Date().toISOString() });

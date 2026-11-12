@@ -1,14 +1,6 @@
-/**
- * URL-to-Markdown conversion.
- *
- * Fetches a URL via Jina Reader (default) or plain fetch + Turndown,
- * returning clean markdown for the annotation pipeline.
- */
-
 import { htmlToMarkdown } from "./html-to-markdown";
 
 export interface UrlToMarkdownOptions {
-  /** Whether to use Jina Reader (true) or plain fetch+Turndown (false). */
   useJina: boolean;
 }
 
@@ -17,34 +9,13 @@ export interface UrlToMarkdownResult {
   source: "jina" | "fetch+turndown" | "fetch-raw" | "content-negotiation";
 }
 
-/** True when the source indicates the markdown was converted from HTML,
- *  not returned as-is from the origin. */
 export const isConvertedSource = (source: UrlToMarkdownResult["source"]): boolean =>
   source === "jina" || source === "fetch+turndown";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
-/**
- * Skip Jina for local/private URLs — fetch them directly instead.
- *
- * IMPORTANT — IPv6 hostname format (verified empirically in Bun 1.3.11, 1.3.14 and 1.4.4, and Node 22 and 24):
- * The WHATWG URL `hostname` getter returns IPv6 addresses WITH brackets.
- * This is why PRIVATE_IPV6 uses `^\[` — it matches the actual runtime output.
- *
- * Verified outputs (both Bun and Node return identical results):
- *   new URL("http://[::1]:3000/").hostname          → "[::1]"
- *   new URL("http://[fe80::1]/").hostname            → "[fe80::1]"
- *   new URL("http://[fc00::1]/").hostname            → "[fc00::1]"
- *   new URL("http://[fd12::1]/").hostname            → "[fd12::1]"
- *   new URL("http://[::ffff:192.168.0.1]/").hostname → "[::ffff:c0a8:1]"
- *   new URL("http://[::ffff:169.254.169.254]/").hostname → "[::ffff:a9fe:a9fe]"
- *
- * The unbracketed "::1" check (line below) covers the edge case defensively.
- */
 const PRIVATE_IPV4 = /^(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01])|169\.254)\.\d{1,3}\.\d{1,3}$/;
-// Bracketed IPv6 private/reserved prefixes (matches WHATWG URL hostname getter output).
-// fc00::/7 covers fc00:: through fdff::, so match [fc or [fd prefix.
 const PRIVATE_IPV6 = /^\[(::1|::ffff:|fe80:|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:)/i;
 function isLocalUrl(url: string): boolean {
   try {
@@ -60,8 +31,6 @@ function isLocalUrl(url: string): boolean {
     ) {
       return true;
     }
-    // IPv6 private ranges: link-local (fe80::), unique-local (fc00::/fd00::),
-    // and IPv4-mapped (::ffff:) which embeds private IPv4 in hex notation
     if (PRIVATE_IPV6.test(hostname)) return true;
     return false;
   } catch {
@@ -69,30 +38,18 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-/**
- * Fetch a URL and return its content as markdown.
- *
- * When `useJina` is true, attempts Jina Reader first (returns markdown
- * directly, handles JS-rendered pages). On failure, warns to stderr
- * and falls back to plain fetch + Turndown.
- */
 export async function urlToMarkdown(
   url: string,
   options: UrlToMarkdownOptions,
 ): Promise<UrlToMarkdownResult> {
-  // URLs pointing to markdown files — fetch raw if the server returns plain text.
-  // If the server returns HTML (e.g. GitHub's .md viewer), fall through to Jina/Turndown.
   const urlPath = url.split("?")[0].split("#")[0];
   if (/\.mdx?$/i.test(urlPath)) {
     const text = await fetchRawText(url);
     if (text !== null) {
       return { markdown: text, source: "fetch-raw" };
     }
-    // Server returned HTML for this .md URL — fall through to normal conversion
   }
 
-  // Content negotiation fast path — if the server natively returns markdown
-  // (e.g. Cloudflare's Markdown for Agents), skip Jina/Turndown entirely.
   const local = isLocalUrl(url);
   if (!local) {
     const negotiated = await fetchViaContentNegotiation(url);
@@ -116,7 +73,6 @@ export async function urlToMarkdown(
   return { markdown, source: "fetch+turndown" };
 }
 
-/** Read response body with a size limit. Throws if the body exceeds MAX_BODY_BYTES. */
 async function readBodyWithLimit(res: Response): Promise<string> {
   const contentLength = res.headers.get("content-length");
   if (contentLength) {
@@ -128,8 +84,6 @@ async function readBodyWithLimit(res: Response): Promise<string> {
   }
   const reader = res.body?.getReader();
   if (!reader) {
-    // Null body is rare (e.g. manually constructed Response). Still enforce
-    // the size limit via the text result length as a best-effort fallback.
     const text = await res.text();
     if (text.length > MAX_BODY_BYTES) {
       throw new Error(`Response too large (>${Math.round(MAX_BODY_BYTES / 1024 / 1024)}MB, max 10MB)`);
@@ -152,14 +106,6 @@ async function readBodyWithLimit(res: Response): Promise<string> {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
-/**
- * Fetch a URL as raw text — for .md/.mdx URLs that are already markdown.
- * Returns null if the server returns HTML (e.g. GitHub's viewer page for
- * a .md file), signaling the caller to fall through to Jina/Turndown.
- *
- * Uses redirect: "manual" with isLocalUrl validation on each hop —
- * same SSRF protection as fetchViaTurndown.
- */
 async function fetchRawText(url: string): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -187,8 +133,6 @@ async function fetchRawText(url: string): Promise<string | null> {
       res.body?.cancel();
       throw new Error(`HTTP ${res.status} ${res.statusText}`);
     }
-    // If server returns HTML (e.g. GitHub's .md viewer), signal caller to
-    // fall through to Jina/Turndown instead of using raw content
     const ct = res.headers.get("content-type") || "";
     if (ct.includes("text/html") || ct.includes("application/xhtml+xml")) {
       res.body?.cancel();
@@ -205,13 +149,7 @@ async function fetchRawText(url: string): Promise<string | null> {
   }
 }
 
-/**
- * Content negotiation fast path — request `text/markdown` via the Accept header.
- * Sites that support Cloudflare's "Markdown for Agents" (or similar) will return
- * markdown directly, letting us skip Jina and Turndown entirely.
- * Returns null if the server doesn't serve markdown.
- */
-const NEGOTIATION_TIMEOUT_MS = 5_000; // Short timeout — this is a best-effort optimization
+const NEGOTIATION_TIMEOUT_MS = 5_000;
 
 async function fetchViaContentNegotiation(url: string): Promise<string | null> {
   const controller = new AbortController();
@@ -256,9 +194,7 @@ async function fetchViaContentNegotiation(url: string): Promise<string | null> {
   }
 }
 
-/** Fetch via Jina Reader — returns markdown directly. */
 async function fetchViaJina(url: string): Promise<string> {
-  // Strip fragment (never sent to server) and encode for Jina's path-based API
   const cleanUrl = url.split("#")[0];
   const jinaUrl = `https://r.jina.ai/${cleanUrl}`;
   const headers: Record<string, string> = {
@@ -293,7 +229,6 @@ async function fetchViaJina(url: string): Promise<string> {
 const MAX_REDIRECTS = 10;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-/** Fetch raw HTML and convert via Turndown. Follows redirects manually to validate each hop. */
 async function fetchViaTurndown(url: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);

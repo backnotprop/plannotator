@@ -1,14 +1,3 @@
-/**
- * In-app CallDiff runtime install coordination.
- *
- * The runtime is strictly opt-in and is not installed by default. Enabling
- * Call flow is the consent that lets a review session install it on demand
- * through POST /api/call-flow/install. This coordinator single-flights
- * concurrent POSTs (a newly required pack, explicit retry, or second tab in
- * this server), which join the active install and never start a second
- * download. The data-dir lease in call-flow-install-lock.ts separately
- * serializes verified publication across server processes.
- */
 import { isSameOriginOrNoOrigin } from "./request-origin";
 import { installCallFlowLanguagePack, installCallFlowRuntime, preflightCallFlowNode } from "./call-flow";
 import type { CallFlowNodePreflight, CallFlowRuntimeInstallResult } from "./call-flow";
@@ -17,11 +6,9 @@ import type { CallFlowInstallStage, CallFlowInstallStatus } from "./call-flow-ty
 
 export type { CallFlowInstallStatus };
 
-/** Injectable boundaries used by tests; production callers omit them. */
 export interface CallFlowInstallCoordinatorOptions {
   readonly install?: (id: CallFlowLanguageId, onStage: (stage: CallFlowInstallStage) => void) => Promise<CallFlowRuntimeInstallResult>;
   readonly preflight?: () => Promise<CallFlowNodePreflight>;
-  /** Fires once per settled install attempt; ok is true only on success. */
   readonly onSettled?: (ok: boolean) => void;
 }
 
@@ -42,24 +29,12 @@ export class CallFlowInstallCoordinator {
     this.onSettled = options.onSettled;
   }
 
-  /**
-   * Current install status. done preserves the completed target set; error
-   * persists until the next start() retries.
-   */
   getStatus(): CallFlowInstallStatus {
     return this.status;
   }
 
-  /**
-   * Start the runtime install in the background, or join the one already
-   * running. Resolves as soon as the install is running (or has failed its
-   * preflight), never when the download completes.
-   */
   start(languageIds: readonly CallFlowLanguageId[]): Promise<CallFlowInstallStatus> {
     for (const id of languageIds) {
-      // requested spans the whole active flight, including the target now
-      // installing and targets already completed. Repeated POSTs must not
-      // requeue either one after runInstall has removed it from pending.
       if (!this.requested.has(id)) this.pending.add(id);
       this.requested.add(id);
     }
@@ -74,8 +49,6 @@ export class CallFlowInstallCoordinator {
       if (!node.ok) {
         this.status = { state: "error", error: node.message, reason: node.reason, languageIds: [...this.requested] };
         this.startGate = null;
-        // The failed attempt belongs to the review that requested it. A later
-        // retry may come from a different view with a different language set.
         this.pending.clear();
         this.requested.clear();
         this.onSettled?.(false);
@@ -126,13 +99,6 @@ export class CallFlowInstallCoordinator {
   }
 }
 
-/**
- * Cheap cross-origin guard for the install endpoint. Starting the install
- * triggers a native download and build, so a drive-by cross-origin POST must
- * not be able to start it: when an Origin header is present it must match
- * the request host. Same-origin requests and non-browser clients (no Origin
- * header) pass.
- */
 export function callFlowInstallOriginAllowed(
   originHeader: string | null | undefined,
   requestHost: string,

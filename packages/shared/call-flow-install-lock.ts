@@ -1,11 +1,3 @@
-/**
- * Cross-process serialization for the managed Call flow runtime store.
- *
- * Review servers are independent processes but publish into one data-dir
- * runtime. The in-process coordinator cannot prevent their verified candidates
- * from swapping over each other, so every core/pack install holds this lease
- * through validation and atomic publication.
- */
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -24,7 +16,6 @@ const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_POLL_INTERVAL_MS = 250;
 
 export interface CallFlowInstallLockOptions {
-  /** Test seam; production always uses the shared Plannotator data dir. */
   readonly lockPath?: string;
   readonly staleAfterMs?: number;
   readonly waitTimeoutMs?: number;
@@ -44,11 +35,9 @@ function removeOwnedLock(lockPath: string, token: string): void {
   try {
     if (readFileSync(lockPath, "utf8") === token) rmSync(lockPath, { force: true });
   } catch {
-    // A crashed or stale-recovery peer may already have removed the lease.
   }
 }
 
-/** Run one install while holding the shared, stale-tolerant runtime lease. */
 export async function withCallFlowInstallLock<T>(
   work: () => Promise<T>,
   options: CallFlowInstallLockOptions = {},

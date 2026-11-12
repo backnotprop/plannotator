@@ -210,7 +210,6 @@ describe("createVcsApi", () => {
     await expect(git.canStageFiles("staged", "/repo")).resolves.toBe(false);
     await expect(git.canStageFiles("branch", "/repo")).resolves.toBe(false);
     await expect(git.canStageFiles("merge-base", "/repo")).resolves.toBe(false);
-    // Historical commit diffs have nothing stageable — plain and worktree forms.
     await expect(git.canStageFiles("commit:abc1234", "/repo")).resolves.toBe(false);
     await expect(git.canStageFiles("worktree:/repo:commit:abc1234", "/repo")).resolves.toBe(false);
   });
@@ -266,8 +265,6 @@ describe("createVcsApi", () => {
   });
 
   test("a saved Evolution diff default opens against the change's previous state, not the line base", async () => {
-    // Failure caught: opening on jj-evolog with the line base, which diffs
-    // the whole line of work under an "Evolution diff from trunk()" label.
     const jj = provider("jj", true, ["jj-current", "jj-evolog"], {
       defaultBranch: "trunk()",
       diffOptions: [
@@ -520,7 +517,6 @@ describe("resolveInitialDiffType", () => {
     });
 
     expect(resolveInitialDiffType(jjContext, "jj-line")).toBe("jj-line");
-    // Evolution diff is only offered with evolog history.
     expect(resolveInitialDiffType(jjContext, "jj-evolog")).toBe("jj-current");
   });
 

@@ -1,15 +1,3 @@
-/**
- * Performance budgets for the Inbox store: how the work grows with the data, not how fast this machine is.
- *
- * A store of N messages and one of 4N are seeded in temp data dirs; each operation the window and the agents
- * lean on is timed (median of several runs) at both sizes. Linear work grows about 4×; the budget fails at
- * 10×, which a new quadratic scan (16×) crosses and timing noise does not. The one thread read is timed on
- * a thread of the same size in both stores, so it should not grow at all; its budget is 3×.
- *
- * Off by default (timing tests are noisy on a busy laptop), and then nothing is seeded: the seeding runs in the
- * describe's beforeAll, which a skipped describe never calls. Run it by hand: `PLANNOTATOR_PERF_BUDGET=1 bun test
- * packages/shared/inbox/store-perf-budget.test.ts`. No CI job runs it.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +14,6 @@ afterAll(() => {
 
 const BODY = ["## Status", "", "The list now reads its rows once per request.", "", "```ts", "const rows = store.listRows();", "```", "", "- one", "- two"].join("\n");
 
-/** A store with `messages` messages: threads of 8 (agent, person, agent, ...), and one 400-message thread. */
 function seed(messages: number): { dir: string; big: string } {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-perf-budget-"));
   roots.push(dir);
@@ -57,7 +44,7 @@ function seed(messages: number): { dir: string; big: string } {
 
 function median(run: () => unknown, times = 7): number {
   const xs: number[] = [];
-  run(); // warm
+  run();
   for (let i = 0; i < times; i++) {
     const t = performance.now();
     run();
@@ -66,7 +53,6 @@ function median(run: () => unknown, times = 7): number {
   return xs.sort((a, b) => a - b)[Math.floor(times / 2)]!;
 }
 
-/** One thread read is well under a millisecond: timed over a batch, so the median sits above timer noise and a GC pause. */
 const THREAD_READS = 50;
 
 function measure(dir: string, big: string) {
@@ -91,7 +77,6 @@ describe.skipIf(!ON)("Inbox store: work grows no faster than the data", () => {
     const large = seed(4 * N);
     a = measure(small.dir, small.big);
     b = measure(large.dir, large.big);
-    // The numbers, for the run's log.
     console.log(JSON.stringify({ n: N, small: a, large: b }, null, 1));
   });
   const ratio = (k: keyof Times) => b[k] / Math.max(a[k], 0.05);

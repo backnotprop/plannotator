@@ -1,25 +1,3 @@
-/**
- * Live app proxy contract — Node transport.
- *
- * The same transport-level contract packages/server/live-proxy.test.ts pins
- * for the Bun transport, run against the node:http implementation the Pi
- * extension ships: bridge injection (placement, exactly one, cross-chunk),
- * header hygiene (Host rewrite, Accept-Encoding on document intent only, CSP
- * replacement, frame-ancestors), passthrough fidelity (assets, encoded HTML,
- * SSE, WebSocket upgrade piping), and the security posture (loopback bind,
- * Host-before-parse incl. the Host-less HTTP/1.0 case, WS origin gate,
- * bridge Sec-Fetch-Site gate, reserved namespace). Pure-decision coverage
- * (injector state machine, predicates) lives once in the shared core and is
- * exercised by the Bun suite's unit-helper block; this file guards what the
- * TRANSPORT can regress.
- *
- * The proxy under test runs in a REAL `node` child process
- * (live-proxy-node.child.ts, built with Bun.build): that is the transport's
- * production runtime under Pi, and Bun's node:http shim drops writes made to
- * an 'upgrade' event's socket, which would fail the WS tests against code
- * that works in production.
- */
-
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { connect } from "node:net";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -50,8 +28,6 @@ function proxyUrl(path: string): string {
   return proxy.origin + path;
 }
 
-/** Build the child entry for real node and spawn it; resolves the proxy port
- * from the child's one-line JSON banner. */
 async function spawnNodeProxyChild(targetUrl: string): Promise<{ port: number; origin: string }> {
   const build = await Bun.build({
     entrypoints: [join(import.meta.dir, "live-proxy-node.child.ts")],
@@ -117,7 +93,6 @@ beforeAll(async () => {
             headers: { "Content-Type": "text/html" },
           });
         case "/chunked-head-open": {
-          // Splits the stream inside the <head ...> open tag.
           const parts = ["<html><hea", "d data-x=\"1\"><title>c</title></head><body>ok</body></html>"];
           const stream = new ReadableStream<Uint8Array>({
             async start(controller) {
@@ -135,7 +110,6 @@ beforeAll(async () => {
             headers: { "Content-Type": "text/html" },
           });
         case "/uppercase-content-type":
-          // Media types are case-insensitive: this is HTML.
           return new Response(HTML_PAGE, {
             headers: { "Content-Type": "TEXT/HTML; charset=UTF-8", "X-Frame-Options": "DENY" },
           });
@@ -222,7 +196,6 @@ beforeAll(async () => {
     },
     websocket: {
       message(ws, raw) {
-        // Echo both text and binary frames.
         ws.send(typeof raw === "string" ? raw : raw);
       },
     },
@@ -243,7 +216,6 @@ describe("node live proxy: HTML injection", () => {
     expect(html).toContain(INJECT_TAG);
     expect(html.split(INJECT_TAG).length - 1).toBe(1);
     expect(html.indexOf(`<head>${INJECT_TAG}`)).toBeGreaterThanOrEqual(0);
-    // Original content is intact around the injection.
     expect(html.replace(INJECT_TAG, "")).toBe(HTML_PAGE);
   });
 
@@ -352,8 +324,6 @@ describe("node live proxy: passthrough fidelity", () => {
     const first = await reader.read();
     const firstLatency = Date.now() - started;
     expect(new TextDecoder().decode(first.value)).toContain("data: first");
-    // The upstream holds the second event for 150ms; getting the first one
-    // well under that proves streaming (no full-body buffering).
     expect(firstLatency).toBeLessThan(140);
     let rest = "";
     for (;;) {
@@ -449,8 +419,6 @@ describe("node live proxy: WebSocket passthrough", () => {
       ws.addEventListener("open", () => ws.send("origin-ok"));
     });
     expect(echoed).toBe("origin-ok");
-    // The upstream connect must be origin-less (the gated, non-browser shape
-    // the Bun transport's fresh WebSocket also produces).
     expect(recordedHeaders["ws-origin"]).toBeNull();
     const closed = new Promise<void>((resolve) => ws.addEventListener("close", () => resolve()));
     ws.close();
@@ -482,8 +450,6 @@ describe("node live proxy: security posture", () => {
 
   test("the proxy origin and bind are loopback, independent of PLANNOTATOR_REMOTE", () => {
     expect(proxy.origin).toBe(`http://127.0.0.1:${proxy.port}`);
-    // The bind is a source-level contract: the literal loopback constant,
-    // never getServerHostname() or any env-dependent interface.
     const source = readFileSync(join(import.meta.dir, "live-proxy-node.ts"), "utf-8");
     expect(source).toContain('const LOOPBACK_HOST = "127.0.0.1";');
     expect(source).toContain("server.listen(candidate, LOOPBACK_HOST");
@@ -507,8 +473,6 @@ describe("node live proxy: security posture", () => {
   });
 
   test("stop() releases the listener port", async () => {
-    // In-process (listener lifecycle only — no upgrade socket involved, so
-    // the Bun shim is faithful here): stop must close the listening socket.
     const local = await startLiveAppProxyNode({
       targetUrl: `http://127.0.0.1:${upstream.port}`,
       editorOrigins: EDITOR_ORIGINS,
@@ -540,8 +504,6 @@ describe("node live proxy: security posture", () => {
   });
 });
 
-/** Minimal raw HTTP/1.1 client: needed to send a forged Host header and to
- * observe exact relayed bytes without fetch's transparent decompression. */
 function rawHttpRequest(
   port: number,
   requestLines: string[],

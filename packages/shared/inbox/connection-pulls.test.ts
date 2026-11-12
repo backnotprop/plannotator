@@ -1,11 +1,3 @@
-/**
- * The line a wake carries when the person changed a thread's PRs (approval
- * "inbox-pr-binding", 2026-11-08). The failures this guards: the line lost
- * (the agent keeps working on a PR the person took off), placed after the
- * closing line or the steps line, printed from a malformed command (text
- * an older or broken Inbox sent going into the session's prompt), and the
- * Claude Code mod's copy saying it differently from every other host.
- */
 import { expect, test } from "bun:test";
 import { INBOX_WAKE_CLOSING_LINE, inboxPullsWakeLine, inboxStepsWakeLine, inboxWakeText } from "./connection";
 import { inboxWakeText as modWakeText } from "../../../apps/hook/hooks/mod/inbox-contract";

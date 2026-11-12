@@ -1,29 +1,3 @@
-/**
- * Plannotator Inbox: telling a film from its bytes, and reading an MP4/MOV's
- * length and frame size from its header without reading the film.
- *
- * - MP4 / MOV: an ISO base media file starts with an `ftyp` box (offset 4)
- *   whose major and compatible brands name what it holds. A video brand
- *   (`isom`, `iso2`..`iso9`, `mp41`, `mp42`, `avc1`, `M4V `, `qt  `, `dash`,
- *   ...) makes it a video, unless the MAJOR brand is an image or audio one
- *   (`avif`, `heic`, `mif1`, `M4A `, ...): an AVIF is sniffed as an image
- *   first anyway, and an `.m4a` lists `isom` among its compatible brands.
- *   `qt  ` as the major brand is QuickTime (`video/quicktime`); the rest is
- *   `video/mp4`.
- * - WebM: the EBML magic `1A 45 DF A3` and a DocType of `webm` in the EBML
- *   header. Matroska (`matroska`, `.mkv`) stays a file: browsers do not
- *   promise to play it. WebM carries no metadata here (contract: MP4/MOV only).
- *
- * The header walk (`readMp4VideoMetadata`) seeks from box to box through a
- * reader that returns a few bytes at a position: the top-level boxes until
- * `moov` (which may sit after a 461 MB `mdat`), then `mvhd` for the length
- * and each `trak`'s `tkhd` + `mdia/hdlr` for the first video track's size.
- * It reads a few hundred bytes in all and visits a bounded number of boxes, so
- * a hostile file costs nothing. A parsed `moov` with tracks but no video track
- * is audio (an `.m4a` named `.mp4`): the caller makes it `audio` (audio.ts).
- */
-
-/** Brands that hold video. */
 const VIDEO_BRANDS: ReadonlySet<string> = new Set([
   "isom",
   "iso2",
@@ -56,7 +30,6 @@ const VIDEO_BRANDS: ReadonlySet<string> = new Set([
   "XAVC",
 ]);
 
-/** Major brands of image and audio files in the same box format: never a video. */
 const NOT_VIDEO_MAJOR_BRANDS: ReadonlySet<string> = new Set([
   "avif",
   "avis",
@@ -89,7 +62,6 @@ function u64(bytes: Uint8Array, at: number): number {
   return u32(bytes, at) * 2 ** 32 + u32(bytes, at + 4);
 }
 
-/** The `ftyp` brands of an ISO base media file, or null when it is not one. */
 export function ftypBrands(head: Uint8Array): { major: string; compatible: string[] } | null {
   if (head.length < 16 || fourcc(head, 4) !== "ftyp") return null;
   const size = u32(head, 0);
@@ -100,7 +72,6 @@ export function ftypBrands(head: Uint8Array): { major: string; compatible: strin
   return { major: fourcc(head, 8), compatible };
 }
 
-/** An EBML variable-length integer at `at`: its value (marker removed unless `keepMarker`) and its length. */
 export function vint(bytes: Uint8Array, at: number, keepMarker: boolean): { value: number; length: number; unknown: boolean } | null {
   const first = bytes[at];
   if (first === undefined || first === 0) return null;
@@ -117,7 +88,6 @@ export function vint(bytes: Uint8Array, at: number, keepMarker: boolean): { valu
   return { value, length, unknown: !keepMarker && allOnes };
 }
 
-/** The DocType a WebM/Matroska EBML header names, or null when the bytes do not start with one. */
 export function ebmlDocType(head: Uint8Array): string | null {
   if (head.length < 8 || head[0] !== 0x1a || head[1] !== 0x45 || head[2] !== 0xdf || head[3] !== 0xa3) return null;
   const size = vint(head, 4, false);
@@ -139,10 +109,6 @@ export function ebmlDocType(head: Uint8Array): string | null {
   return null;
 }
 
-/**
- * The video container the first bytes of a file name, or null. Run AFTER
- * image sniffing (an AVIF stays an image).
- */
 export function sniffInboxVideo(head: Uint8Array): InboxVideoMediaType | null {
   const brands = ftypBrands(head);
   if (brands) {
@@ -153,34 +119,23 @@ export function sniffInboxVideo(head: Uint8Array): InboxVideoMediaType | null {
   return ebmlDocType(head) === "webm" ? "video/webm" : null;
 }
 
-/** Read up to `length` bytes at `position` (fewer at the end of the file). */
 export type InboxVideoReader = (position: number, length: number) => Promise<Uint8Array>;
 
 export interface InboxVideoMetadata {
   duration_ms?: number;
   width?: number;
   height?: number;
-  /** False when the `moov` parsed, had tracks, and none of them was video (an audio file). */
   hasVideoTrack: boolean;
 }
 
-/** The most boxes the walk visits, at every level together. */
 const MAX_BOXES = 4096;
 
 interface Box {
   type: string;
-  /** Where its payload starts. */
   body: number;
-  /** Where it ends. */
   end: number;
 }
 
-/**
- * The length and first video track's frame size of an MP4/MOV, read by
- * seeking from box to box (`read` returns the bytes at a position). Null when
- * the header cannot be walked (truncated, no `moov`): the caller keeps the
- * brand's verdict and records no metadata.
- */
 export async function readMp4VideoMetadata(read: InboxVideoReader, size: number): Promise<InboxVideoMetadata | null> {
   let visited = 0;
   const boxAt = async (at: number, limit: number): Promise<Box | null> => {
@@ -267,7 +222,6 @@ export async function readMp4VideoMetadata(read: InboxVideoReader, size: number)
       }
     }
   }
-  // A moov that listed no tracks at all says nothing either way.
   if (tracks === 0) out.hasVideoTrack = true;
   return out;
 }

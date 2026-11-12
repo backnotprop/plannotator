@@ -1,11 +1,3 @@
-/**
- * PLANNOTATOR_LIVE_PORT: reading the variable and the port loop both live
- * proxy transports share (packages/server/live-proxy.ts for Bun,
- * packages/shared/live-proxy-node.ts for Node/Pi). The transports' own tests
- * bind real ports; this file pins the decisions with errors made by hand, so
- * EACCES is covered on machines where a low port would bind anyway.
- */
-
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   createLiveProxyPortAttempts,

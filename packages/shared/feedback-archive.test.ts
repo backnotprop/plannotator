@@ -1,17 +1,3 @@
-/**
- * Feedback archive module — record shape, append durability, failure policy.
- *
- * Each test names the regression it guards. The archive is the only durable
- * copy of a submitted review, so the failures worth pinning are: an append
- * that damages earlier records, a record that silently grows to the size of
- * the diff it describes, a sidecar that overwrites an earlier one, and a
- * storage failure that escapes into a request handler.
- *
- * All writes are sandboxed under a temp PLANNOTATOR_DATA_DIR set INSIDE the
- * tests (the module resolves the data dir per call precisely so this works
- * under Bun's one-process rule), and the env var is restored in afterEach.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -82,7 +68,6 @@ describe("feedback archive: record shape", () => {
     expect(record.counts).toEqual({ annotations: 1, external: 0, images: 0 });
     expect(record.annotations?.[0]).toMatchObject({ file: "src/parse.ts", lineStart: 12, side: "new" });
 
-    // The sidecar the index names must exist and carry the same feedback.
     expect(record.recordFile).toBeTruthy();
     const sidecar = readFileSync(join(projectDir(dataDir), record.recordFile!), "utf-8");
     expect(sidecar).toContain("Please handle the null case in parse().");
@@ -90,10 +75,6 @@ describe("feedback archive: record shape", () => {
   });
 
   test("a review-level general comment records its scope; a line comment stays scope-free", () => {
-    // Regression (maintainer ruling on open question 2): without `scope` in
-    // the normalizer's copied-field allowlist, a review-level general comment
-    // archives byte-identically to a line comment with sentinel 0/0 lines and
-    // "which comments were review-level?" is unanswerable from the index.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({
       project: PROJECT,
@@ -107,7 +88,6 @@ describe("feedback archive: record shape", () => {
     });
     const record = readIndex(dataDir)[0];
     expect(record.annotations?.find((a) => a.id === "g1")?.scope).toBe("general");
-    // Absent scope stays absent (the pre-scope default), not defaulted-in.
     expect(record.annotations?.find((a) => a.id === "l1")?.scope).toBeUndefined();
   });
 
@@ -145,9 +125,6 @@ describe("feedback archive: record shape", () => {
   });
 
   test("provenance is preserved so `source == null` filters the reviewer's own comments", () => {
-    // Regression: external/WebMCP/agent findings are archived (the submitted
-    // text already embeds them) but must stay distinguishable, or "analyze my
-    // own feedback" silently counts a linter's output as the user's.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({
       project: PROJECT,
@@ -167,8 +144,6 @@ describe("feedback archive: record shape", () => {
   });
 
   test("a bare decision is a decision-only line with no sidecar", () => {
-    // Approval and dismissal rates are the behavior data the archive exists
-    // for; writing an empty markdown file for each would be noise.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({ project: PROJECT, surface: "annotate", decision: "dismissed" });
     const record = readIndex(dataDir)[0];
@@ -178,8 +153,6 @@ describe("feedback archive: record shape", () => {
   });
 
   test("a review record carries diff identity and size metadata, never the patch bytes", () => {
-    // Disk-growth regression: guide history stores full patches and had to be
-    // flagged loudly in the docs. A feedback record must stay text-sized.
     const dataDir = useTempDataDir();
     const patch = "diff --git a/big.ts b/big.ts\n" + "+x\n".repeat(50_000);
     appendFeedbackRecord({
@@ -210,9 +183,6 @@ describe("feedback archive: record shape", () => {
 
 describe("feedback archive: append durability", () => {
   test("successive appends never rewrite earlier lines", () => {
-    // Index corruption regression: the archive is a timeline, so a second
-    // decision on the same session must extend it, never replace it (the
-    // legacy plans/ snapshot overwrites by slug; the archive must not).
     const dataDir = useTempDataDir();
     for (const decision of ["denied", "feedback", "approved"] as const) {
       appendFeedbackRecord({ project: PROJECT, surface: "plan", decision, feedback: `note ${decision}` });
@@ -223,8 +193,6 @@ describe("feedback archive: append durability", () => {
   });
 
   test("feedback containing newlines still serializes to exactly one line", () => {
-    // A record that spanned lines would make every later append unparsable
-    // for a line-oriented reader.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({
       project: PROJECT,
@@ -249,8 +217,6 @@ describe("feedback archive: append durability", () => {
   });
 
   test("sidecars written in the same millisecond never overwrite each other", () => {
-    // The stamp is per-millisecond, so two fast submissions collide; losing
-    // one would lose a submitted review.
     const dataDir = useTempDataDir();
     const now = new Date("2026-08-31T14:22:07.511Z");
     appendFeedbackRecord({ project: PROJECT, surface: "review", decision: "feedback", feedback: "first", now });
@@ -261,14 +227,11 @@ describe("feedback archive: append durability", () => {
     const bodies = files.map((f) => readFileSync(join(recordsDir, f), "utf-8"));
     expect(bodies.some((b) => b.includes("first"))).toBe(true);
     expect(bodies.some((b) => b.includes("second"))).toBe(true);
-    // Each index line names its own sidecar.
     const named = readIndex(dataDir).map((r) => r.recordFile);
     expect(new Set(named).size).toBe(2);
   });
 
   test("an unwritable data dir reports failure instead of throwing", () => {
-    // The module is called from inside request handlers; a throw would turn a
-    // reviewer's submit into a 500.
     const dir = mkdtempSync(join(tmpdir(), "plannotator-feedback-archive-fail-"));
     tempDirs.push(dir);
     const blocker = join(dir, "blocker");
@@ -282,10 +245,6 @@ describe("feedback archive: append durability", () => {
 
 describe("feedback archive: shared index", () => {
   test("another client's lines survive our reader, unknown fields and all", () => {
-    // The index is shared: plannotator-tui appends to the same file. A reader
-    // that validated `client` against an enum, rejected unknown fields, or
-    // parsed sidecar filenames would silently drop every line another tool
-    // wrote. Fields are added and never repurposed, so tolerance is the rule.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({ project: PROJECT, surface: "review", decision: "lgtm" });
     const indexPath = join(projectDir(dataDir), "index.jsonl");
@@ -308,8 +267,6 @@ describe("feedback archive: shared index", () => {
     const records = readIndex(dataDir);
     expect(records.length).toBe(2);
     expect(records.map((r) => r.client)).toEqual(["plannotator", "plannotator-tui"]);
-    // The suffixed sidecar name round-trips untouched: recordFile is a handle,
-    // never something to parse.
     expect(records[1].recordFile).toEndWith("-plannotator-tui.md");
     expect(records[1].target?.agent?.host).toBe("claude-code");
     expect(records[1].clientVersion).toBe("0.3.1");
@@ -318,9 +275,6 @@ describe("feedback archive: shared index", () => {
 
 describe("feedback archive: changed-file counting", () => {
   test("a rename counts once, a delete counts once, an empty patch counts zero", () => {
-    // Regression: extractChangedFiles (code-nav) UNIONS the a/ and b/ sides so
-    // a reader can resolve either path, which makes a one-file rename look
-    // like a two-file review in the record's size metadata.
     const rename =
       "diff --git a/src/old.ts b/src/new.ts\nsimilarity index 92%\nrename from src/old.ts\nrename to src/new.ts\n";
     expect(countChangedFiles(rename)).toBe(1);
@@ -354,9 +308,6 @@ describe("feedback archive: project bucketing", () => {
 
 describe("feedback archive: diagram anchors", () => {
   test("a diagram comment records its validated anchor; a malformed one and a text comment stay anchor-free", () => {
-    // Regression: without the field a comment on a flowchart node archives
-    // as the quote "Approve?" and the index cannot say WHICH node, in WHICH
-    // fence line, the comment was about.
     const dataDir = useTempDataDir();
     const anchor = { v: 1, family: "flowchart", kind: "node", id: "D", label: "Approve?", sourceLine: [7, 7] };
     appendFeedbackRecord({
@@ -381,8 +332,6 @@ describe("feedback archive: diagram anchors", () => {
 
 describe("feedback archive: image regions (#2100)", () => {
   test("a region comment records its validated region; a malformed one is left out", () => {
-    // Regression: without the field a comment on part of a screenshot
-    // archives as the image's src and the index cannot say WHERE on it.
     const dataDir = useTempDataDir();
     const region = { v: 1, src: "figures/status-colors.png", sourceLine: 6, box: { x: 1820, y: 380, w: 420, h: 160 }, naturalWidth: 3664, naturalHeight: 1453 };
     appendFeedbackRecord({
@@ -405,9 +354,6 @@ describe("feedback archive: image regions (#2100)", () => {
 
 describe("feedback archive: question answers", () => {
   test("an answer records its validated questionAnswer; a malformed one and a plain comment stay answer-free", () => {
-    // Regression: without the field an answer archives only as its one-line
-    // text, so the index cannot say which question it answered (key), which
-    // labels were picked, or that it was skipped.
     const dataDir = useTempDataDir();
     const answer = {
       v: 1,
@@ -435,7 +381,6 @@ describe("feedback archive: question answers", () => {
     expect(record.annotations?.[0]?.questionAnswer).toEqual(answer);
     expect(record.annotations?.[1]).not.toHaveProperty("questionAnswer");
     expect(record.annotations?.[2]).not.toHaveProperty("questionAnswer");
-    // Additive: the existing fields of an answer row are unchanged.
     expect(record.annotations?.[0]?.text).toBe("Answer: Local only");
     expect(record.annotations?.[0]?.blockId).toBe("block-3");
   });
@@ -443,8 +388,6 @@ describe("feedback archive: question answers", () => {
 
 describe("feedback archive: quick labels (#2626)", () => {
   test("a quick label records its flag and tip; a plain comment stays label-free", () => {
-    // Regression: without the fields a label archived as a plain comment
-    // whose text happened to be "🔍 Verify this", and its tip was lost.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({
       project: PROJECT,
@@ -471,9 +414,6 @@ describe("feedback archive: quick labels (#2626)", () => {
 
 describe("feedback archive: element identity", () => {
   test("a raw-HTML pinpoint records its element identity and route; other annotations stay identity-free", () => {
-    // Regression: without these fields a pinpoint archives as the bridge's
-    // placeholder quote ("[element: Navigation]") and the index cannot say
-    // WHICH element the comment was about once the page is gone.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({
       project: PROJECT,
@@ -500,7 +440,6 @@ describe("feedback archive: element identity", () => {
       elementName: "Primary",
       pageUrl: "/dashboard?tab=2",
     });
-    // Identity only: the skeleton is feedback-sized, not index-sized.
     expect(JSON.stringify(record.annotations?.[0])).not.toContain("<nav>");
     const plain = record.annotations?.[1] as Record<string, unknown>;
     for (const key of ["elementTag", "elementSelector", "elementPath", "elementRole", "elementName", "pageUrl"]) {

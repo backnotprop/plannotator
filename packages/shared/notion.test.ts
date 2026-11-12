@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { isNotionAvailable, NOTION_API_VERSION, notionPageTitle, saveToNotion } from "./notion";
 
-// Never reaches the real Notion API: fetch is stubbed in every test.
 const originalToken = process.env.NOTION_TOKEN;
 const originalFetch = globalThis.fetch;
 let requests: Request[] = [];

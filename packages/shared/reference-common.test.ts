@@ -31,7 +31,6 @@ describe("isFileBrowserWatchExcludedPath", () => {
 		expect(isFileBrowserWatchExcludedPath(".jj/repo/store")).toBe(true);
 		expect(isFileBrowserWatchExcludedPath("sub\\.jj\\op_store")).toBe(true);
 		expect(isFileBrowserWatchExcludedPath("docs/plan.md")).toBe(false);
-		// The file listing and folder annotate keep their own rules.
 		expect(isFileBrowserExcludedPath(".jj/repo/store")).toBe(false);
 	});
 });

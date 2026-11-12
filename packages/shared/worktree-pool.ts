@@ -1,14 +1,3 @@
-/**
- * Worktree Pool — manages a set of per-PR git worktrees for a review session.
- *
- * Runtime-agnostic. Uses ReviewGitRuntime for all git operations.
- * Both Bun and Pi servers import this module (Pi via vendor.sh).
- *
- * Each PR visited during a session gets its own worktree, created on first
- * access and cached for the session lifetime. Agents run in their PR's
- * worktree undisturbed by PR switches.
- */
-
 import { join } from "node:path";
 import type { ReviewGitRuntime } from "./review-core";
 import { getPRHeadFetchSpec, getPRNumber, type PRMetadata } from "./pr-types";
@@ -36,18 +25,11 @@ export interface WorktreePool {
   cleanup(runtime: ReviewGitRuntime): Promise<void>;
 }
 
-/** A PR checkout is ready, still warming up, or absent from the pool. */
 export type PoolCwdResolution =
   | { kind: "ready"; path: string }
   | { kind: "pending" }
   | { kind: "absent" };
 
-/**
- * Resolve a PR's checkout state from the pool. The "pending" case (entry exists
- * but isn't ready) is kept distinct from "absent" so callers don't fall back to
- * the launch repo for a checkout that simply hasn't finished warming up. Shared
- * by both servers' resolvePRLocalCwd so the readiness rule can't drift.
- */
 export function resolvePoolCwd(pool: WorktreePool, prUrl: string): PoolCwdResolution {
   const entry = pool.get(prUrl);
   if (entry?.ready) return { kind: "ready", path: entry.path };
@@ -62,19 +44,9 @@ export function createWorktreePool(
 ): WorktreePool {
   const pool = new Map<string, PoolEntry>();
   const pending = new Map<string, Promise<PoolEntry>>();
-  // FETCH_HEAD is shared per-repo state: a creation's PR-head fetch must not
-  // run while another creation (or the seeded background warmup) is between
-  // its own fetch and `git worktree add`. Serialize all creations through
-  // this chain.
   let creationChain: Promise<unknown> = Promise.resolve();
   if (initial) pool.set(initial.prUrl, initial);
 
-  // Seeded background warmup: the initial entry starts ready:false while the
-  // caller builds its checkout (fetch/clone) off the request path. ensure()
-  // awaits the in-flight warmup instead of starting a duplicate creation.
-  // On failure the entry is KEPT as ready:false — resolve() stays undefined so
-  // consumers never receive a path that was never created; same-repo ensure()
-  // can retry creation once the failed warmup is cleared from pending.
   if (initial && initialPending) {
     const tracked = initialPending.then(
       (entry) => {
@@ -90,7 +62,7 @@ export function createWorktreePool(
     creationChain = tracked.catch(() => {});
     tracked
       .then(() => pending.delete(initial.prUrl))
-      .catch(() => {}); // warmup may complete with nobody awaiting it
+      .catch(() => {});
   }
 
   return {
@@ -147,9 +119,6 @@ export function createWorktreePool(
     entries() { return pool.values(); },
 
     async cleanup(runtime) {
-      // Wait out in-flight creations first: a warmup or queued ensure() that
-      // finishes after the pool is cleared would resurrect its entry and
-      // orphan the worktree it just built.
       while (pending.size > 0) {
         await Promise.all([...pending.values()].map((p) => p.catch(() => {})));
       }

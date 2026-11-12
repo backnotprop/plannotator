@@ -41,7 +41,6 @@ describe("CallFlowInstallCoordinator", () => {
     expect(third).toEqual(first);
     expect(installs).toBe(1);
 
-    // Still running: a later POST joins rather than restarting.
     expect(await coordinator.start(["python"])).toEqual({ state: "running", stage: "downloading", languageIds: ["python"] });
     expect(installs).toBe(1);
 
@@ -74,7 +73,6 @@ describe("CallFlowInstallCoordinator", () => {
     gate.resolve(installed);
     await Bun.sleep(0);
     expect(coordinator.getStatus()).toEqual({ state: "done", languageIds: ["python"] });
-    // A late stage callback can never resurrect a settled status.
     emit?.("downloading");
     expect(coordinator.getStatus()).toEqual({ state: "done", languageIds: ["python"] });
   });
@@ -92,7 +90,6 @@ describe("CallFlowInstallCoordinator", () => {
     const status = await coordinator.start(["python"]);
     expect(status).toEqual({ state: "error", error: "Node.js was not found.", reason: "node-unavailable", languageIds: ["python"] });
     expect(installs).toBe(0);
-    // The error persists until the next start retries.
     expect(coordinator.getStatus()).toEqual(status);
   });
 

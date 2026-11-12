@@ -1,14 +1,3 @@
-/**
- * Named icons, logos and drawn things on a Shape board (`shape update` stamps them; see
- * apps/hook/server/shape-command.test.ts for the command). What regresses if these fail: a name draws
- * nothing (or something the board's checks then refuse), a logo loses its colour or trips the
- * fixed-colour note, a stamp points outside the board so showing it would fetch something, a board
- * stored again grows a second copy, an edited name, label, size or move keeps the old drawing, a
- * missing name goes unsaid (or is said twice, or only for the picture's wide drawing), a label's words
- * become markup, show an ampersand twice or sit over a server's slots, one of Object's own names draws
- * something, a long name stalls the store, a board of the wrong shape is reshaped before the checks
- * judge it, or the stamps' copy of the kit's marks drifts from the kit.
- */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -47,7 +36,6 @@ describe('stamps', () => {
 
   test('a near-black logo follows the ink, so it shows on a dark board', () => {
     for (const name of ['x', 'github']) expect(expandShapeStamps(`<svg data-logo="${name}"/>`).html).toContain('fill:var(--ink)');
-    // A coloured mark keeps its colour inside.
     expect(expandShapeStamps('<svg data-logo="claude"/>').html).toContain('fill="#d97757"');
   });
 
@@ -92,7 +80,6 @@ describe('stamps', () => {
     expect(missing).toEqual([]);
     expect(html).not.toMatch(/data-(icon|logo|draw)="[^"]*"[^>]*\/>/);
     expect(shapeHtmlProblems(html)).toEqual([]);
-    // The only reference in any stamp is Codex's own picture, inline.
     expect([...html.matchAll(/(?:href|src)="([^"]*)"/g)].map((m) => m[1]!.slice(0, 22))).toEqual(['data:image/png;base64,']);
     expect(html).not.toMatch(/url\(|https?:/);
   });
@@ -121,7 +108,6 @@ describe('stamps', () => {
     expect(once).toContain('data-label="R&amp;D"');
     expect(once).toContain('>a &lt; b &quot;c&quot;</text></g>');
     expect(expandShapeStamps(once).html).toBe(once);
-    // A name we lack is redrawn empty on every store: what the agent wrote on it stays as written.
     const missing = '<svg data-icon="serverr" aria-label="R&amp;D" style="font-family:&quot;Inter&quot;" x="1" y="2"/>';
     const first = expandShapeStamps(missing).html;
     expect(first).toContain('aria-label="R&amp;D"');
@@ -144,7 +130,6 @@ describe('stamps', () => {
     ];
     for (const [before, after] of edits) {
       const stored = fresh(around(before));
-      // The agent edits the board it read back: the inputs on the filled element change, its drawing does not.
       const read = stored.replace(/^(<g data-mark="a">)(<g[^>]*>)*<svg[^>]*>/, (open) => {
         const was = new Map([...before.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1]!, m[2]!]));
         const now = new Map([...after.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1]!, m[2]!]));

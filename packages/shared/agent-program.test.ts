@@ -1,7 +1,3 @@
-/**
- * Is an `agent` on PATH Cursor's CLI? Fake programs in a scratch folder only:
- * the real Cursor, Grok or any other CLI is never run.
- */
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +16,6 @@ const bin = join(root, "bin");
 mkdirSync(bin);
 const log = join(root, "ran.log");
 
-/** A fake program that logs each start, then runs `body`. */
 function program(path: string, body: string): string {
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, `#!/bin/sh\necho "$0 $*" >> '${log}'\n${body}\n`);

@@ -1,13 +1,3 @@
-/**
- * Decisions were removed from the Inbox (2026-10). A store an older Inbox
- * wrote keeps its `decisions.jsonl` on disk and its question records keep
- * their `decision_*` fields; this proves such a store still loads, reads and
- * writes as before. The failures it catches: the store refusing to load (or
- * dropping a line) because of a record kind it no longer knows, a decision's
- * fields leaking onto the wire, a new line reusing a seq a decision line
- * holds (a client's cursor would then skip it), and the old file being
- * rewritten or deleted (it is the person's data; nothing touches it).
- */
 import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,8 +31,6 @@ test("a store with an older Inbox's decisions loads, keeps the file untouched, a
   const asked = store.sendMessage({ project_id: project.id, author: AGENT, body: BODY }).message;
   const question = store.questionRecord(`${asked.id}/${store.questionsOf(asked.id)[0]!.key}`)!;
 
-  // What an older Inbox left: a question snapshot with the decision fields, and a decisions file whose
-  // last line holds the highest seq of the store.
   const folder = join(store.dir, "projects", project.key);
   const at = new Date().toISOString();
   const top = store.cursor();
@@ -56,17 +44,13 @@ test("a store with an older Inbox's decisions loads, keeps the file untouched, a
   writeFileSync(decisionsFile, legacy);
 
   const reopened = InboxStore.open(dataDir);
-  // The thread and its question read as before; the wire carries no decision fields.
   const wire = reopened.questionsOf(asked.id)[0]!;
   expect(wire).toMatchObject({ prompt: "Which database should we use?", state: "open" });
   for (const field of ["decision_on_answer", "decision_id", "decision_recording", "decision_draft"]) expect(wire).not.toHaveProperty(field);
-  // The `Decision:` line an older agent wrote is context, not a flag.
   expect(wire.context).toContain("Decision: when answered");
-  // The next line is written above the decision's seq.
   expect(reopened.cursor()).toBeGreaterThanOrEqual(top + 50);
   const reply = reopened.sendMessage({ project_id: project.id, author: AGENT, body: "Going with Postgres.", reply_to: asked.id }).message;
   expect(reopened.messageCursor(reply.id)).toBeGreaterThan(top + 50);
-  // The decisions file is never rewritten, not even by a deletion in its project.
   const other = reopened.sendMessage({ project_id: project.id, author: { ...AGENT, session: "ses_b" }, body: "Unrelated." }).message;
   reopened.deleteThread(other.thread_id);
   expect(readFileSync(decisionsFile, "utf8")).toBe(legacy);

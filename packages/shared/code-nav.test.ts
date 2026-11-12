@@ -20,10 +20,6 @@ import {
   type CodeNavRuntime,
 } from "./code-nav";
 
-// ---------------------------------------------------------------------------
-// classifyMatch
-// ---------------------------------------------------------------------------
-
 describe("classifyMatch", () => {
   describe("TypeScript/JavaScript", () => {
     const lang = "typescript";
@@ -186,10 +182,6 @@ describe("classifyMatch", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// rankLocations
-// ---------------------------------------------------------------------------
-
 describe("rankLocations", () => {
   function loc(overrides: Partial<CodeNavLocation>): CodeNavLocation {
     return {
@@ -293,10 +285,6 @@ describe("rankLocations", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildRgArgs
-// ---------------------------------------------------------------------------
-
 describe("buildRgArgs", () => {
   test("includes --json flag", () => {
     const args = buildRgArgs("mySymbol");
@@ -349,10 +337,6 @@ describe("buildRgArgs", () => {
     expect(args).not.toContain("--type");
   });
 });
-
-// ---------------------------------------------------------------------------
-// parseRgJsonOutput
-// ---------------------------------------------------------------------------
 
 describe("parseRgJsonOutput", () => {
   test("parses match lines", () => {
@@ -435,10 +419,6 @@ describe("parseRgJsonOutput", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// validateCodeNavRequest
-// ---------------------------------------------------------------------------
-
 describe("validateCodeNavRequest", () => {
   const valid = {
     symbol: "startServer",
@@ -477,10 +457,6 @@ describe("validateCodeNavRequest", () => {
     expect(validateCodeNavRequest({ ...valid, side: "both" })).toBe("side must be 'old' or 'new'");
   });
 });
-
-// ---------------------------------------------------------------------------
-// extractChangedFiles
-// ---------------------------------------------------------------------------
 
 describe("extractChangedFiles", () => {
   test("extracts paths from unified diff", () => {
@@ -525,14 +501,7 @@ rename to src/newName.ts`;
   });
 });
 
-// ---------------------------------------------------------------------------
-// classifyMatchDetailed — the kind the classifier used to discard
-// ---------------------------------------------------------------------------
-
 describe("classifyMatchDetailed", () => {
-  // One case per kind the tables can produce. A pattern-table edit that
-  // silently reclassifies (splitting `const|let|var` the wrong way, dropping
-  // go's receiver form) fails here rather than shipping a wrong badge.
   const cases: Array<[string, string, string | undefined, string | null]> = [
     ["export function charge(amount) {", "charge", "typescript", "function"],
     ["const MAX_ATTEMPTS = 3;", "MAX_ATTEMPTS", "typescript", "const"],
@@ -552,7 +521,6 @@ describe("classifyMatchDetailed", () => {
     ["pub struct Gateway {", "Gateway", "rust", "struct"],
     ["pub trait Payable {", "Payable", "rust", "trait"],
     ["pub mod retry;", "retry", "rust", "module"],
-    // Generic fallback keeps working for languages with no table.
     ["fn charge(amount) {", "charge", undefined, "function"],
     ["charge(42);", "charge", "typescript", null],
   ];
@@ -562,15 +530,10 @@ describe("classifyMatchDetailed", () => {
       const result = classifyMatchDetailed(snippet, symbol, language);
       expect(result.symbolKind).toBe(symbolKind as never);
       expect(result.kind).toBe(symbolKind === null ? "reference" : "definition");
-      // The thin wrapper must keep agreeing with the detailed classifier.
       expect(classifyMatch(snippet, symbol, language)).toBe(result.kind);
     });
   }
 });
-
-// ---------------------------------------------------------------------------
-// scanDocComment — conservative by construction
-// ---------------------------------------------------------------------------
 
 describe("scanDocComment", () => {
   test("typescript: JSDoc block directly above the definition", () => {
@@ -658,10 +621,6 @@ describe("scanDocComment", () => {
     expect(scanDocComment(lines, 1, undefined)).toBeNull();
   });
 
-  // Tooling directives are addressed to a linter, never to a reader. Left in,
-  // they become the card's doc paragraph — the exact "garbage over nothing"
-  // failure this scan exists to prevent, and the most common comment line
-  // sitting directly above a definition in a real codebase.
   test("a lone tooling directive is not documentation", () => {
     const cases: Array<[string[], string | undefined]> = [
       [["// eslint-disable-next-line no-console", "function charge() {}"], "typescript"],
@@ -696,9 +655,6 @@ describe("scanDocComment", () => {
   });
 
   test("a directive below the prose is dropped too, and only it", () => {
-    // The commonest real position: the directive sits on the line directly
-    // above the definition, which is the TRAILING end of the collected run.
-    // A leading-only strip would leak it onto the end of the paragraph.
     const lines = [
       "// Charges the card.",
       "// Retries on 5xx.",
@@ -721,8 +677,6 @@ describe("scanDocComment", () => {
   });
 
   test("a directive between two sentences is left alone", () => {
-    // Only the ends are trimmed: cutting inside prose would mean deciding
-    // what the surrounding sentences meant.
     const lines = [
       "// Charges the card.",
       "// eslint-disable-next-line no-console",
@@ -746,8 +700,6 @@ describe("scanDocComment", () => {
   });
 
   test("prose that merely mentions a directive is untouched", () => {
-    // Only a LEADING run of directives is stripped, and only lines that ARE
-    // one: a sentence about eslint is still documentation.
     const lines = [
       "// Callers must keep the eslint-disable in sync with this list.",
       "function charge() {}",
@@ -773,17 +725,13 @@ describe("scanDocComment", () => {
   test("caps at 600 characters", () => {
     const lines = [`// ${"a".repeat(900)}`, "function charge() {}"];
     const result = scanDocComment(lines, 1, "typescript");
-    expect(result!.length).toBe(601); // 600 + the truncation marker
+    expect(result!.length).toBe(601);
   });
 
   test("an out-of-range definition line scans nothing", () => {
     expect(scanDocComment(["function charge() {}"], 9, "typescript")).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------
-// buildSignature — bounded read-ahead
-// ---------------------------------------------------------------------------
 
 describe("buildSignature", () => {
   test("a balanced line is the signature on its own", () => {
@@ -801,13 +749,12 @@ describe("buildSignature", () => {
 
   test("stops after two read-ahead lines even when unbalanced", () => {
     const lines = ["function charge(", "  a,", "  b,", "  c,", ") {"];
-    // Unbounded read-ahead would swallow the rest of the file.
     expect(buildSignature(lines, 0)?.text).toBe("function charge( a, b,");
   });
 
   test("caps at 300 characters", () => {
     const result = buildSignature([`const x = "${"y".repeat(500)}";`], 0);
-    expect(result!.text.length).toBe(301); // 300 + the truncation marker
+    expect(result!.text.length).toBe(301);
   });
 
   test("a blank or missing line has no signature", () => {
@@ -815,10 +762,6 @@ describe("buildSignature", () => {
     expect(buildSignature([], 0)).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------
-// resolveCodeNavHover
-// ---------------------------------------------------------------------------
 
 function rgMatch(filePath: string, line: number, text: string, start = 0): string {
   return JSON.stringify({
@@ -881,8 +824,6 @@ describe("resolveCodeNavHover", () => {
     expect(result.definition!.signature).toBe("export function charge(amount, key) {");
     expect(result.definition!.signatureApproximate).toBe(true);
     expect(result.definition!.doc).toBe("Charges the card.");
-    // Declared in the shape for a later tier, deliberately unpopulated: the
-    // card renders the signature, so source lines nothing reads are pure cost.
     expect(result.definition!.preview).toBeNull();
     expect(result.definition!.otherCandidateCount).toBe(0);
     expect(result.alternateDefinition).toBeNull();
@@ -970,10 +911,6 @@ describe("resolveCodeNavHover", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Directory exclusions (#1558)
-// ---------------------------------------------------------------------------
-
 describe("buildRgArgs directory exclusions (#1558)", () => {
   test("always-ignored names are excluded at any depth (unanchored glob)", () => {
     const args = buildRgArgs("x");
@@ -989,9 +926,6 @@ describe("buildRgArgs directory exclusions (#1558)", () => {
     }
   });
 
-  // The anchored glob only ever prunes the SEARCH ROOT, so an origin in a
-  // first-party `…/vendor/app/` package needs nothing lifted — and lifting it
-  // handed that request the real root `vendor/` tree back (#1559 follow-up).
   test("a deep same-named package does not lift the root-only exclusion", () => {
     const args = buildRgArgs(
       "fetchContent",
@@ -1006,7 +940,6 @@ describe("buildRgArgs directory exclusions (#1558)", () => {
   test("an origin that really lives under the root directory lifts it", () => {
     const args = buildRgArgs("fetchContent", "java", "vendor/third_party/Vendored.java");
     expect(args).not.toContain("!/vendor");
-    // Only that one name: the other root-only exclusions stand.
     expect(args).toContain("!/target");
     expect(args).toContain("!node_modules");
   });
@@ -1016,10 +949,6 @@ describe("buildRgArgs directory exclusions (#1558)", () => {
     expect(args).not.toContain("!node_modules");
   });
 });
-
-// ---------------------------------------------------------------------------
-// Real-ripgrep exclusion behavior (#1558)
-// ---------------------------------------------------------------------------
 
 const RG_PATH = Bun.which("rg");
 const describeRg = RG_PATH ? describe : describe.skip;
@@ -1052,22 +981,18 @@ describeRg("resolveCodeNav against real ripgrep (#1558)", () => {
 
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "plannotator-code-nav-"));
-    // First-party Java package whose path contains a `vendor` segment.
     await Bun.write(
       `${root}/src/main/java/com/example/vendor/app/ExampleService.java`,
       javaSource("ExampleService"),
     );
-    // Genuine third-party tree at the repo root.
     await Bun.write(
       `${root}/vendor/third_party/Vendored.java`,
       javaSource("Vendored"),
     );
-    // Dependency output nested below the root.
     await Bun.write(
       `${root}/src/app/node_modules/dep/Dep.java`,
       javaSource("Dep"),
     );
-    // A neutral first-party file, the third of the QA repro's three.
     await Bun.write(`${root}/src/other/Other.java`, javaSource("Other"));
   });
 
@@ -1117,10 +1042,6 @@ describeRg("resolveCodeNav against real ripgrep (#1558)", () => {
     expect(found.some((p) => p.includes("node_modules/dep/Dep.java"))).toBe(true);
   });
 
-  // The QA repro (#1559 follow-up): three files define the same symbol — a
-  // first-party package whose path contains `vendor`, the repo-root `vendor/`
-  // tree, and a neutral file. From the package origin the ROOT match was
-  // returned, because the origin-file rule lifted the anchored glob.
   test("a first-party `vendor` package does not un-exclude the root vendor tree", async () => {
     const found = paths(await resolve("src/main/java/com/example/vendor/app/ExampleService.java"));
     expect(found.some((p) => p.includes("com/example/vendor/app/ExampleService.java"))).toBe(true);
@@ -1131,29 +1052,15 @@ describeRg("resolveCodeNav against real ripgrep (#1558)", () => {
   test("a file that really lives under root vendor/ still finds its own siblings", async () => {
     const found = paths(await resolve("vendor/third_party/Caller.java"));
     expect(found.some((p) => p.includes("vendor/third_party/Vendored.java"))).toBe(true);
-    // The exemption is that directory only: node_modules stays excluded.
     expect(found.some((p) => p.includes("node_modules"))).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Origin-file exemption is per directory INSTANCE (#1559 follow-up)
-// ---------------------------------------------------------------------------
-
-/**
- * The exemption exists so a symbol in a changed file finds its own siblings
- * even under a directory whose NAME looks like tool output. Lifting the glob
- * lifted it tree-wide, so a request from a first-party `…/vendor/app/` package
- * also returned the repo-root `vendor/` third-party tree. The rule is now: a
- * match under an excluded directory is kept only when that same directory is
- * an ancestor of the origin file.
- */
 describe("isCodeNavPathAllowed", () => {
   const DEEP_ORIGIN = "src/main/java/com/example/vendor/app/Widget.java";
 
   test("the root-level excluded tree stays excluded for a deep same-named package", () => {
     expect(isCodeNavPathAllowed("vendor/RootVendorFile.java", DEEP_ORIGIN)).toBe(false);
-    // …while the origin's own package is untouched (it was never pruned).
     expect(isCodeNavPathAllowed("src/main/java/com/example/vendor/app/Other.java", DEEP_ORIGIN)).toBe(true);
     expect(isCodeNavPathAllowed("src/other/Other.java", DEEP_ORIGIN)).toBe(true);
   });
@@ -1162,7 +1069,6 @@ describe("isCodeNavPathAllowed", () => {
     const origin = "vendor/RootVendorFile.java";
     expect(isCodeNavPathAllowed("vendor/Sibling.java", origin)).toBe(true);
     expect(isCodeNavPathAllowed("vendor/nested/Deep.java", origin)).toBe(true);
-    // A DIFFERENT excluded root is still excluded for it.
     expect(isCodeNavPathAllowed("dist/Built.java", origin)).toBe(false);
   });
 
@@ -1176,9 +1082,7 @@ describe("isCodeNavPathAllowed", () => {
   test("with no origin, and for ordinary paths, the plain rules apply", () => {
     expect(isCodeNavPathAllowed("vendor/x.java")).toBe(false);
     expect(isCodeNavPathAllowed("src/x.java")).toBe(true);
-    // A nested `vendor/` is not root-level, so the anchored rule leaves it.
     expect(isCodeNavPathAllowed("src/vendor/x.java")).toBe(true);
-    // A FILE named like an excluded directory is a file, not a directory.
     expect(isCodeNavPathAllowed("src/vendor")).toBe(true);
     expect(isCodeNavPathAllowed("./vendor/x.java")).toBe(false);
     expect(isCodeNavPathAllowed("vendor\\x.java")).toBe(false);
