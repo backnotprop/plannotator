@@ -107,6 +107,10 @@ export class OpenClawInbox {
   async start(): Promise<void> {
     this.stopped = false;
     await this.discover();
+    this.restore();
+  }
+
+  private restore(): void {
     if (!this.switchOn()) return;
     for (const known of readKnown(knownSessionsFileOf(this.dataDir))) this.watch(known);
   }
@@ -133,6 +137,7 @@ export class OpenClawInbox {
       .then((tools) => {
         if (tools && !this.connection) {
           this.connection = new InboxAgentConnection({ dataDir: this.dataDir, host: OPENCLAW_INBOX_HOST, agentName: OPENCLAW_INBOX_AGENT_NAME, tools });
+          this.restore();
         }
       })
       .finally(() => {
