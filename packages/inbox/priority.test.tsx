@@ -207,7 +207,7 @@ test.skipIf(!hasDom)('Add to Priority moves the row into a Priority group drawn 
   expect((await serverRow(ids.waiting))!.priority).toMatchObject({ person: true, ask: null });
   await until(() => toast()?.textContent?.includes('Added to Priority') === true, 'the toast');
   expect(toast()!.textContent).toContain(`“${subject}”`);
-  expect(live()).toContain(`Added “${subject}” to Priority.`);
+  await until(() => live().includes(`Added “${subject}” to Priority.`), 'the live line');
 
   await undo();
   await until(() => drawnIn(ids.waiting) === 'waiting', 'the row back in Waiting');
@@ -229,7 +229,7 @@ test.skipIf(!hasDom)('Remove from Priority says where the row went back to; its 
   await until(() => drawnIn(ids.waiting) === 'waiting', 'the row back in Waiting');
   await until(() => toast()?.textContent?.includes('Removed from Priority') === true, 'the toast');
   expect(toast()!.textContent).toContain('Back in Waiting on you');
-  expect(live()).toContain(`Removed “${subject}” from Priority. Back in Waiting on you.`);
+  await until(() => live().includes(`Removed “${subject}” from Priority. Back in Waiting on you.`), 'the live line');
   expect((await serverRow(ids.waiting))!.priority).toBeNull();
 
   await undo();
