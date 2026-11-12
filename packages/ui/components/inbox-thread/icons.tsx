@@ -276,6 +276,7 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
     case 'vscode':
     case 'dsh':
     case 'cline':
+    case 'openclaw':
       return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d={TAB_GLYPHS[host]} />
