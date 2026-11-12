@@ -628,6 +628,7 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
             ...(parent.startMeta ? { startMeta: parent.startMeta } : {}),
             ...(parent.endMeta ? { endMeta: parent.endMeta } : {}),
             ...(parent.htmlAnchor ? { htmlAnchor: parent.htmlAnchor } : {}),
+            // Without the anchor a diagram reply falls back to text search and paints the label wherever prose repeats it.
             ...(parent.diagramAnchor ? { diagramAnchor: parent.diagramAnchor } : {}),
             ...(parent.pageUrl ? { pageUrl: parent.pageUrl } : {}),
             ...(parent.diffContext ? { diffContext: parent.diffContext } : {}),
@@ -726,6 +727,7 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
       const { snapshot, path, tracker } = target;
       const existing = snapshot.annotations.find((a) => a.id === input.id);
       if (!existing) return fail('not_found', 'no comment with that id');
+      // Ownership is this session's tracker, not the `source` stamp: the API accepts any source.
       if (!tracker.isOwn(existing.id)) return fail('forbidden', 'only comments you created can be changed', { hint: NOT_OWNED_HINT });
       if (!adapter.updateAnnotation(input.id, { text: input.text }, path)) {
         return fail('not_available', 'that document is not open, so it cannot be written to', { hint: OPEN_FIRST_HINT });
@@ -752,6 +754,7 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
         path: PATH_PARAM,
       },
     },
+    // destructiveHint is not yet in WebMCP ToolAnnotations (unknown members are ignored); do not remove.
     annotations: { destructiveHint: true },
     execute: async (input) => {
       syncTrackers(adapter, state);

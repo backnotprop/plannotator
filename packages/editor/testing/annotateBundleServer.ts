@@ -1,5 +1,6 @@
 import { startAnnotateServer } from "../../server/annotate";
 
+// Runs as a child process because under happy-dom the global `Response` is happy-dom's, which `Bun.serve` refuses.
 const [root, ...files] = process.argv.slice(2);
 if (!root || files.length < 2) {
   console.error("usage: annotateBundleServer.ts <root> <file> <file>...");

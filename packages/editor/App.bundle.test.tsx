@@ -66,6 +66,7 @@ class SilentEventSource {
 }
 
 const ROOT = "/tmp/bundle-review";
+// Deliberately listed out of name order: alphabetical sorting would put alpha first.
 const BETA = `${ROOT}/docs/beta.md`;
 const ALPHA = `${ROOT}/alpha.md`;
 const TEXT: Record<string, string> = {

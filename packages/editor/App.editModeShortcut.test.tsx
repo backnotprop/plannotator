@@ -250,6 +250,7 @@ describe.if(hasDom)("Mod+E edit-mode toggle", () => {
     if (!content) throw new Error("CodeMirror content DOM did not render");
     expect(saveLabel()).toBe("Saved");
 
+    // Dirty the buffer through a CodeMirror dispatch: happy-dom intermittently never re-delivers MutationObserver records (CI flake).
     const backRef = content as unknown as {
       cmTile?: { view?: { state: { doc: { toString(): string } }; dispatch(spec: unknown): void } };
       cmView?: { view?: { state: { doc: { toString(): string } }; dispatch(spec: unknown): void } };

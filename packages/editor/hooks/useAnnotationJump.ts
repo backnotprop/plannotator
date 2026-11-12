@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { normalizeBrowserPath } from '../sourceDocumentPaths';
 
+// Past the 100ms timeout on which useLinkedDoc re-applies restored highlights.
 const SELECT_AFTER_COMMIT_MS = 160;
 /** A navigation that never commits must not leave a selection pending forever. */
 const COMMIT_TIMEOUT_MS = 5000;
 
-/** Path equality across spellings (Windows separators, doubled slashes). */
+/** Path equality across spellings: on Windows the panel and the host spell the same path differently. */
 function samePath(a: string | null | undefined, b: string | null | undefined): boolean {
   if (a == null || b == null) return false;
   return normalizeBrowserPath(a) === normalizeBrowserPath(b);

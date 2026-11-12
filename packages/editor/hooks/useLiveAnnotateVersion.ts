@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { noteServerSessionMismatch, withServerSession } from '@plannotator/ui/utils/serverSession';
 import type { VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
 
+// Agents write a file in bursts; waiting for it to settle keeps one version per burst.
 export const LIVE_VERSION_SETTLE_MS = 750;
 
 export interface LiveAnnotateVersion {

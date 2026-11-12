@@ -109,6 +109,7 @@ async function mount(props: HarnessProps): Promise<FakeContext> {
   return ctx;
 }
 
+// Deliberately not wrapped in act(): act() holds React's commit until the call settles, and a navigating call waits for that commit (deadlock).
 async function call(ctx: FakeContext, name: string, input: unknown): Promise<any> {
   const response = await ctx.tools.get(`plannotator.${name}`)!.execute(input, { signal: new AbortController().signal });
   await act(async () => {});

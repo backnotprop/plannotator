@@ -1,9 +1,6 @@
 import { useEffect } from 'react';
 
-/**
- * The diff viewer can't render for B (no diff blocks), but the stale `isPlanDiffActive` flag would
- * otherwise keep the annotation toolstrip and sticky header hidden until the user pressed Escape.
- */
+/** Leave the diff view when the document has no baseline; a stale active flag would keep the toolstrip hidden. */
 export function usePlanDiffViewAutoExit(
   active: boolean,
   hasPreviousVersion: boolean,

@@ -16,6 +16,7 @@ export interface DocumentTitleInput {
   sourceFilePath?: string | null;
   activeFile?: string | null;
   folderPath?: string | null;
+  // `index` is 0-based; -1 means the open file is not in the bundle.
   bundle?: { index: number; total: number } | null;
   liveAppUrl?: string | null;
   planHeading?: string | null;
@@ -33,6 +34,7 @@ export interface DocumentHeaderName {
 const URL_PATTERN = /^https?:\/\//i;
 const HEADING_MAX = 80;
 
+// Only these inline tags are stripped, so `Result<T>` or `Vec<String>` keep their angle brackets.
 const HTML_TAG = /<\/?(?:a|abbr|b|bdi|bdo|br|cite|code|del|dfn|em|i|img|ins|kbd|mark|q|s|samp|small|span|strong|sub|sup|time|u|var|wbr)(?:\s[^<>]*)?\/?>|<!--[\s\S]*?-->/gi;
 
 function graphemes(text: string): string[] {
@@ -56,6 +58,7 @@ export function urlDisplayName(url: string): string {
   }
 }
 
+// Host and path only; a query shows as `?…`, with no credentials or fragment, so a token never reaches the screen.
 export function scrubbedUrl(url: string): string {
   let hasQuery: boolean;
   try {

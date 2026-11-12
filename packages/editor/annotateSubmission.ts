@@ -28,6 +28,7 @@ export interface AnnotateApprovalBodyInput {
   feedbackScope?: "message" | "messages";
 }
 
+// CLI plain-mode output and strict-gate exit codes depend on these exact bytes.
 export const ANNOTATE_NO_FEEDBACK_SENTENCE =
   "User reviewed the document and has no feedback.";
 

@@ -29,6 +29,7 @@ export function planDocumentDraftWrites(input: {
   const seen = new Set<string>();
   for (const [path, state] of input.documents) {
     if (input.rootPath && path === input.rootPath) continue;
+    // Never write a document whose saved copy has not been merged in yet: it would replace earlier comments.
     if (!input.loaded.has(path)) continue;
     seen.add(path);
     const next = serialize(state);

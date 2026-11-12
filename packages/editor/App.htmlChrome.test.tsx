@@ -376,8 +376,8 @@ describe.if(hasDom)("HTML annotate chrome (tools toggle + pen toggle)", () => {
   });
 
   test("the restore commit never writes stale pre-restore values to the cookie", async () => {
-    // The chrome writer runs in the same commit as the restore effect, before the restored state
-    // has landed.
+    // The chrome writer runs in the same commit as the restore effect, before the restored state has
+    // landed; saving there would briefly invert the remembered state in the cookie.
     const chromeWrites: string[] = [];
     setStorageBackend({
       getItem: (key) => memory.get(key) ?? null,

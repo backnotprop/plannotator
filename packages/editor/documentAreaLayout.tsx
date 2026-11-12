@@ -1,3 +1,4 @@
+/** Keep as TSX: index.css scans root *.tsx files for the Tailwind classes emitted here. */
 export function resolveDocumentAreaClassName(options: Readonly<{
   isHtmlSurface: boolean;
   gridEnabled: boolean;

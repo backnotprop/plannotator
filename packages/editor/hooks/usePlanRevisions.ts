@@ -12,6 +12,7 @@ export interface PlanRevisionSnapshot {
 
 export type PlanRevisionBlocker = 'edits' | 'linked-document' | 'composer' | null;
 
+// Composers live in the viewer and portals, not App state, so they are found in the DOM.
 export const PLAN_REVISION_COMPOSER_SELECTOR =
   '[data-comment-popover="true"], .annotation-toolbar, [data-diagram-composer], [data-decision-note-input], [data-decision-note-composer]';
 

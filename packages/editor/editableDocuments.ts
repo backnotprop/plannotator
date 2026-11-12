@@ -633,6 +633,7 @@ export function useEditableDocuments() {
   const activeDocument = useMemo(() => getActiveDocument(), [getActiveDocument, version]);
   const fileEditStatuses = useMemo(() => getFileEditStatuses(), [getFileEditStatuses, version]);
 
+  // Keep this object's identity stable until `version` changes: consumers use it in effect deps.
   return useMemo(() => ({
     version,
     activeDocument,

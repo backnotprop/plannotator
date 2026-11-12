@@ -4,6 +4,7 @@ import {
   type AnnotateAgentTerminalSide,
 } from '@plannotator/ui/utils/annotateAgentTerminal';
 
+// The panel is `hidden lg:flex`: below `lg` it has no box, so layout must not reserve width for it.
 export const AGENT_TERMINAL_LG_BREAKPOINT = 1024;
 
 export type AgentTerminalLayoutOptions = {

@@ -5,5 +5,6 @@ export function shouldPrintOnKey(event: Pick<KeyboardEvent, 'key' | 'metaKey' | 
   const tag = (event.target as HTMLElement | null)?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return false;
   if (blocked) return false;
+  // In the VS Code panel Cmd+P is VS Code's Quick Open (forwarded to us).
   return !isVSCodePanel();
 }
