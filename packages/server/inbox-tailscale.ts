@@ -35,6 +35,15 @@
  * Tailscale missing, stopped or signed out never stops the Inbox: the reason
  * is kept for Settings, inbox.json and stderr.
  *
+ * Publishing again by itself. While the switch is on and the last publish
+ * failed, a timer looks again: with Tailscale not ready then (not running,
+ * signed out, starting, or nobody to let in), `tailscale status --json` alone
+ * every 30 s, backing off to every 5 minutes, and the publish as soon as it
+ * is ready; with Tailscale ready and the publish still failing (a mapping on
+ * the port, a refused serve), the whole publish once every 30 minutes. It
+ * stops once published, switched off, stopping, or with no `tailscale` CLI
+ * at all; no timer runs otherwise. A publish it makes tells the windows.
+ *
  * The prototype relay (`openRelay`, inbox-live-relay.ts). A question's
  * running-app prototype is proxied on a loopback port of its own, which a
  * phone cannot reach. While published, the owner's first open of one makes a
@@ -66,6 +75,7 @@ import {
   TAILSCALE_CLI_TIMEOUT_MS,
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunner,
+  type TailscaleRunResult,
 } from "@plannotator/shared/tailscale";
 import {
   enableServeSteps,
@@ -79,12 +89,37 @@ import {
   type TailscaleStep,
   type TailscaleSteps,
 } from "./tailscale-serve";
-import { runTailscaleQuietly } from "./inbox-pairing-checks";
+import { parseTailscaleBackend, runTailscaleQuietly } from "./inbox-pairing-checks";
 import { syncSection } from "./inbox-perf";
 import { INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE } from "./inbox-tailnet-door";
 
 /** The ports the device door may take (inbox-tailnet-door.ts, 8443 to 8450): the window's mapping never takes one. */
 export const isDoorTailnetPort = (port: number): boolean => INBOX_TAILNET_HTTPS_PORTS.includes(port);
+
+/**
+ * Publishing again by itself while the switch is on and the last publish failed. Tailscale not ready: a status
+ * read after each wait in turn, the last one repeated. Ready but the publish still failed: the next try after
+ * `stuckMs`, since the reason (a mapping on the port, a refused serve) is not Tailscale's state.
+ */
+export const INBOX_TAILSCALE_REPUBLISH = {
+  waitMs: [30_000, 60_000, 120_000, 240_000, 300_000] as readonly number[],
+  stuckMs: 30 * 60_000,
+};
+
+/** The retry's clock: tests pass their own. The default never keeps the process alive. */
+export interface InboxTailscaleTimers {
+  set: (fn: () => void, ms: number) => unknown;
+  clear: (handle: unknown) => void;
+}
+
+const defaultTimers: InboxTailscaleTimers = {
+  set: (fn, ms) => {
+    const timer = setTimeout(fn, ms);
+    timer.unref?.();
+    return timer;
+  },
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
 
 /** A serve route that points at the window's own port: it hands the tailnet the whole Inbox, `/mcp` included. */
 export interface InboxTailnetExposure {
@@ -129,6 +164,10 @@ export interface InboxTailscaleContext {
   maxRequestBodySize?: number;
   /** The tailnet listener just opened: the window starts compressing its page for it (#2032). */
   onListen?: () => void;
+  /** Published by itself, after an earlier publish failed (Tailscale came back): the windows hear the new state. */
+  onRepublished?: () => void;
+  /** Tests: the retry's clock. Default: unref'd timers. */
+  timers?: InboxTailscaleTimers;
 }
 
 /** The words for a route that exposes the window's own port, for Settings and stderr. */
@@ -374,9 +413,34 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     return `Tailscale could not publish the Inbox. ${detail}`;
   };
 
+  // ── Publishing again by itself (INBOX_TAILSCALE_REPUBLISH) ──
+
+  const timers = context.timers ?? defaultTimers;
+  let retryTimer: unknown = null;
+  /** "wait": Tailscale was not ready at the last try, so only its status is read. "stuck": it was, and the publish failed anyway. */
+  let retryMode: "wait" | "stuck" = "wait";
+  let retryStep = 0;
+  /** Tailscale was ready (`ready`) when the last publish was tried: its failure was for another reason. */
+  let triedReady = false;
+  /** No `tailscale` command at all: nothing to wait for, as before this retry existed. */
+  let cliMissing = false;
+
+  /** Running, and someone may be let in (the owner, or a login in `inboxTailscaleAllow`). */
+  const ready = (status: TailscaleRunResult): boolean => {
+    if (status.error || status.status !== 0) return false;
+    const backend = parseTailscaleBackend(status.stdout);
+    if (backend.state !== "running") return false;
+    return backend.login !== null || resolveInboxTailscaleAllow(loadConfig()).length > 0;
+  };
+  const observe = (status: TailscaleRunResult) => {
+    cliMissing = (status.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+    triedReady = ready(status);
+  };
+
   /** Who may use the published Inbox: the owner of this machine plus the allowlist. Throws the reason when nobody may. */
   const readAllowed = function* (): TailscaleSteps<{ owner: string | null; allowed: string[] }> {
     const status = yield step(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+    observe(status);
     if (status.error || status.status !== 0) throw new Error(describeTailscaleFailure(status));
     const identity = parseTailscaleSelfIdentity(status.stdout);
     if (!identity) throw new Error("Could not read `tailscale status --json`.");
@@ -417,8 +481,9 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     return true;
   };
 
-  /** Publish the mapping. Never throws: a failure is kept as `error`. */
-  const publish = function* (): TailscaleSteps<boolean> {
+  /** Publish the mapping. Never throws: a failure is kept as `error`. `seenReady`: Tailscale was just read as ready. */
+  const publish = function* (seenReady = false): TailscaleSteps<boolean> {
+    triedReady = seenReady;
     const port = context.port();
     if (!(yield* reconcile())) return false;
     try {
@@ -474,7 +539,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * then publish when the switch is on. A take-down that fails keeps the
    * record (never forgotten), and nothing is published over it this run.
    */
-  const start = () =>
+  const start = () => {
+    triedReady = false;
     runTailscaleSteps(
       (function* () {
         if (!(yield* reconcile())) return;
@@ -483,6 +549,62 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       })(),
       run,
     );
+    afterAttempt();
+  };
+
+  const cancelRetry = () => {
+    if (retryTimer !== null) timers.clear(retryTimer);
+    retryTimer = null;
+  };
+  /** Worth looking again: on, not published, not stopping, and a `tailscale` to ask. */
+  const retryWanted = () => !stopped && !state.url && !cliMissing && resolve().on;
+  const arm = (ms: number) => {
+    cancelRetry();
+    retryTimer = timers.set(() => {
+      retryTimer = null;
+      void serial(retry).catch(() => {});
+    }, ms);
+  };
+  /** After every publish (or a change that may have made one): the next look, or none. */
+  const afterAttempt = () => {
+    cancelRetry();
+    if (!retryWanted()) return;
+    if (triedReady) {
+      retryMode = "stuck";
+      arm(INBOX_TAILSCALE_REPUBLISH.stuckMs);
+    } else {
+      retryMode = "wait";
+      retryStep = 0;
+      arm(INBOX_TAILSCALE_REPUBLISH.waitMs[0]!);
+    }
+  };
+  /** One look, one at a time with the switch's changes. Quiet while Tailscale is not ready: nothing saved, nothing printed. */
+  const retry = async () => {
+    if (!retryWanted()) return;
+    if (retryMode === "wait") {
+      let status: TailscaleRunResult;
+      try {
+        status = await runAsync(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+      } catch (error) {
+        status = { status: null, stdout: "", stderr: "", error: error instanceof Error ? error : new Error(String(error)) };
+      }
+      cliMissing = (status.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+      if (!retryWanted()) return;
+      if (!ready(status)) {
+        const waits = INBOX_TAILSCALE_REPUBLISH.waitMs;
+        retryStep = Math.min(retryStep + 1, waits.length - 1);
+        arm(waits[retryStep]!);
+        return;
+      }
+    }
+    let published = false;
+    try {
+      published = await runTailscaleStepsAsync(publish(true), runAsync);
+    } finally {
+      afterAttempt();
+    }
+    if (published) context.onRepublished?.();
+  };
 
   // ── The request paths' changes, one at a time ──
 
@@ -515,6 +637,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    */
   const stop = (): { failedPort: number | null } => {
     stopped = true;
+    cancelRetry();
     return stopNow();
   };
   const stopNow = (): { failedPort: number | null } => {
@@ -538,7 +661,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
 
   /** The window's switch: saved to config.json, applied now. `via`: the request came through the tailnet. */
   const set = (on: boolean, options: { via?: "local" | "tailnet"; replaceExposed?: boolean } = {}): Promise<InboxTailscaleState> =>
-    serial(() => runTailscaleStepsAsync(setSteps(on, options), runAsync));
+    serial(() => runTailscaleStepsAsync(setSteps(on, options), runAsync).finally(afterAttempt));
   const setSteps = function* (on: boolean, options: { via?: "local" | "tailnet"; replaceExposed?: boolean }): TailscaleSteps<InboxTailscaleState> {
     const env = parseInboxTailscaleEnv();
     if (env !== undefined) {
@@ -584,7 +707,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
           return snapshot();
         })(),
         runAsync,
-      ),
+      ).finally(afterAttempt),
     );
 
   /**
@@ -652,6 +775,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     state: snapshot,
     /** Published only because this run was started (or asked) with `--tailscale`: a restart must pass it on. */
     runOnly: () => runFlag && resolve().source === "flag",
+    /** A retry is waiting to look again (tests). */
+    retrying: () => retryTimer !== null,
     /** The tailnet-only listener's port while published (tests). */
     listenerPort: () => (listener ? (listener.port as number) : null),
     /**

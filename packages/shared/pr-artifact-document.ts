@@ -55,10 +55,7 @@ export interface PRArtifactContentOptions {
   readonly sourceUrl?: string;
   /** Valid single-range header forwarded for video seeking. */
   readonly range?: string;
-  /** Where a redirect may land, on top of the usual rule; absent: any public host. */
   readonly followRedirect?: (next: URL) => boolean;
-  /** Send the sign-in only to the first request's origin, never across a redirect. */
-  readonly authOnRequestedOriginOnly?: boolean;
 }
 
 function contextMarkdown(context: PRContext): readonly string[] {
@@ -301,10 +298,31 @@ function isPrivateNetworkUrl(url: URL): boolean {
     || PRIVATE_IPV6_RE.test(host);
 }
 
-function mayFollowProviderRedirect(currentUrl: URL, nextUrl: URL): boolean {
+const GITHUB_REDIRECT_ORIGINS = new Set([
+  'https://github.com',
+  'https://raw.githubusercontent.com',
+  'https://user-images.githubusercontent.com',
+  'https://private-user-images.githubusercontent.com',
+]);
+const GITHUB_UPLOAD_BUCKET_RE = /^github-production-user-asset-[0-9a-z]+\.s3\.amazonaws\.com$/;
+
+// github.com redirects stay on GitHub's hosts and its S3 upload bucket. GitLab and GitHub Enterprise
+// object storage hand off to a host each instance configures, so there only public https is checked.
+function mayFollowProviderRedirect(currentUrl: URL, nextUrl: URL, metadata: PRMetadata): boolean {
   if (currentUrl.protocol === 'https:' && nextUrl.protocol !== 'https:') return false;
-  return (nextUrl.protocol === 'https:' || nextUrl.protocol === 'http:')
-    && !isPrivateNetworkUrl(nextUrl);
+  if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') return false;
+  if (nextUrl.username || nextUrl.password || isPrivateNetworkUrl(nextUrl)) return false;
+  if (metadata.platform !== 'github' || providerOrigin(metadata) !== 'https://github.com') return true;
+  if (nextUrl.origin.toLowerCase() === 'https://media.githubusercontent.com') {
+    // Only Git LFS's hand-off for this repository's own file.
+    const [kind, owner, repo] = nextUrl.pathname.split('/').filter(Boolean);
+    return currentUrl.origin.toLowerCase() === 'https://raw.githubusercontent.com'
+      && kind === 'media'
+      && owner?.toLowerCase() === metadata.owner.toLowerCase()
+      && repo?.toLowerCase() === metadata.repo.toLowerCase();
+  }
+  return GITHUB_REDIRECT_ORIGINS.has(nextUrl.origin.toLowerCase())
+    || (nextUrl.protocol === 'https:' && nextUrl.port === '' && GITHUB_UPLOAD_BUCKET_RE.test(nextUrl.hostname));
 }
 
 async function providerAuthHeaders(runtime: PRRuntime, metadata: PRMetadata): Promise<Record<string, string>> {
@@ -523,6 +541,7 @@ async function fetchArtifactContent(
     ? gitlabUploadApiUrl(requestedUrl, metadata)
     : null;
   let currentUrl = providerContentUrl(requestedUrl, metadata);
+  const firstOrigin = currentUrl.origin;
   try {
     for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
       const response = await fetch(currentUrl, {
@@ -532,8 +551,8 @@ async function fetchArtifactContent(
           Accept: '*/*',
           'User-Agent': 'Plannotator artifact review',
           ...(isValidRangeHeader(options.range) ? { Range: options.range } : {}),
-          ...(shouldSendProviderAuth(currentUrl, metadata)
-            && (!options.authOnRequestedOriginOnly || currentUrl.origin === requestedUrl.origin) ? providerHeaders : {}),
+          // The token never crosses a redirect: GitHub's signed S3 URL needs none.
+          ...(shouldSendProviderAuth(currentUrl, metadata) && currentUrl.origin === firstOrigin ? providerHeaders : {}),
         },
       });
       if (REDIRECT_STATUSES.has(response.status)) {
@@ -543,7 +562,7 @@ async function fetchArtifactContent(
           throw new PRArtifactDocumentError('Artifact document redirected too many times', 502);
         }
         const nextUrl = new URL(location, currentUrl);
-        if (!mayFollowProviderRedirect(currentUrl, nextUrl) || (options.followRedirect && !options.followRedirect(nextUrl))) {
+        if (!mayFollowProviderRedirect(currentUrl, nextUrl, metadata) || (options.followRedirect && !options.followRedirect(nextUrl))) {
           throw new PRArtifactDocumentError('Artifact document redirected to a blocked address', 403);
         }
         // A sign-in hop returns HTTP 200 with a login/SSO page. Following it would render
@@ -606,15 +625,20 @@ async function fetchArtifactContent(
   }
 }
 
-/** Fetch bounded media or a derived document resource with provider authentication. */
-export function fetchPRArtifactContent(
+const MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'video/mp4', 'video/quicktime', 'video/webm']);
+
+/**
+ * Fetch bounded media or a derived document resource with provider authentication.
+ * A request without `sourceUrl` is a picture or video and must answer as one.
+ */
+export async function fetchPRArtifactContent(
   runtime: PRRuntime,
   metadata: PRMetadata,
   context: PRContext,
   rawUrl: string,
   options: PRArtifactContentOptions = {},
 ): Promise<PRArtifactContent> {
-  return fetchArtifactContent(
+  const content = await fetchArtifactContent(
     runtime,
     metadata,
     context,
@@ -622,6 +646,10 @@ export function fetchPRArtifactContent(
     MAX_MEDIA_BYTES,
     options,
   );
+  if (options.sourceUrl === undefined && !MEDIA_TYPES.has(content.contentType.toLowerCase())) {
+    throw new PRArtifactDocumentError('Artifact is not a picture or video', 415);
+  }
+  return content;
 }
 
 /** Fetch one active PR/MR text document without exposing provider credentials to the browser. */

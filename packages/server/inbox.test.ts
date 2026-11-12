@@ -895,6 +895,13 @@ describe("the window's routes: settings, restart, favicon", () => {
       // A choice made in plan review (config.json written by POST /api/config) is what the Inbox reads.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "totman" }));
       expect(await read()).toBe("totman");
+      // The installed app's manifest and touch icon follow the same choice (inbox-app-icons.ts).
+      const manifest = await fetch(`${base}/manifest.webmanifest`);
+      expect(manifest.headers.get("content-type")).toBe("application/manifest+json; charset=utf-8");
+      const [face] = (await manifest.json()).icons as { src: string }[];
+      expect(face.src).toBe("/app-icon/face-256.png");
+      const touch = new Uint8Array(await (await fetch(`${base}/apple-touch-icon.png`)).arrayBuffer());
+      expect(touch).toEqual(new Uint8Array(await (await fetch(`${base}${face.src}`)).arrayBuffer()));
       // A config.json that still says "classic" (0.28.57's P): read as unset, Glass, and the file is left as it is.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "classic" }));
       expect(await read()).toBe("glass");

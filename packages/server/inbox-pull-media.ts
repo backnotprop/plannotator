@@ -38,7 +38,6 @@ function fetchMedia(read: PullText, metadata: GithubPRMetadata, rawUrl: string, 
     ...(range ? { range } : {}),
     // GitHub hands the bytes to its S3 bucket: follow only there, and never with the person's token.
     followRedirect: isGitHubAttachmentRedirect,
-    authOnRequestedOriginOnly: true,
   });
 }
 
@@ -76,8 +75,8 @@ export async function pullMediaResponse(pulls: Pick<InboxPulls, "text">, key: st
     });
   } catch (cause) {
     if (!(cause instanceof PRArtifactDocumentError)) throw cause;
-    const code = cause.status === 403 ? "media_not_allowed" : cause.status === 413 ? "media_too_large" : cause.status === 504 ? "media_timeout" : cause.status === 401 ? "media_sign_in" : "media_failed";
-    return refuse(cause.status === 401 || cause.status === 403 || cause.status === 413 || cause.status === 504 ? cause.status : 502, code, cause.message);
+    const code = cause.status === 403 ? "media_not_allowed" : cause.status === 413 ? "media_too_large" : cause.status === 415 ? "media_not_media" : cause.status === 504 ? "media_timeout" : cause.status === 401 ? "media_sign_in" : "media_failed";
+    return refuse([401, 403, 413, 415, 504].includes(cause.status) ? cause.status : 502, code, cause.message);
   }
 }
 
