@@ -95,7 +95,7 @@ function chatPurifyConfig(rich: boolean) {
   };
 }
 
-/** Everything the sanitizer must take out. */
+/** Everything the sanitizer must take out; `isSupported` is no proof, since a partial DOM reports true and lets scripts through. */
 const PROOF_INPUT =
   '<a href="javascript:alert(1)" class="c" data-c="1" onclick="alert(2)">kept</a>' +
   '<img src="x" onerror="alert(3)"><script>alert(4)</script>';
@@ -106,7 +106,7 @@ const RICH_PROOF_FAILED = /javascript:|class=|data-c|onclick|onerror|<script|typ
 
 type Sanitize = (html: string) => string;
 
-/** Counted here because every image passes here, from markdown and from a raw tag alike. */
+/** Counted here because every image passes here. `MAX_HTML_CHARS` does not bound the network: 255 KB of `<img>` is 15,000 requests with the host's cookies. */
 const MAX_IMAGES_IN_TEXT = 100;
 
 /** Firefox reads `loading` only if it comes before `src` (bug 1647077). */
@@ -119,6 +119,7 @@ function loadWhenNear(image: Element): void {
 
 function buildSanitizer(rich: boolean): Sanitize | null {
   if (typeof window === 'undefined') return null;
+  // A private instance: a hook on the shared one would reach every other caller.
   const purifier = DOMPurify(window);
   let images = 0;
   purifier.addHook('afterSanitizeAttributes', (node) => {

@@ -972,6 +972,7 @@ const SimpleCodeBlock: React.FC<{ block: Block }> = ({ block }) => {
   );
 };
 
+// Plan content is attacker-influenced (source comments, READMEs, fetched URLs): never render these schemes as live links.
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
 function sanitizeLinkUrl(url: string): string | null {
   if (DANGEROUS_PROTOCOL.test(url)) return null;

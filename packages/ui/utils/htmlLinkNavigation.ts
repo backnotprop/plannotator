@@ -123,6 +123,7 @@ function resolveRelative(
 	};
 }
 
+// Lexical check for the UI only: the asset route refuses `..` and checks the realpath; the server's check is the one that holds.
 function resolveImage(
 	path: string,
 	label: string,

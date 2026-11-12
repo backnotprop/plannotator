@@ -231,6 +231,7 @@ export function useCodeAnnotationDraft({
     const seq = switchSeqRef.current;
     const persist = async () => {
       if (targetChangedRef.current) return;
+      // The switched-onto target's draft is still loading: writing now would overwrite it unread.
       if (awaitingTargetLoadRef.current) {
         skippedWhileAwaitingRef.current = true;
         return;

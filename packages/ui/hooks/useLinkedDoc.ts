@@ -612,6 +612,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   ): boolean => {
     const wanted = normalizeBrowserPath(filepath);
 
+    // The active document's annotations live in host state, not the cache: a write here would be overwritten.
     if (linkedDoc && wanted === normalizeBrowserPath(linkedDoc.filepath)) return false;
 
     let cacheKey: string | undefined;

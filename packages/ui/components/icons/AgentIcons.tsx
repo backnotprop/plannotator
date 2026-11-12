@@ -19,10 +19,8 @@ export function CodexIcon({ className }: { className?: string }) {
   return <img src={CODEX_DATA_URI} className={className} alt="" aria-hidden="true" draggable={false} />;
 }
 
-// Pi brand mark: the pi.dev logo (https://pi.dev/logo.svg), the same paths as
-// ProviderIcons.tsx's PiIcon and apps/marketing/public/assets/icon-pi.svg. Its
-// own three colours in every theme; the viewBox crops pi.dev's 800-unit canvas
-// to the mark plus an even margin so it sits level with the other marks.
+// Pi brand mark (pi.dev logo): its own three colours in every theme; the viewBox crops the
+// 800-unit canvas to the mark plus an even margin so it sits level with the other marks.
 export function PiIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="130 130 540 540" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
@@ -56,8 +54,7 @@ export function CursorIcon({ className }: { className?: string }) {
   );
 }
 
-// OpenCode brand mark — extracted from apps/marketing/public/assets/icon-opencode-dark.svg
-// (same vector ProviderIcons.tsx uses; currentColor so it adapts to theme).
+// OpenCode brand mark; currentColor so it adapts to theme.
 export function OpenCodeIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">

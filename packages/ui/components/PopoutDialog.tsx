@@ -42,6 +42,7 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
   const handleOpenChange = useCallback(
     (next: boolean, eventDetails: Dialog.Root.ChangeEventDetails) => {
       if (next) return;
+      // Annotation toolbars and popovers portal outside the dialog; interacting with them must not dismiss it.
       if (eventDetails.reason === 'outside-press' || eventDetails.reason === 'focus-out') {
         const event = eventDetails.event as Event | undefined;
         const candidates = [

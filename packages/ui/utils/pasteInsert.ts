@@ -107,6 +107,7 @@ export interface PasteEngineNavigator {
   userAgentData?: { brands?: ReadonlyArray<{ brand: string; version: string }>; platform?: string } | null;
 }
 
+// Chromium 155 added the check; 157 ships the fix.
 const AFFECTED_CHROMIUM = new Set([155, 156]);
 
 /**

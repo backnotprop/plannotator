@@ -70,6 +70,7 @@ export function setSkillCatalogExportRegistration(on: boolean): void {
 
 let cached: { at: number; skills: SkillCatalogEntry[] } | null = null;
 let inflight: Promise<SkillCatalogEntry[]> | null = null;
+// Bumped by reset: a request resolving after a reset or supersede must not fill the cache or register the catalog.
 let generation = 0;
 
 /** Fetch the catalog (deduped in-flight, cached for CATALOG_TTL_MS). */

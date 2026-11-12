@@ -12,10 +12,7 @@ export const CodexIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h
   <img src={codexPng} alt="" className={`${className} rounded-sm`} />
 );
 
-/**
- * Pi icon: the pi.dev logo (https://pi.dev/logo.svg), the same file as
- * apps/marketing/public/assets/icon-pi.svg.
- */
+/** Pi icon: the pi.dev logo (https://pi.dev/logo.svg). */
 export const PiIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="130 130 540 540" className={className}>
     <path fill="#F09082" d="M165.29 165.29H517.36V400H400V282.65H165.29Z"/>
@@ -24,7 +21,7 @@ export const PiIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4'
   </svg>
 );
 
-/** OpenCode icon — extracted from apps/marketing/public/assets/icon-opencode-dark.svg */
+/** OpenCode icon. */
 export const OpenCodeIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" className={className}>
     <path d="M3 32V0h26v32zM22 7H10v18h12z" fill="currentColor"/>

@@ -8,6 +8,8 @@ import {
   LIVE_BRIDGE_BOOTSTRAP,
 } from "../components/html-viewer/bridge-script";
 
+// The `.asset.js` name is deliberate: a plain `bridge-script.js` beside the `.ts` would win Vite's extension probe
+// (`.js` before `.ts`) for `./bridge-script` imports and break every consumer build.
 export const BRIDGE_ASSET_FILENAME = "bridge-script.asset.js";
 export const BRIDGE_LITE_FILENAME = "bridge-script.lite.ts";
 

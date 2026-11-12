@@ -206,7 +206,8 @@ function rewriteRelativeRefs(
 }
 
 // The inner HTML is set imperatively (not via dangerouslySetInnerHTML) so that React's
-// reconciliation never replaces the rendered subtree on re-render.
+// reconciliation never replaces the rendered subtree: `<details open>` is DOM-owned state that a
+// re-set innerHTML would collapse.
 const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor }) => {
   const ref = useRef<HTMLDivElement>(null);
   const resolveLocalLink = useLocalLinkResolver();

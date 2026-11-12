@@ -56,7 +56,8 @@ const ThemeProviderContext = createContext<ThemeProviderState>({
 
 /**
  * Held on <html> while a theme change lands. theme.css sets every transition's duration and
- * delay to 0 s under it, so a switch paints its new colours in one frame.
+ * delay to 0 s under it, so a switch paints its new colours in one frame (the global 150 ms colour
+ * transition otherwise froze the page for a third of a second).
  */
 export const THEME_SWITCHING_CLASS = 'pn-theme-switching';
 
@@ -214,8 +215,7 @@ export function ThemeProvider({
   const preferredModeRef = useRef(preferredMode);
   preferredModeRef.current = preferredMode;
 
-  // [P3 fix] Apply theme class synchronously during initialization to prevent flash of unstyled
-  // content.
+  // Apply theme class synchronously during initialization to prevent flash of unstyled content.
   if (typeof window !== 'undefined') {
     applyThemeClasses(colorTheme, resolvedMode);
     markRootPlatform();

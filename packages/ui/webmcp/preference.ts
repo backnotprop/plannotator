@@ -1,3 +1,5 @@
+// Kept out of the settings registry on purpose: its default would be seeded into a cookie for every user,
+// whether or not their browser has WebMCP.
 import { useSyncExternalStore } from 'react';
 import { storage } from '../utils/storage';
 

@@ -307,6 +307,8 @@ export function useAnnotationDraft({
 
   const latestRef = useRef({ annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments, getSavedFileChanges });
   latestRef.current = { annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments, getSavedFileChanges };
+  // The submitted gate is read in the effect but is deliberately not a trigger: a draft just deleted on submit
+  // must not be recreated unless the user changes feedback again.
   const canPersist = isApiMode && !isSharedSession && !submitted;
   const canPersistRef = useRef(canPersist);
   canPersistRef.current = canPersist;
