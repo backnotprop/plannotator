@@ -24,6 +24,7 @@ import { noteReviews, rangeWord } from '../contextNotes/model';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
+import { LaunchChoiceMeta } from './LaunchChoiceMeta';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
@@ -36,6 +37,8 @@ import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
+import { withPictures } from '../commentPictureFiles';
+import { CommentPictures, useCommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
 import { linkReplyFeedback, resolveReplyLink } from '../replyFileLinks';
 import { splitReplyFeedback } from '../replyFeedback';
@@ -601,6 +604,7 @@ export function MessageBody({
   // The files the reply's feedback names, as links (display only; replyFileLinks.ts).
   // Only the person's own message: an agent's text is drawn as it wrote it, whatever its headings say.
   const ownReply = message.author.kind === 'person';
+  const pictures = useCommentPictures();
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
@@ -1152,7 +1156,7 @@ export function MessageBody({
         suggestComment={comments?.suggest}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
-        allowImages={false}
+        allowImages={pictures}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
         // A click on a word of a message makes nothing (the owner, 2026-11-10): a thread is read and clicked
@@ -1432,8 +1436,8 @@ export interface ThreadPaneProps {
    */
   remote?: boolean | null;
   /**
-   * A tailnet guest's page (`tailnetGuest(settings)`): a launched agent's ⋯ has
-   * no Stop or Delete, as the server answers both `owner_only`.
+   * A tailnet guest's page (`tailnetGuest(settings)`): no thread PRs (they run this computer's `gh`), and the
+   * run line offers no Try again (starting an agent is the owner's).
    */
   guest?: boolean;
   /**
@@ -1792,13 +1796,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           copyAttach: attach
             ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
-          // A resting agent (no line) still runs in the background: Stop is offered then too. Never to a tailnet guest.
+          // A resting agent (no line) still runs in the background: Stop is offered then too.
           stop:
-            !guest && launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
+            launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
               ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null))
               : null,
-          // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
-          remove: phone || guest ? null : () => setConfirmDelete(true),
+          // On a phone too (owner ruling 2026-11-11: one person, the same app on every device).
+          remove: () => setConfirmDelete(true),
         }
       : null;
   // Archived (resolved). What an agent wrote after the archive line behaves as
@@ -4935,6 +4939,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const feedback = withSkillsBlock(annotationsFeedback, skills);
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(part.key) ?? [];
+        const files = withPictures(last ? uploads : [], own);
         requests.push({ messageId: target.message.id, input: {
           idempotency_key: sendKeys.current.get(part.key) ?? newUuid(),
           words: last ? words : '',
@@ -4946,7 +4951,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
           ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
           // The pasted files ride the reply that carries the words, as attachments.
-          ...(last && uploads.length > 0 ? { uploads } : {}),
+          ...(files.length > 0 ? { uploads: files } : {}),
           ...(tags.length > 0 ? { tags } : {}),
           // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
           // exactly these words when the `updated_at` they were saved as is not known here).
@@ -6289,6 +6294,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [reuseOffered, resolved, allFiles, box.open, reuseHeld],
   );
   return (
+    <CommentPictures thread={thread.thread_id} records={records}>
     <ReuseContext.Provider value={reuseApi}>
     <>
     <section
@@ -6534,6 +6540,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 <span data-launch-full="">Full permissions</span>
               </>
             )}
+            <LaunchChoiceMeta launch={launched} />
           </div>
         )}
         {confirmDelete && launched && (
@@ -6742,7 +6749,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} machine={machine} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} machine={machine} onChanged={onChanged} />
                   </div>
                 </article>,
               );
@@ -7733,6 +7740,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     )}
     </>
     </ReuseContext.Provider>
+    </CommentPictures>
   );
 }
 

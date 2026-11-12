@@ -672,11 +672,15 @@ export function inboxCommandBriefing(toolName: string = INBOX_TOOL_NAME): string
 
 /**
  * The most characters (UTF-16 code units, a string's `length`) a custom Inbox
- * reminder may hold. Longer text is refused when saved and ignored when read,
- * so the host falls back to the next text in line (the shared one, then the
- * default).
+ * reminder may hold: Claude Code's ceiling for hook text it puts in context
+ * (10,000 characters; past it the agent gets a file path and a 2,000-character
+ * preview), less room for the thread list a compaction adds (5 threads, under
+ * 1,000 characters). Longer text is refused when saved (the count says so)
+ * and, written by hand, ignored when read (Settings → Prompts says so), so
+ * the host falls back to the next text in line (the shared one, then the
+ * default). Through 0.28.61 it was 4,128, for no stated reason.
  */
-export const INBOX_REMINDER_MAX_CHARS = 4128
+export const INBOX_REMINDER_MAX_CHARS = 9000
 
 /**
  * The person's own reminder for a host, from config.json
@@ -1433,8 +1437,10 @@ export function inboxHandedAwayLine(to: string): string {
  * asked a redirected reply): the hosts' own names. An agent chooses its own
  * host string, and these lines go into another session's prompt, so any
  * other value reads as "another agent" (`agent` in the redirected line).
+ * Every name in core's INBOX_HOST_NAMES must be here (this contract may not
+ * import it); `connection-tags.test.ts` fails when one is missing.
  */
-export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code']
+export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code', 'DeepSeek Harness', 'T3 Code', 'Cline']
 
 /** An agent name a wake line carries: one of INBOX_WAKE_AGENT_NAMES (spacing folded), else '' (the caller says "another agent"). */
 function wakeName(value: unknown): string {

@@ -4250,6 +4250,11 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* Settings → Agents' "Scratch folders" path, while it is changed. */
 .ib-agrow .ib-agpath { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-agrow .ib-agpath:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+/* Settings → Agents' one-line rows (LaunchSettingsFile.tsx). */
+.ib-agrow .ib-aglv { display: flex; align-items: center; gap: 4px 10px; min-width: 0; }
+.ib-agrow .ib-aglv > .ib-agval { display: block; min-width: 0; max-width: 100%; }
+.ib-agrow .ib-aglv > .ib-agpath { flex: 1 1 200px; width: auto; }
+.ib-agrow .ib-aghint { flex: none; }
 .ib-agrow .ib-agsub { grid-column: 2 / 4; margin-top: -2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; color: var(--muted-foreground); }
 .ib-agrow .ib-agsub.ib-agwarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
 .pn-inbox .ib-agrow .ib-agsub svg.ib-ic { width: 13px; height: 13px; margin-top: 2px; flex: none; }
@@ -4273,6 +4278,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
   .ib-agrow .ib-agv { grid-column: 1 / 2; grid-row: 2; }
   .ib-agrow .ib-agr { grid-column: 2; grid-row: 1 / 3; }
   .ib-agrow .ib-agsub { grid-column: 1 / 3; }
+  .ib-agrow .ib-aglv { flex-wrap: wrap; }
   .ib-aghead { padding: 11px 12px 4px; flex-wrap: wrap; }
   .ib-aghead .ib-agvia { flex-basis: 100%; order: 3; margin-left: 40px; margin-top: -4px; }
 }
@@ -4732,6 +4738,18 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 /* To as a sentence: "New Claude Code session ▾ in <project> ▾". */
 .ib-cp-startin { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .ib-cp-in { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+/* Compose's model and effort button and menu (compose/LaunchChoiceMenu.tsx). */
+.pn-inbox .ib-cp-tobtn.ib-cp-lchbtn { align-self: center; gap: 4px; height: 30px; padding: 5px 7px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.pn-inbox .ib-cp-tobtn.ib-cp-lchbtn:hover, .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn[aria-expanded="true"] { color: var(--foreground); }
+.ib-cp-lchbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cp-picker.ib-cp-lch { left: auto; right: 14px; width: min(400px, calc(100% - 28px)); }
+.ib-cp-lchcols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 1px solid var(--ib-line); }
+.ib-cp-list.ib-cp-lchcol { grid-template-columns: minmax(0, 1fr) 16px; }
+.pn-inbox .ib-cp-opt.ib-cp-lchopt { width: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); text-align: left; cursor: pointer; }
+.pn-inbox .ib-cp-opt.ib-cp-lchopt:hover, .pn-inbox .ib-cp-opt.ib-cp-lchopt:focus-visible { background: color-mix(in oklch, var(--muted) 80%, transparent); outline: none; }
+:root.light .pn-inbox .ib-cp-opt.ib-cp-lchopt:is(:hover, :focus-visible) { background: var(--muted); }
+.ib-cp-lchopt .ib-cp-op { display: flex; gap: 0.4em; align-items: baseline; }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
@@ -5746,6 +5764,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-tg-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 2px 12px 8px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); min-width: 0; }
 .ib-tg-mode > svg { flex: none; }
 .ib-tg-mode > span { min-width: 0; overflow-wrap: anywhere; }
+/* Long words (many tags, long names) wrap beside the icon instead of leaving it on a line of its own. */
+.ib-tg-mode > span[data-tag-mode-words] { max-width: calc(100% - 20px); }
 .ib-tg-mode b { font-weight: 550; color: var(--foreground); }
 .ib-tg-mode-opt { display: inline-flex; align-items: center; gap: 6px; }
 .pn-inbox .ib-tg-mode-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 550; color: var(--primary); cursor: pointer; border-radius: 4px; }

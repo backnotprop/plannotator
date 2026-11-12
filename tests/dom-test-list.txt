@@ -152,6 +152,7 @@ packages/inbox/decisionAsk.test.tsx
 packages/inbox/decisionData.test.tsx
 packages/inbox/settingsStorageActivity.test.tsx
 packages/inbox/composeTrust.test.tsx
+packages/inbox/composeFirstStart.test.tsx
 packages/inbox/composeEscape.test.tsx
 packages/inbox/openInTerminal.test.tsx
 packages/inbox/runTrustHowto.test.tsx
@@ -702,3 +703,4 @@ packages/inbox/agents/setAgentIcons.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
+packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx

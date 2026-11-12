@@ -60,6 +60,7 @@ import type {
   InboxVoiceSettings,
   InboxVoiceStatus,
 } from '@plannotator/core/inbox-types';
+import { inboxCommentPicture } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
 import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
@@ -694,6 +695,9 @@ export interface InboxLaunchSettings {
   /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
   scratch_dir?: string;
   scratch_dir_shown?: string;
+  /** Only the path: the file may hold a secret. */
+  settings_file?: string | null;
+  settings_file_shown?: string;
 }
 
 /**
@@ -947,6 +951,10 @@ export function idsIn(value: unknown, out: Set<string> = new Set(), depth = 0, o
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     if (typeof item === 'string') {
       if (ROUTED_ID_KEYS.has(key) && /^[A-Za-z0-9_-]{16,80}$/.test(item) && !item.startsWith('ibx_')) out.add(item);
+      else if (key === 'path') {
+        const picture = inboxCommentPicture(item);
+        if (picture) out.add(picture.upload_id);
+      }
     } else idsIn(item, out, depth + 1, onlyLocal);
   }
   return out;
@@ -1365,7 +1373,7 @@ export type CloneReach = 'ok' | 'auth' | 'not_found' | 'network' | 'failed';
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
   /** A live session, or (launch on) a new session of `agent` started in the project, a new scratch folder, or a folder under home (`~/…`); `trust`: Trust and start, on this reading. */
-  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }) & { trust?: InboxLaunchTrust } };
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }) & { trust?: InboxLaunchTrust; model?: string; effort?: string } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1934,6 +1942,7 @@ export const inboxApi = {
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   /** Settings → Agents' "Start agents from New message": writes config.json `inboxLaunch.enabled`; New message follows at once. */
   launchEnabled: (enabled: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { enabled }),
+  launchSettingsFile: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { settings_file: path }),
   /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
   launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
