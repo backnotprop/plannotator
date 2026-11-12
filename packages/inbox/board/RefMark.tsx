@@ -2,14 +2,6 @@ import type { InboxCardMark, InboxCardMarkState } from '@plannotator/core/inbox-
 import { Tip } from '../components/Tip';
 import { shortRef } from './model';
 
-/**
- * A linked PR's or issue's state as a small mark, in the forge's own shapes
- * and colours (GitHub's Octicons: open, draft, merged, closed; an issue open,
- * closed or closed as not planned). Unknown (not read yet, no reader for its
- * source, a failure) is the same shape, quiet and neutral. The mark itself is
- * hidden from screen readers: the card's (or link's) name says the state.
- */
-
 const PATHS = {
   pr: 'M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z',
   draft:
@@ -32,7 +24,6 @@ function pathOf(kind: 'pr' | 'issue', state: InboxCardMarkState): string {
   return PATHS.pr;
 }
 
-/** The state in words, for a name or a tooltip ("merged", "closed as not planned"); null when unknown. */
 export function markStateWords(kind: 'pr' | 'issue', state: InboxCardMarkState): string | null {
   switch (state) {
     case 'open':
@@ -52,7 +43,6 @@ export function markStateWords(kind: 'pr' | 'issue', state: InboxCardMarkState):
   }
 }
 
-/** What a card's name adds for its mark: "Pull request #12, merged" ("Issue #11" while unknown). */
 export function markLabel(mark: Pick<InboxCardMark, 'kind' | 'ref' | 'state'>): string {
   const words = markStateWords(mark.kind, mark.state);
   return `${mark.kind === 'issue' ? 'Issue' : 'Pull request'} ${shortRef(mark.ref)}${words ? `, ${words}` : ''}`;
@@ -66,7 +56,6 @@ export function RefMarkIcon({ kind, state, size = 14 }: { kind: 'pr' | 'issue'; 
   );
 }
 
-/** A lane card's mark, with its tooltip ("#12 vite 8 for the review app · Merged"). */
 export function RefMark({ mark }: { mark: InboxCardMark }) {
   const words = markStateWords(mark.kind, mark.state);
   const tip = [`${shortRef(mark.ref)}${mark.title ? ` ${mark.title}` : ''}`, words ? words[0]!.toUpperCase() + words.slice(1) : null].filter(Boolean).join(' · ');

@@ -1,9 +1,3 @@
-/**
- * The connect snippets are commands a person pastes into a shell or a config
- * file. Whatever path the CLI lives at (spaces, quotes, non-ASCII), each must
- * come back as exactly that path: a wrong quote is a command that fails on
- * someone's machine with nothing on screen to say why.
- */
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import fc from 'fast-check';
@@ -38,7 +32,6 @@ describe('connect snippets', () => {
     expect(goose.searchParams.getAll('arg')).toEqual(['inbox', 'mcp']);
   });
 
-  // After NonoElRobot's fork (c6a02a0): the settings.json entry, never `qwen mcp add` (it writes the other servers' ${VAR} values out).
   test('the Qwen Code panel gives the settings.json entry with the stdio command, and no qwen mcp add', () => {
     const panel = harnessPanel('qwen', ctx('/Users/a b/.local/bin/plannotator'));
     const entry = panel.artefacts[0];
@@ -49,7 +42,6 @@ describe('connect snippets', () => {
     expect(JSON.stringify(panel)).not.toContain('qwen mcp add');
   });
 
-  // Over MCP the Inbox cannot tell DSH sessions apart (DSH strips DSH_* from MCP servers), and a reply never wakes one.
   test('the DeepSeek Harness panel installs Plannotator\'s plugin and never offers the MCP command', () => {
     expect(HARNESSES.some((h) => h.id === 'dsh' && h.label === 'DeepSeek Harness')).toBe(true);
     const panel = harnessPanel('dsh', ctx('/opt/plannotator'));

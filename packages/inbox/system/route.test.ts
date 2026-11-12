@@ -1,9 +1,3 @@
-/**
- * System's part of the Reviews address (route.ts), which App's routeOf, hashOf, Escape ladder and every new Reviews
- * address go through. What regresses: a sheet or full window without a drawing, a PR opened from the full window
- * closing to the pane, a leftover drawing link kept (or Escape caught) while System does not show, or Escape skipping
- * the full window, closing the drawing under a PR's pane.
- */
 import { expect, test } from 'bun:test';
 import { systemDropped, systemEscapeTo, systemHashOf, systemKept, systemRouteOf } from './route';
 

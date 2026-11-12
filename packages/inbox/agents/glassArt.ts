@@ -1,33 +1,16 @@
-/**
- * The Glass faces of the agent marks, drawn as vectors: one glass tile in many colours, each the same object (the
- * same top light, rim, depth and goggles), so a colour is the only thing that changes. Black and Yellow redraw the
- * tab icon's Glass and Yellow pictures (the dark glass with a cream frame and orange lenses; the light glass with an
- * ink frame and ink lenses, each with an orange pixel). Each colour is set in OKLCH and tuned on its own, so none
- * looks muddy or neon at 24 px, on light and dark sidebars alike.
- *
- * Markup from our own code only: each face is an `<img>` of an svg data URL (its gradient and filter ids stay inside
- * it, and an image keeps sharp while its layer moves).
- */
 import type { GlassFace } from './faceChoices';
 import { GOGGLES_FRAME, GOGGLES_LENSES, GOGGLES_MOUTH } from './goggles';
 
-/** A colour in OKLCH: lightness 0..1, chroma, hue in degrees. */
 export type Oklch = readonly [l: number, c: number, h: number];
 
 export interface GlassColour {
-  /** The stored face id (Black and Yellow keep the ids they had: `glass`, `yellow`). */
   id: GlassFace;
-  /** The glass itself. */
   tint: Oklch;
-  /** `dark`: a cream frame on the glass; `light`: an ink frame, as Yellow. */
   frame: 'dark' | 'light';
-  /** The lenses: orange squares (Black), or ink ones with an orange pixel (Yellow). */
   lens: 'orange' | 'ink';
-  /** The mouth, when the usual magenta would not read on this glass. */
   mouth?: Oklch;
 }
 
-/** The set, in the order the picker shows it (round the hue wheel, black first, ice last). */
 export const GLASS_COLOURS: readonly GlassColour[] = [
   { id: 'glass', tint: [0.235, 0.006, 75], frame: 'dark', lens: 'orange' },
   { id: 'glass-red', tint: [0.53, 0.175, 25], frame: 'dark', lens: 'ink', mouth: [0.93, 0.035, 80] },
@@ -41,7 +24,6 @@ export const GLASS_COLOURS: readonly GlassColour[] = [
   { id: 'glass-ice', tint: [0.955, 0.018, 230], frame: 'light', lens: 'ink' },
 ];
 
-/* ---------- OKLCH to sRGB hex (CSS Color 4's matrices), so the svg needs no newer colour syntax ---------- */
 function toLinear([l, c, h]: Oklch): [number, number, number] {
   const a = c * Math.cos((h * Math.PI) / 180);
   const b = c * Math.sin((h * Math.PI) / 180);
@@ -52,7 +34,6 @@ function toLinear([l, c, h]: Oklch): [number, number, number] {
 }
 const gamma = (v: number) => (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055);
 
-/** An OKLCH colour as #rrggbb; out of gamut, its chroma comes down until it fits (the hue and lightness kept). */
 export function oklchHex(colour: Oklch): string {
   let [l, c, h] = colour;
   l = Math.max(0, Math.min(1, l));
@@ -66,22 +47,15 @@ export function oklchHex(colour: Oklch): string {
 
 const shift = ([l, c, h]: Oklch, dl: number, kc = 1): Oklch => [l + dl, c * kc, h];
 
-/**
- * The tile's corner radius in the 1024 grid: about 18 % of its 880 side (4 px at 22, 4.4 at 24). The rounding is part
- * of the picture, so the face is the same rounded tile wherever it is drawn and whole while it moves.
- */
 export const GLASS_CORNER = 160;
 
-/** The face as an svg, in the 1024 grid of the tab icon (the tile 72..952, rounded by GLASS_CORNER). */
 export function glassSvg(colour: GlassColour): string {
   const t = colour.tint;
   const dark = colour.frame === 'dark';
   const hex = oklchHex;
-  // The glass: lit from above, deeper below; the lighter the glass the less it needs to fall off.
   const top = hex(shift(t, t[0] > 0.8 ? 0.035 : 0.075, 0.85));
   const mid = hex(t);
   const low = hex(shift(t, t[0] > 0.8 ? -0.045 : -0.085, 1.04));
-  // The frame: cream on a dark glass, ink on a light one.
   const frameTop = dark ? '#fbf4e6' : '#2a2724';
   const frameLow = dark ? '#e6d7bb' : '#0d0c0b';
   const edge = dark ? 'rgba(90,70,40,0.55)' : 'rgba(255,255,255,0.10)';
@@ -118,5 +92,4 @@ export function glassSvg(colour: GlassColour): string {
   );
 }
 
-/** The face as a data URL (for an `<img>`). */
 export const glassDataUrl = (colour: GlassColour): string => `data:image/svg+xml,${encodeURIComponent(glassSvg(colour))}`;

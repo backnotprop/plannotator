@@ -1,11 +1,3 @@
-/**
- * The real CodeView in a file box of the Inbox: what scrollWithPage's own test cannot see, since it answers plain divs.
- * What regresses: the viewer windowing from its own root rather than the page (a Pierre upgrade asking its root
- * something else, or GuideFileCard no longer asking for it), which leaves deep rows blank in a box with no limit.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Its own file: Pierre keeps module state
- * that a viewer mounted earlier in the same run changes.
- */
 import { plugin } from 'bun';
 import { expect, mock, test } from 'bun:test';
 import { act } from 'react';
@@ -22,7 +14,6 @@ plugin({
     }));
   },
 });
-// The review app's worker pool imports Vite's `?worker&inline`, which Bun cannot load.
 mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => ({
   ReviewWorkerPoolProvider: ({ children }: { children: unknown }) => children,
   useIsWorkerPoolReadyOrDisabled: () => true,
@@ -77,7 +68,6 @@ test.skipIf(!hasDom)("the viewer draws the rows at the page's position, not its 
       [...host.querySelectorAll('diffs-container')].flatMap((view) => [...view.shadowRoot!.querySelectorAll<HTMLElement>('[data-code] [data-line]')]).map((row) => Number(row.dataset.line));
     expect(drawn().length).toBeGreaterThan(0);
     expect(Math.max(...drawn())).toBeLessThan(200);
-    // A deep scroll of the page, heard as the browser tells it: the rows come from around there.
     scrolled = 30_000;
     await act(async () => page.dispatchEvent(new Event('scroll')));
     await settle();

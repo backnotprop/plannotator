@@ -6,14 +6,11 @@ import { FEEDBACK_FAQ, type FeedbackFaqAction } from '../feedbackFaq';
 import { knownAnswerFor, type KnownAnswer } from '../feedbackKnown';
 import { Modal } from './Updates';
 
-/** Shown under the box once the message is this close to the cap. */
 const COUNT_FROM = FEEDBACK_MESSAGE_MAX - 400;
 const SEARCH_PAUSE_MS = 250;
-/** "These might help" shows this many lines at most, a known answer included (three on a phone, by the CSS). */
 const LINES_SHOWN = 5;
 
 const NOTHING_TYPED = { message: '', category: null as FeedbackCategory | null, contact: '' };
-/** What was typed and not sent, for the window's life: any close, even a stray press on the backdrop, loses nothing. */
 let unsent = NOTHING_TYPED;
 export function forgetUnsentFeedback() {
   unsent = NOTHING_TYPED;
@@ -32,18 +29,12 @@ const CATEGORIES: { value: FeedbackCategory; label: string }[] = [
 ];
 
 export interface FeedbackDialogProps {
-  /** This Inbox's version, named in the "what is sent" line. */
   version: string;
   phone: boolean;
-  /** Sends through the Inbox's server; resolves, or rejects with an Error whose message is shown. */
   onSend: (input: { message: string; category: FeedbackCategory | null; contact: string | null }) => Promise<void>;
-  /** "Prompt your agent to send feedback": copies the prompt (with what is typed so far) and closes; the window's toast says how it went. */
   onCopyPrompt: (draft: string) => void;
-  /** A known answer's or a Common question's action (feedbackKnown.ts): the window closes the dialog and runs the setting it names. */
   onAction: (kind: FeedbackFaqAction) => void;
-  /** Simple list is already on: its action says so instead of offering it. */
   simpleListOn?: boolean;
-  /** Known answers this Inbox can't follow (no such switch here, as starting agents on Windows): never shown. */
   hiddenAnswers?: readonly string[];
   onClose: () => void;
 }
@@ -54,20 +45,6 @@ function lengthOf(value: string): number {
   return n;
 }
 
-/**
- * Sidebar → Feedback: a "Feedback" title, then the Inbox's segmented switch
- * (approval "inbox-feedback-faq"): Message, the default, and Common questions,
- * the known answers with a question (feedbackKnown.ts) with "Not here? Tell us about it" back to
- * Message. Message is a short form that sends the person's words about
- * Plannotator to its maintainers. A message; "These might help": a known answer (feedbackKnown.ts) first, then links when a
- * search finds something similar; an optional category and an optional email;
- * a line saying what is sent; Send and Cancel; a
- * short "Sent" state. "Prompt your agent to send feedback" copies a prompt that has
- * the person's agent collect the feedback and send it with
- * `plannotator feedback` after the person says yes. Nothing is sent without
- * Send. No shortcut (owner rule); Escape and the backdrop close it, as every
- * Inbox dialog. On a phone it is a bottom sheet.
- */
 export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction, simpleListOn = false, hiddenAnswers, onClose }: FeedbackDialogProps) {
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const [message, setMessage] = useState(unsent.message);
@@ -84,7 +61,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
   const closed = useRef(false);
   useEffect(() => {
     let latest = true;
-    // The known answers first (feedbackKnown.ts), then the search; both in the window, so what is typed goes nowhere.
     const pause = setTimeout(() => {
       const answer = knownAnswerFor(message, hiddenAnswers);
       void searchShipped(message).then((found) => {
@@ -107,7 +83,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
   useEffect(() => {
     const box = boxRef.current;
     box?.focus();
-    // Kept words go on from their end.
     box?.setSelectionRange(box.value.length, box.value.length);
   }, []);
   useEffect(() => {
@@ -143,7 +118,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
 
   const tabId = (id: FeedbackTab) => `ib-fbk-tab-${id}-${uid}`;
   const panelId = (id: FeedbackTab) => `ib-fbk-panel-${id}-${uid}`;
-  // The switch's keys, as Settings → Appearance's (automatic activation): the arrows, Home and End pick the other tab and focus it.
   const onTabKey = (event: KeyboardEvent<HTMLElement>) => {
     const index = TABS.findIndex((choice) => choice.id === tab);
     const next =
@@ -164,7 +138,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
   };
   const backToMessage = () => {
     setTab('message');
-    // After the panel shows (a hidden box takes no focus).
     requestAnimationFrame(() => boxRef.current?.focus());
   };
 
@@ -175,7 +148,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
       testId="feedback"
       onClose={() => (sending ? undefined : close())}
       ownKeys
-      // On a phone the opener (the Feedback row) was in the drawer, which closed: focus goes to the page heading, not <body>.
       fallbackFocus={pageHeading}
       className={`ib-fbk${phone ? ' ib-fbk-phone' : ''}`}
     >
@@ -287,7 +259,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
                     aria-pressed={category === option.value}
                     data-feedback-category={option.value}
                     disabled={sending}
-                    // A second press clears it: the category is optional.
                     onClick={() => setCategory((current) => (current === option.value ? null : option.value))}
                   >
                     {option.label}
@@ -306,7 +277,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
                 readOnly={sending}
                 data-feedback-contact=""
                 onChange={(event) => setContact(event.target.value)}
-                // Enter does not send (no new keys in the Inbox): only the Send button does.
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') event.preventDefault();
                 }}
@@ -355,7 +325,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
                       className="ib-fbk-q"
                       aria-expanded={open}
                       aria-controls={answerId}
-                      // One open at a time: the panel stays short enough to show them all.
                       onClick={() => setOpenItem(open ? null : item.id)}
                     >
                       <Icon name="chevR" size={14} />
@@ -406,7 +375,6 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction,
   );
 }
 
-/** "Fixed in 0.28.52: ", with Fixed in the accent color (approval "inbox-feedback-faq", take B). */
 function FixedLead({ release }: { release: string }) {
   return (
     <>
@@ -415,10 +383,6 @@ function FixedLead({ release }: { release: string }) {
   );
 }
 
-/**
- * A known answer, first of "These might help": its lead ("Fixed in 0.28.52:", "Experimental:"), its words (a link
- * when it has one) and its action, which the window runs after closing the dialog.
- */
 function KnownLine({ answer, simpleListOn, onAction }: { answer: KnownAnswer; simpleListOn: boolean; onAction: (kind: FeedbackFaqAction) => void }) {
   const { action, link } = answer;
   return (
@@ -453,7 +417,6 @@ function KnownLine({ answer, simpleListOn, onAction }: { answer: KnownAnswer; si
   );
 }
 
-/** Focus after the dialog when its opener is gone: the page's heading (as AgentNoteDialog and SoundIntro do). */
 function pageHeading(): HTMLElement | null {
   const heading = document.querySelector<HTMLElement>('.ib-main h1');
   if (heading && !heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');

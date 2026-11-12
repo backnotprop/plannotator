@@ -1,13 +1,3 @@
-/**
- * The phone composer and its picker sheet (approval "inbox-phone-composer-picker"): on a phone the reply box's row
- * holds who gets the reply in a thread with several agents (the mark and a name, or the first mark and a count with
- * several recipients; a one-agent thread has no control, as on a computer), New message's To is a pill in the foot's
- * row, and both open a bottom sheet. The failures this catches: a reply that goes to another agent than the control names, a sheet that
- * leaves focus nowhere (so the keyboard never comes back), the phone parts leaking onto a computer, and the typing
- * area's cap or the phone query drifting from phone.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,7 +9,6 @@ import { PHONE_QUERY } from './phone';
 import { setSessionLabels } from './sessionLabels';
 
 const hasDom = typeof document !== 'undefined';
-// Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 const { ComposeDialog } = (hasDom ? await import('./compose/ComposeDialog') : {}) as typeof import('./compose/ComposeDialog');
 const { BottomSheet, BOTTOM_SHEET_MS } = (hasDom ? await import('./components/BottomSheet') : {}) as typeof import('./components/BottomSheet');
@@ -130,7 +119,6 @@ function mount(node: React.ReactNode) {
   });
 }
 
-/** The thread with its reply box open and words in it. */
 async function openReply(thread: InboxThread, phone: boolean) {
   mount(<ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} phone={phone} />);
   await settle();
@@ -159,15 +147,12 @@ const click = async (el: Element | null) => {
 const sheetGone = () => until(() => q('[data-sheet]') === null, 'the sheet to leave the DOM');
 const replies = () => posted.filter((p) => p.path.endsWith('/reply'));
 
-// ── the reply row, by state ──
-
 test.skipIf(!hasDom)('a phone, one agent: no agent control in the row (the paperclip, Skills, then Send), as on a computer; Send is the arrow', async () => {
   await openReply(ONE_AGENT(), true);
   const row = q('[data-reply-row][data-phone]')!;
   const order = [...row.querySelectorAll('[data-reply-attach], [data-reply-skills], [data-recipient], [data-reply-send]')].map((el) => [...el.attributes].find((a) => /^data-(reply-attach|reply-skills|recipient|reply-send)$/.test(a.name))!.name);
   expect(order).toEqual(['data-reply-attach', 'data-reply-skills', 'data-reply-send']);
   expect(q('[data-recipient], [data-agent-mark], [data-agent-pill], [data-sheet]')).toBeNull();
-  // Send is the arrow; its word stays as its name.
   expect(q('[data-reply-send]')!.textContent).toBe('Send');
   expect(q('[data-reply-send] svg')).not.toBeNull();
 });
@@ -179,7 +164,6 @@ test.skipIf(!hasDom)('a phone, several agents of different kinds: the mark and a
   const pill = control()!;
   expect(pill.hasAttribute('data-agent-pill')).toBe(true);
   expect(pill.getAttribute('data-recipient-chosen')).toBe('ses_pi');
-  // The mark says who: no name beside it.
   expect(pill.querySelector('.ib-apill-n')).toBeNull();
   expect(pill.textContent).toBe('');
   expect(pill.getAttribute('aria-label')).toBe('Reply goes to Pi. Change');
@@ -210,7 +194,6 @@ test.skipIf(!hasDom)('a phone: a tap on another agent sends to it alone, closes 
   const text = await openReply(TWO_AGENTS(), true);
   await click(control());
   await until(() => sheet() !== null, 'the sheet');
-  // The sheet takes focus (the keyboard goes down) and is a dialog named by its title.
   expect(sheet()!.getAttribute('role')).toBe('dialog');
   expect(sheet()!.getAttribute('aria-label')).toBe('Who gets this reply');
   expect(document.activeElement).toBe(sheet());
@@ -233,7 +216,6 @@ test.skipIf(!hasDom)('a phone, several recipients: the circle adds one and the s
   await click(control());
   await until(() => sheet() !== null, 'the sheet');
   await click(q('[data-recipient-tick="ses_claude"]'));
-  // A tick does not complete the choice: the sheet is still up.
   expect(sheet()).not.toBeNull();
   expect(q('[data-recipient-tick="ses_claude"]')!.getAttribute('aria-checked')).toBe('true');
   const mark = control()!;
@@ -244,7 +226,6 @@ test.skipIf(!hasDom)('a phone, several recipients: the circle adds one and the s
   await settle();
   expect(sheet()).toBeNull();
   expect(document.activeElement).toBe(text);
-  // Escape was the sheet's alone: the reply box is still open with its words.
   expect(text.isConnected).toBe(true);
   expect(text.value).toBe('Ship it.');
 });
@@ -279,7 +260,6 @@ test.skipIf(!hasDom)('a phone: while the sheet is open focus stays in it, and wh
   await click(control());
   await until(() => sheet() !== null, 'the sheet');
   const close = q<HTMLButtonElement>('[data-reply-close]')!;
-  // Something outside takes focus (a box that opens with the sheet focuses its field; a Tab past the sheet's end).
   act(() => close.focus());
   expect(document.activeElement).toBe(sheet());
   await click(q('[data-sheet-scrim]'));
@@ -291,7 +271,6 @@ test.skipIf(!hasDom)('a phone: "Tag another agent" closes the sheet and leaves t
   const text = await openReply(TWO_AGENTS(), true);
   await click(control());
   await until(() => sheet() !== null, 'the sheet');
-  // happy-dom has no execCommand: the typing itself is the browser's.
   const typed: string[] = [];
   (document as unknown as { execCommand: (command: string, ui: boolean, value: string) => boolean }).execCommand = (_command, _ui, value) => {
     typed.push(`${document.activeElement === text ? 'reply' : 'elsewhere'}:${value}`);
@@ -301,11 +280,8 @@ test.skipIf(!hasDom)('a phone: "Tag another agent" closes the sheet and leaves t
   delete (document as unknown as { execCommand?: unknown }).execCommand;
   expect(typed).toEqual(['reply: @']);
   expect(sheet()).toBeNull();
-  // The action's own focus is not taken back by the sheet: the reply has it at once.
   expect(document.activeElement).toBe(text);
 });
-
-// ── New message ──
 
 async function openCompose(phone: boolean) {
   mount(<ComposeDialog request={{}} phone={phone} current={null} lastSent={null} home="/Users/me" launchTip={null} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
@@ -318,18 +294,15 @@ test.skipIf(!hasDom)('a phone: To is a pill in the foot\'s row with no To line a
   expect(q('dialog[data-compose] .ib-cp-to')).toBeNull();
   expect(to().closest('.ib-cp-foot')).not.toBeNull();
   expect(to().hasAttribute('data-agent-pill')).toBe(true);
-  // To starts empty: the pill asks, and Send says why it cannot go.
   expect(to().getAttribute('data-compose-to')).toBe('choose');
   expect(to().textContent).toBe('Choose an agent');
   expect(to().getAttribute('aria-label')).toBe('To: choose an agent');
   await click(to());
   await until(() => q('[data-compose-to-sheet][data-shown]') !== null, 'the To sheet');
-  // The list has the screen: the filter does not take focus (the keyboard stays down).
   expect(document.activeElement).toBe(q('[data-compose-to-sheet]'));
   const row = q('[data-compose-session="ses_claude"]')!;
   expect(row.querySelector('.ib-sheet-t')!.textContent).toBe('Claude Code');
   expect(row.querySelector('.ib-sheet-d')!.textContent).toContain('acme-web');
-  // The running sessions, then the start rows.
   expect(q('[data-compose-start-caption]')!.textContent).toContain('Start a new session in');
   await click(row);
   expect(q('[data-compose-to-sheet][data-shown]')).toBeNull();
@@ -365,8 +338,6 @@ test.skipIf(!hasDom)('a computer\'s New message is as it was: the To line at the
   expect(q('dialog[data-compose] [data-compose-session="ses_claude"]')!.className).toContain('ib-cp-opt');
 });
 
-// ── the sheet itself ──
-
 function pointer(target: Element, type: string, clientY: number, timeStamp: number) {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.assign(event, { clientY, pointerId: 1 });
@@ -385,35 +356,29 @@ test.skipIf(!hasDom)('the sheet: a long drag down on its head closes it, a short
   await until(() => sheet() !== null, 'the sheet');
   const head = q('[data-sheet-head]')!;
   Object.defineProperty(q('[data-sheet]'), 'offsetHeight', { configurable: true, value: 300 });
-  // 40 px in 800 ms: neither far enough nor a flick.
   pointer(head, 'pointerdown', 100, 1000);
   pointer(head, 'pointermove', 140, 1400);
   expect(q('[data-sheet]')!.hasAttribute('data-dragging')).toBe(true);
   pointer(head, 'pointerup', 140, 1800);
   expect(closes).toBe(0);
   expect(q('[data-sheet]')!.hasAttribute('data-dragging')).toBe(false);
-  // 140 px of a 300 px sheet: past a third.
   pointer(head, 'pointerdown', 100, 3000);
   pointer(head, 'pointermove', 240, 3400);
   pointer(head, 'pointerup', 240, 3800);
   expect(closes).toBe(1);
   act(() => root!.render(draw(false)));
   await settle();
-  // Still there for the way out, but no longer shown or pressable.
   expect(q('[data-sheet]')).not.toBeNull();
   expect(sheet()).toBeNull();
   await settle(BOTTOM_SHEET_MS + 40);
   expect(q('[data-sheet], [data-sheet-scrim]')).toBeNull();
 });
 
-// ── the sheet's rules that only CSS holds ──
-
 const CSS = readFileSync(join(import.meta.dir, 'phoneComposer.css'), 'utf8');
 
 test('phoneComposer.css restyles the shared parts only inside phone.ts\'s own query', () => {
   const queries = [...CSS.matchAll(/^@media ([^{]+) \{$/gm)].map((m) => m[1]!.trim());
   expect(queries).toContain(PHONE_QUERY);
-  // Outside that block there is no rule on something a computer also draws (the reply box, compose's dialog).
   const outside = CSS.slice(0, CSS.indexOf(`@media ${PHONE_QUERY}`));
   expect(outside).not.toMatch(/\.ib-(pfoot|rbox|rrow|rscroll|rsend|rtext|rclose|rline|cp-foot|cp-body|cp-head|cp-send)\b/);
   expect(outside).not.toMatch(/dialog\.ib-cp/);
@@ -427,10 +392,8 @@ test('the reply\'s typing area on a phone: a line taller than the 64 px it was, 
   };
   const text = rule('.pn-inbox .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror)');
   const min = Number(/min-height: min\((\d+)px, calc\(var\(--ib-vvh, 100dvh\) \* 0\.4\)\)/.exec(text)![1]);
-  // One 16 px line at the field's 1.5 line height is 24 px.
   expect(min).toBeGreaterThanOrEqual(64 + 24);
   expect(text).toContain('max-height: none');
-  // 16 px, or iOS zooms the page when the field takes focus.
   expect(text).toContain('font-size: 16px');
   const cap = rule('.pn-inbox .ib-pfoot .ib-rbox .ib-rscroll, :root[data-ib-keyboard-pin] .pn-inbox .ib-pfoot .ib-rbox .ib-rscroll');
   expect(cap).toContain('max-height: calc(var(--ib-vvh, 100dvh) * 0.4)');

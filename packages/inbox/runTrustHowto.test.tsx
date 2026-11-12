@@ -1,17 +1,3 @@
-/**
- * The run line's trust how-to (`data-run-trust-howto`), shown when a launch failed on an untrusted folder
- * and no Trust folder button can be offered. It shows only the sentence that is true for the folder (the
- * owner, q-aa43fc24 A): the home folder can never be trusted, so telling the person to run the agent there
- * would be wrong; anywhere else, running the agent there is the way. The failure this catches: both
- * sentences shown together, or the wrong one for the folder, or another agent named as Claude Code.
- *
- * A folder whose trust would land on a repository rooted at home, and `/`, get a third sentence: accepting the agent's
- * prompt there would trust all of home (or `/`), and in that repository "a folder inside it" lands on home too.
- *
- * The three sentences are pinned on purpose: the owner chose their exact words.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -78,6 +64,5 @@ test.skipIf(!hasDom)('trust that would cover home, or `/`: only the sentence tha
   expect(howto(failedUntrusted({ folder: '/', trust_covers_home: true }))).toBe(COVERS_HOME);
   act(() => root?.unmount());
   host?.remove();
-  // Home in a repo rooted there carries both flags (the older flag for a window from before this one).
   expect(howto(failedUntrusted({ folder: '/Users/me', home_folder: true, trust_covers_home: true }))).toBe(COVERS_HOME);
 });

@@ -1,13 +1,3 @@
-/**
- * A launch that clones first, on its run line (approval "launch-create-clone", E1-E11). Each case guards what the
- * person acts on: Cancel during the clone stops it on that machine (never Stop, which would read as the agent's);
- * git's percent shows with its bar only once there is one; a failed clone names the cause and the machine, keeps the
- * message, and offers the way out that fits it (Try again, Copy clone command, Change the URL); a cancelled clone
- * says nothing was kept and offers Clone again; a cloned repo that brings hooks waits for Trust and start; a name taken
- * since the pick is said under the line.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

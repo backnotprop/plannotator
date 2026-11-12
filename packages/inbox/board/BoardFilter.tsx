@@ -5,7 +5,6 @@ import type { ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 
-/** The list-filter glyph (lucide's list-filter, drawn with the window's icon stroke; the icon set has none). */
 function FilterGlyph({ size }: { size: number }) {
   return (
     <svg className="ib-ic" viewBox="0 0 24 24" style={{ width: size, height: size }} aria-hidden="true" focusable="false">
@@ -14,7 +13,6 @@ function FilterGlyph({ size }: { size: number }) {
   );
 }
 
-/** The menus are drawn inside the window's root, so its styles (and theme) reach them. */
 function usePortal(anchor: React.RefObject<HTMLElement | null>) {
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useEffect(() => setPortal(anchor.current?.closest<HTMLElement>('.pn-inbox') ?? null), [anchor]);
@@ -22,33 +20,19 @@ function usePortal(anchor: React.RefObject<HTMLElement | null>) {
 }
 
 export interface BoardFilterProps {
-  /** The projects offered (`boardProjects`); the Project group shows only when there are two or one is picked. */
   projects: readonly ProjectFolder[];
   names: ReadonlyMap<string, string>;
   project: string | null;
   onProject: (project: string | null) => void;
-  /** The live initiatives, in the order they were made. */
   initiatives: readonly InboxInitiative[];
-  /** Cards per initiative id and `none` (initiativeCounts), on the lanes of the picked project. */
   counts: ReadonlyMap<string, number>;
-  /** An `ini_` id, `none`, or null for every card. */
   initiative: string | null;
   onInitiative: (initiative: string | null) => void;
-  /** New initiative… and Edit initiatives…: the Initiatives dialog. */
   onManage: (start: 'new' | 'edit') => void;
   phone: boolean;
-  /** The picks as tokens beside the button (a wide header); false: BoardFilterTokens draws them on their own row. */
   tokens: boolean;
 }
 
-/**
- * The Board's one filter (approval "board-initiatives", take C): an icon at
- * the header's right; its menu holds Initiative (All initiatives, each one
- * with its count, No initiative with its count, then New initiative… and
- * Edit initiatives…) and, once the cards span two projects, Project. The
- * picks show as tokens left of it ("# Shape ×"). Base UI carries the keys
- * (arrows, type-ahead, Escape). No shortcut of its own.
- */
 export function BoardFilter(props: BoardFilterProps) {
   const { initiative, project, phone } = props;
   const [open, setOpen] = useState(false);
@@ -126,7 +110,6 @@ export function BoardFilter(props: BoardFilterProps) {
   );
 }
 
-/** One row of the filter: its icon, its name, its count (initiatives), the check when picked. */
 function FilterItem({ value, label, icon, count, on, data }: { value: string; label: string; icon: 'layers' | 'hash' | 'minus' | 'folder'; count?: number; on: boolean; data: Record<string, string> }) {
   return (
     <Menu.RadioItem value={value} closeOnClick className="ib-pmi" label={label} {...data}>
@@ -144,18 +127,12 @@ function FilterItem({ value, label, icon, count, on, data }: { value: string; la
   );
 }
 
-/** The picked initiative's name: "No initiative" for none, null when nothing is picked (or it is not loaded yet). */
 export function initiativeLabel(initiatives: readonly InboxInitiative[], initiative: string | null): string | null {
   if (initiative === null) return null;
   if (initiative === INBOX_NO_INITIATIVE) return 'No initiative';
   return initiatives.find((i) => i.id === initiative)?.name ?? 'Initiative';
 }
 
-/**
- * The picks as tokens: "# Shape ×", "folder plannotator ×". Beside the
- * filter's icon on a wide header; on their own row under it on a phone or a
- * narrow page, so the header never cuts them.
- */
 export function BoardFilterTokens(
   props: Pick<BoardFilterProps, 'initiatives' | 'initiative' | 'onInitiative' | 'names' | 'project' | 'onProject'> & { focusAfterClear?: () => HTMLElement | null },
 ) {
@@ -208,11 +185,6 @@ function Token({ kind, icon, label, clearLabel, onClear }: { kind: 'initiative' 
   );
 }
 
-/**
- * A card's initiative as a menu (the opened card): "# Shape", or "No
- * initiative"; the menu's rows are CardInitiativeItems. Shown once an
- * initiative exists (or the card is in one).
- */
 export function CardInitiativeMenu({ initiatives, value, onPick }: { initiatives: readonly InboxInitiative[]; value: string | null; onPick: (initiative: string | null) => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -236,7 +208,6 @@ export function CardInitiativeMenu({ initiatives, value, onPick }: { initiatives
   );
 }
 
-/** The rows that put a card in an initiative: each live one, then No initiative; the card's own checked. */
 export function CardInitiativeItems({ initiatives, value, onPick }: { initiatives: readonly InboxInitiative[]; value: string | null; onPick: (initiative: string | null) => void }) {
   const current = value ?? INBOX_NO_INITIATIVE;
   return (

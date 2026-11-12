@@ -1,8 +1,3 @@
-/**
- * The rules of a long paste as a file (approval "inbox-paste-attachment"):
- * the 32 KB threshold in UTF-8 bytes, the file's name, and where the words go
- * back after the person edits around the tile (mapAnchor, putTextBack).
- */
 import { describe, expect, test } from 'bun:test';
 import { PASTE_TO_FILE_BYTES, isLongPaste, mapAnchor, pastedPreview, pastedTextName, putTextBack } from './pastedText';
 
@@ -13,10 +8,8 @@ describe('isLongPaste: 32 KB of UTF-8 bytes, not characters', () => {
   });
 
   test('multi-byte text crosses the threshold with fewer characters', () => {
-    // "é" is 2 bytes: 16,384 of them are 32 KB, though only half as many characters.
     expect(isLongPaste('é'.repeat(PASTE_TO_FILE_BYTES / 2))).toBe(true);
     expect(isLongPaste('é'.repeat(PASTE_TO_FILE_BYTES / 2 - 1))).toBe(false);
-    // A CJK character is 3 bytes.
     expect(isLongPaste('漢'.repeat(Math.ceil(PASTE_TO_FILE_BYTES / 3)))).toBe(true);
     expect(isLongPaste('漢'.repeat(Math.floor(PASTE_TO_FILE_BYTES / 3) - 1))).toBe(false);
   });
@@ -65,9 +58,7 @@ describe('mapAnchor: the paste goes back where it was, whatever is typed around 
   });
 
   test('never between the two halves of an emoji', () => {
-    // A paste between two emoji, both replaced by one that shares their first half.
     expect(mapAnchor('\u{1F600}\u{1F600}', '\u{1F601}', 2)).toBe(0);
-    // An emoji changed right before the paste: it stays after the emoji.
     expect(mapAnchor('a\u{1F600}b', 'a\u{1F601}b', 3)).toBe(3);
   });
 });
@@ -77,6 +68,5 @@ test('putTextBack: the exact words at the place, the words around untouched, the
   const result = putTextBack('before|after', 'before'.length, pasted);
   expect(result.value).toBe(`before${pasted}|after`);
   expect(result.caret).toBe('before'.length + pasted.length);
-  // A place past the end (the words were shortened meanwhile) is the end.
   expect(putTextBack('ab', 9, 'X')).toEqual({ value: 'abX', caret: 3 });
 });

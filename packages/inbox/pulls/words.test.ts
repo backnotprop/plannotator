@@ -4,12 +4,9 @@ import { facesOnce, person, wordsText } from './words';
 test('not twice in a row: the person the row already pictures keeps their name without a second face', () => {
   const words = ['Review requested · ', person('tomas', "'s"), ' PR'];
   expect(facesOnce(words, ['tomas'])).toEqual(['Review requested · ', { person: 'tomas', tail: "'s", face: false }, ' PR']);
-  // Someone else at the left: the face stays.
   expect(facesOnce(words, ['dana'])).toEqual(words);
   expect(facesOnce(words, [null, undefined])).toEqual(words);
-  // Named twice in the same words: the second has no face.
   expect(facesOnce(['Waits on ', person('nina-k'), ' and ', person('nina-k')])).toEqual(['Waits on ', { person: 'nina-k' }, ' and ', { person: 'nina-k', face: false }]);
-  // Leaving a face out never changes what the words say.
   expect(wordsText(facesOnce(words, ['tomas']))).toBe("Review requested · tomas's PR");
 });
 

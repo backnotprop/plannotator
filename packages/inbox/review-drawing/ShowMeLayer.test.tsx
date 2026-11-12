@@ -1,16 +1,3 @@
-/**
- * Show me's parts over the code review (approval "code-review-launch-build",
- * item 1). What regresses if these fail:
- * - the corner card loses which part a click landed on, or the way back to the board;
- * - the box sends with no lines named, or keeps offering Show me while the
- *   agent draws (a second request on top of the first), or loses Stop;
- * - the Overview's picture cannot be hidden, or its changed parts lose their
- *   tag in round 2;
- * - the floating parts lose the marks that keep the Inbox's keys (Escape,
- *   Mod+Enter) from acting through them.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -85,7 +72,6 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     expect(el.querySelector('[role="status"]')!.textContent).toContain('Claude Code is drawing it.');
     act(() => el.querySelector<HTMLButtonElement>('[data-show-me-stop]')!.click());
     expect(stopped).toBe(1);
-    // The Inbox's keys never act from inside it (shortcuts/guards.ts inOverlay, App.tsx's Escape ladder).
     expect(el.querySelector('[data-show-me-box]')!.matches('[data-popover-layer][data-chat-window]')).toBe(true);
   });
 
@@ -105,11 +91,9 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     act(() => choices[1]!.click());
     expect(policies).toEqual(['wait', 'interrupt']);
 
-    // Waiting on the busy agent: running, in the Ask window's words.
     act(() => root!.render(<layer.ShowMeBox state={state({ box, drawing: true, waiting: 'waiting' })} {...props} />));
     expect(el.querySelector('[role="status"]')!.textContent).toBe('Waiting for Claude Code to finish…');
 
-    // Nobody took it: the box is ready to send again, with the problem.
     act(() => root!.render(<layer.ShowMeBox state={state({ box: { ...box, turn: null }, problem: 'No answer arrived.' })} {...props} />));
     expect(el.querySelector('[data-show-me-box]')!.getAttribute('data-show-me-box')).toBe('compose');
     expect(el.querySelector('[role="alert"]')!.textContent).toBe('No answer arrived.');
@@ -154,7 +138,6 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     const box = el.querySelector<HTMLElement>('.ib-ch-fig-box')!;
     expect(box.style.maxHeight).toBe('320px');
     expect(box.style.aspectRatio.replace(/\s/g, '')).toBe('1200/300');
-    // No Hide of its own: the chapter's Diagram header folds it.
     expect(el.querySelector('[aria-expanded]')).toBeNull();
     act(() => el.querySelector<HTMLButtonElement>('[data-chapter-figure-expand]')!.click());
     const pop = document.querySelector('[data-chapter-figure-popout]')!;

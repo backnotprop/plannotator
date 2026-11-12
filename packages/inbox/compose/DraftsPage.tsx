@@ -7,12 +7,6 @@ import { Tip } from '../components/Tip';
 import { SidebarTrigger } from '../shell/sidebar';
 import { draftChip, draftSnippet, hostLabel, subjectPreview } from './model';
 
-/**
- * Drafts (compose): messages the person started and did not send, newest
- * saved first, each with a worded chip (its session is live, has ended, or
- * none was chosen) and a delete with Undo (the window's one toast). A row
- * reopens its draft in compose. A draft never sends itself.
- */
 export function DraftsPage({
   drafts,
   error,
@@ -23,10 +17,6 @@ export function DraftsPage({
   replies = [],
   onOpenReply,
 }: {
-  /**
-   * Open threads holding unsent work (approval "inbox-reply-drafts"): reply
-   * words, picks, comments. Listed above the messages; a row opens its thread.
-   */
   replies?: readonly InboxReplyDraftRow[];
   onOpenReply?: (row: InboxReplyDraftRow) => void;
   drafts: readonly DraftView[] | null;

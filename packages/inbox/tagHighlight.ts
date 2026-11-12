@@ -1,25 +1,7 @@
-/**
- * The agents the person tagged in a sent reply, painted as the composer
- * paints them (approval "inbox-tag-agents"): `@Pi` in the primary color on a
- * light wash, the agent's mark drawn over the `@` (the approved shot 5's
- * chip) in a layer the host owns. Painted with the CSS Custom Highlight API,
- * like the skill references (skillHighlight.ts), so the Viewer's DOM is never changed. The
- * tokens are the labels the reply's own tags carry (what was sent). Where the
- * API is missing (an older browser, the DOM tests) nothing is painted and the
- * words read as plain text.
- */
-
-/** The highlight's name in `CSS.highlights` (inbox.css styles `::highlight(ib-tag-ref)`). */
 export const TAG_REF_HIGHLIGHT = 'ib-tag-ref';
 
-/** Text the tokens are never found in: code, a message's head row (folded or open), and form fields. */
 const SKIP = 'pre, code, [data-skills-line], [data-fold-head], [data-open-head], script, style, textarea';
 
-/**
- * Where `@<label>` appears in `text`: at a word start (the composer's email
- * guard), the longest label first so "Claude Code (another session)" wins
- * over "Claude Code".
- */
 export function tagTokenSpans(text: string, labels: readonly string[]): { start: number; end: number }[] {
   const out: { start: number; end: number }[] = [];
   const sorted = [...new Set(labels.filter((l) => l.trim() !== ''))].sort((a, b) => b.length - a.length);
@@ -28,7 +10,6 @@ export function tagTokenSpans(text: string, labels: readonly string[]): { start:
     const label = sorted.find((l) => text.startsWith(l, i + 1));
     if (!label) continue;
     const end = i + 1 + label.length;
-    // The label ends a word: not "@Pilot" for "Pi".
     if (end < text.length && /[\p{L}\p{N}_]/u.test(text.charAt(end))) continue;
     out.push({ start: i, end });
     i = end - 1;
@@ -36,14 +17,12 @@ export function tagTokenSpans(text: string, labels: readonly string[]): { start:
   return out;
 }
 
-/** One token under `root`: the range of the whole `@<label>`, the range of its `@`, and the label. */
 export interface TagReference {
   range: Range;
   at: Range;
   label: string;
 }
 
-/** The tokens under `root` (never inside `skip`, the marks' own layer). */
 export function tagReferences(root: Node, labels: readonly string[], skip?: Element | null): TagReference[] {
   const out: TagReference[] = [];
   if (labels.length === 0) return out;
@@ -66,7 +45,6 @@ export function tagReferences(root: Node, labels: readonly string[], skip?: Elem
   return out;
 }
 
-/** The ranges of the tokens under `root`. */
 export function tagReferenceRanges(root: Node, labels: readonly string[]): Range[] {
   return tagReferences(root, labels).map((r) => r.range);
 }
@@ -82,7 +60,6 @@ function api(): HighlightApi | null {
   return css?.highlights && typeof Highlight === 'function' ? { highlights: css.highlights, Highlight } : null;
 }
 
-/** The `@` of each token, drawn clear (inbox.css) so the agent's mark sits in its place, as the approved shot 5 draws the chip. */
 export const TAG_AT_HIGHLIGHT = 'ib-tag-at';
 
 const painted = new Map<string, TagReference[]>();
@@ -94,7 +71,6 @@ function publish(registry: HighlightApi): void {
     registry.highlights.delete(TAG_AT_HIGHLIGHT);
     return;
   }
-  // Below search's landing highlight (priority 0), as the skill references are; the `@` above the token's colour.
   const tokens = new registry.Highlight(...refs.map((r) => r.range));
   tokens.priority = -2;
   registry.highlights.set(TAG_REF_HIGHLIGHT, tokens);
@@ -103,7 +79,6 @@ function publish(registry: HighlightApi): void {
   registry.highlights.set(TAG_AT_HIGHLIGHT, ats);
 }
 
-/** Where one agent's mark sits over a token's `@`, in the layer's (else `root`'s) coordinates. */
 export interface TagMarkPlace {
   label: string;
   left: number;
@@ -111,13 +86,6 @@ export interface TagMarkPlace {
   size: number;
 }
 
-/**
- * Paint one message's tag tokens under `root`, again whenever its DOM or its
- * size changes, and report where each token's `@` is (`onMarks`), so the
- * host draws the agent's mark there in a layer of its own (`layer`, inside
- * `root`, never walked). Where the Highlight API is missing nothing is
- * painted and no mark is placed: the words read as plain text. Returns the cleanup.
- */
 export function paintTagReferences(
   key: string,
   root: HTMLElement,
@@ -134,13 +102,11 @@ export function paintTagReferences(
     painted.set(key, refs);
     publish(registry);
     if (!onMarks) return;
-    // Measured from the layer's own box (a zero-height block in `root`), so `root` needs no positioning of its own.
     const box = (layer ?? root).getBoundingClientRect();
     onMarks(
       refs.flatMap((ref) => {
         const rect = ref.at.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) return [];
-        // The mark fits the `@`'s own box (nothing around it moves), left in it so a hair of space stays before the name.
         const size = Math.round(Math.min(14, Math.max(10, rect.width - 2)));
         return [
           {
@@ -163,7 +129,6 @@ export function paintTagReferences(
     });
   };
   const observer = new MutationObserver((records) => {
-    // The marks' own layer changing is not a reason to measure again.
     if (layer && records.every((r) => layer.contains(r.target))) return;
     schedule();
   });

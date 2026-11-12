@@ -1,36 +1,14 @@
-/**
- * Telling the person when a Claude Code session needs `/reload-plugins` after
- * an update (owner approval "restart-warning", 2026-10-19, simplified
- * 2026-10-21: the obvious path leads, alone), and the same for Pi (`/reload`),
- * Oh My Pi (`/restart`) and OpenCode 2 (`opencode2 reload`, or
- * `opencode2 plugin update <its spec>`, run in a shell, with one quiet line on
- * what a reload cancels; owner approval "reload-hosts", 2026-10-26). Pieces:
- *  - `ReloadLead`: one large sentence, "Type /reload-plugins in …", with a
- *    Copy that copies `/reload-plugins`. When the installed plugin is itself
- *    behind this Inbox, two steps instead: the update command with Copy, then
- *    `/reload-plugins`.
- *  - `Fold`: the manual path, folded by default behind one question.
- *  - `RestartLine`: under the person's reply when the session it goes to has
- *    no Send now because it runs an older plugin. The lead, then "Still no
- *    Send now after reloading?" opening `/exit` and the resume command.
- *  - `CopyCommand`: every Copy button. A copy says so in a polite live region.
- * No keyboard shortcut. Real buttons with names; the fold uses
- * aria-expanded / aria-controls.
- */
-
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import type { RestartNote } from '../deliveryLine';
 import { Icon } from '../icons';
 
-/** How long Copy reads "Copied". */
 export const RESTART_COPIED_MS = 2000;
 export const RESTART_COPIED_ANNOUNCEMENT = 'Restart command copied.';
 export const UPDATE_COPIED_ANNOUNCEMENT = 'Update command copied.';
 export const RELOAD_COMMAND = '/reload-plugins';
 export const RELOAD_COPIED_ANNOUNCEMENT = '/reload-plugins copied.';
 
-/** Copy a command, with a short "Copied" and one polite announcement. */
 export function CopyCommand({ text, label, short = 'Copy', announcement = RESTART_COPIED_ANNOUNCEMENT }: { text: string; label: string; short?: string; announcement?: string }) {
   const [copied, setCopied] = useState(false);
   const [said, setSaid] = useState('');
@@ -46,7 +24,6 @@ export function CopyCommand({ text, label, short = 'Copy', announcement = RESTAR
         onClick={async () => {
           const ok = await copyTextToClipboard(text);
           setSaid('');
-          // A fresh string each time, so a second copy is said again.
           setTimeout(() => setSaid(ok ? announcement : "Couldn't copy the command."), 30);
           if (!ok) return;
           setCopied(true);
@@ -64,7 +41,6 @@ export function CopyCommand({ text, label, short = 'Copy', announcement = RESTAR
   );
 }
 
-/** A command on its own line, with Copy. */
 export function CommandLine({ text, label, announcement }: { text: string; label: string; announcement?: string }) {
   return (
     <div className="ib-rw-cmd">
@@ -74,27 +50,17 @@ export function CommandLine({ text, label, announcement }: { text: string; label
   );
 }
 
-/** How a runtime loads new code: a command typed in the session, or run in a shell. */
 export interface ReloadSpec {
   command: string;
   where: 'session' | 'shell';
 }
 
-/** Claude Code's: `/reload-plugins`, typed in the session. */
 export const CLAUDE_RELOAD: ReloadSpec = { command: RELOAD_COMMAND, where: 'session' };
 
-/** Copy the reload command (`/reload-plugins` by default). */
 export function ReloadCopy({ command = RELOAD_COMMAND }: { command?: string } = {}) {
   return <CopyCommand text={command} label={`Copy ${command}`} announcement={`${command} copied.`} />;
 }
 
-/**
- * The one thing to do, large and alone: "Type /reload-plugins {where}." with
- * Copy (Pi `/reload`, Oh My Pi `/restart`). With `updateCommand` (the
- * plugin on disk is itself behind this Inbox), two numbered steps: the update
- * command, then the reload. OpenCode 2 has its own one line (OpenCodeWords):
- * `opencode2 plugin update <spec>` loads the new plugin itself.
- */
 export function ReloadLead({
   where,
   updateCommand,
@@ -104,7 +70,6 @@ export function ReloadLead({
   where: string;
   updateCommand?: string | null;
   reload?: ReloadSpec;
-  /** What the update command updates, for its Copy's name. */
   what?: string;
 }) {
   const verb = reload.where === 'shell' ? 'run' : 'type';
@@ -137,29 +102,20 @@ export function ReloadLead({
   );
 }
 
-/** The reload a note names. */
 export function reloadOf(note: RestartNote): ReloadSpec {
   return { command: note.reloadCommand, where: note.reloadWhere };
 }
 
-/** What a runtime's update command updates, for its Copy's name. */
 export function updatedThing(runtime: RestartNote['runtime']): string {
   if (runtime === 'opencode') return "Plannotator's OpenCode plugin";
   if (runtime === 'pi' || runtime === 'oh-my-pi') return "Plannotator's extension";
   return "Plannotator's Claude Code plugin";
 }
 
-/** "in that Pi to get Send now", or for a shell command "to get Send now". */
 function wherePhrase(note: RestartNote, name: string, purpose: string): string {
   return note.reloadWhere === 'shell' ? purpose : `in that ${name} ${purpose}`;
 }
 
-/**
- * The manual path when the reload does not take, per runtime: Claude Code's
- * `/exit` and `claude --resume`; Pi quit and `pi --continue`; OpenCode 2's
- * `opencode2 service restart`. Oh My Pi's `/restart` already restarts it:
- * nothing more to fold.
- */
 function ManualPath({ note, name }: { note: RestartNote; name: string }) {
   if (note.runtime === 'oh-my-pi') return null;
   if (note.runtime === 'opencode') {
@@ -206,16 +162,13 @@ function ManualPath({ note, name }: { note: RestartNote; name: string }) {
   );
 }
 
-/** OpenCode 2's one command: `opencode2 plugin update <spec>` when the plugin itself is behind, else `opencode2 reload` (after changing a pin). */
 export function openCodeCommand(note: Pick<RestartNote, 'fix' | 'updateCommand' | 'reloadCommand' | 'pinnedSpec'>): string {
   return note.fix === 'update_extension' && note.updateCommand && !note.pinnedSpec ? note.updateCommand : note.reloadCommand;
 }
 
-/** `opencode2 reload` reloads every location of OpenCode's service: say, quietly, what it cancels. */
 export const OPENCODE_RELOAD_WARNING = 'Cancels any permission prompt OpenCode is showing.';
 export const OPENCODE_UPDATES_ALL = 'It updates every OpenCode plugin that has a newer version.';
 
-/** The quiet lines under OpenCode's command: what a reload cancels; that an update with no target updates every plugin. */
 export function OpenCodeQuiet({ command, updatesAll, className = 'ib-rw-after ib-rl-quiet' }: { command: string; updatesAll: boolean; className?: string }) {
   const reload = command === 'opencode2 reload';
   const all = updatesAll && !reload;
@@ -227,11 +180,6 @@ export function OpenCodeQuiet({ command, updatesAll, className = 'ib-rw-after ib
   );
 }
 
-/**
- * OpenCode 2's step as words: "Run <command>" (its Copy follows the line), or,
- * for a pinned spec, change it first: then the Copy sits right after the value
- * to write (`@plannotator/opencode@latest`), the first step's, and copies it.
- */
 export function OpenCodeWords({ command, pinnedSpec, pinTo, tail = '' }: { command: string; pinnedSpec: string | null; pinTo: string | null; tail?: string }) {
   if (pinnedSpec) {
     const to = pinTo ?? '@plannotator/opencode@latest';
@@ -254,7 +202,6 @@ export function OpenCodeWords({ command, pinnedSpec, pinTo, tail = '' }: { comma
   );
 }
 
-/** The manual path, folded by default behind one question. */
 export function Fold({ question, children }: { question: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -271,7 +218,6 @@ export function Fold({ question, children }: { question: string; children: React
   );
 }
 
-/** Under the reply: what brings Send now back, then the manual path, folded. */
 export function RestartLine({ note, name }: { note: RestartNote; name: string }) {
   const updating = note.fix === 'update_plugin' || note.fix === 'update_extension';
   if (note.runtime === 'opencode') {
@@ -302,15 +248,6 @@ export function RestartLine({ note, name }: { note: RestartNote; name: string })
   );
 }
 
-/**
- * In the grey "can't go in sooner" band under a reply that waits on a busy
- * session (approval "inbox-busy-agent-reply"): why it cannot go into the
- * running turn, and the fix with Copy. The session runs an older plugin
- * (`restart`): one sentence with `/reload-plugins`. The installed plugin is
- * itself behind this Inbox (`update_plugin`): the two steps. With no note
- * (no known fix): just that it cannot go in sooner. The manual path stays
- * folded, as under RestartLine.
- */
 export function StuckReason({ note, name }: { note: RestartNote | null; name: string }) {
   if (!note) {
     return (
@@ -323,7 +260,6 @@ export function StuckReason({ note, name }: { note: RestartNote | null; name: st
   const what = note.runtime === 'pi' || note.runtime === 'oh-my-pi' ? 'extension' : 'plugin';
   const verb = note.reloadWhere === 'shell' ? 'Run' : 'Type';
   if (note.runtime === 'opencode') {
-    // One command (an update reloads by itself), or a pin to change first.
     const command = openCodeCommand(note);
     return (
       <div className="ib-rw-note ib-m-whybox" data-restart-note={note.fix} data-restart-runtime={note.runtime}>

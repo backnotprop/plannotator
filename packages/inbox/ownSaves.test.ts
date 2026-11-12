@@ -1,11 +1,3 @@
-/**
- * Which question records only echo this window's own saves (ownSaves.ts).
- * Failures to catch: news taken for an echo, so the open thread is not read
- * again and shows a stale question (another window's newer answer, a Send
- * that marked it sent without raising its revision, a question this window
- * never saved); and an echo taken for news, which reads the thread and its
- * files again for each key typed.
- */
 import { expect, test } from 'bun:test';
 import type { InboxQuestion } from '@plannotator/core/inbox-types';
 import { createOwnSaves } from './ownSaves';
@@ -51,10 +43,8 @@ test("an echo is covered only by a read that started after its save's answer, an
   own.readsStarted();
   expect(own.covered(q(4))).toBe(true);
   expect(own.covered(q(3))).toBe(true);
-  // A newer save's answer lands after that read started: its echo still owes the read.
   own.saved([q(5)]);
   expect(own.covered(q(5))).toBe(false);
-  // News is never covered.
   own.readsStarted();
   expect(own.covered(q(6))).toBe(false);
   expect(own.covered(q(5, { state: 'sent', sent_revision: 5 }))).toBe(false);

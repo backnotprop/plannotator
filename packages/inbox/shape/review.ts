@@ -1,19 +1,8 @@
-/**
- * A board's review: with no Code tab on Plannotator's board, a place in code the board opens (a drawn part's
- * `data-code`) opens the review's own guided review, the way its thread does (`#thread=…&guide=<message>`), at that
- * file and line. (What's changed, which also showed the review's facts, buttons and step links, is gone: approval
- * "shape-whats-changed-removed". `label`, `files`, `additions`, `deletions` and `steps` are still filled in; nothing
- * draws them now.)
- *
- * The review is the newest message in the board's thread that carries a review (`guide.review`). A board with no
- * thread, or a thread with no review, has none: its links open the file in the board's own viewer, as before.
- */
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import type { ShapeReviewAt, ShapeReviewNarrow, ShapeSurfaceReview } from '@plannotator/ui/components/shape/types';
 
-/** The review a board in this thread is part of: its newest one. */
 export function shapeReviewMessage(thread: InboxThread | null): InboxMessageWire | null {
   if (!thread) return null;
   for (let i = thread.messages.length - 1; i >= 0; i--) {
@@ -23,10 +12,6 @@ export function shapeReviewMessage(thread: InboxThread | null): InboxMessageWire
   return null;
 }
 
-/**
- * A stack badge's "Read it in the review" narrowing (`narrow=` beside the place, JSON): the part's name, the PR, and
- * the files. Anything else in the address is not a narrowing.
- */
 export function shapeReviewNarrowOf(value: string | null): ShapeReviewNarrow | null {
   if (!value) return null;
   let raw: unknown;
@@ -49,15 +34,10 @@ export function shapeReviewNarrowOf(value: string | null): ShapeReviewNarrow | n
   };
 }
 
-/**
- * Where a review opens: a board's place, or a context note's lines (`side: 'old'`: the line is a removed line's
- * number, as `:::note path#L3 old` names it; absent, the new side's).
- */
 export interface ReviewAt extends ShapeReviewAt {
   side?: 'old';
 }
 
-/** Where the review opens, in the window's address beside `guide=`: `code=path:line` (`&side=old`), `step=N`, or `files`, and a stack badge's `narrow=`. */
 export function shapeReviewAtOf(params: URLSearchParams): ReviewAt | null {
   const narrow = shapeReviewNarrowOf(params.get('narrow'));
   const withNarrow = (at: ReviewAt): ReviewAt => (narrow ? { ...at, narrow } : at);
@@ -84,9 +64,7 @@ export function writeShapeReviewAt(params: URLSearchParams, at: ReviewAt | null 
   if (at.narrow && (at.path || at.step)) params.set('narrow', JSON.stringify(at.narrow));
 }
 
-/** The files a review changes, read once per review. */
 const reviewFiles = new Map<string, Promise<ReadonlySet<string> | null>>();
-/** A review's whole patch (a stack badge's file in the code popup), read once per review. */
 const reviewPatches = new Map<string, Promise<string | null>>();
 
 export function shapeReviewPatch(messageId: string, read: (messageId: string) => Promise<{ snapshot: unknown }>): Promise<string | null> {
@@ -116,7 +94,6 @@ export function shapeReviewFiles(messageId: string, read: (messageId: string) =>
         return parsed.ok ? new Set(parseDiffToFiles(parsed.value.review.rawPatch).map((f) => f.path)) : null;
       },
       () => {
-        // Not read (a blip): asked again next time.
         reviewFiles.delete(messageId);
         return null;
       },
@@ -126,10 +103,6 @@ export function shapeReviewFiles(messageId: string, read: (messageId: string) =>
   return files;
 }
 
-/**
- * The board's review: its facts (drawn by nothing now), and `open`, which goes to the review there. A file the
- * review does not change, or a step it does not have, answers false: the board shows the file in its own viewer.
- */
 export function shapeReview(message: InboxMessageWire, go: (messageId: string, at: ShapeReviewAt | null) => void, read: (messageId: string) => Promise<{ snapshot: unknown }>): ShapeSurfaceReview {
   const guide = message.guide!;
   const pr = guide.source?.pr?.number;

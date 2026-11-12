@@ -1,11 +1,6 @@
 import { memo } from 'react';
 import type { EarlierReply } from '../earlierComments';
 
-/**
- * The earlier comments themselves, by the reply that carried them. Read only, dimmed like a resolved comment, and it
- * knows nothing of what holds it (EarlierSection.tsx, in the comments column). Memoised: its replies only change with
- * the data, and a long list should not redraw on every key typed in the file view.
- */
 export const EarlierCommentsList = memo(function EarlierCommentsList({ replies }: { replies: readonly EarlierReply[] }) {
   return (
     <div>

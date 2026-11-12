@@ -9,17 +9,10 @@ import { SetsBody } from './SetsBody';
 
 export type AgentIconPlace = 'own' | 'sets';
 
-/** Where the dialog is a sheet from the bottom (iconDialog.css): its place is the sheet's, never pinned. */
 const SHEET = '(max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse)';
-/** The dialog's full height (Sets), as iconDialog.css draws it, and the room it keeps from the window's edges. */
 const FULL = 640;
 const EDGE = 24;
 
-/**
- * The top edge chosen once, as the dialog opens: centred for the place it opens on, raised only as far as Sets' full
- * height needs to fit below it. Switching between "Your own…" and Sets then moves only its bottom edge. A resize
- * chooses again. Not on a phone, where it is a sheet.
- */
 function usePinnedTop(dialog: () => HTMLDialogElement | null | undefined): void {
   useEffect(() => {
     const el = dialog();
@@ -33,16 +26,9 @@ function usePinnedTop(dialog: () => HTMLDialogElement | null | undefined): void 
     pin();
     addEventListener('resize', pin);
     return () => removeEventListener('resize', pin);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 }
 
-/**
- * The agent icon dialog: "Your own…" or "Sets", chosen in the face picker (FaceFan.tsx), opened in the middle of the
- * window in the Inbox's own dialog (`Modal`, components/Updates.tsx: a native modal, Escape and a click outside close
- * it, focus goes back to the agent's face). Its head names the agent and shows the icon it has now; a switch moves
- * between the two places. Picking an icon applies it at once and closes the dialog. On a phone it is a full-height
- * sheet. No shortcut: its keys are the dialog's own.
- */
 export function AgentIconDialog({ place, agent, host, name, face, onClose }: { place: AgentIconPlace; agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; onClose: () => void }) {
   const [on, setOn] = useState<AgentIconPlace>(place);
   const uid = useId();
@@ -51,7 +37,6 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose }: { p
     { id: 'own', label: OWN_LABEL },
     { id: 'sets', label: SETS_LABEL },
   ];
-  // On a touch screen the search is not focused as the dialog opens: its keyboard would come up over the icons.
   const [touch] = useState(() => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
   const head = useRef<HTMLDivElement>(null);
   usePinnedTop(() => head.current?.closest('dialog'));

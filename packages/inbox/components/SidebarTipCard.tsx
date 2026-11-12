@@ -1,19 +1,10 @@
-/**
- * The Sidebar tip's card (rules in sidebarTip.ts): the Launch tip's card (`.ib-tour-coach.ib-ctip`, LaunchTipCard.tsx)
- * standing beside the sidebar, its arrow on the sidebar's edge, level with the Inbox row. It never takes focus: a
- * pointer press on Got it keeps focus where it was. It leaves by itself on Escape (only the tip closes), a right-click
- * on the sidebar (the menu the tip is about), and when `gone` turns true (the Customize panel, the sidebar going away).
- */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { PAGE_OVERLAYS } from '../idleClock';
 import { SIDEBAR_TIP_SAID, SIDEBAR_TIP_TIMES, SIDEBAR_TIP_WORDS, sidebarTipPlace, sidebarTipTarget, type SidebarTipPlace } from '../sidebarTip';
 
 export function SidebarTipCard(props: {
-  /** The tip no longer has its place (the Customize panel opened, the sidebar closed, something is over the page). */
   gone: boolean;
-  /** The window's polite region says it once. */
   onSay: (text: string) => void;
-  /** It left: closed for good (the claim stamped it). */
   onLeave: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -37,7 +28,6 @@ export function SidebarTipCard(props: {
     latest.current.onSay(SIDEBAR_TIP_SAID);
   }, []);
 
-  // Beside the sidebar, wherever its edge is now (its width is the person's to drag); no sidebar, or no room: it leaves.
   useLayoutEffect(() => {
     const measure = () => {
       const card = cardRef.current;
@@ -65,14 +55,12 @@ export function SidebarTipCard(props: {
   }, []);
 
   useEffect(() => {
-    // Escape closes only the tip; with a menu or dialog open, Escape is theirs.
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector(PAGE_OVERLAYS)) return;
       event.preventDefault();
       event.stopPropagation();
       leave();
     };
-    // The sidebar's own menu (a right-click, Shift+F10, the menu key): what the tip is about.
     const onMenu = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest('aside.ib-side')) leave();
     };
@@ -107,7 +95,6 @@ export function SidebarTipCard(props: {
           className="ib-tc-next"
           data-sidebar-tip-ok=""
           tabIndex={leaving ? -1 : undefined}
-          // A pointer press never takes focus from the list or the thread.
           onPointerDown={(event) => event.preventDefault()}
           onMouseDown={(event) => event.preventDefault()}
           onClick={leave}

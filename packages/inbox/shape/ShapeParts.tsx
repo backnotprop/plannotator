@@ -1,14 +1,7 @@
-/**
- * Shape in the Inbox window (approval "shape-inbox-placement"): the thread
- * header's Pebble, the grid page the sidebar's Shape row opens, the board laid
- * over the thread, and the board's Thread tab. No keys of its own: ⌘K and Esc
- * are the window's.
- */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-// The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
@@ -26,7 +19,6 @@ const NO_ANSWERS: ReadonlyMap<string, QuestionAnswer> = new Map();
 const noop = () => {};
 const noFooter = () => null;
 
-/** The grid's card for a board. */
 export function shapeGridItem(s: InboxShapeSummary): ShapeGridItem {
   return {
     id: s.id,
@@ -40,7 +32,6 @@ export function shapeGridItem(s: InboxShapeSummary): ShapeGridItem {
   };
 }
 
-/** The thread header's Pebble: opens and closes the thread's board. A dot: it changed since you looked. */
 export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShapeSummary; open: boolean; onToggle: () => void }) {
   const tip = (
     <span className="ib-shape-tip">
@@ -64,17 +55,6 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
   );
 }
 
-/**
- * The board, over the thread or the grid: its ×, Esc or Back closes it. It covers the page's head, so the sidebar
- * toggle every full page's head has sits at its title's left: the board can take the window's width.
- *
- * `onOpenReview`: a place in code on the board (a drawn part's `data-code`) opens the thread's review there; with Code
- * review on the board rides along as its corner card (ReviewPane). `covered`: a review (the guide pane) is open over
- * it. The board is inert meanwhile, so Esc and Tab go to the review, not to the board's panel, bubble or Show more
- * under it. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the
- * person goes on it. `back` and `headSide`: the way back to the board it came from, at the title's left, and the
- * thread's other boards at its right (Show me from a board, `ThreadShapeLayer`).
- */
 export function ShapeLayer({
   host,
   id,
@@ -100,15 +80,12 @@ export function ShapeLayer({
   back?: ReactNode;
   headSide?: ReactNode;
 }) {
-  // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
   const reviewMessage = shapeReviewMessage(thread);
   const openReview = useRef(onOpenReview);
   openReview.current = onOpenReview;
   const review = useMemo(
     () => (reviewMessage && onOpenReview ? shapeReview(reviewMessage, (message, at) => openReview.current?.(message, at), inboxApi.guide) : null),
-    // A new review in the thread, or new facts on it; not every render's new callback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [reviewMessage?.id, reviewMessage?.guide?.sha256, !!onOpenReview],
   );
   return (
@@ -133,11 +110,6 @@ export function ShapeLayer({
   );
 }
 
-/**
- * The layer itself, needing no sidebar: a review is a full window of its own, outside the sidebar's shell. `hidden`:
- * kept as it is (its view, its panel) while the review shows a part's code. `onCode`: a review lands a part on its line.
- * `place`: the view and panel it starts on (read once, when it mounts); `onNavigate`: each view or panel the person picks.
- */
 export function ShapeBoardLayer({
   host,
   id,
@@ -167,8 +139,6 @@ export function ShapeBoardLayer({
   place?: ShapeBoardPlace | null;
   onNavigate?: ShapeBoardProps['onNavigate'];
 }) {
-  // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
-  // (this layer mounted again, or another board in it) asks for the chunk again.
   const [failedOn, setFailedOn] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   if (failedOn !== null && failedOn !== id) {
@@ -201,7 +171,6 @@ export function ShapeBoardLayer({
   );
 }
 
-/** The board's Thread tab: the thread's messages, read-only, each marked for the board's "jump to the message". */
 export function ShapeThreadTab({ thread, flash, openInFiles = false }: { thread: InboxThread; flash: string | null; openInFiles?: boolean }) {
   return (
     <div className="ib-shape-thread">
@@ -218,13 +187,11 @@ export function ShapeThreadTab({ thread, flash, openInFiles = false }: { thread:
   );
 }
 
-/** The grid page (the sidebar's Shape row): "Shape", Find, and every board newest first. */
 export function ShapeGridPage({ shapes, onOpen }: { shapes: InboxShapeSummary[] | null; onOpen: (s: InboxShapeSummary) => void }) {
   const [query, setQuery] = useState('');
   const items = useMemo(() => (shapes ?? []).filter((s) => s.state === 'active').map(shapeGridItem), [shapes]);
   const byId = useMemo(() => new Map((shapes ?? []).map((s) => [s.id, s])), [shapes]);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  // The page's heading takes focus, as the Board's does; Find is one Tab away.
   useEffect(() => headingRef.current?.focus({ preventScroll: true }), []);
   return (
     <section className="ib-bpage ib-shape-page" data-shape-page="" aria-labelledby="ib-shape-title" aria-busy={shapes === null}>

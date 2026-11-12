@@ -1,14 +1,3 @@
-/**
- * Re-ask (approval "inbox-reask") as the window draws and sends it: the
- * item at the foot of the "N open questions" list when a question waits
- * (owner, 2026-10-23: no Re-ask button in the foot), one note per session,
- * the note's line and "Asked again" on the old cards while it waits, the
- * button gone while the note waits and right after the agent answered it,
- * and the ended-session choice ("Who should ask again?").
- *
- * The pure rules (reask.ts) run everywhere; the window's parts are
- * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -115,7 +104,6 @@ describe('the rules (reask.ts)', () => {
         action: { where: null, where_url: null, run: null, watching: null },
         action_result: marked ? { outcome: 'done', note: null, at: '2026-10-20T10:50:00.000Z', by: 'person' } : null,
       }) as InboxQuestion;
-    // One question and one open action item: offered, and the tooltip names both.
     const msgs = [agent(M1, `One.\n\n${block('Backfill ledger first?')}`, '2026-10-20T10:42:00.000Z'), agent(M3, 'Approve it.', '2026-10-20T10:46:00.000Z', A, { actions: [todo('a-00000001', 'open'), todo('a-00000002', 'picked', true)] })];
     const [t] = reaskTargets(msgs);
     expect(t).toMatchObject({ kind: 'reask', open: 2, actions: 1, picked: 0 });
@@ -124,19 +112,16 @@ describe('the rules (reask.ts)', () => {
     expect(reaskTooltip([t!])).toBe(
       'Ask Claude Code to ask the 1 open question and 1 action item again, together in one message with fresh context. Those that no longer apply are closed; until then they stay open here.',
     );
-    // A marked action item waits on nobody: beside one question it adds nothing, and alone there is nothing to offer.
     const marked = [agent(M1, `One.\n\n${block('Backfill ledger first?')}`, '2026-10-20T10:42:00.000Z'), agent(M3, 'Approve it.', '2026-10-20T10:46:00.000Z', A, { actions: [todo('a-00000002', 'picked', true)] })];
     expect(reaskTargets(marked)).toMatchObject([{ kind: 'reask', open: 1, actions: 0, picked: 0 }]);
     expect(reaskOffered(reaskTargets(marked), marked)).toBe(true);
     const markedOnly = [agent(M3, 'Approve it.', '2026-10-20T10:46:00.000Z', A, { actions: [todo('a-00000002', 'picked', true)] })];
     expect(reaskOffered(reaskTargets(markedOnly), markedOnly)).toBe(false);
-    // One open action item alone: offered, in the singular.
     const oneTodo = [agent(M3, 'Approve it.', '2026-10-20T10:46:00.000Z', A, { actions: [todo('a-00000001', 'open')] })];
     expect(reaskOffered(reaskTargets(oneTodo), oneTodo)).toBe(true);
     expect(reaskTooltip(reaskTargets(oneTodo))).toBe(
       'Ask Claude Code to ask the open action item again, with fresh context. If it no longer applies, it is closed; until then it stays open here.',
     );
-    // The note's line names the action items it asked about.
     expect(reaskNoteSentence('Claude Code', 2, 0, 1)).toBe('You asked Claude Code to ask the 1 open question and 1 action item again, together in one message. They stay open here until it does.');
     expect(reaskNoteSentence('Pi', 1, 0, 1)).toBe('You asked Pi to ask the open action item again. It stays open here until it does.');
   });
@@ -147,13 +132,11 @@ describe('the rules (reask.ts)', () => {
     expect(one[0]).toMatchObject({ session: 'ses_a', open: 3, picked: 0, name: 'Claude Code' });
     expect(one[0]!.message.id).toBe(M2);
     expect(reaskOffered(one)).toBe(true);
-    // One question waiting (owner, 2026-10-23): offered too, worded in the singular.
     const single = reaskTargets([agent(M2, BODY2, '2026-10-20T10:45:00.000Z')]);
     expect(reaskOffered(single)).toBe(true);
     expect(reaskTooltip(single)).toBe(
       'Ask Claude Code to ask the open question again, with fresh context. If it no longer applies, it is closed; until then it stays open here.',
     );
-    // Nothing waiting: nothing to offer.
     expect(reaskOffered(reaskTargets([agent(M2, 'Done with the refunds.', '2026-10-20T10:45:00.000Z')]))).toBe(false);
     const two = reaskTargets([...base(), agent(M3, block('Pin Node?'), '2026-10-20T10:47:00.000Z', B)]);
     expect(two.map((t) => [t.session, t.message.id, t.open])).toEqual([
@@ -192,13 +175,11 @@ describe('the rules (reask.ts)', () => {
     const msgs = base();
     const redirected = note(openIds(msgs), M2, { to: { host: 'claude-code', session: 'ses_c' } });
     expect(reaskTargets([...msgs, redirected])).toEqual([]);
-    // The new session re-asked two and left the third neither replaced nor superseded.
     const old = msgs.map((m) => ({ ...m, questions: m.questions!.map((q) => (q.message_id === M2 ? q : { ...q, state: 'superseded' as const })) }));
     const C: typeof A = { ...A, session: 'ses_c' };
     const answer = agent(M5, `${block('Backfill ledger first?')}\n\n${block('Keep the old webhook?')}`, '2026-10-20T10:55:00.000Z', C, { reply_to: NOTE });
     const thread = [...old, redirected, answer];
     const after = reaskTargets(thread);
-    // ses_c just answered the note (left out); ses_a's question it left open can be asked again: 3 wait in the thread.
     expect(after.map((t) => [t.kind, t.session, t.open])).toEqual([['reask', 'ses_a', 1]]);
     expect(reaskOffered(after, thread)).toBe(true);
   });
@@ -226,15 +207,12 @@ describe('the rules (reask.ts)', () => {
   test('rule 2a: a note stops hiding its session once nothing it lists is open, even if that session never wrote', () => {
     const msgs = base();
     const [q1] = openIds(msgs);
-    // The note listed only q1 (the others were picked then); someone else superseded q1 since.
     const gone = msgs.map((m) => ({ ...m, questions: m.questions!.map((q) => (`${q.message_id}/${q.key}` === q1 ? { ...q, state: 'superseded' as const } : q)) }));
     expect(reaskTargets([...msgs, note([q1!])]).map((t) => t.session)).toEqual([]);
     expect(reaskTargets([...gone, note([q1!])]).map((t) => [t.session, t.open])).toEqual([['ses_a', 2]]);
   });
 
   test('a question record that does not name its message (one that arrived while the thread was open) never throws, and the rules read its holder', () => {
-    // The shape that blanked the thread: every waiting question in one message, and the
-    // question's own `message_id` missing (or naming another message), so no message matched it.
     const strip = (m: InboxMessageWire, to?: string): InboxMessageWire => ({
       ...m,
       questions: m.questions!.map((q) => ({ ...q, message_id: to as unknown as string })),
@@ -245,14 +223,11 @@ describe('the rules (reask.ts)', () => {
     expect(() => (targets = reaskTargets(thread1))).not.toThrow();
     expect(targets.map((t) => [t.kind, t.message.id, t.open])).toEqual([['reask', M2, 1]]);
     expect(reaskOffered(targets, thread1)).toBe(true);
-    // A stale `message_id` (another message's) is read the same way.
     expect(reaskTargets([thread1[0]!, strip(agent(M2, BODY2, '2026-10-20T10:45:00.000Z'), M3)]).map((t) => t.message.id)).toEqual([M2]);
-    // Several open in that one message, answering a note: the session just answered it, so it is left out.
     const msgs = base();
     const answered = strip(agent(M5, `${block('Backfill ledger first?')}\n\n${block('Keep the old webhook?')}`, '2026-10-20T10:55:00.000Z', A, { reply_to: NOTE }));
     const old = msgs.map((m) => ({ ...m, questions: m.questions!.map((q) => ({ ...q, state: 'superseded' as const })) }));
     expect(reaskTargets([...old, note(openIds(msgs)), answered])).toEqual([]);
-    // "Asked again" reads the holding message's id, not the record's.
     const listed = note([`${M2}/${arrived.questions![0]!.key}`]);
     expect(reaskedIn([...thread1, listed], M2, arrived.questions![0]!)?.id).toBe(NOTE);
     expect(reaskedIn([...thread1, listed], M1, arrived.questions![0]!)).toBeNull();
@@ -328,7 +303,6 @@ async function render(t: InboxThread) {
   return host;
 }
 
-/** Base UI opens on the pointer's press, as a person's click does. */
 async function press(target: HTMLElement) {
   await act(async () => {
     target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -339,10 +313,6 @@ async function press(target: HTMLElement) {
   });
 }
 
-/**
- * Re-ask lives at the foot of the "N open questions" list (owner, 2026-10-23):
- * open the list and answer the item, or null when the list or the item is not there.
- */
 async function reaskButton(el: HTMLElement): Promise<HTMLElement | null> {
   expect(el.querySelector('[data-foot-buttons] [data-reask]')).toBeNull();
   const trigger = el.querySelector<HTMLElement>('[data-open-questions]');

@@ -1,23 +1,3 @@
-// Ported from the Workspaces app's sidebar component for the Inbox sidebar
-// (the owner, 2026-10-09: "use that same exact sidebar experience ... the
-// same exact smooth animation"). What came across as is:
-// the provider and its open/closed and mobile state, the ⌘/Ctrl+B toggle, the
-// accepted-width MotionValue, the docked offcanvas motion (one spring on a
-// progress value, allocation = width × progress on the spacer and the
-// clipping panel, content held at full width with opacity on the same
-// progress, inert once the close settles) and the mobile sheet on the same
-// spring. What changed in the port:
-// - Tailwind classes became `ib-` classes in inbox.css, in the Inbox's skin.
-// - The provider does not read or write localStorage: the Inbox drives `open`
-//   from its own cookie (`plannotator-inbox-sidebar-open`).
-// - ⌘/Ctrl+B leaves an input, a textarea or contentEditable alone (and is
-//   always prevented, so Firefox's bookmarks sidebar never opens).
-// - Left out: the icon-mode and `none` collapsibles, the floating and inset
-//   variants, the right side, SidebarRail and the menu, group and skeleton
-//   parts (the Inbox draws its own rows), and the TooltipProvider.
-// - The sheet portals into the provider's wrapper, so it keeps the Inbox's
-//   tokens; Base UI's Dialog is used directly (Workspaces wraps it as Sheet).
-
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { useMotionValue } from "motion/react";
 import type { MotionValue } from "motion/react";
@@ -27,16 +7,11 @@ import { usePhone } from "../phone";
 import { MotionStyleDiv, type MotionStyleValues } from "./motion-style-div";
 import { preloadShellAnimate, useCombinedMotionValue, useShellProgress } from "./shell-motion";
 
-// Fallback only: the Inbox shell always overrides --sidebar-width with its
-// committed resizable value. This static twin exists for bare mounts.
 const SIDEBAR_WIDTH = "232px";
 const SIDEBAR_WIDTH_PX = 232;
 const SIDEBAR_WIDTH_MOBILE = "260px";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 
-// The navigation becomes an off-canvas sheet only on a phone (packages/inbox/phone.ts:
-// under 768 px wide, or a short touch screen, a phone in landscape). Read
-// synchronously, so a phone never paints the docked sidebar first.
 const useIsMobile = usePhone;
 
 type SidebarContext = {
@@ -47,29 +22,15 @@ type SidebarContext = {
 	setOpenMobile: (open: boolean) => void;
 	isMobile: boolean;
 	toggleSidebar: () => void;
-	/** The ACCEPTED desktop width in px, as an element-scoped MotionValue.
-	 * The live resize drag writes it per frame (never an inherited CSS custom
-	 * property: that recalculates style for the whole tree every frame). */
 	widthValue: MotionValue<number>;
-	/** The provider's wrapper, where the mobile sheet portals. */
 	container: HTMLDivElement | null;
-	/** Something the sidebar holds that the closed sidebar would hide (an update): a dot on the trigger. */
 	toggleNotice: SidebarToggleNotice | null;
 };
 
-/**
- * A dot on the sidebar toggle while the sidebar is closed (docked closed, or
- * the phone sheet closed), for something only the sidebar shows. `label`
- * joins the toggle's accessible name ("update available"); the dot itself is
- * hidden from screen readers. `tone`: `primary`, or `neutral` (a failure that
- * is not an error, as the Update button draws it).
- */
 export type SidebarToggleNotice = { tone: "primary" | "neutral"; label: string };
 
 const SidebarContext = React.createContext<SidebarContext | null>(null);
 
-/** Base UI render-prop adapter for MotionStyleDiv: the MotionValue styles
- * merge over Base UI's own style, as they did on `m.div`. */
 function renderMotionDiv(motionStyle: MotionStyleValues, staticStyle?: React.CSSProperties) {
 	return function motionSurface(props: React.ComponentProps<"div">) {
 		return (
@@ -82,7 +43,6 @@ function renderMotionDiv(motionStyle: MotionStyleValues, staticStyle?: React.CSS
 	};
 }
 
-/** An input, a textarea or contentEditable: where ⌘B belongs to the text. */
 function isEditable(target: EventTarget | undefined): boolean {
 	if (!(target instanceof HTMLElement)) return false;
 	return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable;
@@ -108,27 +68,21 @@ function SidebarProvider({
 	children,
 	...props
 }: React.ComponentProps<"div"> & {
-	/** See SidebarToggleNotice. */
 	toggleNotice?: SidebarToggleNotice | null;
 	defaultOpen?: boolean;
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
-	/** Live accepted-width MotionValue (see SidebarContext.widthValue).
-	 * Optional so bare mounts get the static twin. */
 	widthValue?: MotionValue<number>;
 }) {
 	const isMobile = useIsMobile();
 	const [openMobile, setOpenMobile] = React.useState(false);
 	const [container, setContainer] = React.useState<HTMLDivElement | null>(null);
 	const fallbackWidthValue = useMotionValue(SIDEBAR_WIDTH_PX);
-	// Warm the open/close spring's chunk once the shell has painted.
 	React.useEffect(() => {
 		preloadShellAnimate();
 	}, []);
 	const widthValue = widthValueProp ?? fallbackWidthValue;
 
-	// This is the internal state of the sidebar.
-	// We use openProp and setOpenProp for control from outside the component.
 	const [_open, _setOpen] = React.useState(defaultOpen);
 	const open = openProp ?? _open;
 	const setOpen = React.useCallback(
@@ -143,18 +97,14 @@ function SidebarProvider({
 		[setOpenProp, open],
 	);
 
-	// Helper to toggle the sidebar.
 	const toggleSidebar = React.useCallback(() => {
 		return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
 	}, [isMobile, setOpen]);
 
-	// Adds a keyboard shortcut to toggle the sidebar.
 	React.useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
-				// Always ours: Firefox's Ctrl+B would open its bookmarks sidebar.
 				event.preventDefault();
-				// Typing stays typing: the reply box, a field or an editor keeps the sidebar where it is.
 				if (isEditable(event.composedPath()[0])) return;
 				toggleSidebar();
 			}
@@ -164,7 +114,6 @@ function SidebarProvider({
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [toggleSidebar]);
 
-	// We add a state so that we can do data-state="expanded" or "collapsed".
 	const state = open ? "expanded" : "collapsed";
 
 	const contextValue = React.useMemo<SidebarContext>(
@@ -206,18 +155,6 @@ function SidebarProvider({
 function Sidebar({ className, children, ...props }: React.ComponentProps<"div">) {
 	const { isMobile, state, openMobile, setOpenMobile, widthValue, container } = useSidebar();
 
-	// THE sidebar's motion controllers (Workspaces motion contract). Two
-	// surfaces, two controllers, ONE shared vocabulary (shellSpring via
-	// useShellProgress): every entrypoint (SidebarTrigger, ⌘/Ctrl+B, the
-	// collapse edge, the resize snap-close, click-collapse) flips the
-	// provider's booleans; these hooks are the only thing that animates.
-	//
-	// Desktop docked: the accepted width lives in the context's element-
-	// scoped `widthValue` MotionValue (the live resize drag writes it per
-	// frame, render-free), so the animated allocation is width × progress
-	// written to the elements' own styles: the drag flows through the
-	// MotionValue at progress 1 with zero smoothing, while open/close
-	// animates the multiplier.
 	const desktopMotion = useShellProgress(state === "expanded");
 	const desktopClamped = useCombinedMotionValue([desktopMotion.progress], ([value]) =>
 		Math.min(1, Math.max(0, value)),
@@ -227,8 +164,6 @@ function Sidebar({ className, children, ...props }: React.ComponentProps<"div">)
 		return acceptedWidth * openProgress;
 	});
 
-	// Mobile offcanvas: presence-style, opacity 0↔1 with x -8↔0 on the same
-	// spring; the sheet stays mounted until progress zero.
 	const mobileMotion = useShellProgress(isMobile && openMobile);
 	const mobileClamped = useCombinedMotionValue([mobileMotion.progress], ([value]) =>
 		Math.min(1, Math.max(0, value)),
@@ -239,24 +174,12 @@ function Sidebar({ className, children, ...props }: React.ComponentProps<"div">)
 		([value]) => mobileOffset + (0 - mobileOffset) * value,
 	);
 
-	// The closed sidebar deliberately stays MOUNTED (reversible animation),
-	// so it leaves the tab order and accessibility tree once the close
-	// SETTLES: `inert` does all three (tab order, SR tree, clicks). While open
-	// or still animating, inert stays off so an interrupted close remains
-	// fully interactive; on reopen it lifts immediately.
 	const settledHidden = !desktopMotion.mounted;
 
 	if (isMobile) {
-		// Composed from the Dialog primitives so the ONE floating spring owns
-		// the presentation. Base UI owns a11y: portal, modal focus trap, Esc
-		// and backdrop dismiss (onOpenChange), aria wiring from the title.
-		// The dialog's `open` is the controller's `mounted`, so the sheet
-		// stays mounted through the exit spring and unmounts exactly at
-		// progress zero (reduced motion: immediately).
 		return (
 			<SheetPrimitive.Root open={mobileMotion.mounted} onOpenChange={setOpenMobile}>
 				<SheetPrimitive.Portal container={container}>
-					{/* The scrim's fade rides the SAME progress as the panel. */}
 					<SheetPrimitive.Backdrop
 						data-slot="sheet-overlay"
 						render={renderMotionDiv({ opacity: mobileClamped })}
@@ -279,11 +202,6 @@ function Sidebar({ className, children, ...props }: React.ComponentProps<"div">)
 		);
 	}
 
-	// Docked treatment: ONE animated allocation (accepted width × progress)
-	// carried by BOTH the in-flow spacer (so the flex:1 main sibling reflows
-	// continuously) and the fixed panel (which CLIPS). The inner content is
-	// HELD at the accepted width with opacity riding the same progress: text
-	// and icons never compress.
 	return (
 		<div
 			className="ib-sb"
@@ -313,7 +231,6 @@ function Sidebar({ className, children, ...props }: React.ComponentProps<"div">)
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<"button">) {
 	const { toggleSidebar, toggleNotice, isMobile, open, openMobile } = useSidebar();
-	// Only while the sidebar is closed: open, it shows the thing itself.
 	const notice = toggleNotice && !(isMobile ? openMobile : open) ? toggleNotice : null;
 
 	return (
@@ -336,10 +253,6 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<"
 	);
 }
 
-/**
- * The sidebar-toggle glyph, from the Workspaces app's PanelLeftIcon, which
- * copied it from the Plannotator app sidebar reference.
- */
 function PanelLeftIcon(props: React.SVGProps<SVGSVGElement>) {
 	return (
 		<svg

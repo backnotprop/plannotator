@@ -1,17 +1,3 @@
-/**
- * A list row's tooltips mount on first use (RowTip.tsx; .ops/perf/open-thread-xl.md, fix 2): drawing every row's
- * tooltips with the rows was most of the cost of opening a thread from a long list. What is proved: drawing the rows
- * adds no hover listener; the pointer's first entry still opens the tooltip after the delay, from a trigger drawn
- * the same as before; rows drawn again under a pointer at rest (the browser's own mouseenter, no pointer event) open
- * nothing until the pointer moves, then open as before; a Tab from a row onto its hover action keeps focus on the same
- * element (the row armed it) and shows the action's tooltip; a press with no hover before it keeps the element it
- * went down on, over events while it is down included, and its click opens the row; a screen with no hover never
- * draws a trigger again; a pointer gone where the browser sends no mouseleave stops the open at
- * the first real event elsewhere; a touch, its tap's mouse events included, never draws a trigger again (it would be
- * under the finger mid-tap).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -38,7 +24,6 @@ function row(id: string, read: boolean): InboxListRow {
     waiting_on_person: !read,
     project: { id: 'prj_1', name: 'plannotator' },
     thread_name: null,
-    // A read row the list still holds in New: its hover action is Mark unread.
     section: read ? 'new' : 'waiting',
     unread: !read,
     read_at: read ? '2026-10-10T11:00:00.000Z' : null,
@@ -95,7 +80,6 @@ function render(narrow: boolean, onOpen: (id: string) => void = () => {}): HTMLE
   return host;
 }
 
-/** An element's attributes, base-ui's generated `id` left out (no style or test reads it). */
 const attributes = (el: Element) =>
   [...el.attributes]
     .filter((a) => a.name !== 'id')
@@ -104,9 +88,7 @@ const attributes = (el: Element) =>
 
 for (const narrow of [false, true]) {
   test.skipIf(!hasDom)(`drawing ${narrow ? 'three-line' : 'wide'} rows adds no hover listener; the first entry opens the tooltip from a trigger drawn the same`, async () => {
-    // Hover listeners added on anything inside a row (the list's header keeps its own tooltips).
     const added: string[] = [];
-    // The prototype a DOM element takes addEventListener from (happy-dom's own EventTarget, not the global one).
     let owner: object = document.createElement('span');
     while (!Object.prototype.hasOwnProperty.call(owner, 'addEventListener')) owner = Object.getPrototypeOf(owner);
     const target = owner as { addEventListener: (...args: unknown[]) => void };
@@ -121,7 +103,6 @@ for (const narrow of [false, true]) {
     } finally {
       target.addEventListener = real;
     }
-    // Before: every row's tiles, ticks and counts drew a tooltip with four hover listeners each.
     expect(added.filter((t) => t === 'mouseenter' || t === 'mouseleave')).toEqual([]);
     const tiles = () => el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
     const before = tiles();
@@ -140,7 +121,6 @@ for (const narrow of [false, true]) {
 test.skipIf(!hasDom)('rows drawn again under a pointer at rest: the browser\'s mouseenter alone opens nothing; the next move opens the tooltip', async () => {
   const el = render(false);
   const tiles = () => el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
-  // What Chrome sends a new element under a pointer that has not moved: the mouse's boundary events, no pointer event.
   act(() => {
     tiles().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 10, clientY: 10 }));
     tiles().dispatchEvent(new MouseEvent('mouseenter', { clientX: 10, clientY: 10 }));
@@ -159,7 +139,6 @@ test.skipIf(!hasDom)("a Tab from a row onto its hover action keeps focus on the 
   const rowButton = el.querySelector<HTMLElement>('[data-row="msg_1"] [data-thread-id]')!;
   act(() => rowButton.focus());
   expect(document.activeElement).toBe(rowButton);
-  // The row armed its action when focus came in: the Tab's handler holds the element it moves focus to.
   const before = el.querySelector<HTMLElement>('[data-row="msg_1"] [data-row-mark-unread]')!;
   act(() => {
     rowButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
@@ -177,7 +156,6 @@ test.skipIf(!hasDom)("a press with no hover before it (a pen's first contact): t
   const opened: string[] = [];
   const el = render(false, (id) => opened.push(id));
   const tiles = el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
-  // What the browser sends the element under a press that came with no move: its over events, then the press.
   act(() => {
     tiles.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'pen', clientX: 10, clientY: 10 }));
     tiles.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 10, clientY: 10 }));
@@ -192,7 +170,6 @@ test.skipIf(!hasDom)("a press with no hover before it (a pen's first contact): t
     tiles.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
   });
   expect(opened).toEqual(['msg_0']);
-  // As `Tip` let the press cancel its open: nothing opens until the pointer comes back.
   await settle();
   expect(openTooltips()).toEqual([]);
   expect(tiles.isConnected).toBe(true);
@@ -205,7 +182,6 @@ test.skipIf(!hasDom)('over events while the press is down (onto the next tile; a
     target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'pen', buttons, clientX: 10, clientY: 10 }));
   const mouse = (type: string, target: Element, buttons: number) =>
     target.dispatchEvent(new MouseEvent(type, { bubbles: true, buttons, clientX: 10, clientY: 10 }));
-  // A: the press, then the pen slides onto the next tile with the button down.
   const tilesA = el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
   const tile = tilesA.querySelector('.ib-atile') ?? tilesA;
   act(() => {
@@ -225,7 +201,6 @@ test.skipIf(!hasDom)('over events while the press is down (onto the next tile; a
     mouse('mouseup', tilesA, 0);
     mouse('click', tilesA, 0);
   });
-  // B: the compatibility mouseover after the down (the Pointer Events spec allows that order).
   const tilesB = el.querySelector<HTMLElement>(`[data-thread-id="msg_2"] [data-row-agents]`)!;
   act(() => {
     pen('pointerover', tilesB, 0);
@@ -293,8 +268,6 @@ test.skipIf(!hasDom)("the pointer gone where the browser never says it left: the
   const tiles = () => el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
   hover(tiles());
   await settle(0);
-  // The tip waits out its delay. The pointer is now on something else (a row's hover action that showed over it),
-  // and the drawn-again trigger gets no mouseleave: only the browser's over event, on that something else.
   const elsewhere = el.querySelector<HTMLElement>('[data-row="msg_1"]')!;
   const over = new MouseEvent('mouseover', { bubbles: true, clientX: 600, clientY: 10 });
   Object.defineProperty(over, 'isTrusted', { value: true });
@@ -308,7 +281,6 @@ test.skipIf(!hasDom)("the pointer gone where the browser never says it left: the
 test.skipIf(!hasDom)("a touch never draws a trigger again, its tap's mouse events included, and opens no tooltip", async () => {
   const el = render(false);
   const tiles = el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
-  // A tap: its pointer event, then the mouse events a browser sends for it (`sourceCapabilities.firesTouchEvents`).
   const tap = new MouseEvent('mouseover', { bubbles: true, clientX: 10, clientY: 10 });
   Object.defineProperty(tap, 'sourceCapabilities', { value: { firesTouchEvents: true } });
   act(() => {

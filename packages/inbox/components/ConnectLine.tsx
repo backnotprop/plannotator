@@ -4,16 +4,6 @@ import { bandLines, notesAddedParts } from '../agents';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 
-/**
- * One quiet line above the list (the band of the old agent-note dialog, moved
- * here when the note became automatic: approval "inbox-agent-note-auto"): what
- * the last run connected, who needs connecting by hand, what failed, whose
- * entry is someone else's, and the notes Plannotator wrote by itself ("Added
- * the Inbox note to Claude Code's instructions.", the file in each name's
- * tooltip). No popup, nothing to confirm: Got it hides it, and so does the
- * way to Settings → Agents. App.tsx tells the Inbox it was said
- * (`POST /api/inbox/agents/seen`) when it shows, so the next load is clear.
- */
 export function ConnectLine({
   report,
   notes,
@@ -23,7 +13,6 @@ export function ConnectLine({
   report: InboxConnectReport | null;
   notes: readonly InboxNoteAutoAdd[];
   onDismiss: () => void;
-  /** Settings → Agents (the line hides too). */
   onSettings: () => void;
 }) {
   const band = report ? bandLines(report) : null;

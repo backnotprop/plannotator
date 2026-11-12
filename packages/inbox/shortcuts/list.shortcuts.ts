@@ -1,11 +1,5 @@
 import { defineShortcutScope } from '@plannotator/ui/shortcuts';
 
-/**
- * The list's keys (InboxList.tsx). The arrows and Home / End act only while a
- * row has focus (the list's own keydown), so they never take the page's
- * scrolling elsewhere; they move focus and never open a thread (Enter does,
- * the row being a button). Tab still visits every row, as before.
- */
 export const inboxListShortcuts = defineShortcutScope({
   id: 'inbox-list',
   title: 'List',
@@ -16,14 +10,12 @@ export const inboxListShortcuts = defineShortcutScope({
     first: { description: 'First thread', bindings: ['Home'], section: 'List', preventDefault: true, displayOrder: 2 },
     last: { description: 'Last thread', bindings: ['End'], section: 'List', preventDefault: true, displayOrder: 3 },
     open: {
-      // The row is a button: Enter is its own (listed for the map).
       description: 'Open the thread',
       bindings: ['Enter'],
       section: 'List',
       displayOrder: 4,
     },
     rowMenu: {
-      // RowMenu.tsx takes it on a focused row, and the Board's CardMenu.tsx on a focused card (the context-menu key too).
       description: 'Row or card menu',
       bindings: ['Shift+F10'],
       section: 'List',

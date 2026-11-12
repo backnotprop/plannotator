@@ -1,13 +1,3 @@
-/**
- * The grill-me tip in a DOM (shared/inbox/grill-me-tip.ts): the line's hook (reveal.ts `useLineReveal`) with the
- * tip's moment (`grillMeTipLeaveCounts`, `grillMeTipIdleCounts`) driving `GrillMeTip`, as App wires them.
- *
- * What regresses: the card showing on load, or after a thread where the person answered nothing (a skip is not an
- * answer), a thread left too soon or for another thread; the card losing its words or its one button; Got it or
- * Escape not closing it, or sending a Not now (nothing to decline: no three-day wait); a second claim after it closed.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -63,7 +53,6 @@ const card = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog
 
 const ROW = { thread_id: 'msg_a', section: 'sent', unseen: 0 } as InboxListRow;
 
-/** A thread as the window loads it (App's `noteRevealThread`): one agent message asking one question, answered or not. */
 function loaded(threadId: string, answer: 'sent' | 'skipped' | 'none') {
   const question = {
     kind: 'single',
@@ -114,7 +103,6 @@ function mount(state: State) {
   return (next: State) => act(() => root!.render(<Harness state={next} />));
 }
 
-/** A thread open long enough to read: what comes next is leaving it. */
 async function readThread(answer: 'sent' | 'skipped' | 'none' = 'sent', state: State = BASE) {
   loaded('msg_a', answer);
   const render = mount(state);

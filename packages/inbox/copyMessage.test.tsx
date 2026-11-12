@@ -1,27 +1,3 @@
-/**
- * Copy a message, copy a thread (design record "inbox-copy-message", option
- * B, approved 2026-10-28).
- *
- * The Markdown (no DOM): an answered question block becomes readable lines
- * with its choices and the SENT answer (a pick not sent yet shows none); a
- * block inside a code fence stays text; the person's reply keeps their words
- * and drops what the Inbox wrote for the agent; a thread is the subject, the
- * project and count, then each message under its author and time between
- * `---` (the approved sample, word for word). Drawn, a Run command with
- * backticks stays one code span, and a prompt's own bold renders beside the
- * bold Q1./A1. label instead of nesting in it.
- *
- * Attached files (DOM): a message's copy ends with "Files: …", the display
- * names in send order, drawn as plain text however odd the name; a thread
- * copy names each message's files under that message.
- *
- * The menus (DOM-gated: DOM_TESTS=1, from the test.yml DOM list), on the real
- * ThreadPane: each open message's ⋯ after Reply and its items, Copy message
- * and Copy link to message with their toasts, the header's ⋯ and Copy thread
- * (plain Markdown plus rich HTML), the keyboard (arrows, Escape, focus back
- * on ⋯), a right-click on the head line, a refused copy, and a phone (⋯
- * marked always shown, the bottom sheet with its title, no right-click).
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -89,7 +65,6 @@ const THIRD = [
 
 const WORDS = 'Same key. And log every 409 so we can see how often it happens.';
 
-/** The message's questions as the thread read serves them. */
 function questionsOf(messageId: string, body: string, patch: Partial<InboxQuestion> = {}): InboxQuestion[] {
   return parseInboxQuestionBlocks(body).map((q) => ({
     key: q.key,
@@ -135,7 +110,6 @@ function message(id: string, author: InboxAuthor, body: string, minute: number, 
   };
 }
 
-/** The reply body exactly as a Send writes it for the agent: "Answered 1 question.", the words, the answers section. */
 function replyBody(words: string | undefined): string {
   const parsed = parseInboxQuestionBlocks(FIRST);
   const records = parsed.map((q) => ({ ...q, id: `${M1}/${q.key}`, message_id: M1 })) as unknown as InboxQuestionRecord[];
@@ -155,8 +129,6 @@ function sample(state: 'sent' | 'picked' = 'sent'): InboxThread {
   };
 }
 
-// ── The Markdown ──
-
 test('an answered question block reads as lines: the prompt, its context, the choices, the sent answer', () => {
   const out = messageMarkdown(sample().messages[0]!);
   expect(out).toContain(
@@ -171,7 +143,6 @@ test('an answered question block reads as lines: the prompt, its context, the ch
   );
   expect(out).not.toContain(':::');
   expect(out).not.toContain('- [ ]');
-  // The code fence above it is copied as written.
   expect(out).toContain('```ts\nif (err.statusCode === 409) {');
 });
 
@@ -187,7 +158,6 @@ test('a question block inside a code fence is text, copied as written', () => {
 });
 
 test('a Run command with backticks renders as one code span, the command whole', () => {
-  // A backslash does not escape inside a code span: the fence must outrun the command's backticks.
   const body = (run: string) => [':::action', 'Restart the worker on the box', 'It holds the old key in memory.', `Run: ${run}`, ':::'].join('\n');
   for (const run of ['echo `date` && make ``x``', '`pwd`/bin/start']) {
     const html = chatMarkdownToHtml(messageMarkdown(message(M3, CLAUDE, body(run), 32)));
@@ -199,7 +169,6 @@ test('a Run command with backticks renders as one code span, the command whole',
 test('an action item stored before the reader dropped a task box from its first line keeps its Result line (matched by its place)', () => {
   const body = [':::action', '- [ ] Publish the tarball', 'It needs your key.', '', '```', 'npm publish dist/core.tgz', '```', ':::'].join('\n');
   const [parsed] = parseInboxActionBlocks(body);
-  // The record kept the key its first line had then ("[ ] Publish the tarball"), not the one the reader gives now.
   const stored = {
     ...questionsOf(M3, ':::question-text\nx\n:::')[0]!,
     key: 'a-0badc0de',
@@ -235,18 +204,15 @@ test('Markdown inside a question or action prompt renders as written, the label 
   const html = chatMarkdownToHtml(messageMarkdown(message(M3, CLAUDE, body, 32)));
   expect(html).toContain('<strong>Q1.</strong> Ship <strong>only</strong> the retry fix, or <strong>both</strong>?');
   expect(html).toContain('<strong>A1.</strong> Merge the PR, then <strong>tag</strong> it');
-  // No delimiter is left over as text and no bold nests inside another.
   expect(html).not.toContain('**');
   expect(html).not.toMatch(/<strong>[^<]*<strong>/);
 });
 
 test("the person's reply keeps their words and drops what the Inbox wrote for the agent", () => {
   const reply = sample().messages[1]!;
-  // The stored body carries the agent-facing parts (guard: the fixture is the real Send's text).
   expect(reply.body).toContain('Answered 1 question.');
   expect(reply.body).toContain('## Answers to your questions');
   expect(messageMarkdown(reply)).toBe(WORDS);
-  // A reply that carried answers and no words keeps its first line, never an empty copy.
   expect(messageMarkdown(message(M2, { kind: 'person' }, replyBody(undefined), 31))).toBe('Answered 1 question.');
 });
 
@@ -283,11 +249,8 @@ test('a thread: the subject, the project and count, then each message under its 
     THIRD,
   ].join('\n');
   expect(threadMarkdown(t)).toBe(expected);
-  // "Oct 28, 2026, 7:34 PM" in the computer's time, with plain spaces (ICU's narrow space pastes oddly).
   expect(at(0)).toMatch(/^[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2} [AP]M$/);
 });
-
-// ── The menus ──
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -326,7 +289,6 @@ beforeEach(() => {
       },
     },
   });
-  // happy-dom has no copy command: the legacy fallback copies nothing.
   savedExec = (document as unknown as { execCommand?: unknown }).execCommand;
   (document as unknown as { execCommand: () => boolean }).execCommand = () => false;
 });
@@ -394,7 +356,6 @@ const items = (menu: HTMLElement | null) => [...(menu?.querySelectorAll<HTMLElem
 const labels = (menu: HTMLElement | null) => items(menu).map((el) => el.textContent?.trim());
 const item = (menu: HTMLElement | null, name: string) => menu!.querySelector<HTMLElement>(`[data-copy-item="${name}"]`)!;
 
-/** Base UI opens on the pointer's press, as a person's click does. */
 async function press(el: HTMLElement) {
   await act(async () => {
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -419,7 +380,6 @@ async function key(k: string) {
 test.skipIf(!hasDom)("each open message's ⋯ sits after Reply; Copy message copies its Markdown and says so", async () => {
   const t = sample();
   await render(t);
-  // The newest message is open: ⋯ is the last control of its head line, after Reply.
   const button = more(M4)!;
   expect(button).not.toBeNull();
   const tail = button.closest('.ib-fl-tm')!;
@@ -429,13 +389,11 @@ test.skipIf(!hasDom)("each open message's ⋯ sits after Reply; Copy message cop
   expect(button.hasAttribute('data-phone')).toBe(false);
   await press(button);
   await until(() => !!messageMenu(), 'the message menu');
-  // The approved items, in order, Copy thread after a separator.
   expect(labels(messageMenu())).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
   expect(messageMenu()!.querySelector('[role="separator"]')).not.toBeNull();
   expect(button.hasAttribute('data-open')).toBe(true);
   await choose(item(messageMenu(), 'message'));
   expect(copied.map((c) => c.text)).toEqual([THIRD]);
-  // The rich part is the same Markdown drawn (a paste into Gmail or Docs keeps the list and the link).
   expect(copied[0]!.html).toContain('<ol>');
   expect(copied[0]!.html).toContain('href="https://github.com/example/billing-svc/pull/142"');
   expect(toasts[0]).toMatchObject({ icon: 'check', lead: 'Message copied' });
@@ -455,7 +413,6 @@ test.skipIf(!hasDom)('Copy link to message copies the thread address with the me
 test.skipIf(!hasDom)("the header's ⋯: Copy thread copies every message, folded ones too; Copy link and Copy thread ID", async () => {
   const t = sample();
   await render(t);
-  // The earlier messages are folded on screen; the copy holds them anyway.
   expect(more(M1)).toBeNull();
   await press(threadMore()!);
   await until(() => !!threadMenu(), 'the thread menu');
@@ -480,12 +437,10 @@ test.skipIf(!hasDom)("the header's ⋯: Copy thread copies every message, folded
   expect(toasts[0]).toMatchObject({ lead: 'Thread ID copied' });
 });
 
-/** An attached file as the store records it: the display name, and a local path that is never copied. */
 function attached(id: string, name: string): InboxAttachment {
   return { id, path: `/work/billing/out/${id}.bin`, named_path: null, name, kind: 'file', sent_sha256: 'f'.repeat(64), size: 10, sent_at: '2026-10-28T19:33:00.000Z', sent_mtime: '2026-10-28T19:33:00.000Z' };
 }
 
-/** The paragraphs of a copy's rich part, as a paste shows them. */
 function drawnParagraphs(html: string | null): HTMLParagraphElement[] {
   return [...new DOMParser().parseFromString(html ?? '', 'text/html').querySelectorAll('p')];
 }
@@ -500,18 +455,14 @@ test.skipIf(!hasDom)('attached files are named at the end of the copy, in send o
   await press(more(M4)!);
   await until(() => !!messageMenu(), 'the message menu');
   await choose(item(messageMenu(), 'message'));
-  // The Markdown ends with the line; the body above it is unchanged.
   expect(copied[0]!.text.startsWith(`${THIRD}\n\nFiles: `)).toBe(true);
-  // Drawn, the last paragraph is the names exactly as written: no code, bold, link, tag or entity read from them.
   const last = drawnParagraphs(copied[0]!.html).at(-1)!;
   expect(last.textContent).toBe(`Files: plan.md, ${ODD}`);
   expect(last.children.length).toBe(0);
-  // The display name, never the local path; an image the body shows is not an attached file.
   expect(copied[0]!.text).not.toContain('/work/billing/out');
   expect(copied[0]!.text).not.toContain('inline-shot.png');
   await until(() => !messageMenu(), 'the menu to close');
 
-  // A thread copy names each message's files under that message; a message with none has no line.
   toasts = [];
   await press(threadMore()!);
   await until(() => !!threadMenu(), 'the thread menu');
@@ -532,7 +483,6 @@ test.skipIf(!hasDom)('the keyboard: ⋯ opens with the arrows, the arrows walk t
   await until(() => highlighted() === 0, 'Copy message highlighted');
   await key('ArrowDown');
   await until(() => highlighted() === 1, 'Copy link to message highlighted');
-  // The separator is skipped.
   await key('ArrowDown');
   await until(() => highlighted() === 2, 'Copy thread highlighted');
   await key('Escape');
@@ -550,7 +500,6 @@ test.skipIf(!hasDom)('a right-click on the head line opens the same menu; Escape
     head.querySelector('.ib-fl-nm')!.dispatchEvent(event);
   });
   await until(() => !!document.querySelector('[data-message-menu][data-context]'), 'the context menu');
-  // Ours, not the browser's.
   expect(event!.defaultPrevented).toBe(true);
   expect(labels(document.querySelector('[data-message-menu][data-context]'))).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
   expect(more(M4)!.hasAttribute('data-open')).toBe(true);
@@ -588,7 +537,6 @@ test.skipIf(!hasDom)('a phone: ⋯ always shown, both menus are the bottom sheet
   expect(threadMenu()!.querySelector('.ib-pm-title')?.textContent).toBe(t.subject!);
   await key('Escape');
   await until(() => !threadMenu(), 'the thread sheet to close');
-  // A long press (the platform's contextmenu) shows nothing of ours on a phone.
   const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
   await act(async () => {
     button.closest('[data-open-head]')!.querySelector('.ib-fl-nm')!.dispatchEvent(event);

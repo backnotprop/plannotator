@@ -1,16 +1,3 @@
-/**
- * The `#` picker (approval "board-hashtags") as the person uses it. What
- * regresses: a row picked before it was arrowed onto (Enter must keep its
- * meaning), a reply pick that does not write `#Shape` for the agent to read,
- * and New card keeping the tag in the title or not setting the card's
- * initiative (cards show no mark, so the title carries none).
- *
- * The reply box's list is placed by FloatingSkillMenu, which needs a layout
- * happy-dom does not do; its words and keys are the hook's, driven here on a
- * plain field. The list's look is in the build's shots.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -43,7 +30,6 @@ function render(node: React.ReactNode) {
   act(() => root!.render(node));
 }
 
-/** Typed with the caret at the end, as a browser leaves it. */
 function type(el: HTMLInputElement | HTMLTextAreaElement, text: string) {
   act(() => {
     el.focus();
@@ -60,11 +46,9 @@ function key(el: HTMLElement, name: string) {
   });
 }
 
-/** Each row's name and its quiet count (inbox.css hides the skill list's source column for `#`). */
 const options = () =>
   [...document.querySelectorAll('[role="option"]')].map((o) => [o.querySelector('[data-skill-item-part="name"]')?.textContent, o.querySelector('[data-skill-item-part="description"]')?.textContent]);
 
-/** A reply-like field: the hook without `onPick`, its list as New card draws it. */
 function Reply({ onValue }: { onValue: (value: string) => void }) {
   const [value, setValue] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -97,7 +81,6 @@ test.if(hasDom)('a reply: # lists the initiatives; Enter does nothing until a ro
     ['Shape', '4'],
     ['Code review', '0'],
   ]);
-  // Nothing active: Enter is the field's own (here, nothing changes).
   key(field, 'Enter');
   expect(value).toBe('Part of #');
   type(field, 'Part of #co');
@@ -106,7 +89,6 @@ test.if(hasDom)('a reply: # lists the initiatives; Enter does nothing until a ro
   key(field, 'Enter');
   expect(value).toBe('Part of #CodeReview ');
   expect(document.querySelector('[role="listbox"]')).toBeNull();
-  // A query nothing matches closes the list.
   type(field, 'Part of #CodeReview and #zz');
   expect(document.querySelector('[role="listbox"]')).toBeNull();
 });

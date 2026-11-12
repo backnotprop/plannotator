@@ -1,8 +1,3 @@
-/**
- * What's new's rules without a DOM (whatsNew.ts): a release row's words in
- * the approved fallback order, the Latest card's two faces, the label dots,
- * the releases in between, and `code` in a TL;DR line.
- */
 import { expect, test } from 'bun:test';
 import { codeParts, latestCardFace, releasesBetween, releaseWords, tldrDot } from './whatsNew';
 
@@ -15,7 +10,6 @@ test('a row says its TL;DR, else its release-list line, else its first sentence,
   expect(releaseWords(row({ listed, sentence: 'First.' }))).toEqual({ kind: 'listed', text: 'From the table', from: '0.28.53' });
   expect(releaseWords(row({ sentence: 'First.' }))).toEqual({ kind: 'sentence', text: 'First.' });
   expect(releaseWords(row())).toEqual({ kind: 'none' });
-  // Blank words never stand in for a summary.
   expect(releaseWords(row({ tldr: [{ label: 'New', text: ' ' }], listed: { text: ' ', in: '0.28.53' }, sentence: '' }))).toEqual({ kind: 'none' });
 });
 
@@ -35,7 +29,6 @@ test('each label has its dot; any other label has none', () => {
 test('the releases in between: strictly between, each once', () => {
   expect(releasesBetween('0.28.50', '0.28.53', ['0.28.53', '0.28.52', '0.28.51', '0.28.51', '0.28.50', '0.28.9'])).toBe(2);
   expect(releasesBetween('0.28.53', '0.28.53', ['0.28.53'])).toBe(0);
-  // 0.28.100 is newer than 0.28.53, not older (numbers, not text).
   expect(releasesBetween('0.28.53', '0.28.101', ['0.28.100', '0.28.54'])).toBe(2);
 });
 

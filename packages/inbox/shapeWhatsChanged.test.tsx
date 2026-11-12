@@ -1,14 +1,3 @@
-/**
- * Plannotator's board in the Inbox: no Code tab, even on a board the agent gave one, and no What's changed, even on
- * a board that still carries `views.changed` (approval "shape-whats-changed-removed"); a drawn part's place in code
- * opens the thread's own review. The real ShapeLayer and board, the Inbox's doors stubbed at `fetch`. What regresses:
- *  - the Code tab or a What's changed tab comes back on the Inbox's board, or the review's facts and buttons do;
- *  - a drawn part's place in code opens a review other than the thread's newest, or at the wrong place;
- *  - a board in a thread with no review opens a review anyway;
- *  - the board under an open review takes the first Esc (closing its own panel) instead of leaving it to the review.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,7 +13,6 @@ import { bridgeSanitizerDom } from '../../tests/helpers/chat-sanitizer-dom';
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
-  // The real board. By a path in a variable: the window's strict typecheck must not follow it into review-editor.
   const seam: string = './shape/ShapeBoard.tsx';
   const real = (await import(seam)) as Record<string, unknown>;
   mock.module('#shape-board', () => real);
@@ -62,7 +50,6 @@ beforeEach(() => {
     return Response.json({});
   }) as typeof fetch;
   restore.push(() => (globalThis.fetch = saved));
-  // The drawing's sanitizer needs a real DOM's parts, or a drawn part's `data-code` never reaches the drawing.
   restore.push(bridgeSanitizerDom());
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1400 });
@@ -76,7 +63,6 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A board the agent gave every view, Code included, stored as the Inbox stores it. */
 function board(): ShapeLoaded {
   const dir = mkdtempSync(join(tmpdir(), 'shape-whats-changed-'));
   dirs.push(dir);
@@ -138,7 +124,6 @@ async function clickPart() {
 test.skipIf(!hasDom)("the Inbox's board has no Code tab and no What's changed, and none of its words or the review's buttons show", async () => {
   await mount(THREAD);
   expect(tabs()).toEqual(['Shape', 'How it works']);
-  // It still opens on the Shape view.
   expect(document.querySelector('.shp-view.v-picture')).not.toBeNull();
   for (const words of [KETTLE_CHANGED.summary!, KETTLE_CHANGED.items[0]!.title, 'Guided review', 'Full review', 'Guide step']) expect(document.body.textContent).not.toContain(words);
 });
@@ -171,10 +156,8 @@ test.skipIf(!hasDom)('with the review open over the board, Esc is the review\'s:
   };
   cover(true);
   expect(document.querySelector('[data-shape-layer]')!.hasAttribute('inert')).toBe(true);
-  // The host's own Esc (the Inbox: close the review) sees a key the board did not use.
   expect(esc().defaultPrevented).toBe(false);
   expect(panelOpen()).toBe(true);
-  // Back on the board: Esc closes its panel again, first.
   cover(false);
   expect(document.querySelector('[data-shape-layer]')!.hasAttribute('inert')).toBe(false);
   expect(esc().defaultPrevented).toBe(true);

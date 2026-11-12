@@ -1,8 +1,3 @@
-/**
- * PR risk ranking in the window (approval "code-review-launch-build", item 4): what a
- * row's mark says and what the filter keeps. A row takes the highest judgment of
- * its PRs' open layers.
- */
 import type { InboxPullRiskJudgment, InboxPullRiskLevel, InboxPullStack, InboxReviewGroups, InboxReviewRow } from '@plannotator/core/inbox-types';
 import { openLayers } from './model';
 
@@ -24,7 +19,6 @@ export function saveRiskFilter(value: RiskFilterValue): void {
   try {
     window.localStorage.setItem(FILTER_KEY, value);
   } catch {
-    // Remembered for this window only.
   }
 }
 
@@ -32,13 +26,8 @@ export const riskFilterWords: Record<RiskFilterValue, string> = { all: 'All', hi
 export const riskLevelWord: Record<InboxPullRiskLevel, string> = { low: 'Low', medium: 'Medium', high: 'High' };
 
 export type RiskJudgments = Readonly<Record<string, InboxPullRiskJudgment>>;
-/** By pull request key, why it could not be ranked. */
 export type RiskFailures = Readonly<Record<string, string>>;
 
-/**
- * The highest judgment among a stack's open layers, with the layer it is on; null when none has one.
- * Null too when the best it could say is Low with a layer not ranked: that layer could be anything.
- */
 export function stackRisk(stack: Pick<InboxPullStack, 'layers'>, judgments: RiskJudgments): (InboxPullRiskJudgment & { key: string }) | null {
   let top: (InboxPullRiskJudgment & { key: string }) | null = null;
   for (const layer of openLayers(stack)) {
@@ -49,10 +38,6 @@ export function stackRisk(stack: Pick<InboxPullStack, 'layers'>, judgments: Risk
   return top;
 }
 
-/**
- * Why a stack can't be given a level: one of its open layers failed and nothing higher than Low was found on the
- * others. Low with a failed layer would read as safe, and that layer could be anything.
- */
 export function stackRiskFailure(stack: Pick<InboxPullStack, 'layers'>, judgments: RiskJudgments, failed: RiskFailures): string | null {
   if (stackRisk(stack, judgments)) return null;
   for (const layer of openLayers(stack)) {
@@ -64,7 +49,6 @@ export function stackRiskFailure(stack: Pick<InboxPullStack, 'layers'>, judgment
 
 const passes = (level: InboxPullRiskLevel | undefined, filter: RiskFilterValue) => filter === 'all' || (level !== undefined && (filter === 'high' ? level === 'high' : RANK[level] >= RANK.medium));
 
-/** A Reviews row's PRs as one stack: a thread that owns PRs is judged by them, a local review has none. */
 export function rowStack(row: Pick<InboxReviewRow, 'stacks'>): Pick<InboxPullStack, 'layers'> {
   return row.stacks.length === 1 ? row.stacks[0]! : { layers: row.stacks.flatMap((stack) => stack.layers) };
 }
@@ -74,13 +58,6 @@ const rankOf = (row: InboxReviewRow, judgments: RiskJudgments) => {
   return found ? RANK[found] : -1;
 };
 
-/**
- * The rows the filter keeps. With the filter off, the rows as they came. A local review has no PR to rank: the
- * filter hides it, and it is no row the filter could not place. A row it can't say is out for good (a layer not
- * ranked yet, or a run that failed: it could be anything, a huge diff most of all) is never silent. Medium and up
- * keeps a failed row (`riskOrder` puts it after the ranked ones), and `notJudged` counts the others it hid. High
- * hides both kinds and hands them back as `notRanked`, for one quiet line that shows them.
- */
 export function filterReviewRows(
   rows: readonly InboxReviewRow[],
   filter: RiskFilterValue,
@@ -90,7 +67,6 @@ export function filterReviewRows(
   if (filter === 'all') return { rows, notJudged: 0, notRanked: [] };
   const isFailed = (row: InboxReviewRow) => stackRiskFailure(rowStack(row), judgments, failed) !== null;
   const kept = (row: InboxReviewRow) => passes(stackRisk(rowStack(row), judgments)?.level, filter) || (filter !== 'high' && isFailed(row));
-  // A run still going counts too: the count only ever goes down as answers come in, and nothing hides without a word.
   const hidden = rows.filter((row) => !kept(row) && (isFailed(row) || openLayers(rowStack(row)).some((layer) => !judgments[layer.key])));
   return {
     rows: rows.filter(kept),
@@ -99,7 +75,6 @@ export function filterReviewRows(
   };
 }
 
-/** With the filter on: highest first within each group, the groups' own order after that. */
 export function riskOrder(groups: InboxReviewGroups, judgments: RiskJudgments): InboxReviewGroups {
   const sorted = (rows: readonly InboxReviewRow[]) =>
     rows

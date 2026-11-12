@@ -1,7 +1,3 @@
-/**
- * Which projects a typed name points at: the rename warning asks only for a
- * real match, and two clashing clones are still found by the name a person types.
- */
 import { expect, test } from 'bun:test';
 import { projectNameMatches, sameProjectName } from './projectCombine';
 

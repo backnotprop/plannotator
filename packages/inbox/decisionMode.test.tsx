@@ -1,21 +1,3 @@
-/**
- * Decision mode (experimental; approval "inbox-decision-mode", the Queue
- * direction), as the window draws it: the whole window (InboxApp) over a REAL
- * Inbox server in a temp data dir (its own process,
- * tests/helpers/inbox-dom-server.ts in its `decisions` mode, which turns the
- * feature on in the scratch config.json and seeds Claude Code asking two
- * questions, one Stopped, and Codex asking one in the same thread). What is
- * proved: no global way in (no sidebar row, no list-header button); the one
- * way in, the thread's "Decide these N" in its open-questions list, only from
- * two decisions, and nothing of it with the gate off; the dialog from a thread
- * holding only that thread's decisions; walking the queue (a pick saves through the
- * picks route at once and the next card shows); the per-agent Send after the
- * Hold (one reply for the session, in its thread); Undo and Previous; Later;
- * a question the agent replaces while it is on screen; closing with an agent
- * half answered.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -43,11 +25,9 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-/** A test may answer a request itself (a failed reply, a refused pick); null passes it to the Inbox. */
 let intercept:
   | ((path: string, method: string) => { status: number; body: Record<string, unknown> } | null | Promise<{ status: number; body: Record<string, unknown> } | null>)
   | null = null;
-/** The window's event stream, fired by hand: `poke(json)` is one record frame. */
 let poke: ((data: string) => void) | null = null;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
@@ -75,14 +55,12 @@ async function readLine(): Promise<string> {
   return line.trim();
 }
 
-/** An agent writing while the test runs (the server's stdin). */
 async function agentSends(send: Record<string, unknown>): Promise<string> {
   (child!.stdin as { write: (s: string) => void; flush?: () => void }).write(`${JSON.stringify({ send })}\n`);
   (child!.stdin as { flush?: () => void }).flush?.();
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-/** One seeded world per test (and one to spare): raise it with each test added. */
 const TESTS = 34;
 
 beforeAll(async () => {
@@ -116,7 +94,6 @@ afterAll(async () => {
 beforeEach(async () => {
   if (!hasDom) return;
   world = worlds.shift()!;
-  // Only this test's decisions wait: the other worlds' threads are archived.
   for (const other of all) {
     if (other === world) continue;
     for (const id of [other.decide.a, other.decide.b]) await apiPost(`/api/inbox/messages/${id}/resolve`, { resolved: true });
@@ -196,7 +173,6 @@ function button(el: ParentNode, text: string): HTMLButtonElement {
 const dialog = () => document.querySelector('[data-decision-mode]') as HTMLDialogElement | null;
 const prompt = () => dialog()?.querySelector('[data-decision-prompt]')?.textContent?.trim() ?? null;
 
-/** A click on a choice, as a pointer makes it (a press, then the click). */
 function choose(label: string) {
   const choice = [...dialog()!.querySelectorAll('.ib-dm-choice')].find((c) => c.querySelector('.ib-dm-chl')?.textContent?.trim() === label) as HTMLElement;
   if (!choice) throw new Error(`no choice ${label}`);
@@ -211,7 +187,6 @@ async function questionsOf(messageId: string, threadId = world.decide.a): Promis
   return model.thread.messages.find((m) => m.id === messageId)?.questions ?? [];
 }
 
-/** A press as a pointer makes it (Base UI's Menu opens on it). */
 async function press(target: HTMLElement) {
   await act(async () => {
     target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -222,7 +197,6 @@ async function press(target: HTMLElement) {
   });
 }
 
-/** The thread open in the window (its route), its open-questions list open: the list. */
 async function openQuestionsOf(el: HTMLElement, threadId: string): Promise<HTMLElement> {
   if (!window.location.hash.includes(`thread=${threadId}`)) {
     act(() => {
@@ -230,8 +204,6 @@ async function openQuestionsOf(el: HTMLElement, threadId: string): Promise<HTMLE
     });
   }
   const trigger = () => el.querySelector<HTMLElement>('section.ib-pane [data-open-questions]');
-  // A thread with a reply draft opens with its reply box, which takes the foot: its close chevron keeps the draft
-  // and brings the foot's buttons back, as the person would.
   const cancel = () => el.querySelector<HTMLButtonElement>('section.ib-pane .ib-pfoot [data-reply-close]');
   await until(() => window.location.hash.includes(`thread=${threadId}`) && (trigger() !== null || cancel() !== null), 'the thread foot');
   await settle();
@@ -242,7 +214,6 @@ async function openQuestionsOf(el: HTMLElement, threadId: string): Promise<HTMLE
   return document.querySelector<HTMLElement>('[data-open-questions-list]')!;
 }
 
-/** Decision mode's one way in (thread only): the thread's open-questions list, then "Decide these N". */
 async function openDecide(el: HTMLElement, threadId = world.decide.a) {
   const list = await openQuestionsOf(el, threadId);
   await until(() => list.querySelector('[data-thread-decide]') !== null, 'Decide these N');
@@ -250,7 +221,6 @@ async function openDecide(el: HTMLElement, threadId = world.decide.a) {
   await until(() => prompt() !== null, 'the first card');
 }
 
-/** Another thread an agent opens in this test (archived again when the test ends, so later tests never see it). */
 async function otherThread(session: string, questions: string[]): Promise<string> {
   const body = questions.map((p) => [':::question', p, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n')).join('\n\n');
   return agentSends({ project: world.project, session, host: 'codex', body });
@@ -259,7 +229,6 @@ async function otherThread(session: string, questions: string[]): Promise<string
 test.skipIf(!hasDom)('no global way in: no sidebar row, no list-header button, whatever waits; with the gate off nothing of decision mode renders and the route is gone', async () => {
   const el = await renderApp();
   await until(() => el.querySelector('[data-inbox-nav]') !== null, 'the sidebar');
-  // Three decisions wait in the list's one thread: the window draws no Decide entry outside it.
   expect((await api<InboxDecisionsModel>('/api/inbox/decisions')).decisions).toHaveLength(3);
   await settle();
   expect(el.querySelector('[data-decide-nav]')).toBeNull();
@@ -267,7 +236,6 @@ test.skipIf(!hasDom)('no global way in: no sidebar row, no list-header button, w
   expect([...el.querySelectorAll('button')].some((b) => /^Decide\b/.test(b.textContent?.trim() ?? ''))).toBe(false);
   act(() => root?.unmount());
   host?.remove();
-  // Off: Settings' switch, then a fresh window: the thread's list has no Decide row.
   expect((await apiPost('/api/inbox/settings', { experimental: { decision_mode: false } })).status).toBe(200);
   try {
     expect((await loopback('/api/inbox/decisions')).status).toBe(404);
@@ -277,7 +245,6 @@ test.skipIf(!hasDom)('no global way in: no sidebar row, no list-header button, w
     expect(list.querySelectorAll('[data-open-question]')).toHaveLength(3);
     expect(list.querySelector('[data-thread-decide]')).toBeNull();
     expect(document.querySelector('[data-decision-mode]')).toBeNull();
-    // Settings → Capabilities → Experimental shows the switch, off.
     act(() => root?.unmount());
     host?.remove();
     const settings = await renderApp('#settings/capabilities');
@@ -299,12 +266,9 @@ test.skipIf(!hasDom)('the thread\'s way in: "Decide these N" at the top of its o
     const list = await openQuestionsOf(el, world.decide.a);
     await until(() => list.querySelector('[data-thread-decide]') !== null, 'Decide these N');
     const entry = list.querySelector('[data-thread-decide]')!;
-    // Three questions listed, three in the queue: "these".
     expect(entry.textContent?.trim()).toBe('Decide these 3');
     expect(entry.getAttribute('aria-haspopup')).toBe('dialog');
-    // The list's first row, before the questions.
     expect(list.querySelector('[data-thread-decide], [data-open-question]')).toBe(entry);
-    // A thread with one decision: answered on its card, no Decide row.
     act(() => root?.unmount());
     host?.remove();
     const other = await renderApp(`#thread=${single}`);
@@ -324,7 +288,6 @@ test.skipIf(!hasDom)("the dialog from a thread holds only that thread's decision
     const el = await renderApp(`#thread=${world.decide.a}`);
     await openDecide(el);
     expect(dialog()!.querySelector('[data-decision-head]')!.textContent).toContain('1 of 3 · 2 agents waiting');
-    // The head names the thread it is scoped to.
     const subject = (await api<{ thread: InboxThread }>(`/api/inbox/threads/${world.decide.a}`)).thread.subject;
     expect(subject).toBeTruthy();
     expect(dialog()!.querySelector('[data-decision-scope]')!.textContent).toBe(subject!);
@@ -332,11 +295,8 @@ test.skipIf(!hasDom)("the dialog from a thread holds only that thread's decision
     await until(() => dialog()!.querySelector('[data-decision-all]') !== null, 'the overview');
     const prompts = [...dialog()!.querySelectorAll('.ib-dm-allp')].map((p) => p.textContent?.trim());
     expect(prompts).toEqual(['Which way should the worker go on a Stripe 409?', 'Page on-call after 5 tries?', 'Ship the new flag off by default?']);
-    // One chip per agent session in the thread.
     expect(dialog()!.querySelectorAll('[data-decision-chip]')).toHaveLength(2);
-    // Every chip would read the same project here: each names its agent instead.
     expect([...dialog()!.querySelectorAll('[data-decision-chip] .ib-dm-chipname')].map((n) => n.textContent)).toEqual(['Claude Code', 'Codex']);
-    // The other thread's Decide opens its own two once this sitting ends.
     act(() => (dialog()!.querySelector('[data-decision-close]') as HTMLButtonElement).click());
     await until(() => dialog() === null, 'the dialog to close');
     await openDecide(el, elsewhere);
@@ -358,9 +318,7 @@ test.skipIf(!hasDom)('walks the queue: Stopped first, a pick saves at once, the 
   await until(() => prompt() === 'Page on-call after 5 tries?', 'the second card');
   expect(dialog()!.querySelector('[data-decision-live]')!.textContent).toContain('Answered: Retry with the same key. 2 left.');
   choose('Yes, page on-call');
-  // Claude Code's last decision here is handled: its chip holds the reply for 5 s.
   await until(() => dialog()!.querySelector('[data-decision-hold]') !== null, 'the Hold');
-  // The countdown starts at 5, never more (it read "10 s" for a frame from an old clock).
   expect(dialog()!.querySelector('[data-decision-hold]')!.textContent).toMatch(/Sending in 5 s · Hold/);
   act(() => button(dialog()!.querySelector('[data-decision-hold]')!, 'Hold').click());
   await until(() => dialog()!.querySelector('[data-decision-held]') !== null, 'Held');
@@ -368,7 +326,6 @@ test.skipIf(!hasDom)('walks the queue: Stopped first, a pick saves at once, the 
   expect((await questionsOf(world.decide.a)).map((q) => q.state)).toEqual(['picked', 'picked']);
   act(() => button(dialog()!.querySelector('[data-decision-held]')!, 'Send').click());
   await until(async () => (await questionsOf(world.decide.a)).every((q) => q.state === 'sent'), 'the reply');
-  // One reply for the session in its thread, carrying both answers; Codex's question is untouched.
   const replies = posted.filter((p) => p.path.endsWith('/reply'));
   expect(replies).toHaveLength(1);
   expect(replies[0]!.path).toBe(`/api/inbox/messages/${world.decide.a}/reply`);
@@ -409,7 +366,6 @@ test.skipIf(!hasDom)('Undo puts the last pick back and returns to its card; Prev
   act(() => (dialog()!.querySelector('[data-decision-undo]') as HTMLButtonElement).click());
   await until(() => prompt() === 'Which way should the worker go on a Stripe 409?', 'back to the first card');
   await until(async () => (await questionsOf(world.decide.a))[0]?.state === 'open', 'the pick taken back');
-  // Previous: from the second card back to the first.
   choose('Retry with the same key');
   await until(() => prompt() === 'Page on-call after 5 tries?', 'the second card');
   const prev = dialog()!.querySelector('[data-decision-previous]') as HTMLButtonElement;
@@ -417,7 +373,6 @@ test.skipIf(!hasDom)('Undo puts the last pick back and returns to its card; Prev
   act(() => prev.click());
   await settle();
   expect(prompt()).toBe('Which way should the worker go on a Stripe 409?');
-  // The saved pick shows on the card it was made on.
   expect(dialog()!.querySelector('.ib-dm-choice[data-saved] .ib-dm-chl')?.textContent?.trim()).toBe('Retry with the same key');
 }, 30_000);
 
@@ -428,12 +383,10 @@ test.skipIf(!hasDom)('Later puts a decision at the end: the others first, then i
   await until(() => prompt() === 'Page on-call after 5 tries?', 'the next card');
   choose('No, a daily digest');
   await until(() => prompt() === 'Ship the new flag off by default?', "Codex's card");
-  // Claude Code still has a decision put off: no Hold for it.
   const chipA = dialog()!.querySelector(`[data-decision-chip="s:claude-code:${world.decide.sessionA}"]`) as HTMLElement;
   expect(chipA.querySelector('[data-decision-hold]')).toBeNull();
   choose('No');
   await until(() => prompt() === 'Which way should the worker go on a Stripe 409?', 'the card put off');
-  // Nothing was sent for Claude Code while its decision was put off (Codex's own reply may have gone after its Hold).
   expect(posted.filter((p) => p.path === `/api/inbox/messages/${world.decide.a}/reply`)).toHaveLength(0);
   expect((await questionsOf(world.decide.a)).map((q) => q.state)).toEqual(['open', 'picked']);
 }, 30_000);
@@ -451,7 +404,6 @@ test.skipIf(!hasDom)('a question the agent replaces while it is on screen swaps 
   });
   const superseded = (await questionsOf(world.decide.a))[0]!;
   expect(superseded.state).toBe('superseded');
-  // The event stream's question line (the window reads the projection again with it).
   await act(async () => {
     poke!(JSON.stringify({ seq: 999, kind: 'question', id: `${world.decide.a}/${old.key}`, question: superseded }));
   });
@@ -468,7 +420,6 @@ test.skipIf(!hasDom)('closing with an agent half answered asks first: Keep as a 
   await until(() => prompt() === 'Page on-call after 5 tries?', 'the second card');
   act(() => (dialog()!.querySelector('[data-decision-close]') as HTMLButtonElement).click());
   await until(() => (dialog()?.querySelector('[data-decision-confirm]') ?? null) !== null, 'the question');
-  // Escape closes the question first, not the dialog.
   act(() => {
     dialog()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
@@ -508,18 +459,15 @@ test.skipIf(!hasDom)("a card's Open the thread closes the dialog and lands the t
   try {
     const el = await renderApp();
     await openDecide(el);
-    // Codex's card: the second agent's question, further down the thread.
     await goTo('Ship the new flag off by default?');
     const key = (await questionsOf(world.decide.b))[0]!.key;
     act(() => (dialog()!.querySelector('[data-decision-open-thread]') as HTMLButtonElement).click());
     await until(() => dialog()?.open === false, 'the dialog to close');
     const card = () => el.querySelector<HTMLElement>(`section.ib-pane [data-message-id="${world.decide.b}"] [data-question-key="${key}"]`);
     await until(() => card() !== null && document.activeElement?.id === card()!.getAttribute('aria-labelledby'), "focus on the question's prompt");
-    // Its prompt, inside its card, and the card scrolled into view.
     expect(card()!.contains(document.activeElement)).toBe(true);
     expect(document.activeElement!.textContent).toContain('Ship the new flag off by default?');
     expect(scrolled).toContain(card()!);
-    // The sitting is kept in its pill (a Hold never goes unseen), and the address drops the landing.
     expect(el.querySelector('[data-decision-pill]')).not.toBeNull();
     await until(() => !window.location.hash.includes('msg='), 'the landing dropped from the address');
     expect(window.location.hash).toContain(`thread=${world.decide.a}`);
@@ -550,7 +498,6 @@ test.skipIf(!hasDom)("an action item's Open the thread lands on its checklist ro
     await until(() => dialog()?.open === false, 'the dialog to close');
     const row = () => el.querySelector<HTMLElement>(`section.ib-pane [data-message-id="${action}"] [data-action-card="${key}"]`);
     await until(() => row() !== null && document.activeElement === row()!.querySelector('[data-action-toggle]'), "focus on the row's task");
-    // The row, not the whole message, is what scrolled into view.
     expect(scrolled).toContain(row()!);
     expect(scrolled.some((s) => s.hasAttribute('data-message-article'))).toBe(false);
   } finally {
@@ -565,10 +512,8 @@ test.skipIf(!hasDom)("the Resume pill names the sitting's thread while another t
     await openDecide(el);
     act(() => (dialog()!.querySelector('[data-decision-open-thread]') as HTMLButtonElement).click());
     await until(() => el.querySelector('[data-decision-pill]') !== null, 'the pill');
-    // In its own thread: the pill names no thread.
     await until(() => !window.location.hash.includes('msg='), 'the landing');
     expect(el.querySelector('[data-decision-pill-thread]')).toBeNull();
-    // Another thread on screen: the pill says whose decisions it holds.
     const subject = (await api<{ thread: InboxThread }>(`/api/inbox/threads/${world.decide.a}`)).thread.subject!;
     act(() => {
       window.location.hash = `#thread=${elsewhere}`;
@@ -581,12 +526,9 @@ test.skipIf(!hasDom)("the Resume pill names the sitting's thread while another t
   }
 }, 30_000);
 
-// ─────────────────────────────── Review round ───────────────────────────────
-
 const replies = () => posted.filter((p) => p.path.endsWith('/reply'));
 const sleep = (ms: number) => act(async () => void (await new Promise((r) => setTimeout(r, ms))));
 
-/** The overview ("All"), then the row of this prompt: its card. */
 async function goTo(text: string) {
   act(() => (dialog()!.querySelector('[data-decision-overview]') as HTMLButtonElement).click());
   await until(() => dialog()!.querySelector('[data-decision-all]') !== null, 'the overview');
@@ -596,14 +538,12 @@ async function goTo(text: string) {
   await until(() => prompt()?.includes(text) === true, `the card ${text}`);
 }
 
-/** Close, and the close question's words. */
 async function closeAsks(): Promise<string> {
   act(() => (dialog()!.querySelector('[data-decision-close]') as HTMLButtonElement).click());
   await until(() => (dialog()?.querySelector('[data-decision-confirm]') ?? null) !== null, 'the close question');
   return dialog()!.querySelector('[data-decision-confirm]')!.textContent!.replace(/\s+/g, ' ');
 }
 
-/** Words typed into a textarea, as React sees typing. */
 function typeInto(box: HTMLTextAreaElement, words: string) {
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, words);
@@ -626,19 +566,16 @@ test.skipIf(!hasDom)('reopening after "Keep as a draft" sends nothing: picks sav
   await until(() => prompt() === 'Page on-call after 5 tries?', 'the second card');
   choose('Yes, page on-call');
   await until(() => chipA().querySelector('[data-decision-hold]') !== null, 'the Hold');
-  // Close during the Hold: the question says a reply waits to send.
   expect(await closeAsks()).toContain('answered and not sent yet');
   act(() => (dialog()!.querySelector('[data-decision-keep-draft]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'the dialog to close');
   await until(async () => (await questionsOf(world.decide.a)).every((q) => q.state === 'picked'), 'the picks saved');
-  // A new sitting: the group is ready, but the person did nothing in it yet.
   await openDecide(el);
   await until(() => chipA()?.querySelector('[data-decision-held]') !== null, 'Held · Send');
   expect(chipA().querySelector('[data-decision-hold]')).toBeNull();
   await sleep(6000);
   expect(replies()).toHaveLength(0);
   expect((await questionsOf(world.decide.a)).map((q) => q.state)).toEqual(['picked', 'picked']);
-  // The person's own Send still sends it.
   act(() => button(chipA().querySelector('[data-decision-held]')!, 'Send').click());
   await until(async () => (await questionsOf(world.decide.a)).every((q) => q.state === 'sent'), 'the reply');
   expect(replies()).toHaveLength(1);
@@ -654,7 +591,6 @@ test.skipIf(!hasDom)('a follow-up question after a send does send, in a reply of
   act(() => button(chipA().querySelector('[data-decision-hold]')!, 'Hold').click());
   act(() => button(chipA().querySelector('[data-decision-held]')!, 'Send').click());
   await until(async () => (await questionsOf(world.decide.a)).every((q) => q.state === 'sent'), 'the first reply');
-  // Claude Code asks a follow-up in the same thread while the sitting is open.
   const followUp = await agentSends({
     project: world.project,
     session: world.decide.sessionA,
@@ -665,11 +601,9 @@ test.skipIf(!hasDom)('a follow-up question after a send does send, in a reply of
   await act(async () => {
     poke!(JSON.stringify({ seq: 1001, kind: 'question', id: `${followUp}/${q.key}`, question: q }));
   });
-  // It joins the queue (after Codex's card, which is on screen now).
   await until(() => dialog()!.querySelector('[data-decision-head]')!.textContent!.includes(' of 4 '), 'the follow-up in the queue');
   await goTo('Keep the old key for a day?');
   choose('Keep it');
-  // The group goes round again: a Hold, then its reply.
   await until(() => chipA().querySelector('[data-decision-hold]') !== null, 'a Hold for the follow-up');
   expect(chipA().querySelector('[data-decision-hold]')!.textContent).toMatch(/Sending in 5 s/);
   await until(async () => (await questionsOf(followUp, world.decide.a))[0]?.state === 'sent', 'the follow-up sent');
@@ -694,7 +628,6 @@ test.skipIf(!hasDom)('closing after a failed send warns, and says the reply did 
   const asked = await closeAsks();
   expect(asked).toContain("A reply didn't send");
   expect(asked).toContain('1 reply failed to send');
-  // Sending again fails again: the dialog stays open and says so.
   act(() => (dialog()!.querySelector('[data-decision-send-answered]') as HTMLButtonElement).click());
   await until(() => dialog()?.querySelector('.ib-dm-error')?.textContent?.includes('not sent') === true, 'the error');
   expect(dialog()).not.toBeNull();
@@ -716,7 +649,6 @@ test.skipIf(!hasDom)('a thread with a reply draft: "Send what you answered" leav
     expect(replies().filter((r) => r.path.includes(world.decide.a))).toHaveLength(0);
     const draft = await api<{ draft: { body: string } | null }>(`/api/inbox/threads/${thread}/draft`);
     expect(draft.draft?.body).toBe('My own words for Claude.');
-    // Again, answering the rest: the chip says to send from the thread, and nothing goes after the Hold.
     await openDecide(el);
     await goTo('Page on-call after 5 tries?');
     choose('Yes, page on-call');
@@ -727,7 +659,6 @@ test.skipIf(!hasDom)('a thread with a reply draft: "Send what you answered" leav
     expect(replies().filter((r) => r.path.includes(world.decide.a))).toHaveLength(0);
     expect((await questionsOf(world.decide.a)).map((q) => q.state)).toEqual(['picked', 'picked']);
     expect((await api<{ draft: { body: string } | null }>(`/api/inbox/threads/${thread}/draft`)).draft?.body).toBe('My own words for Claude.');
-    // Its way to the thread.
     act(() => button(chipA().querySelector('[data-decision-draft]')!, 'Open the thread').click());
     await until(() => el.querySelector('[data-decision-pill]') !== null, 'the pill');
     expect(window.location.hash).toContain(`thread=${thread}`);
@@ -753,7 +684,6 @@ test.skipIf(!hasDom)("an action item's Undo the server refuses (past its window)
     const q = model.thread.messages.find((m) => m.id === action)?.questions?.[0];
     return q?.action_result?.outcome === 'done';
   }, 'Done saved');
-  // The server's Undo window (400 ms here) passes; the window still offers Undo (its own is 9 s).
   await sleep(900);
   const undo = dialog()!.querySelector('[data-decision-undo]') as HTMLButtonElement;
   expect(undo).not.toBeNull();
@@ -778,12 +708,10 @@ test.skipIf(!hasDom)('Escape in a filled text box lets go of it first; closing t
   typeInto(box, 'refunds-v2');
   escapeOn(box);
   await settle();
-  // The dialog is still open, the words are kept, and focus left the box.
   expect(dialog()).not.toBeNull();
   expect(dialog()!.querySelector('[data-decision-confirm]')).toBeNull();
   expect((dialog()!.querySelector('.ib-dm-ta') as HTMLTextAreaElement).value).toBe('refunds-v2');
   expect(document.activeElement).not.toBe(box);
-  // Escape again: closing would lose them, so it asks.
   escapeOn(dialog()!.querySelector('[data-decision-prompt]')!);
   await until(() => (dialog()?.querySelector('[data-decision-confirm]') ?? null) !== null, 'the question');
   expect(dialog()!.querySelector('[data-decision-confirm]')!.textContent).toContain("The words you typed on this card aren't saved");
@@ -836,33 +764,26 @@ test.skipIf(!hasDom)('a committed swipe keeps moving the way it was thrown, from
     act(() => at('pointermove', to));
     act(() => at('pointerup', to));
   };
-  // Short of the threshold: back to the centre, nothing answered.
   swipe(card(), 200, 250);
   expect(card().style.translate).toBe('');
   expect(card().hasAttribute('data-stamped')).toBe(false);
-  // Committed (right: the first choice): it stays where the finger left it, never at the centre...
   const before = card();
   swipe(before, 200, 360);
   expect(before.hasAttribute('data-flung')).toBe(true);
   expect(before.style.translate).toBe('160px 0');
-  // ...then keeps going right, past the edge.
   await until(() => parseFloat(before.style.translate) > 500, 'the exit');
   await until(async () => (await questionsOf(world.decide.a))[1]?.answer?.selected[0] === 'Yes, page on-call', 'the pick');
 }, 30_000);
 
-// ─────────────────────────────── Re-review ───────────────────────────────
-
 const chipB = () => dialog()!.querySelector(`[data-decision-chip="s:codex:${world.decide.sessionB}"]`) as HTMLElement;
 const waitMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Answer both of Claude Code's questions, so its group starts its Hold. */
 async function answerA(el: HTMLElement) {
   await openDecide(el);
   choose('Retry with the same key');
   await until(() => prompt() === 'Page on-call after 5 tries?', 'the second card');
   choose('Yes, page on-call');
   await until(() => chipA().querySelector('[data-decision-hold]') !== null, 'the Hold');
-  // The stamp lands and the queue moves on to Codex's card.
   await until(() => prompt() === 'Ship the new flag off by default?', "Codex's card");
 }
 
@@ -871,7 +792,6 @@ test.skipIf(!hasDom)('H1: a Hold waits behind the close question, so "Keep as a 
   await answerA(el);
   act(() => (dialog()!.querySelector('[data-decision-close]') as HTMLButtonElement).click());
   await until(() => (dialog()?.querySelector('[data-decision-confirm]') ?? null) !== null, 'the close question');
-  // Longer than the Hold: nothing goes while the question is up.
   await sleep(6500);
   expect(replies()).toHaveLength(0);
   act(() => (dialog()!.querySelector('[data-decision-keep-draft]') as HTMLButtonElement).click());
@@ -905,8 +825,6 @@ test.skipIf(!hasDom)('H2: the cards of a group whose reply is on its way are rea
   await until(() => dialog()!.querySelector('[data-decision-sent]') !== null, 'the card reads Sent');
 }, 30_000);
 
-// Guards how the lock is rendered (from state, so the render that ends the send clears it), not a reproduced
-// bug: the ref-based lock this replaced passed it too, since its final render happened to land after the ref cleared.
 test.skipIf(!hasDom)('the Sending lock clears on the card on screen once its reply fails, without moving the queue', async () => {
   let release!: () => void;
   const landed = new Promise<void>((r) => (release = r));
@@ -926,7 +844,6 @@ test.skipIf(!hasDom)('the Sending lock clears on the card on screen once its rep
   await until(() => dialog()!.querySelector('[data-decision-sending]') !== null, 'the card read only while sending');
   release();
   await until(() => chipB().textContent?.includes('Not sent') === true, 'the failure');
-  // Same card, nothing else touched: the lock is gone and the choices are back.
   await until(() => dialog()!.querySelector('[data-decision-sending]') === null, 'the lock cleared');
   expect(prompt()).toBe('Ship the new flag off by default?');
   expect(dialog()!.querySelectorAll('.ib-dm-choice').length).toBeGreaterThan(0);
@@ -948,7 +865,6 @@ test.skipIf(!hasDom)('H2: an unchanged retry replays its key; a changed answer t
   await until(() => chipB().textContent?.includes('Not sent') === true, 'the second failure');
   const [first, second] = replies();
   expect(second!.body.idempotency_key).toBe(first!.body.idempotency_key);
-  // The person changes the answer, then the Inbox takes it: a new key, so the server cannot replay the old one.
   await goTo('Ship the new flag off by default?');
   choose('No');
   await until(async () => (await questionsOf(world.decide.b))[0]?.answer?.selected[0] === 'No', 'the new pick');
@@ -978,12 +894,10 @@ test.skipIf(!hasDom)("a Done waiting in the thread's reply draft goes with the s
   act(() => button(chipB().querySelector('[data-decision-hold]')!, 'Hold').click());
   act(() => button(chipB().querySelector('[data-decision-held]')!, 'Send').click());
   await until(async () => (await questionsOf(world.decide.b))[0]?.state === 'sent', 'the reply');
-  // One reply for Codex's session (it answers its latest message), carrying the answer and the Done.
   const sent = replies();
   expect(sent).toHaveLength(1);
   expect((sent[0]!.body.questions as { key: string }[]).map((q) => q.key)).toEqual([(await questionsOf(world.decide.b))[0]!.key]);
   expect(sent[0]!.body.actions).toEqual(sent[0]!.path.includes(action) ? [{ key }] : [{ message_id: action, key }]);
-  // The staged Done went with it: nothing of it is left in the thread's draft for a second Send.
   expect((await questionsOf(action))[0]!.state).toBe('sent');
 }, 30_000);
 
@@ -994,7 +908,6 @@ test.skipIf(!hasDom)('M1: a Hold starts for an answer given in this sitting, and
   await until(() => (dialog()?.querySelector('[data-decision-keep-draft]') ?? null) !== null, 'the close question');
   act(() => (dialog()!.querySelector('[data-decision-keep-draft]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'the dialog to close');
-  // A new sitting: both picks were saved before it, so Held · Send.
   await openDecide(el);
   await until(() => chipA()?.querySelector('[data-decision-held]') !== null, 'Held · Send');
   await goTo('Which way should the worker go on a Stripe 409?');
@@ -1015,7 +928,6 @@ test.skipIf(!hasDom)("M2: a group's Hold waits while one of its cards is being e
   await until(() => chipA().querySelector('[data-decision-hold]')?.textContent?.includes('Waiting') === true, 'the Hold paused');
   await sleep(6500);
   expect(replies()).toHaveLength(0);
-  // The note box closes: the Hold runs on, and the reply goes.
   act(() => (dialog()!.querySelector('[data-decision-note]') as HTMLButtonElement).click());
   await until(async () => (await questionsOf(world.decide.a)).every((q) => q.state === 'sent'), 'the reply once done editing');
   expect(replies()).toHaveLength(1);
@@ -1037,7 +949,6 @@ test.skipIf(!hasDom)('M3: comments waiting in a thread count as its draft, and a
   }
   act(() => root?.unmount());
   host?.remove();
-  // The draft read fails: nothing is sent, and the chip says why.
   intercept = (path, method) => (method === 'GET' && path.endsWith('/draft') ? { status: 500, body: { error: 'down', code: 'error' } } : null);
   const el = await renderApp();
   await openDecide(el);
@@ -1057,7 +968,6 @@ test.skipIf(!hasDom)('comments made after the last list read are read fresh befo
   await goTo('Ship the new flag off by default?');
   choose('Yes');
   await until(() => chipB().querySelector('[data-decision-hold]') !== null, "Codex's Hold");
-  // A comment on the message, made elsewhere while the Hold runs; the window's list read is older than it.
   const comment = { id: 'ann-dm-fresh', blockId: 'block-1', startOffset: 0, endOffset: 4, type: 'COMMENT', text: 'Check the flag name.', originalText: 'Ship', createdA: 1 };
   expect((await apiPost(`/api/inbox/messages/${world.decide.b}/annotations`, { annotation: comment })).status).toBe(200);
   try {
@@ -1079,7 +989,6 @@ test.skipIf(!hasDom)('M4: the draft state follows the latest row: the draft disc
   choose('Yes, page on-call');
   await until(() => chipA()?.querySelector('[data-decision-draft]') !== null, 'the draft line');
   await apiPost(`/api/inbox/threads/${thread}/draft/delete`, {});
-  // The next list read (any event) says the draft went.
   await act(async () => {
     poke!(JSON.stringify({ seq: 2001, kind: 'question', id: 'x', question: (await questionsOf(world.decide.a))[0] }));
   });
@@ -1136,18 +1045,15 @@ test.skipIf(!hasDom)('a notification for another card while words are typed here
   });
   await until(() => prompt() === 'What should the flag be called?', 'the text card');
   typeInto(dialog()!.querySelector('.ib-dm-ta') as HTMLTextAreaElement, 'refunds-v2');
-  // A Stopped notification while the sitting is open: a new start.
   act(() => draw(stopped.id, 2));
   await settle();
   expect(prompt()).toBe('What should the flag be called?');
   expect((dialog()!.querySelector('.ib-dm-ta') as HTMLTextAreaElement).value).toBe('refunds-v2');
   expect(dialog()!.querySelector('[data-decision-start-banner]')!.textContent).toContain(stopped.question.prompt);
-  // The person moves; the words are kept for when the card comes back.
   act(() => (dialog()!.querySelector('[data-decision-start-go]') as HTMLButtonElement).click());
   await until(() => prompt() === stopped.question.prompt, 'the Stopped card');
   await goTo('What should the flag be called?');
   expect((dialog()!.querySelector('.ib-dm-ta') as HTMLTextAreaElement).value).toBe('refunds-v2');
-  // With nothing typed, a new start moves at once.
   typeInto(dialog()!.querySelector('.ib-dm-ta') as HTMLTextAreaElement, '');
   act(() => draw(stopped.id, 3));
   await until(() => prompt() === stopped.question.prompt, 'moved');

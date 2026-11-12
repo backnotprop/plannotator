@@ -1,23 +1,13 @@
-/**
- * "Draft" (approval "inbox-reply-drafts", variant Label): what the person has
- * not sent in a thread, said with Gmail's word wherever the window used to say
- * "Not sent". The row's count slot ("Draft · Your reply, 2 picks"), the soft
- * pill under the reply box ("Draft  Saved 4:43 PM  Discard"), and the
- * thread's foot ("Draft · 2 picks" before Send / Edit draft). Action
- * items waiting for the Send count as "1 done", "1 can't do".
- */
 import { INBOX_DRAFT_BODY_MAX, type InboxRowUnsent } from '@plannotator/core/inbox-types';
 import { shortTime } from '../format';
 import { Icon } from '../icons';
 
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`;
 
-/** What waits, in words: "Your reply, 2 picks, 1 comment" (`lead`: capitalized). */
 export function unsentWords(unsent: { reply: boolean; picks: number; comments: number; done?: number; cant?: number }, lead = true): string {
   const parts: string[] = [];
   if (unsent.reply) parts.push('your reply');
   if (unsent.picks > 0) parts.push(plural(unsent.picks, 'pick'));
-  // Action items whose Done or Can't do it waits for the Send (approval "inbox-action-items-in-reply").
   if ((unsent.done ?? 0) > 0) parts.push(`${unsent.done} done`);
   if ((unsent.cant ?? 0) > 0) parts.push(`${unsent.cant} can't do`);
   if (unsent.comments > 0) parts.push(plural(unsent.comments, 'comment'));
@@ -25,15 +15,10 @@ export function unsentWords(unsent: { reply: boolean; picks: number; comments: n
   return lead ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 
-/** A row's `unsent`, as unsentWords takes it. */
 export function rowUnsent(unsent: InboxRowUnsent): { reply: boolean; picks: number; comments: number; done?: number; cant?: number } {
   return { reply: unsent.reply_at !== null, picks: unsent.picks, comments: unsent.comments, done: unsent.done ?? 0, cant: unsent.cant ?? 0 };
 }
 
-/**
- * "Draft · Your reply" (the Drafts page). `short`: "Draft" alone, the list row's short form (approval
- * "inbox-row-byline", option A); the row says the rest in its tooltip and name.
- */
 export function DraftLabel({ unsent, short = false }: { unsent: InboxRowUnsent; short?: boolean }) {
   if (short) {
     return (
@@ -49,38 +34,22 @@ export function DraftLabel({ unsent, short = false }: { unsent: InboxRowUnsent; 
   );
 }
 
-/** Above the reply box when its words are longer than a draft holds (the Inbox refuses such a draft). */
 export const DRAFT_NOT_SAVED_TOO_LONG = `Not saved: a draft holds at most ${INBOX_DRAFT_BODY_MAX.toLocaleString('en-US')} characters.`;
 
-/** Above the reply box when the last save did not land (refused, or no answer): said in place of "Saved …". */
 export const DRAFT_NOT_SAVED_FAILED = 'Not saved. It tries again when you type.';
 
-/** The conflict line's words: both windows hold words for this reply. */
 export function conflictText(sentElsewhere: boolean): string {
   return sentElsewhere ? 'Not saved: this reply was sent or discarded in another window.' : 'Not saved: this reply changed in another window.';
 }
 
-/**
- * Both windows hold words for this reply: this window's save was refused, and
- * its words are in the box, not saved. Keep mine saves them over the other's;
- * Discard mine drops only this window's words (the other's draft stays).
- */
 export interface DraftConflict {
-  /** The line's id: the reply box names it in aria-describedby. */
   id: string;
   text: string;
   onKeepMine: () => void;
   onDiscard: () => void;
 }
 
-/**
- * Above the open reply box only after a conflict: the line and its choice (Keep mine, Discard mine). On a
- * computer nothing else sits above the box (approval "inbox-reply-recipient": the "Reply to X in Z" label is
- * gone, and the Draft mark, the saved time and Discard are under it, `DraftStamp`); on a phone `DraftStamp`
- * is above it.
- */
 export function DraftHead({ conflict }: { conflict: DraftConflict }) {
-  // Not a live region: the thread's own region says it once when it appears.
   return (
     <div className="ib-reply-l ib-draft-head" data-draft-head="" data-draft-conflict="">
       <span className="ib-draft-pill">Draft</span>
@@ -99,12 +68,6 @@ export function DraftHead({ conflict }: { conflict: DraftConflict }) {
   );
 }
 
-/**
- * Above the open reply box, at the right, on a phone (the owner, 2026-11-03): "Draft  Saved 4:51 PM  Discard",
- * nothing until the first save. "Not saved …" in place of the time when the words are longer than a draft holds
- * or the last save did not land. A computer saves without a word (approval "inbox-reply-box", T6): only "Not
- * saved …" shows, on its own line over the box's row, and the bin at the row's far right is Discard.
- */
 export function DraftStamp({
   savedAt,
   onDiscard,
@@ -113,9 +76,7 @@ export function DraftStamp({
 }: {
   savedAt: string | null;
   onDiscard: () => void;
-  /** The box's words are longer than a draft holds: not saved, said in place of "Saved …". */
   tooLong?: boolean;
-  /** The last save of the box's words did not land: "Not saved", in place of "Saved …" (an older save's time). */
   failed?: boolean;
 }) {
   if (!tooLong && !failed && savedAt === null) return null;
@@ -134,16 +95,6 @@ export function DraftStamp({
   );
 }
 
-/**
- * The thread's foot while the box is closed and something waits: "Draft · 2 picks, 3 comments".
- * The words before the comments ("Your reply, 2 picks") and the comment count are spans of their own: short of room
- * the foot's row drops the pick words (footFit.ts step `draft`) and shows the count in the pill instead ("Draft 💬3").
- * That glyph and number are hidden from screen readers; the words stay as hidden text ("Draft, 2 picks, 3 comments").
- *
- * With `onComments` the count is the way to the list: the words a quiet link, the pill's count a button. One of the
- * two shows at a time (inbox.css keeps the other out of the Tab order), and each says the same words to a screen reader.
- * Send's description then reads a hidden copy of the words: from the note itself, the pill's button would speak first.
- */
 export function DraftFootNote({
   unsent,
   id,
@@ -163,7 +114,6 @@ export function DraftFootNote({
     {link && <span id={id} hidden>{['Draft', lead, comments].filter(Boolean).join(', ')}</span>}
     <span className="ib-draft-foot" data-draft-foot="" id={link ? undefined : id}>
       <span className="ib-draft-pill">
-        {/* The comma is for the ear ("Draft, 1 pick, 3 comments"): inline and sized to nothing, so no space comes before it. */}
         <span>
           Draft
           {(lead || comments) && <span className="ib-draft-comma">,</span>}

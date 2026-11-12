@@ -1,17 +1,3 @@
-/**
- * One agent, one face, everywhere (agents/agentFaces.ts, icons.tsx `HostMark`'s `agent` and `AuthorMark`): a face
- * chosen on the sidebar's Agents mark shows on that agent's list-row tile, its messages' author marks, the thread's
- * participants, the reply box's recipient pill and its phone sheet, without a reload.
- *
- * What this catches: an icon that keeps the plain mark after a choice; a choice that another window (the event
- * stream) never draws; a conversation that went on under a new session id, or a launch's session, losing its face;
- * an ended agent's threads losing it; the plain mark painted first on a reload when a face is kept (a flash); a choice
- * redrawing icons of other agents (render counts over 300 rows); this browser's old faces lost on the way to the
- * Inbox, or dropped when the Inbox could not take them; the frame name missing from the shared stream.
- *
- * The Inbox's route is the real one (packages/server/inbox-agent-faces.ts) on a temp folder, called through a fetch
- * stand-in: no Inbox is started. DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,7 +32,6 @@ const ART = Object.fromEntries((motion.AGENT_FACES ?? []).filter((f) => f !== 'a
 
 let root: Root | null = null;
 let realFetch: typeof fetch;
-/** What the windows' streams carried (`event: agent-faces`). */
 let events: InboxAgentFacesWire[] = [];
 let posts: Record<string, unknown>[] = [];
 let failPosts = false;
@@ -149,10 +134,8 @@ test.if(hasDom)('a face chosen on the sidebar mark shows on the row, the authors
   for (const s of ['row', 'author', 'recipient']) expect(faceOf(at(host, s))).toBe('agent');
   act(() => host.querySelector<HTMLButtonElement>('[data-agent-icon="ses_a"]')!.click());
   for (const s of ['row', 'author', 'recipient']) expect(faceOf(at(host, s))).toBe('glass');
-  // The phone row and the header's stack: the Claude Code tile is ses_a's (the first to join), Pi stays itself.
   expect(at(host, 'phone-row')!.querySelectorAll('[data-agent-face="glass"]').length).toBe(1);
   expect(at(host, 'header')!.querySelectorAll('[data-agent-face="glass"]').length).toBe(1);
-  // Another agent of the same kind keeps its own mark.
   expect(faceOf(at(host, 'other-author'))).toBe('agent');
   await settle();
   expect(posts).toEqual([{ agent: 'ses_a', sessions: [], face: 'glass' }]);
@@ -162,19 +145,16 @@ test.if(hasDom)('a face chosen on the sidebar mark shows on the row, the authors
 test.if(hasDom)('another window’s choice, carried by the shared stream, redraws this one', async () => {
   const file = inbox();
   const host = mount(<Surfaces sidebar={agent({})} />);
-  // The frame name is one the tabs' shared stream passes on.
   expect(api.INBOX_EVENT_FRAMES).toContain('agent-faces');
   file.change({ agent: 'ses_a', face: 'glass-blue' });
   act(() => api.dispatchInboxFrame({ name: 'agent-faces', data: JSON.stringify(events.at(-1)), id: null }, { onRecord: () => {}, onStatus: () => {}, onAgentFaces: faces.hearAgentFacesEvent }));
   for (const s of ['row', 'author', 'recipient', 'sidebar']) expect(at(host, s)!.querySelector('[data-agent-face="glass-blue"], [data-face="glass-blue"]')).not.toBeNull();
-  // An older copy (a late relay) never takes it back.
   act(() => faces.hearAgentFacesEvent({ faces: {}, rev: 0 }));
   expect(faceOf(at(host, 'row'))).toBe('glass-blue');
 });
 
 test.if(hasDom)('a conversation that went on under a new id, and a launch’s session, keep their face', async () => {
   inbox();
-  // ses_a chose Pink; its conversation goes on as ses_c (a poll's `continues`).
   faces.keepAgentFace(agent({}), 'glass-pink');
   await settle();
   setInboxAgents(listed(agent({ id: 'ses_c', session: 'ses_c', continues: ['ses_a'] })));
@@ -194,7 +174,6 @@ test.if(hasDom)('a conversation that went on under a new id, and a launch’s se
   );
   expect(faces.agentFaceOf('ses_c')).toBe('glass-pink');
   expect(faceOf(at(host, 'new'))).toBe('glass-pink');
-  // A launch chosen while starting: its real session, once listed, has the face.
   faces.keepAgentFace(agent({ id: 'lnc_1', session: 'launch:lnc_1', host: 'codex' }), 'totman');
   await settle();
   act(() => setInboxAgents(listed(agent({ id: 'lnc_1', session: 'ses_real', host: 'codex', launch: { id: 'lnc_1', thread_id: 'msg_1' } }))));
@@ -267,7 +246,6 @@ test.if(hasDom)('a choice redraws only that agent’s icons, of 300 rows', async
   await settle();
   expect([...renders.keys()]).toEqual(['ses_7']);
   expect(renders.get('ses_7')).toBe(1);
-  // The server's answer (the same face) redraws nothing.
   expect(posts.length).toBe(1);
 });
 
@@ -285,15 +263,11 @@ test.if(hasDom)('this browser’s faces from before show at once, go to the Inbo
   await act(async () => await faces.readAgentFaces());
   expect(window.localStorage.getItem(faces.AGENT_FACES_KEY)).toBeNull();
   expect(faces.agentFaceOf('lnc_9')).toBe('glass-ice');
-  // Read again: nothing more to send.
   await act(async () => await faces.readAgentFaces());
   expect(posts.filter((p) => 'adopt' in p).length).toBe(2);
   expect(JSON.parse(window.localStorage.getItem(faces.AGENT_FACES_PAINT_KEY)!).faces.ses_old.face).toBe('totman');
 });
 
-// The owner's rule (2026-11-10): a face is drawn in exactly the box the plain mark has in every row look, so no row's
-// height, gap or alignment moves, and a list with no face chosen is the same as before (measured: every look, wide,
-// beside a thread and at 390, 0 pixels differ; tools in the PR body). These pin what that rests on.
 test.if(hasDom)('a face takes the plain mark’s element and tile: same classes but `ib-face`, one picture in place of the glyph', () => {
   const host = mount(
     <>

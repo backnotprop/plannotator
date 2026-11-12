@@ -1,25 +1,3 @@
-/**
- * The Inbox's text size (owner's request, 2026-10-18: "a setting where I can
- * just set it, it's default 14, but I could also go to 13 or 15 or even 12").
- * Settings → General → Appearance → Text size, 12 / 13 / 14 / 15, scales the
- * window's whole type ramp from the body size at once, and is kept in
- * config.json `inboxTextSize`.
- *
- * The whole window (InboxApp) over a REAL Inbox server in a temp data dir
- * (tests/helpers/inbox-dom-server.ts). What a size draws is worked out from
- * inbox.css by cssCascade.testing.ts (happy-dom computes no custom-property
- * arithmetic), then the resolved `max()` / `calc()` evaluated here. The two
- * things measured are a list row's subject and a message body's paragraph
- * (ui's Viewer, `text-[15px]`, which follows the Inbox through inbox.css's
- * `ib-type` layer).
- *
- * The failure this catches: a pick that does not reach the type (the
- * property not set, a rule that does not read it), a pick that is not kept,
- * 14 drawing anything but today's sizes, and config.json's size not adopted
- * on load.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -70,7 +48,6 @@ function writeSizeOnDisk(size: number | undefined) {
   writeFileSync(configPath(), JSON.stringify(current, null, 2));
 }
 
-/** A resolved CSS length (px, rem at 16 px, plain numbers, calc / max / min with + - * /) in px. */
 function px(value: string): number {
   let i = 0;
   const src = value.trim();
@@ -133,14 +110,11 @@ function px(value: string): number {
   return out;
 }
 
-/** What the window draws now: a list row's subject and a message body's paragraph, in px. */
 function drawn(el: HTMLElement) {
   const cascade = loadCascade(CSS);
   const subject = el.querySelector<HTMLElement>(`[data-thread-id="${thread}"] .ib-title`);
   const body = el.querySelector<HTMLElement>('.ib-body p[data-block-id]');
   if (!subject || !body) throw new Error('the list row or the message body is not drawn');
-  // The cascade leaves a property the stylesheet never declares as written; the page sets this one on the
-  // document element, and inbox.css's own fallback is 14, as a browser would read it.
   const size = (el: HTMLElement) => px(cascade.resolved(el, 'font-size')!.replaceAll(`var(${TEXT_SIZE_PROPERTY})`, property() || '14'));
   return { subject: size(subject), body: size(body) };
 }
@@ -254,7 +228,6 @@ test.skipIf(!hasDom)('picking 12 and 15 scales a row subject and a message body;
   writeSizeOnDisk(undefined);
   const el = await renderApp(`#thread=${thread}`);
   await until(threadShown(el), 'the thread beside the list');
-  // The default: nothing set on the document, today's sizes.
   expect(property()).toBe('');
   const today = drawn(el);
   expect(today.body).toBe(15);
@@ -273,7 +246,6 @@ test.skipIf(!hasDom)('picking 12 and 15 scales a row subject and a message body;
   expect(big.body).toBeCloseTo((15 * 15) / 14, 3);
   expect(big.subject).toBeCloseTo((today.subject * 15) / 14, 3);
 
-  // Back to 14: the property is gone and every size is today's again.
   await pick(el, 14);
   expect(property()).toBe('');
   expect(drawn(el)).toEqual(today);

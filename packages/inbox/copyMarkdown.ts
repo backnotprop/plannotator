@@ -1,28 +1,3 @@
-/**
- * Copy a message, copy a thread (design record "inbox-copy-message", option B,
- * approved 2026-10-28): the Markdown a person pastes elsewhere, and the copy
- * itself.
- *
- * - An agent's message is its Markdown as written, with each question block
- *   and action item as readable lines: "**Q1.** prompt" (only the label in
- *   bold, so a prompt's own Markdown renders as written), its context, the
- *   choices as a list ("(recommended)" on the recommended one), then
- *   "Answer: …" once the answer was sent.
- * - The person's reply leaves out what the Inbox wrote for the agent ("Answered
- *   1 question.", the still-open line, "## Answers to your questions", the
- *   action items section, the skills block): their own words. The answers
- *   show on the questions they answered.
- * - A message with attached files ends with "Files: plan.md, shot.png" (the
- *   display names, in send order, escaped to read as plain text).
- * - A thread is "# Subject", "project · N messages", then each message under
- *   "**Author** · Oct 28, 2026, 7:34 PM", separated by `---`. Folded messages
- *   are included: it copies the thread, not what is on screen.
- *
- * The copy puts the Markdown on the clipboard as plain text and the same
- * Markdown drawn as rich text (sanitized HTML), so a paste into Gmail or Docs
- * keeps the formatting and a paste into an agent or a terminal gets Markdown.
- */
-
 import { findDirectiveBlocks, findQuestionBlocks } from '@plannotator/core/question-block';
 import { INBOX_REPLY_SENTENCE_LINE, parseInboxQuestionBlocks, splitInboxReplyBody } from '@plannotator/core/inbox-questions';
 import { parseInboxActionBlocks, withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
@@ -34,17 +9,10 @@ import { pickWords } from './components/ReplacedQuestion';
 import { isActionRecord } from './actions';
 import { agentName, plural } from './format';
 
-/** The message's author as the thread names it: the agent, or "You". */
 export function copyAuthor(message: InboxMessageWire): string {
   return message.author.kind === 'agent' ? agentName(message.author) : 'You';
 }
 
-/**
- * "Oct 28, 2026, 7:34 PM" in the computer's own time. The day and the time
- * are formatted apart and joined here: ICU versions join them differently
- * ("…, 2026, 7:34 PM" or "… 2026 at 7:34 PM"). Plain spaces: ICU's narrow
- * one before PM pastes oddly.
- */
 export function copyTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
@@ -53,7 +21,6 @@ export function copyTime(iso: string): string {
   return `${day}, ${time}`.replace(/\s/g, ' ');
 }
 
-/** A question's shape, from its record or, with none, from the block itself. */
 interface QuestionShape {
   prompt: string;
   context: string | null;
@@ -62,7 +29,6 @@ interface QuestionShape {
   suggested: string | null;
 }
 
-/** An answer's words: the pick (Other and text too), then a note. */
 function answerLine(question: InboxQuestion): string | null {
   if (question.state === 'superseded') return 'Replaced by a later question.';
   const answer = question.answer;
@@ -106,11 +72,6 @@ function actionLines(number: number, parsed: ReturnType<typeof parseInboxActionB
 
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-/**
- * Text as one Markdown code span, CommonMark's way: a backslash does not
- * escape inside one, so the fence is a run of backticks longer than any run
- * in the text, padded with a space when the text starts or ends with one.
- */
 export function codeSpan(text: string): string {
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
   const fence = '`'.repeat(longest + 1);
@@ -118,11 +79,6 @@ export function codeSpan(text: string): string {
   return `${fence}${pad}${text}${pad}${fence}`;
 }
 
-/**
- * An agent's message: its body with each question block and action item
- * turned into readable lines. Blocks are found exactly as the window finds
- * them (core's block splitter: a `:::question` inside a code fence is text).
- */
 function agentMarkdown(message: InboxMessageWire): string {
   const body = message.body;
   if (!body.includes(':::')) return body.trim();
@@ -132,7 +88,6 @@ function agentMarkdown(message: InboxMessageWire): string {
   const parsedQuestions = new Map(parseInboxQuestionBlocks(body).map((q) => [q.key, q]));
   const parsedActions = new Map(parseInboxActionBlocks(body).map((a) => [a.startLine, a]));
   const directiveEnds = new Map(findDirectiveBlocks(body, { frontmatter: false }).map((d) => [d.startLine, d.endLine]));
-  /** Each block's lines (1-based, inclusive) and what replaces them. */
   const swaps: { start: number; end: number; lines: string[] }[] = [];
   findQuestionBlocks(body, { frontmatter: false }).forEach((location, index) => {
     const record = questionRecords.get(location.key) ?? null;
@@ -149,7 +104,6 @@ function agentMarkdown(message: InboxMessageWire): string {
   for (const [startLine, parsed] of parsedActions) {
     const end = directiveEnds.get(startLine);
     if (end === undefined) continue;
-    // By its place when the key moved (a message stored before the reader dropped a task box), as actionForBlock does.
     const record = actionRecords.get(parsed.key) ?? [...actionRecords.values()].find((a) => a.position === parsed.position) ?? null;
     swaps.push({ start: startLine, end, lines: actionLines((record?.position ?? parsed.position) + 1, parsed, record) });
   }
@@ -158,12 +112,6 @@ function agentMarkdown(message: InboxMessageWire): string {
   return lines.join('\n').trim();
 }
 
-/**
- * The person's message in their own words. An Inbox note (set aside,
- * reopened, 👍), an action report and a re-ask are kept as written: they are
- * what the thread shows. A reply that carried only answers keeps its first
- * line ("Answered 1 question."), so a copy is never empty.
- */
 function personMarkdown(message: InboxMessageWire): string {
   if (isInboxNote(message) || isInboxActionReport(message) || (message.reask?.length ?? 0) > 0) return message.body.trim();
   const text = withoutInboxActionsSection(splitInboxSkillsBlock(message.body)?.before ?? message.body);
@@ -175,34 +123,21 @@ function personMarkdown(message: InboxMessageWire): string {
   return INBOX_REPLY_SENTENCE_LINE.test(first) ? first : '';
 }
 
-/**
- * A file name as plain Markdown text: each character Markdown could read as
- * code, emphasis, a link, an image, HTML, an entity, a table cell or a
- * strikethrough is escaped with a backslash.
- */
 function plainMarkdownText(text: string): string {
   return text.replace(/[\\`*_[\]<>|~&!#]/g, '\\$&');
 }
 
-/**
- * The message's attached files by name, in the order they were sent
- * ("Files: plan.md, shot.png"), or null when it has none. Images the body
- * shows (`inline_images`) are not attachments: they stay in the body as
- * written.
- */
 function filesLine(message: InboxMessageWire): string | null {
   const names = (message.attachments ?? []).map((file) => plainMarkdownText(file.name));
   return names.length > 0 ? `Files: ${names.join(', ')}` : null;
 }
 
-/** One message as Markdown a person reads, its attached files named at the end. */
 export function messageMarkdown(message: InboxMessageWire): string {
   const text = message.author.kind === 'agent' ? agentMarkdown(message) : personMarkdown(message);
   const files = filesLine(message);
   return files ? [text, files].filter(Boolean).join('\n\n') : text;
 }
 
-/** The whole thread: the subject, the project and count, then each message under its author and time. */
 export function threadMarkdown(thread: InboxThread): string {
   const out = [`# ${thread.subject ?? '(no subject)'}`, '', `${thread.project.name} · ${plural(thread.messages.length, 'message')}`];
   for (const message of thread.messages) {
@@ -213,7 +148,6 @@ export function threadMarkdown(thread: InboxThread): string {
   return out.join('\n');
 }
 
-/** The Markdown drawn as clipboard HTML: sanitized (no script, no link back to this machine), '' when it cannot be. */
 export function markdownClipboardHtml(markdown: string): string {
   try {
     return sanitizeRichHtml(chatMarkdownToHtml(markdown)) ?? '';
@@ -222,13 +156,6 @@ export function markdownClipboardHtml(markdown: string): string {
   }
 }
 
-/**
- * Put Markdown on the clipboard: the text as plain text, drawn as rich text
- * beside it. A promise (the row menu reads the thread first) goes to the
- * clipboard as one item with promised parts, so the write starts inside the
- * click, as Safari requires. False when nothing was copied (the read failed,
- * or the clipboard refused).
- */
 export async function copyMarkdown(markdown: string | Promise<string>): Promise<boolean> {
   if (typeof markdown === 'string') return (await copyRichTextToClipboard(markdownClipboardHtml(markdown), markdown)) !== false;
   if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
@@ -240,7 +167,6 @@ export async function copyMarkdown(markdown: string | Promise<string>): Promise<
       await navigator.clipboard.write([item]);
       return true;
     } catch {
-      // Refused, or the read failed: the read once more decides below.
     }
   }
   let text: string;

@@ -1,15 +1,3 @@
-/**
- * Code review ships with Shape off (approval "code-review-029-shape-off"): every Shape piece in a review rides Shape's
- * own switch, not Code review's. What regresses:
- *  - Code review on, Shape off: the selection bar offers Show me, the review's heading has its Show me, the Overview
- *    draws its picture (or says there is one it does not draw), or a board opens over the review;
- *  - Code review and Shape on: any of these missing (as before the switch split).
- *
- * The diff reader is stubbed: it records what the review hands it (the selection actions, the snapshot, the
- * Overview's renderer, the heading's actions) and draws only the last two. The board is stubbed too.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -58,7 +46,6 @@ const settle = async () => {
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'kettle-abcdef', name: 'kettle', root: '/work/kettle', created_at: '2026-11-05T10:00:00.000Z' };
 const REVIEW = 'msg_01M4H6G73M9H3Z32T859E7KETL';
-/** A drawn Overview picture (snapshot version 3: it has a width and height). */
 const DRAWN: GuideOverviewDiagram = { kind: 'html', source: '<div data-mark="whistle" data-code="src/kettle.ts#L1">The whistle</div>', width: 800, height: 360 };
 const snapshotWith = (diagram?: GuideOverviewDiagram): GuideSnapshot =>
   buildGuideSnapshot({
@@ -89,7 +76,6 @@ const message = {
 const thread: InboxThread = { thread_id: REVIEW, project: PROJECT, subject: 'Kettle', thread_name: null, resolved_at: null, messages: [message] };
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
-/** The review, Code review on, its agent live (it can take a question), with `shape` as given. */
 async function openReview({ shape, diagram, board = null }: { shape: boolean; diagram?: GuideOverviewDiagram; board?: string | null }) {
   const snapshot = snapshotWith(diagram);
   savedFetch = globalThis.fetch;
@@ -140,7 +126,6 @@ test.skipIf(!hasDom)('Code review on, Shape off: selected lines offer Comment an
 
 test.skipIf(!hasDom)("Code review on, Shape off: a drawn Overview picture is neither drawn nor noted, and no board opens over the review", async () => {
   const props = await openReview({ shape: false, diagram: DRAWN, board: 'shp_a' });
-  // The picture is left out of what the reader draws (no "custom picture" note in its place); the words stay.
   expect(props.snapshot.guide.overview?.text).toBe('The kettle whistles once.');
   expect(props.snapshot.guide.overview?.diagram).toBeUndefined();
   expect(document.querySelector('[data-stub-overview]')).toBeNull();
@@ -164,7 +149,6 @@ test.skipIf(!hasDom)('Code review and Shape on: the drawn Overview picture is dr
 });
 
 test.skipIf(!hasDom)("a chapter's drawn html picture is drawn only with Shape on; with Shape off the chapter shows as with no diagram", async () => {
-  // Shape off: the pane draws none (null), so the guide chain shows the chapter as without a diagram.
   const off = await openReview({ shape: false });
   const offDrawn = off.renderChapterDiagram?.(DRAWN, 0) ?? null;
   expect(offDrawn).toBeNull();
@@ -173,7 +157,6 @@ test.skipIf(!hasDom)("a chapter's drawn html picture is drawn only with Shape on
   root = null;
   if (savedFetch) globalThis.fetch = savedFetch;
   savedFetch = null;
-  // Shape on: the capped ChapterFigure.
   const on = await openReview({ shape: true });
   const drawn = on.renderChapterDiagram?.(DRAWN, 0) ?? null;
   expect(drawn).not.toBeNull();

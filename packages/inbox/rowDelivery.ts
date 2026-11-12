@@ -1,24 +1,14 @@
-/**
- * The list row's delivery glyph ("Ticks", approval "inbox-row-delivery",
- * 2026-10-20): its words, from the row's additive `delivery` field, which the
- * server decides with the thread's own rule (`inboxDeliveryState`). The
- * tooltip is the thread's line word for word (`deliveryText`); the row's
- * accessible name carries the state in words. Pure, for the tests.
- */
 import { inboxAgentName, type InboxListRow, type InboxListSection, type InboxRowDelivery } from '@plannotator/core/inbox-types';
 import { deliveryText, INBOX_STOPPED_REPLY_TEXT, type DeliveryLine } from './deliveryLine';
 import { whenTime } from './format';
 
-/** Whom it goes to, as the thread names it ("Claude Code", "Claude Code (another session)", an MCP agent's own name). */
 export function rowDeliveryName(d: InboxRowDelivery): string {
   const name = inboxAgentName({ kind: 'agent', host: d.host, name: d.name });
   return d.another_session ? `${name} (another session)` : name;
 }
 
-/** The tooltip: the thread's delivery line for the same state (a 👍's says so first). */
 export function rowDeliveryLine(d: InboxRowDelivery, time: (iso: string) => string = whenTime): string {
   const name = rowDeliveryName(d);
-  // "Saved for <the agent that asked>": the session that asked may be another than the thread's first agent.
   const endedName = d.asking ? inboxAgentName({ kind: 'agent', ...d.asking }) : name;
   const text = deliveryText(d.reason, {
     name,
@@ -34,20 +24,13 @@ export function rowDeliveryLine(d: InboxRowDelivery, time: (iso: string) => stri
   return d.kind === 'ack' ? `👍 Looks good · ${text}` : text;
 }
 
-/**
- * The row's wait on a busy session (approval "inbox-busy-agent-reply"):
- * "Undelivered N min", blue while it can go in now (`steerable`), grey when
- * it cannot. Null for every other state, and from an older Inbox.
- */
 export function rowWait(d: InboxRowDelivery | null | undefined): NonNullable<DeliveryLine['wait']> | null {
   if (!d || d.reason !== 'working' || !d.waiting_since) return null;
   return { since: d.waiting_since, steerable: d.steerable === true, autoSendAt: d.auto_send_at ?? null };
 }
 
-/** The state in words, for the row's accessible name (the time follows it there). */
 export function rowDeliverySpoken(d: InboxRowDelivery): string {
   const name = rowDeliveryName(d);
-  // Held by a stopped Claude Code session (approval "inbox-stopped-reply"): the thread's words, not "queued".
   const stopped = d.reason === 'stopped' ? INBOX_STOPPED_REPLY_TEXT.charAt(0).toLowerCase() + INBOX_STOPPED_REPLY_TEXT.slice(1) : null;
   const words =
     stopped ??
@@ -62,30 +45,16 @@ export function rowDeliverySpoken(d: InboxRowDelivery): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** The row's time: when it was delivered, once it was; else the thread's latest activity. */
 export function rowTimeIso(row: InboxListRow): string {
-  // A thread back from a snooze shows its return (a later message, when one came after it).
   if (row.snooze_back) return row.last_at;
   return row.delivery?.state === 'delivered' && row.delivery.at ? row.delivery.at : row.last_at;
 }
 
-/**
- * Whether an `event: deliveries` reads the list again: a session's label changed, a session ended or came back (a
- * row's "Session ended", on a row with no reply too), the agents moved while something draws them (`agentsShown`,
- * agentsList.ts), or some row's delivery can still move.
- */
 export function deliveriesReadList(change: { labels: boolean; sessions: boolean; agents?: boolean } | undefined, sections: readonly InboxListSection[] | null, agentsShown = false): boolean {
   return !!change?.labels || !!change?.sessions || (!!change?.agents && agentsShown) || hasMovingDelivery(sections);
 }
 
-/**
- * Some row's delivery can still move with the live sessions, so
- * `event: deliveries` reads the list again: anything but delivered, and
- * saved for an agent that only reads the thread (`reads`), which only a store
- * line (its read) changes.
- */
 export function hasMovingDelivery(sections: readonly InboxListSection[] | null): boolean {
   const moves = (d: InboxRowDelivery | null | undefined) => !!d && d.state !== 'delivered' && !(d.state === 'saved' && d.reason === 'reads');
-  // A launched thread's row (`run` present, launch only) moves with its agent: Starting, Working, Stopped on you.
   return !!sections?.some((section) => section.threads.some((row) => moves(row.delivery) || row.run !== undefined));
 }

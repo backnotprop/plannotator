@@ -17,7 +17,6 @@ describe("a phone's thread header", () => {
   test('a control past the edge never fits, whatever the label shows', () => {
     expect(phoneHeadFits({ overflow: 6, label: { shown: 42, whole: 42 } })).toBe(false);
     expect(phoneHeadFits({ overflow: 6, label: null })).toBe(false);
-    // The chevron alone fits once nothing is past the edge.
     expect(phoneHeadFits({ overflow: 0, label: null })).toBe(true);
   });
 
@@ -25,13 +24,10 @@ describe("a phone's thread header", () => {
     const first = (step: string) => PHONE_HEAD_FITS.findIndex((fit) => fit.includes(step as never));
     expect(first('count')).toBeGreaterThan(-1);
     expect(first('count')).toBeLessThan(first('back'));
-    // The way back keeps its label in every way but the last.
     expect(PHONE_HEAD_FITS.filter((fit) => fit.includes('back'))).toHaveLength(1);
     expect(PHONE_HEAD_FITS.at(-1)).toContain('back');
   });
 
-  // The approval "inbox-thread-header": the subject is in the bar at every width with room, so a way that leaves it
-  // a sliver does not fit, and the header gives way further (the subject used to vanish on a phone).
   test('a way that leaves the subject less than its floor does not fit; the bar with no subject is judged without it', () => {
     expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 }, subject: SUBJECT_FLOOR - 10 })).toBe(false);
     expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 }, subject: SUBJECT_FLOOR })).toBe(true);

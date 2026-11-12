@@ -1,15 +1,3 @@
-/**
- * The board's title comes first (owner feedback 2026-11-04 in
- * shape-board-look): no eyebrow row above it (no "<project> · Shape · as of
- * …", no version dots). What the row carried that the board still needs sits
- * in the group at the title's right, in order: "<agent> is drawing v<n>…"
- * with the Pebble while the agent draws, "Finished", Global comment, and the ×
- * ("Close Shape") that closes the board. What regresses: the row coming back,
- * Global comment dropping below the title, the board losing its close, or the
- * person losing the sign that the agent is drawing.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,7 +30,6 @@ function board(): ShapeLoaded {
   return { shape: made.record, version: store.read(made.id)!, seen: 1, notes: [], session: { state: 'live', agent: 'Claude Code' } };
 }
 
-/** The board, desktop-wide (happy-dom lays nothing out, so every width reads 0, a phone's). */
 async function mount(loaded: ShapeLoaded, onClose?: () => void): Promise<HTMLElement> {
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1280 });
@@ -63,7 +50,6 @@ async function mount(loaded: ShapeLoaded, onClose?: () => void): Promise<HTMLEle
   return el;
 }
 
-/** The words and buttons at the title's right, in order. */
 const side = (el: HTMLElement) =>
   [...el.querySelectorAll('.shp-head-side > *')].map((n) => n.getAttribute('aria-label') ?? n.textContent?.trim());
 

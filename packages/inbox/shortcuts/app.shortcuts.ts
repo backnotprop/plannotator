@@ -1,12 +1,6 @@
 import { defineShortcutScope, type ShortcutDefinition } from '@plannotator/ui/shortcuts';
 import { INBOX_SHORTCUT_EXTRAS, type InboxShortcutExtras } from './extras';
 
-/**
- * The window's own keys (App.tsx): the shortcut map, the sidebar, leaving a
- * focused page, and (an extra) going to the Inbox, the Board or Settings.
- * `?` is matched by its character (`event.key`), so it is Shift+/ on a US
- * keyboard and Shift+, on a French one.
- */
 export type InboxAppAction = 'openMap' | 'goInbox' | 'goBoard' | 'goPulls' | 'goDrafts' | 'goSettings' | 'compose' | 'refresh' | 'toggleSidebar' | 'leavePage';
 
 export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORTCUT_EXTRAS) {
@@ -14,7 +8,6 @@ export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORT
     ? {
         goInbox: { description: 'Go to the Inbox', bindings: ['G I'], section: 'Everywhere', hint: 'Focus lands on the first row, or the open thread’s row.', preventDefault: true, displayOrder: 2 },
         goBoard: { description: 'Go to the Board', bindings: ['G B'], section: 'Everywhere', hint: 'When the Board is on.', preventDefault: true, displayOrder: 3 },
-        // G P and G D (approval "inbox-keyboard-keys-2026-11-07", item 5): each only while its sidebar row shows.
         goPulls: { description: 'Go to Reviews (pull requests)', bindings: ['G P'], section: 'Everywhere', hint: 'When Code review is on.', preventDefault: true, displayOrder: 3.1 },
         goDrafts: { description: 'Go to Drafts', bindings: ['G D'], section: 'Everywhere', hint: 'When you have drafts.', preventDefault: true, displayOrder: 3.2 },
         goSettings: { description: 'Go to Settings', bindings: ['G S'], section: 'Everywhere', preventDefault: true, displayOrder: 4 },
@@ -35,7 +28,6 @@ export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORT
       },
       ...goTo,
       compose: {
-        // App.tsx: the sidebar pencil's path (approval "inbox-keyboard-keys-2026-11-07", item 4; Gmail's and Linear's C).
         description: 'New message',
         bindings: ['C'],
         section: 'Everywhere',
@@ -44,7 +36,6 @@ export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORT
         displayOrder: 4.5,
       },
       refresh: {
-        // App.tsx: the list header's ↻ (approval "inbox-refresh-key"; "R for refresh", beside ⌘R; plain R stays Reply).
         description: 'Refresh',
         bindings: ['Shift+R'],
         section: 'Everywhere',
@@ -53,7 +44,6 @@ export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORT
         displayOrder: 4.6,
       },
       toggleSidebar: {
-        // Wired in shell/sidebar.tsx (the sidebar primitive's own listener, unchanged); listed here for the map.
         description: 'Show or hide the sidebar',
         bindings: ['Mod+B'],
         section: 'Everywhere',
@@ -67,7 +57,6 @@ export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORT
         hint: 'Settings and What’s new go back to where you were.',
         displayOrder: 9,
       },
-      // With an extra off its actions are simply absent: the registry lists entries, and a handler for an absent one never runs.
     } as Record<InboxAppAction, ShortcutDefinition>,
   });
 }

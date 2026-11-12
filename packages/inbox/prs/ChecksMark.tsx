@@ -1,8 +1,3 @@
-/**
- * A PR's checks on a tile, in the Mark style (approval "inbox-pr-dashboard", round 6): a faint tick when they passed,
- * a faint spinner glyph while they run, and only a failure in colour, a red disc with a cross. Nothing when none ran.
- * The owner's answer on the style is pending (q-f1bccbe2): this one component is all there is to swap.
- */
 import type { InboxPullChecks } from '@plannotator/core/inbox-types';
 
 export function checksLabel(checks: InboxPullChecks | null): string | null {

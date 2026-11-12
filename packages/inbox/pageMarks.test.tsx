@@ -1,11 +1,3 @@
-/**
- * The Inbox window's page marks (pageMarks.ts): the attributes its build keys inbox.css's anchored `:has()` rules on
- * (build/inbox-page-marks.ts). What regresses if these fail: a look keyed on a part (the room the decision pill takes,
- * the page's own background) does not come with the part, or stays after it went; with the tour's layer and the
- * window both holding `data-pn-inbox`, the tour's end takes it from the window.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

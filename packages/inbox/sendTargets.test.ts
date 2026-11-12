@@ -1,9 +1,3 @@
-/**
- * The replies one Send makes (approval "inbox-explicit-skip", 2026-10-21):
- * ONE per agent session, carrying every pick waiting on that session's
- * messages, and skipping only the questions the person chose ("Skip them").
- * The owner's thread: one session, 8 messages, 11 questions; one answered.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { replyKeysToRenew, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SentContents } from './sendTargets';

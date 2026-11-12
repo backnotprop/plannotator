@@ -1,19 +1,9 @@
-/**
- * Open in Terminal on a launched thread's run line, as the window draws it: it shows only when a session
- * waits on Terminal or can't start, on the Inbox's own computer, for any host. The failures this catches: a
- * button a tailnet window can only be refused on, a host whose stuck session has no way to its terminal (a
- * host may offer no attach command while something still has the session), and a line left stale after the
- * host handed the session over. The ⋯ menu and Terminal itself are in tests/e2e/inbox-launch-claude.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxLaunchRecord, InboxMessageWire, InboxProject, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-// Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-10-11T10:00:00.000Z' };

@@ -1,8 +1,3 @@
-/**
- * What the open thread keeps of a return (approval `snooze-back-line`), and
- * which message the line sits above. The drawn line: snoozeBackLine.test.tsx.
- * The whole flow: tests/e2e/inbox-snooze-back.spec.ts.
- */
 import { describe, expect, test } from 'bun:test';
 import { snoozeBackAbove, snoozeBackAfter } from './snoozeBack';
 
@@ -21,7 +16,6 @@ describe('snoozeBackAfter', () => {
     const kept = snoozeBackAfter(null, 'msg_a', back);
     expect(kept).toEqual({ threadId: 'msg_a', until: UNTIL });
     expect(snoozeBackAfter(kept, 'msg_a', settled)).toBe(kept);
-    // A read that has no row yet takes nothing away.
     expect(snoozeBackAfter(kept, 'msg_a', null)).toBe(kept);
   });
 

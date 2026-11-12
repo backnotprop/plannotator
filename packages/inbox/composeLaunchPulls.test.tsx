@@ -1,13 +1,3 @@
-/**
- * A pull request handed to a new session (launch): the session starts in the
- * pull request's own project, as a live one must. To offers only that project,
- * whatever the person is looking at (the Pull requests page has no current
- * project), so the first choice is the right one and the thread is handed the
- * PR (`ComposeSent.pullKeys`). The failure this catches: To naming another
- * project, then Send refusing it.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -49,7 +39,6 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** New message for the PR with the person looking at `current` (null: the Pull requests page). */
 async function open(current: (typeof PROJECTS)[number] | null, pulls: typeof PULLS = PULLS) {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -81,7 +70,6 @@ async function open(current: (typeof PROJECTS)[number] | null, pulls: typeof PUL
   await until(() => inDialog('[data-compose-to]:not([data-loading])') !== null, 'To');
 }
 
-/** "Claude Code New session", then Send with words. */
 async function startAndSend() {
   act(() => inDialog('button[data-compose-to]')!.click());
   await until(() => inDialog(`[data-compose-start="${AGENT}"]`) !== null, 'the start row');

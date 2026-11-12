@@ -1,14 +1,3 @@
-/**
- * How the Inbox fits with your agents (the owner, for 0.28.31; copy from the
- * tour v2 brief, step 0, exactly): the top tile of the first-run "Two paths"
- * bento, and the short first card when the tour starts ("a fresh reminder").
- *
- * The picture: your own agents, one line each (their real mark, their
- * name, "(you run this as normal)"), a straight arrow from each into the
- * Inbox card at the same height, and a primary "your reply" arrow back,
- * parallel to Claude Code's. HTML and CSS only, no asset but the card's
- * thumbnail. The reply arrow draws once, 600 ms, not under reduced motion.
- */
 import { HostMark, Icon } from '../icons';
 import { tourAssetUrl } from './assets';
 
@@ -20,7 +9,6 @@ export const TOUR_FIT_LINES = [
 ] as const;
 const PICTURE_ALT = 'Your agents keep running in your terminal and editor. They send questions, work and files to the Inbox; your reply goes back to the same session.';
 
-/** One of your agents, in one line: its mark, its name, and that you run it as normal. */
 function Session({ host, name, row }: { host: string; name: string; row: number }) {
   return (
     <div className="tp-win" style={{ gridRow: row }}>
@@ -34,7 +22,6 @@ function Session({ host, name, row }: { host: string; name: string; row: number 
   );
 }
 
-/** A straight arrow from a session into the Inbox card, at the session's height; Claude Code's has the reply back beside it. */
 function Link({ row, reply }: { row: number; reply?: boolean }) {
   return (
     <div className="tp-link" style={{ gridRow: row }}>
@@ -59,7 +46,6 @@ export function TourFitPicture() {
         <Link row={1} reply />
         <Link row={2} />
         <Link row={3} />
-        {/* A phone: the sessions on top, then the questions down and the reply up, side by side. */}
         <div className="tp-down" aria-hidden="true">
           <span className="tp-dn">↓ questions, work, files</span>
           <span className="tp-up">↑ your reply</span>
@@ -73,7 +59,6 @@ export function TourFitPicture() {
             <HostMark host="claude-code" />
             <b>Which direction?</b>
             <span className="tp-c">1 question</span>
-            {/* Not here: the row keeps its words, never a broken image. */}
             <img className="tp-th" src={tourAssetUrl('vs-a-thumb.webp')} alt="" onError={(event) => (event.currentTarget.style.display = 'none')} />
           </div>
           <div className="tp-row">
@@ -87,7 +72,6 @@ export function TourFitPicture() {
   );
 }
 
-/** The words: the title and its three sentences (the heading level is the host's). */
 export function TourFitText({ as: Heading = 'h3', id }: { as?: 'h2' | 'h3'; id?: string }) {
   return (
     <>
@@ -101,10 +85,6 @@ export function TourFitText({ as: Heading = 'h3', id }: { as?: 'h2' | 'h3'; id?:
   );
 }
 
-/**
- * The tour's first card: the same explanation, then Show me. Not modal: the tour bar (and its Exit) stays in
- * reach above it. Focus goes to its title when it opens.
- */
 export function TourIntro({ onGo }: { onGo: () => void }) {
   return (
     <div className="ib-tour-intro-scrim">

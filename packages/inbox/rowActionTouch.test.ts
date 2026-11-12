@@ -1,31 +1,13 @@
-/**
- * A list row's hover action (Mark read, Mark unread, Send now: `.ib-ract`) is
- * shown by `:hover` only where the pointer can hover (`@media (hover: hover)`).
- *
- * iOS and iPadOS Safari apply `:hover` on a finger's first tap, and when that
- * makes a button appear (a `display`, `visibility` or `opacity` change) WebKit
- * treats the tap as a hover and drops its click. On an iPad, opening a thread
- * from the list took two taps: the first showed "Mark read", the second opened
- * the thread. Chromium does not do this, so the browser tests cannot see it:
- * this file reads the sheet instead. Keyboard focus still shows the action.
- *
- * The sidebar's Projects and Starred rows take the other way out (the owner,
- * 2026-11-11): on a screen that cannot hover (`@media (hover: none)`) their ⋯
- * and + are always shown and the count or state stays, so a tap's hover shows
- * nothing new; with a mouse they still appear on hover.
- */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 interface StyleRule {
   selectors: string[];
-  /** The preludes of the at-rules around the rule, outermost first. */
   within: string[];
   body: string;
 }
 
-/** Every style rule in a stylesheet, with the at-rules it sits in (comments dropped). */
 export function styleRules(css: string): StyleRule[] {
   const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const rules: StyleRule[] = [];
@@ -33,7 +15,6 @@ export function styleRules(css: string): StyleRule[] {
   let prelude = '';
   for (const char of text) {
     if (char === '{') {
-      // A nested rule's head starts after the last declaration of the rule around it.
       const head = prelude.slice(prelude.lastIndexOf(';') + 1).trim();
       const rule = head && !head.startsWith('@') ? { selectors: splitTop(head), within: stack.filter((s) => !s.rule).map((s) => s.prelude), body: '' } : null;
       if (rule) rules.push(rule);
@@ -49,7 +30,6 @@ export function styleRules(css: string): StyleRule[] {
   return rules;
 }
 
-/** A selector list split on its top-level commas. */
 function splitTop(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -66,15 +46,12 @@ function splitTop(text: string): string[] {
   return parts.filter(Boolean);
 }
 
-/** The selectors where a list row's own `:hover` (`.ib-rw:hover` or `.ib-rw:is(:hover, …)`) styles something in it. */
 function rowHoverSelectors(rule: StyleRule): string[] {
   return rule.selectors.filter((s) => /\.ib-rw(?::[\w-]+(?:\([^)]*\))?)*:(?:hover|is\([^)]*:hover)/.test(s));
 }
 
-/** An at-rule that holds only where the pointer can hover. */
 const hovers = (prelude: string) => /^@media\b/.test(prelude) && /\(\s*hover\s*:\s*hover\s*\)/.test(prelude) && !prelude.includes(',');
 
-/** The row-hover selectors that apply on a screen that cannot hover. */
 export function unguardedRowHovers(css: string): string[] {
   return styleRules(css)
     .filter((rule) => !rule.within.some(hovers))
@@ -85,7 +62,6 @@ const sheet = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
 
 describe("a list row's hover action on a touch screen", () => {
   test('the check catches a row hover outside (hover: hover) and passes one inside it', () => {
-    // The rules as they were when an iPad needed two taps to open a thread.
     const before = [
       '.ib-rw:hover .ib-ract, .ib-rw:has(:focus-visible) .ib-ract { display: inline-flex; }',
       '.pn-inbox .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-tick) > .ib-ract { right: 32px; }',
@@ -102,7 +78,6 @@ describe("a list row's hover action on a touch screen", () => {
 
   test("the Inbox's sheet shows the action on hover only where the pointer hovers", () => {
     const guarded = styleRules(sheet).filter((rule) => rule.within.some(hovers)).flatMap(rowHoverSelectors);
-    // The scan still finds the rules it guards: a rename would otherwise make this a silent pass.
     expect(guarded.some((s) => /^\.ib-rw:hover \.ib-ract$/.test(s))).toBe(true);
     expect(unguardedRowHovers(sheet)).toEqual([]);
   });
@@ -116,10 +91,8 @@ describe("a list row's hover action on a touch screen", () => {
   });
 });
 
-/** An at-rule that holds only where the pointer cannot hover. */
 const noHover = (prelude: string) => /^@media\b/.test(prelude) && /\(\s*hover\s*:\s*none\s*\)/.test(prelude) && !prelude.includes(',');
 
-/** What a sidebar row must show where the pointer cannot hover: a selector, and a declaration a rule for it sets. */
 const SIDEBAR_ON_TOUCH: Array<{ selector: string; sets: RegExp; why: string }> = [
   { selector: '.pn-inbox :is(.ib-projrow, .ib-pinrow) .ib-pmore', sets: /opacity:\s*1\b/, why: 'a project or starred row\'s ⋯' },
   { selector: '.pn-inbox .ib-projrow .ib-pplus', sets: /opacity:\s*1\b/, why: "a project row's +" },
@@ -127,7 +100,6 @@ const SIDEBAR_ON_TOUCH: Array<{ selector: string; sets: RegExp; why: string }> =
   { selector: '.ib-pinrow:hover .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch)', sets: /visibility:\s*visible/, why: "a starred row's state, under a tap's hover" },
 ];
 
-/** The entries of SIDEBAR_ON_TOUCH no `(hover: none)` rule in the sheet sets. */
 export function sidebarHiddenOnTouch(css: string): string[] {
   const touch = styleRules(css).filter((rule) => rule.within.some(noHover));
   return SIDEBAR_ON_TOUCH.filter(({ selector, sets }) => !touch.some((rule) => rule.selectors.includes(selector) && sets.test(rule.body))).map((e) => e.why);

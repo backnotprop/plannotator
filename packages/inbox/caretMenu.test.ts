@@ -1,9 +1,3 @@
-/**
- * The box the compose picker hangs off (caretMenu.ts caretAnchor): the
- * caret's line, held inside the part of the field that is on screen, so a
- * field scrolled past the caret keeps the picker beside the field instead of
- * floating over the To line or the footer.
- */
 import { describe, expect, test } from 'bun:test';
 import { caretAnchor, phoneSkillListHeight, seenBox } from './caretMenu';
 

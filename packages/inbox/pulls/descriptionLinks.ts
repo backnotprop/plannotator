@@ -1,28 +1,16 @@
-/**
- * Where a link in a PR's description goes. A body is written for the forge, so a path in it (`docs/guide.md`) means a
- * file of the repository, never an address of this window: it opens on the forge at the PR's head. Only the web's
- * schemes stay links; a body is someone else's words, and `vscode:` or `ssh:` would launch an app from a click.
- */
-
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import { GITHUB_SHORTCODES } from './githubShortcodes';
 
 type Layer = Pick<InboxPull, 'url' | 'platform' | 'repo' | 'head' | 'head_repo' | 'head_sha'>;
 
-/** The commit a file link names: the head commit, or the branch unless it lives in a fork (not found in this repo). */
 function fileRef(layer: Layer, headSha: string | null | undefined): string | null {
   const sha = headSha ?? layer.head_sha;
   if (sha) return sha;
   return !layer.head_repo || layer.head_repo === layer.repo ? layer.head : null;
 }
 
-/** The forge's address for a path in this layer's description, or null when it has none (it climbs out of the repo). */
 let shortcodes: Map<string, string> | null = null;
 
-/**
- * `:robot:` as the forge draws it, 🤖, wherever its alias is GitHub's; any other `:word:` stays. ui's Markdown knows a
- * few dozen (`inlineTransforms`), the same pattern; a forge's words use the whole set, bots' most of all.
- */
 export function withEmoji(text: string): string {
   if (!text.includes(':')) return text;
   if (!shortcodes) {
@@ -34,11 +22,6 @@ export function withEmoji(text: string): string {
   return text.replace(/:([a-z0-9_+-]+):/g, (whole, code: string) => known.get(code) ?? whole);
 }
 
-/**
- * A forge's body as the Inbox's Markdown should read it: HTML comments gone (a PR template's, which the forge hides too),
- * a line holding nothing but `<br>` (dependabot's), which would draw as those words, and `:shortcodes:` as their emoji.
- * In code, each stays; in an address, a shortcode stays.
- */
 export function forgeBody(markdown: string): string {
   const out: string[] = [];
   let fence: string | null = null;
@@ -67,7 +50,6 @@ export function forgeBody(markdown: string): string {
         inComment = false;
         continue;
       }
-      // Code, a comment's start, and an address (a link's `](…)`, an autolink, a bare URL), which an emoji would break.
       const next = /(`+).*?\1|<!--|\]\((?:<[^>\n]*>|[^)\s]*)|<[a-z][a-z0-9+.-]*:[^\s<>]*>|\bhttps?:\/\/[^\s<>]+/i.exec(rest);
       if (!next) {
         kept += withEmoji(rest);
@@ -104,7 +86,6 @@ export function forgeFileUrl(layer: Layer, headSha: string | null | undefined, h
 
 const LIVE_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
 
-/** Whether a click on this link stays in the browser: the web's schemes, as the link's own parsing reads them. */
 export function isLiveLink(link: { protocol: string }): boolean {
   return LIVE_SCHEMES.has(link.protocol);
 }

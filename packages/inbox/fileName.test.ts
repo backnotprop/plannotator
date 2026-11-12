@@ -1,8 +1,3 @@
-/**
- * A long file name is cut in its middle, never at its end (the stress test of
- * 2026-10-12, rows 16 to 20, 49 and 74, and the owner's own screenshot of a
- * tile): the end tells two files apart, so it is what stays.
- */
 import { describe, expect, test } from 'bun:test';
 import { splitFileName } from './components/FileName';
 

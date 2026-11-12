@@ -1,8 +1,3 @@
-/**
- * How an attachment opens (fileView.ts, approval "inbox-side-by-side"): the
- * decision table (address × choice × kind × room), and the remembered choice
- * through the storage seam.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { resetStorageBackend, setStorageBackend } from '@plannotator/ui/utils/storage';
 import {
@@ -32,11 +27,9 @@ const html = { kind: 'html' } as const;
 const markdown = { kind: 'markdown' } as const;
 const code = { kind: 'code' } as const;
 const attachedImage = { kind: 'image' } as const;
-/** An image a message's text shows (`ref`, the src as written). */
 const inTextImage = { kind: 'image', ref: 'shots/after.png' } as const;
 const video = { kind: 'video' } as const;
 const pdf = { kind: 'pdf' } as const;
-/** A kind this build does not know reads as `file`. */
 const unknownKind = { kind: 'hologram' } as unknown as typeof pdf;
 
 test("before any choice, today's rule: an HTML page and an image from a message's text open full screen, the rest side by side", () => {
@@ -91,7 +84,6 @@ test('the remembered choice: written, read back, forgotten; a stored value that 
   writeFileViewChoice('full');
   expect(openingView(markdown)).toBe('full');
 
-  // Undo of a first pick: back to no choice, and today's rule again.
   writeFileViewChoice(null);
   expect(store.has(FILE_VIEW_COOKIE)).toBe(false);
   expect(openingView(markdown)).toBe('side');
@@ -108,7 +100,6 @@ test("a linked page's Back finds its entry whatever view either hash names", () 
   expect(hashWithoutView('#view=full')).toBe('');
   expect(sameScreenAnyView(before, '#thread=msg_1&file=att_1&linked=B.html&view=full')).toBe(true);
   expect(sameScreenAnyView(before, '#thread=msg_1&file=att_1&linked=B.html')).toBe(true);
-  // Another page, another file, another version: another screen.
   expect(sameScreenAnyView(before, '#thread=msg_1&file=att_1&linked=C.html&view=side')).toBe(false);
   expect(sameScreenAnyView(before, '#thread=msg_1&file=att_2&linked=B.html&view=side')).toBe(false);
   expect(sameScreenAnyView(before, '#thread=msg_1&file=att_1&v=sent&linked=B.html&view=side')).toBe(false);

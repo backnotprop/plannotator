@@ -7,13 +7,6 @@ import { stepsCount } from './model';
 import { StepsButtonFace } from './StepsButton';
 import { StepsLists } from './StepsList';
 
-/**
- * The Checklist's one-time reveal (approval "inbox-checklist-reveal", 2026-11-04): the Board's first-visit
- * dialog's frame, type and buttons (`.ib-bi`), over a small thread foot whose checklist ticks itself from 1/4 to 4/4,
- * with its list open for a moment. Shown once, as an offer (the owner, 2026-11-04: reveals are opt-in): "Turn it on"
- * turns the Checklist on; "Not now", Escape and a click outside close it and leave it off. Every way out is final. No
- * keyboard shortcut. Under reduced motion the picture rests on its last beat: 4/4, the list open.
- */
 export function ChecklistIntro({ phone, onClose, onTurnOn }: { phone: boolean; onClose: () => void; onTurnOn: () => void }) {
   return (
     <Modal labelledBy="ib-ci-title" describedBy="ib-ci-desc" testId="checklist-intro" onClose={onClose} ownKeys className={`ib-bi ib-ci${phone ? ' ib-bi-phone' : ''}`}>
@@ -36,15 +29,9 @@ export function ChecklistIntro({ phone, onClose, onTurnOn }: { phone: boolean; o
   );
 }
 
-/** The picture's steps: an invoice fix, each short enough for one line at 320 px. */
 const STEPS = ['Reproduce the bug', 'Find the extra line', 'Fix the PDF template', 'Run the invoice tests'];
-/** When each step was ticked: minutes past 2 PM today. */
 const DONE_AT = [8, 14, 21, 26];
 
-/**
- * One loop, ms from its start: how many steps are done and whether the list is open. A beat holds until the next;
- * the last one fades the picture out, and the loop starts again.
- */
 const BEATS: { at: number; done: number; open: boolean }[] = [
   { at: 0, done: 1, open: false },
   { at: 1400, done: 2, open: false },
@@ -75,7 +62,6 @@ function useBeat(still: boolean): { done: number; open: boolean; fading: boolean
   return { done: BEATS[index]!.done, open: BEATS[index]!.open, fading };
 }
 
-/** The picture: the end of an agent's message and the thread's foot, Reply and the checklist button. Decoration only. */
 function ChecklistIntroArt() {
   const still = useReducedMotion();
   const { done, open, fading } = useBeat(still);
@@ -120,7 +106,6 @@ function ChecklistIntroArt() {
               <span className="ib-btn ib-st-btn ib-st-working" data-popup-open={open ? '' : undefined}>
                 <StepsButtonFace list={list} />
               </span>
-              {/* Over the message, from the button's left edge (a phone's: the stage's, as the popover shifts to fit). */}
               {open && (
                 <div className="ib-stp ib-ci-pop">
                   <div className="ib-stp-scroll">

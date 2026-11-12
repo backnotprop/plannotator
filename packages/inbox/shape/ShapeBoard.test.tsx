@@ -1,10 +1,3 @@
-/**
- * The Inbox's board (ShapeBoard.tsx) draws the crosshair only when asked (`crosshair`, which only the Inbox's
- * ShapeLayer passes); without it the board keeps Annotate, as `plannotator shape open` shows it. What regresses: the
- * crosshair reaching the standalone page, or the Inbox losing it.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,8 +9,6 @@ import type { ShapeHost, ShapeLoaded } from '@plannotator/ui/components/shape';
 import type { ShapeBoardProps } from './types';
 
 const hasDom = typeof document !== 'undefined';
-// The real file, typed as the window sees it (board-module.d.ts): ShapeBoard.tsx is checked by tsconfig.guide.json,
-// not the window's strict settings, so its path is not one TypeScript follows from here.
 const boardFile = './ShapeBoard.tsx';
 const { default: ShapeBoard } = (hasDom ? await import(boardFile) : {}) as { default: ComponentType<ShapeBoardProps> };
 
@@ -43,7 +34,6 @@ function loaded(): ShapeLoaded {
 }
 
 async function mount(props: { crosshair?: boolean; onAddToReply?: () => void }) {
-  // Desktop-wide: happy-dom lays nothing out, so every width reads 0, a phone's.
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1280 });
   restore.push(() => (width ? Object.defineProperty(HTMLElement.prototype, 'clientWidth', width) : delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth));
@@ -80,8 +70,6 @@ test.skipIf(!hasDom)('with it (the Inbox’s ShapeLayer): the crosshair in Annot
   expect(annotate(el)).toBeNull();
 });
 
-// inbox.css's `body:has([data-shape-layer] .shp-dock)` (a toast lifted over the dock) runs in the window
-// keyed on a page mark (../pageMarks.ts, build/inbox-page-marks.ts): <body> carries it exactly while the dock is there.
 test.skipIf(!hasDom)('the dock marks <body> (data-ib-shape-dock) while the board is open, and the mark goes with it', async () => {
   const el = await mount({ crosshair: true });
   expect(el.querySelector('.shp-dock')).not.toBeNull();

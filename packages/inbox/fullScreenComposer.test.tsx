@@ -1,25 +1,3 @@
-/**
- * Full screen's composer (approval "inbox-fullscreen-composer", 2A, round 4)
- * through the whole window: InboxApp over a REAL Inbox server in a temp data
- * dir (its own process, tests/helpers/inbox-dom-server.ts in its `open-in`
- * mode, whose thread carries page.html and shot.png), its fetches carried
- * over loopback.
- *
- * Proves: the tabs switch between the image's own comment row and the
- * thread's reply; the reply is the thread's one draft (typed in the card it
- * is saved and the thread's box holds it; typed in the box the card shows
- * it); the card's minimize gathers it with the toolbar into the corner control,
- * as Hide (») does, kept across files, and one press brings both back with
- * focus where it was; an HTML page offers Comment and Reply too; Send from
- * the card refuses as the thread's Send does (nothing to send, the server
- * refusing) and keeps the words, and a Send that goes clears them and the
- * draft while full screen stays. Files: the Reply tab's paperclip (the reply
- * box's, first in its toolbar; none on the Comment tab), a paste and a drop on
- * the card attach to the reply box's own files, shown in both places, and the
- * card's Send carries them.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, setDefaultTimeout, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -51,7 +29,6 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-/** The reply route answers this refusal instead of reaching the server (null: it reaches it). */
 let refuseReply: { status: number; body: Record<string, unknown> } | null = null;
 
 function loopback(path: string, method = 'GET', body?: string | Buffer, headers: Record<string, string> = {}): Promise<{ status: number; text: string }> {
@@ -72,7 +49,6 @@ const TESTS = 14;
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000020000000308060000009d74c6e10000000d49444154789c636060000000040001f61738550000000049454e44ae426082', 'hex');
 const image = (name: string) => new File([PNG], name, { type: 'image/png' });
 
-/** The window's upload (api.ts uploadFile): an XMLHttpRequest, carried over loopback with the file's bytes. */
 class LoopbackXhr {
   status = 0;
   responseText = '';
@@ -199,7 +175,6 @@ async function until(check: () => boolean | Promise<boolean>, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** The window, on the thread with `name` open full screen. */
 async function renderFull(name: string) {
   window.location.hash = `#thread=${world.openIn.thread}&file=${world.openIn.ids[name]}&view=full`;
   host = document.createElement('div');
@@ -246,7 +221,6 @@ const clip = () => card()?.querySelector<HTMLInputElement>('input[type="file"][d
 const threadFiles = () => host!.querySelector('.ib-rbox [data-reply-files]');
 const cardFiles = () => card()?.querySelector('[data-fcomp-files]') ?? null;
 
-/** Choose `files` with an `<input type="file">` (the paperclip). */
 function choose(input: HTMLInputElement, files: File[]) {
   Object.defineProperty(input, 'files', { configurable: true, value: files });
   act(() => {
@@ -254,7 +228,6 @@ function choose(input: HTMLInputElement, files: File[]) {
   });
 }
 
-/** A drag event on `target` carrying `files` (a drag from the file manager). True when the page took it. */
 function drag(target: Element, type: 'dragover' | 'drop', files: File[]): boolean {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(event, 'dataTransfer', { value: { files, types: ['Files'], dropEffect: 'none', getData: () => '' } });
@@ -264,7 +237,6 @@ function drag(target: Element, type: 'dragover' | 'drop', files: File[]): boolea
   return event.defaultPrevented;
 }
 
-/** A paste of `files` (a screenshot) on `target`. True when the browser's own paste was prevented. */
 function pasteFiles(target: HTMLElement, files: File[]): boolean {
   const items = files.map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file }));
   const event = new Event('paste', { bubbles: true, cancelable: true });
@@ -278,7 +250,6 @@ function pasteFiles(target: HTMLElement, files: File[]): boolean {
 const commentField = () => host!.querySelector<HTMLTextAreaElement>('[data-fcomp-comment-slot] [data-image-composer] textarea');
 const stepGuard = () => host!.querySelector<HTMLElement>('[data-step-guard]');
 
-/** → in full screen: the next file of the thread. */
 async function stepNext() {
   await act(async () => {
     (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true }));
@@ -295,7 +266,6 @@ test.skipIf(!hasDom)('the tabs switch between the image’s comment row and the 
   await renderFull('shot.png');
   const group = card()!.querySelector('[role="radiogroup"]')!;
   expect(group.querySelectorAll('[role="radio"]').length).toBe(2);
-  // No draft: Comment first, the image's own comment row inside the card.
   expect(radio('comment').getAttribute('aria-checked')).toBe('true');
   expect(radio('reply').getAttribute('aria-checked')).toBe('false');
   expect(radio('comment').tabIndex).toBe(0);
@@ -306,13 +276,10 @@ test.skipIf(!hasDom)('the tabs switch between the image’s comment row and the 
 
   await click(radio('reply'));
   expect(radio('reply').getAttribute('aria-checked')).toBe('true');
-  // The comment row stays drawn, hidden (its words are kept): the reply field shows.
   expect(card()!.querySelector('[data-image-composer]')!.closest('[hidden]')).not.toBeNull();
   expect(document.activeElement).toBe(replyField());
-  // Empty: Send is dimmed.
   expect(card()!.querySelector<HTMLButtonElement>('[data-fcomp-send]')!.disabled).toBe(true);
 
-  // Arrows move the pick (a radio group's own keys).
   await act(async () => {
     radio('reply').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
   });
@@ -324,7 +291,6 @@ test.skipIf(!hasDom)('the card’s reply is the thread’s one draft: typed in t
   await click(radio('reply'));
   type(replyField()!, 'Keep the footer, pad the form.');
   await until(async () => (await draftOnServer()) === 'Keep the footer, pad the form.', 'the draft saved');
-  // The thread's box opened behind full screen with the same words, without taking focus from the card.
   expect(threadBox()?.value).toBe('Keep the footer, pad the form.');
   expect(document.activeElement).toBe(replyField());
   expect(card()!.querySelector<HTMLButtonElement>('[data-fcomp-send]')!.disabled).toBe(false);
@@ -342,7 +308,6 @@ test.skipIf(!hasDom)('the card’s minimize is the toolbar’s »: card and tool
   await click(radio('reply'));
   expect(card()!.querySelector('[data-fcomp-minimize]')!.getAttribute('aria-label')).toBe('Hide tools');
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
-  // One gather: the card and the toolbar both go (inert), no pill of its own.
   expect(toolsState()).toBe('tucked');
   expect(card()!.inert).toBe(true);
   expect(host!.querySelector<HTMLElement>('[data-full-view-bar]')!.inert).toBe(true);
@@ -350,20 +315,17 @@ test.skipIf(!hasDom)('the card’s minimize is the toolbar’s »: card and tool
   expect(document.activeElement).toBe(corner());
   expect(corner()!.inert).toBe(false);
 
-  // One press on the corner control: everything is back, focus where the person left (the card's field).
   await click(corner()!);
   expect(toolsState()).toBe('pinned');
   expect(card()!.inert).toBe(false);
   expect(host!.querySelector<HTMLElement>('[data-full-view-bar]')!.inert).toBe(false);
   expect(document.activeElement).toBe(replyField());
 
-  // Words waiting: the corner control says so (words, no dot).
   type(replyField()!, 'A draft.');
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
   expect(corner()!.textContent).toContain('Draft');
   expect(corner()!.getAttribute('aria-label')).toContain('reply draft');
 
-  // Another file of the thread keeps the tools gathered; the corner control still brings them back.
   await openFull('shot.png');
   await until(() => card() !== null, 'the card on the image');
   expect(toolsState()).toBe('tucked');
@@ -374,7 +336,6 @@ test.skipIf(!hasDom)('the card’s minimize is the toolbar’s »: card and tool
 
 test.skipIf(!hasDom)('Hide (») takes the card out with the toolbar: inert until one press on the corner control; an HTML page offers Comment and Reply, Comment first', async () => {
   await renderFull('page.html');
-  // HTML: both tabs, as on an image; Comment picked (no reply draft waits), its field the page's own row.
   expect(card()!.querySelector('[role="radiogroup"]')).not.toBeNull();
   expect(radio('comment').getAttribute('aria-checked')).toBe('true');
   expect(card()!.querySelector('[data-html-page-comment] textarea')).not.toBeNull();
@@ -388,11 +349,9 @@ test.skipIf(!hasDom)('Hide (») takes the card out with the toolbar: inert until
   await click(host!.querySelector<HTMLButtonElement>('[data-full-view-handle]')!);
   await until(() => host!.querySelector('[data-full-view-dock]')?.getAttribute('data-bar') === 'pinned', 'the tools back');
   expect(card()!.inert).toBe(false);
-  // Back from », focus lands on » again.
   expect(document.activeElement).toBe(host!.querySelector('[data-full-view-hide]'));
 });
 
-/** The platform's own ⌘⇧X (the html-annotate scope's Hide / Show tools). */
 const toolsChord = (): KeyboardEventInit =>
   getShortcutPlatform() === 'mac' ? { key: 'X', code: 'KeyX', metaKey: true, shiftKey: true } : { key: 'X', code: 'KeyX', ctrlKey: true, shiftKey: true };
 
@@ -408,8 +367,6 @@ test.skipIf(!hasDom)('⌘⇧X with focus on a button of the card: focus goes to 
   expect(card()!.inert).toBe(true);
   expect(document.activeElement).toBe(corner());
 
-  // Gathered by ⌄, then brought back by the chord from the page (focus not on the corner control): that gather is
-  // forgotten, so » and a press on the corner control put focus back on », not in the card's field.
   await click(corner()!);
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
   expect(toolsState()).toBe('tucked');
@@ -428,13 +385,11 @@ test.skipIf(!hasDom)('⌘⇧X with focus on a button of the card: focus goes to 
 test.skipIf(!hasDom)('Send from the card refuses as the thread’s Send does: nothing to send, or the server refusing; the words stay, full screen stays', async () => {
   await renderFull('shot.png');
   await click(radio('reply'));
-  // Nothing to send: the thread's own refusal, shown in the card; nothing posted.
   sendKey(replyField()!);
   await until(() => card()!.querySelector('[data-fcomp-error]') !== null, 'the refusal');
   expect(card()!.querySelector('[data-fcomp-error]')!.textContent).toBe('Write a reply or pick an answer first.');
   expect(posted.some((p) => p.path.endsWith('/reply'))).toBe(false);
 
-  // The server refuses: its words, the reply's words kept in the card and as the draft, still full screen.
   type(replyField()!, 'Ship it on Friday.');
   await until(async () => (await draftOnServer()) === 'Ship it on Friday.', 'the draft saved');
   refuseReply = { status: 409, body: { error: 'This thread changed. Read it again before you send.', code: 'conflict' } };
@@ -455,12 +410,10 @@ test.skipIf(!hasDom)('a Send from the card goes: the words leave the card and th
   await until(() => card()?.querySelector('[data-fcomp-sent]') != null, 'the Sent line');
   const reply = posted.find((p) => p.path.endsWith('/reply'))!;
   expect(reply.body.words).toBe('Looks right. Ship it.');
-  // The Send names the draft its words were saved as, so the server clears that draft.
   expect(typeof reply.body.clear_draft).toBe('string');
   expect(replyField()!.value).toBe('');
   expect(await draftOnServer()).toBeNull();
   expect(host!.querySelector('[data-attachment-pane][data-full-view]')).not.toBeNull();
-  // The card stays on Reply, its field keeps focus.
   expect(radio('reply').getAttribute('aria-checked')).toBe('true');
 });
 
@@ -475,7 +428,6 @@ test.skipIf(!hasDom)('the chord on the card (a tab, off the field) sends the rep
     act(async () => {
       await new Promise((r) => setTimeout(r, 400));
     });
-  // The Comment tab: the chord is the comment's, never a send (the thread's own handler stands down under full screen).
   chord(radio('comment'));
   await settle();
   expect(replies()).toBe(0);
@@ -494,32 +446,25 @@ test.skipIf(!hasDom)('the chord on the card (a tab, off the field) sends the rep
 
 test.skipIf(!hasDom)('the paperclip: none on the Comment tab, first in the Reply tab’s toolbar; a chosen file is the thread box’s file too, and the card’s Send carries it', async () => {
   await renderFull('shot.png');
-  // A comment takes no files: no paperclip with the image's comment row.
   expect(clip()).toBeNull();
   await click(radio('reply'));
-  // The reply box's own button, first in the card's toolbar, named, the card's 30 px button.
   const input = clip()!;
   expect(input).not.toBeNull();
   const label = input.closest('label')!;
   expect(label.getAttribute('aria-label')).toBe('Attach files');
   expect(label.classList.contains('ib-fvb')).toBe(true);
-  // Round 3: Send first in the reply's row, the paperclip after it.
   const foot = card()!.querySelector('[data-fcomp-foot]')!;
   expect(foot.firstElementChild!.hasAttribute('data-fcomp-send')).toBe(true);
   expect(foot.contains(label)).toBe(true);
-  // Nothing written yet: Send is dimmed.
   expect(card()!.querySelector<HTMLButtonElement>('[data-fcomp-send]')!.disabled).toBe(true);
 
   choose(input, [image('footer-375.png')]);
   await until(() => tiles(cardFiles())[0]?.getAttribute('data-compose-file') === 'done', 'the chosen file uploaded, in the card');
   expect(tiles(cardFiles())[0]!.getAttribute('data-compose-file-name')).toBe('footer-375.png');
-  // One reply: the thread's box, open behind full screen, holds the same file, and focus stayed in full screen.
   expect(tiles(threadFiles()).map((t) => t.getAttribute('data-compose-file-name'))).toEqual(['footer-375.png']);
   expect(host!.querySelector('[data-attachment-pane][data-full-view]')).not.toBeNull();
-  // A file alone is something to send.
   expect(card()!.querySelector<HTMLButtonElement>('[data-fcomp-send]')!.disabled).toBe(false);
 
-  // Words typed in the thread's box ride with it: the card shows them.
   type(threadBox()!, 'The footer at 375 px.');
   expect(replyField()!.value).toBe('The footer at 375 px.');
 
@@ -529,7 +474,6 @@ test.skipIf(!hasDom)('the paperclip: none on the Comment tab, first in the Reply
   expect(replies).toHaveLength(1);
   expect(replies[0]!.body.words).toBe('The footer at 375 px.');
   expect((replies[0]!.body.uploads as string[]).length).toBe(1);
-  // Sent: the tiles go from the card and the box; full screen stays.
   expect(tiles(cardFiles())).toHaveLength(0);
   expect(tiles(threadFiles())).toHaveLength(0);
   expect(host!.querySelector('[data-attachment-pane][data-full-view]')).not.toBeNull();
@@ -539,14 +483,11 @@ test.skipIf(!hasDom)('the paperclip: none on the Comment tab, first in the Reply
 
 test.skipIf(!hasDom)('a paste and a drop on the card attach to the reply as on the reply box; a file in the box shows in the card; × takes it from both; files alone make the pill a draft', async () => {
   await renderFull('page.html');
-  // The paperclip is the Reply tab's.
   await click(radio('reply'));
   expect(clip()).not.toBeNull();
-  // A screenshot pasted into the card's field attaches (the browser's own paste prevented: no text in it).
   expect(pasteFiles(replyField()!, [image('pasted.png')])).toBe(true);
   await until(() => tiles(cardFiles()).length === 1, 'the pasted file in the card');
   expect(tiles(threadFiles())).toHaveLength(1);
-  // Files dragged over the card: it takes them (dashed), and the drop attaches.
   expect(drag(card()!, 'dragover', [image('dropped.png')])).toBe(true);
   expect(card()!.hasAttribute('data-drop-over')).toBe(true);
   expect(drag(card()!, 'drop', [image('dropped.png')])).toBe(true);
@@ -554,13 +495,11 @@ test.skipIf(!hasDom)('a paste and a drop on the card attach to the reply as on t
   expect(card()!.hasAttribute('data-drop-over')).toBe(false);
   expect(tiles(threadFiles()).map((t) => t.getAttribute('data-compose-file-name'))).toEqual(tiles(cardFiles()).map((t) => t.getAttribute('data-compose-file-name')));
 
-  // × on a tile in the card takes it out of the reply (the box too), focus back in the card's field.
   await click(tiles(cardFiles())[0]!.querySelector<HTMLButtonElement>('button')!);
   expect(tiles(cardFiles())).toHaveLength(1);
   expect(tiles(threadFiles())).toHaveLength(1);
   expect(document.activeElement).toBe(replyField());
 
-  // Files and no words: gathered, the corner control still says a reply waits.
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
   expect(host!.querySelector('[data-full-view-handle]')!.textContent).toContain('Draft');
 });
@@ -594,7 +533,6 @@ test.skipIf(!hasDom)('a long text paste in the card is a pasted-text tile in bot
   expect(document.activeElement).toBe(replyField());
   expect(card()!.querySelectorAll('[data-pasted-text]')).toHaveLength(0);
   expect(threadFiles()?.querySelectorAll('[data-pasted-text]').length ?? 0).toBe(0);
-  // The thread's box holds the same words: it is one reply.
   expect(threadBox()!.value).toBe(`${before}${log}${after}`);
 });
 
@@ -605,16 +543,13 @@ for (const away of ['the Reply tab', 'gathered into the corner'] as const) {
     type(commentField()!, 'Too much padding.');
     if (away === 'the Reply tab') await click(radio('reply'));
     else await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
-    // Out of sight (hidden, or inert in the corner), still there.
     expect(commentField()!.closest(away === 'the Reply tab' ? '[hidden]' : '[inert]')).not.toBeNull();
     expect(commentField()!.value).toBe('Too much padding.');
     await act(async () => (document.activeElement as HTMLElement | null)?.blur());
     await stepNext();
-    // Nothing asks: the step goes on the first press, and nothing is posted.
     await until(() => host!.querySelector(`[data-attachment-pane="${shot}"]`) === null, 'the next file');
     expect(stepGuard()).toBeNull();
     expect(posted.some((p) => p.path.endsWith('/api/inbox/annotations'))).toBe(false);
-    // Back on the image: the words wait in its row.
     await act(async () => {
       (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true, cancelable: true }));
     });
@@ -632,7 +567,6 @@ test.skipIf(!hasDom)('a comment saved from the card’s Comment tab is the image
   expect(saved.body.attachment_id).toBe(world.openIn.ids['shot.png']);
   expect(JSON.stringify(saved.body.annotation)).toContain('The CVC field is under the footer.');
   await until(() => commentField()!.value === '', 'the row clear');
-  // The pane counts it, and the card stays on Comment.
   await until(() => (host!.querySelector('[data-full-view-dock]')?.textContent ?? '').includes('1'), 'the comment counted');
   expect(radio('comment').getAttribute('aria-checked')).toBe('true');
 });

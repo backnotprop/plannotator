@@ -1,15 +1,3 @@
-/**
- * The review's chapter menu in its top bar (ReviewJump, approval "review-deslop"). What regresses:
- *
- *  - the button naming the wrong place: a card past the chapters ("Everything else") reading as the Overview, or a
- *    file named by its position in the patch when the review draws code before tests;
- *  - what the left rail gave going missing: the Overview, a row per chapter with its tick, the count reviewed, the
- *    files with their Viewed ticks;
- *  - Escape in the menu leaving the review as well as the menu.
- *
- * The browser walk is tests/e2e/inbox-code-review.spec.ts. DOM-gated: runs under DOM_TESTS=1 (happy-dom), from
- * tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -38,7 +26,6 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-/** A scroller with its children at these tops (the scroller's own top is 0). */
 function scroller(attr: string, tops: [string, number][]): HTMLElement {
   const body = document.createElement('div');
   body.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
@@ -69,12 +56,10 @@ test.skipIf(!hasDom)('the file in view is the one drawn there, by its path: the 
 test.skipIf(!hasDom)('the button says where the person is, in the approved words', () => {
   const walk = { mode: 'walkthrough' as const, chapters: CHAPTERS, files: FILES };
   expect(jumpPlace({ ...walk, current: null })).toEqual({ lead: '', name: 'Overview', done: false });
-  // Pinned on purpose: "2 of 3 ‹chapter›" is the approved bar (approval "review-deslop").
   expect(jumpPlace({ ...walk, current: 1 })).toEqual({ lead: '2 of 2', name: 'The worker', done: false });
   expect(jumpPlace({ ...walk, current: 0 }).done).toBe(true);
   const all = { mode: 'files' as const, chapters: CHAPTERS, files: FILES };
   expect(jumpPlace({ ...all, current: 0 })).toEqual({ lead: '1 of 2', name: 'a.ts', done: true });
-  // No files in the patch: a count, not a blank button.
   expect(jumpPlace({ ...all, files: [], current: 0 })).toEqual({ lead: '', name: '0 files', done: false });
 });
 
@@ -106,7 +91,6 @@ test.skipIf(!hasDom)('the menu holds the Overview, each chapter with its tick, a
   expect(rows[1]!.getAttribute('aria-label')).toContain('reviewed');
   expect(rows[1]!.querySelector('[data-done]')).not.toBeNull();
   expect(rows[2]!.querySelector('[data-done]')).toBeNull();
-  // The one in view is marked.
   expect(rows.map((row) => row.hasAttribute('data-on'))).toEqual([false, false, true]);
   expect(menu.querySelector('[data-review-progress]')?.textContent).toBe('1 of 2 chapters reviewed');
   await act(async () => rows[0]!.click());
@@ -121,7 +105,6 @@ test.skipIf(!hasDom)('in All files the menu lists the files with their counts an
   expect(rows[0]!.querySelector('[data-done]')).not.toBeNull();
   expect(rows[0]!.textContent).toContain('+3');
   expect(rows[0]!.textContent).toContain('-1');
-  // Nothing removed: no "-0" beside the file, as on its chip.
   expect(rows[1]!.textContent).not.toContain('-0');
   expect(menu.querySelector('[data-review-progress]')?.textContent).toBe('1 of 2 files viewed');
   await act(async () => rows[1]!.click());
@@ -134,7 +117,6 @@ test.skipIf(!hasDom)('with no Viewed ticks to give (a guide, or Code review off)
   expect(menu.querySelectorAll('[data-review-jump-row]').length).toBe(2);
   expect(menu.querySelector('[data-done]') === null).toBe(true);
   expect(menu.querySelector('[data-review-progress]') === null).toBe(true);
-  // The chapters keep their count: Reviewed ticks are every guide's.
   act(() => root?.unmount());
   host?.remove();
   document.body.innerHTML = '';
@@ -151,6 +133,5 @@ test.skipIf(!hasDom)("Escape in the menu closes the menu and is marked used: the
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
   expect(host!.querySelector('[data-review-jump]')?.getAttribute('aria-expanded')).toBe('false');
-  // App's window listener stands down on a used key (App.tsx: event.defaultPrevented).
   expect(escape.defaultPrevented).toBe(true);
 });

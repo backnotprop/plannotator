@@ -5,7 +5,6 @@ import { riskFilterWords, type RiskFilterValue } from './risk';
 
 const OPTIONS: RiskFilterValue[] = ['all', 'high', 'medium'];
 
-/** All | High | Medium and up, in the Board's filter chip, and the way to the rules: all it holds until rules exist. No shortcut of its own. */
 export function RiskFilter({ value, rulesSet, phone, onChange, onRules }: { value: RiskFilterValue; rulesSet: boolean; phone: boolean; onChange: (value: RiskFilterValue) => void; onRules: () => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -24,7 +23,6 @@ export function RiskFilter({ value, rulesSet, phone, onChange, onRules }: { valu
         <Menu.Portal container={portal ?? undefined}>
           {phone && <Menu.Backdrop className="ib-pm-scrim" />}
           <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4} data-phone={phone ? '' : undefined}>
-            {/* The way back is keyboard's alone: after a click or a tap, no ring stays on the chip. */}
             <Menu.Popup className="ib-pm ib-bpf-menu" aria-label="Risk" finalFocus={(closeType) => closeType === 'keyboard'} data-pulls-risk-menu="">
               {rulesSet && (
                 <>

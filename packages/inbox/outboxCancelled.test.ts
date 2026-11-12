@@ -1,7 +1,3 @@
-/**
- * A write held for another machine that the person took back with Cancel: a Send retried with the same key answers
- * `202` with the entry `cancelled`. The window must say it was never sent, not "Sending…" (held) and not delivered.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { InboxApiError, InboxHeldError, inboxApi } from './api';
 import { resetMachineRoutes, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -12,7 +8,6 @@ const saved = globalThis.fetch;
 const savedSelf = selfMachineId();
 afterEach(() => {
   globalThis.fetch = saved;
-  // setSelfMachine ignores null: back to no id at all when there was none.
   if (savedSelf === null) resetMachineRoutes();
   else setSelfMachine(savedSelf);
 });

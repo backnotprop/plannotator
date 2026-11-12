@@ -1,15 +1,3 @@
-/**
- * A recording in the window (DOM_TESTS=1 for the rendering tests; the owner's
- * ask, 2026-11-09: "the ability to like annotate an audio file … right now
- * audio file is just download instead of play"): the tile names it "MP3 audio
- * · 1:23 · …" with Play; the pane plays it from its `audio` route in its own
- * player card (play / pause, the waveform to scrub, the time), with the
- * video's rail of comment dots that seek; typing pauses and pins the moment;
- * Comment saves the video's contract (`blockId: "video"`, `inboxVideo.time`)
- * with no frame and no Mark up; a phone opens the row from "Comment at". And
- * the feedback a Send carries (no DOM): comments by time, each with its
- * "At 0:12 (12.5 s of 1:23)" line, exactly as a film's.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -26,7 +14,6 @@ let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
 const restores: (() => void)[] = [];
 
-/** Replace a member for one test (restored after it). */
 function stub<T extends object>(target: T, key: string, descriptor: PropertyDescriptor) {
   const previous = Object.getOwnPropertyDescriptor(target, key);
   Object.defineProperty(target, key, { configurable: true, ...descriptor });
@@ -39,7 +26,6 @@ beforeEach(() => {
   paused = 0;
   played = 0;
   if (!hasDom) return;
-  // happy-dom's media element neither plays nor keeps a time: plain fields stand in, and the events fire as a browser's do.
   stub(HTMLMediaElement.prototype, 'paused', {
     get(this: { _paused?: boolean }) {
       return this._paused ?? true;
@@ -174,7 +160,6 @@ test.skipIf(!hasDom)('the pane plays it from its audio route in its own player; 
   await render(pane([later, earlier]));
   const audio = host!.querySelector<HTMLAudioElement>('audio[data-video-player]')!;
   expect(audio.getAttribute('src')).toBe(`/api/inbox/attachments/${take.id}/audio`);
-  // Its own controls, not the browser's.
   expect(audio.hasAttribute('controls')).toBe(false);
   expect(host!.querySelector('video')).toBeNull();
   expect(host!.querySelector('.ib-vhead .ib-from')!.textContent).toBe('1:23');
@@ -188,7 +173,6 @@ test.skipIf(!hasDom)('the pane plays it from its audio route in its own player; 
   await act(async () => play.click());
   expect(play.getAttribute('aria-label')).toBe('Play');
 
-  // The bar: a slider over the recording; the keys move 5 s, Home and End go to the ends, and it never pauses.
   const bar = host!.querySelector<HTMLElement>('[data-audio-scrub]')!;
   expect(bar.getAttribute('role')).toBe('slider');
   expect(bar.getAttribute('aria-valuemax')).toBe('83');
@@ -200,14 +184,12 @@ test.skipIf(!hasDom)('the pane plays it from its audio route in its own player; 
   expect(paused).toBe(pausesBefore);
   expect(host!.querySelector('[data-video-time-now]')!.textContent).toBe('1:23 / 1:23');
 
-  // A dot per comment, at its moment along the bar; a click seeks there and selects it.
   const dots = [...host!.querySelectorAll<HTMLButtonElement>('[data-video-dot]')];
   expect(dots.map((d) => d.getAttribute('data-video-dot'))).toEqual(['ann-vid-a', 'ann-vid-b']);
   expect(dots[0]!.style.left).toBe(`${(12.5 / 83) * 100}%`);
   await act(async () => dots[1]!.click());
   expect(audio.currentTime).toBe(61);
   expect(dots[1]!.className).toContain('ib-on');
-  // The panel: "Comments · By time", a time pill per card that seeks, no frame.
   const panel = host!.querySelector('[data-annotation-panel]')!;
   expect(panel.querySelector('[data-annotation-panel-note]')!.textContent).toBe('By time');
   const pills = [...host!.querySelectorAll<HTMLButtonElement>('[data-video-card-time]')];
@@ -253,7 +235,6 @@ test.skipIf(!hasDom)('typing pauses and pins the moment; Comment saves a comment
 
   await act(async () => host!.querySelector<HTMLButtonElement>('[data-video-comment-save]')!.click());
   await settle();
-  // No frame is kept: the only write is the comment.
   expect(posts.filter((p) => p.url.startsWith('/api/inbox/markups'))).toEqual([]);
   const saved = (posts.find((p) => p.url === '/api/inbox/annotations')!.body as { annotation: Record<string, unknown> }).annotation;
   expect(saved).toMatchObject({
@@ -288,7 +269,6 @@ test.skipIf(!hasDom)('the waveform is drawn from the decoded peaks of a small fi
   await settle();
   const bar = host!.querySelector('[data-audio-scrub]')!;
   expect(bar.hasAttribute('data-waveform')).toBe(true);
-  // The bars twice: the whole recording, and the part played over it.
   expect(bar.querySelectorAll('rect').length).toBe(AUDIO_PEAK_BARS * 2);
   expect(fetched).toContain('/api/inbox/attachments/att_01K7AAAAAAAAAAAAAAAAAAAAAB/audio');
 
@@ -335,7 +315,6 @@ test('the reply carries each comment at its moment, as a film\'s does', () => {
   const second = feedback.indexOf('### 2. Feedback on: "take-2.mp3 at 1:01"\nAt 1:01 (61 s of 1:23)\n> The music drowns the last line.');
   expect(first).toBeGreaterThan(-1);
   expect(second).toBeGreaterThan(first);
-  // Without a recorded length (an Ogg whose tail held no page, AAC, WebM): the moment alone.
   const unknown = attachmentFeedback([earlier], [{ ...take, duration_ms: undefined }], new Map(), '/work/launch-site');
   expect(unknown).toContain('At 0:12 (12.5 s)\n');
 });
@@ -345,7 +324,6 @@ test('the waveform\'s peaks: the loudest of each slice against the loudest of al
   const loud = new Float32Array(400).fill(0.5);
   const peaks = audioPeaksOf([Float32Array.from([...quiet, ...loud])], 4);
   expect(peaks).toEqual([0.04, 0.04, 1, 1]);
-  // Over every channel: the louder one wins.
   expect(audioPeaksOf([new Float32Array(4).fill(0.1), Float32Array.from([0, 0, 0.8, 0.8])], 2)).toEqual([Math.pow(0.1 / 0.8, 0.7), 1]);
   expect(audioPeaksOf([], 4)).toEqual([]);
   expect(audioPeaksOf([new Float32Array(10)], 2)).toEqual([0.04, 0.04]);

@@ -1,9 +1,3 @@
-/**
- * What an error toast says (design record "inbox-toasts-break-fixes"): the
- * Inbox's own sentence, plain words when the Inbox did not answer, and the
- * caller's fallback for a program's own error. The cause itself goes to the
- * console, never the toast.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { InboxApiError, InboxHeldError } from './api';
 import { errorText, errorToast, INBOX_UNREACHABLE } from './toastError';

@@ -1,10 +1,3 @@
-/**
- * When a list read owes the window a drafts read (draftsReads.ts, #2593). What
- * this catches: a thread holding unsent work deleted (no record says it) left
- * counted in the sidebar's Drafts; and a linked machine's rows holding unsent
- * work (never in this machine's `replies`) owing a drafts read after every
- * list read, which would put back the read per agent message.
- */
 import { expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { draftsReadOwed, replyDraftsDiffer } from './draftsReads';
@@ -35,7 +28,6 @@ test("a linked machine's rows never owe a read; this machine's own (`self`) do",
 });
 
 test("the echo of this window's own pick save owes the drafts read of a thread holding unsent work, as its record did", () => {
-  // A pick is unsent work: the Drafts row counts it. The echo reads no thread, but the drafts still follow it.
   const batch = newRecordBatch();
   noteOwnRecord(batch, 'a');
   expect(draftsReadOwed(batch, ['a'])).toBe(true);

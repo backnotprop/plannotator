@@ -1,17 +1,3 @@
-/**
- * The question cards inside an attached Markdown file answer like the
- * message body's (issue #2828): a card the message recorded takes a pick,
- * which goes to the thread under the RECORD's key (unique in its message,
- * not always the key the card computes in the file); a card no record names
- * stays read-only; a locked message (closed, sent) locks every card; a pick
- * not sent reads "Draft" with its footer, as in the body.
- *
- * What regresses if this fails: the file's cards go back to read-only, or a
- * pick lands on the wrong question (the file's key sent where the record's
- * differs), or a card answers that the server would refuse.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -20,7 +6,6 @@ import type { InboxAttachmentState, InboxQuestion } from '@plannotator/core/inbo
 import type { FileQuestions } from './fileQuestions';
 
 const hasDom = typeof document !== 'undefined';
-// The pane pulls in the Viewer, which reads `window` at module-eval time.
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
 
 let root: Root | null = null;
@@ -87,7 +72,6 @@ const attachment: InboxAttachmentState = {
 
 const [dbKey, flagKey] = findQuestionBlocks(PLAN).map((b) => b.key) as [string, string];
 
-/** A record of the message for a question of the file (the third card has none: it was not in the sent text). */
 function record(fileKey: string, key: string, position: number, prompt: string, labels: string[], state: InboxQuestion['state'] = 'open'): InboxQuestion {
   return {
     key,
@@ -174,13 +158,11 @@ function questionsWith(records: InboxQuestion[], picks: { key: string; answer: Q
 
 test.skipIf(!hasDom)("a recorded card takes a pick, sent under the record's key; a card no record names stays read-only", async () => {
   const picks: { key: string; answer: QuestionAnswer | null }[] = [];
-  // The body asks the flag question too, so the file's record took `<key>-2`.
   const records = [record(dbKey, dbKey, 0, 'Which database should invoices live in?', ['Postgres', 'SQLite']), record(flagKey, `${flagKey}-2`, 1, 'Ship the retry behind a flag?', ['Yes', 'No'])];
   const [db, flag, added] = await mount(questionsWith(records, picks));
   expect(radiosLive(db!)).toBe(true);
   expect(radiosLive(flag!)).toBe(true);
   expect(buttonIn(flag!, 'Accept recommended')).toBeDefined();
-  // Not in the sent text: no record, so nothing to answer.
   expect(radiosLive(added!)).toBe(false);
   expect(buttonIn(added!, 'Accept recommended')).toBeUndefined();
 

@@ -1,21 +1,3 @@
-/**
- * Stepping through a thread's files on a phone (approval
- * "mobile-file-stepping", toolbar-swipe): the toolbar's `2/5 ⌄` pill opens
- * every file in one tap, and a sideways swipe on the file steps.
- *
- * What is proved here, on the pane as the thread drives it: the pill's name,
- * place and one-tap sheet (focus back on it; a pick steps); a desktop keeps
- * its own N/M and inline peek; the swipe follows the finger and shows the
- * "Next · name" card, steps past a third of the width, springs back short of
- * it, resists at the last file and says the end note; and every case it
- * leaves alone: a vertical scroll, two fingers, selected text, a block that
- * scrolls sideways (and the same block at its edge, which steps), HTML pages,
- * a desktop, an open sheet (images follow the finger too: imageSwipe.test.tsx); a typed comment asks
- * first; reduced motion steps on release without following. The real-touch
- * proof is tests/e2e/inbox-phone-stepping.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -98,7 +80,6 @@ function stubViews() {
   }) as unknown as typeof fetch;
 }
 
-/** The pane as the thread drives it on a phone (always full screen); a step opens the next file in place. */
 function Pane({ start, phone = true, opened }: { start: InboxAttachmentState; phone?: boolean; opened: string[] }) {
   const [open, setOpen] = useState(start);
   const noop = () => {};
@@ -156,7 +137,6 @@ const area = () => host!.querySelector<HTMLElement>('.ib-docarea')!;
 const live = () => host!.querySelector('[data-step-live]')!.textContent;
 const card = () => host!.querySelector<HTMLElement>('[data-file-swipe-card]');
 
-/** The phone's width for the file and the body around it, where the swipe is heard (happy-dom lays nothing out). */
 function sized(el: HTMLElement, width = 390) {
   for (const node of [el, el.parentElement!]) node.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 700, width, height: 700, toJSON: () => ({}) }) as DOMRect;
 }
@@ -174,7 +154,6 @@ function reducedMotion(on: boolean) {
   })) as unknown as typeof window.matchMedia;
 }
 
-/** A touch event as a phone sends it (happy-dom has no Touch constructor). */
 function touchEvent(target: EventTarget, type: string, points: { x: number; y: number }[]): Event {
   const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
   const list = points.map((p, i) => ({ identifier: i, clientX: p.x, clientY: p.y, target }));
@@ -184,7 +163,6 @@ function touchEvent(target: EventTarget, type: string, points: { x: number; y: n
   return event;
 }
 
-/** One finger from (200, 300) by (dx, dy), in `moves` moves, then lifted (unless `lift` is false). */
 async function drag(target: EventTarget, dx: number, dy = 0, { moves = 6, lift = true, fingers = 1 } = {}) {
   const from = { x: 200, y: 300 };
   const extra = (p: { x: number; y: number }) => (fingers === 2 ? [p, { x: p.x + 60, y: p.y }] : [p]);
@@ -205,7 +183,6 @@ test('which files take the swipe', () => {
   expect(fileSwipeMode('code', false)).toBe('follow');
   expect(fileSwipeMode('pdf', false)).toBe('follow');
   expect(fileSwipeMode('file', false)).toBe('follow');
-  // A text file too large to show is the download card.
   expect(fileSwipeMode('html', true)).toBe('follow');
   expect(fileSwipeMode('image', false)).toBe('follow');
   for (const kind of ['html', 'mermaid', 'graphviz', 'video'] as const) expect(fileSwipeMode(kind, false)).toBe('none');
@@ -221,7 +198,6 @@ test.skipIf(!hasDom)('the pill: named "2/5: file 2 of 5, plan.txt. Show every fi
   expect(button.textContent).toBe('2/5');
   expect(button.getAttribute('aria-haspopup')).toBe('grid');
   expect(button.getAttribute('aria-expanded')).toBe('false');
-  // No inline peek on a phone: one tap opens the bottom sheet in the Inbox's root.
   await act(async () => button.click());
   await settle();
   expect(button.getAttribute('aria-expanded')).toBe('true');
@@ -233,7 +209,6 @@ test.skipIf(!hasDom)('the pill: named "2/5: file 2 of 5, plan.txt. Show every fi
   await settle(80);
   expect(document.querySelector('.pn-inbox-peek [role="grid"]')).toBeNull();
   expect(document.activeElement).toBe(pill());
-  // A pick in the sheet steps there.
   await act(async () => pill()!.click());
   await settle();
   const cell = [...document.querySelectorAll<HTMLElement>('.pn-inbox-peek [role="gridcell"]')].find((c) => c.textContent?.includes('spec.pdf'))!;
@@ -263,7 +238,6 @@ test.skipIf(!hasDom)('a swipe on a document follows the finger with the "Next ·
   expect(area().getAttribute('data-file-swipe')).toBe('follow');
   sized(area());
   await drag(area(), -180, 6, { lift: false });
-  // The file follows the finger; the card names what comes in.
   expect(area().style.transform).toBe('translateX(-180px)');
   expect(card()!.getAttribute('data-file-swipe-card')).toBe('next');
   expect(card()!.textContent).toContain('Next');
@@ -272,15 +246,12 @@ test.skipIf(!hasDom)('a swipe on a document follows the finger with the "Next ·
   await act(async () => {
     touchEvent(area(), 'touchend', [{ x: 20, y: 306 }]);
   });
-  // It slides out, then the next file opens and slides in.
   expect(opened).toEqual([]);
   await settle(SWIPE_SLIDE_MS + 60);
   expect(opened).toEqual([plan.id]);
   expect(card()).toBeNull();
-  // The step is said once in the live region, as any step.
   await settle(400);
   expect(live()).toContain('2 of 5, plan.txt');
-  // And back: a swipe the other way names the previous file.
   sized(area());
   await drag(area(), 180, 0, { lift: false });
   expect(card()!.getAttribute('data-file-swipe-card')).toBe('previous');
@@ -298,7 +269,6 @@ test.skipIf(!hasDom)('a finger that comes back while the file is still sliding a
   const opened = await render(notes);
   sized(area());
   await drag(area(), -200, 0);
-  // Still sliding off toward plan.txt; the file is off to the left, so the next finger lands on the body around it.
   expect(area().style.transform).toBe('translateX(-390px)');
   expect(opened).toEqual([]);
   const body = area().parentElement!;
@@ -319,12 +289,10 @@ test.skipIf(!hasDom)('short of the line it springs back; a vertical scroll and t
   reducedMotion(false);
   const opened = await render(notes);
   sized(area());
-  // 30 px: under the flick's 40 px and a third of the width.
   await drag(area(), -30, 0);
   await settle(SWIPE_SLIDE_MS + 60);
   expect(opened).toEqual([]);
   expect(area().style.transform).toBe('');
-  // More down than across: a scroll, never a swipe (and never cancelled).
   let moved: Event | null = null;
   await act(async () => {
     touchEvent(area(), 'touchstart', [{ x: 200, y: 300 }]);
@@ -336,7 +304,6 @@ test.skipIf(!hasDom)('short of the line it springs back; a vertical scroll and t
   expect(moved!.defaultPrevented).toBe(false);
   expect(opened).toEqual([]);
   expect(area().style.transform).toBe('');
-  // Two fingers: a pinch.
   await drag(area(), -200, 0, { fingers: 2 });
   await settle(SWIPE_SLIDE_MS + 60);
   expect(opened).toEqual([]);
@@ -377,7 +344,6 @@ test.skipIf(!hasDom)('selected text and a block that scrolls sideways keep the t
   await settle(80);
   expect(opened).toEqual([]);
   window.getSelection()!.removeAllRanges();
-  // A wide code line or table: it scrolls sideways, so the touch is its own.
   const wide = document.createElement('div');
   wide.style.overflowX = 'auto';
   Object.defineProperty(wide, 'scrollWidth', { value: 1200 });
@@ -388,7 +354,6 @@ test.skipIf(!hasDom)('selected text and a block that scrolls sideways keep the t
   await drag(wide, -200);
   await settle(80);
   expect(opened).toEqual([]);
-  // Scrolled to its end, it has nothing more that way: next steps.
   left = 840;
   await drag(wide, -200);
   await settle(80);
@@ -402,7 +367,6 @@ test.skipIf(!hasDom)('reduced motion: nothing follows the finger, the step happe
   sized(area());
   await drag(area(), -180, 0, { lift: false });
   expect(area().style.transform).toBe('');
-  // The card still says where a release goes (no motion: it only appears).
   expect(card()!.textContent).toContain('plan.txt');
   await act(async () => {
     touchEvent(area(), 'touchend', [{ x: 20, y: 300 }]);
@@ -426,14 +390,12 @@ test.skipIf(!hasDom)('an HTML page takes no swipe from the pane; an image takes 
   const fromImage = await render(shot);
   expect(area().getAttribute('data-file-swipe')).toBe('follow');
   sized(area());
-  // Anywhere over the image's area, as over a document (its own touchend-only swipe is off here).
   await drag(area(), -200);
   await settle(80);
   expect(fromImage).toEqual([page.id]);
   act(() => root?.unmount());
   host?.remove();
 
-  // The pill's sheet open over a document: the swipe waits.
   const withSheet = await render(notes);
   sized(area());
   await act(async () => pill()!.click());
@@ -462,7 +424,6 @@ test.skipIf(!hasDom)('a typed comment never stops a swipe: it follows through to
   popover.remove();
 });
 
-/** The phone's file sheet, opened from the toolbar's pill. */
 async function openSheet() {
   await act(async () => pill()!.click());
   await settle();
@@ -477,7 +438,6 @@ test.skipIf(!hasDom)('the sheet the pill opens leads with ‹ Previous and Next 
   const sheet = await openSheet();
   const header = sheet.querySelector('[data-peek-sheet-header]')!;
   expect(header).not.toBeNull();
-  // Above the grid and outside it (a grid holds only rows).
   expect(header.compareDocumentPosition(sheet.querySelector('[role="grid"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(sheet.querySelector('[role="grid"] [data-peek-step]')).toBeNull();
   expect(prevButton()!.getAttribute('aria-label')).toBe('Previous file: notes.md');
@@ -489,7 +449,6 @@ test.skipIf(!hasDom)('the sheet the pill opens leads with ‹ Previous and Next 
   await act(async () => nextButton()!.click());
   await settle(80);
   expect(opened).toEqual([shot.id]);
-  // The sheet closes with the step: the new file is what you see.
   expect(document.querySelector('[data-image-peek-sheet]')).toBeNull();
   expect(document.activeElement).toBe(pill());
   expect(live()).toContain('3 of 5, shot.png');
@@ -519,7 +478,6 @@ test.skipIf(!hasDom)('Previous and Next show on every file, an HTML page include
   expect(document.querySelector('[data-image-peek-sheet]')).not.toBeNull();
   expect(document.activeElement).toBe(next);
   expect(live()).toBe('Last file in this thread');
-  // Escape in the header closes the sheet, focus back on the pill.
   await act(async () => next.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   await settle(80);
   expect(document.querySelector('[data-image-peek-sheet]')).toBeNull();
@@ -530,12 +488,10 @@ test.skipIf(!hasDom)('focus never leaves the open sheet for the page behind: Shi
   stubViews();
   await render(plan);
   await openSheet();
-  // From Next, Shift+Tab is the browser's own move to Previous: nothing closes.
   const fromNext = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
   await act(async () => nextButton()!.dispatchEvent(fromNext));
   expect(fromNext.defaultPrevented).toBe(false);
   expect(document.querySelector('[data-image-peek-sheet]')).not.toBeNull();
-  // From Previous (the sheet's first control), Shift+Tab would land behind the backdrop: the sheet closes instead.
   prevButton()!.focus();
   const fromPrev = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
   await act(async () => prevButton()!.dispatchEvent(fromPrev));
@@ -543,7 +499,6 @@ test.skipIf(!hasDom)('focus never leaves the open sheet for the page behind: Shi
   expect(fromPrev.defaultPrevented).toBe(true);
   expect(document.querySelector('[data-image-peek-sheet]')).toBeNull();
   expect(document.activeElement).toBe(pill());
-  // Tab out of the grid still closes it too.
   await openSheet();
   await act(async () => document.querySelector<HTMLElement>('.pn-inbox-peek [role="grid"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
   await settle(80);
@@ -566,7 +521,6 @@ test.skipIf(!hasDom)('ImagePeek without a header is the sheet it was: no header,
   expect(grid.className).toContain('rounded-t-[12px]');
   await act(async () => grid.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true })));
   expect(closed).toEqual(['key']);
-  // With a header, Shift+Tab moves up into it instead of closing.
   closed.length = 0;
   await act(async () => {
     root!.render(<ImagePeek rows={rows} current="a" label="Files" variant="sheet" onClose={(r) => closed.push(r)} onPick={() => {}} sheetHeader={<button type="button">Prev</button>} />);
@@ -583,9 +537,7 @@ test.skipIf(!hasDom)('a decided swipe cancels its moves (no scroll under it); th
   const moves: Event[] = [];
   await act(async () => {
     touchEvent(area(), 'touchstart', [{ x: 200, y: 300 }]);
-    // Under the 10 px decision: not the swipe's yet.
     moves.push(touchEvent(area(), 'touchmove', [{ x: 196, y: 301 }]));
-    // Decided: a swipe. This move and every one after it are cancelled, vertical drift included.
     moves.push(touchEvent(area(), 'touchmove', [{ x: 160, y: 304 }]));
     moves.push(touchEvent(area(), 'touchmove', [{ x: 120, y: 330 }]));
   });
@@ -601,7 +553,6 @@ test.skipIf(!hasDom)('the code viewer draws the line under the finger again mid-
   reducedMotion(true);
   const opened = await render(notes);
   sized(area());
-  // A line the viewer replaces once the finger is down: its later touch events fire at the detached node and bubble nowhere.
   const line = document.createElement('div');
   line.textContent = 'export function retry() {}';
   area().appendChild(line);
@@ -619,7 +570,6 @@ test.skipIf(!hasDom)('the code viewer draws the line under the finger again mid-
     touchEvent(line, 'touchend', [{ x: 20, y: 304 }]);
   });
   area().removeEventListener('touchmove', spy);
-  // Nothing reached the file itself: the swipe heard it on the line it started on.
   expect(reached).toEqual([]);
   expect(moved!.defaultPrevented).toBe(true);
   await settle(20);

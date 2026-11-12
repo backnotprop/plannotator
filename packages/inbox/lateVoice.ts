@@ -1,8 +1,3 @@
-/**
- * Dictated words that did not reach their thread's reply after the person moved on (voiceSession.ts `attach`): the take
- * failed, or its words could not be saved in the draft. Kept per thread for this page's life, so the thread says so
- * (with Retry where something can be retried) when the person is in it, or comes back to it.
- */
 import { useCallback, useSyncExternalStore } from 'react';
 
 export interface LateVoiceMiss {

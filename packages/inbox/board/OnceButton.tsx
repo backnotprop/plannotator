@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes } from 'react';
 
-/**
- * A button whose action runs once at a time: a second press while the first
- * is on its way does nothing (Restore twice would move a card twice). It
- * stays focusable while busy (`aria-disabled`, never `disabled`), so the
- * keyboard does not lose its place.
- */
 export function OnceButton({ onClick, children, ...rest }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & { onClick: () => unknown }) {
   const [busy, setBusy] = useState(false);
   const running = useRef(false);

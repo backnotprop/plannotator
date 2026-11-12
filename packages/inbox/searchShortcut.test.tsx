@@ -1,24 +1,3 @@
-/**
- * ⌘K / Ctrl+K opens search: the Inbox's one keyboard shortcut, an owner
- * exception (approval amendment 2026-10-14). What is proved here, on the real
- * handler the window installs (search/searchShortcut.ts):
- *
- * - only the platform's own modifier with K counts (⌘K on macOS, Ctrl+K
- *   elsewhere); Shift, Alt, the other modifier, a bare K and a chord while an
- *   IME composes do not;
- * - from a text field (the reply box) it opens search and stops the browser's
- *   own Ctrl+K; typing there is untouched;
- * - with the palette open it goes back to the palette's input, the words
- *   selected, and opens nothing new;
- * - another modal dialog keeps the keys;
- * - the scope holds this one shortcut and nothing else;
- * - the Search entry shows the registry's keycaps and names the chord in
- *   aria-keyshortcuts.
- *
- * The whole window on the compiled binary, macOS and not: tests/e2e/inbox-search.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -41,12 +20,10 @@ const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { key: 'k'
 
 test.skipIf(!hasDom)('only the platform modifier with K is the chord', () => {
   const { isOpenSearchKey } = shortcut;
-  // Not macOS: Ctrl+K.
   expect(isOpenSearchKey(key({ ctrlKey: true }), false)).toBe(true);
   expect(isOpenSearchKey(key({ ctrlKey: true, key: 'K' }), false)).toBe(true);
   for (const init of [{ metaKey: true }, { ctrlKey: true, shiftKey: true }, { ctrlKey: true, altKey: true }, { ctrlKey: true, metaKey: true }, {}, { ctrlKey: true, isComposing: true }, { ctrlKey: true, key: 'j', code: 'KeyJ' }])
     expect([init, isOpenSearchKey(key(init), false)]).toEqual([init, false]);
-  // macOS: ⌘K; Ctrl+K stays the text field's delete-to-end-of-line.
   expect(isOpenSearchKey(key({ metaKey: true }), true)).toBe(true);
   for (const init of [{ ctrlKey: true }, { metaKey: true, shiftKey: true }, { metaKey: true, ctrlKey: true }, { metaKey: true, isComposing: true }])
     expect([init, isOpenSearchKey(key(init), true)]).toEqual([init, false]);
@@ -86,7 +63,6 @@ test.skipIf(!hasDom)('with the palette open it goes back to the palette\'s input
   expect(document.activeElement).toBe(input);
   expect([input.selectionStart, input.selectionEnd]).toEqual([0, 'rate limit'.length]);
   palette.remove();
-  // The update, sound and agent-note dialogs are native modal dialogs.
   const modal = document.createElement('dialog');
   modal.className = 'ib-dlg';
   modal.setAttribute('open', '');
@@ -110,9 +86,7 @@ test.skipIf(!hasDom)('/ opens search where nobody is typing, and never in a fiel
   document.body.append(row, field);
   row.focus();
   expect(slash(row)).toEqual({ opened: 1, prevented: true });
-  // Where `/` is Shift+7 (German, Swiss, Nordic layouts) it is still the key that types `/`.
   expect(slash(row, { shiftKey: true, code: 'Digit7' })).toEqual({ opened: 1, prevented: true });
-  // Typing a slash in the reply box is a slash.
   expect(slash(field)).toEqual({ opened: 0, prevented: false });
   expect(slash(row, { ctrlKey: true })).toEqual({ opened: 0, prevented: false });
   expect(slash(row, { isComposing: true })).toEqual({ opened: 0, prevented: false });
@@ -168,7 +142,6 @@ test.skipIf(!hasDom)('the Search entry shows the keycaps and names the chord', (
     ),
   );
   const entry = host.querySelector<HTMLButtonElement>('.ib-sp-entry')!;
-  // The chord, and `/` (an extra, on).
   expect(entry.getAttribute('aria-keyshortcuts')).toBe(`${shortcut.openSearchAriaKeys()} /`);
   const hint = entry.querySelector('[data-shortcut-hint="inbox-search.openSearch"]')!;
   expect(hint.getAttribute('data-keycap')).toBe(shortcut.openSearchHint());

@@ -1,13 +1,3 @@
-/**
- * What a pinned row calls its thread (owner ask, 2026-10-29): the thread's name
- * when it has one, the subject otherwise, by the list's own rule
- * (`threadChipName`). The failures this catches: a named thread's pin that
- * still shows the first message's subject, an unnamed one that shows nothing,
- * a pin that keeps the old name after a rename, and a tooltip or accessible
- * name that loses the subject the row no longer shows.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

@@ -1,12 +1,3 @@
-/**
- * The connect prompt names this computer's plannotator so an agent pasted it
- * can run every command without guessing PATH. What regresses: a path with
- * spaces left unquoted (the agent runs a different command), the trailing
- * `inbox mcp` kept (the agent runs `… inbox mcp inbox --help`), a step that
- * still names bare `plannotator` once the path is known, the fallback lost
- * before settings load, or the dropped step 6 (asking about the instructions
- * note, which the Inbox's own dialog does now) coming back.
- */
 import { describe, expect, test } from 'bun:test';
 import { connectCommand, connectPrompt } from './connectPrompt';
 
@@ -38,7 +29,6 @@ describe('connectPrompt', () => {
     expect(text).toContain(`Run Plannotator as: ${BIN}\n`);
     expect(text).toContain(`\`${BIN} inbox --help\``);
     expect(text).toContain(`\`${BIN} inbox mcp\``);
-    // No command falls back to whatever `plannotator` the agent's PATH finds.
     expect(text).not.toMatch(/`plannotator /);
     expect(text).not.toContain('~/.local/bin/plannotator');
   });

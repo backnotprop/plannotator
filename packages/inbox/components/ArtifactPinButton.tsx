@@ -1,23 +1,9 @@
-/**
- * Pin / Unpin one artifact (approval "inbox-artifact-stars"; the word is Pin):
- * on an Artifacts card (shown on hover, and always once pinned), in the file
- * viewer's bar, and on a picture of the Artifacts wall. The icon set's pin,
- * outlined when not pinned and filled when pinned, in a quiet colour (never
- * the thread stars' amber).
- */
-
 import { useState } from 'react';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@plannotator/ui/components/ui/dropdown-menu';
 import { Icon } from '../icons';
 import { artifactPinnable, setArtifactPinned, useArtifactPins } from '../artifactPins';
 import { Tip } from './Tip';
 
-/**
- * How the pin looks, in one place (the owner's pick from
- * /tmp/artifact-pins/build-shots/pin-look): `tilted` (B, the pin turned 45°,
- * filled in ink), `upright` (A, standing, filled in the muted grey) or `chip`
- * (C, standing, filled on a small muted chip). inbox.css draws each.
- */
 export const ARTIFACT_PIN_LOOK: 'tilted' | 'upright' | 'chip' = 'tilted';
 
 export function ArtifactPinButton({
@@ -29,10 +15,8 @@ export function ArtifactPinButton({
 }: {
   threadId: string;
   artifactKey: string;
-  /** The artifact's name: "Pin checkout-a.png". */
   name: string;
   surface: 'card' | 'bar' | 'wall';
-  /** A phone's viewer bar: a 44 px target. */
   big?: boolean;
 }) {
   const { byKey } = useArtifactPins();
@@ -51,7 +35,6 @@ export function ArtifactPinButton({
         data-artifact-pin={artifactKey}
         data-pop={pop > 0 && pinned ? pop : undefined}
         onClick={(event) => {
-          // On a card the pin sits over the tile: the press is the pin's, never the tile's.
           event.preventDefault();
           event.stopPropagation();
           if (!pinned) setPop((n) => n + 1);
@@ -64,11 +47,6 @@ export function ArtifactPinButton({
   );
 }
 
-/**
- * Pin / Unpin as an item of full screen's ⋯ (OpenIn.tsx `FullScreenMore`): a phone's HTML page, whose toolbar
- * shares its row with the reply and has no room for one more 44 px button at 320 px. The same pin as the bar's,
- * then a separator before the menu's other items. Nothing for a thread that cannot pin (the tour).
- */
 export function ArtifactPinMenuItem({ threadId, artifactKey, name }: { threadId: string; artifactKey: string; name: string }) {
   const { byKey } = useArtifactPins();
   if (!artifactPinnable(threadId)) return null;

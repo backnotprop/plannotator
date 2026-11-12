@@ -1,17 +1,3 @@
-/**
- * The Inbox's image viewer zooms and pans like the lightbox (ui's
- * ImageZoomStage): Ctrl/⌘ + wheel and a pinch about the pointer, a plain
- * wheel, drag, double click, Fit / Actual size with the scale beside them, a
- * comment's drawing kept in the image's transform, Fit for tall and wide
- * images, the swipe that steps only at Fit, and what a phone's follow swipe
- * asks the image (pan to the edge first, a drag down only at Fit). The keys (← → always step)
- * are in attachmentStepping.test.tsx; the real browser proof is
- * tests/e2e/inbox-image-zoom.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- * happy-dom has no layout, so the stage's box and the image's own size are
- * given here.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,7 +15,6 @@ const happy = () => (window as unknown as { happyDOM: { setURL(url: string): voi
 
 beforeEach(() => {
   if (!hasDom) return;
-  // happy-dom answers a relative src with an error on about:blank: give the page an address.
   was = location.href;
   happy().setURL('http://localhost:4000/');
 });
@@ -90,7 +75,6 @@ async function rerender(props: Props) {
   });
 }
 
-/** Give the zoom stage a 1000 × 600 box and the image its own size (2000 × 1000 by default: Fit is 50%), then load it. */
 async function load(width = 2000, height = 1000) {
   const stage = host!.querySelector<HTMLElement>('[data-image-zoom-stage]')!;
   stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
@@ -145,7 +129,6 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     expect(event.defaultPrevented).toBe(true);
     const after = view(img);
     expect(after.scale).toBeGreaterThan(0.6);
-    // The pixel under the pointer stays under it (across; down, the taller image now covers the stage).
     expect(after.x + imageX * after.scale).toBeCloseTo(700, 5);
     expect(outer().getAttribute('data-fit')).toBe('zoom');
     expect(zoomText()).toBe(`${Math.round(after.scale * 100)}%`);
@@ -181,7 +164,6 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     await pointer(stage, 'pointermove', 1, 400, 250);
     await pointer(stage, 'pointerup', 1, 400, 250);
     expect(view(img)).toEqual({ x: -100, y: -50, scale: 1 });
-    // A gesture's zoom is remembered as Fit (the next visit opens at Fit).
     await wheel(stage, -50, { ctrlKey: true });
     expect(outer().getAttribute('data-fit')).toBe('zoom');
     await act(async () => fitButton().click());
@@ -209,7 +191,6 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
       await pointer(stage, 'pointerup', 1, 500, 300);
     }
     expect(view(img).scale).toBe(0.5);
-    // Two fingers 200 px apart spread to 400 px: twice the scale.
     await pointer(stage, 'pointerdown', 1, 400, 300, 'touch');
     await pointer(stage, 'pointerdown', 2, 600, 300, 'touch');
     await pointer(stage, 'pointermove', 1, 300, 300, 'touch');
@@ -234,7 +215,6 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     const layer = host!.querySelector<HTMLElement>('[data-zoom-overlay]')!;
     const drawing = layer.querySelector<HTMLImageElement>('[data-markup-overlay]')!;
     expect(drawing.getAttribute('src')).toContain('abc.png');
-    // The same size and the same transform as the image (not reset to Fit).
     expect(layer.style.width).toBe('2000px');
     expect(layer.style.height).toBe('1000px');
     expect(layer.style.transform).toBe(img.style.transform);
@@ -244,7 +224,6 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     await pointer(stage, 'pointermove', 1, 420, 330);
     await pointer(stage, 'pointerup', 1, 420, 330);
     expect(layer.style.transform).toBe(img.style.transform);
-    // "Show the image" takes the drawing away; the zoom stays.
     const zoom = img.style.transform;
     await act(async () => host!.querySelector<HTMLButtonElement>('[data-showing-markup] button')!.click());
     expect(host!.querySelector('[data-zoom-overlay]')).toBeNull();
@@ -254,7 +233,6 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
   test('a tall screenshot fits its width from the top, a panorama its height from the left; both pinch out to the whole image', async () => {
     await mount();
     const tall = await load(500, 3000);
-    // Width fit: 1000 / 500 is above 1, so its own size, from the top.
     expect(view(tall.img)).toEqual({ x: 250, y: 0, scale: 1 });
     for (let i = 0; i < 30; i += 1) await wheel(tall.stage, 100, { ctrlKey: true });
     expect(view(tall.img).scale).toBeCloseTo(0.2, 5);
@@ -276,18 +254,14 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     await act(async () => {
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     });
-    // Loaded and laid out: a swipe's picture of it can go.
     expect(shown).toBe(1);
-    // At Fit the whole image shows: a swipe either way steps, and a drag down closes.
     expect(edges.current!.keeps(1)).toBe(false);
     expect(edges.current!.keeps(-1)).toBe(false);
     expect(edges.current!.canDismiss()).toBe(true);
-    // Zoomed about the middle: more to see both ways, so a swipe pans; a drag down pans too.
     await wheel(stage, -100, { ctrlKey: true });
     expect(edges.current!.keeps(1)).toBe(true);
     expect(edges.current!.keeps(-1)).toBe(true);
     expect(edges.current!.canDismiss()).toBe(false);
-    // Panned to its right edge: the next swipe toward more of the right steps; back toward the left still pans.
     await pointer(stage, 'pointerdown', 1, 900, 300);
     await pointer(stage, 'pointermove', 1, -3000, 300);
     await pointer(stage, 'pointerup', 1, -3000, 300);
@@ -299,7 +273,6 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     act(() => root!.unmount());
     root = null;
     host!.remove();
-    // A panorama at Fit reads from its left edge: a swipe toward more of it pans first, back the other way steps.
     await mount({ edgesRef: edges });
     await load(6000, 1000);
     expect(edges.current!.keeps(1)).toBe(true);
@@ -363,7 +336,6 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
       await mount();
       const { img } = await load();
       expect(view(img).scale).toBe(0.5);
-      // A phone-sized window: 100 px of padding on every side leaves 800 × 400 for Fit.
       padding = '100px';
       await act(async () => {
         for (const fn of listeners) fn();

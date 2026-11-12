@@ -1,13 +1,3 @@
-/**
- * Settings → General's "Open Plannotator at plannotator.localhost" (#2184) in the
- * Inbox window: the row follows `cookie_host` from GET /api/inbox/settings,
- * a click asks to flip it, and it is locked (with what holds it) while
- * PLANNOTATOR_URL_HOST is set or config.json holds another urlHost. A
- * settings model without `cookie_host` (a page through the tailnet, an older
- * Inbox) shows no row.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

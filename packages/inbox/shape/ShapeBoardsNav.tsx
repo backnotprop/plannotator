@@ -1,9 +1,3 @@
-/**
- * Getting around a thread's boards: the arrow beside the title goes back to the board this one was made from, and
- * "2 of 6" at the title's right lists them all, each under the board it came from. The chapter menu's look
- * (components/ReviewJump.tsx), the review's own arrow; no stack and no store: the links are the Show me turns
- * (`boardParents`). No limit on how many or how deep. No keys of their own.
- */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import type { InboxShapeSummary } from '../api';
@@ -15,10 +9,8 @@ function BoardsMenu({ rows, current, onGo }: { rows: readonly BoardRow[]; curren
   const [open, setOpen] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  // On the board's phone layout the list opens under the title, not over it (the review has no sidebar to ask).
   const anchor = () => (trigger.current?.closest('.shp-root.phone') ? trigger.current.closest<HTMLElement>('.shp-title-row') : null) ?? trigger.current;
   const at = rows.findIndex((row) => row.id === current);
-  // Many boards: the menu opens with this one in view.
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => list.current?.querySelector('[data-on]')?.scrollIntoView?.({ block: 'nearest' }));
@@ -52,7 +44,6 @@ function BoardsMenu({ rows, current, onGo }: { rows: readonly BoardRow[]; curren
   );
 }
 
-/** The arrow and the list for a board of this thread. Alone on its thread: neither. */
 export function useBoardsNav({
   shapes,
   threadId,

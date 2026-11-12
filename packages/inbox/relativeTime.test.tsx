@@ -1,11 +1,3 @@
-/**
- * Settings → Rows' Time "Relative" (relativeTime.ts, approval "inbox-customize-rows").
- * What this catches: a wrong step ("60m" instead of "1h", "24h" instead of "1d", a week shown as "7d" instead of its
- * date), a time in the future read as negative; a screen reader given "4m" instead of words; and a list that starts a timer per row instead of the one shared
- * minute clock, starts one while every row shows the clock form, or leaves it running once no row needs it.
- *
- * The clock half is DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -35,7 +27,6 @@ describe('the words', () => {
     expect(relativeWords(new Date(NOW + 5 * MIN).toISOString(), NOW)).toBe('just now');
   });
 
-  // Review of #2516: a screen reader read "4m" as "4 meters".
   test('a screen reader hears the same step in words, singular at one, then the same date', () => {
     expect(relativeWords(ago(59_999), NOW)).toBe('just now');
     expect(relativeWords(ago(MIN), NOW)).toBe('1 minute ago');

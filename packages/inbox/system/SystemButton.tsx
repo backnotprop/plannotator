@@ -1,10 +1,3 @@
-/**
- * The System button in the Reviews header (approval "system-inbox", screens 3 and 2a), beside the filter mark: its
- * menu lists the projects that have a drawing, each with its sheet count, and "Set up a project" at the foot (the
- * setup dialog, `openSystemSetup`). A project opens its drawing in the Reviews pane; the list is never filtered by it
- * (Reviews with no filters, variant B). While a project is open the button names it, filled as the filter's picked
- * rows are. Shown only while System shows (`systemShown`). Base UI carries the keys; no shortcut of its own.
- */
 import { useEffect, useState, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { systemListed, type SystemProjectRow } from '@plannotator/core/inbox-system';
@@ -14,15 +7,11 @@ import { openSystemSetup } from './opener';
 import { systemStateWords } from './projects';
 
 export interface SystemButtonProps {
-  /** The projects with their drawing's state; null until read. */
   projects: SystemProjectRow[] | null;
-  /** The project whose drawing is open in the pane, or null. */
   open: string | null;
   phone: boolean;
-  /** Where the menu is drawn (the window's root, so its theme reaches it). */
   portalRef: RefObject<HTMLElement | null>;
   onOpen: (project: string) => void;
-  /** The menu opened: the projects are read again. */
   onMenu?: () => void;
 }
 
@@ -50,7 +39,6 @@ export function SystemButton({ projects, open, phone, portalRef, onOpen, onMenu 
             </span>
           </span>
         ) : (
-          // Drawn anew when the menu opens or closes, so a tooltip never stays over the open menu.
           <Tip key={menuOpen ? 'menu' : 'rest'} content="System">
             <span className="ib-sysb-in">
               <Icon name="diagram" />

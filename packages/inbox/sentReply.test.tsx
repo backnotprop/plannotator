@@ -1,19 +1,3 @@
-/**
- * The person's own sent reply reads in their own words (the onboarding
- * audit, finding 7; owner approval 2026-10-24), drawn by the whole window
- * over a REAL Inbox in a temp data dir (its own process,
- * tests/helpers/inbox-dom-server.ts `sent-reply`). Before this the thread
- * showed what the agent gets: "Answered 1 question." and "## Answers to your
- * questions … ### Q1. … (line 4)" in large headings. Now:
- * - their words, then a short list "Q1 <prompt> → <answer>" read from the
- *   questions (`sent_reply_id`), a skip marked, grouped by the message that
- *   asked when the reply answered several;
- * - their comments' feedback after it, as before;
- * - a row takes them to its card (a folded message opens);
- * - the stored body, which agents get, is unchanged.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -150,7 +134,6 @@ test.skipIf(!hasDom)('a reply with words, answers on two messages, a skip and a 
   expect(body.hasAttribute('data-sent-reply')).toBe(true);
   const shown = text(body);
   expect(shown.startsWith('Go with the dense table. Thanks!')).toBe(true);
-  // None of what the store writes for the agent.
   expect(shown).not.toContain('Answered');
   expect(shown).not.toContain('Answers to your questions');
   expect(shown).not.toContain('(line');
@@ -160,23 +143,19 @@ test.skipIf(!hasDom)('a reply with words, answers on two messages, a skip and a 
 
   const list = body.querySelector<HTMLElement>('[data-sent-answers]')!;
   expect(text(list.querySelector('.ib-ranswers-h'))).toBe('You answered 2 questions, skipped 1');
-  // Two asking messages: grouped under each, in thread order.
   expect([...list.querySelectorAll('[data-sent-answers-group]')].map((g) => g.getAttribute('data-sent-answers-group'))).toEqual([ids.a, ids.b]);
   expect(rows(body)).toEqual([
     { n: 'Q1', prompt: 'Which layout should the export use?', answer: 'A dense table', skipped: false },
     { n: 'Q2', prompt: 'Should the export include voided invoices?', answer: 'Skipped', skipped: true },
     { n: 'Q1', prompt: 'Ship it behind a flag?', answer: 'Yes, behind a flag', skipped: false },
   ]);
-  // The list sits between the words and the comment's feedback.
   const order = [...body.querySelectorAll('[data-sent-answers], .ib-body > *')].map((n) => n.hasAttribute('data-sent-answers'));
   expect(order.indexOf(true)).toBeGreaterThan(0);
   expect(shown.indexOf('Go with the dense table')).toBeLessThan(shown.indexOf('You answered'));
   expect(shown.indexOf('You answered')).toBeLessThan(shown.indexOf('Say which plan.'));
   expect(shown).toContain('Feedback on the attached files');
-  // Hover text is component tooltips, never native titles.
   expect(list.querySelector('[title]')).toBeNull();
 
-  // What the agent got is unchanged.
   const thread = JSON.parse((await loopback(`/api/inbox/threads/${ids.thread}`)).text).thread as { messages: { id: string; body: string }[] };
   const stored = thread.messages.find((m) => m.id === ids.reply)!.body;
   expect(stored.startsWith('Answered 2 questions, skipped 1.\n\nGo with the dense table. Thanks!')).toBe(true);

@@ -1,14 +1,3 @@
-/**
- * How the Pull requests list is read for the page and for the sidebar's count (`usePulls`). What regresses:
- *  - the count read on every focus (a GraphQL call per host each time) instead of at most every 20 s;
- *  - the count never read until the page is opened;
- *  - leaving the page dropping a read already on its way, so the count stays stale until the next focus;
- *  - a read kept going (and the forges asked on focus) once Code review is off;
- *  - Others asked as often as the list while its view is closed, or not read at once when the Others view opens;
- *  - Others' answer (read in the background, never waited for) not asked for again shortly, or asked forever.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -24,10 +13,8 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let now = 1_800_000_000_000;
 let clock: { mockRestore: () => void } | null = null;
-/** Each read of the list, with its signal, answered when the test says. */
 let reads: { url: URL; signal: AbortSignal | undefined; answer: (over?: Partial<InboxPullsAnswer>) => void }[] = [];
 let seen: ReturnType<typeof usePulls> | null = null;
-/** Each read of the rows from the cache, answered when the test says. */
 let cachedReads: { signal: AbortSignal | undefined; answer: (body: unknown) => void }[] = [];
 
 beforeEach(() => {
@@ -107,7 +94,6 @@ test.skipIf(!hasDom)('leaving the page keeps a read on its way: its answer is th
   render(true, true);
   expect(reads).toHaveLength(1);
   render(false, true);
-  // Not dropped, and not asked again.
   expect(reads[0]!.signal?.aborted).toBe(false);
   expect(reads).toHaveLength(1);
   reads[0]!.answer();
@@ -137,7 +123,6 @@ test.skipIf(!hasDom)('the Others view: opening it reads at once, asking for Othe
   expect(reads[1]!.url.searchParams.get('others')).toBe('1');
   reads[1]!.answer();
   await settle();
-  // The sidebar's count alone (the page closed) never asks for Others.
   render(false, true, false);
   now += PULLS_FOCUS_MS;
   focus();
@@ -148,7 +133,6 @@ test.skipIf(!hasDom)('the Others view: opening it reads at once, asking for Othe
 test.skipIf(!hasDom)("Others on its way: asked again shortly, until it has answered", async () => {
   const realSetTimeout = globalThis.setTimeout;
   const timers: { fn: () => void; ms: number }[] = [];
-  // Only the pending re-read's timer is held for the test to fire; every other timer runs as asked.
   globalThis.setTimeout = ((fn: () => void, ms?: number) => (ms === PULLS_PENDING_MS ? (timers.push({ fn, ms }), 0) : realSetTimeout(fn, ms))) as unknown as typeof setTimeout;
   try {
     render(true, true);

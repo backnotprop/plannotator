@@ -1,15 +1,3 @@
-/**
- * The guided review's reader is a chunk the Inbox serves on first use
- * (build/pack-inbox.ts, #2593). When it cannot arrive (the Inbox stopped, or
- * restarted onto a new release under the open page, whose chunk names are
- * gone), React.lazy throws. What regresses without the pane's boundary: React
- * unmounts the whole window, the list and anything the person was writing
- * with it, leaving a blank page.
- *
- * The reader's module is made to fail as a missing chunk does; the rest of
- * the window is a sentinel beside the pane.
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -97,7 +85,6 @@ test.skipIf(!hasDom)("a reader chunk that cannot load says so in the pane, with 
   expect(document.querySelector('[data-window-sentinel]')).not.toBeNull();
   const pane = document.querySelector('section[aria-label="Review"]');
   expect(pane).not.toBeNull();
-  // ui's LazyLoadNotice: why the reader is missing, and Reload.
   const notice = pane!.querySelector('[data-lazy-load-failed]');
   expect(notice).not.toBeNull();
   expect(notice!.querySelector('button')).not.toBeNull();

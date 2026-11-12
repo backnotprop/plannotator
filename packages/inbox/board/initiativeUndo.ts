@@ -1,23 +1,15 @@
-/**
- * Undo of deleted initiatives, the same in the Initiatives dialog's toast and the window's: every restore is
- * tried, so one refused or failed never strands the others. A name taken since refuses for good, and only that
- * says why (the server's words); anything else, a network failure too, is the one line and can be tried again.
- */
 import { InboxApiError, inboxApi } from '../api';
 import type { InboxInitiative } from '@plannotator/core/inbox-types';
 
 export const INITIATIVE_SAVE_FAILED = 'That did not save. Try again.';
 
-/** A refusal the person can read: the server's own words stand. */
 export function initiativeRefusal(cause: unknown): string | null {
   return cause instanceof InboxApiError && cause.code === 'initiative_exists' ? cause.message : null;
 }
 
 export interface InitiativesRestored {
   restored: readonly InboxInitiative[];
-  /** What Undo still offers: what is not back, while a save failed (a retry then also says why a refused one stays out). */
   left: readonly InboxInitiative[];
-  /** The line to show; null when all came back. */
   line: string | null;
 }
 

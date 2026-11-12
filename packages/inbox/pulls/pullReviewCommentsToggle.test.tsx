@@ -1,22 +1,9 @@
-/**
- * "Review layer by layer": the comments panel opens and closes at every width (approval "pr-view-one-surface",
- * addendum 2026-11-07 18:33Z, "like the review app"), with the Inbox's doors stubbed at `fetch` and the diff reader
- * stubbed to hand out its comment seam. What regresses:
- *
- *  - a wide window opening with the comments column shown, or keeping its width for the code when closed;
- *  - the bar's Comments button missing from a wide window, or not opening and closing the column;
- *  - a new comment (line or global) landing while the column is closed;
- *  - a phone's Comments sheet opening by itself on a new comment, or losing its button.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullLink, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-/** The reader's comment seam as the review last gave it. */
 let reader: { onShowGlobalComment?: (id: string) => void; onSave: (annotation: Record<string, unknown>) => Promise<boolean>; draftScope: string } | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
@@ -25,7 +12,6 @@ if (hasDom) {
       return null;
     },
   }));
-  // The real review-app dialog and submit, by a path in a variable (the window's strict typecheck must not follow it).
   const seam: string = '../guide/PlatformPost.tsx';
   const real = (await import(seam)) as Record<string, unknown>;
   mock.module('#platform-post', () => real);
@@ -76,9 +62,7 @@ const link: InboxPullLink = {
   last: { message_id: LAST, preview: 'The stack is up.', at: PUSHED },
   guide: null,
 };
-/** The person's stack, its thread tied to the bottom layer (no head read: the agent's verdict alone). */
 const own = [pull(412, { head: 'retry/schedule' }), pull(413, { head: 'retry/backoff', base: 'retry/schedule' })];
-/** A teammate's stack, posted to GitHub (no agent here). */
 const theirs = [
   pull(880, { repo: 'northwind/web-app', mine: false, author: 'tomas', head: 'rtl', head_sha: SHA }),
   pull(881, { repo: 'northwind/web-app', mine: false, author: 'tomas', head: 'rtl-2', base: 'rtl', head_sha: SHA }),
@@ -159,7 +143,6 @@ function mount(node: React.ReactNode) {
   });
 }
 
-/** The review of one layer. */
 function Review({ layer, scope }: { layer: InboxPull; scope: 'layer' | 'stack' }) {
   const stackId = (own.some((p) => p.key === layer.key) ? own : theirs).at(-1)!.key;
   return <PullReview model={model} modelError={null} stackId={stackId} layerKey={layer.key} scope={scope} onLayer={() => {}} onBack={() => {}} onSent={() => {}} />;
@@ -171,7 +154,6 @@ const el = <T extends Element = HTMLElement>(selector: string) => {
   return found as unknown as T;
 };
 
-/** The review pane measures this wide (REVIEW_FOLD_PANEL_BELOW is 1,500 px); everything else keeps happy-dom's zero. */
 function paneWidth(width: number) {
   HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
     const rect = savedRect!.call(this);
@@ -183,7 +165,6 @@ function aPhone() {
 }
 const pane = () => el('[data-pull-review]');
 const button = () => el('.ib-vcomments');
-/** The column is open: the button says so and the pane draws it beside the code (not as a sheet over it). */
 const columnOpen = () => {
   const open = button().getAttribute('aria-expanded') === 'true';
   expect(pane().classList.contains('ib-prr-panel-shut')).toBe(!open);
@@ -202,7 +183,6 @@ test.skipIf(!hasDom)('a wide window: the column starts closed, and the bar\'s Co
   expect(columnOpen()).toBe(false);
   await act(async () => button().click());
   expect(columnOpen()).toBe(true);
-  // A column, not a sheet: no close of its own.
   expect(document.querySelector('.ib-gpanel .ib-sheet-h')).toBeNull();
   await act(async () => button().click());
   expect(columnOpen()).toBe(false);
@@ -222,7 +202,6 @@ test.skipIf(!hasDom)('a wide window: a new line comment, and a new global commen
   await act(async () => void (await reader!.onSave(newComment({ id: 'n2', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, text: 'Ship it after the rename.' }))));
   await settle();
   expect(columnOpen()).toBe(true);
-  // Editing one already there leaves a closed column closed.
   await act(async () => button().click());
   await act(async () => void (await reader!.onSave(newComment({ id: 'n2', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, text: 'Ship it after the rename, please.' }))));
   await settle();

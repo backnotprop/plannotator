@@ -6,13 +6,6 @@ import { AnimateIt } from './AnimateIt';
 import { fitPicture } from './fitPicture';
 import { ownIconSrc, useOwnIcons } from './ownIcons';
 
-/**
- * "Your own…" in the agent icon dialog (AgentIconDialog.tsx): a large drop area (a click picks a file; a picture can
- * also be dropped anywhere on the dialog, or pasted while it is open), then the pictures already uploaded, any of
- * which this agent can show. A new picture, or one picked, shows on this agent at once and the dialog closes (`onDone`).
- * × takes a picture away, with no question: the agents that showed it go back to their own mark. The refusals are Set
- * picture…'s own words. Each picture is drawn as its still, as uploaded, scaled to fit its tile.
- */
 export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
   const icons = useOwnIcons() ?? [];
   const [refused, setRefused] = useState<string | null>(null);
@@ -23,7 +16,6 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
     if (!file || busy) return;
     setBusy(true);
     setRefused(null);
-    // A still photo over the limit (a phone's) is shrunk here first (fitPicture.ts); the upload checks what comes out.
     const fitted = await fitPicture(file);
     const refusal = 'refused' in fitted ? fitted.refused : await keepOwnPicture(agent, fitted.file);
     setBusy(false);
@@ -37,8 +29,6 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
     input.addEventListener('change', () => void take(input.files?.[0]), { once: true });
     input.click();
   };
-  // A pasted picture, or one dropped anywhere (the dialog covers the window), while the dialog shows this: the
-  // browser's own paste and drop, nothing else listened for.
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const file = [...(event.clipboardData?.files ?? [])].find((f) => f.type.startsWith('image/')) ?? event.clipboardData?.files?.[0];

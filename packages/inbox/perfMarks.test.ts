@@ -1,15 +1,3 @@
-/**
- * The window's performance marks (perfMarks.ts) run only while the Inbox's debug log is on. Off, an interaction
- * leaves no `performance.measure`, asks for no frame, and the overlay never shows even when asked for. On, each
- * interaction leaves its `pn:` measure, the overlay shows when asked for, and the timings stay honest: a thread
- * left before it loaded lends no old start to a later open, a hidden window times nothing, and a burst waits on
- * one frame. Each interaction is dropped if the window was hidden at any moment since it started; a second read of
- * the thread being opened keeps its start, and a read that lands after the person left it ends it. When debug goes
- * off, the overlay, the observers and the visibility listener go too. The overlay's opt-in is an exact `perf=1` / `perf=0` in the hash, never a substring an agent's file
- * name could carry. The debug state is the one seam (debugLog.ts `debugLogOn`), replaced here so no recorder starts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, expect, mock, test } from 'bun:test';
 import { resolve } from 'node:path';
 
@@ -27,7 +15,6 @@ if (hasDom) {
     },
   }));
 }
-/** The window hears that debug went off (debugLog.ts learnDebugLog). */
 const debugGoesOff = () => {
   debugOn = false;
   for (const listener of [...stops]) {
@@ -116,13 +103,11 @@ test.skipIf(!hasDom)('debug on: each interaction leaves its pn: measure, and the
 test.skipIf(!hasDom)('a thread left before its read came back lends no start to a later open', async () => {
   debugOn = true;
   measured.length = 0;
-  // A, then B before A's read is back: A's late answer draws nothing.
   marks.perfThreadOpenStart('msg_a');
   marks.perfThreadOpenStart('msg_b');
   marks.perfThreadReadLanded('msg_a', null, false);
   await drawn();
   expect(named('pn:thread-open')).toEqual([]);
-  // A again, much later (the list in between): timed from this open, not the first.
   await new Promise((done) => setTimeout(done, 80));
   const reopened = performance.now();
   marks.perfThreadOpenStart('msg_a');
@@ -143,14 +128,12 @@ test.skipIf(!hasDom)('a hidden window times nothing, and a wait the window was h
   expect(marks.perfStart()).toBeNull();
   await drawn();
   expect(frames).toBe(before);
-  // Asked while shown, hidden before the frame, shown again: the measure would hold the hidden time.
   visibility = 'visible';
   marks.perfUntilNextFrame('record-refresh', marks.perfStart());
   hide('hidden');
   hide('visible');
   await drawn();
   expect(measured).toEqual([]);
-  // The next one, all visible, is timed again.
   marks.perfUntilNextFrame('record-refresh', marks.perfStart());
   await drawn();
   expect(named('pn:record-refresh')).toHaveLength(1);
@@ -170,12 +153,10 @@ test.skipIf(!hasDom)('a burst waits on one frame, timed from its first', async (
 test.skipIf(!hasDom)('a hide after the interaction started, before its frame was asked for, drops it', async () => {
   debugOn = true;
   measured.length = 0;
-  // A thread tapped, the person switches away and back before its read lands.
   marks.perfThreadOpenStart('msg_h');
   hide('hidden');
   hide('visible');
   marks.perfThreadReadLanded('msg_h', 5, true);
-  // An event heard, the window hidden and shown before the re-read is drawn.
   const heard = marks.perfStart();
   hide('hidden');
   hide('visible');
@@ -190,14 +171,12 @@ test.skipIf(!hasDom)('a second read of the thread being opened keeps its start; 
   const first = performance.now();
   marks.perfThreadOpenStart('msg_s');
   await new Promise((done) => setTimeout(done, 60));
-  // An event's re-read (or a retry) of the same thread, then a read that was not applied while it is still shown.
   marks.perfThreadOpenStart('msg_s');
   marks.perfThreadReadLanded('msg_s', null, true);
   marks.perfThreadReadLanded('msg_s', 4, true);
   await drawn();
   expect(named('pn:thread-open')).toHaveLength(1);
   expect(named('pn:thread-open')[0]!.start).toBeLessThan(first + 30);
-  // Opened, left for the list, its read lands unapplied: a later open of it is timed from then.
   measured.length = 0;
   marks.perfThreadOpenStart('msg_s');
   marks.perfThreadReadLanded('msg_s', null, false);
@@ -230,7 +209,6 @@ test.skipIf(!hasDom)('debug going off removes the overlay and the listeners, and
   expect(measured).toEqual([]);
   expect(document.querySelector('[data-perf-overlay]')).toBeNull();
   expect(removed).toContain('visibilitychange');
-  // On again: one overlay, not two, and timings flow.
   debugOn = true;
   marks.perfUntilNextFrame('record-refresh', marks.perfStart());
   await drawn();

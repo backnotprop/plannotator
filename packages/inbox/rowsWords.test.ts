@@ -1,11 +1,3 @@
-/**
- * The agent's row settings (core inbox-rows-words.ts, what `plannotator inbox rows set` writes) against the page's
- * controls (rowsControls.ts): one vocabulary, two doors.
- * What this catches: a setting an agent can write that a click cannot (or the reverse); a value that saves a
- * different look from the command than from the page; a label in the command's "before -> after" that is not the
- * page's; `look=` drifting from "Start from"; `rows set` saving part of a refused command, or applying `look=` after
- * the options it was typed with; the instruction block losing its markers (the wake cuts a long message before them).
- */
 import { describe, expect, test } from 'bun:test';
 import { INBOX_ROWS_OPTIONS, type InboxRowsOption } from '@plannotator/core/inbox-types';
 import { INBOX_ROWS_ASK_BLOCK, INBOX_ROWS_ASK_CLOSE, INBOX_ROWS_ASK_OPEN, INBOX_ROWS_LOOKS, INBOX_ROWS_SETTINGS, inboxRowsApply, inboxRowsChangeLines, inboxRowsListing, inboxRowsLookOf } from '@plannotator/core/inbox-types';

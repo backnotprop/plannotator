@@ -1,18 +1,3 @@
-/**
- * The list's filter in the list (components/ListFilter.tsx, listFilter.ts): the header's funnel and its badge, the
- * menu's picks, Clear filters, and "No threads match" in the body.
- *
- * What this catches: anything but the funnel in the header (a token, a chip, a line), at rest or with picks; the funnel
- * not taking the accent colour or the count with picks, or keeping them after a clear; a pick that does not narrow the
- * rows, or a group whose band stays drawn with no rows left; Clear filters (the menu's or the empty state's) that
- * leaves a pick, the cookie, or focus nowhere; the empty words drawn in the header; a project's page that offers the
- * Project group or counts its picks; a reload that forgets the picks; a menu that puts Project anywhere but last (the
- * sidebar already narrows by project), or a Pull request group that does not narrow by the row's PR.
- *
- * The harness wires the list as App.tsx does (filter the sections, hand the list the rows before the filter).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,10 +40,6 @@ afterEach(() => {
   sheet = null;
 });
 
-/**
- * The page's clock for every test here: an afternoon, local time. The rows are a few hours old and "Today" starts at
- * local midnight, so on the real clock the Today cases failed for the first three hours of every day.
- */
 const NOW = new Date(2026, 10, 5, 15, 0, 0);
 const recent = (hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString();
 
@@ -92,10 +73,8 @@ const LIST = sections({
   new: [row('n-web', 'web', 3, 'codex', 'new', 'open'), row('n-docs-old', 'docs', 24 * 40, 'claude-code', 'new')],
 });
 
-/** The list the harness draws: LIST unless a test swaps it. */
 let list = LIST;
 
-/** App.tsx's wiring: the picks from this browser, the sections filtered, the rows before the filter for the menu. */
 function Harness({ scoped }: { scoped: boolean }) {
   const [picks, setPicks] = useListFilter();
   const applied = appliedFilter(picks, scoped);
@@ -121,7 +100,6 @@ function Harness({ scoped }: { scoped: boolean }) {
   );
 }
 
-/** The funnel's rules from the window's stylesheet (outside the phone block), with an accent to read back. */
 function funnelRules(): string {
   const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
   const lines = css.split('\n').filter((line) => /^\.pn-inbox \.ib-lflt[\[:, {]/.test(line));
@@ -149,7 +127,6 @@ function render(scoped = false): HTMLElement {
 async function settle() {
   for (let i = 0; i < 6; i += 1) await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
 }
-/** Base UI opens on the pointer's press, as a person's click does. */
 async function press(target: HTMLElement) {
   await act(async () => {
     target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -170,9 +147,7 @@ const funnel = () => $('.ib-lhead [data-list-filter]')!;
 const badge = () => funnel().querySelector('[data-list-filter-count]')?.textContent ?? null;
 const rowIds = (el: HTMLElement) => [...el.querySelectorAll('.ib-lbody [data-thread-id]')].map((n) => n.getAttribute('data-thread-id'));
 const bands = (el: HTMLElement) => [...el.querySelectorAll('.ib-lbody .ib-band')].map((n) => n.closest('[data-section-id]')!.getAttribute('data-section-id'));
-/** The header's words: its title, and the funnel's count when it has one. A token, chip or line would add words. */
 const headerWords = (el: HTMLElement) => el.querySelector('.ib-lhead')!.textContent;
-/** A new page: unmount, forget what this page read, draw again from the cookie. */
 function rerender(scoped = false): HTMLElement {
   act(() => root?.unmount());
   host?.remove();
@@ -199,13 +174,11 @@ describe.skipIf(!hasDom)('the funnel', () => {
     await click($('[data-list-filter-updated="7d"]')!);
     expect(rowIds(el)).toEqual(['w-web', 'n-web']);
     await click($('[data-list-filter-agent="Claude Code"]')!);
-    // web and Claude Code: nothing; Codex too widens the agents again.
     await click($('[data-list-filter-agent="Codex"]')!);
     expect(rowIds(el)).toEqual(['w-web', 'n-web']);
     expect(badge()).toBe('4');
     expect(funnel().getAttribute('aria-label')).toBe('Filter, 4 active');
     expect(headerWords(el)).toBe('Inbox4');
-    // A pick that empties a group takes its band away.
     await click($('[data-list-filter-project="prj_web"]')!);
     await click($('[data-list-filter-project="prj_billing"]')!);
     expect(rowIds(el)).toEqual(['w-billing']);
@@ -240,7 +213,6 @@ describe.skipIf(!hasDom)('the funnel', () => {
     expect(badge()).toBeNull();
     expect(funnel().hasAttribute('data-set')).toBe(false);
     expect(stored.has(LIST_FILTER_COOKIE)).toBe(false);
-    // The next page draws the quiet funnel (the open menu holds the hover colour on this one).
     rerender();
     expect(getComputedStyle(funnel()).color).toBe('rgb(9, 9, 9)');
   });

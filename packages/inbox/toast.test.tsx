@@ -1,11 +1,3 @@
-/**
- * The window's one toast (design record "inbox-toast", approved 2026-10-14):
- * its approved words (pure, always run), and under DOM_TESTS=1 (happy-dom,
- * from tests/dom-test-list.txt) its shape, its actions, that a desktop toast
- * never moves for what is open (its place, the window's bottom center, is
- * CSS and is measured in tests/e2e/inbox-mark-read.spec.ts), and the phone's
- * short form.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -34,7 +26,6 @@ describe('markReadToast: the approved words', () => {
   test('a row while another thread is open: the subject, never words that read as the open thread', () => {
     expect(markReadToast(row(), 'held')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: '“Invoice list layout”', warn: false });
     expect(markReadToast(row({ resolved_at: '2026-10-14T00:00:00Z' }), 'held')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: '“Invoice list layout”', warn: false });
-    // Still a warning (its icon and Reply), named by its subject.
     expect(markReadToast(row({ questions: questions({ stopped: true }) }), 'held')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: '“Invoice list layout”', warn: true });
   });
 
@@ -44,7 +35,6 @@ describe('markReadToast: the approved words', () => {
       lead: 'Marked read',
       phoneLead: 'Read',
       detail: 'Claude Code (worktree agent-a0316994da8… was stopped',
-      // A phone: what happened first, so the line's "…" only ever cuts the name.
       phoneDetail: 'Stopped · Claude Code (worktree agent-a0316994da8…',
       warn: true,
       speech: 'Marked read. Claude Code (worktree agent-a0316994da8440ab5) was stopped.',
@@ -64,12 +54,10 @@ test('toastSpeech: the live region reads the lead and the detail as sentences, a
   expect(toastSpeech({ lead: 'Marked read', detail: 'Moves to Quiet' })).toBe('Marked read. Moves to Quiet.');
   expect(toastSpeech({ lead: 'Moved to Quiet', detail: '“Invoice list layout”' })).toBe('Moved to Quiet. “Invoice list layout”');
   expect(toastSpeech({ lead: 'Archived' })).toBe('Archived.');
-  // An error's own message keeps its punctuation.
   expect(toastSpeech({ lead: 'The thread did not change.' })).toBe('The thread did not change.');
   const undo = () => {};
   expect(toastSpeech({ lead: 'Marked read', detail: 'Moves to Quiet', onUndo: undo })).toBe('Marked read. Moves to Quiet. Press Z to undo.');
   expect(toastSpeech({ lead: 'Archived', onUndo: undo }, true)).toBe('Archived. Undo is available.');
-  // A toast kept short for one line can say more to a screen reader.
   expect(toastSpeech({ lead: 'Sent to Pi', detail: 'in ledger', speech: 'Sent to Pi in ledger. It takes it as its next turn.' })).toBe('Sent to Pi in ledger. It takes it as its next turn.');
 });
 
@@ -77,7 +65,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 const realMatchMedia = hasDom ? window.matchMedia : undefined;
 
-/** The window as a phone: a narrow one (the phone layout), and with `touch` a touch screen with no hover. */
 function phoneWindow(touch: boolean) {
   window.matchMedia = ((query: string) => ({
     matches: query.includes('max-width: 767px') || (touch && query.includes('pointer: coarse')),
@@ -100,12 +87,10 @@ afterEach(() => {
   host = null;
 });
 
-/** A fixed box for an element (happy-dom lays nothing out). */
 function boxAt(el: Element, left: number, top: number, width: number, height: number) {
   el.getBoundingClientRect = () => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 }
 
-/** A 1400 × 900 window: the list column, and (with `thread`) an open pane beside it whose foot starts at y 820. */
 function windowWith(thread: boolean): HTMLElement {
   Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, get: () => 1400 });
   host = document.createElement('div');
@@ -145,7 +130,6 @@ function show(toast: Omit<InboxToastModel, 'id'>, phone = false, into?: HTMLElem
   return target.querySelector('[data-inbox-toast]') as HTMLElement;
 }
 
-/** An open thread's pane (620..1400) whose foot starts at y 820. */
 function threadPane(): HTMLElement {
   const pane = document.createElement('section');
   pane.className = 'ib-pane';
@@ -172,30 +156,25 @@ test.skipIf(!hasDom)('desktop warning: one line (icon, lead, detail), Reply and 
   expect(toast.classList.contains('ib-toast-wrap')).toBe(false);
   expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Marked read');
   expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Claude Code was stopped');
-  // Reply, Undo, and the × last (owner, 2026-10-20: a toast can be closed early).
   expect(buttons(toast)).toEqual(['Reply', 'Undo', '']);
   expect(toast.querySelector('[data-toast-undo] kbd')?.getAttribute('data-keycap')).toBe('Z');
   expect([...toast.querySelectorAll('button')].at(-1)?.getAttribute('aria-label')).toBe('Dismiss');
-  // The Z hint is for the eye; the button's name stays "Undo" and it says its key.
   const undo = toast.querySelector('[data-toast-undo]') as HTMLButtonElement;
   expect(undo.querySelector('kbd')?.getAttribute('aria-hidden')).toBe('true');
   expect(undo.getAttribute('aria-keyshortcuts')).toBe('Z');
   act(() => undo.click());
   act(() => (toast.querySelector('[data-toast-reply]') as HTMLButtonElement).click());
   expect([undone, replied, dismissed]).toEqual([1, 1, 0]);
-  // The × dismisses, and never undoes.
   act(() => (toast.querySelector('[data-toast-dismiss]') as HTMLButtonElement).click());
   expect([undone, replied, dismissed]).toEqual([1, 1, 1]);
 });
 
-/** A touch pointer event at (x, y) at time `t` (happy-dom ignores a `timeStamp` init, so it is set on the event). */
 function pointer(type: string, x: number, y: number, pointerId: number, t: number): PointerEvent {
   const event = new PointerEvent(type, { bubbles: true, cancelable: true, pointerId, pointerType: 'touch', isPrimary: true, button: 0, clientX: x, clientY: y });
   Object.defineProperty(event, 'timeStamp', { value: t });
   return event;
 }
 
-/** A pointer at (x, y) on `el`: down, the moves, then up (or a cancel, as when the page takes a vertical pan). */
 function drag(el: HTMLElement, path: [number, number][], end: 'pointerup' | 'pointercancel' = 'pointerup', start = el) {
   const at = (type: string, [x, y]: [number, number], target: Element, t: number) => target.dispatchEvent(pointer(type, x, y, 7, 1000 + t));
   act(() => {
@@ -225,7 +204,6 @@ describe.skipIf(!hasDom)('swipe a toast away (owner, 2026-10-20)', () => {
     const where = phone ? 'a phone' : 'a desktop';
     test(`${where}: a drag past 40% of the width dismisses it, and never undoes; its timer was held from the drag's start`, () => {
       const { toast, holds, count } = swipeable(phone);
-      // Slow (no flick), 200 px of a 400 px toast: half its width.
       drag(toast, [[600, 860], [610, 861], [680, 862], [740, 862], [800, 862]]);
       expect(count()).toEqual({ dismissed: 1, undone: 0 });
       expect(holds).toEqual([true]);
@@ -235,10 +213,7 @@ describe.skipIf(!hasDom)('swipe a toast away (owner, 2026-10-20)', () => {
       const { toast, holds, count } = swipeable(phone);
       drag(toast, [[600, 860], [610, 860], [625, 860], [640, 860], [655, 860], [670, 860]]);
       expect(count()).toEqual({ dismissed: 0, undone: 0 });
-      // Held while dragged, resumed on the spring-back.
       expect(holds).toEqual([true, false]);
-      // Back where it was: nothing left on it from the drag but the entrance kept off (removing
-      // ib-toast-dragging would otherwise bring back `animation: ib-toast-in` and replay it).
       expect(toast.style.translate).toBe('');
       expect(toast.style.opacity).toBe('');
       expect(toast.style.animation).toBe('none');
@@ -248,7 +223,6 @@ describe.skipIf(!hasDom)('swipe a toast away (owner, 2026-10-20)', () => {
 
   test('a fast flick dismisses it from a shorter drag', () => {
     const { toast, count } = swipeable();
-    // 90 px in 80 ms: about 1.1 px per ms, well past the flick speed, though short of 40%.
     const at = (type: string, x: number, t: number) =>
       act(() => {
         toast.dispatchEvent(pointer(type, x, 860, 3, 1000 + t));
@@ -279,7 +253,6 @@ test.skipIf(!hasDom)('a desktop toast stays where it is whatever opens: a thread
   const toast = show({ icon: 'check', lead: 'Moved to Quiet', detail: '“Invoice list layout”', onUndo: () => {} }, false, win);
   const placed = () => ({ style: toast.getAttribute('style'), className: toast.className });
   const first = placed();
-  // Nothing measured onto it: the window's bottom center comes from inbox.css alone.
   expect(first.style).toBeNull();
 
   act(() => win.querySelector('main')!.appendChild(threadPane()));
@@ -336,7 +309,6 @@ test.skipIf(!hasDom)('a phone toast sits above a full-screen file\'s bar, and mo
   const page = document.createElement('div');
   document.body.appendChild(page);
   host = page;
-  // A file open full screen on a phone: its bar starts at y 740.
   const dock = document.createElement('div');
   dock.className = 'ib-fvdock-phone';
   const bar = document.createElement('div');
@@ -346,7 +318,6 @@ test.skipIf(!hasDom)('a phone toast sits above a full-screen file\'s bar, and mo
   page.appendChild(dock);
   const toast = show({ icon: 'check', lead: 'Marked read', onUndo: () => {} }, true, page, () => {});
   expect(toast.style.bottom).toBe('68px');
-  // The file closes, a thread opens under the toast: its foot (y 700) is measured once it is there.
   dock.remove();
   const pane = document.createElement('section');
   pane.className = 'ib-pane';
@@ -368,7 +339,6 @@ test('splitErrorAction: what happened, then what to do (the last sentence), toge
   const three = 'It stopped. Nothing was lost! Try again?';
   expect(splitErrorAction(three).action).toBe('Try again?');
   expect(splitErrorAction(three).head + splitErrorAction(three).action).toBe(three);
-  // One sentence, or a dot that ends no sentence (a version, a file name): nothing to split.
   expect(splitErrorAction('The thread did not change.')).toEqual({ head: 'The thread did not change.', action: '' });
   expect(splitErrorAction('Could not open notes.v2.md')).toEqual({ head: 'Could not open notes.v2.md', action: '' });
 });
@@ -394,7 +364,6 @@ test.skipIf(!hasDom)('an error keeps its message whole and may wrap, with no act
 });
 
 test.skipIf(!hasDom)('a toast leaving with focus inside and nowhere to return it gives focus to the open pane\'s visible header, never the body', () => {
-  // A phone with a thread open: the list's heading is hidden, so the thread's ‹ Inbox takes focus.
   const page = document.createElement('div');
   page.className = 'pn-inbox';
   const main = document.createElement('main');
@@ -411,7 +380,6 @@ test.skipIf(!hasDom)('a toast leaving with focus inside and nowhere to return it
   document.body.appendChild(page);
   try {
     const toast = show({ icon: 'check', lead: 'Archived', onUndo: () => {} }, true, page, () => {});
-    // Focus arrives from nowhere (the body), then the toast goes.
     act(() => (toast.querySelector('[data-toast-dismiss]') as HTMLButtonElement).focus());
     act(() => root?.unmount());
     root = null;

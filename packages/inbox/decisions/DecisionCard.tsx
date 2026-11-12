@@ -1,20 +1,3 @@
-/**
- * One decision card of decision mode (approval "inbox-decision-mode", the
- * Queue direction; experimental). Who and where, the prompt, why it waits,
- * the context, the pictures, the answers, then the secondary actions, in
- * that order (brief §7, the screen reader order).
- *
- * The agent contract lines (approval "inbox-decision-mode", "Agent contract
- * lines", 2026-10-24; drawn as contract-compare.html has them), read from the
- * question by `cardFacts`: the Stakes line under the prompt, the Shows picture
- * leading on the left (a Shows file is one of the card's references), the Why
- * line under the answers, and for `Reversible: no` a "One-way" badge, no
- * swipe, and a confirm step before any answer but a Skip counts (the grammar
- * does not say which choice is the one-way one, so the recommendation asks
- * too). Picture choices are the
- * thread card's own tiles (ui's `QuestionPictureTiles`): the picture picks and
- * the zoom button opens the viewer, never both.
- */
 import { inboxUrl, machineOf } from '../inboxUrl';
 import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
@@ -31,26 +14,13 @@ import { useRefRepo } from '../links';
 import { choiceName } from '../optionSets';
 import { answerNeedsConfirm, answerWords, choiceAnswer, confirmLabel, otherAnswer, skipAnswer, swipeChoices, swipeHint, textAnswer } from './model';
 
-/**
- * The contract lines a card shows (the question's additive `stakes`, `why`,
- * `reversible` and `shows`; absent on older records, which draw as before).
- */
 export interface CardFacts {
-  /** `Stakes:` — the bold line under the prompt. */
   stakes: string | null;
-  /** `Why:` — under the answers. */
   why: string | null;
-  /** `Reversible: no — <why>`: the One-way badge, a confirm step, and never a swipe. `why` may be null. */
   irreversible: { why: string | null } | null;
-  /** `Shows:` — the one picture (the hero) or file (a reference) the decision is about. */
   shows: { kind: 'image' | 'link'; label: string; src: string } | null;
 }
 
-/**
- * A line the card draws as a sentence, as contract-compare.html draws them: its first letter capitalised,
- * but only when its first word is plain lower-case letters (a-z, then a space, or a punctuation mark and a
- * space), so a URL, a path, `code` or a name such as iOS stays as written.
- */
 export function sentence(text: string | null | undefined): string | null {
   const trimmed = text?.trim();
   if (!trimmed) return null;
@@ -62,28 +32,19 @@ export function cardFacts(decision: InboxDecision): CardFacts {
   return {
     stakes: sentence(q.stakes),
     why: sentence(q.why),
-    // The reason follows "Can't be undone:", so it stays as the agent wrote it.
     irreversible: q.reversible ? { why: q.reversible.why?.trim() || null } : null,
     shows: q.shows ?? null,
   };
 }
 
-/** A picture the card shows: a captured image of the message, or an image file it attached. */
 export interface CardPicture {
   attachmentId: string;
   name: string;
-  /** The src the context wrote it as, when it came from there (left out of the context, shown as the hero). */
   ref: string | null;
   src: string;
-  /** The picture's own alt text, where its name is something else (a picture choice is named by its choice). */
   alt?: string;
 }
 
-/**
- * The pictures on the card's left: the `Shows:` picture first, then the
- * message's other images and image files. A picture choice's picture is its
- * tile, never here.
- */
 export function cardPictures(decision: InboxDecision): CardPicture[] {
   const q = decision.question;
   const choiceRefs = new Set(q.choices.map((choice) => choice.image?.src).filter((src): src is string => !!src));
@@ -108,16 +69,11 @@ export function cardPictures(decision: InboxDecision): CardPicture[] {
   return out;
 }
 
-/** Where a picture choice's picture loads from: its captured file, else the message's image route. */
 export function choicePictureUrl(decision: InboxDecision, src: string): string {
   const image = decision.pictures.inline.find((candidate) => candidate.ref === src);
   return image ? inboxUrl(`/attachments/${encodeURIComponent(image.attachment_id)}/image`, undefined, machineOf(image.attachment_id)) : inboxMessageImageUrl(decision.message.id, src);
 }
 
-/**
- * The attached file a `Shows:` link names, if the message carries it: by its path when the link has a
- * folder (the file's real path, or the path it was named by, ends with it), else by its file name.
- */
 export function showsFile(decision: InboxDecision, src: string): InboxDecision['pictures']['attachments'][number] | null {
   const path = (src.split(/[?#]/)[0] ?? '').replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
   const name = path.split('/').pop() ?? '';
@@ -129,11 +85,6 @@ export function showsFile(decision: InboxDecision, src: string): InboxDecision['
   return files.find((file) => file.name === name) ?? null;
 }
 
-/**
- * The context without what the card draws apart: the images (the hero and its
- * strip), and the `Stopped:` and `Holds up:` lines (drawn as their own lines
- * under the prompt; the server reads them from the context the same way).
- */
 function contextWithout(context: string, refs: readonly string[]): string {
   let out = context
     .split('\n')
@@ -150,36 +101,24 @@ function contextWithout(context: string, refs: readonly string[]): string {
 
 export interface DecisionCardProps {
   decision: InboxDecision;
-  /** The banner over the card when the agent replaced the question on screen. */
   banner?: ReactNode;
-  /** The pick just made (the stamp): the card shows it while it leaves. */
   stamp: QuestionAnswer | 'done' | 'cant' | null;
   phone: boolean;
   touch: boolean;
-  /** Answer the question (a pick, saved at once). */
   onAnswer: (answer: QuestionAnswer) => void;
-  /** An action item's Done, or Can't do it with the reason. */
   onAction: (mark: { outcome: 'done' | 'cant'; note?: string }) => void;
   onLater: () => void;
   onOpenThread: (fileId?: string) => void;
   onImage: (pictures: CardPicture[], index: number) => void;
-  /** Escape walked out of a field the card opened: report it so the dialog does not close too. */
   fieldOpenRef: { current: (() => boolean) | null };
-  /** Whether the card holds words typed and not answered with (closing asks first). */
   unsavedWordsRef?: { current: (() => boolean) | null };
-  /** A reply already took this answer (Previous reached it): drawn read only. */
   sent?: boolean;
-  /** Its group's reply is on its way: drawn read only until it lands (a pick would race the Send). */
   sending?: boolean;
-  /** Words typed on cards the queue moved away from, by decision id: put back here, kept from here. */
   keptWords?: Map<string, CardWords>;
-  /** The card is being edited (a box open, or words typed and not answered): its group's Hold waits. */
   onEditing?: (editing: boolean) => void;
-  /** prefers-reduced-motion: a committed swipe stays where the finger left it, no exit motion. */
   reduced?: boolean;
 }
 
-/** The words a card holds before they are an answer. */
 export interface CardWords {
   field: 'none' | 'other' | 'note' | 'cant';
   other: string;
@@ -188,7 +127,6 @@ export interface CardWords {
   reason: string;
 }
 
-/** How far a committed swipe throws the card: past the window's edge. */
 function flingDistance(direction: number): number {
   const width = typeof window === 'undefined' ? 1200 : window.innerWidth;
   return direction * Math.max(width, 600);
@@ -197,7 +135,6 @@ function flingDistance(direction: number): number {
 export function DecisionCard(props: DecisionCardProps) {
   const { decision } = props;
   const q = decision.question;
-  // The thread's repo, so `#123` and `owner/repo#123` link as in the thread (none: they stay plain).
   const refRepo = useRefRepo(decision.thread.project.repo ?? null);
   const refProps = { githubRepo: refRepo?.display, repoHost: refRepo?.host };
   const kind = readInboxQuestionKind(q.kind);
@@ -208,7 +145,6 @@ export function DecisionCard(props: DecisionCardProps) {
   const promptRef = useRef<HTMLHeadingElement>(null);
   const saved = q.state === 'picked' ? q.answer : null;
   const [selected, setSelected] = useState<string[]>(() => initialSelection(q));
-  // Words kept from an earlier visit to this card (Later, Previous, a notification moved the queue) come back.
   const kept = props.keptWords?.get(decision.id);
   const [field, setField] = useState<'none' | 'other' | 'note' | 'cant'>(() => kept?.field ?? (saved?.other ? 'other' : saved?.note ? 'note' : 'none'));
   const [other, setOther] = useState(kept?.other ?? saved?.other ?? '');
@@ -218,18 +154,13 @@ export function DecisionCard(props: DecisionCardProps) {
   const pointer = useRef(false);
   const swipe = useRef<{ x: number; y: number; id: number } | null>(null);
   const [drag, setDrag] = useState(0);
-  /** A committed swipe's exit: the card keeps going that way from where the finger left it. */
   const [fling, setFling] = useState<number | null>(null);
   const articleRef = useRef<HTMLElement>(null);
   const locked = props.sent === true || props.sending === true;
-  // Never a swipe for a one-way question or a picture choice (swipeChoices), nor while locked.
   const choices2 = locked ? null : swipeChoices(q);
-  /** A pick on a `Reversible: no` question waiting for its confirm (contract-compare.html, pair 2). */
   const [confirming, setConfirming] = useState<{ answer: QuestionAnswer; words: string } | null>(null);
   const confirmCancelRef = useRef<HTMLButtonElement>(null);
-  /** The choices as the card draws them: each description a sentence (the labels are the answers, as written). */
   const shownChoices = q.choices.map((choice) => (choice.description ? { ...choice, description: sentence(choice.description) } : choice));
-  // Picture choices: each choice's picture URL, and the pictures that failed to load (a tile then shows its alt text).
   const [failedPictures, setFailedPictures] = useState<ReadonlySet<string>>(() => new Set());
   const tileUrls = q.choices.map((choice) => {
     if (!choice.image) return null;
@@ -238,16 +169,11 @@ export function DecisionCard(props: DecisionCardProps) {
   });
   const showTiles = (kind === 'single' || kind === 'multi') && tileUrls.some((url) => url !== null);
 
-  /** The words in a box the card shows, by box (empty when the box is closed). */
   const boxWords = (box: 'other' | 'note' | 'cant' | 'text'): string =>
     box === 'other' ? other : box === 'note' ? note : box === 'cant' ? reason : text;
   const openBoxEmpty = field === 'none' || !boxWords(field).trim();
 
-  // Escape is one layer at a time. A box with words in it is a layer: Escape lets go of it (the
-  // words stay, focus goes to the prompt), and the dialog then asks before it closes over them.
-  // An empty box the card opened closes.
   props.fieldOpenRef.current = () => {
-    // The confirm step is a layer of its own: Escape cancels it, nothing is answered.
     if (confirming) {
       cancelConfirm();
       return true;
@@ -275,7 +201,6 @@ export function DecisionCard(props: DecisionCardProps) {
       (field === 'cant' && reason.trim() !== ''));
   if (props.unsavedWordsRef) props.unsavedWordsRef.current = () => typedWords;
 
-  // Being edited (a box open, or words typed): its group's Hold waits. Said once per change, and undone when the card goes.
   const editing = !props.stamp && !locked && (field !== 'none' || typedWords);
   const onEditing = useRef(props.onEditing);
   onEditing.current = props.onEditing;
@@ -284,7 +209,6 @@ export function DecisionCard(props: DecisionCardProps) {
   }, [editing]);
   useEffect(() => () => onEditing.current?.(false), []);
 
-  // Words typed and not answered with are kept when the card goes, and dropped once answered.
   const words = useRef<{ typed: boolean; value: CardWords }>({ typed: false, value: { field, other, note, text, reason } });
   words.current = { typed: typedWords, value: { field, other, note, text, reason } };
   useEffect(() => {
@@ -294,22 +218,18 @@ export function DecisionCard(props: DecisionCardProps) {
       if (words.current.typed) store.set(decision.id, words.current.value);
       else store.delete(decision.id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decision.id]);
 
   useEffect(() => {
     promptRef.current?.focus({ preventScroll: true });
   }, [decision.id]);
 
-  // The confirm step takes focus on its safe button: Enter there cancels, never answers.
   useEffect(() => {
     if (!confirming) return;
-    // On a phone the step can open below the fold: it comes into view with the focus.
     confirmCancelRef.current?.focus();
     confirmCancelRef.current?.closest('[data-decision-confirm-pick]')?.scrollIntoView?.({ block: 'nearest' });
   }, [confirming]);
 
-  /** An answer counts at once, unless it cannot be undone: then it asks once more first. */
   const request = (answer: QuestionAnswer) => {
     if (answerNeedsConfirm(q, answer)) setConfirming({ answer, words: answerWords(answer) });
     else props.onAnswer(answer);
@@ -317,8 +237,6 @@ export function DecisionCard(props: DecisionCardProps) {
   const cancelConfirm = () => {
     const was = confirming;
     setConfirming(null);
-    // A pick-one goes back to what it showed before (the saved pick, or nothing); focus to the choice the person
-    // was on, else the prompt.
     if (kind === 'single') setSelected(initialSelection(q));
     const label = was?.answer.selected[0];
     const radio = label ? [...(articleRef.current?.querySelectorAll<HTMLInputElement>('.ib-dm-answers input') ?? [])].find((input) => input.value === label) : undefined;
@@ -335,11 +253,9 @@ export function DecisionCard(props: DecisionCardProps) {
   const badge = q.stopped !== null ? <span className="ib-badge ib-b-stop">Stopped</span> : q.holds_up.length > 0 ? <span className="ib-badge ib-b-hold">Holds up {formatCount(q.holds_up.length)}</span> : null;
   const heroRefs = pictures.map((p) => p.ref).filter((r): r is string => r !== null);
   const context = contextWithout(q.context ?? '', heroRefs);
-  // A `Shows:` file leads the references: the attached file it names, else a web link, else the thread.
   const shownFile = facts.shows?.kind === 'link' ? showsFile(decision, facts.shows.src) : null;
   const files = decision.pictures.attachments.filter((f) => f.kind !== 'image' && f.attachment_id !== shownFile?.attachment_id);
   const recommendedLabels = q.choices.filter((c) => c.recommended).map((c) => c.label);
-  /** The tile pictures, for the viewer's stepping (a zoom opens on its own tile). */
   const tilePictures: CardPicture[] = q.choices.flatMap((choice, index) =>
     choice.image && tileUrls[index] ? [{ attachmentId: '', name: choiceName(choice.label, index, q.choices.map((c) => c.label)), alt: choice.image.alt || choice.label, ref: choice.image.src, src: tileUrls[index]! }] : [],
   );
@@ -360,10 +276,7 @@ export function DecisionCard(props: DecisionCardProps) {
     swipe.current = null;
     if (!start || start.id !== event.pointerId || !choices2) return setDrag(0);
     const dx = event.clientX - start.x;
-    // Short of the threshold: back to the centre.
     if (Math.abs(dx) < 90) return setDrag(0);
-    // Committed: the card stays where the finger left it, then (with motion) keeps going that way while the
-    // stamp shows; it never jumps back to the centre first. Under reduced motion it just stays.
     setDrag(dx);
     if (!props.reduced) {
       const target = flingDistance(Math.sign(dx));
@@ -428,7 +341,6 @@ export function DecisionCard(props: DecisionCardProps) {
         </div>
       )}
       <div className="ib-dm-main">
-        {/* Who and where. */}
         <div className="ib-dm-who">
           <HostMark host={author.kind === 'agent' ? author.host : null} />
           <b>{name}</b>
@@ -452,7 +364,6 @@ export function DecisionCard(props: DecisionCardProps) {
         <h2 id={promptId} ref={promptRef} tabIndex={-1} className="ib-dm-prompt" data-decision-prompt="">
           <InlineMarkdown {...refProps} text={q.prompt} />
         </h2>
-        {/* The stakes line (`Stakes:`): what the choice affects, in one sentence. */}
         {facts.stakes && (
           <p id={stakesId} className="ib-dm-stakes" data-decision-stakes="">
             <Icon name="warn" size={16} />
@@ -520,7 +431,6 @@ export function DecisionCard(props: DecisionCardProps) {
             </span>
           </p>
         )}
-        {/* The answers. */}
         {!locked && (
         <div className="ib-dm-answers" onPointerDownCapture={() => (pointer.current = true)} onKeyDownCapture={() => (pointer.current = false)}>
           {showTiles && (
@@ -536,8 +446,6 @@ export function DecisionCard(props: DecisionCardProps) {
                     ? setSelected((current) => (checked ? [...current.filter((l) => l !== label), label] : current.filter((l) => l !== label)))
                     : checked && setSelected([label])
                 }
-                // The picture picks (it is in the tile's label); the zoom button opens the viewer and never picks.
-                // By the choice's place, not its picture's URL: a picture two choices share opens as the one zoomed.
                 onZoom={(_url, _alt, index) => props.onImage(tilePictures, q.choices.slice(0, index).filter((c, i) => c.image && tileUrls[i]).length)}
                 onPictureError={(url) => setFailedPictures((prev) => (prev.has(url) ? prev : new Set([...prev, url])))}
                 renderText={(text) => <InlineMarkdown {...refProps} text={text} />}
@@ -546,7 +454,6 @@ export function DecisionCard(props: DecisionCardProps) {
                   onClick:
                     kind === 'single'
                       ? () => {
-                          // A click (or a tap) on the picture or the words answers at once; the arrow keys only move.
                           if (pointer.current) commitChoice([label]);
                         }
                       : undefined,
@@ -581,7 +488,6 @@ export function DecisionCard(props: DecisionCardProps) {
                       value={choice.label}
                       checked={on}
                       onChange={() => setSelected([choice.label])}
-                      // A click (or a tap) answers at once; the arrow keys only move the choice, Enter or Space answers.
                       onClick={() => {
                         if (pointer.current) commitChoice([choice.label]);
                       }}
@@ -731,7 +637,6 @@ export function DecisionCard(props: DecisionCardProps) {
               <b>{recommendedLabels.length > 0 || q.suggested_text ? `Why ${name} recommends it:` : 'Why:'}</b> <InlineMarkdown {...refProps} text={facts.why} />
             </p>
           )}
-          {/* Swipe is touch only, for a two-way choice, and always has its buttons (the choices above). */}
           {choices2 && props.touch && (
             <p className="ib-dm-swipehint" aria-hidden="true">
               {swipeHint(choices2)}
@@ -740,7 +645,6 @@ export function DecisionCard(props: DecisionCardProps) {
         </div>
         )}
 
-        {/* The secondary actions: Other, Add a note, Later, Skip. */}
         {!locked && kind !== 'action' && (
           <>
             {field === 'other' && kind !== 'text' && (
@@ -804,7 +708,6 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
 }
 
-/** What the card starts with: the saved pick, else (multi) the recommendation ticked, else nothing. */
 function initialSelection(q: InboxQuestion): string[] {
   if (q.state === 'picked' && q.answer) return [...q.answer.selected];
   if (readInboxQuestionKind(q.kind) === 'multi') return q.choices.filter((c) => c.recommended).map((c) => c.label);

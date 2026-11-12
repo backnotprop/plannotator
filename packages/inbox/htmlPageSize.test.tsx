@@ -1,30 +1,3 @@
-/**
- * The size control on an HTML page on a phone (approval
- * "inbox-html-attachments-phone", part B "Fit the page"; pageSize.ts).
- *
- * What is proved here, on the pane as a phone draws it: the control is one
- * icon with no words (the owner's pick, "Just the icon no words") in the page's
- * corner, outside the scaled page, and gathers with the other tools; its icon
- * shows the size the page is at and its name and tooltip say what a press
- * does; a page that fits opens on Phone size (a phone icon, "Desktop size"); a
- * page the bridge reports clearly wider than the phone (1.5 times) opens on Desktop size by itself,
- * while one long line poking out a little does not;
- * scaled to the phone's width (a laptop icon, "Phone size"); a press switches and
- * is remembered for that file, so a remount (a reload) opens the way it was
- * left even when the page is wide; the remembered choice is per file; the
- * scale reaches the viewer, so the pen's coordinates convert (the math is
- * HtmlViewer.frameScale.test.tsx's); a desktop draws no control and no scale.
- * The icon gets out of the way (addendum 17:53Z, sizeIconFade.ts): shown when
- * the page opens, faded after about 3 seconds, back on a scroll up or a tap
- * near the top (not one lower down), held by keyboard focus (a finger's
- * focus, and its blur, do not bring a faded icon back); faded, it takes
- * no taps (inbox.css's own rules, applied here), and its name stays. Hiding
- * the tools (») and bringing them back brings a faded icon back with them.
- * A press is announced with the approved words only.
- * The real layout and a real tap are tests/e2e/inbox-html-fit.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeAll, expect, jest, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { act } from 'react';
@@ -103,7 +76,6 @@ function stubViews() {
   }) as unknown as typeof fetch;
 }
 
-/** The phone's width for the page's box (happy-dom lays nothing out). */
 function phoneWidth(width = 390) {
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
     configurable: true,
@@ -119,14 +91,12 @@ async function settle(ms = 60) {
       await new Promise((resolve) => setTimeout(resolve, ms));
       return;
     }
-    // Fake timers: the view's fetch settles on microtasks; the clock moves only as told.
     for (let i = 0; i < 20; i++) await Promise.resolve();
     jest.advanceTimersByTime(ms);
     for (let i = 0; i < 20; i++) await Promise.resolve();
   });
 }
 
-/** The clock moves `ms`, and React draws what changed. */
 function elapse(ms: number) {
   act(() => {
     jest.advanceTimersByTime(ms);
@@ -175,7 +145,6 @@ const corner = () => host!.querySelector<HTMLElement>('[data-page-size-corner]')
 const icon = () => toggle()!.querySelector('svg')!.getAttribute('data-icon');
 const name = () => toggle()!.getAttribute('aria-label');
 
-/** The page's bridge reporting how wide the page lays out against its frame. */
 async function reportWidth(width: number, viewport = 390) {
   const iframe = frameBox().querySelector('iframe')!;
   await act(async () => {
@@ -187,7 +156,6 @@ async function press() {
   await act(async () => toggle()!.click());
 }
 
-/** The page's bridge: the person scrolled back up, or tapped at `y` (the page's own pixels; unscaled here). */
 async function fromPage(data: Record<string, unknown>) {
   const iframe = frameBox().querySelector('iframe')!;
   await act(async () => {
@@ -197,7 +165,6 @@ async function fromPage(data: Record<string, unknown>) {
 
 const faded = () => corner()!.hasAttribute('data-faded');
 
-/** inbox.css's own rules for the corner and its icon (single-line rules, outside media queries), so taps are real CSS. */
 function sizeIconCss() {
   const css = readFileSync(new URL('./inbox.css', import.meta.url), 'utf8');
   const rules = css.split('\n').filter((line) => /^\.ib-size(corner|btn)\b/.test(line));
@@ -207,7 +174,6 @@ function sizeIconCss() {
   return style;
 }
 
-/** Whether a tap at the icon would land on it: its own pointer-events, as the cascade computes them. */
 const takesTaps = () => getComputedStyle(toggle()!).pointerEvents !== 'none';
 
 test.if(hasDom)('the icon shows when the page opens, fades after about 3 seconds without catching taps, and a scroll up brings it back', async () => {
@@ -219,14 +185,12 @@ test.if(hasDom)('the icon shows when the page opens, fades after about 3 seconds
     await reportWidth(1180);
     expect(faded()).toBe(false);
     expect(takesTaps()).toBe(true);
-    // The corner itself never catches a tap: only the drawn icon does.
     expect(getComputedStyle(corner()!).pointerEvents).toBe('none');
 
     elapse(SIZE_ICON_SHOW_MS - 200);
     expect(faded()).toBe(false);
     elapse(200);
     expect(faded()).toBe(true);
-    // Faded: a tap there reaches the page. Still in the tree, under the same name.
     expect(takesTaps()).toBe(false);
     expect(name()).toBe('Phone size');
 
@@ -280,7 +244,6 @@ test.if(hasDom)('a blur after a finger press does not bring a faded icon back', 
   fakeTimers = true;
   await render(dashboard);
   await reportWidth(390);
-  // A finger's press leaves focus on the button (Android Chrome), not a keyboard's focus ring.
   const realMatches = Element.prototype.matches;
   Element.prototype.matches = function (this: Element, selector: string) {
     return selector === ':focus-visible' ? false : realMatches.call(this, selector);
@@ -288,9 +251,7 @@ test.if(hasDom)('a blur after a finger press does not bring a faded icon back', 
   try {
     act(() => toggle()!.focus());
     elapse(SIZE_ICON_SHOW_MS);
-    // Not held: it fades with focus still on it.
     expect(faded()).toBe(true);
-    // A later tap on the page takes focus away: the icon stays faded.
     act(() => toggle()!.blur());
     expect(faded()).toBe(true);
   } finally {
@@ -321,13 +282,11 @@ test.if(hasDom)('a page that fits opens on Phone size; the control is one icon w
   expect(frameBox().dataset.pageSize).toBe('phone');
   expect(frameBox().classList.contains('ib-fitdesk')).toBe(false);
   expect(corner()).not.toBeNull();
-  // Not inside the page's box, so the scale never shrinks it.
   expect(frameBox().contains(toggle())).toBe(false);
   expect(toggle()!.textContent).toBe('');
   expect(icon()).toBe('phone');
   expect(name()).toBe('Desktop size');
   expect(toggle()!.title).toBe('Desktop size');
-  // It floats like the other tools, so » and a pinch gather it with them.
   const { GATHERED } = await import('./components/FullViewBar');
   expect(corner()!.matches(GATHERED)).toBe(true);
 });
@@ -342,16 +301,13 @@ test.if(hasDom)('a page wider than the phone opens on Desktop size by itself, la
   expect(icon()).toBe('laptop');
   expect(name()).toBe('Phone size');
   expect(toggle()!.title).toBe('Phone size');
-  // Nothing was pressed: no choice is stored, so the page's width decides again next time.
   expect(window.localStorage.getItem(PAGE_SIZE_KEY)).toBeNull();
-  // Once fitted, the page reports against the laptop width: that does not undo it.
   await reportWidth(1280, 1280);
   expect(frameBox().dataset.pageSize).toBe('desktop');
 });
 
 test.if(hasDom)('a phone-friendly page with one long line poking out a little stays on Phone size', async () => {
   await render(dashboard);
-  // One unbroken hash or URL: about 500 px on a 390 px phone, under the 1.5 line.
   await reportWidth(500);
   expect(frameBox().dataset.pageSize).toBe('phone');
   expect(frameBox().classList.contains('ib-fitdesk')).toBe(false);
@@ -364,7 +320,6 @@ test.if(hasDom)('a squeezed page takes one press, and the press is remembered af
   expect(frameBox().dataset.pageSize).toBe('desktop');
   expect(icon()).toBe('laptop');
   expect(name()).toBe('Phone size');
-  // The icon and its name changed; the pane's live region says what happened.
   await settle();
   expect(host!.querySelector('[data-step-live]')!.textContent).toBe('Desktop size');
   await press();

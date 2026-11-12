@@ -1,12 +1,3 @@
-/**
- * A thread's artifact list (artifacts.ts; approval "inbox-thread-artifacts"):
- * the one list both the Artifacts grid and the viewer's stepping read. What
- * this catches: a kind left out of the grid (a download, a guided review, the
- * person's pasted file), the grid in thread order instead of newest first
- * (or messages split apart), an image shown in the text AND attached counted
- * twice, and the viewer's stepping drifting from the grid (a guide stepped
- * into, or a file missing from one of them).
- */
 import { expect, test } from 'bun:test';
 import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { artifactKey, artifactOfFile, artifactsNewestFirst, threadArtifacts } from './artifacts';
@@ -52,7 +43,6 @@ const messages = [
   agent(M3, '2026-10-10T11:30:00.000Z', { guide: GUIDE }),
   agent(M4, '2026-10-10T13:52:00.000Z'),
 ];
-// In the text of M1 and also attached to it: one file on disk, two records.
 const beforeInline = file('att_01K7AAAAAAAAAAAAAAAAAAAAAA', 'checkout-before.png', 'image', M1, { ref: 'design/checkout-before.png', media_type: 'image/png', width: 1280, height: 800 });
 const beforeAttached = file('att_01K7BBBBBBBBBBBBBBBBBBBBBB', 'checkout-before.png', 'image', M1, { media_type: 'image/png', width: 1280, height: 800 });
 const spec = file('att_01K7CCCCCCCCCCCCCCCCCCCCCC', 'checkout-spec.md', 'markdown', M1, { changed_since_sent: true, current: { sha256: 'd'.repeat(64), size: 1200, mtime: '2026-10-10T14:14:00.000Z' } });
@@ -62,7 +52,6 @@ const pdf = file('att_01K7FFFFFFFFFFFFFFFFFFFFFF', 'checkout-perf.pdf', 'pdf', M
 const sql = file('att_01K7GGGGGGGGGGGGGGGGGGGGGG', '0042_checkout_sessions.sql', 'code', M4, { size: 331, current: { sha256: 'a'.repeat(64), size: 331, mtime: '2026-10-10T13:52:00.000Z' } });
 const zip = file('att_01K7HHHHHHHHHHHHHHHHHHHHHH', 'e2e-traces.zip', 'file', M4);
 
-// The model lists the records in any order; the thread's order decides.
 const ARTIFACTS = threadArtifacts(messages, [video, sql, spec, beforeAttached, pdf, zip, sketch], [beforeInline]);
 
 test('every kind counts: attachments of every kind, images in the text, the person\'s pasted file, one guided review per message', () => {
@@ -81,7 +70,6 @@ test('an image shown in the text and attached to the same message is one artifac
   expect(before[0]!.type === 'file' && before[0]!.inline).toBe(true);
   expect(before[0]!.type === 'file' && before[0]!.alsoIds).toEqual([beforeAttached.id]);
   expect(artifactOfFile(ARTIFACTS, beforeAttached.id)?.attachment.id).toBe(beforeInline.id);
-  // The same image in two different messages stays two artifacts.
   const later = file('att_01K7JJJJJJJJJJJJJJJJJJJJJJ', 'checkout-before.png', 'image', M4, { ref: 'design/checkout-before.png' });
   expect(threadArtifacts(messages, [beforeAttached], [beforeInline, later]).filter((a) => a.type === 'file')).toHaveLength(2);
 });
@@ -93,7 +81,6 @@ test('the grid is newest message first, each message keeping its own order', () 
 test('the viewer steps through the same list in thread order, its files only; a twin record finds its step', () => {
   const steps = stepsOf(ARTIFACTS);
   expect(steps.map((s) => s.attachment.id)).toEqual(ARTIFACTS.filter((a) => a.type === 'file').map(artifactKey));
-  // The grid counts the guide; the viewer does not (it opens its own reader).
   expect(ARTIFACTS.length - steps.length).toBe(1);
   expect(attachmentSequence(messages, [video, sql, spec, beforeAttached, pdf, zip, sketch], [beforeInline])).toEqual(steps);
   expect(stepIndexOf(steps, beforeAttached.id)).toBe(0);

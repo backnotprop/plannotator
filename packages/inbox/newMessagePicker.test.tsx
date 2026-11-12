@@ -1,14 +1,3 @@
-/**
- * New message's session picker is a menu (role="menu" / "menuitem"), so it
- * must act like one from the keyboard. Failures to catch: focus left on the
- * page when the menu opens; Up / Down not moving between sessions, or not
- * wrapping at the ends; Home / End dead; type-ahead not finding a session by
- * its host; more than one item in the Tab order; Escape closing the menu but
- * dropping focus on the page instead of New message, or reaching the window's
- * Escape rungs too.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -102,7 +91,6 @@ test.skipIf(!hasDom)('the session picker moves focus like a menu: into it on ope
   };
   try {
     expect(host!.querySelector('[role="menu"]')).not.toBeNull();
-    // Opened: focus is on the first session, the only one in the Tab order.
     expect(document.activeElement).toBe(items()[0]);
     expect(items().map((el) => el.tabIndex)).toEqual([0, -1, -1, -1]);
     expect(press('ArrowDown').defaultPrevented).toBe(true);
@@ -110,7 +98,6 @@ test.skipIf(!hasDom)('the session picker moves focus like a menu: into it on ope
     expect(items().map((el) => el.tabIndex)).toEqual([-1, 0, -1, -1]);
     press('ArrowUp');
     press('ArrowUp');
-    // Up from the first wraps to the last.
     expect(document.activeElement).toBe(items()[3]);
     press('ArrowDown');
     expect(document.activeElement).toBe(items()[0]);
@@ -118,16 +105,13 @@ test.skipIf(!hasDom)('the session picker moves focus like a menu: into it on ope
     expect(document.activeElement).toBe(items()[3]);
     press('Home');
     expect(document.activeElement).toBe(items()[0]);
-    // Type-ahead by host: "o" finds OpenCode; "p" twice cycles through the Pi sessions.
     press('o');
     expect(document.activeElement).toBe(items()[2]);
-    // A pause ends the typed word, so the next letter starts a new search.
     pause();
     press('p');
     expect(document.activeElement).toBe(items()[3]);
     press('p');
     expect(document.activeElement).toBe(items()[1]);
-    // The highlight follows focus: one item drawn as current.
     expect(host!.querySelectorAll('.ib-mi.ib-on')).toHaveLength(1);
     expect(items()[1]!.classList.contains('ib-on')).toBe(true);
   } finally {
@@ -147,7 +131,6 @@ test.skipIf(!hasDom)('Escape in the session picker closes it, puts focus back on
     expect(closed).toBe(1);
     expect(host!.querySelector('[role="menu"]')).toBeNull();
     expect(document.activeElement).toBe(host!.querySelector('[data-new-message]'));
-    // One layer: the window's Escape rungs never see it.
     expect(windowEscapes.count).toBe(0);
   } finally {
     unlisten();

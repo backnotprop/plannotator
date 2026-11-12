@@ -1,20 +1,11 @@
 import spriteSheet from '../assets/tater-sidebar.webp';
 import { Modal } from './Updates';
 
-/** Where Bro mode came from (the owner, 2026-11-05; the post and the skill, 2026-11-08): the card's credit line. */
 export const BRO_CREDIT = {
   seenBy: 'https://x.com/dillon_mulroy/status/2079238358358778142',
   by: 'https://github.com/backnotprop/bro/blob/main/skills/bro/SKILL.md',
 } as const;
 
-/**
- * Bro mode's one-time offer (approval "bro-mode", 2026-11-05; the owner picked the poster look): the name as the
- * picture, with the sidebar's Tater sprite sitting on it, played as the sidebar plays it (a one-frame window over the
- * strip, sliding by `transform` in whole frames; its first frame under reduced motion). "Turn it on" turns Bro mode on;
- * "Not now", Escape and a click outside close it and leave it off. Every way out is final: the claim already stamped
- * it. No keyboard shortcut. Marked Experimental (the owner, 2026-11-08): the Settings chip, in the card's own colours,
- * beside the name and outside the title, so the dialog is still named "Bro mode".
- */
 export function BroIntro({ phone, onClose, onTurnOn }: { phone: boolean; onClose: () => void; onTurnOn: () => void }) {
   return (
     <Modal labelledBy="ib-bro-title" describedBy="ib-bro-desc" testId="bro-intro" onClose={onClose} ownKeys className={`ib-bi ib-bro${phone ? ' ib-bi-phone' : ''}`}>

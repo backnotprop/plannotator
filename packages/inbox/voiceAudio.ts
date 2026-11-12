@@ -1,11 +1,5 @@
-/**
- * Voice dictation's sums: the clip's WAV, the voice gate, the clock. No browser APIs, so tests read them directly.
- */
-
-/** The rate of the clip the Inbox sends on: the format the route was verified with, and the source of the 5.8 MB limit. */
 export const VOICE_WAV_RATE = 24_000;
 
-/** One mono 16-bit PCM WAV at 24 kHz from the samples as they came, averaging what falls in each output sample. */
 export function encodeWav(chunks: readonly Float32Array[], rate: number): Blob {
   const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
   const samples = new Float32Array(total);
@@ -33,8 +27,8 @@ export function encodeWav(chunks: readonly Float32Array[], rate: number): Blob {
   text(8, 'WAVE');
   text(12, 'fmt ');
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, 1, true); // mono
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
   view.setUint32(24, VOICE_WAV_RATE, true);
   view.setUint32(28, VOICE_WAV_RATE * 2, true);
   view.setUint16(32, 2, true);
@@ -44,12 +38,6 @@ export function encodeWav(chunks: readonly Float32Array[], rate: number): Blob {
   return new Blob([header, out.buffer], { type: 'audio/wav' });
 }
 
-/**
- * Is this voice? The floor is the quietest thing heard this clip, and it follows the room up slowly. A dip between
- * syllables resets it, so a clip that opens on speech still finds the floor. The gate sits 10 dB above it, inside
- * fixed limits: below -52 dB is never voice, above -30 dB always is. Digital zero is the stream starting up, not the
- * room, so it never pins the floor. The values come from synthetic clips, not a real room.
- */
 export function createVoiceGate(): (db: number) => { level: number; voice: boolean } {
   let floor: number | null = null;
   return (db) => {
@@ -59,7 +47,6 @@ export function createVoiceGate(): (db: number) => { level: number; voice: boole
   };
 }
 
-/** `0:07`, `1:45`. */
 export function voiceClock(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;

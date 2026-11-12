@@ -1,11 +1,3 @@
-/**
- * The onboarding tour's state machine, coach cards and fixture (approval
- * "inbox-onboarding-tour", v2). Pure: no DOM. The fixture is the shipped one
- * (packages/inbox/tour/content/fixture.json), checked as the brief asks:
- * every question block parses with core's parser, every referenced asset
- * ships and is in the server's manifest, the content stays under its budget,
- * and nothing private ships.
- */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -63,7 +55,6 @@ const files = tourAttachments(fixture, tourStateAt(TOUR_STEPS, REAL, fixture));
 const fileNamed = (name: string) => files.find((a) => a.name === name)!;
 const ask = tourQuestion(fixture)!.message;
 
-/** A comment the person saves in a viewer, as the tour's file source records it. */
 function fileComment(name: string, annotation: Record<string, unknown> = {}) {
   const a = fileNamed(name);
   const thread = fixture.threads.find((t) => t.messages.some((m) => m.id === a.message_id))!.id;
@@ -74,13 +65,11 @@ const wordsComment = tourRecord({ id: 'ann-words', thread: TOUR_THREAD, message:
 describe('the walk', () => {
   test('1 to 10 advance on the real actions; Next only where the brief puts it', () => {
     let s = TOUR_START;
-    // Step 1 opens on "How it's organised", then the question's row.
     expect(tourCoach(s, names)).toMatchObject({ key: '1-orient', picture: 'orient', next: true });
     s = tourReducer(s, { type: 'next' });
     expect(tourCoach(s, names)).toMatchObject({ key: '1', target: 'row' });
     s = tourReducer(s, { type: 'open', thread: TOUR_THREAD });
     expect(s).toMatchObject({ step: 2, route: TOUR_THREAD });
-    // Crawl: a plain question first. The picture question is not in the thread yet.
     expect(tourCoach(s, names)).toMatchObject({ key: '2', target: 'warm-choices' });
     expect(tourMessages(fixture, TOUR_THREAD, s).some((v) => v.fixture?.asks)).toBe(false);
     expect(tourReducer(s, { type: 'next' })).toBe(s);
@@ -91,7 +80,6 @@ describe('the walk', () => {
     s = tourReducer(s, { type: 'warmSend' });
     expect(s).toMatchObject({ step: 2, warmSent: true });
     expect(tourCoach(s, names)!.wait).toBe(true);
-    // The answer arrives with the picture question: step 3 starts on it (walk).
     expect(tourReducer(s, { type: 'warmArrive' })).toBe(s);
     s = run([{ type: 'warmDelivered' }, { type: 'warmArrive' }], s);
     expect(s).toMatchObject({ step: 3, warmArrived: true });
@@ -118,12 +106,10 @@ describe('the walk', () => {
     expect(tourCoach(s, names)).toMatchObject({ key: '7', target: 'inline-img' });
     s = tourReducer(s, { type: 'openFile', id: fileNamed('a1.png').id, full: true });
     expect(tourCoach(s, names)!.key).toBe('7-file');
-    // While the drawing surface is open, the card points at nothing (it stands clear of the drawing tools).
     expect(tourCoach(s, names, {}, { annotating: true })).toMatchObject({ key: '7-drawing', target: null });
     expect(tourCoach(s, names, {}, { drawn: true })!.key).toBe('7-drawn-unsaved');
     s = tourReducer(s, { type: 'comment', record: fileComment('a1.png') });
     expect(tourCoach(s, names)).toMatchObject({ key: '7-drawn', next: true });
-    // The Artifacts part: the card, the grid, a tile, Next.
     s = tourReducer(s, { type: 'next' });
     expect(tourCoach(s, names)).toMatchObject({ key: '7-art', target: 'art-button' });
     s = tourReducer(s, { type: 'artifacts', open: true });
@@ -156,7 +142,6 @@ describe('the walk', () => {
     s = tourReducer(s, { type: 'next' });
     expect(tourCoach(s, names)).toMatchObject({ key: '9-also', next: true });
     expect(tourCoach(s, names)!.items!.map((i) => i.title)).toEqual(['Star a thread', 'Snooze', 'Looks good', 'Re-ask', 'Send now']);
-    // "Make it yours" comes after the replay, over the thread with pictures, with Skip and a Next that names what comes next; then the person's own Inbox.
     s = tourReducer(s, { type: 'next' });
     expect(s).toMatchObject({ step: TOUR_SETTINGS_STEP, route: TOUR_THREAD, file: null });
     expect(tourCoach(s, names)).toMatchObject({ key: '10-yours', picture: 'settings', next: true, nextLabel: 'Connect agents next', nextArrow: true, skip: true, target: null });
@@ -178,7 +163,6 @@ describe('the walk', () => {
   });
 
   test('Send needs a pick and its step; never twice; a pick after Send changes nothing', () => {
-    // The warm-up: no Send without a pick, and only on step 2.
     const s2 = tourStateAt(2, REAL, fixture);
     expect(tourReducer(s2, { type: 'warmSend' })).toBe(s2);
     const s3 = tourStateAt(3, REAL, fixture);
@@ -187,7 +171,6 @@ describe('the walk', () => {
     const s7 = tourStateAt(7, REAL, fixture);
     expect(tourReducer(s7, { type: 'send' })).toBe(s7);
     expect(tourReducer(s7, { type: 'pick', label: 'B · Our reader beside a live native diff' })).toBe(s7);
-    // The film's Send needs a comment waiting.
     const s8 = tourStateAt(8, REAL, fixture);
     expect(tourReducer(s8, { type: 'filmSend' })).toBe(s8);
   });
@@ -226,7 +209,6 @@ describe('the walk', () => {
     for (let n = 1; n <= TOUR_STEPS; n++) {
       const s = tourStateAt(n, REAL, fixture);
       expect(s.step).toBe(n);
-      // Every state reached directly draws a coach card (11 none) and its lists.
       if (n < TOUR_STEPS) expect(tourCoach(s, names)).not.toBeNull();
       expect(tourSections(fixture, s).length).toBeGreaterThan(0);
     }
@@ -292,7 +274,6 @@ describe('fast-forward', () => {
     expect(s.step).toBe(6);
     expect(s.picked).toBe(B);
     expect(s.comments.filter((r) => r.message).map((r) => r.id)).toEqual(['mine']);
-    // Past the Send, the person's unsent comments were sent with it.
     s = forward(s);
     expect(s.step).toBe(7);
     expect(s.comments.find((r) => r.id === 'mine')!.sent_reply_id).toBe(TOUR_REPLY_ID);
@@ -384,7 +365,6 @@ describe('what the window draws', () => {
     const s9 = tourStateAt(9, REAL, fixture);
     expect(sectionOf({ ...s9, compose: 'sent' }, TOUR_NEW_THREAD)).toBe('sent');
     expect(sectionOf(tourStateAt(10, REAL, fixture), TOUR_NEW_THREAD)).toBe('new');
-    // A pick and comments not sent read as a draft on the row; so does the warm-up's pick.
     const row = tourSections(fixture, tourStateAt(6, REAL, fixture)).flatMap((s) => s.threads).find((r) => r.thread_id === TOUR_THREAD)!;
     expect(row.unsent).toEqual({ reply_at: null, picks: 1, comments: 2 });
     const warmRow = tourSections(fixture, { ...tourStateAt(2, REAL, fixture), warmPicked: WARM }).flatMap((s) => s.threads).find((r) => r.thread_id === TOUR_THREAD)!;
@@ -393,7 +373,6 @@ describe('what the window draws', () => {
 
   test('the messages follow the walk; the replayed reply carries the pick and its comments', () => {
     const ids = (s: TourState) => tourMessages(fixture, TOUR_THREAD, s).map((v) => (v.reply ? 'reply' : v.replay ? 'replay' : v.wire.id));
-    // Crawl, walk, run: the plain question alone first; the rich message (pictures, files) arrives after its Send.
     expect(ids(TOUR_START)).toEqual(['tour-vscode-1', 'tour-vscode-2']);
     expect(ids(tourStateAt(3, REAL, fixture))).toEqual(['tour-vscode-1', 'tour-vscode-2', 'reply', 'replay']);
     expect(ids(tourStateAt(7, REAL, fixture))).toEqual(['tour-vscode-1', 'tour-vscode-2', 'reply', 'replay', 'reply', 'replay', 'replay']);
@@ -407,11 +386,9 @@ describe('what the window draws', () => {
     expect(reply.wire.sent_annotations).toBe(2);
     const asking = tourMessages(fixture, TOUR_THREAD, tourStateAt(7, REAL, fixture)).find((v) => v.fixture?.asks)!;
     expect(asking.wire.questions![0]).toMatchObject({ state: 'sent', sent_reply_id: TOUR_REPLY_ID });
-    // The PR message shows its screenshots in its text, as captured images of the thread.
     const pr = tourMessages(fixture, TOUR_THREAD, tourStateAt(7, REAL, fixture)).at(-1)!;
     expect(pr.wire.body).toContain('](built-a1.webp)');
     expect(pr.wire.inline_images!.map((i) => i.id)).toEqual(['tour-img-built-a1', 'tour-img-built-a2']);
-    // C: the person's message, then the agent's answer.
     const c = tourMessages(fixture, TOUR_NEW_THREAD, tourStateAt(10, REAL, fixture));
     expect(c.map((v) => v.wire.author.kind)).toEqual(['person', 'agent']);
   });
@@ -448,12 +425,10 @@ describe('the fixture', () => {
     const q = tourQuestion(fixture)!;
     expect(q.question.parsed.choices.map((c) => c.label)).toContain(REAL);
     expect(q.question.parsed.choices.filter((c) => c.image).length).toBe(3);
-    // The warm-up is plain text (crawl): no pictures, its real answer one of its choices.
     const w = tourWarmQuestion(fixture)!;
     expect(w.question.kind).toBe('single');
     expect(w.question.parsed.choices.map((c) => c.label)).toContain(WARM);
     expect(w.question.parsed.choices.every((c) => !c.image)).toBe(true);
-    // The suggestions name words that are on screen.
     expect(ask.body).toContain(ask.suggest!.phrase!);
     expect(readFileSync(join(CONTENT, 'evaluation.md'), 'utf8')).toContain(ask.attachments!.find((a) => a.name === 'EVALUATION.md')!.suggest!.phrase!);
   });

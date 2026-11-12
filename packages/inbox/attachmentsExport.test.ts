@@ -1,11 +1,3 @@
-/**
- * The feedback a Send carries for images a message shows (approval
- * "inbox-image-viewer"): named by the path as written plus the message it was
- * in; two messages showing the same path within one minute never share a
- * heading; and a comment whose file the caller did not list (an older phone
- * app that does not know `inline_images`) still rides the Send under the path
- * it was made on, never dropped while it is marked sent.
- */
 import { expect, test } from 'bun:test';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { attachmentFeedback, exportFileLabel } from './attachments';
@@ -58,7 +50,6 @@ test('an image in a message is named by its path and the message; the same path 
   const labelC = exportFileLabel(c, '/work/shop', all);
   expect(labelB).toMatch(/:\d{2}:41 [AP]M message 1\)$/);
   expect(labelC).toMatch(/:\d{2}:41 [AP]M message 2\)$/);
-  // Each picture keeps its own section in the feedback.
   const text = attachmentFeedback([comment('c1', a, 'First.'), comment('c2', b, 'Second.', 'msg_b'), comment('c3', c, 'Third.', 'msg_c')], all, new Map(), '/work/shop');
   expect(text.match(/^## design\/b\.png/gm)).toHaveLength(3);
 });

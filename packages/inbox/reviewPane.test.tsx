@@ -1,18 +1,3 @@
-/**
- * The verdict from the full-window review (code review in the Inbox), with
- * the Inbox's doors stubbed at `fetch`. What regresses:
- *
- *  - the verdict going to the session that wrote the review after it ended,
- *    with no word to the person, while another session of the project is
- *    live (a reply asks where it goes; so does the verdict);
- *  - the note on a decision lost when its send fails, or a retry of the same
- *    verdict going with a new idempotency key (two replies for one verdict);
- *  - a verdict whose answer comes after the person left the review pulling
- *    them back to its thread.
- *
- * The diff reader is stubbed: this file is about the header's decision.
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,8 +13,6 @@ const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
   mock.module('#guide-reader', () => ({ default: () => null }));
-  // The real review-app dialog and submit (tsconfig `paths` points the window's typecheck at its .d.ts).
-  // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
   const seam: string = './guide/PlatformPost.tsx';
   const real = (await import(seam)) as Record<string, unknown>;
   mock.module('#platform-post', () => real);
@@ -76,17 +59,12 @@ let posted: Record<string, unknown>[] = [];
 let others: (typeof OTHER)[] = [];
 let replyAnswer: () => Response = () => Response.json({ reply: {}, questions: [], replayed: false });
 let backs = 0;
-/** Post to GitHub/GitLab: what went to `POST /api/inbox/pulls/review`, and the list the review reads its PR from. */
 let reviewPosts: Record<string, unknown>[] = [];
-/** The answer to the next `POST /pulls/review`, and the head the pull list reads (a refresh included). */
 let reviewReply: () => Response = () => Response.json({ ok: true, prUrl: 'https://github.com/acme/ledger/pull/880', submission: { status: 'complete' } });
 let listHead = 'a'.repeat(40);
 let listReads: string[] = [];
-/** The thread's annotation records (`/attachments`): a guided-review comment when a test writes one. */
 let annotations: Record<string, unknown>[] = [];
-/** What asked `GET /api/inbox/pulls/details`. */
 let detailsReads: string[] = [];
-/** `GET /api/inbox/pulls/diff`: the PR's own diff, when a test gives one (else the door answers `{}`, a diff not read). */
 let pullDiffAnswer: Record<string, unknown> | null = null;
 const PR_KEY = 'github.com/acme/ledger#880';
 const PR = {
@@ -189,13 +167,10 @@ test.skipIf(!hasDom)('the top bar holds what the rail held: Walkthrough | All fi
   expect(bar.querySelector('[data-review-mode-choice="files"]')).not.toBeNull();
   expect(bar.querySelector('[data-review-jump]')?.textContent).toContain('Overview');
   expect(bar.querySelector('[data-review-title]')?.textContent).toBe('Token refresh');
-  // Less to read: the way back is its arrow, still named for a screen reader and a tooltip.
   const back = bar.querySelector<HTMLElement>('.ib-back')!;
   expect(back.textContent).toBe('');
   expect(back.getAttribute('aria-label')).toBe('Thread');
-  // Nothing of the old header's: the review's name is said once.
   expect(bar.textContent).not.toContain('· from');
-  // The diff controls are the bar's (approval "diff-controls-headers"): one Split / Unified button, not the old radios.
   const controls = bar.querySelector<HTMLElement>('[data-diff-controls]')!;
   expect(controls).not.toBeNull();
   expect(bar.querySelector('[data-review-title]')!.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -234,7 +209,6 @@ test.skipIf(!hasDom)('a walkthrough (code as it is) reads with no Approve or Req
   expect(document.querySelector('[data-review-message]')?.getAttribute('aria-label')).toBe('Walkthrough');
   expect(!!document.querySelector('[data-review-decision]')).toBe(false);
   expect(!!document.querySelector('[data-decision-primary]')).toBe(false);
-  // Nothing is marked as changed, so Split would draw the same code twice: the bar keeps its other controls only.
   const controls = document.querySelector<HTMLElement>('[data-review-message] [data-diff-controls]')!;
   expect(!!controls).toBe(true);
   expect(!!controls.querySelector('[data-diff-layout-toggle]')).toBe(false);
@@ -257,7 +231,6 @@ test.skipIf(!hasDom)('a walkthrough (code as it is) reads with no Approve or Req
 
 test.skipIf(!hasDom)("a teammate's PR posts its full verdict on GitHub, while its agent path stays verdict-free (no reply, no choice)", async () => {
   await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
-  // Posting is the only ending here: no agent verdict control, no choice of where it goes.
   expect(document.querySelector('[data-review-destination]')).toBeNull();
   expect(document.querySelector('[data-review-decision]:not([data-review-posts])')).toBeNull();
   const primary = document.querySelector<HTMLElement>('[data-review-posts="github"] [data-decision-primary]');
@@ -273,7 +246,6 @@ test.skipIf(!hasDom)("a teammate's PR posts its full verdict on GitHub, while it
   expect(document.querySelector('[data-pull-review-posted]')?.textContent).toContain('Approved on GitHub');
 });
 
-/** Types into the open dialog's main comment, as a person does (React reads the input event). */
 function typeMainComment(words: string) {
   const box = document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')!;
   Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!.call(box, words);
@@ -287,7 +259,6 @@ test.skipIf(!hasDom)('after a post: a follow-up main comment still posts; a push
   await act(async () => dialogButton('Approve').click());
   await settle();
   expect(document.querySelector('[data-review-posted-done]')?.textContent).toContain('Approved on GitHub');
-  // Only the main comment changed: a follow-up, with no line comments posted again.
   await click('[data-review-post-followup]');
   act(() => typeMainComment('Also: the sidebar icons.'));
   await act(async () => dialogButton('Post Comments').click());
@@ -296,7 +267,6 @@ test.skipIf(!hasDom)('after a post: a follow-up main comment still posts; a push
   expect(String(reviewPosts.at(-1)!.body)).toContain('Also: the sidebar icons.');
   expect(document.querySelector('[data-review-posted-done]')?.textContent).toContain('Approved on GitHub');
 
-  // Pushed since: the post is refused, the PR is read again from the forge, and the next post goes at the new head.
   reviewReply = () => Response.json({ error: 'This pull request has new commits since you read it.', code: 'pull_moved' }, { status: 409 });
   listHead = 'b'.repeat(40);
   await click('[data-review-post-followup]');
@@ -341,7 +311,6 @@ test.skipIf(!hasDom)('a comment posted once is never posted again, even after a 
   await act(async () => dialogButton('Approve').click());
   await settle();
   expect(String(reviewPosts[0]!.body)).toContain('Mirror the icons.');
-  // A follow-up refused for a push: read again at head B.
   reviewReply = () => Response.json({ error: 'This pull request has new commits since you read it.', code: 'pull_moved' }, { status: 409 });
   listHead = 'b'.repeat(40);
   await click('[data-review-post-followup]');
@@ -349,7 +318,6 @@ test.skipIf(!hasDom)('a comment posted once is never posted again, even after a 
   await act(async () => dialogButton('Post Comments').click());
   await settle();
   expect(document.querySelector('[data-review-pull-moved]')?.getAttribute('data-review-pull-moved')).toBe('read');
-  // At B: the decision is back, and its post carries no comment that already went.
   reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
   await click('[data-review-posts] [data-decision-primary]');
   await act(async () => dialogButton('Approve').click());
@@ -434,7 +402,6 @@ test.skipIf(!hasDom)('a failed send keeps the note, and the retry goes with the 
   expect(backs).toBe(0);
   expect(Object.values(readReviewNotes(REVIEW))).toEqual(['Ship it after the test.']);
 
-  // Retried: the same verdict, the same key; once it went, the note is gone.
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
   await click('[data-review-decision] [data-decision-caret]');
   const again = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((el) => el.textContent?.includes('note'));
@@ -463,8 +430,6 @@ test.skipIf(!hasDom)('a verdict answered after the review closed leaves the pers
   expect(backs).toBe(0);
 });
 
-// A global comment (on the whole review) is a comment like a line comment: it flips Approve to Send feedback and
-// rides the verdict, under "Global comments" ahead of the files.
 test.skipIf(!hasDom)('a global comment flips the decision to Send feedback and rides the verdict under Global comments', async () => {
   others = [];
   const text = 'Split the guard and the retry into two PRs.';
@@ -484,16 +449,10 @@ test.skipIf(!hasDom)('a global comment flips the decision to Send feedback and r
   expect(String(posted[0]!.feedback)).toContain(`## Global comments\n\n${text}`);
 });
 
-// The PR page's Details in the full review (approval "inbox-review-details-panel"), and the PR title as its way in.
 const titleButton = () => document.querySelector<HTMLElement>('[data-review-message] .ib-vhead [data-pull-details-title]');
 const detailsButton = () => document.querySelector<HTMLElement>('[data-review-message] .ib-vhead [data-pull-details-button]');
-// Booleans, not `toBeNull()` on an element: Bun's matcher can pass an element it takes seconds to print.
 const detailsShown = () => !!document.querySelector('[data-pull-details]');
 
-/**
- * App's Escape ladder stands in here: a window listener in the bubble, as App's is, that leaves the review on an Escape
- * nothing marked used. What it saw, one entry per Escape.
- */
 function windowLadder() {
   const seen: boolean[] = [];
   const onKey = (event: KeyboardEvent) => {
@@ -507,13 +466,10 @@ test.skipIf(!hasDom)('a thread handed one PR: its title opens the PR page\'s det
   await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
   const title = titleButton()!;
   expect(title.tagName).toBe('BUTTON');
-  // Its name starts with the words on screen, and says what a click does.
   expect(title.getAttribute('aria-label')).toBe('Token refresh, opens details');
   expect(title.getAttribute('aria-expanded')).toBe('false');
-  // The owner's "title only": no Details button beside it.
   expect(detailsButton() === null).toBe(true);
   expect(detailsShown()).toBe(false);
-  // The status the button carried rides at the title's end: failing checks, one person's comment.
   expect(title.querySelector('[data-pull-details-checks]')?.getAttribute('data-pull-details-checks')).toBe('fail');
   expect(title.querySelector('[data-pull-details-comments]')?.textContent).toBe('1');
 
@@ -527,7 +483,6 @@ test.skipIf(!hasDom)('a thread handed one PR: its title opens the PR page\'s det
   expect(panel.textContent).toContain('Does this handle Hebrew?');
   expect(panel.querySelector('[data-pull-details-labels]')?.textContent).toBe('i18n');
 
-  // Escape closes the details, not the review: App's ladder on the window finds it used.
   const ladder = windowLadder();
   try {
     await act(async () => {
@@ -570,7 +525,6 @@ test.skipIf(!hasDom)('Escape in a menu over the bar closes only the menu: the de
   }
   expect(document.querySelector('[data-review-message] [data-review-jump]')?.getAttribute('aria-expanded')).toBe('false');
   expect(detailsShown()).toBe(true);
-  // The menu kept its Escape (stopped or marked): the ladder never sees it as unused.
   expect(ladder.seen).not.toContain(false);
 });
 
@@ -581,7 +535,6 @@ test.skipIf(!hasDom)('Tab out of the details closes them, so focus never lands u
   const panel = document.querySelector<HTMLElement>('[data-pull-details]')!;
   const close = panel.querySelector<HTMLElement>('[data-pull-details-close]')!;
   await act(async () => close.focus());
-  // A click elsewhere (no Tab) leaves them open.
   await act(async () => titleButton()!.focus());
   expect(detailsShown()).toBe(true);
   await act(async () => close.focus());
@@ -593,7 +546,6 @@ test.skipIf(!hasDom)('Tab out of the details closes them, so focus never lands u
   expect(detailsShown()).toBe(false);
 });
 
-/** inbox.css's `display: none` rules for a window `width` px wide: the selectors inside a `@media` whose min/max widths hold it. */
 function hiddenAt(width: number): string[] {
   const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
   const found: string[] = [];
@@ -627,7 +579,6 @@ test.skipIf(!hasDom)('a short bar (768 to 959 px) hides the review\'s title but 
     }
   });
   await render();
-  // The rule is read: a local review's title gives way there.
   expect(hides(document.querySelector('[data-review-message] .ib-vhead [data-review-title]')!).length).toBeGreaterThan(0);
   act(() => root?.unmount());
   host?.remove();
@@ -653,7 +604,6 @@ test.skipIf(!hasDom)('no details where there is no one PR: a local review, and a
   await render();
   expect(titleButton() === null).toBe(true);
   expect(detailsButton() === null).toBe(true);
-  // The title stays words, not a button.
   expect(document.querySelector('[data-review-title]')?.tagName).toBe('SPAN');
   act(() => root?.unmount());
   host?.remove();

@@ -1,10 +1,3 @@
-/**
- * Earlier comments in the comments column, in the real pane. What would regress: a file you commented on reading as
- * empty ("0", "No annotations yet"), a list that scrolls or folds on its own terms, anything changing for a file with
- * no earlier comments, or the drawer's remembered state being forced open.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -55,7 +48,6 @@ const STEPS: AttachmentStep[] = attachmentSequence([{ id: M1, created_at: '2026-
 
 const annotation = (id: string, text: string, originalText: string) => ({ id, blockId: 'block-0', startOffset: 0, endOffset: 4, type: 'COMMENT', text, originalText, createdA: 1 });
 
-/** A sent comment on notes.md, made on an older attachment of the same path. */
 const EARLIER = {
   id: 'ann_old',
   attachment_id: 'att_01K7OLDOLDOLDOLDOLDOLDOLDO',
@@ -136,13 +128,11 @@ const row = () => host!.querySelector<HTMLButtonElement>('[data-earlier-row]')!;
 const listed = () => host!.querySelector('[data-earlier-comment="ann_old"]');
 const column = () => host!.querySelector<HTMLElement>('.ib-apanel')!;
 const muted = (el: Element) => [...el.querySelectorAll('.ib-earlier-cnt')].map((s) => s.textContent);
-/** The number in the button as it reads, its muted parts included. */
 const reads = () => button().textContent;
 const click = async (el: HTMLElement) => {
   await act(async () => el.click());
   await settle();
 };
-/** Full screen and a phone keep the column closed until the comment button opens it. */
 const openColumn = async () => {
   const comments = host!.querySelector<HTMLButtonElement>('[data-full-view-comments]');
   if (comments?.getAttribute('aria-expanded') === 'false') await click(comments);
@@ -223,7 +213,6 @@ for (const [mode, props] of [
       expect(column().contains(section())).toBe(true);
       const card = column().querySelector('[data-annotation-id="d1"]')!;
       expect(Boolean(card.compareDocumentPosition(section()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-      // The row is the section's one control: no edit, delete or selection on an earlier comment.
       const controls = [...section()!.querySelectorAll('button, textarea, a')];
       expect(controls.length).toBe(1);
       expect(controls[0] === row()).toBe(true);
@@ -254,7 +243,6 @@ describe('nothing reads as gone', () => {
     expect(column().querySelector('[data-strip-chip]')!.textContent).toContain('1 annotation');
     expect(column().querySelector('[data-strip-chip]')!.textContent).toContain('on other files');
     expect(row().textContent).toBe('Earlier on this file1');
-    // No zero, for the eye or the ear: the only number here is the earlier one.
     expect(column().querySelector('.ib-sheet-h')!.textContent).toBe('Comments');
     expect(reads()).toBe('1');
     expect(button().getAttribute('aria-label')).toBe('Comments, 1 earlier');

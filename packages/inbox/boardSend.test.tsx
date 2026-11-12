@@ -1,24 +1,3 @@
-/**
- * Send to an agent and Start on the Board (approval "inbox-board", step 2)
- * against a REAL Inbox (its own process, tests/helpers/inbox-dom-server.ts),
- * with a live agent session polling the bridge as a connection does. What is
- * proved, with the window's own code (BoardPage) doing the calls:
- *
- *  - Start on an agent's Todo card sends that agent ONE message in the
- *    card's thread naming the card, and marks the card sent; the card stays
- *    in Todo. When the answer to the send is lost, pressing Start again
- *    sends nothing more: the message and the send replay.
- *  - New card, Send to an agent: the card is made first (so the message can
- *    name it), then a thread to the session, then the send. When the answer
- *    to the thread is lost, pressing Send again makes no second card and no
- *    second thread. The agent's wake carries the card's id.
- *
- * What regresses: a retry that sends a second message or makes a second
- * card, a message that says "it is yours now" for a card that does not
- * exist, or a Start that moves the card.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -46,11 +25,8 @@ let root: Root | null = null;
 let savedFetch: typeof fetch;
 let reader: ReadableStreamDefaultReader<Uint8Array>;
 let buffered = '';
-/** The next request whose answer the test throws away after the server handled it (a lost answer). */
 let loseAnswerOf: { method: string; path: RegExp } | null = null;
-/** The next request that fails before it reaches the server (nothing happens there). */
 let failBeforeOf: { method: string; path: RegExp } | null = null;
-/** Whether the window's read of the live sessions has been answered in this test. */
 let sessionsAnswered = false;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
@@ -89,7 +65,6 @@ const get = async <T,>(path: string) => JSON.parse((await loopback(path)).text) 
 beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-board-send-dom-')));
-  // The Board is off by default: this person turned it on (config.json `inboxBoard`), so agents get the card action.
   mkdirSync(join(dir, 'data'), { recursive: true });
   writeFileSync(join(dir, 'data', 'config.json'), JSON.stringify({ inboxBoard: true }));
   child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '5'], {
@@ -156,7 +131,6 @@ async function until(check: () => boolean | Promise<boolean>, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** The Board as App draws it, over the real Inbox: the cards, the projects, the opened card. */
 async function drawBoard(openCard: string | null) {
   const model = await get<NonNullable<BoardPageProps['model']>>('/api/inbox/cards');
   const { projects } = await get<{ projects: BoardPageProps['projects'] }>('/api/inbox/projects');
@@ -193,18 +167,14 @@ const cardsTitled = async (title: string) => (await get<{ cards: InboxCardWire[]
 
 test.if(hasDom)('Start tells the card’s live agent once, in the card’s thread, naming the card; a retry after a lost answer sends nothing more', async () => {
   const session = `ses_a${index - 1}`;
-  // The agent's connection polls: it is live. It makes a card (Todo, an agent's default), linked to its thread.
   await ask({ poll: { session, body: {} } });
   const { carded } = (await ask({ card: { project: world.project, session, title: 'Retry budget', say: 'Not started', thread: world.stopped } })) as { carded: string };
   await drawBoard(carded);
   await until(() => !!document.querySelector<HTMLButtonElement>('[data-card-start]:not([disabled])'), 'Start, with the agent live');
-  // The send's answer is lost: the window says so, the server has done it.
   loseAnswerOf = { method: 'POST', path: new RegExp(`^/api/inbox/cards/${carded}$`) };
   await act(async () => document.querySelector<HTMLButtonElement>('[data-card-start]')!.click());
   await until(() => !document.querySelector('[data-card-start][disabled]'), 'Start done');
-  // The answer was lost (the server sent the message and marked the card), so the window tries again.
   expect(loseAnswerOf).toBeNull();
-  // Press it again: the same message and the same send replay.
   await act(async () => document.querySelector<HTMLButtonElement>('[data-card-start]')?.click());
   await until(async () => (await cardsTitled('Retry budget'))[0]?.sent !== null, 'the card sent');
   const [card] = await cardsTitled('Retry budget');
@@ -214,10 +184,8 @@ test.if(hasDom)('Start tells the card’s live agent once, in the card’s threa
   const mine = thread.thread.messages.filter((m) => m.author.kind === 'person');
   expect(mine).toHaveLength(1);
   expect(mine[0]!.body).toContain(`Board card ${carded}`);
-  // The agent's wake: one message, naming the card.
   const { commands } = (await ask({ poll: { session, body: {} } })) as { commands: { type: string; body: string }[] };
   expect(commands.filter((c) => c.body.includes(carded))).toHaveLength(1);
-  // History says the Start went into the card's own thread.
   const { history } = await get<{ history: { kind: string; existing_thread?: boolean }[] }>(`/api/inbox/cards/${carded}`);
   expect(history.find((h) => h.kind === 'sent')).toMatchObject({ existing_thread: true });
 });
@@ -233,33 +201,26 @@ test.if(hasDom)('New card, Send to an agent: the card first and named in the mes
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title, 'Sent from the Board');
     title.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  // Send to an agent once the window knows the live sessions (choosing Send opens the picker
-  // only then; Bun 1.4.4's loopback answers after the click when the test does not wait).
   await until(() => sessionsAnswered, 'the live sessions read');
   await act(async () => document.querySelector<HTMLInputElement>('[data-new-card-mode="send"] input')!.click());
   await until(() => document.querySelectorAll('[role="option"]').length > 0, 'the live sessions');
   await act(async () => document.querySelector<HTMLElement>('[role="option"]')!.click());
-  // The thread's answer is lost once.
   loseAnswerOf = { method: 'POST', path: /^\/api\/inbox\/messages$/ };
   const send = () => [...document.querySelectorAll<HTMLButtonElement>('[data-new-card-add]')].at(-1)!;
   await act(async () => send().click());
   await until(() => !!document.querySelector('[data-new-card-error]'), 'the error');
-  // One card already, unsent, in Backlog (the message names it when it goes).
   expect(await cardsTitled('Sent from the Board')).toHaveLength(1);
   await act(async () => send().click());
   await until(() => !document.querySelector('[data-new-card-title]'), 'the dialog closed');
   const cards = await cardsTitled('Sent from the Board');
   expect(cards).toHaveLength(1);
   expect(cards[0]!.sent).toMatchObject({ to: { session } });
-  // One thread to the session, its message naming the card.
   const { commands } = (await ask({ poll: { session, body: {} } })) as { commands: { type: string; body: string; thread_id: string }[] };
   const mine = commands.filter((c) => c.body.includes(`card ${cards[0]!.id}`));
   expect(mine).toHaveLength(1);
   expect(mine[0]!.thread_id).toBe(cards[0]!.sent!.thread_id);
 });
 
-// What regresses: the answer to the create is lost, the person fixes the title, and every retry is
-// refused `idempotency_key_reused` (the same key with other words), or a retry makes a second card.
 test.if(hasDom)('New card into Backlog: the answer lost, the title edited, then Add again makes one card, with the new title', async () => {
   await drawBoard(null);
   act(() => document.querySelector<HTMLButtonElement>('[data-board-new]')!.click());
@@ -276,7 +237,6 @@ test.if(hasDom)('New card into Backlog: the answer lost, the title edited, then 
   const add = () => [...document.querySelectorAll<HTMLButtonElement>('[data-new-card-add]')].at(-1)!;
   await act(async () => add().click());
   await until(() => !!document.querySelector('[data-new-card-error]'), 'the error');
-  // The server made it; the window never heard.
   expect(await cardsTitled('Retry me, first words')).toHaveLength(1);
   await type('Retry me, better words');
   await act(async () => add().click());
@@ -287,7 +247,6 @@ test.if(hasDom)('New card into Backlog: the answer lost, the title edited, then 
   expect(cards[0]!.column).toBe('backlog');
 });
 
-/** New card's title field, typed into. */
 async function typeTitle(value: string) {
   const title = document.querySelector<HTMLInputElement>('[data-new-card-title]')!;
   await act(async () => {
@@ -296,7 +255,6 @@ async function typeTitle(value: string) {
   });
 }
 
-/** New card's project menu: pick another project (by id). */
 async function pickProject(id: string) {
   const trigger = document.querySelector<HTMLElement>('[data-new-card-project]')!;
   await act(async () => {
@@ -320,8 +278,6 @@ async function addExpectingError() {
   await until(() => !!document.querySelector('[data-new-card-error]'), 'the error');
 }
 
-// What regresses: the answer lost, the project changed, and the old card's drop fails (two live cards),
-// or its drop landed with the answer lost and every retry is refused for dropping a dropped card.
 test.if(hasDom)('New card: the answer lost, the project changed, the drop failing then its answer lost: one live card, in the new project', async () => {
   const other = worlds.find((w) => w.project !== world.project)!.project;
   await drawBoard(null);
@@ -332,15 +288,12 @@ test.if(hasDom)('New card: the answer lost, the project changed, the drop failin
   await addExpectingError();
   expect((await cardsTitled('Moved after a lost answer')).map((c) => c.project_id)).toEqual([world.project]);
   await pickProject(other);
-  // The old card's drop never reaches the server: nothing new is made beside it.
   failBeforeOf = { method: 'POST', path: /^\/api\/inbox\/cards\/crd_/ };
   await addExpectingError();
   let cards = await cardsTitled('Moved after a lost answer');
   expect(cards.map((c) => [c.project_id, c.column])).toEqual([[world.project, 'backlog']]);
-  // The drop lands, its answer lost.
   loseAnswerOf = { method: 'POST', path: /^\/api\/inbox\/cards\/crd_/ };
   await addExpectingError();
-  // Then Add works: the dropped card is not dropped again, and one card stands, in the new project.
   await act(async () => addButton().click());
   await until(() => !document.querySelector('[data-new-card-title]'), 'the dialog closed');
   cards = await cardsTitled('Moved after a lost answer');

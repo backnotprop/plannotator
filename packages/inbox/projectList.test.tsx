@@ -1,15 +1,3 @@
-/**
- * The list's project column. With every project shown a wide row starts with
- * the project label and the agents' marks after it (approval
- * "list-rows-mail-icons", 2026-10-30), then the title cell; the words, the
- * badge, the count and the time follow in columns of their own. In one
- * project's list (a sidebar folder) the project label is not rendered and the
- * first cell holds the marks alone. The failure this catches is the label
- * coming back merely hidden (display: none, an empty span), or the marks
- * dropped with it. Pixel positions are proved in tests/e2e/inbox.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -108,16 +96,12 @@ describe.if(hasDom)('the wide list', () => {
       expect(cells[0]!.querySelector('.ib-p')!.textContent).toBe('billing-svc');
       expect(cells[0]!.querySelector('.ib-p + .ib-ags .ib-mk')).not.toBeNull();
       expect(cells[1]!.className).toBe('ib-subj');
-      // The badge sits in its own column, never inside the title cell, and no mark is right of the project cell;
-      // every row has every cell, empty or not, so the columns line up down the list.
       expect(cells[1]!.querySelector('.ib-badge, .ib-mk')).toBeNull();
       expect(cells.slice(2).map((c) => c.className.split(' ')[0])).toEqual(['ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
       expect(cells.slice(1).some((c) => c.querySelector('.ib-mk'))).toBe(false);
     }
-    // The badge's column holds the words of a blocked row in full-width mode (`WIDE_ROW_WAIT_WORDS`), or nothing.
     expect(rowEl(el, 'msg_stop').children[3]!.querySelector('.ib-badge')).toBeNull();
     expect(rowEl(el, 'msg_stop').children[3]!.textContent).toBe(WIDE_ROW_WAIT_WORDS ? 'Stopped' : '');
-    // The open count is ?N (from one question on), filled when the row is blocked, its words for a screen reader.
     expect(rowEl(el, 'msg_stop').children[4]!.querySelector('.ib-sr')!.textContent!.trim()).toBe('Stopped on you: 1 question');
     expect(rowEl(el, 'msg_wait').children[4]!.querySelector('.ib-sr')!.textContent!.trim()).toBe('1 question');
   });
@@ -131,17 +115,14 @@ describe.if(hasDom)('the wide list', () => {
       expect(cells.map((c) => c.className.split(' ')[0])).toEqual(['ib-from', 'ib-subj', 'ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
       expect([...cells[0]!.children].map((c) => c.className)).toEqual(['ib-ags']);
     }
-    // The title cell starts with the title: the thread's name, or the subject of an unnamed thread.
     expect(rowEl(el, 'msg_wait').querySelector('.ib-subj > .ib-title')!.textContent).toBe('refund-webhooks');
     expect(rowEl(el, 'msg_sent').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-title');
-    // The badge's column keeps its place; a blocked row's mark is in the open counts' column, never in the title cell.
     for (const [id, words, step] of [['msg_stop', 'Stopped', 'stop'], ['msg_hold', 'Holds up 2', 'hold']] as const) {
       const r = rowEl(el, id);
       expect(r.querySelector('.ib-subj :is(.ib-badge, .ib-qn)')).toBeNull();
       expect(r.querySelector('.ib-bcol')!.textContent).toBe(WIDE_ROW_WAIT_WORDS ? words : '');
       expect(r.querySelector<HTMLElement>('.ib-cq > .ib-qn')!.dataset.waitStep).toBe(step);
     }
-    // The guided review mark stays in the title cell, after the preview.
     const wait = rowEl(el, 'msg_wait').querySelector('.ib-subj')!;
     expect([...wait.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-title', 'ib-pv', 'ib-att']);
     const mark = wait.querySelector('[data-guide-mark]')!;
@@ -166,11 +147,9 @@ describe.if(hasDom)('the wide list', () => {
   test('every project, in a list narrower than the wide row needs: three-line rows; one project keeps its wide rows', () => {
     const saved = globalThis.ResizeObserver;
     let width = 800;
-    // happy-dom lays nothing out: report the list's width the way a browser's observer would.
     globalThis.ResizeObserver = class {
       constructor(private readonly callback: ResizeObserverCallback) {}
       observe() {
-        // A browser's entry: the border box, and a content box 1px narrower (the column's border).
         this.callback([{ contentRect: { width: width - 1 }, borderBoxSize: [{ inlineSize: width, blockSize: 0 }] } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
       }
       unobserve() {}
@@ -180,7 +159,6 @@ describe.if(hasDom)('the wide list', () => {
       let el = render(false);
       expect(el.querySelectorAll('.ib-row').length).toBe(0);
       expect(el.querySelectorAll('.ib-nrow').length).toBe(4);
-      // The guided review mark stays on the three-line row.
       expect(el.querySelector('.ib-nrow[data-thread-id="msg_wait"] [data-guide-mark]')).not.toBeNull();
       act(() => root?.unmount());
       host?.remove();
@@ -188,7 +166,6 @@ describe.if(hasDom)('the wide list', () => {
       expect(el.querySelectorAll('.ib-row').length).toBe(4);
       act(() => root?.unmount());
       host?.remove();
-      // One project's list, past what its columns can give up (only a wide sidebar gets here): three-line rows too.
       width = ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH;
       el = render(true);
       expect(el.querySelectorAll('.ib-row').length).toBe(4);
@@ -211,9 +188,6 @@ describe.if(hasDom)('the wide list', () => {
   test('a focused row keeps focus when the list crosses the three-line width, both ways', () => {
     const saved = globalThis.ResizeObserver;
     let resize: (width: number) => void = () => {};
-    // happy-dom lays nothing out: the stub reports the widths a browser's observer would.
-    // Only the list's own observer (the first): a badge's card, shown while its row has keyboard focus,
-    // positions itself with observers of its own.
     let listObserver = false;
     globalThis.ResizeObserver = class {
       constructor(private readonly callback: ResizeObserverCallback) {}
@@ -238,7 +212,6 @@ describe.if(hasDom)('the wide list', () => {
       expect(document.activeElement).toBe(narrow);
       act(() => resize(1000));
       expect(document.activeElement).toBe(el.querySelector('.ib-row[data-thread-id="msg_hold"]'));
-      // Focus outside the list is left alone.
       const outside = document.createElement('button');
       document.body.append(outside);
       outside.focus();

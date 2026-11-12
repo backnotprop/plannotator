@@ -1,24 +1,3 @@
-/**
- * `/side`, the reply box's built-in command for the side chat (the owner,
- * 2026-11-09: "Similar to draw, I want a baked in command for side chat").
- * It is a row of the reply box's "/" list beside Plannotator's other
- * built-ins, and it is a window action, not a skill: picking it takes the
- * words typed in the reply to the thread's side chat (Ask AI's window), in
- * its box, focused, not sent; the reply lets go of them only once that box
- * has them.
- *
- * Failures to catch: the row listed in a thread that cannot ask (a dead
- * entry) or on a phone (no Ask there), or missing from one that can; the
- * words lost, sent on their own, or left in both boxes; words already in the
- * chat's box replaced; `/side` or a skills block reaching the agent or the
- * thread; a typed `/side` painted or counted as a skill; a pick with nothing
- * typed not opening the chat; a skill of the person's own named `side` losing
- * to the command; `$` listing a command that is not a skill.
- *
- * The real useInboxAsk, ThreadPane, composer field and ui picker, with fetch
- * answering for the Inbox; no Inbox server.
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -80,12 +59,9 @@ afterEach(async () => {
   }
 });
 
-/** Everything the window sent that could reach the agent or the thread: every request that is not a read or a draft save. */
 let wrote: { url: string; body: Record<string, unknown> }[] = [];
-/** The reply draft as the window last saved it (null: deleted, or never saved). */
 let draft: string | null = null;
 
-/** The Inbox's answers: the thread's Ask model (`can_ask` as given), its reply draft, and the skills the person has. */
 function serve(canAsk: boolean, skills: SkillCatalogEntry[] = []) {
   wrote = [];
   draft = null;
@@ -121,7 +97,6 @@ async function until(check: () => boolean | Promise<boolean>, what: string, ms =
   }
 }
 
-/** The thread and the window's Ask, wired as App wires them. */
 function ThreadWithAsk({ phone = false }: { phone?: boolean }) {
   const ask = useInboxAsk({ on: true, codeReview: false, threadId: ROOT, phone, openThread: () => {}, replyInThread: () => {} });
   return (
@@ -149,7 +124,6 @@ const askBox = () => document.querySelector<HTMLTextAreaElement>('[data-chat-win
 const listed = () => [...document.querySelectorAll<HTMLElement>('[data-skill-menu] [data-skill-item]')].map((row) => row.dataset.skillItem);
 const row = (name: string) => document.querySelector<HTMLElement>(`[data-skill-menu] [data-skill-item="${name}"]`);
 
-/** The thread on screen with its reply box open. */
 async function openReply(canAsk: boolean, skills: SkillCatalogEntry[] = [], phone = false) {
   serve(canAsk, skills);
   host = document.createElement('div');
@@ -166,7 +140,6 @@ async function openReply(canAsk: boolean, skills: SkillCatalogEntry[] = [], phon
   await settle();
 }
 
-/** Type as a person does: the value, the caret at its end, then what React's select plugin reads. */
 async function type(el: HTMLTextAreaElement, value: string) {
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, value);
@@ -195,7 +168,6 @@ test.skipIf(!hasDom)('a thread that can ask: /side is listed after the other bui
   await type(replyBox()!, 'Why is the cap five attempts? /');
   await until(() => listed().length > 0, 'the "/" list');
   expect(listed()).toEqual(['review-curate', 'shape', 'side', 'readback']);
-  // A built-in's row: its name, one line, and "Plannotator" at the right end, as /shape's.
   const parts = (name: string) => [...row(name)!.querySelectorAll<HTMLElement>('[data-skill-item-part]')].map((part) => part.dataset.skillItemPart);
   expect(parts('side')).toEqual(parts('shape'));
   expect(row('side')!.querySelector('[data-skill-item-part="root"]')!.textContent).toBe(row('shape')!.querySelector('[data-skill-item-part="root"]')!.textContent);
@@ -203,30 +175,25 @@ test.skipIf(!hasDom)('a thread that can ask: /side is listed after the other bui
   expect(row('side')!.getAttribute('role')).toBe('option');
   expect(askBox()).toBeNull();
 
-  // The words are a saved draft by now, as any reply's.
   await until(() => draft === 'Why is the cap five attempts? /', 'the draft to save', 5000);
 
   await press(row('side')!);
   await until(() => askBox() !== null, 'the side chat');
   expect(askBox()!.value).toBe('Why is the cap five attempts?');
   await until(() => document.activeElement === askBox(), 'focus in the chat box');
-  // The reply let go of the words, and of its draft.
   await until(() => replyBox() === null || replyBox()!.value === '', 'the reply to clear');
   expect(listed()).toEqual([]);
   await until(() => draft === null || draft === '', 'the draft to clear', 5000);
-  // Nothing went anywhere: no reply, no question, no skills block.
   expect(wrote).toEqual([]);
 });
 
 test.skipIf(!hasDom)('the keyboard: a typed query, an arrow and Enter pick /side; words already in the chat box stay above the new ones', async () => {
   await openReply(true);
-  // No skill installed: /side alone is still something to pick.
   await type(replyBox()!, '/');
   await until(() => listed().length > 0, 'the "/" list');
   expect(listed()).toEqual(['side']);
   await press(row('side')!);
   await until(() => askBox() !== null, 'the side chat');
-  // Nothing typed: the chat opened, focused, with an empty box.
   expect(askBox()!.value).toBe('');
   await until(() => document.activeElement === askBox(), 'focus in the chat box');
   expect(replyBox()!.value).toBe('');
@@ -266,14 +233,11 @@ test.skipIf(!hasDom)('/side typed and not picked is plain words: not painted, no
   await openReply(true, [SHAPE]);
   await type(replyBox()!, 'see /side and /shape');
   await settle();
-  // The field paints /shape as a reference and says its instructions go along; /side gets neither.
   const painted = () => [...document.querySelectorAll<HTMLElement>('[data-composer-field] [data-skill-ref-token]')].map((el) => el.dataset.skillRefToken);
   await until(() => painted().length > 0, 'the painted reference');
   expect(painted()).toEqual(['shape']);
   expect(document.querySelector('[data-skill-human-only-notice] .font-mono')!.textContent).toBe('shape');
-  // What a Send would add for the agent: /shape's block only.
   const block = await inboxSkillsBlock(['see /side and /shape'], INBOX_REPLY_SKILL_AUDIENCE, undefined, inboxSkillFilter(false));
-  // The block's list of skills, before any pasted instructions.
   const named = block.split('--- BEGIN')[0]!.split('\n').filter((line) => line.startsWith('- `'));
   expect(named).toHaveLength(1);
   expect(named[0]).toContain('`shape`');
@@ -295,10 +259,8 @@ test.skipIf(!hasDom)("a skill of the person's own named side wins: it is inserte
   expect(askBox()).toBeNull();
 });
 
-/** The list's children in order: an option's name, or "|" for the hairline between the groups. */
 const listChildren = () =>
   [...document.querySelector('[data-skill-menu] [data-skill-menu-list]')!.children].map((el) => ((el as HTMLElement).dataset.skillMenuDivider ? '|' : (el as HTMLElement).dataset.skillItem));
-/** The options as assistive tech meets them: role, id by position, and whether the row is drawn as a built-in. */
 const options = () =>
   [...document.querySelectorAll<HTMLElement>('[data-skill-menu] [role="option"]')].map((el) => ({ name: el.dataset.skillItem, at: el.id.split('-option-')[1], builtin: el.dataset.skillItemHost === 'true' }));
 
@@ -309,7 +271,6 @@ test.skipIf(!hasDom)("the built-ins are one group above the person's skills: one
   await type(replyBox()!, '/');
   await until(() => listed().length > 0, 'the "/" list');
   expect(listChildren()).toEqual(['review-walkthrough', 'shape', 'side', '|', 'readback', 'write-better']);
-  // The hairline is no option and nothing a screen reader meets; the options keep their count and positions.
   const divider = document.querySelector<HTMLElement>('[data-skill-menu-divider]')!;
   expect(divider.getAttribute('aria-hidden')).toBe('true');
   expect(divider.getAttribute('role')).toBeNull();
@@ -322,24 +283,19 @@ test.skipIf(!hasDom)("the built-ins are one group above the person's skills: one
     { name: 'write-better', at: '4', builtin: false },
   ]);
 
-  // Every built-in wears Plannotator's mark, a skill the cube: both 16 px and decorative, so no row changes size.
   const icon = (name: string) => row(name)!.querySelector('svg')!;
   expect(['review-walkthrough', 'shape', 'side', 'readback', 'write-better'].map((name) => icon(name).hasAttribute('data-plannotator-mark'))).toEqual([true, true, true, false, false]);
   const frame = (name: string) => `${icon(name).getAttribute('viewBox')} ${icon(name).getAttribute('aria-hidden')} ${['w-4', 'h-4', 'shrink-0'].filter((cls) => icon(name).classList.contains(cls)).join(' ')}`;
   for (const name of ['review-walkthrough', 'shape', 'side', 'write-better']) expect(frame(name)).toBe(frame('readback'));
   expect(frame('readback')).toBe('0 0 24 24 true w-4 h-4 shrink-0');
-  // The mark is the theme's primary colour by its token, never a colour of its own.
   expect(icon('side').classList.contains('text-primary')).toBe(true);
   expect(icon('side').outerHTML).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(/i);
-  // The glyph adds nothing to what the option says.
   expect(row('side')!.textContent).toBe(`side${row('side')!.querySelector('[data-skill-item-part="description"]')!.textContent}Plannotator`);
 
-  // Typing keeps the built-ins on top, whatever the match ("w" starts write-better, and is only inside review-walkthrough and side's line).
   await type(replyBox()!, '/w');
   await type(replyBox()!, '/w');
   await until(() => listed().length === 3, 'the filtered list');
   expect(listChildren()).toEqual(['review-walkthrough', 'side', '|', 'write-better']);
-  // The arrows run through the hairline as if it were not there.
   await key(replyBox()!, 'ArrowDown');
   await key(replyBox()!, 'ArrowDown');
   expect(replyBox()!.getAttribute('aria-activedescendant')).toBe(row('side')!.id);
@@ -348,7 +304,6 @@ test.skipIf(!hasDom)("the built-ins are one group above the person's skills: one
   await key(replyBox()!, 'ArrowDown');
   expect(replyBox()!.getAttribute('aria-activedescendant')).toBe(row('review-walkthrough')!.id);
 
-  // One group only: no hairline, above or below.
   await type(replyBox()!, '/si');
   await until(() => listed().length === 1, 'only side');
   expect(listChildren()).toEqual(['side']);

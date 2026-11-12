@@ -1,7 +1,3 @@
-/**
- * The stack in the PR page's rail, words not marks. Near layers stay out, far ones fold until wanted. The bar owns
- * the title, so the row you are on says where you are instead of repeating it.
- */
 import { useEffect, useRef, useState } from 'react';
 import { inboxPullLabel, type InboxPull } from '@plannotator/core/inbox-types';
 import { RefMarkIcon } from '../board/RefMark';
@@ -10,7 +6,6 @@ import { Icon } from '../icons';
 import { chainTo } from './model';
 import { isOpen } from './topology';
 
-/** Layers this many or more fold what is far from you. */
 const FOLD_FROM = 8;
 const NEAR = 2;
 
@@ -32,9 +27,7 @@ export function RailStack({ layers, here, scope, wholeTip, wholeCounts, onLayer 
   layers: InboxPull[];
   here: InboxPull;
   scope: 'layer' | 'stack';
-  /** What the whole stack compares: its row's tip. */
   wholeTip: string;
-  /** The whole stack's own numbers, once its diff is on screen; layers' sums count a line changed twice twice. */
   wholeCounts?: { add: number; del: number };
   onLayer: (key: string, scope: 'layer' | 'stack') => void;
 }) {
@@ -45,11 +38,8 @@ export function RailStack({ layers, here, scope, wholeTip, wholeCounts, onLayer 
   const foldable = layers.length >= FOLD_FROM;
   let start = foldable && !showEarlier ? Math.max(0, at - NEAR) : 0;
   let end = foldable && !showLater ? Math.min(layers.length, at + NEAR + 1) : layers.length;
-  // A fold never hides just one row.
   if (start === 1) start = 0;
   if (end === layers.length - 1) end = layers.length;
-  // "All": every open layer, from wherever you are. What it opens is the diff up to the topmost, so its number and its
-  // counts are that diff's: merged layers are not read again, and a sibling branch is not on its chain.
   const open = layers.filter(isOpen);
   const tip = open.at(-1);
   const whole = tip ? chainTo(open, tip) : [];
@@ -79,7 +69,6 @@ export function RailStack({ layers, here, scope, wholeTip, wholeCounts, onLayer 
   );
   return (
     <div className="ib-prp-stack">
-      {/* One open layer is its own whole stack: no row that would say "All 1 layers". */}
       {whole.length > 1 && (
         <Tip content={wholeTip}>
           <button type="button" className={`ib-prp-row ib-prp-all${onWhole ? ' ib-on' : ''}`} aria-pressed={onWhole} onClick={() => tip && onLayer(tip.key, 'stack')} data-pull-layer-all="">

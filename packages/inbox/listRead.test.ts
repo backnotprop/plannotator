@@ -1,11 +1,3 @@
-/**
- * The window's list reads (listRead.ts, #2593). What this catches: a burst of
- * events reading the list once each again (Fix 2); a read asked for while
- * one is out answered by that older read, which may predate what the caller
- * just did (an action's own result missing from the list); a change put on a
- * list it was not made from (rows of another version); and a failed read
- * losing the list held, so every later read is a whole one.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { createListReader, type ListReadAnswer } from './listRead';
@@ -20,7 +12,6 @@ const change = (since: string, version: string, cursor: number, rows: InboxListR
   delta: { since, rows, sections: [{ id: 'waiting', label: 'Waiting on you', threads: order }], lists: {} },
 });
 
-/** A fetch the test answers by hand, recording each `since` and when each read started. */
 function scripted() {
   const asked: string[] = [];
   const pending: { since: string; answer: (a: ListReadAnswer<Model>) => void; fail: (e: Error) => void }[] = [];
@@ -44,7 +35,6 @@ describe('the list reader', () => {
     s.pending[0]!.answer(whole('v1', 1, row('a', 'A')));
     const first = await Promise.all(burst);
     expect(new Set(first).size).toBe(1);
-    // The next tick's calls: one more read, shared, asking for the changes since.
     const after = [reader.read(), reader.read()];
     await tick();
     expect(s.asked).toEqual(['', 'v1']);
@@ -66,12 +56,10 @@ describe('the list reader', () => {
     const fast = reader.read();
     await tick();
     expect(s.asked).toEqual(['', 'v1', 'v1']);
-    // The later read lands first, then the slow one: each is put together with the list it asked against (v1).
     s.pending[2]!.answer(change('v1', 'v3', 3, [row('a', 'A3'), row('c', 'C')], ['c', 'a']));
     expect((await fast).sections[0]!.threads.map((r) => r.subject)).toEqual(['C', 'A3']);
     s.pending[1]!.answer(change('v1', 'v2', 2, [row('a', 'A2')], ['a']));
     expect((await slow).sections[0]!.threads.map((r) => r.subject)).toEqual(['A2']);
-    // The next read names the list of the read that started last, not the one that landed last.
     const later = reader.read();
     await tick();
     expect(s.asked.at(-1)).toBe('v3');

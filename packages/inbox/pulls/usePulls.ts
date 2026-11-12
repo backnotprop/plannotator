@@ -2,39 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxPullsAnswer, InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 
-/** The window got its focus back: the list is read again, at most this often. */
 export const PULLS_FOCUS_MS = 20_000;
-/** While the page stays open, the list is read again this often (the server answers from its cache in between). */
 export const PULLS_TICK_MS = 2 * 60_000;
-/** Others is read in the background (the server never waits for it): while it is on its way, ask again this soon. */
 export const PULLS_PENDING_MS = 2_000;
 
 export interface PullsState {
   model: InboxPullsAnswer | null;
-  /** The Reviews rows (`GET /api/inbox/reviews`): review threads and listed PRs. */
   reviews: InboxReviewsAnswer | null;
   error: string | null;
   loading: boolean;
-  /** Read the forges again now (the footer's refresh). */
   refresh: () => void;
-  /** Read the list again from the server's cache (a PR was just handed to an agent: its thread is new). */
   reload: () => void;
-  /** The store changed (a review arrived, a verdict went): the rows again, from what the forges last answered. */
   reloadRows: () => void;
 }
 
-/**
- * The Pull requests list (approval "inbox-code-review-direction", item 4):
- * read while `enabled` (the page is open and Code review is on): on open, on
- * focus after `PULLS_FOCUS_MS`, every `PULLS_TICK_MS` while visible. While the
- * page is closed but `counted` (Code review is on), the sidebar's "On you"
- * count is kept current: the list is read once when the window starts and
- * again on focus after `PULLS_FOCUS_MS` (the server answers from its cache
- * while that is fresh). Leaving the page keeps a read in flight while the
- * count still wants it (its answer is the count's). Neither: nothing is asked
- * and a read in flight is dropped. `othersView`: the page shows the Others view, so the server reads Others as often
- * as the list (else every 5 min at most); opening it reads at once.
- */
 export function usePulls(enabled: boolean, counted = false, othersView = false): PullsState {
   const [model, setModel] = useState<InboxPullsAnswer | null>(null);
   const [reviews, setReviews] = useState<InboxReviewsAnswer | null>(null);
@@ -53,7 +34,6 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
       pendingTimer.current = null;
       inFlight.current?.abort();
-      // A late answer from the cache never overwrites this newer read.
       rowsInFlight.current?.abort();
       const controller = new AbortController();
       inFlight.current = controller;
@@ -67,7 +47,6 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
           setModel(answer);
           setReviews(rows);
           setError(null);
-          // Others still on its way: its answer lands on the server's next answer (a cache read, no forge call).
           if (answer.hosts.some((h) => h.others_pending)) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
         })
         .catch((cause: unknown) => {
@@ -88,7 +67,6 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
 
   useEffect(() => {
     if (!enabled && counted) {
-      // The page is closed: the count only. Read when the window starts (or Code review is turned on), then on focus.
       if (lastAt.current === 0 || Date.now() - lastAt.current >= PULLS_FOCUS_MS) read(false);
       const onFocus = () => {
         if (Date.now() - lastAt.current >= PULLS_FOCUS_MS) read(false);
@@ -97,7 +75,6 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
       return () => window.removeEventListener('focus', onFocus);
     }
     if (!enabled) {
-      // Neither the page nor the count: a read in flight is dropped.
       inFlight.current?.abort();
       inFlight.current = null;
       setLoading(false);
@@ -114,18 +91,15 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
     return () => {
       window.removeEventListener('focus', onFocus);
       clearInterval(tick);
-      // Not aborted here: the page closing while the count is kept lets the read land (the next state decides).
     };
   }, [enabled, counted, read]);
 
-  // The Others view opened: read now, so its PRs are as fresh as the list's (the server reads Others then).
   const wasOthers = useRef(othersView);
   useEffect(() => {
     if (othersView && !wasOthers.current && enabled) read(false);
     wasOthers.current = othersView;
   }, [othersView, enabled, read]);
 
-  // Gone from the window: whatever is in flight is dropped.
   useEffect(
     () => () => {
       inFlight.current?.abort();
@@ -138,18 +112,15 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
   const refresh = useCallback(() => read(true), [read]);
   const reload = useCallback(() => read(false), [read]);
   const reloadRows = useCallback(() => {
-    // A read of the whole list in flight brings the rows too.
     if (inFlight.current || (!enabled && !counted)) return;
     rowsInFlight.current?.abort();
     const controller = new AbortController();
     rowsInFlight.current = controller;
     inboxApi.reviewsCached(controller.signal).then(
       (rows) => {
-        // Nothing read since the Inbox started (`cold`): the next read of the list brings them.
         if (!controller.signal.aborted && !('cold' in rows)) setReviews(rows);
       },
       () => {
-        // The next read of the list says what is wrong.
       },
     );
   }, [enabled, counted]);

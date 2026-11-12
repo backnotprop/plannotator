@@ -1,15 +1,3 @@
-/**
- * The order of the sidebar's Projects, on the window's own Sidebar: no choice
- * draws the server's order and writes nothing; the first press goes A to Z, then
- * one button goes between most recent and A to Z, never back to the first order;
- * the choice survives a remount; A to Z ignores case and
- * accents and counts numbers; most recent reads the list's rows and puts a
- * project with none last; no toggle with one project or none, or while the
- * section is closed. tests/e2e/inbox-projects-sort.spec.ts proves the real
- * reload, the hover and the phone's target.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -46,7 +34,6 @@ afterEach(() => {
 });
 
 const folder = (id: string, name: string, listed = 1) => ({ id, key: `${name}-abc123`, name, root: `/tmp/${name}`, created_at: '2026-10-11T10:00:00.000Z', threads: listed, unread: 0, listed });
-// The server's order: oldest project first.
 const PROJECTS = [folder('prj_z', 'zephyr'), folder('prj_a', 'Atlas'), folder('prj_m', 'billing-svc')];
 const ACTIVITY = new Map([
   ['prj_a', '2026-11-01T09:00:00.000Z'],
@@ -175,7 +162,6 @@ test.skipIf(!hasDom)('the choice survives a remount, and a press says the new or
 
 test.skipIf(!hasDom)('A to Z goes by the name on screen', () => {
   storage.setItem(PROJECTS_SORT_COOKIE, 'name');
-  // The window's name wins over the server's: "zephyr" reads "aardvark" here.
   draw({ projectNames: new Map([['prj_z', 'aardvark']]) });
   expect(names()).toEqual(['aardvark', 'Atlas', 'billing-svc']);
 });
@@ -220,7 +206,6 @@ test.skipIf(!hasDom)('no toggle with one project or none', () => {
 });
 
 test.skipIf(!hasDom)('no toggle when only one project is on screen, though more exist', () => {
-  // The rest have nothing in the list, so they left the sidebar.
   draw({ projects: [PROJECTS[0]!, folder('prj_g', 'gone', 0), folder('prj_h', 'hidden', 0)] as never });
   expect(names()).toEqual(['zephyr']);
   expect(toggle()).toBeNull();

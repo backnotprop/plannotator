@@ -1,15 +1,3 @@
-/**
- * Reply drafts in the window (approval "inbox-reply-drafts", variant Label):
- * the words typed in a thread's reply box are kept as a server draft while
- * typing, come back (without taking focus) when the thread opens again,
- * survive closing the box, go with Discard and with the Send that carries them; the
- * list row says "Draft · Your reply" (or "Draft · 1 pick"), and the Drafts
- * page lists the threads holding unsent work above the messages.
- *
- * The window over a REAL Inbox (tests/helpers/inbox-dom-server.ts), its
- * fetches carried over loopback. DOM-gated: runs under DOM_TESTS=1
- * (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, setDefaultTimeout, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -23,11 +11,6 @@ import { configStore } from '@plannotator/ui/config';
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 
-// Every test here drives the window against a real Inbox with deliberate delays (a
-// 1.5 s held reply, 200 ms settles); on CI's runners several take just over bun's 5 s
-// default. A test that times out also makes bun kill "dangling" processes, which takes
-// the shared DOM server (spawned in beforeAll) down with it, so every later test then
-// fails on "the foot". Give them room.
 setDefaultTimeout(30_000);
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
@@ -43,13 +26,9 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-/** How long the reply route's answer is held back (the delayed-reply probe), in ms. */
 let replyDelay = 0;
-/** This test's fetch calls not answered yet: afterEach waits for none before the real fetch is back. */
 let inflight = 0;
-/** The window's event streams (a stand-in EventSource), to hand it an `event: drafts`. */
 let streams: { listeners: Map<string, ((event: { data: string }) => void)[]> }[] = [];
-/** Records emitted so far: each gets a seq above the last and past the list's cursor, as the server's are. */
 let emitted = 0;
 function emit(type: string, data: unknown) {
   for (const stream of streams) for (const listener of stream.listeners.get(type) ?? []) listener({ data: JSON.stringify(data) });
@@ -132,7 +111,6 @@ beforeEach(() => {
       const body = init?.body ? String(init.body) : undefined;
       if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
       const answer = await loopback(path, method, body);
-      // Only the reply's answer is held back: the request itself has reached the server.
       if (replyDelay > 0 && method === 'POST' && path.endsWith('/reply')) await new Promise((r) => setTimeout(r, replyDelay));
       return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
     } finally {
@@ -162,9 +140,6 @@ afterEach(async () => {
   host?.remove();
   root = null;
   host = null;
-  // Leaving the thread saves what waits at once: that save (and its read-back) is answered by this test's Inbox
-  // before the real fetch is back. On the real fetch it fails (a relative URL), and a save that did not land
-  // marks its thread "not saved" in module state, so the next test would start with the restart guard asking.
   await requestsSettled();
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
@@ -178,12 +153,7 @@ async function settle(ms = 40) {
   }
 }
 
-/**
- * No request of this test is in flight, on two reads a macrotask apart: the draft's saves chain on microtasks,
- * so a save queued behind an answer has started its request by the second read.
- */
 async function requestsSettled() {
-  // About 5 s: a reply held back (`replyDelay`) or a slow runner still settles.
   for (let i = 0; i < 250; i++) {
     if (inflight === 0) {
       await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
@@ -248,8 +218,6 @@ test.skipIf(!hasDom)('typed words are saved while typing, and come back in the b
   await settle();
   type(el, 'Pagefind, but index the changelog too');
   await until(async () => (await serverDraft(world.waiting))?.body === 'Pagefind, but index the changelog too', 'the draft saved');
-  // A computer saves silently (approval "inbox-reply-box", T6): no Draft pill or Saved time in the box, and Discard is
-  // the bin in the box's row.
   expect(el.querySelector('[data-draft-head]')).toBeNull();
   expect(el.querySelector('[data-reply-row] [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   leave();
@@ -332,7 +300,6 @@ test.skipIf(!hasDom)('the Send that carries the words clears the draft (clear_dr
   act(() => button(el, 'Send').click());
   await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
-  // The draft the words were saved as, by its updated_at: the server clears that draft only.
   expect(reply.body).toMatchObject({ words: 'Pagefind, thanks.' });
   expect(reply.body.clear_draft).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   expect(await serverDraft(world.waiting)).toBeNull();
@@ -343,18 +310,15 @@ test.skipIf(!hasDom)('a Send pressed before the pause in typing, whose answer is
   await until(() => [...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Reply'), 'the foot');
   act(() => button(el, 'Reply').click());
   await settle(5);
-  // The reply's answer comes 800 ms late; Send goes well inside the 500 ms pause before the save.
   replyDelay = 800;
   type(el, 'Sent quickly.');
   act(() => button(el, 'Send').click());
   await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
   expect(reply.body.words).toBe('Sent quickly.');
-  // Past any save the typing scheduled: the server holds no draft, and the window shows none.
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   expect(el.querySelector('[data-draft-foot]')).toBeNull();
-  // The save that ran before the Send is the only one; none came after it.
   const saves = posted.filter((p) => /\/draft$/.test(p.path));
   const replyAt = posted.indexOf(reply);
   expect(saves.every((p) => posted.indexOf(p) < replyAt)).toBe(true);
@@ -368,7 +332,6 @@ test.skipIf(!hasDom)('the foot\'s Send (box closed) carries the draft as it is n
   type(el, 'Pagefind.');
   act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft(world.waiting))?.body === 'Pagefind.', 'the draft saved on close');
-  // Another window types over the draft; no event reaches this one.
   const mine = (await serverDraft(world.waiting))!;
   const theirs = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Orama, after all.', base: mine.updated_at }));
   expect(theirs.status).toBe(200);
@@ -398,12 +361,9 @@ test.skipIf(!hasDom)('an `event: drafts` for the open thread reads its draft aga
 });
 
 test.skipIf(!hasDom)('the list says "Draft" ("Draft · Your reply", "Draft · 1 pick" in full); the Drafts row counts them and its page lists them above the messages', async () => {
-  // Words typed in this world's waiting thread, through the window's route.
   const saved = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Pagefind.', base: null }));
   expect(saved.status).toBe(200);
   const el = await renderApp('');
-  // The full words (`data-count-words`); the row draws them on a wide row, "Draft" on a three-line or phone row
-  // (approval "inbox-row-byline", option A).
   const label = (id: string) => el.querySelector(`[data-thread-id="${id}"] [data-draft-label]`)?.textContent?.replace(/\s+/g, ' ').trim();
   const full = (id: string) => el.querySelector(`[data-thread-id="${id}"] .ib-c`)?.getAttribute('data-count-words');
   const drawn = (id: string) => (el.querySelector(`.ib-row[data-thread-id="${id}"] .ib-cfull`) ? full(id) ?? undefined : 'Draft');
@@ -440,21 +400,17 @@ test.skipIf(!hasDom)('typing during a slow Send never brings back a draft holdin
   await settle();
   type(el, 'First words.');
   await until(async () => (await serverDraft(world.waiting))?.body === 'First words.', 'the words saved');
-  // The reply's answer is held 1.5 s; the person keeps typing meanwhile.
   replyDelay = 1500;
   act(() => button(el, 'Send').click());
   await until(() => posted.some((p) => p.path.endsWith('/reply')), 'the reply posted');
   expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).readOnly).toBe(true);
   type(el, 'First words. And more.');
-  // The box keeps the words the Send carries.
   expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('First words.');
   await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
-  // No save went after the reply.
   const reply = posted.findIndex((p) => p.path.endsWith('/reply'));
   expect(posted.slice(reply).some((p) => /\/draft$/.test(p.path))).toBe(false);
-  // The next visit shows no draft.
   leave();
   const again = await renderApp(`#thread=${world.waiting}`);
   await until(() => [...again.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Reply'), 'the foot');
@@ -489,29 +445,24 @@ test.skipIf(!hasDom)('another window sent the words: this window\'s next save is
   await settle();
   type(el, 'First words.');
   await until(async () => (await serverDraft(world.waiting))?.body === 'First words.', 'the words saved');
-  // Window A sends those words (its Send clears the draft it saved).
   const mine = (await serverDraft(world.waiting))!;
   const sent = await loopback(`/api/inbox/messages/${world.waiting}/reply`, 'POST', JSON.stringify({ idempotency_key: 'other-window', words: 'First words.', clear_draft: mine.updated_at }));
   expect(sent.status).toBe(200);
   expect(await serverDraft(world.waiting)).toBeNull();
-  // This window keeps typing: its save is refused, and it adopts the server's state.
   type(el, 'First words. And more.');
   await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
   expect(el.querySelector('[data-draft-conflict] .ib-draft-saved')?.textContent).toBe('Not saved: this reply was sent or discarded in another window.');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
-  // More typing stays here, not saved.
   type(el, 'First words. And more, still.');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('First words. And more, still.');
-  // Keep mine: the person's choice saves them.
   act(() => (el.querySelector('[data-draft-keep-mine]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft(world.waiting))?.body === 'First words. And more, still.', 'kept on purpose');
   expect(el.querySelector('[data-draft-conflict]')).toBeNull();
 });
 
-/** Open the waiting thread's box with words saved there; answers the draft as the server holds it. */
 async function openWithSaved(words: string) {
   const el = await renderApp(`#thread=${world.waiting}`);
   const opener = () => [...el.querySelectorAll('.ib-pfoot button')].find((b) => ['Reply', 'Edit draft'].includes(b.textContent?.replace(/\s+/g, ' ').trim() ?? '')) as HTMLButtonElement | undefined;
@@ -528,12 +479,10 @@ const liveText = (el: HTMLElement) => [...el.querySelectorAll('[aria-live]')].ma
 
 test.skipIf(!hasDom)('event: drafts, sent elsewhere: a box with no edits closes, and the sent words never come back', async () => {
   const { el, saved } = await openWithSaved('First words.');
-  // Another window (or the phone, then the computer's window) sends them and clears the draft.
   await loopback(`/api/inbox/messages/${world.waiting}/reply`, 'POST', JSON.stringify({ idempotency_key: 'elsewhere-1', words: 'First words.', clear_draft: saved.updated_at }));
   await act(async () => emit('drafts', { thread_id: world.waiting }));
   await until(() => box(el) === null, 'the box closed');
   expect(liveText(el)).toContain('This reply was sent or discarded in another window.');
-  // Opening the box again and typing makes a new draft of new words only.
   act(() => button(el, 'Reply').click());
   await settle();
   expect(box(el)!.value).toBe('');
@@ -549,7 +498,6 @@ const unloadAsks = () => {
 
 test.skipIf(!hasDom)('event: drafts, sent elsewhere while this box has edits: the save is refused, the conflict shows, nothing comes back', async () => {
   const { el, saved } = await openWithSaved('First words.');
-  // Nothing would be lost yet: a reload is not asked about.
   expect(unloadAsks()).toBe(false);
   type(el, 'First words. And more.');
   await loopback(`/api/inbox/messages/${world.waiting}/reply`, 'POST', JSON.stringify({ idempotency_key: 'elsewhere-2', words: 'First words.', clear_draft: saved.updated_at }));
@@ -558,12 +506,10 @@ test.skipIf(!hasDom)('event: drafts, sent elsewhere while this box has edits: th
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   expect(box(el)!.value).toBe('First words. And more.');
-  // Announced in the thread's live region; the box names the line.
   expect(liveText(el)).toContain('Not saved: this reply was sent or discarded in another window.');
   const line = el.querySelector('[data-draft-conflict] .ib-draft-saved')!;
   expect(line.getAttribute('role')).toBeNull();
   expect(box(el)!.getAttribute('aria-describedby')).toContain(line.id);
-  // The restart guard and a reload ask while those words are not saved.
   expect(unsentReply()).not.toBeNull();
   expect(unloadAsks()).toBe(true);
 });
@@ -574,7 +520,6 @@ test.skipIf(!hasDom)('event: drafts, the other window typed: a box with no edits
   await act(async () => emit('drafts', { thread_id: world.waiting }));
   await until(() => box(el)?.value === 'Theirs.', 'their words in the box');
   expect(el.querySelector('[data-draft-conflict]')).toBeNull();
-  // Typing on from there saves over it, as an edit of the newest words.
   type(el, 'Theirs. And mine.');
   await until(async () => (await serverDraft(world.waiting))?.body === 'Theirs. And mine.', 'saved on top');
 });
@@ -589,7 +534,6 @@ test.skipIf(!hasDom)('event: drafts, the other window typed while this box has e
   await settle(200);
   expect((await serverDraft(world.waiting))?.body).toBe('Theirs.');
   expect(box(el)!.value).toBe('Mine, and more.');
-  // Two choices only, and their hit areas apart (the gap is wider than both ::after reaches).
   const acts = el.querySelector('[data-draft-conflict] .ib-draft-acts')!;
   expect([...acts.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Keep mine', 'Discard mine']);
   act(() => (el.querySelector('[data-draft-conflict] [data-draft-discard]') as HTMLButtonElement).click());
@@ -603,7 +547,6 @@ test.skipIf(!hasDom)('event: drafts, the other window typed while this box has e
 test.skipIf(!hasDom)('an empty box refused by a newer draft shows nothing and never deletes it', async () => {
   const { el, saved } = await openWithSaved('Mine.');
   await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Theirs.', base: saved.updated_at }));
-  // This window empties its box (no event reached it): the delete is refused.
   type(el, '');
   await settle(200);
   expect(el.querySelector('[data-draft-conflict]')).toBeNull();
@@ -620,7 +563,6 @@ test.skipIf(!hasDom)('a Send after a conflict carries this window\'s words and t
   await until(() => box(el) === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
   expect(reply.body.words).toBe('Mine, sent.');
-  // No updated_at named (not the other window's draft's): the server clears only a draft holding these words.
   expect(reply.body.clear_draft).toBe('');
   expect((await serverDraft(world.waiting))?.body).toBe('Theirs.');
   await until(() => el.querySelector('[data-draft-foot]') !== null, 'the foot shows the other window\'s draft');
@@ -629,7 +571,6 @@ test.skipIf(!hasDom)('a Send after a conflict carries this window\'s words and t
   expect(box(el)!.value).toBe('Theirs.');
 });
 
-/** An agent writing in the thread while the test runs (the DOM server's `send`): answers the new message's id. */
 async function agentSend(body: string, replyTo: string): Promise<string> {
   const before = lines.length;
   (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_later', body, reply_to: replyTo } })}\n`);
@@ -638,7 +579,6 @@ async function agentSend(body: string, replyTo: string): Promise<string> {
   return (JSON.parse(lines.slice(before).find((l) => l.includes('"sent"'))!) as { sent: string }).sent;
 }
 
-/** The reply's answer is lost after the Inbox took it. */
 function loseReplyAnswers(real: typeof fetch) {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const answer = await real(input, init);
@@ -684,7 +624,6 @@ test.skipIf(!hasDom)('a Send carrying a comment whose answer is lost after it we
   expect(replies).toHaveLength(1);
   expect(replies[0]!.body.annotation_ids).toEqual(['ann-lost-answer']);
   expect(await personReplies('Went with a comment.')).toHaveLength(1);
-  // No "Draft · 1 comment": it went with the reply.
   expect(el.querySelector('[data-draft-foot]')).toBeNull();
 }, 30_000);
 
@@ -696,7 +635,6 @@ test.skipIf(!hasDom)('after a lost answer, the same words sent later to a new qu
   await until(() => box(el) === null, 'the box closed');
   globalThis.fetch = real;
   const first = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
-  // The agent asks something new in the thread; the person answers "Yes." again.
   const asked = await agentSend(['One more:', '', ':::question', 'Ship it today?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'), world.waiting);
   await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
   leave();
@@ -725,7 +663,6 @@ test.skipIf(!hasDom)('a Send the Inbox never got, then a new comment: the next S
   act(() => button(el, 'Send').click());
   await until(() => !!el.textContent?.includes('The reply may not have gone.'), 'the error');
   globalThis.fetch = real;
-  // A comment made after the lost Send (the thread read again: leave and come back).
   await loopback(
     `/api/inbox/messages/${world.waiting}/annotations`,
     'POST',
@@ -745,7 +682,6 @@ test.skipIf(!hasDom)('a Send the Inbox never got, then a new comment: the next S
 test.skipIf(!hasDom)('a Send the Inbox took while its thread could not be read: the next Send finds it and sends nothing again', async () => {
   const { el } = await openWithSaved('Landed while unread.');
   const real = globalThis.fetch;
-  // The reply reaches the Inbox but its answer is lost, and the thread read fails too.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (/\/api\/inbox\/threads\/[^/]+$/.test(path)) throw new TypeError('Failed to fetch');
@@ -767,7 +703,6 @@ test.skipIf(!hasDom)('a Send the Inbox took while its thread could not be read: 
 test.skipIf(!hasDom)('a Send while the Inbox is down: the draft stays, and the retry clears it with the Send (no draft of the sent words)', async () => {
   const { el, saved } = await openWithSaved('Sent while it was down.');
   const real = globalThis.fetch;
-  // The reply and the thread read both fail before reaching the Inbox.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (((init?.method ?? 'GET') === 'POST' && path.endsWith('/reply')) || /\/api\/inbox\/threads\/[^/]+$/.test(path)) throw new TypeError('Failed to fetch');
@@ -776,7 +711,6 @@ test.skipIf(!hasDom)('a Send while the Inbox is down: the draft stays, and the r
   act(() => button(el, 'Send').click());
   await until(() => !!el.textContent?.includes('The reply may not have gone.'), 'the error');
   globalThis.fetch = real;
-  // Nothing reached the Inbox: the draft is still there.
   expect((await serverDraft(world.waiting))?.updated_at).toBe(saved.updated_at);
   act(() => button(el, 'Send').click());
   await until(() => box(el) === null, 'the retry');
@@ -792,21 +726,17 @@ test.skipIf(!hasDom)('words a conflict left unsaved come back when the thread is
   await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Theirs.', base: saved.updated_at }));
   await act(async () => emit('drafts', { thread_id: world.waiting }));
   await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
-  // Leave the thread (the pane goes), then open it again.
   leave();
   expect(unsentReply()).not.toBeNull();
   const again = await renderApp(`#thread=${world.waiting}`);
   await until(() => box(again)?.value === 'Mine, kept through a switch.', 'the unsaved words back');
   await until(() => again.querySelector('[data-draft-conflict]') !== null, 'the conflict line back');
   expect((await serverDraft(world.waiting))?.body).toBe('Theirs.');
-  // Keep mine still works from here.
   act(() => (again.querySelector('[data-draft-keep-mine]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft(world.waiting))?.body === 'Mine, kept through a switch.', 'kept');
-  // Nothing of this thread is left unsaved: the line is gone (other threads' unsaved words are kept as they are).
   expect(again.querySelector('[data-draft-conflict]')).toBeNull();
 }, 30_000);
 
-/** The reply reaches the Inbox but its answer is lost, and thread reads fail (the Inbox stops answering). */
 function landUnread(real: typeof fetch) {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -825,7 +755,6 @@ test.skipIf(!hasDom)('an unconfirmed Send is forgotten when the person leaves: t
   await until(() => !!el.textContent?.includes('The reply may not have gone.'), 'the error');
   globalThis.fetch = real;
   const first = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
-  // The Inbox recovers; the agent asks something new; the person leaves and comes back.
   const asked = await agentSend(['One more:', '', ':::question', 'Ship it today?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'), world.waiting);
   leave();
   const again = await renderApp(`#thread=${world.waiting}`);
@@ -849,7 +778,6 @@ test.skipIf(!hasDom)('an unconfirmed Send that a thread read shows landed is fin
   act(() => button(el, 'Send').click());
   await until(() => !!el.textContent?.includes('The reply may not have gone.'), 'the error');
   globalThis.fetch = real;
-  // The Inbox answers again: the stream's next record reads the thread, and the reply is there.
   await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
   await until(() => box(el) === null, 'the box closed');
   await until(() => liveText(el).includes('Your reply went.'), 'said in the live region');
@@ -863,7 +791,6 @@ test.skipIf(!hasDom)('an unconfirmed Send found by the next Send: a pick made si
   act(() => button(el, 'Send').click());
   await until(() => !!el.textContent?.includes('The reply may not have gone.'), 'the error');
   globalThis.fetch = real;
-  // A pick, made after the lost Send.
   const choice = [...el.querySelectorAll('fieldset[data-question-key] label')].find((l) => l.textContent?.includes('Pagefind')) as HTMLElement;
   act(() => choice.click());
   await until(() => el.textContent!.includes('in your draft'), 'the pick saved');
@@ -873,8 +800,6 @@ test.skipIf(!hasDom)('an unconfirmed Send found by the next Send: a pick made si
   expect(posted.filter((p) => p.path.endsWith('/reply')).length).toBe(before);
   expect(liveText(el)).toContain('Your reply went. Not sent yet: 1 pick.');
   expect(await personReplies('Words first.')).toHaveLength(1);
-  // Send sends the pick as an ordinary reply, once the first Send has finished reading the thread (Send is
-  // disabled until then, and a press on it does nothing).
   await until(() => !button(el, 'Send').disabled, 'Send ready again');
   act(() => button(el, 'Send').click());
   await until(() => posted.filter((p) => p.path.endsWith('/reply')).length === before + 1, 'the pick sent');
@@ -926,7 +851,6 @@ test.skipIf(!hasDom)('a lost Send then the box closed: the reply is read back, a
   expect(await serverDraft(world.waiting)).toBeNull();
 }, 30_000);
 
-/** No `/draft` save went after the reply (a save after it would bring the sent words back as a draft). */
 const noSaveAfterReply = () => {
   const reply = posted.findIndex((p) => p.path.endsWith('/reply'));
   return reply >= 0 && !posted.slice(reply).some((p) => /\/draft$/.test(p.path));
@@ -939,7 +863,6 @@ test.skipIf(!hasDom)('a Send whose own save lands without its answer leaves no d
   await settle(5);
   const real = globalThis.fetch;
   let lost = 0;
-  // The save the Send flushes reaches the Inbox; its answer never reaches the window.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const answer = await real(input, init);
     if (lost === 0 && (init?.method ?? 'GET') === 'POST' && /\/draft$/.test(String(input)) && String(init?.body).includes('Dictated, sent at once.')) {
@@ -949,7 +872,6 @@ test.skipIf(!hasDom)('a Send whose own save lands without its answer leaves no d
     return answer;
   }) as typeof fetch;
   try {
-    // Send inside the 500 ms pause: the Send's claim saves the words.
     type(el, 'Dictated, sent at once.');
     act(() => button(el, 'Send').click());
     await until(() => box(el) === null, 'the Send');
@@ -957,7 +879,6 @@ test.skipIf(!hasDom)('a Send whose own save lands without its answer leaves no d
     globalThis.fetch = real;
   }
   expect(lost).toBe(1);
-  // The `drafts` frames for that save and the Send reach the window late.
   await act(async () => emit('drafts', { thread_id: world.waiting }));
   await settle(100);
   expect(await serverDraft(world.waiting)).toBeNull();
@@ -979,7 +900,6 @@ test.skipIf(!hasDom)('a drafts read answered after the Send never writes the sen
     const path = String(input);
     const method = init?.method ?? 'GET';
     if (replyIssued && method === 'GET' && /\/draft$/.test(path)) {
-      // Served now, before the reply clears the draft; answered only after the reply's answer.
       held += 1;
       const answer = await real(input, init);
       await replied;
@@ -998,7 +918,6 @@ test.skipIf(!hasDom)('a drafts read answered after the Send never writes the sen
     type(el, 'Sent while a read was out.');
     act(() => button(el, 'Send').click());
     await until(() => replyIssued, 'the reply going');
-    // The window's own `drafts` frame (its save just landed) while the Send is in flight.
     await act(async () => emit('drafts', { thread_id: world.waiting }));
     await until(() => box(el) === null, 'the Send');
     await settle(100);
@@ -1018,7 +937,6 @@ test.skipIf(!hasDom)('pagehide then pageshow (back/forward cache) inside the pau
   await settle(5);
   const transition = (name: 'pagehide' | 'pageshow') => Object.defineProperty(new Event(name), 'persisted', { value: true });
   type(el, 'Kept alive, then sent.');
-  // The page goes inside the 500 ms pause: the words go as the keepalive save, whose answer is never read.
   act(() => {
     window.dispatchEvent(transition('pagehide'));
   });
@@ -1062,7 +980,6 @@ test.skipIf(!hasDom)('after a Send, another window\'s draft of the same words is
   await settle();
   act(() => button(el, 'Reply').click());
   await settle();
-  // Another window drafts the same words (no event reaches this one).
   const theirs = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'ok', base: null }));
   expect(theirs.status).toBe(200);
   type(el, 'no, wait');
@@ -1080,7 +997,6 @@ test.skipIf(!hasDom)('a Send whose own save lands without its answer, and whose 
   const real = globalThis.fetch;
   let lost = 0;
   let unread = 0;
-  // The save the Send flushes reaches the Inbox without its answer; the read back that follows fails too.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const draftPath = /\/draft$/.test(String(input));
@@ -1105,7 +1021,6 @@ test.skipIf(!hasDom)('a Send whose own save lands without its answer, and whose 
   expect([lost, unread]).toEqual([1, 1]);
   await act(async () => emit('drafts', { thread_id: world.waiting }));
   await settle(100);
-  // The window knew no updated_at: the Send's clear_draft ('') and its words cleared the draft.
   expect(await serverDraft(world.waiting)).toBeNull();
   expect(el.querySelector('[data-draft-foot]')).toBeNull();
   expect(noSaveAfterReply()).toBe(true);

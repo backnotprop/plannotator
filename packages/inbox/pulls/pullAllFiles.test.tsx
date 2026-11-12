@@ -1,16 +1,3 @@
-/**
- * The PR page rail's Changes | All files (the owner's take A on #2639). What regresses:
- *  - the switch missing from the rail's head, or offered with no head commit to list the repository at;
- *  - All files asking for another commit than the patch on screen was read at, or another PR's;
- *  - a file the PR does not change not opening in place of the diff, or the diff not coming back on Changes or on a
- *    changed file picked in All files;
- *  - the review app's reads (`/api/repo-files`, `/api/repo-file`) not reaching the Inbox's routes for this PR, or
- *    anything else (its live stream) being fetched through them;
- *  - the choice not remembered as the review app remembers it.
- * The review app's real tree (guide/PullRepoParts.tsx) draws All files; the diff reader and the file view are stubs.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -20,7 +7,6 @@ import { pullRepoFetch } from './RailScope';
 const hasDom = typeof document !== 'undefined';
 const reveals: (string | null)[] = [];
 if (hasDom) {
-  // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
   const seam: string = '../guide/PullRepoParts.tsx';
   const real = (await import(seam)) as Record<string, unknown>;
   mock.module('#guide-reader', () => ({
@@ -37,7 +23,6 @@ if (hasDom) {
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { storage, setStorageBackend, resetStorageBackend } = (hasDom ? await import('@plannotator/ui/utils/storage') : {}) as typeof import('@plannotator/ui/utils/storage');
-/** The window's storage, in memory (the test page keeps no cookies). */
 const kept = new Map<string, string>();
 const { TREE_SCOPE_COOKIE } = (hasDom ? await import('@plannotator/review-editor/hooks/useTreeScope') : {}) as typeof import('@plannotator/review-editor/hooks/useTreeScope');
 
@@ -82,7 +67,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let reads: string[] = [];
-/** The head the diff door names (`head_sha`); null: none. */
 let diffHead: string | null = HEAD;
 
 beforeEach(() => {
@@ -149,7 +133,6 @@ const listed = () => reads.filter((read) => read.includes('/pulls/repo-files'));
 test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a file opened in place of the diff, and back', async () => {
   mount(pr);
   await settle();
-  // The rail's head is the review app's switch: Changes with the PR's count, on.
   expect(el('[data-tree-scope="changes"]').textContent).toBe('Changes1');
   expect(el('[data-tree-scope="changes"]').getAttribute('aria-pressed')).toBe('true');
   expect(!!document.querySelector('[data-review-files]')).toBe(true);
@@ -157,21 +140,17 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
 
   await act(async () => el('[data-tree-scope="all"]').click());
   await settle();
-  // At the head the patch on screen was read at, for this PR, through the Inbox's route.
   expect(listed()).toEqual([`/api/inbox/pulls/repo-files?key=${encodeURIComponent(pr.key)}&snapshot=${HEAD}`]);
   expect(el('[data-tree-scope="all"]').getAttribute('aria-pressed')).toBe('true');
   expect(!!document.querySelector('[data-review-files]')).toBe(false);
-  // Remembered as the review app remembers it.
   expect(storage.getItem(TREE_SCOPE_COOKIE)).toBe('all');
 
-  // A file the PR does not change opens in place of the diff, at that head.
   await act(async () => el('[data-repo-file="README.md"]').click());
   await settle();
   expect(el('[data-pull-repo-file]').getAttribute('data-pull-repo-file')).toBe('README.md');
   expect(el('[data-pull-repo-file]').getAttribute('data-sha')).toBe(HEAD);
   expect(el('.ib-gbody').hasAttribute('data-repo-open')).toBe(true);
 
-  // A changed file picked in All files: the diff again, on it.
   await act(async () => el('[data-repo-folder="src"]').click());
   await settle();
   await act(async () => el('[data-repo-file="src/app.ts"] button').click());
@@ -180,7 +159,6 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   expect(el('.ib-gbody').hasAttribute('data-repo-open')).toBe(false);
   expect(reveals.at(-1)).toBe('src/app.ts');
 
-  // Changes: the PR's own files again, and the diff.
   await act(async () => el('[data-repo-file="README.md"]').click());
   await settle();
   await act(async () => el('[data-tree-scope="changes"]').click());

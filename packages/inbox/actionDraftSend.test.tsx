@@ -1,16 +1,3 @@
-/**
- * Send carries an action item's note as the person left it (approval
- * "inbox-action-items-in-reply"): a note typed under a Done waiting in the
- * draft is saved after a typing pause, so a Send pressed inside that pause
- * must save it first and wait for the save before it posts the reply.
- * Failures to catch: the reply posted before the note's save (the agent gets
- * the Done without the note), or the note never saved at all. And the reply
- * box's list of what goes with the reply ("Your 2 action items go with this
- * reply"): an item missing from it, or its note or reason; a sent list that
- * says "You did" for a Can't do it the agent then saw done.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -76,7 +63,6 @@ function thread(): InboxThread {
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-/** What was posted, in order, and when each answer was given. */
 let events: string[] = [];
 let releaseMark: () => void = () => {};
 
@@ -89,7 +75,6 @@ beforeEach(() => {
     if (init?.method === 'POST' && path.includes('/actions/')) {
       const body = JSON.parse(String(init.body)) as { note?: string };
       events.push(`mark posted: ${body.note ?? ''}`);
-      // The save answers only when the test says so: a Send must wait for it.
       await new Promise<void>((resolve) => {
         releaseMark = resolve;
       });
@@ -141,13 +126,11 @@ test.skipIf(!hasDom)('a Send pressed inside the note\'s typing pause saves the n
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(note, 'Promoted from the CLI.');
     note.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  // Inside the 600 ms pause: nothing saved yet.
   expect(events).toEqual([]);
   const send = [...host.querySelectorAll<HTMLButtonElement>('.ib-pfoot button')].find((b) => b.textContent?.trim() === 'Send')!;
   expect(send).toBeDefined();
   act(() => send.click());
   await settle();
-  // The Send saved the note at once, and waits for that save.
   expect(events).toEqual(['mark posted: Promoted from the CLI.']);
   await act(async () => {
     releaseMark();
@@ -178,7 +161,6 @@ test.skipIf(!hasDom)("the reply box lists what goes with the reply: each action 
     );
   });
   await settle();
-  // The box is closed: no list yet (the foot counts them).
   expect(host.querySelector('[data-reply-actions="draft"]')).toBeNull();
   act(() => host!.querySelector<HTMLButtonElement>('[data-reply-button]')!.click());
   await settle();

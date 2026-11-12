@@ -5,13 +5,10 @@ import type { AgentFace } from './faceChoices';
 import { SETS_LABEL } from './FaceFan';
 import { getIconSet, isSetFace, setArtStyle, readIconSets, refreshFetchable, setCreditsHref, setFaceParts, setIconSrc, setLookOf, useIconSets, useSetListing } from './iconSets';
 
-/** The set last looked at in this page: the panel opens on it again. */
 let lastSet: string | null = null;
 
-/** "#007", or "#0025" in a set of a thousand or more. */
 export const setNumber = (n: number, count: number) => `#${String(n).padStart(count >= 1000 ? 4 : 3, '0')}`;
 
-/** The icons a search keeps: a number ("27", "#027") finds that icon; words find names and search words. */
 export function searchSetIcons(icons: readonly InboxIconSetIcon[], query: string): readonly InboxIconSetIcon[] {
   const q = query.trim().toLowerCase();
   if (!q) return icons;
@@ -21,21 +18,10 @@ export function searchSetIcons(icons: readonly InboxIconSetIcon[], query: string
   return icons.filter((icon) => icon.n === n || (!number && (icon.name.toLowerCase().includes(text) || !!icon.words?.some((word) => word.startsWith(text)))));
 }
 
-/** "CC-BY-3.0" → "CC BY 3.0". */
 const licenceLabel = (spdx: string | undefined) => (spdx ? spdx.replace(/-(\d+\.\d+)$/, ' $1').replace(/-/g, ' ') : '');
 
-/**
- * "Sets" in the agent icon dialog (AgentIconDialog.tsx): the icon sets, then a numbered grid of the chosen one with a
- * search by name or number, the Pokédex feel. Choosing an icon shows it on this agent at once, in every window
- * (`set:<set>/<icon>` in the faces). A fetchable set shows "Get" until it is downloaded; its icons then fill in as
- * they arrive. Icons load only as they scroll into view.
- *
- * Its keys are the dialog's own (the arrows move in the grid, Enter in the search picks the first found): it adds no
- * shortcut. Choosing an icon closes the dialog (`onDone`). The one credit a set's licence asks for (game-icons.net's) is a muted line under its grid.
- */
 export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
   const sets = useIconSets();
-  // The pointer of fetchable sets is read only here, when the person opens Sets.
   useEffect(() => {
     void readIconSets(true);
   }, []);
@@ -48,19 +34,16 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
   const state = set?.get?.state ?? 'done';
   const listing = useSetListing(set && (!fetchable || state !== 'none') ? set.id : null);
 
-  // While a set fills in: read it again, twice a second, as long as the dialog shows it.
   useEffect(() => {
     if (!set || state !== 'getting') return;
     const timer = setInterval(() => void refreshFetchable(set.id), 500);
     return () => clearInterval(timer);
-  }, [set?.id, state]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [set?.id, state]);
 
   const icons = listing?.icons ?? [];
   const found = useMemo(() => searchSetIcons(icons, query), [icons, query]);
   const have = useMemo(() => (fetchable ? new Set(listing?.have ?? []) : null), [fetchable, listing]);
 
-  // Icons load as they scroll into view (an image's address or a mask is set only then), watched in the grid's own
-  // scroll box; the watcher goes with the dialog.
   const scroller = useRef<HTMLDivElement>(null);
   const watcher = useRef<IntersectionObserver | null>(null);
   const lazy = useCallback((el: HTMLElement | null) => {
@@ -90,7 +73,6 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
     onDone();
   };
   const onGridKey = (event: KeyboardEvent) => {
-    // The grid's own column count (it fills the dialog's width).
     const columns = Math.max(1, getComputedStyle(event.currentTarget).gridTemplateColumns.split(' ').filter(Boolean).length);
     const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -columns, ArrowDown: columns }[event.key];
     if (!step) return;
@@ -211,7 +193,6 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
   );
 }
 
-/** An icon cell come into view: its image's address, or its mask. */
 function reveal(el: HTMLElement): void {
   const src = el.dataset.src;
   if (!src) return;
@@ -219,13 +200,8 @@ function reveal(el: HTMLElement): void {
   else el.querySelector('img')?.setAttribute('src', src);
 }
 
-/** When an icon that did not load is asked for again: the link back, else after 2, 8 and 30 s. */
 const ICON_RETRY_MS = [2_000, 8_000, 30_000];
 
-/**
- * An icon in the grid that did not load (a dropped link, a request that failed): hidden behind its faint tile, never
- * the browser's broken picture, and asked for again (the link back, else after a while), a few times at most.
- */
 function askAgain(img: HTMLImageElement): void {
   img.dataset.failed = '';
   const tries = Number(img.dataset.tries ?? 0);

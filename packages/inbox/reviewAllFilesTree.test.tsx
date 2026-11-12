@@ -1,15 +1,3 @@
-/**
- * All files in the full-window review has the PR page's file tree on the left (approval "review-allfiles-tree").
- * What regresses:
- *
- *  - the tree missing from All files, or showing in Walkthrough (which keeps no list);
- *  - a click on a file in the tree not going to that file (the reader's reveal and the top bar's "N of M" menu);
- *  - Viewed circles in the tree of a review that takes no ticks (a guide), or a circle that does not save the tick;
- *  - on a phone, the tree taking the diff's width instead of opening from the Files button as a sheet that a pick closes.
- *
- * The diff reader is stubbed (it records what it was asked to show). DOM-gated: runs under DOM_TESTS=1 (happy-dom),
- * from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -19,7 +7,6 @@ import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapes } from './shape/useInboxShapes';
 
 const hasDom = typeof document !== 'undefined';
-/** What the stubbed reader was last asked: its mode and the file to bring into view. */
 let reader: { mode?: string; reveal?: { path: string } | null } = {};
 if (hasDom) {
   mock.module('#guide-reader', () => ({
@@ -29,7 +16,6 @@ if (hasDom) {
     },
   }));
 }
-// The pane's Shape props (required since the board's Show me): no boards here.
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
 
@@ -140,7 +126,6 @@ const allFiles = () => click(document.querySelector('[data-review-mode-choice="f
 const tree = () => document.querySelector<HTMLElement>('[data-review-message] [data-review-tree]');
 const treeFile = (path: string) => tree()?.querySelector<HTMLElement>(`[data-review-file="${path}"]`) ?? null;
 
-/** A phone: the window's phone query matches (restored after each test). */
 function asPhone() {
   window.matchMedia = ((query: string) => ({
     matches: query.includes('max-width: 767px'),
@@ -164,16 +149,13 @@ test.skipIf(!hasDom)('Walkthrough has no file list; All files has the tree on th
   expect(reader.mode).toBe('files');
   const rail = tree();
   expect(rail !== null).toBe(true);
-  // Beside the diff, in the review's split.
   expect(rail!.parentElement?.classList.contains('ib-rsplit')).toBe(true);
   expect([...rail!.querySelectorAll<HTMLElement>('[data-review-file]')].map((row) => row.dataset.reviewFile).sort()).toEqual(['docs/notes.md', 'src/auth/guard.ts', 'src/auth/token.ts']);
   expect(rail!.querySelector('[data-review-folder="src/auth"]') !== null).toBe(true);
   expect(rail!.textContent).toContain('3 files');
   expect(treeFile('src/auth/token.ts')!.textContent).toContain('+2');
-  // The "1 of N" menu stays in the bar.
   expect(document.querySelector('[data-review-jump]')?.textContent).toContain('of 3');
 
-  // Back to Walkthrough: the list goes again.
   await click(document.querySelector('[data-review-mode-choice="walkthrough"] input'));
   expect(tree() !== null).toBe(false);
 });
@@ -197,7 +179,6 @@ test.skipIf(!hasDom)("a review's tree has Viewed circles that save the tick; a g
   await click(circle);
   expect(viewedPosts).toEqual([['src/auth/guard.ts']]);
   expect(treeFile('src/auth/guard.ts')!.querySelector('[role="checkbox"]')?.getAttribute('aria-checked')).toBe('true');
-  // The circle marks the file; it does not go to it.
   expect(reader.reveal ?? null).toBeNull();
 
   act(() => root?.unmount());
@@ -213,7 +194,6 @@ test.skipIf(!hasDom)("a phone: no rail beside the diff; the bar's Files button o
   await render();
   const pane = () => document.querySelector<HTMLElement>('[data-review-message]')!;
   expect(document.querySelector('[data-review-files-button]') !== null).toBe(false);
-  // All files from the phone's menu.
   await click(document.querySelector('[data-review-jump]'));
   await click(document.querySelector('[data-review-mode-choice="files"]'));
   expect(reader.mode).toBe('files');

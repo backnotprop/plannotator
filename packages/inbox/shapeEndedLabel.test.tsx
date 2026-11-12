@@ -1,15 +1,3 @@
-/**
- * Once the agent's session ended, the board's Ask panel says what happens to a
- * question (owner's call on #2592, "A"): in the Inbox nothing answers then, so
- * it reads "Session ended · your question waits for the agent"; a host with an
- * Ask AI fallback keeps "Session ended · Ask AI answers; changes wait for the
- * agent". The standalone page knows no sessions (every board reads `gone`), so
- * it shows no session line at all. What regresses: the Inbox promising an Ask
- * AI answer that never comes, a host with the fallback losing its words, or the
- * standalone page saying "Session ended" while the agent is live.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,7 +20,6 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A board whose session ended, as the store keeps it. */
 function endedBoard(): ShapeLoaded {
   const dir = mkdtempSync(join(tmpdir(), 'shape-ended-label-'));
   dirs.push(dir);
@@ -70,7 +57,6 @@ function fakeHost(loaded: ShapeLoaded, extra: Partial<ShapeHost>): ShapeHost {
 
 test.skipIf(!hasDom)('the Inbox host says a question waits once the session ended; a host with the Ask AI fallback keeps its words', async () => {
   const loaded = endedBoard();
-  // The Inbox's own host carries the flag (it has no Ask AI fallback).
   const inbox = createInboxShapeHost({ subscribe: () => () => {} });
   expect(inbox.askWaitsWhenEnded).toBe(true);
 

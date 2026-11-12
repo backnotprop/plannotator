@@ -1,9 +1,3 @@
-/**
- * The line under the person's last message (deliveryLine.ts). The failure
- * this catches: the owner's report, a reply to a working agent that read
- * "Saved for Claude Code. It sees it when it checks.", as if it were dropped
- * or the agent had to poll for it.
- */
 import { describe, expect, test } from 'bun:test';
 import { INBOX_SEND_NOW_SINCE } from '@plannotator/core/inbox-types';
 import { deliveryLine, restartNote, sentRowLine, type DeliveryLineInput } from './deliveryLine';
@@ -50,20 +44,16 @@ describe('the line under a sent reply', () => {
     expect(deliveryLine({ ...base, connection: null }).text).toBe('Queued for Claude Code; it gets this when its session is back.');
   });
 
-  // Approval "inbox-stopped-reply": Claude Code refused the reply after the person stopped that session (#2780), and
-  // takes nothing until they type there. "Sending" or "Queued" would promise a turn that is not coming.
   test('a session Claude Code holds until the person types: Stopped, whatever the turn state or Send now', () => {
     const stopped = { state: 'queued' as const, text: 'Stopped: goes in when you type in that session' };
     const idle = { busy: false, idle_since: '2026-10-16T17:00:00.000Z', send_now: true };
     expect(deliveryLine({ ...base, connection: { ...idle, held: true } })).toEqual(stopped);
     expect(deliveryLine({ ...base, sendingNow: true, connection: { ...idle, held: true } })).toEqual(stopped);
     expect(deliveryLine({ ...base, connection: { busy: null, idle_since: null, send_now: false, held: true } })).toEqual(stopped);
-    // They typed and it went in: Delivered, not Stopped, even before the connection's next word clears the hold.
     expect(deliveryLine({ ...base, deliveredAt: '2026-10-16T17:12:00.000Z', connection: { ...idle, held: true } })).toEqual({
       state: 'delivered',
       text: 'Delivered to Claude Code, 5:12 PM',
     });
-    // Not held: the ordinary words.
     expect(deliveryLine({ ...base, connection: { ...idle, held: false } }).text).toBe('Sending to Claude Code…');
     expect(deliveryLine({ ...base, connection: { busy: true, idle_since: null, send_now: false } }).text).toBe('Queued · Claude Code is working; it gets this when its turn ends.');
     expect(deliveryLine({ ...base, connection: null }).text).toBe('Queued for Claude Code; it gets this when its session is back.');
@@ -86,9 +76,6 @@ describe('the line under a sent reply', () => {
   });
 });
 
-// The restart line (owner approval "restart-warning"): it explains a missing Send now, so it shows only
-// when the session works, has no Send now, and runs an older plugin; never for an engine too old for
-// Send now (a restart would not bring it, and the owner chose to say nothing about that).
 describe('restartNote', () => {
   const outdated = { loaded: '0.28.21', installed: '0.28.23', fix: 'restart' as const };
   const busy = { busy: true, idle_since: null, send_now: false, outdated, engine: '2.1.305', restart_command: 'cd ~/code/billing-api && claude --resume abc' };
@@ -111,7 +98,6 @@ describe('restartNote', () => {
     expect(INBOX_SEND_NOW_SINCE).toBe('0.28.24');
     expect(restartNote({ ...busy, outdated: { loaded: '0.28.24', installed: '0.28.25', fix: 'restart' } })).toBeNull();
     expect(restartNote({ ...busy, outdated: { loaded: '0.29.0', installed: '0.29.1', fix: 'restart' } })).toBeNull();
-    // A development build counts as having it; an unknown version (an older mod) and anything older do not.
     expect(restartNote({ ...busy, outdated: { loaded: '0.0.0-dev', installed: '0.28.25', fix: 'restart' } })).toBeNull();
     expect(restartNote({ ...busy, outdated: { loaded: null, installed: '0.28.25', fix: 'restart' } })).not.toBeNull();
     expect(restartNote({ ...busy, outdated: { loaded: '0.28.23', installed: '0.28.25', fix: 'restart' } })).not.toBeNull();

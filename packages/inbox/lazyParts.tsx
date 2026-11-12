@@ -1,31 +1,9 @@
-/**
- * The window's parts loaded on first use (#2593): the guided/code review
- * reader, the Shape board, the search palette and the post dialog.
- *
- * Each is a chunk the Inbox serves (build/pack-inbox.ts). Through a bare
- * React.lazy, the first open suspends while its chunk arrives, and React holds
- * a Suspense boundary's fallback at least 300 ms before it reveals the content
- * (its fallback throttle): a guided review then took ~345 ms to draw its diff
- * where the inline bundle drew it in ~50 ms. So the parts are fetched once the
- * window is idle (WarmWindowParts, ~0.5 MB of script in all; the diagram
- * runtimes, KaTeX and the grammars stay on first use), and a part already
- * loaded renders at once, never through Suspense.
- */
-
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { diffDrawReady, diffLanguages, diffReadyNow } from './threadDrawReady';
 
 type Loaded<P> = { default: ComponentType<P> };
 
-/**
- * A lazy component that renders synchronously once its module is in, and the
- * `preload` that brings it in. A failed load reaches the caller's
- * LazyBlockBoundary and is forgotten by `preload`. React.lazy keeps its
- * rejection for good, so a host that offers the part again after a failure
- * (the next ⌘K, the next Post, the next Shape board) calls `retry()` first: the next mount then asks
- * for the chunk again. Without it the part stays failed until Reload.
- */
 export function lazyPart<P extends object>(load: () => Promise<Loaded<P>>) {
   let loaded: ComponentType<P> | null = null;
   let pending: Promise<Loaded<P>> | null = null;
@@ -56,17 +34,11 @@ export function lazyPart<P extends object>(load: () => Promise<Loaded<P>>) {
   return { Part, preload, retry, isLoaded: () => loaded !== null };
 }
 
-/** Runs `run` once the failure is on screen. */
 function Failed({ run }: { run: () => void }) {
   useEffect(run, [run]);
   return null;
 }
 
-/**
- * A part drawn in a pane (the review reader, the Shape board): one whose chunk cannot arrive says so in the
- * pane with ui's notice and Reload, and the window stays as it is. `loading`: what shows while it arrives.
- * `onFailed`: runs once the notice shows (the host's part `retry()`, so its next open asks again).
- */
 export function PanePart({ children, loading = null, onFailed }: { children: ReactNode; loading?: ReactNode; onFailed?: () => void }) {
   return (
     <LazyBlockBoundary
@@ -82,11 +54,6 @@ export function PanePart({ children, loading = null, onFailed }: { children: Rea
   );
 }
 
-/**
- * The review reader in a pane (ReviewPane, PullReview): drawn once its chunk is in and its diff's
- * grammars are attached in the diff themes (threadDrawReady.ts), so no diff line paints plain first. Both
- * already in (the usual case once the window has been idle): it draws in the same commit.
- */
 export function ReaderPart({ diff, children }: { diff: string; children: ReactNode }) {
   const langs = useMemo(() => diffLanguages(diff), [diff]);
   const [waited, setWaited] = useState<readonly string[] | null>(null);
@@ -94,7 +61,6 @@ export function ReaderPart({ diff, children }: { diff: string; children: ReactNo
   useEffect(() => {
     if (show) return;
     let live = true;
-    // A reader that cannot load still draws: its boundary then says so.
     void Promise.all([diffDrawReady(langs), GuideReaderPart.preload().catch(() => undefined)]).then(() => {
       if (live) setWaited(langs);
     });
@@ -106,7 +72,6 @@ export function ReaderPart({ diff, children }: { diff: string; children: ReactNo
 }
 
 export const GuideReaderPart = lazyPart(() => import('#guide-reader'));
-/** The PR page's All files (the review app's tree and file view), from the reader's own chunk. */
 export const PullAllFilesPart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullAllFiles })));
 export const PullRepoFilePart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullRepoFile })));
 export const ShapeBoardPart = lazyPart(() => import('#shape-board'));
@@ -115,7 +80,6 @@ export const PlatformPostPart = lazyPart(() => import('#platform-post'));
 
 const PARTS = [GuideReaderPart, ShapeBoardPart, SearchPalettePart, PlatformPostPart];
 
-/** Once the window is idle after its first paint: fetch the parts, one per idle slot. Draws nothing. */
 export function WarmWindowParts() {
   useEffect(() => {
     let cancelled = false;
@@ -123,7 +87,6 @@ export function WarmWindowParts() {
     const next = (i: number) => {
       if (cancelled || i >= PARTS.length) return;
       const run = () => {
-        // A part that cannot load now is tried again when it is opened.
         void PARTS[i]!.preload().catch(() => {}).finally(() => next(i + 1));
       };
       if (typeof requestIdleCallback === 'function') {

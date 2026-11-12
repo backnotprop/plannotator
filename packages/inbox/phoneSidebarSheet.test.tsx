@@ -1,14 +1,3 @@
-/**
- * A phone's sidebar sheet, once open (approval "inbox-phone-sidebar-sheet", "Sheet 1 · Same sections, fixed").
- * What is proved on the window's own Sidebar, at a phone width and off it:
- * the sheet has one scroll (the places scroll with Starred, Agents and Projects, and nothing else in it scrolls);
- * each heading shows how many rows its section holds and folds it through the sidebar's own cookie; "Showing only"
- * names what narrows the list, in full, and Clear goes back to everything; Search and New message are not in the
- * sheet; Settings, Feedback and light/dark share one row; and off a phone the sidebar is drawn as it always was.
- * A starred thread that is also an agent's thread staying in both sections: agents/agentsSection.test.tsx.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { readFileSync } from 'node:fs';
@@ -42,7 +31,6 @@ beforeEach(() => {
     setItem: (key, value) => void stored.set(key, value),
     removeItem: (key) => void stored.delete(key),
   });
-  // The window is a phone while `phone` says so: the one query phone.ts asks.
   savedMatchMedia = window.matchMedia;
   window.matchMedia = ((query: string) => ({ media: query, matches: query === PHONE_QUERY && phone, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
 });
@@ -95,7 +83,6 @@ function draw(over: Partial<SidebarProps> = {}) {
   act(() =>
     root!.render(
       <SidebarProvider>
-        {/* The sheet's own box (shell/sidebar.tsx), which the sheet's rules hang from. */}
         <div className={phone ? 'ib-sb-sheet-in' : 'ib-sb-inner'}>
           <Sidebar
             page="inbox"
@@ -128,10 +115,8 @@ const one = <T extends Element = HTMLElement>(selector: string) => document.quer
 const header = (section: 'pinned' | 'agents' | 'projects') => one<HTMLButtonElement>(`[data-sidebar-section="${section}"]`)!;
 const total = (section: 'pinned' | 'agents' | 'projects') => header(section).querySelector('[data-section-total]')?.textContent ?? null;
 const click = (el: HTMLElement) => act(() => el.click());
-/** The Feedback rows on screen, by their words (the Sidebar here opens no dialog and sends nothing). */
 const feedbackRows = (scope: ParentNode = document) => [...scope.querySelectorAll<HTMLElement>('button.ib-nav')].filter((button) => button.textContent === 'Feedback');
 
-/** The window's rules for the sidebar's boxes, the phone block's unwrapped (the window is a phone here). */
 function sidebarRules(): string {
   const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
   return css
@@ -147,15 +132,12 @@ test.skipIf(!hasDom)("a phone's sheet has one scroll: the places and every secti
   document.head.append(sheet);
   draw();
   const scroll = one('.ib-sidescroll')!;
-  // The places (Inbox, Drafts) scroll with Starred, Agents and Projects.
   for (const selector of ['[data-inbox-nav]', '[data-drafts-nav]', '[data-sidebar-section="pinned"]', '[data-pinned-row]', '[data-sidebar-section="projects"]', '.ib-projs .ib-proj']) {
     expect(one(selector)).not.toBeNull();
     expect(scroll.contains(one(selector))).toBe(true);
   }
-  // The head and the foot stay put.
   expect(scroll.contains(one('.ib-brand'))).toBe(false);
   expect(scroll.contains(one('.ib-side-foot'))).toBe(false);
-  // One box scrolls, and only one.
   const scrolling = [...one('.ib-sb-sheet-in')!.querySelectorAll<HTMLElement>('aside, div, section')].filter((el) => /auto|scroll/.test(getComputedStyle(el).overflowY));
   expect(scrolling.map((el) => el.className)).toEqual(['ib-sidescroll']);
 });
@@ -170,7 +152,6 @@ test.skipIf(!hasDom)("a heading shows how many rows its section holds and folds 
   click(header('pinned'));
   expect(header('pinned').getAttribute('aria-expanded')).toBe('false');
   expect(document.querySelectorAll('[data-pinned-row]')).toHaveLength(0);
-  // Folded, the count stays, and Starred says how many of its rows wait on the person (Stopped, Holds, a question).
   expect(total('pinned')).toBe('5');
   expect(header('pinned').querySelector('.ib-n')?.textContent).toBe('3 waiting on you');
   expect(storage.getItem(SIDEBAR_CLOSED_COOKIE)).toBe('pinned');
@@ -190,24 +171,20 @@ test.skipIf(!hasDom)('"Showing only" names the project in full, Clear goes back 
   const line = one('[data-sheet-showing]')!;
   expect(line.getAttribute('data-sheet-showing')).toBe('project');
   expect(line.querySelector('bdi')?.textContent).toBe(LONG);
-  // At the top of the sheet: above the scroll, not in it.
   expect(one('.ib-sidescroll')!.contains(line)).toBe(false);
   expect(line.compareDocumentPosition(one('.ib-sidescroll')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const row = [...document.querySelectorAll<HTMLElement>('.ib-projs .ib-proj')].find((el) => el.textContent?.includes(LONG))!;
   expect(row.classList.contains('ib-on')).toBe(true);
   expect(row.getAttribute('aria-current')).toBe('page');
-  // Inbox is not where the person is while a project narrows the list.
   expect(one('[data-inbox-nav]')!.getAttribute('aria-current')).toBeNull();
 
   click(one('[data-sheet-clear]')!);
   expect(cleared).toBe(1);
 
-  // A machine narrows the list the same way; another page shows no line.
   const machines = machinesModel([view(SELF, 'This Mac'), view(MINI, 'Studio Mac mini')]);
   draw({ machineId: MINI, machines });
   expect(one('[data-sheet-showing]')!.getAttribute('data-sheet-showing')).toBe('machine');
   expect(one('[data-sheet-showing] bdi')?.textContent).toBe('Studio Mac mini');
-  // So does an agent (its row's name), and its Clear is the same Clear.
   draw({ agentFilter: { id: 'ses_a', name: 'Invoice retries' }, onInbox: () => void cleared++ });
   expect(one('[data-sheet-showing]')!.getAttribute('data-sheet-showing')).toBe('agent');
   expect(one('[data-sheet-showing] bdi')?.textContent).toBe('Invoice retries');
@@ -226,7 +203,6 @@ test.skipIf(!hasDom)('Search and New message are not in the sheet on a phone; Se
   expect(feedbackRows(foot)).toHaveLength(1);
   expect(feedbackRows()).toHaveLength(1);
   expect(foot.querySelector('[data-theme-toggle]')).not.toBeNull();
-  // The way out at a width the sheet fills.
   expect(one('[data-sheet-close]')).not.toBeNull();
 });
 
@@ -236,18 +212,14 @@ test.skipIf(!hasDom)('off a phone the sidebar is as it was: the places above the
   const scroll = one('.ib-sidescroll')!;
   expect(scroll.contains(one('[data-inbox-nav]'))).toBe(false);
   expect(scroll.contains(one('[data-drafts-nav]'))).toBe(false);
-  // Search and New message lead the sidebar, as before.
   expect(one('[data-open-search]')).not.toBeNull();
   expect(one('[data-open-compose]')).not.toBeNull();
-  // The sections are the scroll's own children: no block around them, no row around Starred's heading.
   expect(header('pinned').parentElement).toBe(scroll);
   expect(one('.ib-pins')!.parentElement).toBe(scroll);
   expect(one('.ib-projs')!.parentElement).toBe(scroll);
   expect(document.querySelectorAll('[data-section-total], [data-sheet-showing], [data-sheet-close], .ib-sheet-sec, .ib-pin-sub')).toHaveLength(0);
-  // Feedback is its own row above Settings, not in Settings' row.
   expect(feedbackRows(one('.ib-setrow')!)).toHaveLength(0);
   expect(feedbackRows(one('.ib-side-foot')!)).toHaveLength(1);
-  // A folded Starred still says its waiting count to a screen reader only, as before.
   click(header('pinned'));
   expect(header('pinned').querySelector('.ib-n')?.textContent).toBe('3 waiting on you');
   expect(header('pinned').querySelector('.ib-n .ib-sr')?.textContent).toBe(' waiting on you');
@@ -259,6 +231,5 @@ test.skipIf(!hasDom)("a starred row on a phone says its project and its state in
   expect(sub('t_one').querySelector('.ib-pin-proj')?.textContent).toBe('alpha');
   expect(sub('t_one').querySelector('.ib-pin-st')?.textContent).toBe('1 question');
   expect(sub('t_stop').querySelector('.ib-spill')?.textContent).toBe('Stopped');
-  // Nothing waits: the project alone, with no dangling dot.
   expect(sub('t_quiet').textContent).toBe('alpha');
 });

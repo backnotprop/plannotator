@@ -1,17 +1,3 @@
-/**
- * Who gets the reply, on a phone (approval "inbox-phone-composer-picker"): the agent control in the reply box's row,
- * after the paperclip and Skills, and the sheet it opens. A computer keeps ReplyRecipient.tsx. Like that pill it shows
- * only in a thread with several agents (ThreadPane's `pillActive`): a one-agent thread has no control in its row.
- *
- * - One recipient: its mark and a small chevron, never a name (`AgentPill`; the owner: "It should only ever be one"),
- *   also when two of the thread's agents are of one kind. The accessible name says who, with the session's title, and
- *   the sheet lists every agent by name with the current one marked. Several recipients: the first mark with how many
- *   (`AgentMark`).
- * - The sheet: each agent by its session's title (issue #2450) with "<agent> · <folder>" under it. A tap on a row sends
- *   to that agent only and closes; the circle at a row's end adds it and the sheet stays; the last row types a real `@`.
- *
- * The rules stay replyRecipients.ts and ThreadPane's (the choice, the most one reply goes to, Send).
- */
 import { Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import { labelOf, type SessionLabels } from '../sessionLabels';
@@ -41,27 +27,21 @@ export function PhoneReplyRecipient({
   labels,
   folderOf,
 }: {
-  /** Every agent the sheet offers, live first, ended last. */
   rows: readonly RecipientRow[];
-  /** Who gets the reply now, the one it answers first (a typed `@` included). */
   chosen: readonly RecipientRow[];
   open: boolean;
   onOpen: (open: boolean) => void;
   onOnly: (row: RecipientRow) => void;
   onToggle: (row: RecipientRow) => void;
   onTagAnother: () => void;
-  /** The thread's pane: the sheet is drawn in it. */
   section: HTMLElement | null;
-  /** Each session's title, where it has one. */
   labels: SessionLabels;
-  /** The folder a session works in, as the thread knows it. */
   folderOf: (session: string) => string;
 }) {
   const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
   const chosenIds = chosen.map((r) => r.session);
   const first = chosen[0];
   const ended = chosen.length === 1 && first!.state === 'ended';
-  /** As it is read out: "Claude Code · Invoice PDF fonts", each agent with its session's title. */
   const spoken = namesList(chosen.map((r) => (titleOf(r) ? `${agentName(r.host)} · ${titleOf(r)}` : r.label)));
   const control = {
     open,

@@ -1,19 +1,3 @@
-/**
- * Whether a list read shows nothing the list held does not: then the window
- * keeps the list it holds and draws nothing for that read.
- *
- * A record anywhere reads the list again, and the window's own saves do too
- * (each key typed in a question's "Other…" field is a save). Most of those
- * reads bring no row that changed, yet each one set a new list, which drew
- * the whole window again: the list, and the open thread with every message.
- *
- * Rows keep their objects from read to read (listRead.ts puts a change
- * together with the rows the window holds), so most rows compare by identity;
- * any other row, section or field compares by its JSON. `list_version` names
- * the read, not what it shows; `agents` have their own store (agentsList.ts). `cursor` (the store's newest record) shows only
- * on Settings (the Archived count reads again when it moves): elsewhere a
- * read whose only change is the cursor is the same list.
- */
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 
 const sameJson = (a: unknown, b: unknown): boolean => a === b || JSON.stringify(a) === JSON.stringify(b);
@@ -38,14 +22,12 @@ function sameSections(a: readonly InboxListSection[] | undefined, b: readonly In
   return true;
 }
 
-/** `cursor`: the store's cursor counts too (Settings is open). */
 export function sameListModel(held: object | null | undefined, next: object | null | undefined, options: { cursor: boolean }): boolean {
   if (held === next) return true;
   if (!held || !next) return false;
   const a = held as Record<string, unknown>;
   const b = next as Record<string, unknown>;
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-    // `agents` live in their own store (agentsList.ts), which draws what reads them: their last poll moves on every read.
     if (key === 'list_version' || key === 'agents' || (key === 'cursor' && !options.cursor)) continue;
     const left = a[key];
     const right = b[key];
@@ -59,7 +41,6 @@ export function sameListModel(held: object | null | undefined, next: object | nu
   return true;
 }
 
-/** `next`, or `held` when it is the same as JSON: a read that brought nothing new keeps the value drawn. */
 export function keepSame<T>(held: T, next: T): T {
   return sameJson(held, next) ? held : next;
 }

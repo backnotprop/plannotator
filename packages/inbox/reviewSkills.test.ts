@@ -1,19 +1,3 @@
-/**
- * The review skills in the reply box's "/" list (code review in the Inbox,
- * approval "inbox-code-review-direction"). What regresses:
- *
- *  - a review skill's instructions not reaching the agent with the reply that
- *    names it, or reaching it with a reply that does not;
- *  - `/review-recheck` offered (or matched at Send) in a thread where no
- *    review happened (the owner's rule: only after a verdict or review
- *    comments in that thread);
- *  - a typed review skill name turning into a reference while the catalog
- *    has none (Code review off: the Inbox lists no Plannotator skill);
- *  - the skills' overview-drawing lines reaching the agent while Shape is off
- *    (approval "code-review-029-shape-off"), or missing while it is on;
- *  - a chapter diagram's line reaching the agent while Settings → Capabilities →
- *    Chapter diagrams is off, Shape off or on.
- */
 import { describe, expect, test } from 'bun:test';
 import { INBOX_REPLY_SKILL_AUDIENCE, splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { INBOX_GUIDE_FEEDBACK_TITLE, INBOX_REVIEW_CURATE_DRAWING_LINE, INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE, INBOX_REVIEW_RECHECK_DRAWING_LINE, INBOX_REVIEW_SKILL_TEXTS, INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE, inboxThreadHadReview, type InboxReviewThreadMessage } from '@plannotator/core/inbox-review';
@@ -27,7 +11,6 @@ const ON: SkillCatalogEntry[] = [
 ];
 const sources = (catalog: SkillCatalogEntry[]) => ({
   catalog: async () => catalog,
-  // A Plannotator skill is never read from disk: a call here for one fails the test.
   content: async (name: string) => {
     throw new Error(`read ${name} from disk`);
   },
@@ -44,7 +27,6 @@ describe('a reply that names a review skill', () => {
     expect(split?.skills[0]).toMatchObject({ name: 'review-curate', included: true });
     expect(block).toContain(INBOX_REVIEW_SKILL_TEXTS['review-curate']!.body);
     expect(block).not.toContain('Skill directory:');
-    // A reply that names none carries nothing.
     expect(await inboxSkillsBlock(['Looks good, ship it.'], INBOX_REPLY_SKILL_AUDIENCE, sources(ON))).toBe('');
   });
 
@@ -58,18 +40,13 @@ describe('/review-recheck needs a review in the thread', () => {
     const hidden = inboxSkillFilter(false);
     expect(ON.filter(hidden).map((s) => s.name)).toEqual(['review-curate', 'deploy']);
     expect(ON.filter(inboxSkillFilter(true)).map((s) => s.name)).toEqual(['review-curate', 'review-recheck', 'deploy']);
-    // A skill of the person's own with the name is never hidden.
     expect(hidden({ name: 'review-recheck', root: 'claude', humanOnly: false })).toBe(true);
 
-    // No review at all; a review with no answer; a plain reply to it: no. (The server's marking of a real Send is
-    // in packages/server/inbox-code-review.test.ts.)
     expect(inboxThreadHadReview([agent('m1'), person('m2')])).toBe(false);
     expect(inboxThreadHadReview([agent('m1', true)])).toBe(false);
     expect(inboxThreadHadReview([agent('m1', true), person('m2', { reply_to: 'm1', body: 'Thanks.' })])).toBe(false);
-    // A verdict, or a reply the Inbox marked as carrying the review's comments (to whichever message): yes.
     expect(inboxThreadHadReview([agent('m1', true), person('m2', { reply_to: 'm1', review_verdict: { of: 'm1', verdict: 'approved', comments: 0 } })])).toBe(true);
     expect(inboxThreadHadReview([agent('m1', true), agent('m2'), person('m3', { reply_to: 'm2', review_comments_of: ['m1'] })])).toBe(true);
-    // The feedback heading alone (comments on a plain guide, or typed words) is not a review.
     expect(inboxThreadHadReview([agent('m1', true), person('m2', { reply_to: 'm1', body: `# ${INBOX_GUIDE_FEEDBACK_TITLE}` })])).toBe(false);
   });
 
@@ -109,7 +86,6 @@ describe("the review skills' chapter diagram lines ride Chapter diagrams", () =>
       for (const shape of [false, true]) {
         setReviewSkillsShape(shape);
         const off = await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), reviewed);
-        // Both skills are pasted, with their other words.
         expect(off).toContain('Give one chapter to each comment you acted on');
         expect(off).toContain('Needs the person:');
         expect([shape, /diagram|mermaid/i.test(off)]).toEqual([shape, false]);

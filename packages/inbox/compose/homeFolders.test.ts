@@ -1,9 +1,3 @@
-/**
- * "Another folder on <machine>…": which folder is read for a typed path, which of its names are offered, and when the
- * field names a folder one can start in. A wrong split reads the wrong folder (the suggestions under "~/code/bil"
- * would be home's), a wrong filter hides the folder being typed, and a Start row for home or an unread name would
- * start an agent somewhere the person never saw.
- */
 import { describe, expect, test } from 'bun:test';
 import { closestFirst, folderSuggestions, nameBelow, normalizeFolderPath, splitFolderPath } from './homeFolders';
 
@@ -41,7 +35,6 @@ describe('folderSuggestions', () => {
 test('the folders under the missing line: the one closest to what was typed first, ties in their order', () => {
   expect(closestFirst(['billing-api', 'billing-reports', 'billing-svc', 'infra'], 'biling-svc')).toEqual(['billing-svc', 'billing-api', 'billing-reports', 'infra']);
   expect(closestFirst(['code', 'notes'], 'NOTE')).toEqual(['notes', 'code']);
-  // A shared start counts before length: "nope" is nearer notes-local than the shorter web-app.
   expect(closestFirst(['notes-local', 'web-app'], 'nope')).toEqual(['notes-local', 'web-app']);
   expect(closestFirst(['web-app', 'notes-local'], 'nope')).toEqual(['notes-local', 'web-app']);
   expect(closestFirst(['b', 'a'], '')).toEqual(['b', 'a']);

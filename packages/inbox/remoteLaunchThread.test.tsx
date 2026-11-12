@@ -1,16 +1,3 @@
-/**
- * Remote launch, in the window: an agent started on another linked machine, its thread open here.
- * - The run line's Stop and the ⋯'s Stop go to that machine (`/api/inbox/m/<machine>/launch/…`), never to this one,
- *   which has no such launch; Open in Terminal is not offered (that Terminal is on the other machine).
- * - The header says which machine started it, when that was not this one.
- * - A prompt only Claude Code's own dialog can approve says so with that machine's name, offers Copy attach command,
- *   and no Approve in Terminal (it would open a Terminal here, where the session isn't).
- *
- * The failure this catches: a Stop pressed here answered by this machine's 404, or a button that opens a Terminal
- * on the wrong computer.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
