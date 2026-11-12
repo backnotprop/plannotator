@@ -1,20 +1,6 @@
-/**
- * Jump to an annotation that lives in another document.
- *
- * Navigation is asynchronous and the destination's annotations are re-applied
- * to the DOM a beat after it commits, so selecting the target id immediately
- * after requesting the navigation lands on the old document (or on a document
- * whose highlights are not painted yet, where the scroll-to-selected effect
- * finds nothing and gives up). This waits for the commit that makes the target
- * the open document — the same waiter shape `reveal { path }` uses in
- * packages/editor/webmcp — and only then selects.
- */
-
 import { useCallback, useEffect, useRef } from 'react';
 import { normalizeBrowserPath } from '../sourceDocumentPaths';
 
-/** Grace for the destination's restored highlights to paint before we scroll
- *  to one. useLinkedDoc re-applies them on a 100ms timeout. */
 const SELECT_AFTER_COMMIT_MS = 160;
 /** A navigation that never commits must not leave a selection pending forever. */
 const COMMIT_TIMEOUT_MS = 5000;
@@ -26,11 +12,8 @@ function samePath(a: string | null | undefined, b: string | null | undefined): b
 }
 
 export interface AnnotationJumpOptions {
-  /** Path of the document that is open right now. */
   currentPath: string | null;
-  /** Ask the host to open `path` (the file browser's own selection path). */
   navigate: (path: string) => void | Promise<void>;
-  /** Select an annotation in the document that is open. */
   select: (id: string) => void;
   selectAfterCommitMs?: number;
   commitTimeoutMs?: number;
@@ -54,9 +37,6 @@ export function useAnnotationJump(options: AnnotationJumpOptions): (path: string
 
   const jump = useCallback((path: string, id: string) => {
     const { currentPath, navigate, select } = optionsRef.current;
-    // The panel addresses documents by their normalized path while the host
-    // carries the raw server spelling; on Windows those differ, and comparing
-    // them raw made every same-document jump navigate instead of selecting.
     if (samePath(path, currentPath)) {
       select(id);
       return;
@@ -73,7 +53,6 @@ export function useAnnotationJump(options: AnnotationJumpOptions): (path: string
     });
   }, []);
 
-  // The commit that makes the requested document the open one.
   const currentPath = options.currentPath;
   useEffect(() => {
     const pending = pendingRef.current;

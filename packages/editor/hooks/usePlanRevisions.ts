@@ -1,22 +1,3 @@
-/**
- * Revised plans pushed into an open plan review.
- *
- * A host whose plan review does not block the agent (Pi) keeps the review
- * server open while the agent revises the plan, and pushes each revision
- * into the server. The server advertises this by sending `planRevision` on
- * `/api/plan`; this hook then polls `/api/plan/revision` and, when a newer
- * revision exists, loads `/api/plan` and hands it to `onApply`. Servers that
- * never revise send no `planRevision` and the hook does nothing.
- *
- * A revision is held back while applying it would lose the reviewer's work
- * or yank the view: while the source editor is open or holds unsent direct
- * edits (those are a diff against the version on screen), while a linked
- * document or archived plan is open (the root plan is stashed), and while a
- * comment composer or the selection toolbar is open (applying re-renders the
- * document under it and would drop the half-written comment or selection).
- * It loads as soon as that clears.
- */
-
 import { useCallback, useEffect, useRef } from 'react';
 import type { VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
 
@@ -25,21 +6,12 @@ export interface PlanRevisionSnapshot {
   previousPlan: string | null;
   versionInfo: VersionInfo | null;
   planRevision: number;
-  /** The revision's history version file (absolute), when the server names it. */
   planPath?: string | null;
-  /** The plan's own file (absolute), when the server trusts it (its text is the plan). */
   planFilePath?: string | null;
 }
 
 export type PlanRevisionBlocker = 'edits' | 'linked-document' | 'composer' | null;
 
-/**
- * Comment composers and the selection toolbar live inside the viewer (and in
- * portals), not in App state, so they are read from the DOM at apply time.
- * The decision control's note field (the header popover's composer) and the
- * compact DecisionNoteDialog count too: a note is written about the plan on
- * screen, so a revision waits until it is sent or put away (#1057).
- */
 export const PLAN_REVISION_COMPOSER_SELECTOR =
   '[data-comment-popover="true"], .annotation-toolbar, [data-diagram-composer], [data-decision-note-input], [data-decision-note-composer]';
 
@@ -48,7 +20,6 @@ export function isPlanRevisionComposerOpen(): boolean {
   return document.querySelector(PLAN_REVISION_COMPOSER_SELECTOR) !== null;
 }
 
-/** How often a revision held by an open composer re-checks whether it closed. */
 export const PLAN_REVISION_COMPOSER_RETRY_MS = 400;
 
 /** Why a pending revision cannot load right now, or null when it can. */
@@ -65,23 +36,17 @@ export function planRevisionBlocker(state: {
 export const PLAN_REVISION_POLL_MS = 2000;
 
 export interface UsePlanRevisionsOptions {
-  /** `planRevision` from the initial `/api/plan`; null when the server never revises. */
   initialRevision: number | null;
-  /** False once the reviewer decided: stop polling. */
   active: boolean;
   blocker: PlanRevisionBlocker;
   onApply: (snapshot: PlanRevisionSnapshot) => void;
-  /** Called once per revision that is waiting on `blocker`. */
   onBlocked?: (revision: number, blocker: Exclude<PlanRevisionBlocker, null>) => void;
-  /** Whether a comment composer is open right now (default: the DOM probe above). */
   isComposerOpen?: () => boolean;
   intervalMs?: number;
 }
 
 export interface UsePlanRevisionsResult {
-  /** The revision on screen, to echo on approve/deny; null when unsupported. */
   currentRevision: () => number | null;
-  /** Check now (e.g. after the server refused a decision as stale). */
   refreshNow: () => void;
 }
 
@@ -105,7 +70,6 @@ export function usePlanRevisions(options: UsePlanRevisionsOptions): UsePlanRevis
   const currentBlocker = (): PlanRevisionBlocker =>
     blockerRef.current ?? (isComposerOpenRef.current() ? 'composer' : null);
 
-  // The initial payload arrives after mount.
   useEffect(() => {
     if (initialRevision === null) return;
     if (appliedRef.current === null || initialRevision > appliedRef.current) appliedRef.current = initialRevision;
@@ -122,8 +86,6 @@ export function usePlanRevisions(options: UsePlanRevisionsOptions): UsePlanRevis
         blockedNoticeRef.current = latest;
         onBlockedRef.current?.(latest, blockedBy);
       }
-      // A composer closing changes no React state this hook sees: re-check
-      // shortly so the revision loads soon after the comment is done.
       if (blockedBy === 'composer' && composerRetryRef.current === null) {
         composerRetryRef.current = setTimeout(() => {
           composerRetryRef.current = null;
@@ -138,8 +100,6 @@ export function usePlanRevisions(options: UsePlanRevisionsOptions): UsePlanRevis
       if (!res.ok) return;
       const data = (await res.json()) as Partial<PlanRevisionSnapshot>;
       if (typeof data.plan !== 'string' || typeof data.planRevision !== 'number') return;
-      // Re-check: the reviewer may have started editing or commenting while
-      // this loaded. The next check retries.
       if (currentBlocker()) {
         if (isComposerOpenRef.current() && composerRetryRef.current === null) {
           composerRetryRef.current = setTimeout(() => {
@@ -162,7 +122,6 @@ export function usePlanRevisions(options: UsePlanRevisionsOptions): UsePlanRevis
         planFilePath: typeof data.planFilePath === 'string' ? data.planFilePath : null,
       });
     } catch {
-      // The next poll retries.
     } finally {
       loadingRef.current = false;
     }
@@ -197,7 +156,6 @@ export function usePlanRevisions(options: UsePlanRevisionsOptions): UsePlanRevis
     return () => clearInterval(timer);
   }, [initialRevision, active, intervalMs, check]);
 
-  // A held-back revision loads as soon as its blocker clears.
   useEffect(() => {
     if (!active || blocker) return;
     void tryApply();

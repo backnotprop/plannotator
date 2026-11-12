@@ -1,14 +1,3 @@
-/**
- * Jumping to an annotation in another document (DOM-gated).
- *
- * Failures to catch:
- *  - Selecting the target id before the destination commits: the selection
- *    lands on the document the reviewer is leaving (where that id does not
- *    exist), so the click appears to do nothing.
- *  - Not navigating at all, or navigating to the wrong path.
- *  - A navigation that never commits leaving a selection armed, which would
- *    then fire into whatever document happens to be open later.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -84,7 +73,6 @@ describe.if(hasDom)('useAnnotationJump', () => {
     await act(async () => api!.jump(TARGET, 'ann-2'));
 
     expect(navigate.mock.calls).toEqual([[TARGET]]);
-    // Nothing selected yet — the old document is still the open one.
     await tick();
     expect(select).not.toHaveBeenCalled();
 
@@ -106,12 +94,6 @@ describe.if(hasDom)('useAnnotationJump', () => {
   });
 
   test('path spellings are compared normalized, not byte-for-byte', async () => {
-    // The panel addresses documents by their NORMALIZED path (that is what
-    // groupAnnotationsByDocument emits) while the host carries the raw server
-    // spelling. On Windows those differ, so a jump inside the open document
-    // used to navigate to a path the host already had open, and a commit for
-    // the destination never matched the pending request: the click did
-    // nothing at all.
     await mount();
     await act(async () => api!.setCurrentPath('C:\\repo\\open.md'));
     await act(async () => api!.jump('C:/repo/open.md', 'ann-win'));
@@ -135,7 +117,6 @@ describe.if(hasDom)('useAnnotationJump', () => {
     await act(async () => api!.jump(TARGET, 'ann-4'));
     await tick(30);
 
-    // The destination arrives only after the request expired.
     await act(async () => api!.setCurrentPath(TARGET));
     await tick();
     expect(select).not.toHaveBeenCalled();
