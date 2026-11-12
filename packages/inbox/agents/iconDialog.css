@@ -1,7 +1,8 @@
 /* ---------- The agent icon dialog: "Your own…" and "Sets" (AgentIconDialog.tsx, OwnIconsBody.tsx, SetsBody.tsx) ----------
    The Inbox's own dialog (`.ib-dlg`, a native modal in the middle of the window), made a fixed size so the grid scrolls
    inside it; a full-height sheet on a phone. */
-.pn-inbox dialog.ib-dlg.ib-agi, dialog.ib-dlg.ib-agi { width: min(720px, calc(100vw - 32px)); height: min(640px, calc(100vh - 48px)); overflow: hidden; }
+/* Its top edge stays where it opened (`--agi-top`, AgentIconDialog.tsx): switching places moves only the bottom edge. */
+.pn-inbox dialog.ib-dlg.ib-agi, dialog.ib-dlg.ib-agi { width: min(720px, calc(100vw - 32px)); height: min(640px, calc(100vh - 48px)); overflow: hidden; margin: var(--agi-top, auto) auto auto; }
 dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 /* "Your own…" is only as tall as its pictures need (the grid of a set keeps the full height). */
 .pn-inbox dialog.ib-dlg.ib-agi:has(.ib-agi-own), dialog.ib-dlg.ib-agi:has(.ib-agi-own) { height: fit-content; max-height: min(640px, calc(100vh - 48px)); }
@@ -11,9 +12,12 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .ib-agi-mark { display: inline-grid; place-items: center; flex: none; }
 .ib-agi-x { flex: none; }
 .ib-agi-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* Focused as the dialog opens on a touch screen (nothing to type yet): no ring. */
+.ib-agi-body:focus { outline: none; }
 
 /* "Your own…": a large drop area, the pictures beneath. */
-.ib-agi-own { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+/* Its scroll box clips at its edge: 4 px of room (taken back by the margin) keeps the drop area's focus ring whole. */
+.ib-agi-own { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; padding: 4px; margin: -4px; }
 .ib-agi-drop { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 168px; border: 1.5px dashed color-mix(in oklch, var(--foreground) 24%, transparent); border-radius: 12px; background: color-mix(in oklch, var(--foreground) 3%, transparent); color: var(--muted-foreground); font: inherit; cursor: pointer; transition: background 120ms linear, border-color 120ms linear; }
 .ib-agi-drop:hover, .ib-agi-own[data-over] .ib-agi-drop { border-color: var(--primary); background: color-mix(in oklch, var(--primary) 7%, transparent); }
 /* Focused as the dialog opens: a quiet ring, not the drop's own highlight. */
@@ -21,7 +25,10 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .ib-agi-drop .am-own-add { width: 28px; height: 28px; border-radius: 8px; }
 .ib-agi-drop-l { font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); }
 .ib-agi-drop-b { font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 550; }
-.ib-agi-own[data-busy] .ib-agi-drop { cursor: progress; opacity: 0.6; }
+/* Uploading (seconds on a slow link): a spinner in the "+"'s place, the words dimmed. */
+.ib-agi-own[data-busy] .ib-agi-drop { cursor: progress; }
+.ib-agi-own[data-busy] .ib-agi-drop > :not(.ib-spin) { opacity: 0.55; }
+.ib-agi-drop > .ib-spin { width: 22px; height: 22px; margin: 3px; color: var(--primary); }
 .ib-agi-status { min-height: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-agi-status:empty { display: none; }
 .ib-agi .am-own-g { display: grid; grid-template-columns: repeat(auto-fill, 52px); gap: 8px; }
@@ -34,7 +41,11 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .ib-agi .am-own-x { position: absolute; right: -4px; top: -4px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--foreground); color: var(--background); cursor: pointer; opacity: 0; transition: opacity 100ms linear; }
 .ib-agi .am-own-x > svg { width: 8px; height: 8px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; fill: none; }
 .ib-agi .am-own-c:hover > .am-own-x, .ib-agi .am-own-c:focus-within > .am-own-x { opacity: 1; }
-@media (hover: none) { .ib-agi .am-own-x { opacity: 1; width: 24px; height: 24px; right: -6px; top: -6px; } }
+/* No hover: every × shows, so each is a quiet grey dot (18 px drawn, 24 px to tap), not a row of black badges. */
+@media (hover: none) {
+  .ib-agi .am-own-x { opacity: 1; width: 24px; height: 24px; right: -7px; top: -7px; background: none; color: var(--muted-foreground); isolation: isolate; }
+  .ib-agi .am-own-x::before { content: ""; position: absolute; inset: 3px; z-index: -1; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 1.5px var(--background); }
+}
 
 /* "Animate it" (AnimateIt.tsx): under the agent's own picture, the picture, one line, one button. */
 .ib-agi-anim { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in oklch, var(--foreground) 3%, transparent); }
@@ -64,7 +75,10 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .am-sets-i[aria-checked="true"] { box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--foreground) 55%, transparent); }
 .am-sets-i:disabled { cursor: default; }
 .am-sets-n { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; line-height: 1; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.am-sets-i[data-missing] .am-sets-art { border-radius: 6px; background: color-mix(in oklch, var(--foreground) 6%, transparent); }
+/* Not here yet (a set still downloading) or still loading (a slow link): a faint tile, not an empty space. */
+.am-sets-i[data-missing] .am-sets-art, .am-sets-i > .am-sets-art:not([data-mono]):not([data-loaded]) { border-radius: 6px; background: color-mix(in oklch, var(--foreground) 6%, transparent); }
+/* One that did not load waits behind that tile to be asked again (SetsBody.tsx), never a broken picture. */
+.am-sets-art > img[data-failed] { visibility: hidden; }
 .am-sets-get { display: flex; align-items: center; gap: 10px; padding: 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; flex: none; }
 .am-sets-getb { height: 28px; padding: 0 14px; border: 0; border-radius: 7px; background: var(--primary); color: var(--primary-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; cursor: pointer; }
 .am-sets-getb:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--background), 0 0 0 3.5px var(--primary); }
@@ -75,7 +89,8 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 
 /* A phone: a full-height sheet from the bottom, finger-sized cells. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox dialog.ib-dlg.ib-agi, dialog.ib-dlg.ib-agi, .pn-inbox dialog.ib-dlg.ib-agi:has(.ib-agi-own), dialog.ib-dlg.ib-agi:has(.ib-agi-own) { inset: auto 0 0 0; margin: 0; width: 100vw; max-width: none; height: calc(var(--ib-vvh, 100dvh) - 12px - env(safe-area-inset-top)); max-height: none; border: 0; border-radius: var(--ib-sheet-corner, 16px) var(--ib-sheet-corner, 16px) 0 0; }
+  /* Hung from the top, so it ends where `--ib-vvh` ends: the keyboard's top when the search has it up. */
+  .pn-inbox dialog.ib-dlg.ib-agi, dialog.ib-dlg.ib-agi, .pn-inbox dialog.ib-dlg.ib-agi:has(.ib-agi-own), dialog.ib-dlg.ib-agi:has(.ib-agi-own) { inset: calc(12px + env(safe-area-inset-top)) 0 auto 0; margin: 0; width: 100vw; max-width: none; height: calc(var(--ib-vvh, 100dvh) - 12px - env(safe-area-inset-top)); max-height: none; border: 0; border-radius: var(--ib-sheet-corner, 16px) var(--ib-sheet-corner, 16px) 0 0; }
   .ib-agi > .ib-dlg-in { padding: 14px 14px calc(12px + env(safe-area-inset-bottom)); }
   .ib-agi-head { flex-wrap: wrap; }
   .ib-agi-head .ib-seg { order: 3; width: 100%; }
@@ -88,4 +103,9 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
   .am-sets-tab { height: 34px; padding: 0 11px; }
   .am-sets-g { grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); }
   .am-sets-i { height: 62px; }
+  /* The keyboard up (the search is the dialog's only field): the switch, the set's name line and the credit step
+     aside and the sets keep one row that scrolls sideways, so the icons found keep the room that is left. */
+  :root[data-ib-keyboard] .ib-agi-head .ib-seg, :root[data-ib-keyboard] .ib-agi .am-sets-head, :root[data-ib-keyboard] .ib-agi .am-sets-credit { display: none; }
+  :root[data-ib-keyboard] .ib-agi .am-sets-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -14px; padding: 0 14px; }
+  :root[data-ib-keyboard] .ib-agi .am-sets-tabs::-webkit-scrollbar { display: none; }
 }

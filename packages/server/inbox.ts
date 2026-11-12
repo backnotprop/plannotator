@@ -307,7 +307,7 @@ import { replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
-import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale } from "./inbox-tailscale";
+import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
 import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-new-images";
 
@@ -315,6 +315,7 @@ import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-ne
 const INBOX_WHATS_NEW_RELEASES_PATH = "/api/inbox/whats-new/releases";
 import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical";
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
+import { inboxAppIconResponse } from "./inbox-app-icons";
 import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
@@ -506,6 +507,8 @@ export interface InboxServerOptions {
   unlinkedRefusalKeptMs?: number;
   /** How "Reach from my tailnet" runs the `tailscale` CLI. Default: the CLI on PATH. */
   tailscale?: TailscaleRunner;
+  /** Tests: the clock of "Over your tailnet"'s publish-again retry (inbox-tailscale.ts). Default: unref'd timers. */
+  tailscaleTimers?: InboxTailscaleTimers;
   /** Tests: more agents beside Claude Code (`createInboxLaunch`'s `hosts`), for a sandbox with no CLI to start. */
   launchHosts?: (context: LaunchHostContext) => LaunchHost[];
   /** Tests: how step 1 of Pair a phone reads this computer (packages/server/inbox-pairing-checks.ts). Default: its own tools. */
@@ -1173,6 +1176,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pinListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
   const artifactPinListeners = new Set<() => void>();
+  /** `plannotator inbox --open <thread>`: the thread, and the window (inbox-windows.ts `lastUsed`) that shows it. */
+  const showListeners = new Set<(threadId: string, windowId: string) => void>();
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
   /**
@@ -1196,6 +1201,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
   const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => void>();
+  /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
+  const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -3571,6 +3578,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The pinned artifacts changed (any window's, a phone's, or a deletion): the window reads them again. Windows only.
         const onArtifactPins = () => send(`event: artifact-pins\ndata: {}\n\n`);
         if (windowId) artifactPinListeners.add(onArtifactPins);
+        // Show a thread (`plannotator inbox --open <thread>`): every tab hears it, only the window it names moves. This computer's windows only.
+        const onShow = (threadId: string, target: string) => send(`event: show\ndata: ${JSON.stringify({ thread_id: threadId, window: target })}\n\n`);
+        if (windowId && via === "local") showListeners.add(onShow);
         // A snooze changed or ran out: the list is read again. Windows, and a linked machine that asks (`snoozes=1`:
         // a snooze writes no record, so its copy of this machine's rows would not move). The phone's door hears nothing new.
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
@@ -3613,6 +3623,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
+        // The same state GET /api/inbox/settings answers every window with, so Settings' row follows without a reload.
+        const onTailscale = () => send(`event: tailscale\ndata: ${JSON.stringify({ tailscale: tailscale.state() })}\n\n`);
+        if (windowId) tailscaleListeners.add(onTailscale);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows, and a linked machine that asks
         // (`deliveries=1`), whose copy of this machine's rows would otherwise keep a "Session ended" that is over.
@@ -3649,6 +3662,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
           artifactPinListeners.delete(onArtifactPins);
+          showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
           rowsListeners.delete(onRows);
@@ -3656,6 +3670,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
           capabilityListeners.delete(onCapabilities);
+          tailscaleListeners.delete(onTailscale);
           stopShapes?.();
           stopShapes = null;
           deliveryListeners.delete(sendDeliveries);
@@ -4879,6 +4894,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         return json({ connect: await connectAgents() });
       }
+      // `plannotator inbox --open <thread>`: the window on this computer the person used last shows the thread,
+      // as a row click would. `shown: false`: no window is open, and the caller opens one at the thread.
+      if (path === "/api/inbox/control/show") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = (await req.json().catch(() => null)) as { thread?: unknown } | null;
+        const ref = typeof body?.thread === "string" ? body.thread.trim() : "";
+        // A thread id, or any message's id (its thread).
+        const threadId = ref ? (store.message(ref)?.thread_id ?? null) : null;
+        if (!threadId || !store.thread(threadId)) return json({ error: `No thread ${ref || "named"} in this Inbox.`, code: "thread_unknown" }, 404);
+        const target = windows.lastUsed();
+        if (target) for (const listener of showListeners) listener(threadId, target);
+        return json({ shown: target !== null, thread: threadId });
+      }
       // `plannotator inbox link`: offer, link, unlink and list linked machines (inbox-machines.ts).
       if (path.startsWith("/api/inbox/control/machines")) {
         try {
@@ -5416,7 +5444,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.served_by !== undefined && body.served_by !== null && !servedBy) {
           throw new InboxError("validation_error", "served_by: 8 to 64 letters, digits, - or _.", { field: "served_by" });
         }
-        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy });
+        // `used` (additive): the window got focus, so `plannotator inbox --open <thread>` moves this one.
+        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy, used: body.used === true });
         return json({ notify_reach: windows.reach(notificationsState().enabled) });
       }
       if (path === "/api/inbox/restart") {
@@ -6657,6 +6686,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
+      // The installed app's manifest and icons (inbox-app-icons.ts), of the same favicon style.
+      if (req.method === "GET") {
+        const appIcon = inboxAppIconResponse(path, faviconState());
+        if (appIcon) return appIcon;
+      }
 
       // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
       // person's signed-in dev app; another site's page is refused, reads included.
@@ -6809,6 +6843,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     registry: () => registry,
     dispatch: async (req) => markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet"))),
     tailscale: options.tailscale,
+    timers: options.tailscaleTimers,
+    // Published by itself after Tailscale came back: every window's Settings row follows at once.
+    onRepublished: () => {
+      for (const listener of tailscaleListeners) listener();
+    },
     flag: options.publishTailnet === true,
     maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
     // A terminal closing a foreground Inbox while published: the clean stop (both tailnet mappings), then exit.

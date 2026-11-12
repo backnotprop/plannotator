@@ -215,7 +215,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator guide import --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--pr <url>]",
     "  plannotator sessions",
     "  plannotator data-dir",
-    "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
+    "  plannotator inbox [--background | --no-open | --open [<thread>]] [--tailscale]",
     "  plannotator inbox mcp [--t3]",
     "  plannotator inbox status [--json] | stop | restart",
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
@@ -553,7 +553,7 @@ export const INBOX_CALL_USAGE = [
  */
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
+  "  plannotator inbox [--background | --no-open | --open [<thread>]] [--tailscale]",
   "  plannotator inbox mcp [--t3]",
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
@@ -580,6 +580,7 @@ export const INBOX_COMMAND_USAGE = [
   "                                  detached first when it is not running. Never blocks:",
   "                                  what the /plannotator-inbox commands run, and how to",
   "                                  find the Inbox's address for the person.",
+  "  plannotator inbox --open <thread>  Show that thread in the open Inbox window, or open one.",
   "  plannotator inbox --tailscale   Also publish it over the person's tailnet for this",
   "                                  run (tailscale serve, HTTPS, never funnel), for the",
   "                                  Tailscale login that owns this machine only. With",

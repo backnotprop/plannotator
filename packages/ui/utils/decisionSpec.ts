@@ -159,14 +159,18 @@ export interface DecisionPlatformInput {
   /** The viewer authored this PR/MR: approve paths mute, never disappear. */
   selfAuthored: boolean;
   /**
-   * #1611: whether the platform has a real request-changes review (GitHub
-   * does, GitLab does not). `false` makes the request-changes rows say they
-   * post as a comment. Absent keeps the original copy, so a host that never
-   * sets it renders exactly what it rendered before. When supported, a
-   * self-authored PR mutes Request changes too (GitHub refuses it on your own
-   * PR) and adds a live "Comment…" row so the empty state is never a dead end.
+   * #1611: whether the platform has a real request-changes decision. `false`
+   * makes the request-changes rows say they post as a comment. Absent keeps
+   * the original copy, so a host that never sets it renders exactly what it
+   * rendered before. When supported, a self-authored PR mutes Request changes
+   * too and adds a live "Comment…" row so the empty state is never a dead end.
    */
   requestChangesSupported?: boolean;
+  /**
+   * `false` keeps Request changes live on a self-authored PR (GitLab accepts
+   * it from the author). Absent follows `selfAuthored`.
+   */
+  selfRequestChangesBlocked?: boolean;
 }
 
 export const DECISION_NOTE_PLACEHOLDER = 'Add a note...';
@@ -387,7 +391,9 @@ function buildPlatformSpec(input: DecisionSpecInput, platform: DecisionPlatformI
   const selfReasonShort = `You can't approve your own ${platform.mrLabel}`;
   const requestChangesUnsupported = platform.requestChangesSupported === false;
   // GitHub refuses REQUEST_CHANGES on your own PR, exactly like APPROVE.
-  const requestChangesMuted = selfAuthored && platform.requestChangesSupported === true;
+  const requestChangesMuted = selfAuthored
+    && platform.requestChangesSupported === true
+    && platform.selfRequestChangesBlocked !== false;
   const selfRequestChangesShort = `You can't request changes on your own ${platform.mrLabel}`;
   const postsAsComment = `Posts as a comment; ${platform.label} has no request-changes review`;
 
