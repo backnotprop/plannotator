@@ -4,12 +4,10 @@
  *
  * `data` holds everything the body draws from, as plain values: the message (the cache keeps an unchanged message
  * the same object), its answers as shown, each question's footer, its cards' replacements, its comments, and the
- * thread's values it reads. `draw` builds the body from them. The rules that keep it right:
+ * thread's values it reads. `draw` builds the body from them. The two rules that keep it right:
  *  - `draw` reads nothing a render can change besides `data` (a value the body shows goes into `data`);
  *  - the body's event handlers call the pane's newest functions (the pane hands them through a ref), since a body
- *    that did not draw again keeps the handlers of its last draw;
- *  - `data` holds the thread object itself: a kept handler holds its whole pane render (the closure's scope), so every
- *    message draws again when the thread changes and only the newest read's render stays alive, never one per read.
+ *    that did not draw again keeps the handlers of its last draw.
  * Compared field by field: a value is the same object, or an array or a Map holding the same objects.
  */
 import { memo, type ReactNode } from 'react';

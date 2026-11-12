@@ -9,7 +9,6 @@ test('a burst of records redraws the open thread twice (the first at once, the r
   const key = ['inbox', 'thread', 't1'];
   client.setQueryData<number[]>(key, []);
   const observer = new QueryObserver<number[]>(client, { queryKey: key, enabled: false, notifyOnChangeProps: ['data'] });
-  // React draws once per task that changed the store, however many changes the task held.
   let redraws = 0;
   let inTask = false;
   const stop = observer.subscribe(() => {
@@ -20,7 +19,6 @@ test('a burst of records redraws the open thread twice (the first at once, the r
   });
   await wait(DRAW_GAP_MS + 20);
 
-  // Records in tasks of their own, 5 ms apart (an agent writing fast), all inside one gap.
   const count = Math.floor(DRAW_GAP_MS / 10);
   for (let n = 1; n <= count; n++) {
     drawSoon(() => client.setQueryData<number[]>(key, (held = []) => [...held, n]));

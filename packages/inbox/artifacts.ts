@@ -80,7 +80,6 @@ export function originOf(message: Pick<InboxMessageWire, 'id' | 'author' | 'crea
   return origin;
 }
 
-/** One origin per message object and day: every read's list, and every render a kept handler still holds, shares it. */
 const origins = new WeakMap<object, { day: string; origin: ArtifactOrigin }>();
 
 function originNow(message: Pick<InboxMessageWire, 'id' | 'author' | 'created_at'>): ArtifactOrigin {

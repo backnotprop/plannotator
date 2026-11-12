@@ -1,7 +1,3 @@
-/**
- * A thread left open while an agent writes keeps only its newest render: each new message (a new thread object) must
- * not leave the earlier renders of the pane alive through messages that did not draw again (DOM-gated: DOM_TESTS=1).
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -95,7 +91,6 @@ test.skipIf(!hasDom)('messages that did not draw again keep no earlier render of
   const earlier: WeakRef<InboxThread>[] = [];
   for (let n = 3; n < 3 + ARRIVALS; n++) {
     earlier.push(new WeakRef(thread));
-    // A record applied in place: a new thread object, every unchanged message the same object.
     thread = { ...thread, messages: [...thread.messages, message(n)] };
     await draw(thread);
   }
