@@ -115,12 +115,20 @@ export interface LaunchTurnError {
 export function writeLaunchNote(
   context: Pick<LaunchPermissionContext, "store" | "onChange">,
   root: InboxMessage,
-  note: { author: { host: string; session: string; name: string }; body: string; key: string },
+  note: { author: { host: string; session: string; name: string }; body: string; key: string; turnError?: boolean },
   log: (line: string) => void,
 ): void {
   try {
     const latest = context.store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
-    context.store.sendMessage({ project_id: root.project_id, author: { kind: "agent", ...note.author }, body: note.body, reply_to: latest, idempotency_key: note.key });
+    context.store.sendMessage({
+      project_id: root.project_id,
+      author: { kind: "agent", ...note.author },
+      body: note.body,
+      reply_to: latest,
+      idempotency_key: note.key,
+      // A failed turn's note: the window notifies for it (`InboxMessage.turn_error`).
+      ...(note.turnError ? { turn_error: true } : {}),
+    });
     context.onChange();
   } catch (error) {
     log(`Inbox launch ${root.launch?.id ?? root.id}: a note was not written: ${error instanceof Error ? error.message : String(error)}`);

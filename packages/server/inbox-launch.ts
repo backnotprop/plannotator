@@ -699,7 +699,7 @@ export function createInboxLaunch(options: {
       writeLaunchNote(
         { store, onChange: options.onChange },
         root,
-        { author: { host: launch.agent, session, name: host.name }, body: launchTurnErrorNote(host.name, found.text), key: `${launch.agent}-error-${launch.id}-${found.key}` },
+        { author: { host: launch.agent, session, name: host.name }, body: launchTurnErrorNote(host.name, found.text), key: `${launch.agent}-error-${launch.id}-${found.key}`, turnError: true },
         log,
       );
     }
