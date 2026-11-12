@@ -41,8 +41,9 @@ describe("config and data files in the annotatable seam", () => {
 		expect(documentRenderKindForPath("flow.mmd")).toBe("mermaid");
 		expect(documentRenderKindForPath("guide.adoc")).toBe("asciidoc");
 		expect(documentRenderKindForPath("config.yaml.bak")).toBeNull();
-		// `.env` is refused outright, never rendered.
-		expect(documentRenderKindForPath(".env")).toBeNull();
+		// A `.env` the person names renders as a code document, like `.env.example`.
+		expect(documentRenderKindForPath(".env")).toBe("code");
+		expect(documentRenderKindForPath("app/.env.local")).toBe("code");
 	});
 
 	test("isDocumentRenderKind accepts code", () => {

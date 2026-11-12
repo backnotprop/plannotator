@@ -64,6 +64,7 @@ export function createBunRefCliRunner(timeoutMs: number = REF_TIMEOUT_MS): RefRu
         stdout: "pipe",
         stderr: "pipe",
         detached: group,
+        windowsHide: true,
       });
     } catch {
       return Promise.resolve({ stdout: "", stderr: `${cli}: not found`, exitCode: 127 });

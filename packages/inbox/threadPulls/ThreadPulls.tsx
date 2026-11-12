@@ -15,7 +15,9 @@
  *   ("Stack of 3"), then the others under a divider with no heading, in the
  *   order they were added, each with its live state.
  *   The person adds a PR (its ref or link) and removes one there; a removal
- *   says so with Undo. On a touch screen a tap opens it as a bottom sheet.
+ *   says so with Undo. On a phone (phone.ts) it opens as a bottom sheet, the
+ *   width of the screen at its bottom edge; a tablet gets the card, as its
+ *   ⋯ menus do.
  *
  * Nothing here has a keyboard shortcut.
  */
@@ -31,6 +33,7 @@ import { inboxApi } from '../api';
 import { INBOX_UNREACHABLE } from '../toastError';
 import { RefMarkIcon } from '../board/RefMark';
 import { CountBadge, countBadgeText } from '../components/CountBadge';
+import { isPhone } from '../phone';
 import { labelOfKey, pullExtras, pullHeadline, pullsHead, pullsMarkWords, pullStateWord, pullsSummaryOf, threadPullsBus } from './model';
 
 const WIDTH = 400;
@@ -176,6 +179,9 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (ref.current?.contains(t) || anchor.contains(t)) return;
+      // The sheet's scrim closes it on its click (below), not on the press: closed on the press, the touch's click
+      // would land on what was under the scrim (the thread header's Back, a link), as BottomSheet.tsx says.
+      if (t instanceof Element && t.closest('[data-pr-scrim]')) return;
       onClose();
     };
     const onScroll = (e: Event) => {
@@ -222,6 +228,7 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
       <>
         <div
           className="ib-prpop-scrim"
+          data-pr-scrim=""
           onClick={(e) => {
             e.stopPropagation();
             onClose();
@@ -508,7 +515,7 @@ export function RowPullsMark({ threadId, summary }: { threadId: string; summary:
           // A tap on the mark opens its card, not the thread.
           e.preventDefault();
           e.stopPropagation();
-          setOpen({ anchor: e.currentTarget, sheet: true, pinned: true });
+          setOpen({ anchor: e.currentTarget, sheet: isPhone(), pinned: true });
         }}
       >
         <span className="ib-sr">{words}</span>
@@ -537,7 +544,7 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
   const { answer, failed, setAnswer } = useThreadPulls(threadId, true);
   const shown = answer ? pullsSummaryOf(answer) : summary;
   useEffect(() => {
-    if (adding && button.current) setOpen({ anchor: button.current, sheet: coarse(), pinned: true });
+    if (adding && button.current) setOpen({ anchor: button.current, sheet: isPhone(), pinned: true });
   }, [adding, setOpen]);
   const closeAll = (restoreFocus?: boolean) => {
     close();
@@ -563,7 +570,7 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
         onClick={(e) => {
           // Read now: React clears currentTarget once the handler returns, before the update runs.
           const anchor = e.currentTarget;
-          setOpen((now) => (now?.pinned ? null : { anchor, sheet: coarse(), pinned: true }));
+          setOpen((now) => (now?.pinned ? null : { anchor, sheet: isPhone(), pinned: true }));
         }}
       >
         {shown ? <PullsMarkIcon summary={shown} size={17} /> : <RefMarkIcon kind="pr" state="unknown" size={17} />}

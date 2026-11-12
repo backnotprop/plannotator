@@ -191,7 +191,7 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
                   onClick={() => choose(icon)}
                 >
                   <span ref={lazy} className="am-sets-art" data-src={src} data-pixel={look?.pixelated ? '' : undefined} data-mono={look?.mono ? '' : undefined} style={setArtStyle(look, null) as CSSProperties}>
-                    {look?.mono ? <span className="am-sets-mono" /> : <img alt="" draggable={false} decoding="async" />}
+                    {look?.mono ? <span className="am-sets-mono" /> : <img alt="" draggable={false} decoding="async" onLoad={(event) => event.currentTarget.parentElement?.setAttribute('data-loaded', '')} onError={(event) => askAgain(event.currentTarget)} />}
                   </span>
                   <span className="am-sets-n">{number}</span>
                 </button>
@@ -217,4 +217,31 @@ function reveal(el: HTMLElement): void {
   if (!src) return;
   if (el.dataset.mono !== undefined) el.style.setProperty('--set-src', `url("${src}")`);
   else el.querySelector('img')?.setAttribute('src', src);
+}
+
+/** When an icon that did not load is asked for again: the link back, else after 2, 8 and 30 s. */
+const ICON_RETRY_MS = [2_000, 8_000, 30_000];
+
+/**
+ * An icon in the grid that did not load (a dropped link, a request that failed): hidden behind its faint tile, never
+ * the browser's broken picture, and asked for again (the link back, else after a while), a few times at most.
+ */
+function askAgain(img: HTMLImageElement): void {
+  img.dataset.failed = '';
+  const tries = Number(img.dataset.tries ?? 0);
+  if (tries >= ICON_RETRY_MS.length) return;
+  img.dataset.tries = String(tries + 1);
+  const src = img.getAttribute('src');
+  if (!src) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const again = () => {
+    clearTimeout(timer);
+    window.removeEventListener('online', again);
+    if (!img.isConnected) return;
+    delete img.dataset.failed;
+    img.removeAttribute('src');
+    img.setAttribute('src', src);
+  };
+  timer = setTimeout(again, ICON_RETRY_MS[tries]);
+  window.addEventListener('online', again);
 }

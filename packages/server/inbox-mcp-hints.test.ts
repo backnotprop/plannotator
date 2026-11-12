@@ -4,7 +4,8 @@
  * with options that carry no pros, cons or prototype. The failures these
  * guard: a hint on a message that is right (the PR is on the thread, the
  * link is an issue or sits in code, the question has trade-offs), a session
- * told twice, two hints on one send, and a hint on a refused send.
+ * told twice, two hints on one send, and a hint on a refused send. The
+ * picture-choices advice is not a quiet hint: it is said every time.
  *
  * A real store in a temp dir and send_message's own handler; no Inbox
  * server, no network.
@@ -123,10 +124,11 @@ test("no hint on a refused send, a replay, or a send with no session; a refused 
   expect((await w.send("", { body: BARE, thread: "anon" })).lines).toHaveLength(1);
 });
 
-test("the picture-choices advice is said once to a session", async () => {
+test("the picture-choices advice is said on every send it holds for, in any session", async () => {
   const w = world();
   const pictured = (prompt: string) => ["- A: ![a](designs/a.png)", "- B: ![b](designs/b.png)", "", ":::question", prompt, "", "- [ ] A", "    Pros: calm", "- [ ] B", ":::"].join("\n");
   expect((await w.send("ses_a", { body: pictured("Which theme?") })).result.content[0]!.text).toContain("choices have no pictures");
-  expect((await w.send("ses_a", { body: pictured("Which icon set?"), thread: "icons" })).result.content[0]!.text).not.toContain("choices have no pictures");
+  expect((await w.send("ses_a", { body: pictured("Which icon set?"), thread: "icons" })).result.content[0]!.text).toContain("choices have no pictures");
   expect((await w.send("ses_b", { body: pictured("Which font?"), thread: "fonts" })).result.content[0]!.text).toContain("choices have no pictures");
+  expect((await w.send("", { body: pictured("Which grid?"), thread: "grids" })).result.content[0]!.text).toContain("choices have no pictures");
 });

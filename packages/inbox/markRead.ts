@@ -124,6 +124,11 @@ export function setAsideCount(
 /** The person's answer to the warning: Cancel, or go on (and, with `never`, stop asking). */
 export type SetAsideAnswer = { go: false } | { go: true; never: boolean };
 
+/** Whether the warning asks before this Mark read: the person has it on and something would be set aside. */
+export function warnsBeforeRead(count: SetAsideCount, warnOn: boolean): boolean {
+  return warnOn && count.questions + count.actions > 0;
+}
+
 /**
  * Whether a Mark read goes ahead: straight on when nothing would be set aside or the person turned the warning off;
  * else the warning asks (`ask`), and "Don't show this again" turns it off (`turnOff`) before the Mark read goes.
@@ -134,7 +139,7 @@ export async function confirmSetAside(
   ask: (count: SetAsideCount) => Promise<SetAsideAnswer>,
   turnOff: () => void,
 ): Promise<boolean> {
-  if (!warnOn || count.questions + count.actions === 0) return true;
+  if (!warnsBeforeRead(count, warnOn)) return true;
   const answer = await ask(count);
   if (!answer.go) return false;
   if (answer.never) turnOff();

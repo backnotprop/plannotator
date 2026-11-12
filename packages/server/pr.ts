@@ -62,6 +62,7 @@ const bunCommandRuntime: PRRuntime = {
       stdout: "pipe",
       stderr: "pipe",
       ...(group ? { detached: true } : {}),
+      windowsHide: true,
     });
     const stop = () => refRunnerKill((sig) => (group ? process.kill(-proc.pid, sig) : proc.kill(sig)));
     if (signal?.aborted) stop();
@@ -86,6 +87,7 @@ const bunCommandRuntime: PRRuntime = {
       stdout: "pipe",
       stderr: "pipe",
       stdin: "pipe",
+      windowsHide: true,
     });
 
     proc.stdin.write(input);

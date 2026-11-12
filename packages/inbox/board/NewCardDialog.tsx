@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
-import { INBOX_CARD_NOTES_MAX, INBOX_CARD_TITLE_MAX, type InboxInitiative } from '@plannotator/core/inbox-types';
+import { INBOX_CARD_TITLE_MAX, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ComposeSessionsModel, ProjectFolder } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -216,7 +216,6 @@ export function NewCardDialog({
               className="ib-ncd-notes"
               placeholder={mode === 'send' ? 'Notes: what the agent should do. They are the message it gets.' : 'Notes (optional)'}
               value={notes}
-              maxLength={INBOX_CARD_NOTES_MAX}
               onChange={(event) => {
                 setNotes(event.target.value);
                 notesHash.onSelect();

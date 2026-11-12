@@ -308,6 +308,11 @@ const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unk
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
+import { INBOX_CHECK_CHILD_ENV, runInboxCheckChild } from "@plannotator/shared/inbox/store-log/sqlite/check-child";
+
+// The second half of an Inbox move's check (check-child.ts): this program, run again by the Inbox while it moves
+// its records into SQLite. Nothing else, before any startup work.
+if (process.env[INBOX_CHECK_CHILD_ENV]) process.exit(await runInboxCheckChild(process.env));
 
 // The optional T3 Code hook (`t3-hook` with no arguments) runs on EVERY Bash
 // call of a Claude session that loads it. Only an Agent SDK session can be a
@@ -1501,6 +1506,7 @@ if (args[0] === "sessions") {
             env: ghAccountEnv ? childEnv({ ...opts.env, ...ghAccountEnv }) : (opts.env ?? childEnv()),
             stdout: "ignore",
             stderr: "pipe",
+            windowsHide: true,
           });
           warmupProcs.add(proc);
           try {
@@ -1597,14 +1603,14 @@ if (args[0] === "sessions") {
           if (isSameRepo) {
             try {
               for (const entry of worktreePool?.entries() ?? []) {
-                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir, env: childEnv() });
+                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir, env: childEnv(), windowsHide: true });
               }
             } catch {}
             // Clear any registration left by a worktree add that completed
             // after the kill (or by a not-ready entry the loop can't see).
-            try { Bun.spawnSync(["git", "worktree", "prune"], { cwd: repoDir, env: childEnv() }); } catch {}
+            try { Bun.spawnSync(["git", "worktree", "prune"], { cwd: repoDir, env: childEnv(), windowsHide: true }); } catch {}
           }
-          try { Bun.spawnSync(["rm", "-rf", warmupSessionDir], { env: childEnv() }); } catch {}
+          try { Bun.spawnSync(["rm", "-rf", warmupSessionDir], { env: childEnv(), windowsHide: true }); } catch {}
         });
 
         console.error(isSameRepo

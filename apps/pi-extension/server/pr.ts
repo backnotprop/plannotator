@@ -44,6 +44,7 @@ const nodeCommandRuntime: PRRuntime = {
 			// options.env is added to (never replacing) the environment: another gh account's token (#2157).
 			const proc = spawn(cmd, args, {
 				stdio: ["ignore", "pipe", "pipe"],
+				windowsHide: true,
 				...(options?.env ? { env: { ...process.env, ...options.env } } : {}),
 				...(group ? { detached: true } : {}),
 			});
@@ -77,6 +78,7 @@ const nodeCommandRuntime: PRRuntime = {
 		return new Promise((resolve, reject) => {
 			const proc = spawn(cmd, args, {
 				stdio: ["pipe", "pipe", "pipe"],
+				windowsHide: true,
 				...(options?.env ? { env: { ...process.env, ...options.env } } : {}),
 			});
 			let stdout = "";

@@ -406,6 +406,41 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     expect(fake.calls()).toEqual([]);
   });
 
+  test("Hermes Agent with Plannotator's plugin: its tool on, and Hermes's own config set lets the plugin wake its sessions, once", async () => {
+    fake.install("hermes");
+    const plugin = join(fake.home, ".hermes", "plugins", "plannotator");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(join(plugin, "plugin.yaml"), readFileSync(join(import.meta.dir, "..", "..", "apps", "hermes-plugin", "plugin.yaml")));
+    const report = await connect();
+    expect(report.added).toEqual(["hermes"]);
+    expect(loadConfig().inboxTool).toEqual({ hermes: true });
+    expect(fake.calls()).toEqual([{ name: "hermes", args: ["config", "set", "plugins.entries.plannotator.allow_gateway_injection", "true"] }]);
+    expect((await connect()).added).toEqual([]);
+    expect(fake.calls()).toHaveLength(1);
+  });
+
+  test("Hermes Agent without the plugin is left to the person with the one-line install, and hermes is never run", async () => {
+    fake.install("hermes");
+    mkdirSync(join(fake.home, ".hermes"), { recursive: true });
+    const report = await connect();
+    expect(report.manual).toEqual(["hermes"]);
+    expect(report.manual_why).toEqual([{ agent: "hermes", why: "add Plannotator's Hermes Agent plugin (hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable)" }]);
+    expect(loadConfig().inboxTool).toBeUndefined();
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("Hermes Agent: a refused config set is reported and tried again on the next run", async () => {
+    fake.install("hermes");
+    const plugin = join(fake.home, ".hermes", "plugins", "plannotator");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(join(plugin, "plugin.yaml"), readFileSync(join(import.meta.dir, "..", "..", "apps", "hermes-plugin", "plugin.yaml")));
+    const failed = await connect({ FAKE_AGENT_FAIL: "hermes" });
+    expect(failed.failed.map((entry) => entry.agent)).toEqual(["hermes"]);
+    expect(failed.failed[0]!.reason).toContain("hermes config set plugins.entries.plannotator.allow_gateway_injection true exited with code 3");
+    expect((await connect()).already).toEqual(["hermes"]);
+    expect(fake.calls()).toHaveLength(2);
+  });
+
   test("Cline with Plannotator's plugin installed from npm: inboxTool on for it, and cline is never run", async () => {
     fake.install("cline");
     const pkg = join(fake.home, ".cline", "plugins", "_installed", "npm", "plannotator-cline-1a2b3c", "package", "node_modules", "@plannotator", "cline");
@@ -454,6 +489,28 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     const report = await connect();
     expect(report.manual).toEqual(["cline"]);
     expect(loadConfig().inboxTool).toBeUndefined();
+  });
+
+  test("OpenClaw with Plannotator's plugin from npm: inboxTool on for it, and openclaw is never run", async () => {
+    fake.install("openclaw");
+    const pkg = join(fake.home, ".openclaw", "npm", "projects", "plannotator-openclaw-3f2a", "node_modules", "@plannotator", "openclaw");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/openclaw", version: "0.28.61" }));
+    const report = await connect();
+    expect(report.added).toEqual(["openclaw"]);
+    expect(report.manual).toEqual([]);
+    expect(loadConfig().inboxTool).toEqual({ openclaw: true });
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("OpenClaw without the plugin is left to the person; a ClawHub install under OPENCLAW_STATE_DIR is found", async () => {
+    const state = join(fake.root, "claw-state");
+    mkdirSync(join(state, "extensions", "plannotator"), { recursive: true });
+    expect((await connect({ OPENCLAW_STATE_DIR: state })).manual).toEqual(["openclaw"]);
+    expect(loadConfig().inboxTool).toBeUndefined();
+    writeFileSync(join(state, "extensions", "plannotator", "package.json"), JSON.stringify({ name: "@plannotator/openclaw", version: "0.28.61" }));
+    expect((await connect({ OPENCLAW_STATE_DIR: state })).added).toEqual(["openclaw"]);
+    expect(fake.calls()).toEqual([]);
   });
 
   test("Claude Code: nothing written; said to be on already", async () => {

@@ -24,7 +24,7 @@ All Plannotator environment variables and their defaults.
 | `PLANNOTATOR_ORIGIN` | auto-detect | Explicit agent-origin override. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `pi`, `oh-my-pi`, `gemini-cli`, `kiro-cli`, `mistral-vibe`, `qwen-code`. Invalid values silently fall through to env-based detection. |
 | `PLANNOTATOR_READY_FILE` | (none) | Internal host-plugin side channel. When set, Plannotator appends server-ready JSON lines containing the local UI URL. |
 | `PLANNOTATOR_SKIP_BROWSER_OPEN` | unset | Internal host-plugin flag. Set to `1` to prevent Plannotator from opening the browser itself when the host will open the URL. |
-| `PLANNOTATOR_AI` | enabled | Set to `disabled` to disable Ask AI and the Review Agents / Guided Review execution surfaces, including provider and agent-job endpoints. Persisted guide data is retained and its server APIs remain available, but the in-app history browser is hidden while AI is disabled. External agents can still open reviews and submit annotations; the annotate agent terminal is separate. |
+| `PLANNOTATOR_AI` | enabled | Set to `disabled` to disable Ask AI and the Review Agents / Guided Review execution surfaces, including provider and agent-job endpoints. Saved guides stay: with AI off, the Guide page lists them under "Saved guides" and opens them; only starting a new guide is off. External agents can still open reviews and submit annotations; the annotate agent terminal is separate. |
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off sharing. Hides share UI and import options. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Base URL for share links. Set this when self-hosting the share portal. |
 | `PLANNOTATOR_GUIDE_VIEWER_URL` | `https://guides.show/v1/` | Base URL of the viewer that downloaded portable guides pin. Must be `https:` (or `http:` on localhost). Also `--viewer-url` on `plannotator guide export`. |
@@ -141,7 +141,7 @@ These environment variables are still detected for backwards compatibility:
 | `SSH_TTY` | Set by SSH when a TTY is allocated |
 | `SSH_CONNECTION` | Set by SSH with connection details |
 
-If either is present, Plannotator enables remote mode automatically when `PLANNOTATOR_REMOTE` is unset. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
+If either is present, Plannotator enables remote mode automatically when `PLANNOTATOR_REMOTE` is unset. When remote mode is on only because of SSH (`PLANNOTATOR_REMOTE` unset), the server listens and advertises exactly as above, and a request that reaches it over loopback (your own `ssh -L` tunnel or editor port forward, or a browser on that machine) gets what a local session gives: Ask this session, link hover cards, the annotate agent terminal, and documents outside the project. A request from any other address gets what remote mode gives. Open in, opening a browser and live app annotation stay off over SSH. `PLANNOTATOR_REMOTE=1` keeps remote mode whole for every request. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
 
 ## Port resolution order
 
