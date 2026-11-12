@@ -72,6 +72,18 @@ export function artifactKey(artifact: Artifact): string {
 
 /** Who sent a message and when, as a tile says it (also the Artifacts wall's, from its rows). */
 export function originOf(message: Pick<InboxMessageWire, 'id' | 'author' | 'created_at'>): ArtifactOrigin {
+  const day = new Date().toDateString();
+  const kept = origins.get(message);
+  if (kept?.day === day) return kept.origin;
+  const origin = originNow(message);
+  origins.set(message, { day, origin });
+  return origin;
+}
+
+/** One origin per message object and day: every read's list, and every render a kept handler still holds, shares it. */
+const origins = new WeakMap<object, { day: string; origin: ArtifactOrigin }>();
+
+function originNow(message: Pick<InboxMessageWire, 'id' | 'author' | 'created_at'>): ArtifactOrigin {
   const fromPerson = message.author.kind === 'person';
   return {
     messageId: message.id,
@@ -100,12 +112,12 @@ export function threadArtifacts(
   const out: Artifact[] = [];
   const placed = new Set<string>();
   for (const message of messages) {
-    const origin = originOf(message);
+    const origin = () => originOf(message);
     const files: FileArtifact[] = [];
     for (const image of inlineImages) {
       if (image.message_id !== message.id || placed.has(image.id)) continue;
       placed.add(image.id);
-      files.push({ type: 'file', ...origin, attachment: image, inline: true, alsoIds: [] });
+      files.push({ type: 'file', ...origin(), attachment: image, inline: true, alsoIds: [] });
     }
     for (const attachment of attachments) {
       if (attachment.message_id !== message.id || placed.has(attachment.id)) continue;
@@ -116,10 +128,10 @@ export function threadArtifacts(
         twin.alsoIds = [...twin.alsoIds, attachment.id];
         continue;
       }
-      files.push({ type: 'file', ...origin, attachment, inline: false, alsoIds: [] });
+      files.push({ type: 'file', ...origin(), attachment, inline: false, alsoIds: [] });
     }
     out.push(...files);
-    if (message.guide) out.push({ type: 'guide', ...origin, guide: message.guide });
+    if (message.guide) out.push({ type: 'guide', ...origin(), guide: message.guide });
   }
   for (const [list, inline] of [
     [inlineImages, true],
