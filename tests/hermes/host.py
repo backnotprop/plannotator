@@ -52,6 +52,15 @@ class FakeHermes:
         self.injected: list = []
         self.live: set = set()
         self.injected_event = threading.Event()
+        self.unloads: list = []
+
+    def on_unload(self, callback):
+        self.unloads.append(callback)
+
+    def unload(self):
+        for callback in reversed(self.unloads):
+            callback()
+        self.unloads.clear()
 
     def register_tool(self, name, toolset, schema, handler, check_fn=None, requires_env=None, is_async=False, description="", emoji="", override=False):
         self.tools[name] = {"toolset": toolset, "schema": schema, "handler": handler, "check_fn": check_fn}

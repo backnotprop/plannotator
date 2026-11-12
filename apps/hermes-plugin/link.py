@@ -20,8 +20,9 @@ def plannotator_command() -> list:
 
 
 class Link:
-    def __init__(self, argv: list, on_event):
+    def __init__(self, argv: list, on_event, wakes: bool = False):
         self._argv = argv
+        self.wakes = wakes
         self._on_event = on_event
         self._write_lock = threading.Lock()
         self._answers: dict = {}
@@ -54,6 +55,23 @@ class Link:
         if not self._ready.wait(timeout):
             self.why = self.why or "plannotator did not answer in time"
         return self.tool is not None
+
+    def alive(self) -> bool:
+        return self._process is not None and self._process.poll() is None
+
+    def stop(self, wait: float = 2.0) -> None:
+        process = self._process
+        if process is None:
+            return
+        try:
+            if process.stdin is not None:
+                process.stdin.close()
+        except (OSError, ValueError):
+            pass
+        try:
+            process.wait(wait)
+        except subprocess.TimeoutExpired:
+            process.terminate()
 
     def send(self, message: dict) -> bool:
         process = self._process
@@ -99,7 +117,8 @@ class Link:
                     self._answers[event.get("id")] = event
                     self._answered.notify_all()
             else:
-                threading.Thread(target=self._on_event, args=(event,), daemon=True).start()
+                threading.Thread(target=self._on_event, args=(self, event), daemon=True).start()
+        self._process.stdout.close()
         self._ready.set()
         with self._answered:
             self._answered.notify_all()

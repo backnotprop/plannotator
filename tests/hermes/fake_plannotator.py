@@ -18,6 +18,10 @@ def say(event):
 
 note({"argv": sys.argv[1:]})
 tool = {"name": "plannotator_inbox", "description": "The Inbox.", "parameters": {"type": "object", "properties": {"action": {"type": "string"}}}}
+if os.path.exists(os.environ.get("FAKE_NEVER_RAN", "")):
+    say({"type": "ready", "tool": None, "on": False, "why": "The Inbox has never run on this computer."})
+    sys.stdin.read()
+    sys.exit(0)
 say({"type": "ready", "tool": tool, "on": os.environ.get("FAKE_SWITCH", "1") == "1"})
 opened = set()
 woken = set()
