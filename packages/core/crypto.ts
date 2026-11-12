@@ -128,6 +128,14 @@ export async function deriveRelayKeys(pairingSecret: string, deviceId: string): 
   return { key: await derive(RELAY_KEY_INFO), upKey: await derive(RELAY_UP_INFO), collapseKey: await derive(RELAY_COLLAPSE_INFO), relaySecret: await derive(RELAY_AUTH_INFO) };
 }
 
+const RELAY_SIGNAL_INFO = 'plannotator-inbox relay signal v1';
+
+export async function deriveRelaySignalToken(pairingSecret: string, deviceId: string): Promise<string> {
+  const ikm = await crypto.subtle.importKey('raw', base64urlToBytes(pairingSecret).buffer as ArrayBuffer, 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode(deviceId), info: new TextEncoder().encode(RELAY_SIGNAL_INFO) }, ikm, 256);
+  return bytesToBase64url(new Uint8Array(bits));
+}
+
 // --- Helpers ---
 
 function bytesToBase64url(bytes: Uint8Array): string {

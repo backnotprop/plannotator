@@ -34,7 +34,7 @@ export interface BoardFilterProps {
   /** An `ini_` id, `none`, or null for every card. */
   initiative: string | null;
   onInitiative: (initiative: string | null) => void;
-  /** New initiative… and Edit initiatives…: the Initiatives dialog. */
+  /** New tag… and Edit tags…: the Tags dialog. */
   onManage: (start: 'new' | 'edit') => void;
   phone: boolean;
   /** The picks as tokens beside the button (a wide header); false: BoardFilterTokens draws them on their own row. */
@@ -43,9 +43,9 @@ export interface BoardFilterProps {
 
 /**
  * The Board's one filter (approval "board-initiatives", take C): an icon at
- * the header's right; its menu holds Initiative (All initiatives, each one
- * with its count, No initiative with its count, then New initiative… and
- * Edit initiatives…) and, once the cards span two projects, Project. The
+ * the header's right; its menu holds Tag (All tags, each one
+ * with its count, No tag with its count, then New tag… and
+ * Edit tags…) and, once the cards span two projects, Project. The
  * picks show as tokens left of it ("# Shape ×"). Base UI carries the keys
  * (arrows, type-ahead, Escape). No shortcut of its own.
  */
@@ -73,33 +73,33 @@ export function BoardFilter(props: BoardFilterProps) {
           <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4} data-phone={phone ? '' : undefined}>
             <Menu.Popup className="ib-pm ib-bflt-menu" aria-label="Filter" data-board-filter-menu="">
               <Menu.Group>
-                <Menu.GroupLabel className="ib-pm-glabel">Initiative</Menu.GroupLabel>
+                <Menu.GroupLabel className="ib-pm-glabel">Tag</Menu.GroupLabel>
                 <Menu.RadioGroup value={initiative ?? ''} onValueChange={(next: string) => next !== (initiative ?? '') && props.onInitiative(next || null)}>
-                  <FilterItem value="" label="All initiatives" icon="layers" on={initiative === null} data={{ 'data-board-initiative-option': '' }} />
+                  <FilterItem value="" label="All tags" icon="layers" on={initiative === null} data={{ 'data-board-initiative-option': '' }} />
                   {props.initiatives.map((i) => (
                     <FilterItem key={i.id} value={i.id} label={i.name} icon="hash" count={props.counts.get(i.id) ?? 0} on={initiative === i.id} data={{ 'data-board-initiative-option': i.id }} />
                   ))}
                   <FilterItem
                     value={INBOX_NO_INITIATIVE}
-                    label="No initiative"
+                    label="No tag"
                     icon="minus"
                     count={props.counts.get(INBOX_NO_INITIATIVE) ?? 0}
                     on={initiative === INBOX_NO_INITIATIVE}
                     data={{ 'data-board-initiative-option': INBOX_NO_INITIATIVE }}
                   />
                 </Menu.RadioGroup>
-                <Menu.Item className="ib-pmi ib-bflt-act" label="New initiative…" onClick={() => props.onManage('new')} data-board-initiative-new="">
+                <Menu.Item className="ib-pmi ib-bflt-act" label="New tag…" onClick={() => props.onManage('new')} data-board-initiative-new="">
                   <span className="ib-bflt-ico" aria-hidden="true">
                     <Icon name="plus" size={14} />
                   </span>
-                  <span className="ib-pmi-l">New initiative…</span>
+                  <span className="ib-pmi-l">New tag…</span>
                 </Menu.Item>
                 {props.initiatives.length > 0 && (
-                  <Menu.Item className="ib-pmi ib-bflt-act" label="Edit initiatives…" onClick={() => props.onManage('edit')} data-board-initiative-edit="">
+                  <Menu.Item className="ib-pmi ib-bflt-act" label="Edit tags…" onClick={() => props.onManage('edit')} data-board-initiative-edit="">
                     <span className="ib-bflt-ico" aria-hidden="true">
                       <Icon name="pen" size={14} />
                     </span>
-                    <span className="ib-pmi-l">Edit initiatives…</span>
+                    <span className="ib-pmi-l">Edit tags…</span>
                   </Menu.Item>
                 )}
               </Menu.Group>
@@ -144,11 +144,11 @@ function FilterItem({ value, label, icon, count, on, data }: { value: string; la
   );
 }
 
-/** The picked initiative's name: "No initiative" for none, null when nothing is picked (or it is not loaded yet). */
+/** The picked initiative's name: "No tag" for none, null when nothing is picked (or it is not loaded yet). */
 export function initiativeLabel(initiatives: readonly InboxInitiative[], initiative: string | null): string | null {
   if (initiative === null) return null;
-  if (initiative === INBOX_NO_INITIATIVE) return 'No initiative';
-  return initiatives.find((i) => i.id === initiative)?.name ?? 'Initiative';
+  if (initiative === INBOX_NO_INITIATIVE) return 'No tag';
+  return initiatives.find((i) => i.id === initiative)?.name ?? 'Tag';
 }
 
 /**
@@ -171,7 +171,7 @@ export function BoardFilterTokens(
           kind="initiative"
           icon={props.initiative === INBOX_NO_INITIATIVE ? 'minus' : 'hash'}
           label={initiativeName}
-          clearLabel="Clear the initiative filter"
+          clearLabel="Clear the tag filter"
           onClear={() => {
             props.onInitiative(null);
             refocus();
@@ -220,14 +220,14 @@ export function CardInitiativeMenu({ initiatives, value, onPick }: { initiatives
   const name = value ? (initiatives.find((i) => i.id === value)?.name ?? null) : null;
   return (
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
-      <Menu.Trigger ref={trigger} className="ib-crdp-ini" data-card-initiative={value ?? INBOX_NO_INITIATIVE} aria-label={`Initiative: ${name ?? 'none'}. Change`}>
+      <Menu.Trigger ref={trigger} className="ib-crdp-ini" data-card-initiative={value ?? INBOX_NO_INITIATIVE} aria-label={`Tag: ${name ?? 'none'}. Change`}>
         <Icon name={name ? 'hash' : 'minus'} size={14} />
-        <span dir="auto">{name ?? 'No initiative'}</span>
+        <span dir="auto">{name ?? 'No tag'}</span>
         <Icon name="chevD" size={13} />
       </Menu.Trigger>
       <Menu.Portal container={portal ?? undefined}>
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4}>
-          <Menu.Popup className="ib-pm ib-bflt-menu" aria-label="Initiative" data-card-initiative-menu="">
+          <Menu.Popup className="ib-pm ib-bflt-menu" aria-label="Tag" data-card-initiative-menu="">
             <CardInitiativeItems initiatives={initiatives} value={value} onPick={onPick} />
           </Menu.Popup>
         </Menu.Positioner>
@@ -236,11 +236,11 @@ export function CardInitiativeMenu({ initiatives, value, onPick }: { initiatives
   );
 }
 
-/** The rows that put a card in an initiative: each live one, then No initiative; the card's own checked. */
+/** The rows that put a card in an initiative: each live one, then No tag; the card's own checked. */
 export function CardInitiativeItems({ initiatives, value, onPick }: { initiatives: readonly InboxInitiative[]; value: string | null; onPick: (initiative: string | null) => void }) {
   const current = value ?? INBOX_NO_INITIATIVE;
   return (
-    <Menu.RadioGroup value={current} onValueChange={(next: string) => next !== current && onPick(next === INBOX_NO_INITIATIVE ? null : next)} aria-label="Initiative">
+    <Menu.RadioGroup value={current} onValueChange={(next: string) => next !== current && onPick(next === INBOX_NO_INITIATIVE ? null : next)} aria-label="Tag">
       {initiatives.map((i) => (
         <Menu.RadioItem key={i.id} value={i.id} closeOnClick className="ib-pmi" label={i.name} data-card-initiative-option={i.id}>
           <span className="ib-bflt-ico" aria-hidden="true">
@@ -253,11 +253,11 @@ export function CardInitiativeItems({ initiatives, value, onPick }: { initiative
         </Menu.RadioItem>
       ))}
       <Menu.Separator className="ib-pm-sep" />
-      <Menu.RadioItem value={INBOX_NO_INITIATIVE} closeOnClick className="ib-pmi" label="No initiative" data-card-initiative-option={INBOX_NO_INITIATIVE}>
+      <Menu.RadioItem value={INBOX_NO_INITIATIVE} closeOnClick className="ib-pmi" label="No tag" data-card-initiative-option={INBOX_NO_INITIATIVE}>
         <span className="ib-bflt-ico" aria-hidden="true">
           <Icon name="minus" size={14} />
         </span>
-        <span className="ib-pmi-l">No initiative</span>
+        <span className="ib-pmi-l">No tag</span>
         {current === INBOX_NO_INITIATIVE && <Icon name="check" size={15} className="ib-pmi-check" />}
       </Menu.RadioItem>
     </Menu.RadioGroup>
