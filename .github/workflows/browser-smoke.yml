@@ -20,7 +20,6 @@ on:
   pull_request:
     branches:
       - main
-      - ci/comments-only-lane
 
 permissions:
   contents: read
