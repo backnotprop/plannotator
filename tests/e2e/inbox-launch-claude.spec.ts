@@ -54,6 +54,7 @@ import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { FAKE_LOGIN_CLAUDE_VALUE, installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
+import { installFakeCodexLaunch } from '../helpers/fake-codex-launch';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -203,7 +204,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeConfig({ inboxLaunch: { enabled: false } });
   const env: Record<string, string> = {
     // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
-    PATH: `${bin}:/usr/bin:/bin`,
+    PATH: `${bin}:${join(root, 'codex', 'bin')}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
     PLANNOTATOR_DATA_DIR: dataDir,
@@ -815,5 +816,40 @@ test('phone: the To picker, the To sentence, the working line, the permission pr
   } finally {
     fake.configure({ hold: false, waiting: false });
     await phone.close();
+  }
+});
+
+test('Codex: its own models with each one\'s levels; the pick goes on thread/start and shows in the header', async () => {
+  const { page } = world;
+  mkdirSync(join(world.home, '.codex'), { recursive: true });
+  writeFileSync(join(world.home, '.codex', 'config.toml'), '[mcp_servers.plannotator-inbox]\ncommand = "plannotator"\nargs = ["inbox", "mcp"]\n');
+  const codex = installFakeCodexLaunch(join(world.root, 'codex'));
+  try {
+    await page.goto(world.url);
+    await openCompose(page);
+    const d = dialog(page);
+    await d.locator('[data-compose-to]').click();
+    await d.locator('[data-compose-start="codex"]').first().click({ timeout: 20_000 });
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model', { timeout: 10_000 });
+    await d.locator('[data-compose-choice]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="ultra"]').click();
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="gpt-5.5"]').click();
+    await expect(d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value]')).toHaveText(['Default', 'low', 'medium', 'high', 'xhigh']);
+    await expect(d.locator('[data-compose-choice]')).toHaveText('gpt-5.5');
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="high"]').click();
+    await page.keyboard.press('Escape');
+    await expect(d.locator('[data-compose-choice]')).toHaveText('gpt-5.5 · high');
+    await d.getByRole('textbox', { name: 'Message' }).fill('Bump the parser.');
+    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    await d.locator('[data-compose-send]').click();
+    const { thread_id } = (await (await answer).json()) as { thread_id: string };
+    const started = await waitFor('thread/start', () => codex.rpc('thread/start')[0]);
+    expect(started.params.model).toBe('gpt-5.5');
+    expect(started.params.config.model_reasoning_effort).toBe('high');
+    await openThread(page, thread_id);
+    await expect(pane(page).locator('[data-launched] [data-launch-choice]')).toHaveText('gpt-5.5 · high');
+  } finally {
+    rmSync(join(world.home, '.codex'), { recursive: true, force: true });
+    for (const start of codex.starts()) if (codex.alive(start.pid)) process.kill(start.pid, 'SIGKILL'); // inbox-guard: own child (the fake codex)
   }
 });

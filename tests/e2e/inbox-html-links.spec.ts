@@ -4,7 +4,7 @@
  * under a temp PLANNOTATOR_DATA_DIR and HOME, an agent sends through
  * `plannotator inbox mcp` (scripts/inbox-sim.ts) a message attaching
  * `site/SHEET.html` and one frame of the page, and Chromium opens the page.
- * Armed (Annotate, the default; no mode switch) a plain click on each link of
+ * With Annotate on (the page opens in Interact) a plain click on each link of
  * the page follows it, and a Cmd/Ctrl-click pins it for a comment: a sibling page that is
  * not attached opens read-only over the page with Back and Open in new tab,
  * and its own links follow; Back returns to the page; the attached frame
@@ -135,7 +135,7 @@ async function world() {
   return { root, url, agent, thread: sent.thread_id as string, ids };
 }
 
-/** The attached page opened from its tile (full screen), armed (Annotate, the default): a plain click on a link follows it. */
+/** The attached page opened from its tile (full screen), with Annotate on: a plain click on a link follows it. */
 async function openSheet(page: Page, url: string, thread: string, sheet: string) {
   // From its tile, as the person opens it: HTML opens full screen.
   await page.goto(`${url}#thread=${thread}`);
@@ -145,10 +145,11 @@ async function openSheet(page: Page, url: string, thread: string, sheet: string)
   await expect(pane).toHaveAttribute('data-full-view', '');
   const frame = page.frameLocator('.ib-htmlframe iframe');
   await expect(frame.locator('h1')).toHaveText('Guided narrative: contact sheet');
-  // On a phone the pen starts off (approval "inbox-html-attachments-phone"): these tests are about Annotate, so it goes on.
+  // The pen starts off (Interact) unless it was turned on in this thread: these tests are about Annotate, so it goes on.
+  await expect(page.locator('[data-full-view-pen]')).toBeVisible();
   const interact = page.locator('[data-full-view-pen][aria-pressed="false"]');
   if (await interact.isVisible()) await interact.click();
-  // No mode switch: the page stays in Annotate, where a plain click on a link follows it.
+  // In Annotate a plain click on a link still follows it.
   await expect(page.getByRole('button', { name: 'Annotate mode' })).toBeVisible();
   return { pane, frame };
 }
