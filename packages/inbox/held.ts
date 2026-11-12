@@ -326,7 +326,8 @@ export function settlesOnBack(shown: readonly InboxListSection[], row: InboxList
   if (drawn && (drawn.id === INBOX_SNOOZED_BAND.id) !== !!row.snoozed) return true;
   if (row.snoozed) return false;
   if (row.unseen > 0) return true;
-  if (row.section !== 'stopped' && row.section !== 'holding' && row.section !== 'waiting') return false;
+  const onYou = (section: string | undefined) => section === 'stopped' || section === 'holding' || section === 'waiting';
+  if (!onYou(row.section)) return onYou(drawn?.id);
   return drawn?.id !== row.section;
 }
 

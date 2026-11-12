@@ -425,6 +425,15 @@ describe('the open thread', () => {
     // An arrival not seen: it comes back unread, as before.
     expect(settlesOnBack(shown, arrived)).toBe(true);
   });
+
+  test('settlesOnBack: a thread the person answered and sent while it covered the list leaves Waiting on you on Back; one still waiting stays as left', () => {
+    const waitingOpen = { ...r('open', 'billing-svc', 1, 'waiting', 0), unread: false } as InboxListRow;
+    const drawnWaiting = bySection(waitingOpen, other);
+    const answered = { ...waitingOpen, section: 'sent', last_at: at(3) } as InboxListRow;
+    expect(settlesOnBack(drawnWaiting, answered)).toBe(true);
+    expect(ids(settleThread(drawnWaiting, bySection(answered, other), 'open'))).toEqual(['new:other', 'sent:open']);
+    expect(settlesOnBack(drawnWaiting, waitingOpen)).toBe(false);
+  });
 });
 
 // The failure this guards (the owner, 2026-10-16: "When I create a new thread
