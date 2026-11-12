@@ -36,6 +36,7 @@ import {
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from "@plannotator/shared/guide";
 import { readGuideInstructions, writeGuideInstructions } from "@plannotator/shared/guide-instructions-store";
+import { inboxRulesModel } from "./inbox-rules";
 
 type Group = InboxPromptItem["group"];
 
@@ -130,6 +131,7 @@ export function inboxPromptsModel(
     },
     others,
     guide: { text: readGuideInstructions() || null, max: GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS },
+    rules: inboxRulesModel(config, wakes),
   };
 }
 
@@ -144,7 +146,7 @@ export function parseInboxPromptsChange(input: unknown): InboxPromptsChange {
   };
   const top = record(input);
   if (!top || Object.keys(top).length === 0 || Object.keys(top).some((key) => key !== "inbox" && key !== "guide")) {
-    fail("prompts: { inbox?: { reminder?, runtimes? }, guide? }, at least one.", "prompts");
+    fail("prompts: { inbox?: { reminder?, rules?, runtimes? }, guide? }, at least one.", "prompts");
   }
   const text = (value: unknown, field: string, max = INBOX_REMINDER_MAX_CHARS): string | null => {
     if (value === null) return null;
@@ -159,11 +161,12 @@ export function parseInboxPromptsChange(input: unknown): InboxPromptsChange {
   if ("guide" in top!) change.guide = text(top!.guide, "prompts.guide", GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS);
   if (!("inbox" in top!)) return change;
   const inbox = record(top!.inbox);
-  if (!inbox || Object.keys(inbox).length === 0 || Object.keys(inbox).some((key) => key !== "reminder" && key !== "runtimes")) {
-    fail("prompts.inbox: { reminder?, runtimes? }, at least one.", "prompts.inbox");
+  if (!inbox || Object.keys(inbox).length === 0 || Object.keys(inbox).some((key) => key !== "reminder" && key !== "rules" && key !== "runtimes")) {
+    fail("prompts.inbox: { reminder?, rules?, runtimes? }, at least one.", "prompts.inbox");
   }
   change.inbox = {};
   if ("reminder" in inbox!) change.inbox.reminder = text(inbox!.reminder, "prompts.inbox.reminder");
+  if ("rules" in inbox!) change.inbox.rules = text(inbox!.rules, "prompts.inbox.rules");
   if ("runtimes" in inbox!) {
     const runtimes = record(inbox!.runtimes);
     if (!runtimes || Object.keys(runtimes).length === 0) fail("prompts.inbox.runtimes: { <claude-code|pi|opencode>: { reminder } }.", "prompts.inbox.runtimes");
@@ -171,10 +174,14 @@ export function parseInboxPromptsChange(input: unknown): InboxPromptsChange {
     for (const [host, entry] of Object.entries(runtimes!)) {
       if (!(INBOX_PROMPT_HOSTS as readonly string[]).includes(host)) fail(`prompts.inbox.runtimes.${host}: not an agent (claude-code, pi, opencode).`, `prompts.inbox.runtimes.${host}`);
       const fields = record(entry);
-      if (!fields || Object.keys(fields).length !== 1 || !("reminder" in fields)) {
-        fail(`prompts.inbox.runtimes.${host}: { reminder }.`, `prompts.inbox.runtimes.${host}`);
+      const keys = fields ? Object.keys(fields) : [];
+      if (keys.length === 0 || keys.some((key) => key !== "reminder" && key !== "rules")) {
+        fail(`prompts.inbox.runtimes.${host}: { reminder?, rules? }.`, `prompts.inbox.runtimes.${host}`);
       }
-      change.inbox.runtimes[host as InboxPromptHost] = { reminder: text(fields!.reminder, `prompts.inbox.runtimes.${host}.reminder`) };
+      const own: { reminder?: string | null; rules?: string | null } = {};
+      if ("reminder" in fields!) own.reminder = text(fields!.reminder, `prompts.inbox.runtimes.${host}.reminder`);
+      if ("rules" in fields!) own.rules = text(fields!.rules, `prompts.inbox.runtimes.${host}.rules`);
+      change.inbox.runtimes[host as InboxPromptHost] = own;
     }
   }
   return change;
@@ -187,10 +194,14 @@ export function saveInboxPromptsChange(change: InboxPromptsChange): void {
   const inbox: NonNullable<PromptConfig["inbox"]> & Record<string, unknown> = {};
   // `undefined` deletes the key (saveConfig's prompts merge drops it, and an emptied entry with it).
   if ("reminder" in change.inbox) inbox.reminder = change.inbox.reminder ?? undefined;
+  if ("rules" in change.inbox) inbox.rules = change.inbox.rules ?? undefined;
   if (change.inbox.runtimes) {
     inbox.runtimes = {};
     for (const [host, entry] of Object.entries(change.inbox.runtimes)) {
-      inbox.runtimes[host as InboxPromptHost] = { reminder: entry?.reminder ?? undefined };
+      const own: { reminder?: string; rules?: string } = {};
+      if (entry && "reminder" in entry) own.reminder = entry.reminder ?? undefined;
+      if (entry && "rules" in entry) own.rules = entry.rules ?? undefined;
+      inbox.runtimes[host as InboxPromptHost] = own;
     }
   }
   saveConfig({ prompts: { inbox } });
@@ -198,7 +209,11 @@ export function saveInboxPromptsChange(change: InboxPromptsChange): void {
   const same = (stored: unknown, wanted: string | null | undefined) => (wanted === null || wanted === undefined ? stored === undefined : stored === wanted);
   const ok =
     (!("reminder" in change.inbox) || same(saved?.reminder, change.inbox.reminder)) &&
-    Object.entries(change.inbox.runtimes ?? {}).every(([host, entry]) => same(record(record(saved?.runtimes)?.[host])?.reminder, entry?.reminder));
+    (!("rules" in change.inbox) || same(saved?.rules, change.inbox.rules)) &&
+    Object.entries(change.inbox.runtimes ?? {}).every(([host, entry]) => {
+      const stored = record(record(saved?.runtimes)?.[host]);
+      return (!entry || !("reminder" in entry) || same(stored?.reminder, entry.reminder)) && (!entry || !("rules" in entry) || same(stored?.rules, entry.rules));
+    });
   if (!ok) {
     throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
   }

@@ -717,11 +717,15 @@ export function inboxCommandBriefing(toolName: string = INBOX_TOOL_NAME): string
 
 /**
  * The most characters (UTF-16 code units, a string's `length`) a custom Inbox
- * reminder may hold. Longer text is refused when saved and ignored when read,
- * so the host falls back to the next text in line (the shared one, then the
- * default).
+ * reminder may hold: Claude Code's ceiling for hook text it puts in context
+ * (10,000 characters; past it the agent gets a file path and a 2,000-character
+ * preview), less room for the thread list a compaction adds (5 threads, under
+ * 1,000 characters). Longer text is refused when saved (the count says so)
+ * and, written by hand, ignored when read (Settings → Prompts says so), so
+ * the host falls back to the next text in line (the shared one, then the
+ * default). Through 0.28.61 it was 4,128, for no stated reason.
  */
-export const INBOX_REMINDER_MAX_CHARS = 4128
+export const INBOX_REMINDER_MAX_CHARS = 9000
 
 /**
  * The person's own reminder for a host, from config.json
@@ -740,15 +744,43 @@ export function inboxReminderCustomText(config: unknown, host: string): string |
   return usable(record(record(inbox.runtimes)?.[host])?.reminder) ?? usable(inbox.reminder)
 }
 
+function withToolName(text: string, toolName: string): string {
+  return text.replace(/(^|[^A-Za-z0-9_])plannotator_inbox(?![A-Za-z0-9_])/g, (_match: string, before: string) => before + toolName)
+}
+
+export const INBOX_RULES_LEAD =
+  "The person's own rules for how you use the Plannotator Inbox. They come from the person, so where they differ from the lines above (being proactive included), follow these:"
+
+export const INBOX_RULES_MARGIN = 100
+
+export function inboxReminderRulesText(config: unknown, host: string): string | null {
+  const record = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  const usable = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null)
+  const inbox = record(record(record(config)?.prompts)?.inbox)
+  if (!inbox) return null
+  return usable(record(record(inbox.runtimes)?.[host])?.rules) ?? usable(inbox.rules)
+}
+
+export function inboxRulesRoom(reminder: string): number {
+  return Math.max(0, INBOX_REMINDER_MAX_CHARS - reminder.length - INBOX_RULES_LEAD.length - 3 - INBOX_RULES_MARGIN)
+}
+
+export function inboxReminderWithRules(reminder: string, rules: string | null | undefined, toolName: string = INBOX_TOOL_NAME): string {
+  if (typeof rules !== 'string' || rules.trim() === '') return reminder
+  const text = `${reminder}\n\n${INBOX_RULES_LEAD}\n${withToolName(rules.trim(), toolName)}`
+  return text.length <= INBOX_REMINDER_MAX_CHARS ? text : reminder
+}
+
 /**
  * The reminder a host sends: the person's own text when there is one (it
  * REPLACES the line, for hosts with the wake and without it alike, every
  * whole word `plannotator_inbox` in it renamed to the tool as the host
  * registered it), else exactly `inboxReminderText(toolName, options)`.
  */
-export function inboxReminderFor(custom: string | null | undefined, toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean } = {}): string {
-  if (typeof custom !== 'string' || custom.trim() === '') return inboxReminderText(toolName, options)
-  return custom.replace(/(^|[^A-Za-z0-9_])plannotator_inbox(?![A-Za-z0-9_])/g, (_match: string, before: string) => before + toolName)
+export function inboxReminderFor(custom: string | null | undefined, toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean; rules?: string | null } = {}): string {
+  const reminder = typeof custom !== 'string' || custom.trim() === '' ? inboxReminderText(toolName, options) : withToolName(custom, toolName)
+  return inboxReminderWithRules(reminder, options.rules, toolName)
 }
 
 /**
@@ -1478,8 +1510,10 @@ export function inboxHandedAwayLine(to: string): string {
  * asked a redirected reply): the hosts' own names. An agent chooses its own
  * host string, and these lines go into another session's prompt, so any
  * other value reads as "another agent" (`agent` in the redirected line).
+ * Every name in core's INBOX_HOST_NAMES must be here (this contract may not
+ * import it); `connection-tags.test.ts` fails when one is missing.
  */
-export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code']
+export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code', 'DeepSeek Harness', 'T3 Code', 'Cline']
 
 /** An agent name a wake line carries: one of INBOX_WAKE_AGENT_NAMES (spacing folded), else '' (the caller says "another agent"). */
 function wakeName(value: unknown): string {
@@ -1520,6 +1554,9 @@ export const INBOX_HELD_POLL_FIELD = 'held'
  * never sends it.
  */
 export const INBOX_CONTINUES_POLL_FIELD = 'continues'
+
+/** Kept apart from `label`: only list rows show a generated title. Empty or absent clears it. */
+export const INBOX_TITLE_POLL_FIELD = 'title'
 
 /**
  * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it

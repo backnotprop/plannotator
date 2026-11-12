@@ -243,7 +243,7 @@ const SETTLE_MS = 2000;
 export function defaultRunChrome(path: string, shot: FrameShot, timeoutMs: number): Promise<"saved" | "timeout" | { failed: string }> {
   return new Promise((done) => {
     let finished = false;
-    const child = nodeSpawn(path, chromeArgs(shot), { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
+    const child = nodeSpawn(path, chromeArgs(shot), { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"], windowsHide: true });
     const toChrome = child.stdio[3] as NodeJS.WritableStream | null;
     const fromChrome = child.stdio[4] as NodeJS.ReadableStream | null;
     const kill = () => {

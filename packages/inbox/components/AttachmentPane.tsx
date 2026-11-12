@@ -52,6 +52,7 @@ import {
 import { whenTime, formatBytes } from '../format';
 import { useRefRepo } from '../links';
 import { inboxMarkdownImageBase } from '../images';
+import { useCommentPictures } from '../commentPictures';
 import { ImageAttachmentView, type ImageSwipeEdges } from './ImageAttachmentView';
 import type { WheelHintGate } from '@plannotator/ui/components/ImageZoomStage';
 import { VideoAttachmentView, type VideoAttachmentViewHandle } from './VideoAttachmentView';
@@ -466,6 +467,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const viewerRef = useRef<ViewerHandle>(null);
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null);
   const source = useInboxFileSource();
+  const pictures = useCommentPictures();
   const suggestion = source.suggestion?.(attachment) ?? null;
 
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
@@ -2649,8 +2651,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
-              // The Inbox's upload takes no image: the page's comment boxes draw no image button (the owner, 2026-11-07).
-              allowCommentImages={false}
+              allowCommentImages={pictures}
               // Desktop size scales the page down: what the page measures converts through it.
               frameScale={fitted ? fitScale : undefined}
               onContentWidth={phoneHtml ? onContentWidth : undefined}
@@ -2889,15 +2890,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   props.readOnly
                     ? undefined
                     : (input) =>
-                        void save(
-                          codeCommentAnnotation({
+                        void save({
+                          ...codeCommentAnnotation({
                             id: `ann-code-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Date.now().toString(36)}`,
                             lineStart: input.lineStart,
                             lineEnd: input.lineEnd,
                             text: input.text,
                             code: input.originalCode,
                           }),
-                        )
+                          ...(input.images?.length ? { images: input.images } : {}),
+                        })
                 }
                 onEditAnnotation={props.readOnly ? undefined : (id, updates) => edit(id, { text: updates.text })}
                 reopenComment={codeReopen}
@@ -2906,7 +2908,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   codeLines.current = lines;
                 }}
                 onDeleteAnnotation={props.readOnly ? undefined : (id) => void remove(id)}
-                allowImages={false}
+                allowImages={pictures}
                 lang={view.text.length > CODE_HIGHLIGHT_MAX_CHARS ? 'text' : undefined}
                 // A minified file's one line wraps (no toggle: a line this long is never read by scrolling sideways).
                 overflow={wrapCode ? 'wrap' : undefined}
@@ -2947,7 +2949,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 stickyActions={false}
                 disableCodePathValidation
                 copyLabel="Copy file"
-                allowImages={false}
+                allowImages={pictures}
                 quickLabels={false}
                 onSide={sideFrom}
                 sideButton={sideButton}

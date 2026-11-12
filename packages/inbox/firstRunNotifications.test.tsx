@@ -356,7 +356,18 @@ test.skipIf(!hasDom)('moved: allowed at another port of this computer, the first
   expect(buttonIn(line, 'Allow')).toBeDefined();
 }, 30_000);
 
-test.skipIf(!hasDom)('over the tailnet: the first-run screen asks nothing (another device; the first run is set up on this computer)', async () => {
+test.skipIf(!hasDom)("the owner over the tailnet (their phone or another computer): the first-run screen asks as on this computer", async () => {
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
+  settingsOver = (settings) => {
+    settings.via = 'tailnet';
+    settings.guest = false;
+  };
+  const el = await renderApp();
+  await until(() => firstRunAsk(el) !== null, 'the first-run ask');
+  expect(buttonIn(firstRunAsk(el)!, 'Turn on')).toBeDefined();
+}, 30_000);
+
+test.skipIf(!hasDom)("a tailnet guest's page: the first-run screen asks nothing (the first run is the owner's)", async () => {
   tailnetPage = true;
   settingsOver = (settings) => {
     settings.via = 'tailnet';
