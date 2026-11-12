@@ -14,24 +14,24 @@ import { buildInboxSearchShortcuts, inboxSearchShortcuts } from '../search/searc
 import { buildInboxAppShortcuts, inboxAppShortcuts } from './app.shortcuts';
 import type { InboxShortcutExtras } from './extras';
 import { inboxFileViewerShortcuts } from './fileViewer.shortcuts';
-import { inboxArtifactsShortcuts, inboxBoardShortcuts } from './grid.shortcuts';
+import { inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts } from './grid.shortcuts';
 import { inboxListShortcuts } from './list.shortcuts';
 import { inboxThreadShortcuts } from './thread.shortcuts';
 
 export { inboxAppShortcuts } from './app.shortcuts';
 export { inboxFileViewerShortcuts } from './fileViewer.shortcuts';
-export { inboxArtifactsShortcuts, inboxBoardShortcuts } from './grid.shortcuts';
+export { inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts } from './grid.shortcuts';
 export { inboxListShortcuts } from './list.shortcuts';
 export { inboxThreadShortcuts } from './thread.shortcuts';
 export { inboxSearchShortcuts } from '../search/searchShortcut';
 export { INBOX_SHORTCUT_EXTRAS, type InboxShortcutExtras } from './extras';
 export * from './guards';
 
-export const inboxShortcutRegistry = createShortcutRegistry([inboxAppShortcuts, inboxSearchShortcuts, inboxListShortcuts, inboxThreadShortcuts, inboxFileViewerShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts]);
+export const inboxShortcutRegistry = createShortcutRegistry([inboxAppShortcuts, inboxSearchShortcuts, inboxListShortcuts, inboxThreadShortcuts, inboxFileViewerShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts]);
 
 /** The registry with other extras (tests: every combination must validate and stay unambiguous). */
 export function buildInboxShortcutRegistry(extras: InboxShortcutExtras): ShortcutRegistry {
-  return createShortcutRegistry([buildInboxAppShortcuts(extras), buildInboxSearchShortcuts(extras), inboxListShortcuts, inboxThreadShortcuts, inboxFileViewerShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts]);
+  return createShortcutRegistry([buildInboxAppShortcuts(extras), buildInboxSearchShortcuts(extras), inboxListShortcuts, inboxThreadShortcuts, inboxFileViewerShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts]);
 }
 
 export const inboxSurface: ShortcutSurface = {
