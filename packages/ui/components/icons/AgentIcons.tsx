@@ -73,7 +73,7 @@ export function GrokBotIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="16 16 60 60" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
       <path className="ib-gk-body" d={GROK_BOT_CIRCLE_PATH} fill="#0b0b0c" />
-      <path d={GROK_BOT_EYES_PATH} fill="#fff" />
+      <path className="ib-gk-eyes" d={GROK_BOT_EYES_PATH} fill="#fff" />
     </svg>
   );
 }
