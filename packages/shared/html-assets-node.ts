@@ -51,6 +51,8 @@ export function outsideRootAssetAllowsCors(relativePath: string): boolean {
   return /\.(?:otf|ttf|woff2?)$/i.test(relativePath);
 }
 
+// Inside the requesting document's own directory anything goes (hidden segments included); otherwise no segment under the
+// folder, as requested and by realpath, may be hidden or in the dotenv family.
 export function folderSessionAssetAllowed(root: string, docDir: string, assetPath: string): boolean {
   if (isWithinDirectory(resolvePath(root, assetPath), docDir)) return true;
   return !htmlAssetPathRefused(root, assetPath, refusesHiddenHtmlAssetPath);

@@ -44,6 +44,7 @@ export function countUnsentDraftComments(draft: unknown): number {
 	);
 }
 
+// Constant-time comparison of two short ASCII tokens.
 function tokensEqual(a: string, b: string): boolean {
 	if (a.length !== b.length) return false;
 	let diff = 0;

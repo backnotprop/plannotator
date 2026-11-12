@@ -383,6 +383,7 @@ function stillSameFile(real: string, stat: { dev: number; ino: number }): boolea
   }
 }
 
+// Through one descriptor: never follows a final symlink, never blocks on a FIFO, reads at most cap + 1 bytes, and refuses if the path no longer leads to the file read.
 function readImageFile(real: string): { ok: true; bytes: Buffer; mtime: string } | Refusal {
   let fd: number;
   try {

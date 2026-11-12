@@ -136,6 +136,7 @@ export class InboxDevices {
     return id ? (this.devices.get(id) ?? null) : null;
   }
 
+  // The pairing secret is kept beside the device (0600 in a 0700 folder).
   add(input: { id: string; name: string; platform: string; token: string; secret: string; at: string }): InboxDevice {
     mkdirSync(this.secretsDir, { recursive: true, mode: 0o700 });
     try {
