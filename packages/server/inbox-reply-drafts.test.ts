@@ -1,12 +1,3 @@
-/**
- * Reply drafts (approval "inbox-reply-drafts") through the Inbox's real
- * doors on a running Inbox (temp data dir, loopback): the words typed in a
- * thread's reply box, kept per thread outside the event log. Saved with a
- * compare-and-set, read back, discarded, cleared by the Send that carries
- * them, kept across a restart, gone with their thread; never seen by an
- * agent through the MCP. The row's `unsent` and the section rule: a thread
- * holding unsent work never sits in Quiet unless archived.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -81,12 +72,10 @@ describe("reply drafts", () => {
     const read = (await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json()) as { draft: InboxReplyDraft };
     expect(read.draft).toEqual(second);
 
-    // Another window saved since: the old base is refused, and nothing changes.
     const stale = await post(server, `/api/inbox/threads/${thread_id}/draft`, { body: "lost", base: first.updated_at });
     expect(stale.status).toBe(409);
     expect(await stale.json()).toMatchObject({ code: "draft_conflict", draft: second });
 
-    // Emptied: deleted.
     expect(await saveDraft(server, thread_id, "   ", second.updated_at)).toBeNull();
     expect((await rowOf(server, thread_id)).unsent ?? null).toBeNull();
     await saveDraft(server, thread_id, "again", null);
@@ -107,7 +96,6 @@ describe("reply drafts", () => {
     expect(row.section).toBe("new");
     expect(row.unread).toBe(false);
 
-    // Mark read keeps it in New while the words wait; discarding the words lets it go to Quiet.
     expect((await post(server, `/api/inbox/threads/${thread_id}/read`, {})).status).toBe(200);
     expect((await rowOf(server, thread_id)).section).toBe("new");
     await post(server, `/api/inbox/threads/${thread_id}/draft/delete`, {});
@@ -123,7 +111,6 @@ describe("reply drafts", () => {
     const row = await rowOf(server, thread_id);
     expect(row.unsent).toEqual({ reply_at: null, picks: 1, comments: 0 });
     expect(row.section).toBe("new");
-    // "Answered, not sent" stays bold: it waits only for the person's Send.
     expect(row.unread).toBe(true);
   });
 
@@ -134,7 +121,6 @@ describe("reply drafts", () => {
     const kept = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "From the phone" });
     expect(kept.status).toBe(200);
     expect(server.store.replyDraft(thread_id)?.body).toBe("Ship it");
-    // An older window's `clear_draft: true` names no draft: nothing is cleared.
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k2", words: "Ship it", clear_draft: true })).status).toBe(200);
     expect(server.store.replyDraft(thread_id)?.body).toBe("Ship it");
     const draft = server.store.replyDraft(thread_id)!;
@@ -148,12 +134,10 @@ describe("reply drafts", () => {
     const { server, send } = await setup();
     const { thread_id, message_id } = await send("The build is green.", "ses_c2");
     const mine = (await saveDraft(server, thread_id, "Ship it", null))!;
-    // Another window types over it before this window's Send lands.
     const theirs = (await saveDraft(server, thread_id, "Ship it, and tag the release", mine.updated_at))!;
     const sent = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Ship it", clear_draft: mine.updated_at });
     expect(sent.status).toBe(200);
     expect(server.store.replyDraft(thread_id)).toEqual(theirs);
-    // That window's own Send clears its own draft.
     await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k2", words: theirs.body, clear_draft: theirs.updated_at });
     expect(server.store.replyDraft(thread_id)).toBeNull();
   });
@@ -161,14 +145,11 @@ describe("reply drafts", () => {
   test("a Send whose clear_draft names a stale updated_at (or none) still clears a draft holding exactly its words", async () => {
     const { server, send } = await setup();
     const { thread_id, message_id } = await send("The build is green.", "ses_c5");
-    // The window's last save landed without its answer: it still knows the first draft's updated_at.
-    // The box's raw words are saved; the Send carries them trimmed.
     const first = (await saveDraft(server, thread_id, "Ship", null))!;
     await saveDraft(server, thread_id, "Ship it\n", first.updated_at);
     const stale = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Ship it", clear_draft: first.updated_at });
     expect(stale.status).toBe(200);
     expect(server.store.replyDraft(thread_id)).toBeNull();
-    // No updated_at known at all ('').
     await saveDraft(server, thread_id, "Tag the release", null);
     const none = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k2", words: "Tag the release", clear_draft: "" });
     expect(none.status).toBe(200);
@@ -179,7 +160,6 @@ describe("reply drafts", () => {
     const { server, send } = await setup();
     const { thread_id, message_id } = await send("The build is green.", "ses_c6");
     const mine = (await saveDraft(server, thread_id, "Ship it", null))!;
-    // Another window's newer, different words.
     const theirs = (await saveDraft(server, thread_id, "Ship it, and tag the release", mine.updated_at))!;
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Ship it", clear_draft: mine.updated_at })).status).toBe(200);
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k2", words: "Ship it", clear_draft: "" })).status).toBe(200);
@@ -190,14 +170,12 @@ describe("reply drafts", () => {
     const { server, send } = await setup();
     const { thread_id } = await send("The build is green.", "ses_c3");
     const first = (await saveDraft(server, thread_id, "Ship", null))!;
-    // The window's next save landed, but the page went before its answer came back: base is still the first.
     await saveDraft(server, thread_id, "Ship it", first.updated_at);
     const stale = await post(server, `/api/inbox/threads/${thread_id}/draft`, { body: "Ship it now", base: first.updated_at });
     expect(stale.status).toBe(409);
     const kept = await post(server, `/api/inbox/threads/${thread_id}/draft`, { body: "Ship it now", base: first.updated_at, base_body: "Ship it" });
     expect(kept.status).toBe(200);
     expect(server.store.replyDraft(thread_id)?.body).toBe("Ship it now");
-    // Words another window wrote are not this window's: still a conflict.
     const other = await post(server, `/api/inbox/threads/${thread_id}/draft`, { body: "mine", base: first.updated_at, base_body: "Ship it" });
     expect(other.status).toBe(409);
     expect((await post(server, `/api/inbox/threads/${thread_id}/draft`, { body: "x", base: null, base_body: 3 })).status).toBe(422);
@@ -282,7 +260,6 @@ describe("reply drafts", () => {
     const byId = new Map(answer.replies.map((r) => [r.thread_id, r]));
     expect(byId.get(words.thread_id)!.reply_preview).toBe("Thanks, ship it");
     expect(byId.get(picks.thread_id)!.reply_preview).toBeNull();
-    // Archived wins: archiving is the person's explicit "done"; its draft is kept.
     expect(server.store.replyDraft(archived.thread_id)?.body).toBe("never mind");
   });
 
@@ -315,7 +292,6 @@ describe("reply drafts", () => {
     const reader = stream.body!.getReader();
     const decoder = new TextDecoder();
     let text = "";
-    // Wait for hello, then save.
     while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
     await saveDraft(server, thread_id, "words", null);
     const deadline = Date.now() + 3000;
@@ -325,11 +301,6 @@ describe("reply drafts", () => {
   });
 });
 
-/**
- * A long paste kept beside the words (approval "inbox-paste-attachment"): the
- * reply draft's `files`, each a pending upload with where it goes back, read
- * back after a reload or in another window through `GET uploads/:id/text`.
- */
 describe("reply drafts keep long pastes", () => {
   const LOG = "2026-11-01T21:10:04Z worker-3 retry 2 status=failed\n".repeat(700);
   const PREVIEW = "2026-11-01T21:10:04Z worker-3 retry 2 status=failed";
@@ -355,16 +326,13 @@ describe("reply drafts keep long pastes", () => {
     expect(first.status).toBe(200);
     const draft = (await draftOf(first))!;
     expect(draft.files).toEqual([{ ...file, pasted: { at: "Here is the log.".length, preview: PREVIEW } }]);
-    // Another window (or a reload) reads the same draft, then the paste's exact words.
     const read = (await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json()) as { draft: InboxReplyDraft };
     expect(read.draft).toEqual(draft);
     expect(await textOf(server, file.upload_id)).toEqual({ status: 200, body: { text: LOG } });
 
-    // Words gone, the paste kept: still a draft, still unsent on its row.
     const filesOnly = await draftOf(await save(server, thread_id, { body: "", base: draft.updated_at, files: [pasted(file.upload_id, 0)] }));
     expect(filesOnly?.files?.map((f) => f.upload_id)).toEqual([file.upload_id]);
     expect((await rowOf(server, thread_id)).unsent?.reply_at).toBe(filesOnly!.updated_at);
-    // Nothing left: deleted, as an empty body was.
     expect(await draftOf(await save(server, thread_id, { body: "  ", base: filesOnly!.updated_at }))).toBeNull();
     expect(server.store.replyDraft(thread_id)).toBeNull();
   });
@@ -375,14 +343,11 @@ describe("reply drafts keep long pastes", () => {
     const a = await upload(server, "pasted-text-a.txt", LOG);
     const b = await upload(server, "pasted-text-b.txt", `${LOG}more\n`);
     const mine = (await draftOf(await save(server, thread_id, { body: "Log:", base: null, files: [pasted(a.upload_id, 4)] })))!;
-    // Another window keeps the same words but swaps the paste.
     const theirs = (await draftOf(await save(server, thread_id, { body: "Log:", base: mine.updated_at, files: [pasted(b.upload_id, 4)] })))!;
-    // This window's next save is a step behind: its words match, its files do not. Refused, nothing written over.
     const refused = await save(server, thread_id, { body: "Log: see the file", base: mine.updated_at, base_body: "Log:", base_files: [a.upload_id], files: [pasted(a.upload_id, 4)] });
     expect(refused.status).toBe(409);
     expect(await refused.json()).toMatchObject({ code: "draft_conflict", draft: theirs });
     expect(server.store.replyDraft(thread_id)).toEqual(theirs);
-    // Naming the files the draft does hold, the shortcut holds.
     const ok = await save(server, thread_id, { body: "Log: see the file", base: mine.updated_at, base_body: "Log:", base_files: [b.upload_id], files: [pasted(b.upload_id, 4)] });
     expect(ok.status).toBe(200);
     expect(server.store.replyDraft(thread_id)?.body).toBe("Log: see the file");
@@ -408,7 +373,6 @@ describe("reply drafts keep long pastes", () => {
     const png = await upload(server, "shot.png", Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
     expect((await textOf(server, png.upload_id)).status).toBe(404);
     expect(await textOf(server, "upl_01K70000000000000000000099")).toMatchObject({ status: 404, body: { code: "upload_not_found" } });
-    // A draft of the paste alone, carried by the Send: the draft is cleared and the paste is no longer pending.
     const draft = (await draftOf(await save(server, thread_id, { body: "", base: null, files: [pasted(file.upload_id, 0)] })))!;
     const sent = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "paste-1", words: "", uploads: [file.upload_id], clear_draft: draft.updated_at });
     expect(sent.status).toBe(200);
@@ -454,13 +418,11 @@ describe("reply drafts keep long pastes", () => {
     const { thread_id, message_id } = await send("The nightly import failed.", "ses_u");
     const file = await upload(server, "pasted-text-g.txt", LOG);
     const first = (await draftOf(await save(server, thread_id, { body: "Log", base: null, files: [pasted(file.upload_id, 3)] })))!;
-    // The window's last save (the words emptied, the paste kept) landed without its answer: it still knows the first updated_at.
     expect((await save(server, thread_id, { body: "", base: first.updated_at, files: [pasted(file.upload_id, 0)] })).status).toBe(200);
     const sent = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "paste-u", words: "", uploads: [file.upload_id], clear_draft: first.updated_at });
     expect(sent.status).toBe(200);
     expect(server.store.replyDraft(thread_id)).toBeNull();
     expect((await rowOf(server, thread_id)).unsent ?? null).toBeNull();
-    // No updated_at known at all (''), words beside the paste.
     const other = await upload(server, "pasted-text-h.txt", LOG);
     await save(server, thread_id, { body: "Here:", base: null, files: [pasted(other.upload_id, 5)] });
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "paste-v", words: "Here:", uploads: [other.upload_id], clear_draft: "" })).status).toBe(200);
@@ -470,15 +432,12 @@ describe("reply drafts keep long pastes", () => {
   test("a stale Send of the same words leaves a draft holding a paste another window added, and its words still read", async () => {
     const { server, send } = await setup();
     const { thread_id, message_id } = await send("The nightly import failed.", "ses_w");
-    // Window A saves "Yes". Window B adds a long paste beside the same words.
     const mine = (await draftOf(await save(server, thread_id, { body: "Yes", base: null })))!;
     const file = await upload(server, "pasted-text-i.txt", LOG);
     const theirs = (await draftOf(await save(server, thread_id, { body: "Yes", base: mine.updated_at, files: [pasted(file.upload_id, 3)] })))!;
-    // A, before it hears of B's save, sends "Yes" naming its own old updated_at, without the paste.
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "w1", words: "Yes", clear_draft: mine.updated_at })).status).toBe(200);
     expect(server.store.replyDraft(thread_id)).toEqual(theirs);
     expect(await textOf(server, file.upload_id)).toEqual({ status: 200, body: { text: LOG } });
-    // A Send carrying another paste, not B's, leaves it too.
     const another = await upload(server, "pasted-text-j.txt", `${LOG}j\n`);
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "w2", words: "Yes", uploads: [another.upload_id], clear_draft: "" })).status).toBe(200);
     expect(server.store.replyDraft(thread_id)).toEqual(theirs);
@@ -491,7 +450,6 @@ describe("reply drafts keep long pastes", () => {
     expect(elsewhere).not.toBe(thread_id);
     const p = await upload(server, "pasted-text-p.txt", LOG);
     const q = await upload(server, "pasted-text-q.txt", `${LOG}q\n`);
-    // Window A saves "Yes" and P; window B adds Q beside them. Another thread's draft holds P alone.
     const mine = (await draftOf(await save(server, thread_id, { body: "Yes", base: null, files: [pasted(p.upload_id, 3)] })))!;
     const theirs = (await draftOf(await save(server, thread_id, { body: "Yes", base: mine.updated_at, files: [pasted(p.upload_id, 3), pasted(q.upload_id, 3)] })))!;
     expect((await save(server, elsewhere, { body: "", base: null, files: [pasted(p.upload_id, 0)] })).status).toBe(200);
@@ -503,25 +461,20 @@ describe("reply drafts keep long pastes", () => {
     let text = "";
     while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
 
-    // A, before it hears of B's save, sends "Yes" and P naming its own old updated_at: B's draft stays, without P.
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "x1", words: "Yes", uploads: [p.upload_id], clear_draft: mine.updated_at })).status).toBe(200);
     const left = server.store.replyDraft(thread_id)!;
     expect(left.body).toBe("Yes");
     expect(left.files?.map((f) => f.upload_id)).toEqual([q.upload_id]);
     expect(left.updated_at).not.toBe(theirs.updated_at);
     expect(server.store.replyDraft(elsewhere)).toBeNull();
-    // Both threads' windows hear it.
     const deadline = Date.now() + 3000;
     const heard = () => text.includes(`event: drafts\ndata: {"thread_id":"${thread_id}"}`) && text.includes(`event: drafts\ndata: {"thread_id":"${elsewhere}"}`);
     while (!heard() && Date.now() < deadline) text += decoder.decode((await reader.read()).value);
     controller.abort();
     expect(text).toContain(`event: drafts\ndata: {"thread_id":"${elsewhere}"}`);
     expect(text).toContain(`event: drafts\ndata: {"thread_id":"${thread_id}"}`);
-    // What the windows read back names no gone upload.
     const read = (await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json()) as { draft: InboxReplyDraft };
     expect(read.draft).toEqual(left);
-    // B, typing before it heard: its save names the base it knew and the pastes it saved last (P and Q). P is a
-    // sent paste now, so it does not tell B's draft apart: the save of Q alone beside B's words is B's own and lands.
     const fromB = await save(server, thread_id, { body: "Yes, see Q", base: theirs.updated_at, base_body: "Yes", base_files: [p.upload_id, q.upload_id], files: [pasted(q.upload_id, 3)] });
     expect(fromB.status).toBe(200);
     expect(server.store.replyDraft(thread_id)?.body).toBe("Yes, see Q");
@@ -533,7 +486,6 @@ describe("reply drafts keep long pastes", () => {
     const kept = await upload(server, "pasted-text-e.txt", LOG);
     const loose = await upload(server, "pasted-text-f.txt", `${LOG}loose\n`);
     expect((await save(server, thread_id, { body: "Log:", base: null, files: [pasted(kept.upload_id, 4)] })).status).toBe(200);
-    // Both two days old, as the sweep sees them.
     const pending = join(server.store.dir, "uploads", "pending");
     for (const id of [kept.upload_id, loose.upload_id]) {
       const path = join(pending, `${id}.json`);
@@ -542,7 +494,6 @@ describe("reply drafts keep long pastes", () => {
     }
     server.stop();
     servers.splice(servers.indexOf(server), 1);
-    // The Inbox sweeps as it starts.
     const again = await start(dataDir);
     expect(await textOf(again.server, kept.upload_id)).toEqual({ status: 200, body: { text: LOG } });
     expect((await textOf(again.server, loose.upload_id)).status).toBe(404);
@@ -550,12 +501,6 @@ describe("reply drafts keep long pastes", () => {
   });
 });
 
-/**
- * Every file attached to a reply box (paperclip, drop, paste) is part of the
- * draft, beside its words, so it syncs to every window and the phone and goes
- * with whichever device sends. An older page that knew long pastes only never
- * drops one; a Send that did not carry one leaves it behind, never loses it.
- */
 describe("reply drafts keep every attached file", () => {
   const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52]);
   const LOG = "2026-11-01T21:10:04Z worker-3 retry 2 status=failed\n".repeat(700);
@@ -574,19 +519,15 @@ describe("reply drafts keep every attached file", () => {
     const { thread_id } = await send("Here is the log.", "ses_r1");
     const LOG = "2026-11-01T21:10:04Z worker-3 retry 2 status=failed\n".repeat(700);
     const first = (await draftOf(await save(server, thread_id, { body: "Hello world", base: null, files_add: [], files_remove: [], files_place: [] })))!;
-    // The phone pastes a long log between "Hello " and "world" (a tile: its words do not change).
     const log = await upload(server, "pasted-text.txt", LOG);
     const phone = (await draftOf(
       await save(server, thread_id, { body: "Hello world", base: first.updated_at, base_body: "Hello world", files_add: [{ upload_id: log.upload_id, pasted: { at: 6, preview: "2026-11-01" } }], files_remove: [], files_place: [] }),
     ))!;
     expect(phone.files!.map((f) => f.pasted?.at)).toEqual([6]);
-    // This window, a step behind, puts "Oh. " in front of its words: accepted (its own words), naming no file.
     const mine = await save(server, thread_id, { body: "Oh. Hello world", base: first.updated_at, base_body: "Hello world", files_add: [], files_remove: [], files_place: [] });
     expect(mine.status).toBe(200);
     const after = (await draftOf(mine))!;
-    // The paste was between "Hello " and "world": after "Oh. Hello " now.
     expect(after.files!.map((f) => f.pasted?.at)).toEqual([10]);
-    // Shorter words never leave it past their end.
     const short = (await draftOf(await save(server, thread_id, { body: "Oh.", base: after.updated_at, base_body: "Oh. Hello world", files_add: [], files_remove: [], files_place: [] })))!;
     expect(short.files!.map((f) => f.pasted?.at)).toEqual([3]);
   });
@@ -612,7 +553,6 @@ describe("reply drafts keep every attached file", () => {
     const read = (await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json()) as { draft: InboxReplyDraft };
     expect(read.draft).toEqual(draft);
 
-    // The words gone, the files kept: a draft of files only, unsent on its row, named on the Drafts page.
     const filesOnly = (await draftOf(await save(server, thread_id, { body: "", base: draft.updated_at, files: [shot.upload_id], all_files: true })))!;
     expect(ids(filesOnly)).toEqual([shot.upload_id]);
     expect((await rowOf(server, thread_id)).unsent?.reply_at).toBe(filesOnly.updated_at);
@@ -628,20 +568,16 @@ describe("reply drafts keep every attached file", () => {
     const later = await upload(server, "later.png", Uint8Array.from([...PNG, 2]));
     const first = (await draftOf(await save(server, thread_id, { body: "Shots", base: null, files_add: [mine.upload_id], files_remove: [], files_place: [] })))!;
     expect(ids(first)).toEqual([mine.upload_id]);
-    // Another window adds its file (a step ahead of this one).
     const other = (await draftOf(await save(server, thread_id, { body: "Shots", base: first.updated_at, base_body: "Shots", files_add: [theirs.upload_id], files_remove: [], files_place: [] })))!;
-    // This window, a version behind, adds one more and names nothing else: theirs stays. Its words are its own (base_body).
     const behind = await save(server, thread_id, { body: "Shots, both", base: first.updated_at, base_body: "Shots", files_add: [later.upload_id], files_remove: [], files_place: [] });
     expect(behind.status).toBe(200);
     const both = (await draftOf(behind))!;
     expect(ids(both)).toEqual([mine.upload_id, theirs.upload_id, later.upload_id]);
     expect(both.updated_at > other.updated_at).toBe(true);
-    // Removing a file another window already removed, and adding one twice, change nothing more.
     const again = (await draftOf(await save(server, thread_id, { body: "Shots, both", base: both.updated_at, files_add: [later.upload_id], files_remove: [mine.upload_id], files_place: [] })))!;
     expect(ids(again)).toEqual([theirs.upload_id, later.upload_id]);
     const twice = (await draftOf(await save(server, thread_id, { body: "Shots, both", base: again.updated_at, files_add: [], files_remove: [mine.upload_id], files_place: [] })))!;
     expect(ids(twice)).toEqual([theirs.upload_id, later.upload_id]);
-    // Different words from elsewhere do refuse it, with the newer draft.
     await save(server, thread_id, { body: "Other words", base: twice.updated_at, files_add: [], files_remove: [], files_place: [] });
     const refused = await save(server, thread_id, { body: "Mine", base: twice.updated_at, base_body: "Shots, both", files_add: [], files_remove: [theirs.upload_id], files_place: [] });
     expect(refused.status).toBe(409);
@@ -654,26 +590,19 @@ describe("reply drafts keep every attached file", () => {
     const f = await upload(server, "f.png", PNG);
     const g = await upload(server, "g.png", Uint8Array.from([...PNG, 1]));
     const NO = { files_remove: [], files_place: [] };
-    // This window's add of f lands, but its answer is lost: it still knows no draft (base null).
     const landed = (await draftOf(await save(server, thread_id, { body: "Shots", base: null, files_add: [f.upload_id], ...NO })))!;
-    // The phone takes f out.
     const phone = (await draftOf(await save(server, thread_id, { body: "Shots", base: landed.updated_at, files_add: [], files_remove: [f.upload_id], files_place: [] })))!;
     expect(ids(phone)).toEqual([]);
-    // This window sends the add again (its own words, a step behind) with a new file: f stays out, g joins.
     const again = await save(server, thread_id, { body: "Shots!", base: null, base_body: "Shots", files_add: [f.upload_id, g.upload_id], ...NO });
     expect(again.status).toBe(200);
     const afterAgain = (await draftOf(again))!;
     expect(ids(afterAgain)).toEqual([g.upload_id]);
-    // A step behind on a version that already held f (before the phone's removal): still not back.
     const stale = (await draftOf(await save(server, thread_id, { body: "Shots!!", base: landed.updated_at, base_body: "Shots!", files_add: [f.upload_id], ...NO })))!;
     expect(ids(stale)).toEqual([g.upload_id]);
-    // A save that knows the removal (its base is after it) adds f back: the person attached it again.
     const back = (await draftOf(await save(server, thread_id, { body: "Shots!!", base: stale.updated_at, files_add: [f.upload_id], ...NO })))!;
     expect(ids(back)).toEqual([g.upload_id, f.upload_id]);
-    // Once back, a save a step behind that names it again changes nothing (it is there).
     const twice = (await draftOf(await save(server, thread_id, { body: "Shots!!!", base: landed.updated_at, base_body: "Shots!!", files_add: [f.upload_id], ...NO })))!;
     expect(ids(twice)).toEqual([g.upload_id, f.upload_id]);
-    // The draft gone (Discard), one made again against no draft adds every file it names.
     expect((await post(server, `/api/inbox/threads/${thread_id}/draft/delete`, {})).status).toBe(200);
     const fresh = (await draftOf(await save(server, thread_id, { body: "New", base: null, files_add: [f.upload_id], ...NO })))!;
     expect(ids(fresh)).toEqual([f.upload_id]);
@@ -695,15 +624,12 @@ describe("reply drafts keep every attached file", () => {
     expect(saved.status).toBe(200);
     const draft = (await draftOf(saved))!;
     expect(ids(draft)).toEqual([paste.upload_id]);
-    // The words grew before the paste: its place moves with them; a place for a file not in the draft does nothing.
     const moved = (await draftOf(
       await save(server, thread_id, { body: "The log: ", base: draft.updated_at, files_add: [], files_remove: [], files_place: [{ upload_id: paste.upload_id, pasted: { at: 9, preview: "2026-11-01" } }, { upload_id: gone.upload_id, pasted: { at: 0, preview: "x" } }] }),
     ))!;
     expect(moved.files!.map((file) => [file.upload_id, file.pasted?.at])).toEqual([[paste.upload_id, 9]]);
-    // No words and no file left: the draft goes.
     const emptied = await save(server, thread_id, { body: "", base: moved.updated_at, files_add: [], files_remove: [paste.upload_id], files_place: [] });
     expect(await draftOf(emptied)).toBeNull();
-    // A malformed change is refused, naming its field.
     const bad = await save(server, thread_id, { body: "x", base: null, files_add: [], files_remove: "nope", files_place: [] });
     expect(bad.status).toBe(422);
   });
@@ -714,16 +640,12 @@ describe("reply drafts keep every attached file", () => {
     const a = await upload(server, "a.png", PNG);
     const b = await upload(server, "b.png", Uint8Array.from([...PNG, 1]));
     const mine = (await draftOf(await save(server, thread_id, { body: "Shots", base: null, files: [a.upload_id], all_files: true })))!;
-    // Another window adds B beside the same words.
     const theirs = (await draftOf(await save(server, thread_id, { body: "Shots", base: mine.updated_at, files: [a.upload_id, b.upload_id], all_files: true })))!;
-    // This window's next save is a step behind and names only A as what it saved last: refused, nothing written over.
     const refused = await save(server, thread_id, { body: "Shots, see A", base: mine.updated_at, base_body: "Shots", base_files: [a.upload_id], files: [a.upload_id], all_files: true });
     expect(refused.status).toBe(409);
     expect(await refused.json()).toMatchObject({ code: "draft_conflict", draft: theirs });
-    // A stale base alone is refused too.
     expect((await save(server, thread_id, { body: "x", base: mine.updated_at, files: [], all_files: true })).status).toBe(409);
     expect(server.store.replyDraft(thread_id)).toEqual(theirs);
-    // With all_files, a list without A removes it.
     const removed = (await draftOf(await save(server, thread_id, { body: "Shots", base: theirs.updated_at, files: [b.upload_id], all_files: true })))!;
     expect(ids(removed)).toEqual([b.upload_id]);
   });
@@ -734,15 +656,12 @@ describe("reply drafts keep every attached file", () => {
     const shot = await upload(server, "error.png", PNG);
     const paste = await upload(server, "pasted-text-o.txt", LOG);
     const mine = (await draftOf(await save(server, thread_id, { body: "Log:", base: null, files: [shot.upload_id, { upload_id: paste.upload_id, pasted: { at: 4, preview: "log" } }], all_files: true })))!;
-    // The older page saves its words and the paste it knows; the picture stays.
     const older = (await draftOf(await save(server, thread_id, { body: "Log: retry 2", base: mine.updated_at, files: [{ upload_id: paste.upload_id, pasted: { at: 4, preview: "log" } }] })))!;
     expect(older.body).toBe("Log: retry 2");
     expect(ids(older)).toEqual([shot.upload_id, paste.upload_id]);
-    // It drops the paste and every word: the picture still stays, as a draft of files only.
     const emptied = (await draftOf(await save(server, thread_id, { body: "", base: older.updated_at })))!;
     expect(emptied.body).toBe("");
     expect(ids(emptied)).toEqual([shot.upload_id]);
-    // Its save a step behind compares only the pastes it can name (none here), so it is still its own.
     const behind = await save(server, thread_id, { body: "Again", base: older.updated_at, base_body: "", base_files: [] });
     expect(behind.status).toBe(200);
     expect(ids(await draftOf(behind))).toEqual([shot.upload_id]);
@@ -753,7 +672,6 @@ describe("reply drafts keep every attached file", () => {
     const { thread_id, message_id } = await send("Here is the dashboard.", "ses_f4");
     const shot = await upload(server, "chart.png", PNG);
     const other = await upload(server, "table.csv", "a,b\n1,2\n");
-    // Carried: the draft is done, the upload is now the reply's attachment.
     const draft = (await draftOf(await save(server, thread_id, { body: "Ship it", base: null, files: [shot.upload_id], all_files: true })))!;
     const sent = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "f4-1", words: "Ship it", uploads: [shot.upload_id], clear_draft: draft.updated_at });
     expect(sent.status).toBe(200);
@@ -768,7 +686,6 @@ describe("reply drafts keep every attached file", () => {
     let text = "";
     while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
 
-    // A phone (or an older page) sends the words alone, naming the draft's version: the words go, the file stays.
     const next = (await draftOf(await save(server, thread_id, { body: "And the table", base: null, files: [other.upload_id], all_files: true })))!;
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "f4-2", words: "And the table", clear_draft: next.updated_at })).status).toBe(200);
     const left = server.store.replyDraft(thread_id)!;
@@ -783,7 +700,6 @@ describe("reply drafts keep every attached file", () => {
     controller.abort();
     expect(text).toContain(heard);
 
-    // A stale version with the same words, not carrying the file: another window's work, kept whole.
     const words = (await draftOf(await save(server, thread_id, { body: "Table attached", base: left.updated_at, files: [other.upload_id], all_files: true })))!;
     expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "f4-3", words: "Table attached", clear_draft: left.updated_at })).status).toBe(200);
     expect(server.store.replyDraft(thread_id)).toEqual(words);
@@ -794,7 +710,6 @@ describe("reply drafts keep every attached file", () => {
     const { thread_id, message_id } = await send("Here is the dashboard.", "ses_f5");
     const kept = await upload(server, "kept.png", PNG);
     expect((await save(server, thread_id, { body: "", base: null, files: [kept.upload_id], all_files: true })).status).toBe(200);
-    /** Two days old, as the sweep sees it. */
     const age = (dir: string, id: string) => {
       const path = join(dir, "uploads", "pending", `${id}.json`);
       const record = JSON.parse(readFileSync(path, "utf8")) as InboxUpload;
@@ -803,14 +718,11 @@ describe("reply drafts keep every attached file", () => {
     age(server.store.dir, kept.upload_id);
     server.stop();
     servers.splice(servers.indexOf(server), 1);
-    // The Inbox sweeps as it starts: the draft's file is still there.
     let again = await start(dataDir);
     expect(pending(again.server, kept.upload_id)).toBe(true);
     expect(ids(again.server.store.replyDraft(thread_id))).toEqual([kept.upload_id]);
 
-    // Discard: no draft names it, so the next sweep forgets it.
     expect((await post(again.server, `/api/inbox/threads/${thread_id}/draft/delete`, {})).status).toBe(200);
-    // A sent reply holds the same bytes as another pending upload: their blob stays when that upload goes.
     const sharedBytes = Uint8Array.from([...PNG, 9]);
     const shared = await upload(again.server, "shared.png", sharedBytes);
     const twin = await upload(again.server, "twin.png", sharedBytes);

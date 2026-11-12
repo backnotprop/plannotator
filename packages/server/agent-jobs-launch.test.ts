@@ -1,17 +1,3 @@
-/**
- * Launch-plumbing tests for the custom-reviews `reviewProfileId` field.
- *
- * These exercise the Bun POST /api/agents/jobs handler contract that the Pi
- * mirror must match byte-for-byte:
- *  - `reviewProfileId` is parsed from the body and forwarded into buildCommand.
- *  - Unknown fields are rejected (fail loud, not silently ignored).
- *  - An absent id forwards no `reviewProfileId` (review.ts resolves that to
- *    builtin:default).
- *  - The launched job carries the reviewProfileId/Label stamped by buildCommand.
- *
- * `Bun.which` is mocked so capability detection reports providers available
- * regardless of whether the host has the CLIs installed (CI parity).
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,18 +6,12 @@ import { buildMarkerCommand, MARKER_ENGINES } from "./marker-review";
 
 const realWhich = Bun.which;
 beforeEach(() => {
-  // Make every provider "available" so the capability gate doesn't depend on
-  // the host having claude/codex installed.
   (Bun as { which: typeof Bun.which }).which = (() => "/fake/bin") as typeof Bun.which;
 });
 afterEach(() => {
   (Bun as { which: typeof Bun.which }).which = realWhich;
 });
 
-// Imported after the which-mock is in place at module top so the factory's
-// one-time capability scan sees available providers. createAgentJobHandler reads
-// Bun.which at call time (inside the factory), so import timing is irrelevant —
-// but the per-test beforeEach guarantees availability anyway.
 const { createAgentJobHandler } = await import("./agent-jobs");
 
 function post(body: unknown): Request {
@@ -53,7 +33,6 @@ describe("POST /api/agents/jobs — reviewProfileId launch plumbing", () => {
       getCwd: () => "/tmp",
       async buildCommand(_provider, config) {
         seenConfig = config;
-        // Return a no-op command that won't actually spawn anything useful.
         return { command: ["true"], reviewProfileId: "user:security", reviewProfileLabel: "Security" };
       },
     });
@@ -101,8 +80,6 @@ describe("POST /api/agents/jobs — reviewProfileId launch plumbing", () => {
 
     expect(res?.status).toBe(201);
     expect(called).toBe(true);
-    // No config keys at all → buildCommand receives undefined (review.ts maps
-    // that to builtin:default).
     expect(seenConfig?.reviewProfileId).toBeUndefined();
     handler.killAll();
   });
@@ -172,7 +149,6 @@ describe("POST /api/agents/jobs — guide launch review plumbing (portable expor
     const res = await handler.handle(post({ provider: "guide" }), JOBS_URL);
     expect(res?.status).toBe(201);
     const { job } = await res!.json();
-    // The patch must not ride the SSE-broadcast job object.
     expect("launchReview" in job).toBe(false);
     await completed;
     expect(seenMeta?.launchReview).toEqual(launchReview);
@@ -181,20 +157,14 @@ describe("POST /api/agents/jobs — guide launch review plumbing (portable expor
 });
 
 describe("POST /api/agents/jobs — OpenCode runs in the review's cwd (#1609)", () => {
-  // OpenCode v2's `run` rejects `--dir`, so the review directory reaches
-  // OpenCode ONLY as the spawned process's cwd. A fake `opencode` on PATH
-  // prints its physical working directory and argv; the job must run in the
-  // review cwd (not the server's) and receive no `--dir`.
   test("the opencode job spawns with the build result's cwd and no --dir", async () => {
-    if (process.platform === "win32") return; // the fake binary relies on a shebang
+    if (process.platform === "win32") return;
     const root = mkdtempSync(join(tmpdir(), "plannotator-opencode-cwd-"));
     const binDir = join(root, "bin");
     const reviewCwd = join(root, "review-checkout");
     const serverCwd = join(root, "server-cwd");
     for (const dir of [binDir, reviewCwd, serverCwd]) mkdirSync(dir);
     const fake = join(binDir, "opencode");
-    // A bun script, not /bin/sh: a POSIX shell rewrites an inherited PWD that does
-    // not name its real directory, which would hide exactly the leak this guards.
     writeFileSync(
       fake,
       [
@@ -210,8 +180,6 @@ describe("POST /api/agents/jobs — OpenCode runs in the review's cwd (#1609)", 
 
     const realPwd = process.env.PWD;
     process.env.PATH = `${binDir}:${realPath ?? ""}`;
-    // The server's own PWD deliberately differs from the review cwd: OpenCode 1.x
-    // reads PWD before process.cwd(), so an inherited PWD would win.
     process.env.PWD = serverCwd;
     try {
       let stdout: string | undefined;
@@ -222,7 +190,6 @@ describe("POST /api/agents/jobs — OpenCode runs in the review's cwd (#1609)", 
         getServerUrl: () => "http://localhost:1234",
         getCwd: () => serverCwd,
         async buildCommand() {
-          // The shape review.ts's marker-engine branch returns.
           const { command } = buildMarkerCommand(MARKER_ENGINES.opencode, "review this", undefined, reviewCwd);
           return { command, prompt: "review this", cwd: reviewCwd, captureStdout: true };
         },
@@ -272,7 +239,6 @@ describe("Claude blocked-shell warning (#1627)", () => {
       getServerUrl: () => "http://localhost:1234",
       getCwd: () => tmpdir(),
       async buildCommand() {
-        // Trailing flags are ignored by `bun -e`; the runner reads the allowlist from them.
         return { command: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stream)})`, "--allowedTools", "Bash(git merge-base:*),Bash(git diff:*)"], captureStdout: true };
       },
       async onJobComplete(job) {

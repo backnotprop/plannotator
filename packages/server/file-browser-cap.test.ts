@@ -1,7 +1,3 @@
-/**
- * Bun annotate server: the file browser over its file cap. The scenarios are
- * shared with the Pi mirror, see file-browser-cap.scenarios.ts.
- */
 import { defineFileBrowserCapScenarios } from "./file-browser-cap.scenarios";
 import { startAnnotateServer } from "./annotate";
 

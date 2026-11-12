@@ -1,10 +1,3 @@
-/**
- * The Inbox's Settings → General "Open Plannotator at plannotator.localhost"
- * (#2184): GET /api/inbox/settings carries `cookie_host`, POST `{ cookie_host }`
- * writes or removes config.json `urlHost: "plannotator.localhost"`, never
- * replaces another `urlHost`, and is locked while PLANNOTATOR_URL_HOST is set.
- * (Through the tailnet it is refused: inbox-tailscale.test.ts.)
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +13,6 @@ const KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_URL_HOST"] as const;
 beforeEach(() => {
   for (const key of KEYS) saved[key] = process.env[key];
   dataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-cookie-host-")));
-  // config.json is read from the data dir env.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   delete process.env.PLANNOTATOR_URL_HOST;
 });
@@ -53,7 +45,6 @@ test("on writes urlHost, off removes it, other config is kept; a non-boolean is 
   expect(on.status).toBe(200);
   expect((await on.json()).cookie_host).toEqual({ on: true, env: null, url_host: null });
   expect(loadConfig()).toMatchObject({ displayName: "tater", urlHost: "plannotator.localhost" });
-  // The running Inbox keeps the address it started with: the switch applies from the next start.
   expect(server.url).toBe(`http://localhost:${server.port}/`);
   expect((await post(server, { cookie_host: false })).status).toBe(200);
   expect(loadConfig().urlHost).toBeUndefined();

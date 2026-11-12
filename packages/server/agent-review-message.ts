@@ -8,8 +8,6 @@ import {
 
 export type { WorkspaceReviewPromptContext } from "@plannotator/shared/review-workspace";
 
-// Moved to @plannotator/core/review-prompt (browser-safe); re-exported so
-// every existing importer of this module keeps working unchanged.
 export { buildWorkspacePromptContextLines, getLocalDiffInstruction };
 export type { LocalDiffInstruction } from "@plannotator/shared/review-prompt";
 
@@ -55,15 +53,6 @@ export function buildAgentReviewUserMessageForTarget(
   );
 }
 
-/**
- * Build the dynamic user message shared by local Claude and Codex review jobs.
- *
- * `contextOnly` strips the "Review… / provide findings" framing prose and keeps
- * only the git/PR context the agent needs to locate the changes. Used by custom
- * review skills, which carry their own instructions and must not inherit the
- * default review's framing. With `contextOnly` off the output is byte-identical
- * to today's prompt.
- */
 export function buildAgentReviewUserMessage(
   patch: string,
   diffType: DiffType,
@@ -85,9 +74,6 @@ export function buildAgentReviewUserMessage(
       ].join("\n");
     }
     if (options?.hasLocalAccess) {
-      // Pure context already (where the checkout is, how to diff against the
-      // base) — no "Review… / provide findings" framing to strip, so this is
-      // identical for default and custom reviews regardless of contextOnly.
       return [
         prMetadata.url,
         "",
@@ -96,13 +82,7 @@ export function buildAgentReviewUserMessage(
         "Do NOT diff against the local `main` branch; it may be stale. Always use origin/.",
       ].join("\n");
     }
-    // No confirmed local checkout yet. A worktree at the PR head is being
-    // prepared and pulls the PR files on demand — tell the agent to verify the
-    // files exist before relying on them, give it the same diff command, and
-    // fall back to the PR URL if the checkout isn't ready.
     if (!getPRPlatformCapabilities(prMetadata).agentCliAccess) {
-      // No CLI the job may run can read this platform's PR (Bitbucket), so
-      // the URL alone is not enough: carry the diff inline.
       return [
         prMetadata.url,
         "",

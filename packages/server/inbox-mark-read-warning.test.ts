@@ -1,16 +1,3 @@
-/**
- * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10), its switch on a real Inbox
- * with config.json deciding:
- *
- *  - unset: on in the settings read (everyone has the warning until they say otherwise), and another switch's
- *    `event: capabilities` leaves it out (a window's frame stays as it was);
- *  - "Don't show this again" (off), then Settings (on again): config.json `inboxMarkReadWarning` is written, the answer
- *    and the read follow, and every window hears each change, so no other window asks again;
- *  - a bad value is refused and writes nothing.
- *
- * What regresses: the warning off for someone who never turned it off, a "Don't show this again" that is not kept
- * or that another window does not hear, or a switch Settings cannot turn back on.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,7 +38,6 @@ async function world(config: Record<string, unknown> | null) {
   return { base, read, post, save, saved };
 }
 
-/** A window's event stream: the `event: capabilities` frames, as they arrive. */
 async function windowCapabilities(base: string) {
   const controller = new AbortController();
   const response = await fetch(`${base}/api/inbox/events?window=mark-read-warning-test`, { signal: controller.signal, headers: { "Sec-Fetch-Site": "same-origin" } });

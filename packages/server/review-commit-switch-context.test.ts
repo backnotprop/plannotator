@@ -1,16 +1,3 @@
-/**
- * Same-cwd commit:<sha> switches must not echo a gitContext — dual-runtime
- * (Bun + Pi).
- *
- * Failure caught: /api/diff/switch answering a Commits-rail click with the
- * launch-frozen session context. The client merges `gitContext` from every
- * switch response unconditionally, so echoing the frozen one reverts the base
- * picker and the commit-baseline list to launch-time data (a commit made
- * mid-session disappears until the next non-commit switch; a worktree review
- * repoints at the main repo). The recompute is deliberately skipped on that
- * hot path, so the correct response carries no `gitContext` at all — the
- * client keeps what it has. Regressed in 0.27.14-dev (#1497), caught by QA.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -109,21 +96,16 @@ describe("same-cwd commit switch keeps the client's git context", () => {
         htmlContent: "<!doctype html><html><body>review</body></html>",
       });
       try {
-        // A commit made mid-session: the launch-frozen context cannot know it.
         writeFileSync(join(repoDir, "b.txt"), "b\n");
         git(repoDir, ["add", "b.txt"]);
         git(repoDir, ["commit", "-q", "-m", "mid-session"]);
         const midSha = git(repoDir, ["rev-parse", "HEAD"]);
 
-        // Control: a non-commit switch recomputes and delivers a fresh context
-        // that includes the new commit. Proves the emit path still works.
         const control = await switchDiff(server.url, { diffType: "uncommitted" });
         expect(control.gitContext).toBeDefined();
         const subjects = JSON.stringify(control.gitContext?.recentCommits ?? []);
         expect(subjects).toContain("mid-session");
 
-        // The regression: a same-cwd commit switch skips the recompute, so the
-        // response must carry NO gitContext (not the launch-frozen one).
         const switched = await switchDiff(server.url, { diffType: `commit:${midSha}` });
         expect(switched.diffType).toBe(`commit:${midSha}`);
         expect("gitContext" in switched).toBe(false);

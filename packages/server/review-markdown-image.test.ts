@@ -1,16 +1,3 @@
-/**
- * `GET /api/review-markdown-image` (the code-review Markdown preview's
- * images) against a real git repository, on BOTH review servers (Bun and the
- * Pi mirror), so the two cannot drift.
- *
- * Regressions guarded:
- *  - an image read from the working tree instead of the side on screen (the
- *    old side of a modified image, a deleted document's images);
- *  - a path the document does not show being readable (unreferenced files,
- *    `..` above the repository root);
- *  - the `markdownPreviewSupported` advert missing from the diff payload,
- *    or present on a static patch session.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -55,7 +42,6 @@ function git(cwd: string, args: string[]): string {
   return result.stdout;
 }
 
-/** A PNG header (real IHDR) followed by bytes a UTF-8 decode would mangle. */
 function png(width: number, height: number, seed: number): Uint8Array {
   const out = new Uint8Array(33 + 64);
   out.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
@@ -182,11 +168,9 @@ for (const [runtime, startServer] of [
         expect(after.headers.get("content-security-policy")).toContain("sandbox");
         expect(after.headers.get("cross-origin-resource-policy")).toBe("same-origin");
 
-        // The old side reads the committed image, not the working tree's.
         const before = await image("docs/guide.md", "old", "img/shot.png");
         expect(await bodyBytes(before)).toEqual(fixture.files["shot-before"]);
 
-        // `/` is the repository root; an <img src> value is decoded.
         expect(await bodyBytes(await image("docs/guide.md", "new", "/assets/logo.png"))).toEqual(fixture.files.logo);
         expect(await bodyBytes(await image("docs/guide.md", "new", "img/b&w.png"))).toEqual(fixture.files.bw);
       } finally {
@@ -214,7 +198,6 @@ for (const [runtime, startServer] of [
         const unreferenced = await image("docs/guide.md", "new", "img/secret.png");
         expect(unreferenced.status).toBe(403);
         expect(await reason(unreferenced)).toBe("not-referenced");
-        // Referenced on the new side only: the old document never showed it.
         expect(await reason(await image("docs/guide.md", "old", "img/b&w.png"))).toBe("not-referenced");
 
         const escape = await image("docs/guide.md", "new", "../../outside.png");

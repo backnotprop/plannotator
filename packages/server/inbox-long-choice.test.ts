@@ -1,11 +1,3 @@
-/**
- * A question choice longer than 200 characters is picked through the
- * server's real doors (the owner's 0.28.17 report: the window's pick answered
- * `422 "<the first 200 characters>" is not one of the question's choices`).
- * The window's picks route and a paired phone's door both take the whole
- * label, and the reply carries it. A running server on loopback, real
- * `fetch`, an agent over MCP, a temp data dir per test.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

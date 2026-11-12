@@ -1,21 +1,3 @@
-/**
- * Caller-pinned review open state (--base / --diff-type) — dual-runtime
- * (Bun + Pi) server flow.
- *
- * Guards:
- *  1. `initialBase` + `initialBaseExplicit` seed the session verbatim — the
- *     server must serve and echo the caller's base, not the detected default.
- *  2. The startup base upgrade must NOT rewrite an explicitly-pinned local
- *     default name to origin/* (the exact regression the explicit bit exists
- *     to prevent), while an unpinned forwarded local name keeps upgrading
- *     (Pi's documented forward-and-let-it-upgrade behavior).
- *  3. `resolveReviewBase` canonicalization stays off for the session, so an
- *     unrelated switch echoing the pinned bare name does not revert it.
- *  4. `openStatePinned` rides /api/diff only when the caller set it — absent
- *     otherwise, so the client guards stay unreachable for ordinary sessions.
- *  5. A pinned session writes nothing to config.json (the maintainer's
- *     no-persistence constraint).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -60,15 +42,12 @@ function initRepo(): string {
   return repoDir;
 }
 
-/** A repo whose detected remote default resolves to origin/main via a local bare origin. */
 function initRepoWithOrigin(): string {
   const repoDir = initRepo();
   const bareDir = makeTempDir("plannotator-open-state-origin-");
   spawnSync("git", ["init", "-q", "--bare", "-b", "main", bareDir], { encoding: "utf-8" });
   git(repoDir, ["remote", "add", "origin", bareDir]);
   git(repoDir, ["push", "-q", "-u", "origin", "main"]);
-  // A feature branch with an extra commit so branch-vs-main has content and
-  // "main" vs "origin/main" are both meaningful names.
   git(repoDir, ["checkout", "-q", "-b", "feature/x"]);
   writeFileSync(join(repoDir, "feature.txt"), "feature\n");
   git(repoDir, ["add", "feature.txt"]);
@@ -135,8 +114,6 @@ afterEach(() => {
 describe("caller-pinned review open state", () => {
   for (const [runtime, startServer] of RUNTIMES) {
     test(`${runtime}: initialBase + explicit is served verbatim over the detected default`, async () => {
-      // Failure caught: the server ignoring the caller's base and serving the
-      // patch under the detected default — a mixed-base review.
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-open-state-data-");
       await preparePiPort(runtime);
       const repoDir = initRepo();
@@ -174,10 +151,6 @@ describe("caller-pinned review open state", () => {
     }, 15_000);
 
     test(`${runtime}: startup upgrade honors the explicit bit and canonicalization stays off`, async () => {
-      // Failure caught: `--base main` on a repo with origin/main silently
-      // rewritten to origin/main after the patch was computed against local
-      // main (review.ts startup upgrade), and resolveReviewBase reverting the
-      // pinned name on the first unrelated non-explicit switch echo.
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-open-state-data-");
       await preparePiPort(runtime);
       const repoDir = initRepoWithOrigin();
@@ -197,14 +170,9 @@ describe("caller-pinned review open state", () => {
         htmlContent: "<!doctype html><html><body>review</body></html>",
       });
       try {
-        // Give the startup probe ample time to have fired (the unpinned
-        // control test below proves it fires well inside this window).
         await Bun.sleep(1_500);
         expect((await fetchDiff(server.url)).base).toBe("main");
 
-        // A non-explicit switch echoing the pinned bare name (a diff-type or
-        // whitespace toggle re-sends the current base without explicitBase)
-        // must not be canonicalized back to origin/main.
         const switched = (await fetch(`${server.url}/api/diff/switch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -218,9 +186,6 @@ describe("caller-pinned review open state", () => {
     }, 20_000);
 
     test(`${runtime}: without the explicit bit a forwarded local name still upgrades`, async () => {
-      // Failure caught: the new option accidentally changing Pi's documented
-      // forward-the-local-name-and-let-it-upgrade behavior. Also the control
-      // proving the probe fires inside the pinned test's wait window.
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-open-state-data-");
       await preparePiPort(runtime);
       const repoDir = initRepoWithOrigin();
@@ -247,8 +212,6 @@ describe("caller-pinned review open state", () => {
     }, 20_000);
 
     test(`${runtime}: openStatePinned is absent for ordinary sessions`, async () => {
-      // Failure caught: pinning every session, which would disable the
-      // first-run dialog and the panel-pair self-heal for everyone.
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-open-state-data-");
       await preparePiPort(runtime);
       const repoDir = initRepo();
@@ -274,8 +237,6 @@ describe("caller-pinned review open state", () => {
     }, 15_000);
 
     test(`${runtime}: a pinned session leaves config.json byte-identical`, async () => {
-      // Failure caught: someone "helpfully" persisting the flag as
-      // diffOptions.defaultDiffType — the maintainer's stated constraint.
       const dataDir = makeTempDir("plannotator-open-state-data-");
       process.env.PLANNOTATOR_DATA_DIR = dataDir;
       await preparePiPort(runtime);

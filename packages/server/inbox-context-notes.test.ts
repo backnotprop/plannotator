@@ -1,11 +1,3 @@
-/**
- * Context notes (approval "inbox-context-notes"): what an agent can send and
- * read. The guide author's notes are checked when the guide is sent (each
- * inside one hunk) and make a version-4 snapshot; every word that tells an
- * agent about notes rides the Code review switch, so with it off the texts are
- * what they were and a notes snapshot is refused. No Inbox is started: the
- * check is called directly and the MCP server is built, never served.
- */
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,7 +31,6 @@ describe("submit_guide: the guide author's notes", () => {
   });
 
   test("the brief's example with a note is a call that works as it is: a review, its note kept", () => {
-    // As submit_guide reads it: `review` from the call itself, not from the test.
     const checked = checkInboxGuide(GUIDE_BRIEF_EXAMPLE_WITH_NOTE, root, { codeReview: true, review: GUIDE_BRIEF_EXAMPLE_WITH_NOTE.review === true });
     expect(checked.ok).toBe(true);
     if (!checked.ok) return;
@@ -53,7 +44,6 @@ describe("submit_guide: the guide author's notes", () => {
     if (!authored.ok) return;
     expect(authored.snapshot.version).toBe(1);
     expect(authored.snapshot.guide.sections.some((s) => s.diffs.some((d) => "notes" in d))).toBe(false);
-    // Left out unread: a note that would be refused on a review does not refuse a plain guided review.
     expect(checkInboxGuide({ guide: guide([{ ...note, lineStart: 5, lineEnd: 30 }]), patch: FIXTURE_PATCH_TS_JSON }, root, { codeReview: true }).ok).toBe(true);
   });
 
@@ -88,7 +78,6 @@ describe("submit_guide: the guide author's notes", () => {
     const off = checkInboxGuide({ snapshot: withNote(note) }, root, { codeReview: false });
     expect(off.ok).toBe(false);
     if (!off.ok) expect(off.error).toContain("Unsupported snapshot version: 4");
-    // Code review on, sent without `review: true`: taken, its notes left out, at the version it has without them.
     const plain = checkInboxGuide({ snapshot: withNote(note) }, root, { codeReview: true });
     expect(plain.ok).toBe(true);
     if (!plain.ok) return;
@@ -117,7 +106,6 @@ describe("the words that tell an agent about notes ride the Code review switch",
   test("send_message's body names the `:::note` block only while Code review is on", () => {
     expect(field(tools(true), "send_message", "body")).toContain(INBOX_NOTE_BLOCK_LINE);
     expect(field(tools(false), "send_message", "body")).not.toContain(":::note");
-    // Off, the body's words are what they were, byte for byte.
     expect(field(tools(false), "send_message", "body")).toBe(SEND_BODY_DESCRIPTION);
   });
 
@@ -134,7 +122,6 @@ describe("the words that tell an agent about notes ride the Code review switch",
     expect(on).toContain("lineStart");
     expect(off).not.toContain("lineStart");
     expect(off).not.toContain(JSON.stringify(INBOX_REVIEW_NOTES_RULE).slice(1, 40));
-    // Off, the worked example is the one it always was (no `review`, no note), byte for byte.
     const example = async (codeReview: boolean) => ((await tools(codeReview).get_guide_brief!.handler!({}, {})) as { structuredContent?: { example?: unknown } }).structuredContent?.example;
     expect(JSON.stringify(await example(false))).toBe(JSON.stringify(GUIDE_BRIEF_EXAMPLE));
     expect(await example(true)).toEqual(GUIDE_BRIEF_EXAMPLE_WITH_NOTE);

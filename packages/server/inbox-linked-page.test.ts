@@ -1,9 +1,3 @@
-/**
- * A page an attached HTML page links to, shown read-only in its pane
- * (`GET /api/inbox/attachments/:id/linked-page?path=`): the attached page's
- * own folder only, the asset route's rules, the page served with its
- * `<base href>`. Real Inbox on loopback, the agent through the MCP SDK.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,12 +58,10 @@ test("a sibling page comes back with its <base href>, its asset URL, and its ima
   const base = /<base href="(\/api\/html-assets\/[A-Za-z0-9_-]+\/)"/.exec(page.html)?.[1];
   expect(base).toBeTruthy();
   expect(page.html).toContain('<h1 id="pr1">Cards</h1>');
-  // Open in new tab: the page itself at its folder's asset URL, under the document CSP.
   const tab = await get(server, page.url);
   expect(tab.status).toBe(200);
   expect(tab.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
   expect(await tab.text()).toContain("Cards");
-  // A page in a subfolder of the attached page's folder.
   expect((await linked(server, sheet, "sub/deep.htm")).status).toBe(200);
 });
 
@@ -77,7 +69,6 @@ test("refusals: outside the folder, hidden, not HTML, missing, too large, anothe
   const { server, sheet, notes } = await world();
   const code = async (res: Response) => [res.status, ((await res.json()) as { code: string }).code];
   expect(await code(await linked(server, sheet, "../outside.html"))).toEqual([403, "linked_page_outside"]);
-  // A link inside the folder that leads outside it.
   expect(await code(await linked(server, sheet, "escape.html"))).toEqual([403, "linked_page_outside"]);
   expect(await code(await linked(server, sheet, "/etc/passwd.html"))).toEqual([422, "validation_error"]);
   expect(await code(await linked(server, sheet, ".private/x.html"))).toEqual([403, "linked_page_refused"]);
@@ -100,7 +91,6 @@ test("a parent folder swapped for a symlink between the realpath and the open ne
   writeFileSync(join(project, "SHEET.html"), "<p>Sheet</p>");
   writeFileSync(join(project, "sub", "deep.htm"), "<p>inside</p>");
   writeFileSync(join(root, "outdir", "deep.htm"), "<p>OUTSIDE</p>");
-  // Another process swaps `sub` for a symlink to a folder outside and back, as fast as it can.
   const swapper = Bun.spawn(
     [
       process.execPath,
@@ -123,7 +113,6 @@ test("a parent folder swapped for a symlink between the realpath and the open ne
         const page = await readInboxLinkedPage(join(project, "SHEET.html"), "sub/deep.htm");
         if (page.text.includes("OUTSIDE")) outside++;
       } catch {
-        // Refused while the folder is a symlink: what should happen.
       }
     }
     expect(outside).toBe(0);
@@ -161,7 +150,6 @@ test("a link named like a document but leading to another kind of file is refuse
   const code = async (res: Response) => [res.status, ((await res.json()) as { code: string }).code];
   expect(await code(await linked(server, notes, "alias.md"))).toEqual([415, "linked_page_not_html"]);
   expect(await code(await linked(server, sheet, "alias.html"))).toEqual([415, "linked_page_not_html"]);
-  // The image route reads a linked document the same way.
   const image = await fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${notes}/markdown-image?document=alias.md&path=a.png`);
   expect(image.status).toBe(415);
 });

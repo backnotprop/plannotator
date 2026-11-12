@@ -1,8 +1,3 @@
-/**
- * `update-prepare` alone, for the POSIX wrapper tests: they point the
- * wrapper's PLANNOTATOR_UPDATE_BINARY / PLANNOTATOR_UPDATE_ENTRY at
- * `bun <this file>`, since the compiled binary is not built in the test job.
- */
 import { runUpdatePrepareCommand } from "./update-prepare";
 
 const argv = process.argv.slice(2);

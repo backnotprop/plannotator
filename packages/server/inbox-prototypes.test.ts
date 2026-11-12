@@ -1,11 +1,3 @@
-/**
- * A question's prototypes are checked at send, before anything is written
- * (packages/server/inbox-prototypes.ts): a file must be an HTML file of the
- * same send's attachments, and a running app goes through the live engine's
- * checks and probe. A refusal names the question and the option. The real
- * send through a running Inbox (a stopped app, Plannotator's own port, the
- * probe) is in inbox-live.test.ts.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

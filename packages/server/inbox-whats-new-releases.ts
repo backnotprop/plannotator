@@ -1,29 +1,3 @@
-/**
- * What's new's releases panel (design of record
- * .product/approved/inbox-whats-new-tldr/): the newest releases with their
- * dates and TL;DRs, from one request to GitHub's releases API a day.
- *
- *  - The list: `GET …/releases?per_page=20` (fetchReleaseList, the release
- *    check's client rules), asked when What's new opens and the last answer
- *    is over a day old (an hour after a failure; a rate limit waits what
- *    GitHub names, an hour to 6 h). Never while update checks are off.
- *    Cached in `update-notes/releases.json` (versions, dates, body stamps),
- *    so the panel works offline and `uninstall --purge` removes it.
- *  - Each listed release's notes are saved to `update-notes/<v>.json` from
- *    the same answer when none are saved yet, so opening one needs no request
- *    of its own. Notes saved WITHOUT a TL;DR are written again once when the
- *    list's body differs from the one they were read from (`stamp`): a TL;DR
- *    added to an older release later reaches people who saved it before.
- *    Notes that have a TL;DR are left as saved.
- *  - The panel's rows are the listed releases and the notes saved on this
- *    computer (newest first, at most PANEL_ROWS, the running version always
- *    in). A row's words come from its TL;DR; the client falls back to its
- *    line in the newest saved "Missed recent releases?" table, then the
- *    first sentence of its notes, then "No summary".
- *
- * Bun-only, like the rest of the Inbox.
- */
-
 import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -41,28 +15,18 @@ import {
   type TldrLine,
 } from "@plannotator/shared/update-check";
 
-/** A successful list is asked for again after a day. */
 export const RELEASE_LIST_INTERVAL_MS = 24 * 60 * 60 * 1000;
-/** A failed one (offline, a 5xx) after an hour. */
 export const RELEASE_LIST_RETRY_MS = 60 * 60 * 1000;
-/** A rate-limited one waits what GitHub names, kept between an hour and this. */
 export const RELEASE_LIST_RATE_LIMITED_MAX_MS = 6 * 60 * 60 * 1000;
-/** The panel's rows at most (the running version is always one of them). */
 export const PANEL_ROWS = 30;
-/** Saved notes read for the panel's rows and fallback lines, newest first. */
 const NOTES_READ = 40;
 
 export interface ReleaseListCache {
-  /** The last request (claimed before it is made). */
   attemptedAt: number;
-  /** The last request that answered. */
   fetchedAt?: number;
-  /** Set when the last request failed. */
   failedAt?: number;
   error?: string;
-  /** No request before this (a failure's or a rate limit's wait). */
   retryAt?: number;
-  /** The last answer's releases, newest first. */
   releases: { version: string; publishedAt?: string; stamp?: string }[];
 }
 
@@ -102,18 +66,15 @@ function writeReleaseList(cache: ReleaseListCache, dataDir: string): void {
   renameSync(tmp, path);
 }
 
-/** Whether the list may be asked for now: a day after an answer, an hour after a failure, never before a rate limit's wait. */
 export function isReleaseListDue(cache: ReleaseListCache | null, now: number): boolean {
   if (!cache) return true;
   const at = cache.attemptedAt;
-  // A clock moved back: ask, rather than wait out a date in the future.
   if (at > now) return true;
   if (typeof cache.retryAt === "number" && cache.retryAt > now && cache.retryAt - at <= RELEASE_LIST_RATE_LIMITED_MAX_MS) return false;
   const failed = typeof cache.failedAt === "number" && cache.failedAt >= at;
   return now - at >= (failed ? RELEASE_LIST_RETRY_MS : RELEASE_LIST_INTERVAL_MS);
 }
 
-/** The last request failed (the panel and the notes page say "Can't reach GitHub" from it). */
 export function releaseListFailing(cache: ReleaseListCache | null): boolean {
   return !!cache && typeof cache.failedAt === "number" && cache.failedAt >= cache.attemptedAt;
 }
@@ -121,9 +82,7 @@ export function releaseListFailing(cache: ReleaseListCache | null): boolean {
 export interface ReleaseListDeps {
   dataDir: string;
   now?: () => number;
-  /** The knob (resolveUpdateCheck): off, nothing is asked. */
   enabled: () => boolean;
-  /** The person's Try again: ask now, whatever the throttle says (`enabled` still applies). */
   force?: boolean;
   fetchList?: () => Promise<FetchReleaseListResult>;
 }
@@ -133,10 +92,6 @@ export type ReleaseListOutcome =
   | { outcome: "fetched"; versions: string[]; written: string[] }
   | { outcome: "failed"; error: string };
 
-/**
- * Ask for the newest releases when it is time, cache the list and save the
- * notes it brings (see the header). Never throws.
- */
 export async function refreshReleaseList(deps: ReleaseListDeps): Promise<ReleaseListOutcome> {
   if (!deps.enabled()) return { outcome: "disabled" };
   const now = (deps.now ?? Date.now)();
@@ -168,7 +123,6 @@ export async function refreshReleaseList(deps: ReleaseListDeps): Promise<Release
         deps.dataDir,
       );
     } catch {}
-    // One line per run of failures, not one per hour.
     if (!releaseListFailing(before) || before?.error !== result.error.slice(0, 200)) {
       updateLog(`could not read the release list (${result.error}); next try in ${Math.round(wait / 60_000)}m`, deps.dataDir, "whats-new");
     }
@@ -181,10 +135,9 @@ export async function refreshReleaseList(deps: ReleaseListDeps): Promise<Release
     if (!version || releases.some((r) => r.version === version)) continue;
     const fresh = releaseNotesFrom(version, release);
     releases.push({ version, ...(release.publishedAt && { publishedAt: release.publishedAt }), stamp: fresh.stamp });
-    if (!fresh.notes) continue; // GitHub's generated body (the written notes come later): nothing to read yet.
+    if (!fresh.notes) continue;
     const saved = readReleaseNotes(version, deps.dataDir);
     const missing = !hasReleaseNotesContent(saved);
-    // Saved without a TL;DR, from another body than this one: written again, once (the stamps then match).
     const backfilled = !missing && (saved.tldr?.length ?? 0) === 0 && saved.stamp !== fresh.stamp;
     if (!missing && !backfilled) continue;
     try {
@@ -202,36 +155,24 @@ export async function refreshReleaseList(deps: ReleaseListDeps): Promise<Release
   return { outcome: "fetched", versions: releases.map((r) => r.version), written };
 }
 
-/** One release in the panel (GET /api/inbox/whats-new/releases). */
 export interface WhatsNewRelease {
   version: string;
   published_at: string | null;
-  /** Its TL;DR (empty: none). */
   tldr: TldrLine[];
-  /** Its line in the newest saved "Missed recent releases?" table, and the release whose notes carry it. */
   listed: { text: string; in: string } | null;
-  /** The first sentence of its saved notes. */
   sentence: string | null;
-  /** Its notes are saved on this computer (they open offline). */
   saved: boolean;
 }
 
 export interface WhatsNewReleases {
-  /** The newest release this computer knows of (the panel's Latest card); null with no rows. */
   latest: string | null;
-  /** The version this Inbox runs (`dev` for a development build). */
   current: string;
-  /** Newest first. */
   releases: WhatsNewRelease[];
-  /** The list is being asked for now: the page asks again shortly. */
   refreshing: boolean;
-  /** The last request for the list failed (offline, GitHub refused). */
   offline: boolean;
-  /** When the list last answered (ISO); null: never. */
   fetched_at: string | null;
 }
 
-/** The versions whose notes are saved here, newest first. */
 function savedVersions(dataDir: string): string[] {
   try {
     return readdirSync(updateCheckPaths(dataDir).notes)
@@ -246,7 +187,6 @@ function savedVersions(dataDir: string): string[] {
   }
 }
 
-/** The first sentence of the notes' opening paragraph, as plain text (no links, no bold), or null. */
 export function firstSentence(notes: string): string | null {
   const para = releaseSummary(notes)
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
@@ -259,13 +199,11 @@ export function firstSentence(notes: string): string | null {
   return para.length > 200 ? `${para.slice(0, 199).trimEnd()}…` : para;
 }
 
-/** The panel's model, from the cached list and the notes saved here (no request). */
 export function whatsNewReleases(
   dataDir: string,
   input: {
     current: string;
     refreshing: boolean;
-    /** Versions to show though neither listed nor saved: the newest release the release check knows of, the one running. */
     known?: (string | null | undefined)[];
   },
 ): WhatsNewReleases {
@@ -281,7 +219,6 @@ export function whatsNewReleases(
   const all = [...new Set([...listed.keys(), ...saved, ...known])].sort((a, b) => compareStableVersions(b, a) ?? 0);
   let rows = all.slice(0, PANEL_ROWS);
   if (current && all.includes(current) && !rows.includes(current)) rows = [...rows, current];
-  // A row's table line: the newest saved notes whose "Missed recent releases?" table names it.
   const tableLine = (version: string): WhatsNewRelease["listed"] => {
     for (const [from, n] of notes) {
       const hit = n?.highlights.find((h) => h.version === version);
@@ -311,7 +248,6 @@ export function whatsNewReleases(
   };
 }
 
-/** The cached list names this version (the What's new route may fetch its notes by its tag). */
 export function releaseListNames(dataDir: string, version: string): boolean {
   return readReleaseList(dataDir)?.releases.some((r) => r.version === version) ?? false;
 }

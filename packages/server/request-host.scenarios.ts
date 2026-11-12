@@ -1,15 +1,3 @@
-/**
- * Host-header allowlist (packages/shared/request-host.ts), driven over HTTP
- * against real plan, review and annotate servers. Shared by the Bun suite
- * (request-host.test.ts) and the Pi mirror
- * (apps/pi-extension/server/request-host.test.ts), so both runtimes answer
- * the same scenarios.
- *
- * Requests go through node:http so the Host header is exactly the one under
- * test (fetch sets its own). Every test runs under a temp
- * PLANNOTATOR_DATA_DIR; nothing touches the real ~/.plannotator.
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { request } from "node:http";
@@ -34,14 +22,12 @@ export type StartHostScenarioServer = (
 const HTML = "<!doctype html><html><body>host-scenario-app</body></html>";
 const EVIL = "evil.example";
 
-/** The JSON read each kind's page loads first. */
 const FIRST_READ: Record<HostScenarioKind, string> = {
   plan: "/api/plan",
   annotate: "/api/plan",
   review: "/api/diff",
 };
 
-/** The decision endpoint each kind takes. */
 const DECISION: Record<HostScenarioKind, string> = {
   plan: "/api/approve",
   annotate: "/api/feedback",
@@ -77,7 +63,6 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
     process.env.PLANNOTATOR_REMOTE = options.remote ? "1" : "0";
     if (options.allowedHosts !== undefined) process.env.PLANNOTATOR_ALLOWED_HOSTS = options.allowedHosts;
     if (options.remote) {
-      // Remote mode would otherwise bind the fixed 19432.
       const { start: port, servers } = await occupyConsecutivePorts(1);
       await closeServer(servers[0]);
       process.env.PLANNOTATOR_PORT = String(port);
@@ -121,21 +106,16 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
             expect(body).not.toContain("host-scenario-app");
           }
 
-          // Writes are refused before they reach a handler: no decision, no config write.
           const decision = await rawRequestWithBody(server, DECISION[kind], evil, { feedback: "x", annotations: [] });
           expect(decision.status).toBe(403);
           const config = await rawRequestWithBody(server, "/api/config", evil, { displayName: "rebound" });
           expect(config.status).toBe(403);
 
-          // A WebSocket upgrade never succeeds: a 403, or (node:http with no
-          // upgrade listener attached, i.e. no agent terminal) a closed
-          // socket. The guarded-listener case is request-host-guard.test.ts.
           const upgrade = await rawRequest(`${loopbackBase(server)}/api/agent-terminal/pty/x`, {
             headers: { host: evil, connection: "Upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" },
           }).then((res) => res.status, () => "closed");
           expect([403, "closed"]).toContain(upgrade);
 
-          // The session is still undecided and answers its own page.
           const after = await get(server, FIRST_READ[kind], `localhost:${port}`);
           expect(after.status).toBe(200);
         } finally {
@@ -165,15 +145,12 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
         }
       });
 
-      // A reverse proxy (Cloudflare Tunnel, Caddy) that forwards the browser's
-      // Host must reach the session it advertises, without PLANNOTATOR_ALLOWED_HOSTS.
       test("remote mode answers the public URL's host; a local session does not", async () => {
         await isolate({ remote: true });
         process.env.PLANNOTATOR_PUBLIC_URL = "https://plannotator.example.com";
         const server = await start(kind, { docPath, htmlContent: HTML });
         try {
           expect(server.url).toBe("https://plannotator.example.com");
-          // The advertised URL has no port; reach the server on the one it bound.
           const base = `http://127.0.0.1:${process.env.PLANNOTATOR_PORT}${FIRST_READ[kind]}`;
           expect((await rawRequest(base, { headers: { host: "plannotator.example.com" } })).status).toBe(200);
           expect((await rawRequest(base, { headers: { host: "other.example.com" } })).status).toBe(403);
@@ -231,7 +208,6 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
 function rawRequestWithBody(server: HostScenarioServer, path: string, host: string, body: unknown) {
   const text = JSON.stringify(body);
   return new Promise<{ status: number }>((resolve, reject) => {
-    // node:http directly: rawRequest sends no body.
     const req = request(
       `${loopbackBase(server)}${path}`,
       { method: "POST", headers: { host, "content-type": "application/json", "content-length": String(Buffer.byteLength(text)) } },
@@ -245,12 +221,10 @@ function rawRequestWithBody(server: HostScenarioServer, path: string, host: stri
   });
 }
 
-/** Connect over loopback whatever URL the session advertises (urlHost). */
 function loopbackBase(server: HostScenarioServer): string {
   return `http://127.0.0.1:${new URL(server.url).port}`;
 }
 
-/** A GET (or bodiless request) with exactly these headers; fetch would set its own Host. */
 function rawRequest(url: string, options: { headers: Record<string, string> }): Promise<{ status: number; body: Buffer }> {
   return new Promise((resolve, reject) => {
     const req = request(url, { method: "GET", headers: options.headers }, (res) => {

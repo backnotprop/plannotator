@@ -1,9 +1,3 @@
-/**
- * The risk agent's prompt and what its answer may be (inbox-pull-risk.ts). The
- * rules are the person's; the title and the diff were written by others, so they
- * travel as fenced data under a fence no diff can guess, and the only thing kept
- * from the answer is a level and a sentence that pass a strict parse.
- */
 import { INBOX_PULL_RISK_LEVELS, INBOX_PULL_RISK_PLACES_MAX, INBOX_PULL_RISK_WHY_MAX, type InboxPullRiskJudgment, type InboxPullRiskLevel, type InboxPullRiskPlace } from "@plannotator/core/inbox-types";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { inboxLinesInOneHunk } from "@plannotator/core/inbox-context-notes";
@@ -27,7 +21,6 @@ Do not use tools. Answer with exactly one line of JSON and nothing else:
 {"risk":"high","why":"…","where":[{"file":"src/api/routes.ts","side":"old","lines":[5,5],"rule":"Anything that changes permissions.","why":"One short plain sentence: what these lines do that the rule describes."}]}
 "file" is the path as the diff names it. "side" is "new" for added or unchanged lines and "old" for removed lines. "lines" are the first and last line numbers, from the hunk headers. "rule" is the line of the rules they touch, copied word for word. Low and medium answers have no "where".`;
 
-/** The message that carries the rules and the pull request. `fence` must not be guessable from the diff. */
 export function buildRiskPrompt(input: { rules: string; title: string; diff: string; fence: string }): string {
   const { rules, title, diff, fence } = input;
   return [
@@ -45,20 +38,16 @@ export function buildRiskPrompt(input: { rules: string; title: string; diff: str
   ].join("\n");
 }
 
-/** A fence for one prompt: random, so a diff cannot close it. */
 export function riskFence(): string {
   return `DATA-${crypto.randomUUID()}`;
 }
 
-/** Characters that reorder text on screen: a sentence from a diff's reader has no use for them, and they can make it read as something else. */
 const BIDI_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 
-/** Why a run failed, as one short line to show: the words of a CLI or of an agent that read the diff. */
 export function riskFailureLine(text: string): string {
   return text.replace(BIDI_CONTROLS, "").replace(/\s+/g, " ").trim().slice(0, INBOX_PULL_RISK_WHY_MAX);
 }
 
-/** One plain sentence of at most `INBOX_PULL_RISK_WHY_MAX` characters, bidi controls taken out, or null. */
 function riskSentence(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const sentence = value.replace(BIDI_CONTROLS, "").trim();
@@ -66,23 +55,15 @@ function riskSentence(value: unknown): string | null {
   return sentence;
 }
 
-/** A rule line as the person wrote it, its list marker (`-`, `*`, `•`, `1.`) and runs of spaces set aside, for a word-for-word match. */
 function ruleKey(line: string): string {
   return line.replace(/\s+/g, " ").trim().replace(/^(?:[-*•+]|\d+[.)])\s+/, "");
 }
 
-/** What `parseRiskAnswer` checks a high judgment's places against: the person's rules and the diff that was judged. */
 export interface RiskPlaceCheck {
   rules: string;
   patch: string;
 }
 
-/**
- * A high judgment's `where`, as far as it is good: each place a file of the diff with its side, first and last line
- * inside one hunk of that file, and one sentence; a `rule` kept only when it is a line of the person's rules, word for
- * word. A bad place is dropped, never the judgment. Without `check` (a judgment read back from the store, checked when
- * it was made) only the shape is read.
- */
 function riskPlaces(input: unknown, check: RiskPlaceCheck | undefined): InboxPullRiskPlace[] {
   if (!Array.isArray(input)) return [];
   const files = check ? new Map(parseDiffToFiles(check.patch).map((file) => [file.path, file.patch] as const)) : null;
@@ -114,14 +95,6 @@ function riskPlaces(input: unknown, check: RiskPlaceCheck | undefined): InboxPul
   return out;
 }
 
-/**
- * The agent's answer as a judgment, or null. The whole answer must be the one
- * object (a single code fence around it is forgiven, since models add those), with
- * exactly the two keys, or the three with `where`, and a known level. A verdict
- * inside other text is not a verdict: anything else is no judgment, never a guess.
- * Only a high judgment keeps its `where` (`riskPlaces`); a medium or low one's is
- * dropped, and so is a place outside the diff `check` names.
- */
 export function parseRiskAnswer(text: string | null | undefined, check?: RiskPlaceCheck): InboxPullRiskJudgment | null {
   if (typeof text !== "string") return null;
   const fenced = /^```(?:json)?\s*\n([^`]*)\n?```$/.exec(text.trim());

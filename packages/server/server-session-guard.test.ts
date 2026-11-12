@@ -1,19 +1,3 @@
-/**
- * Stale-tab guard (packages/core/server-session.ts), both runtimes.
- *
- * Regression guarded: a tab left open on a port that a NEW Plannotator server
- * now owns (fixed PLANNOTATOR_PORT, remote mode's 19432, a rare random-port
- * reuse) posted its decision to the new server, which accepted it: the
- * reviewer "approved" a document they never saw. Every decision body now
- * echoes the nonce its tab loaded; a different one must be refused with
- * 409 session_mismatch BEFORE anything settles (the session stays open for
- * its own tab), the matching one must still settle, and a body without one
- * (an older client, an empty exit) must keep working.
- *
- * Temp PLANNOTATOR_DATA_DIR per test; nothing touches the real data dir. The
- * PR-mode review servers run their `gh` commands through a fake runtime.
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,9 +61,7 @@ interface Case {
   name: string;
   surface: Surface;
   start: (dir: string) => Promise<Running>;
-  /** The payload that advertises the nonce. */
   payloadPath: "/api/plan" | "/api/diff";
-  /** Decision posts with a JSON body. */
   decisions: Array<{ path: string; body: Record<string, unknown> }>;
 }
 
@@ -166,7 +148,6 @@ async function nonceOf(server: Running, path: string): Promise<string> {
   return payload.serverSession as string;
 }
 
-/** Whether the decision promise settled within a short wait. */
 async function settled(promise: Promise<unknown>): Promise<boolean> {
   return Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 150))]);
 }
@@ -194,7 +175,6 @@ for (const c of cases) {
           expect(refused.status).toBe(409);
           expect(((await refused.json()) as { code?: string }).code).toBe(SERVER_SESSION_MISMATCH_CODE);
           expect(await settled(pending)).toBe(false);
-          // The session is still open for its own tab.
           const nonce = await nonceOf(server, c.payloadPath);
           const accepted = await post(`${server.url}${decision.path}`, { ...decision.body, serverSession: nonce });
           expect(accepted.status).toBe(200);
@@ -236,8 +216,6 @@ for (const c of cases) {
   });
 }
 
-// /api/pr-action posts a review to GitHub/GitLab/Bitbucket: a stale tab of an
-// earlier session on this port must not post through this one's PR.
 const PR_METADATA = {
   platform: "github",
   host: "github.invalid",

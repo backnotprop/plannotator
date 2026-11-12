@@ -5,8 +5,6 @@ import { join } from "node:path";
 import { LOCAL_IMAGE_CSP } from "@plannotator/shared/local-image";
 import { handleImage, handleUpload } from "./shared-handlers";
 
-// /api/image serves any local file with an image extension, SVG included. An
-// SVG opened directly is a document; every answer must keep it sandboxed.
 function expectProtected(res: Response): void {
   expect(res.headers.get("content-security-policy")).toBe(LOCAL_IMAGE_CSP);
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");

@@ -1,14 +1,3 @@
-/**
- * --tailscale serve orchestration tests.
- *
- * Run: bun test packages/server/tailscale-serve.test.ts
- *
- * Every test injects a fake runner — the real `tailscale` CLI is never
- * spawned and no tailnet state is touched. Bun runs every test file in one
- * process, so afterEach resets the module's port registry, cleanup runner,
- * and process exit listener via resetTailscaleServeForTests().
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import type { TailscaleRunResult } from "@plannotator/shared/tailscale";
 import {
@@ -78,7 +67,6 @@ describe("enableTailscaleServe", () => {
     expect(url).toBe("https://vps-1.tail1234.ts.net:4321");
     expect(calls).toContainEqual(["serve", "--bg", "--https=4321", "http://127.0.0.1:4321"]);
     disableTailscaleServe(4321, runner);
-    // Teardown issued the matching off command for our port only.
     expect(calls.at(-1)).toEqual(["serve", "--https=4321", "off"]);
   });
 
@@ -87,7 +75,6 @@ describe("enableTailscaleServe", () => {
       status: { status: 0, stdout: JSON.stringify({ TCP: { "4321": { HTTPS: true } } }), stderr: "" },
     });
     expect(() => enableTailscaleServe(4321, runner)).toThrow(/already routes port 4321/);
-    // The pre-existing mapping was neither replaced nor torn down.
     expect(calls.some((args) => args.includes("--bg"))).toBe(false);
     expect(calls.some((args) => args.includes("off"))).toBe(false);
   });
@@ -131,12 +118,9 @@ describe("enableTailscaleServe", () => {
       serve: { status: 0, stdout: "https://vps-1.tail1234.ts.net:8443/\n", stderr: "" },
     });
     expect(() => enableTailscaleServe(4321, runner)).toThrow(/https:\/\/ URL for port 4321/);
-    // Our own just-created mapping was taken back down.
     expect(calls.at(-1)).toEqual(["serve", "--https=4321", "off"]);
   });
 
-  // What `tailscale serve` prints when Serve is off for the tailnet (its CLI
-  // prints the control server's text and link on stdout, then exits 0 or waits).
   const SERVE_OFF = "\nServe is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=nABC\n\n";
 
   test("Serve off for the tailnet, CLI exits 0: says so with Tailscale's link and takes nothing down", () => {
@@ -173,9 +157,7 @@ describe("teardown hardening", () => {
     }
     const offCalls = calls.filter((args) => args.includes("off"));
     expect(offCalls).toHaveLength(2);
-    // The warning names the exact manual cleanup command.
     expect(stderr.output()).toContain(`tailscale serve --https=4321 off`);
-    // The port was NOT forgotten: a later disable retries the off again.
     const stderr2 = captureStderr();
     try {
       disableTailscaleServe(4321, runner);
@@ -197,17 +179,12 @@ describe("teardown hardening", () => {
       stderr.restore();
     }
     expect(stderr.output()).toBe("");
-    // Port forgotten: another disable is a no-op.
     disableTailscaleServe(4321, runner);
     expect(calls.filter((args) => args.includes("off"))).toHaveLength(2);
   });
 });
 
 describe("SIGHUP routing", () => {
-  // Guards the nohup contract: any SIGHUP listener overrides the ignored
-  // disposition `nohup` depends on, so a listener may exist ONLY while a
-  // serve mapping does. An unconditional listener regressed
-  // `nohup plannotator review &` into dying on terminal close.
   test("installs the SIGHUP→exit route only once a mapping exists, and reset removes it", () => {
     const before = process.listenerCount("SIGHUP");
     const { runner } = makeRunner({});
@@ -246,9 +223,7 @@ describe("enableTailscaleServe for the Inbox (8443, persisted, re-pointed)", () 
     const { url } = enableTailscaleServe(52900, runner, { httpsPort: 8443, ownTargets: ["http://127.0.0.1:52900", "http://127.0.0.1:52817"], persist: true });
     expect(url).toBe("https://vps-1.tail1234.ts.net:8443");
     expect(calls[1]).toEqual(["serve", "--bg", "--https=8443", "http://127.0.0.1:52900"]);
-    // Persisted: no exit teardown, so a restart-to-update never takes the new run's mapping down.
     expect(process.listenerCount("exit")).toBe(before);
-    // And the served name never joins a window's Host allowlist: the Inbox publishes a door-only listener.
     expect(createRequestHostGuard({ localOnly: true }).check(new Request("http://127.0.0.1/", { headers: { Host: "vps-1.tail1234.ts.net:8443" } }))?.status).toBe(403);
   });
 
@@ -271,9 +246,6 @@ describe("announceTailscaleSession", () => {
     }
   };
 
-  // The tailnet path used to print its own "served over your tailnet" block;
-  // with the shared ready line on every start it would have printed the URL
-  // twice. One ready line, then the tailnet line and the QR.
   test("prints the ready line once, above the tailnet line, and opens no browser", async () => {
     const url = "https://vps-1.tail1234.ts.net:4321";
     const capture = captureStderr();
@@ -283,7 +255,6 @@ describe("announceTailscaleSession", () => {
       capture.restore();
     }
     const output = capture.output();
-    // Literal text, not the constant (see shared-handlers.test.ts).
     expect(output.split("Plannotator session ready: ").length - 1).toBe(1);
     expect(output.split(url).length - 1).toBe(1);
     expect(output).toContain(`\n  Plannotator session ready: ${url}\n`);

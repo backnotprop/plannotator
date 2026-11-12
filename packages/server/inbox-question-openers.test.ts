@@ -1,14 +1,3 @@
-/**
- * send_message with a question opener that has text after its name
- * (`:::question {#bar}`; the owner, 2026-11-02: the person saw a question
- * they could not answer and the result said only `questions: []`). A running
- * Inbox on loopback (a temp data dir), an agent over MCP.
- *
- * What regresses if this fails: the warning stops reaching the agent at the
- * moment it sends (a new message or a reply_to), or it turns into friction
- * (the send refused, or the message the person reads changed), or it nags a
- * message whose blocks opened.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,7 +56,6 @@ test("an opener with text after its name: sent as written, and the result warns 
   const body = [":::question {#bar}", "Which bar?", "- [ ] Top", "- [ ] Bottom", ":::", "", ":::question-multi foo", "Which checks?", "- [ ] Lint", ":::"].join("\n");
   const { text, structured } = await send(client, { project_path: project, body, thread: "Bars" });
   expect(text).toStartWith("Sent to the Plannotator Inbox");
-  // Each warning on a line of its own.
   expect(text.split("\n")).toContain(warning(1, ":::question"));
   expect(text.split("\n")).toContain(warning(7, ":::question-multi"));
   expect(structured.questions).toEqual([]);
@@ -75,12 +63,10 @@ test("an opener with text after its name: sent as written, and the result warns 
     { line: 1, directive: ":::question" },
     { line: 7, directive: ":::question-multi" },
   ]);
-  // The person's message is the one the agent sent.
   const thread = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${structured.thread_id}`)).json()) as any;
   expect(thread.thread.messages).toHaveLength(1);
   expect(thread.thread.messages[0].body).toBe(body);
 
-  // A reply_to carries it too, by its own body's lines.
   const reply = await send(client, { project_path: project, reply_to: structured.message_id, body: "Asking again:\n\n:::question-text {#why}\nWhy?\n:::" });
   expect(reply.text.split("\n")).toContain(warning(3, ":::question-text"));
   expect(reply.structured.question_openers_with_text).toEqual([{ line: 3, directive: ":::question-text" }]);
@@ -97,7 +83,6 @@ test("a correct block, or an example in a code fence: no warning", async () => {
 
 test("a warning with other hints in the same result: every warning stays a line of its own, the hints whole", async () => {
   const { project, client } = await world();
-  // A broken opener, and a question that marks its recommendation in a label (its own hint).
   const body = [
     ":::question {#a}",
     "Which bar?",
@@ -119,7 +104,6 @@ test("a warning with other hints in the same result: every warning stays a line 
   const lines = text.split("\n");
   expect(lines).toContain(warning(1, ":::question"));
   expect(lines).toContain(warning(12, ":::question-text"));
-  // The other hint is whole, on a line with no warning in it.
   const hint = lines.find((line) => line.includes("marks its recommendation inside a choice label"));
   expect(hint).toBeDefined();
   expect(hint).not.toContain("has text after it");
@@ -140,7 +124,6 @@ test("submit_guide: the warnings come last there too, each a line of its own aft
   expect(result.structuredContent.question_openers_with_text).toEqual([{ line: 1, directive: ":::question" }]);
   expect(result.structuredContent.recommended_in_label).toHaveLength(1);
   const lines = result.content.map((part) => part.text).join("\n").split("\n");
-  // The warning is the last line, whole; the other hint sits on a line with no warning in it.
   expect(lines.at(-1)).toBe(warning(1, ":::question"));
   const hint = lines.find((line) => line.includes("marks its recommendation inside a choice label"));
   expect(hint).toBeDefined();

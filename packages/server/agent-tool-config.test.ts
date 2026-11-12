@@ -1,14 +1,3 @@
-/**
- * The `agentTool` setting through the Bun servers:
- *  - POST /api/config refuses a cross-origin write on every server (a page on
- *    another site must not be able to turn the tool on, or flip any other
- *    setting), accepts `agentTool` as a boolean only;
- *  - /api/plan's serverConfig advertises the tool only when the integration
- *    that started the server registers it: the pull-bridge host the Claude
- *    Code mod / OpenCode 2 plugin hands the CLI, or an in-process bridge's
- *    host. The agent origin alone is not enough (classic hook, OpenCode 1).
- * The Pi mirror is apps/pi-extension/agent-tool-config.test.ts.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,7 +38,6 @@ const post = (url: string, body: unknown, headers: Record<string, string> = {}) 
 const serverConfig = async (url: string) =>
   ((await (await fetch(`${url}/api/plan`)).json()) as { serverConfig: Record<string, unknown> }).serverConfig;
 
-/** A bridge as OpenCode 2's embedded plan review passes it in-process; only `host` is read here. */
 const opencodeBridge = { host: "opencode", status: () => "ready", modes: { turn: true, transient: false }, ask: async () => undefined } as unknown as SessionBridge;
 
 describe("POST /api/config on the Bun servers", () => {
@@ -62,7 +50,6 @@ describe("POST /api/config on the Bun servers", () => {
     test(`${name}: a cross-origin write is refused and writes nothing; same-origin and Origin-less writes work`, async () => {
       const server = await start();
       try {
-        // The text/plain shape a page can send without a CORS preflight.
         const forged = await fetch(`${server.url}/api/config`, {
           method: "POST",
           headers: { "Content-Type": "text/plain", Origin: "https://evil.example" },
@@ -75,7 +62,6 @@ describe("POST /api/config on the Bun servers", () => {
         expect(loadConfig().agentTool).toBe(true);
         expect((await post(server.url, { agentTool: false })).status).toBe(200);
         expect(loadConfig().agentTool).toBe(false);
-        // Boolean only.
         expect((await post(server.url, { agentTool: "true" })).status).toBe(200);
         expect(loadConfig().agentTool).toBe(false);
       } finally {
@@ -126,9 +112,6 @@ describe("the agent tool advert on the Bun servers", () => {
   });
 
   test("an OpenCode bridge whose host cannot register the tool: no agentTool fields", async () => {
-    // A host without a tool domain, or a plugin release from before the tool,
-    // still bridges the session; it must not be offered a switch for a tool
-    // it cannot have.
     const server = await startPlannotatorServer({ plan: "# Plan", origin: "opencode", htmlContent: MINIMAL_HTML, sessionBridge: opencodeBridge });
     try {
       const config = await serverConfig(server.url);
@@ -138,8 +121,6 @@ describe("the agent tool advert on the Bun servers", () => {
     }
   });
 
-  // The CLI reads the launching host once per process from the pull-bridge
-  // env the mod / OpenCode 2 plugin set, so each case runs in its own process.
   async function launchingHost(env: Record<string, string>, discard = false, advert = false): Promise<string | null> {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-launching-host-"));
     try {
@@ -166,7 +147,6 @@ describe("the agent tool advert on the Bun servers", () => {
     expect(await launchingHost(mod)).toBe("claude-code");
     expect(await launchingHost({ ...mod, PLANNOTATOR_REMOTE: "1" })).toBe("claude-code");
     expect(await launchingHost(mod, true)).toBe("claude-code");
-    // No integration (classic hook, OpenCode 1, a shell), or a malformed one.
     expect(await launchingHost({})).toBeNull();
     expect(await launchingHost({ ...mod, PLANNOTATOR_SESSION_BRIDGE_TOKEN: "short" })).toBeNull();
   }, 20_000);

@@ -17,77 +17,24 @@ import {
   type ReviewAnnotationInput,
 } from "./review-findings";
 
-/**
- * Marker Review Engines — the shared machinery for review CLIs that expose NO
- * schema-validation flag, so their final review output is prose. Cursor (the
- * `cursor-agent` binary, or `agent` when that is Cursor's), OpenCode (`opencode run`), and Pi (`pi --mode json`) are the
- * three. Because they can't be told to emit validated structured output, they
- * are instead told to emit a marker-delimited JSON block, and we extract the
- * LAST complete block from the reconstructed canonical text.
- *
- * Everything else — the finding model (nullable file/line/end_line, classified
- * into line/whole-file/general by classifyFindingPlacement), custom review
- * profiles, and the transform into external annotations — is IDENTICAL to
- * Claude/Codex. The ONLY per-engine differences are captured in the
- * `MarkerEngine` descriptor: the binary, how to build argv, how to pull text
- * out of one stream event, how to discover models, and how to format a live log
- * line. There is exactly ONE copy of every shared piece below.
- *
- * PI-SAFETY: This file is vendored into the Pi (Node) build via vendor.sh, so it
- * MUST contain ZERO Bun.* / Bun-only APIs. The model-discovery SPAWN lives in
- * each runtime's agent-jobs adapter; this module only provides parseModels +
- * buildArgv + modelsArgv (pure data/functions).
- */
-
-// ---------------------------------------------------------------------------
-// Per-job marker — the JSON payload is delimited by tags carrying a random,
-// per-job nonce: <plannotator-review-json:NONCE> … </plannotator-review-json:NONCE>.
-//
-// Why the nonce: in review mode the diff (and the model's own prose) is
-// untrusted text that routinely contains the bare string "plannotator-review-json"
-// — e.g. when reviewing this very module, or when the model echoes the contract
-// example. A static tag let those echoed mentions be mistaken for the real
-// delimiter, so extraction grabbed prose instead of the payload and valid
-// reviews failed. The nonce is generated at prompt-build time, embedded in the
-// output contract the model copies, and recovered from the stored prompt at
-// parse time, so only the model's genuine payload can match.
-// ---------------------------------------------------------------------------
-
 const MARKER_TAG = "plannotator-review-json";
 
-/** Open delimiter for a job's nonce. */
 export function markerOpen(nonce: string): string {
   return `<${MARKER_TAG}:${nonce}>`;
 }
-/** Close delimiter for a job's nonce. */
 export function markerClose(nonce: string): string {
   return `</${MARKER_TAG}:${nonce}>`;
 }
 
-/** Generate an unguessable per-job marker nonce (matches html-assets token style). */
 export function makeMarkerNonce(): string {
   return "pn" + crypto.randomUUID().replace(/-/g, "").slice(0, 12);
 }
 
-/**
- * Recover the nonce embedded in a composed prompt's marker contract. Returns
- * null when absent — the parser then fails closed, since no payload can be
- * trusted without the expected delimiter.
- */
 export function extractMarkerNonce(prompt: string): string | null {
   const m = new RegExp(`<${MARKER_TAG}:(pn[0-9a-f]{12})>`).exec(prompt);
   return m ? m[1] : null;
 }
 
-// ---------------------------------------------------------------------------
-// Finding model — IDENTICAL to ClaudeFinding: nullable file/line/end_line so a
-// finding can be a line issue (file + line), a whole-file issue (file, line
-// null), or a general review-level note (both null). Nothing is dropped.
-// ---------------------------------------------------------------------------
-
-// Marker findings ARE review findings — reuse the one shared shape from
-// review-findings.ts (this module already imports its transform) rather than
-// keeping a byte-identical copy that could silently diverge.
 export type MarkerSeverity = ReviewSeverity;
 export type MarkerFinding = ReviewFinding;
 
@@ -108,37 +55,18 @@ const VALID_SEVERITIES: ReadonlySet<string> = new Set([
   "pre_existing",
 ]);
 
-// ---------------------------------------------------------------------------
-// Schema validator — hand-rolled (no Ajv): marker output is prompt-enforced, so
-// validation is the floor that turns prose back into a trusted object. Mirrors
-// the claude-review.ts schema, which uses type [string,null] for file/line/
-// end_line: a missing or null placement is VALID (whole-file / general note).
-// Empty findings are valid as long as the JSON is valid and the summary is.
-// ---------------------------------------------------------------------------
-
-/**
- * Read a line coordinate that may be a finite integer, null, or absent. The
- * marker block is prompt-enforced, so a fractional/NaN/Infinity line is garbage
- * we will not trust as an annotation coordinate — it is rejected here.
- */
 function optionalNullableInteger(value: unknown): { ok: true; value: number | null } | { ok: false } {
   if (value === undefined || value === null) return { ok: true, value: null };
   if (typeof value === "number" && Number.isInteger(value)) return { ok: true, value };
   return { ok: false };
 }
 
-/** Read a value that may be a string, null, or absent — anything else is invalid. */
 function optionalNullableString(value: unknown): { ok: true; value: string | null } | { ok: false } {
   if (value === undefined || value === null) return { ok: true, value: null };
   if (typeof value === "string") return { ok: true, value };
   return { ok: false };
 }
 
-/**
- * Validate a parsed object against the marker review schema. Returns the typed
- * output, or null if the shape is invalid. file/line/end_line are nullable —
- * absent or null is accepted (whole-file or general findings).
- */
 export function validateMarkerReviewOutput(parsed: unknown): MarkerReviewOutput | null {
   if (!parsed || typeof parsed !== "object") return null;
   const obj = parsed as Record<string, unknown>;
@@ -182,95 +110,45 @@ export function validateMarkerReviewOutput(parsed: unknown): MarkerReviewOutput 
     summary: {
       correctness: s.correctness,
       explanation: s.explanation,
-      // Clamp to [0,1] — the model occasionally reports out-of-range confidence.
       confidence: Math.max(0, Math.min(1, s.confidence)),
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// MarkerEngine descriptor — the ONLY per-engine surface. Six fields.
-// ---------------------------------------------------------------------------
 
 export interface MarkerModel {
   id: string;
   label: string;
 }
 
-/** One parsed stream event, opaque to the shared reducer (each engine reads it). */
 export type MarkerStreamEvent = Record<string, unknown>;
 
-/** Optional per-engine run knobs. Engines ignore fields they have no flag
- *  for — today Pi consumes `thinking` (its unified reasoning level) and
- *  Cursor consumes `cursorSandbox`. */
 export interface MarkerBuildOptions {
-  /** Pi: `--thinking off|minimal|low|medium|high|xhigh` (Pi's default is
-   *  medium; xhigh is accepted only by codex-max models — Pi errors clearly
-   *  otherwise, surfaced as a failed job). */
   thinking?: string;
-  /** Cursor: pass `--sandbox enabled` (default true). Callers resolve this via
-   *  resolveCursorSandbox() (PLANNOTATOR_CURSOR_SANDBOX env var / config.json
-   *  `cursorSandbox`) — this module stays env-free. When false the pair is
-   *  OMITTED entirely (never `--sandbox disabled`), deferring to the user's
-   *  own Cursor Agent sandbox configuration. */
   cursorSandbox?: boolean;
 }
 
-/** Stable ids of the marker engines — the single union every cast/lookup
- *  should use, so adding an engine is one edit here plus a descriptor below. */
 export type MarkerEngineId = "cursor" | "opencode" | "pi" | "copilot";
 
 export interface MarkerEngine {
-  /** Stable engine id — also the provider id used by the server. */
   id: MarkerEngineId;
-  /** Display name for the capabilities/provider listing (e.g. "Cursor CLI"). */
   name: string;
-  /** The CLI binary to spawn, by its own name (Cursor's: `cursor-agent`). */
   binary: string;
-  /**
-   * Other names the same CLI is installed under, tried after `binary` (Cursor's
-   * installer also links `agent`). A program found under one is used only when
-   * it has `binarySignature`: other tools install a generic `agent` too.
-   */
   altBinaries?: readonly string[];
   binarySignature?: ProgramSignature;
-  /** Author string stamped on every annotation this engine produces. */
   author: string;
-  /** Build the full argv (binary + flags + trailing prompt) for a review run. */
   buildArgv: (prompt: string, model?: string, cwd?: string, opts?: MarkerBuildOptions) => string[];
-  /** Pull readable text out of one parsed stream event, or null if none. */
   extractText: (event: MarkerStreamEvent) => string | null;
-  /** Update the stream's provider failure: undefined = unrelated event,
-   *  null = successful terminal assistant outcome, string = safe failure. */
   extractError?: (event: MarkerStreamEvent) => string | null | undefined;
-  /** Argv (after the binary) for model discovery, e.g. ["models"]. */
   modelsArgv: string[];
-  /** Parse the model-discovery stdout into a catalog. */
   parseModels: (stdout: string) => MarkerModel[];
-  /** Format one stream line for the live log, or null to skip it. */
   formatLogEvent: (event: MarkerStreamEvent) => string | null;
-  /**
-   * The same run with its prompt on stdin instead of in the argv, or null when
-   * the argv is not this engine's. Used only where the prompt cannot be an
-   * argument: a Windows `.cmd` shim, which runs through cmd.exe (#2372).
-   */
   promptOnStdin?: (argv: string[]) => { command: string[]; stdin: string } | null;
 }
 
-// ---------------------------------------------------------------------------
-// Cursor engine helpers
-// ---------------------------------------------------------------------------
-
-/**
- * A Cursor partial-output assistant event is a real new text delta only when
- * `timestamp_ms` is present AND `model_call_id` is absent. Every other assistant
- * flush is a duplicate re-emission (pre-tool-call flush or end-of-turn flush).
- */
 function cursorIsRealAssistantDelta(event: MarkerStreamEvent): boolean {
   return event.timestamp_ms !== undefined && event.model_call_id === undefined;
 }
 
-/** Pull readable text out of a Cursor assistant event's content (string or parts). */
 function cursorAssistantText(event: MarkerStreamEvent): string {
   if (typeof event.text === "string") return event.text;
   const message = event.message as { content?: unknown } | undefined;
@@ -286,17 +164,6 @@ function cursorAssistantText(event: MarkerStreamEvent): string {
   return "";
 }
 
-/**
- * Cursor `extractText` for the canonical-text reducer: append a real new delta
- * (timestamp_ms present, model_call_id absent). The no-timestamp branch KEEPS
- * the end-of-turn flush — it covers both partial-streaming-disabled output (the
- * full message arrives once) and the enabled-mode final flush, and is a
- * parse-robustness safety net (extractLastMarkerBlock takes the LAST block, so a
- * duplicate is harmless). result events carry the final text too.
- *
- * This is deliberately MORE lenient than cursorFormatLogEvent, which drops the
- * flush so live logs don't repeat the whole assistant output. Do not unify them.
- */
 function cursorExtractText(event: MarkerStreamEvent): string | null {
   if (event.type === "assistant") {
     if (event.timestamp_ms !== undefined) {
@@ -314,20 +181,12 @@ function cursorExtractText(event: MarkerStreamEvent): string | null {
   return null;
 }
 
-/**
- * Parse `agent models` / `agent --list-models` output into a model catalog. The
- * CLI prints one model per line as `<id> - <Label>`, wrapped by an "Available
- * models" header and a "Tip: ..." footer. Returns [] when no model lines are
- * present (e.g. unauthenticated: "No models available...").
- */
 function cursorParseModels(stdout: string): MarkerModel[] {
   if (!stdout) return [];
   const models: MarkerModel[] = [];
   const seen = new Set<string>();
   for (const rawLine of stdout.split("\n")) {
     const line = rawLine.trim();
-    // `id - Label` — id is a single whitespace-free token; the separator is
-    // " - " with surrounding spaces (model ids contain hyphens but never " - ").
     const match = /^(\S+)\s+-\s+(.+)$/.exec(line);
     if (!match) continue;
     const id = match[1];
@@ -339,11 +198,6 @@ function cursorParseModels(stdout: string): MarkerModel[] {
   return models;
 }
 
-/**
- * Format one Cursor `stream-json` event for the LiveLogViewer. Applies the same
- * partial-output dedup rule as the reducer: an assistant delta is shown only
- * when `timestamp_ms` is present and `model_call_id` is absent.
- */
 function cursorFormatLogEvent(event: MarkerStreamEvent): string | null {
   switch (event.type) {
     case "system": {
@@ -389,36 +243,12 @@ function cursorFormatLogEvent(event: MarkerStreamEvent): string | null {
   }
 }
 
-/**
- * Build the `cursor-agent -p` command. NOTE the binary is `cursor-agent` (or
- * Cursor's own `agent`, swapped in at spawn by resolveMarkerBinary), NOT
- * `cursor`, and never another program named `agent`.
- *
- * Read-only posture comes entirely from `--mode ask` + `--sandbox enabled` and
- * the absence of `--force`/`--yolo`. `--trust` is required in headless print
- * mode: without it Cursor stops on an interactive workspace-trust prompt that a
- * background job can never answer. The prompt is the trailing positional arg —
- * `agent` reads task text from argv, not stdin. `--model` is omitted when the
- * model is `Auto`/empty so Cursor uses its default model selection. `--workspace`
- * is set to the launch cwd when provided.
- *
- * Escape hatch: on systems where Cursor's sandbox cannot start (NixOS,
- * AppArmor-restricted Linux) the hardcoded `--sandbox enabled` hard-fails the
- * job ("Sandbox mode is enabled but not available on this system") and
- * overrides the user's own `agent sandbox` configuration. `opts.cursorSandbox:
- * false` (resolved from PLANNOTATOR_CURSOR_SANDBOX / config.json
- * `cursorSandbox`) OMITS the pair entirely — never `--sandbox disabled` — so
- * the user's Cursor Agent configuration governs. Tradeoff stated plainly:
- * opting out means the review job's write protection rests on `--mode ask`
- * plus whatever sandboxing the user's own Cursor config provides.
- */
 function cursorBuildArgv(
   prompt: string,
   model?: string,
   cwd?: string,
   opts?: MarkerBuildOptions,
 ): string[] {
-  // `auto` is Cursor's default model id — omit --model so the CLI chooses.
   const useModel = !!model && model.toLowerCase() !== "auto";
   return [
     "cursor-agent",
@@ -432,21 +262,10 @@ function cursorBuildArgv(
     ...(cwd ? ["--workspace", cwd] : []),
     ...(opts?.cursorSandbox === false ? [] : ["--sandbox", "enabled"]),
     ...(useModel ? ["--model", model] : []),
-    // Prompt is the trailing positional arg — agent reads it from argv, not stdin.
     prompt,
   ];
 }
 
-// ---------------------------------------------------------------------------
-// OpenCode engine helpers
-// ---------------------------------------------------------------------------
-
-/**
- * OpenCode `extractText`: the assistant text arrives in `type: "text"` events
- * carrying `part.text` (each finalized once). No partial-output dedup is needed —
- * just return the text part. tool_use / step_start / step_finish / reasoning /
- * error events carry no review text.
- */
 function opencodeExtractText(event: MarkerStreamEvent): string | null {
   if (event.type === "text") {
     const part = event.part as { text?: unknown } | undefined;
@@ -455,20 +274,12 @@ function opencodeExtractText(event: MarkerStreamEvent): string | null {
   return null;
 }
 
-/**
- * Parse `opencode models` output into a model catalog. The CLI prints one model
- * id per line as `provider/model`. Returns [] when there are no model lines
- * (e.g. unauthenticated / no providers configured).
- */
 function opencodeParseModels(stdout: string): MarkerModel[] {
   if (!stdout) return [];
   const models: MarkerModel[] = [];
   const seen = new Set<string>();
   for (const rawLine of stdout.split("\n")) {
     const id = rawLine.trim();
-    // A model id is `provider/model` and may carry extra `/` segments (e.g.
-    // OpenRouter's `openrouter/deepseek/deepseek-chat-v3`): a leading provider,
-    // a slash, then a non-empty remainder, all whitespace-free.
     if (!id || /\s/.test(id) || !/^[^/\s]+\/\S+$/.test(id)) continue;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -477,10 +288,6 @@ function opencodeParseModels(stdout: string): MarkerModel[] {
   return models;
 }
 
-/**
- * Format one `opencode run --format json` event for the LiveLogViewer. Returns a
- * human-readable string, or null if the event should be skipped.
- */
 function opencodeFormatLogEvent(event: MarkerStreamEvent): string | null {
   const part = event.part as
     | { text?: unknown; tool?: unknown; state?: { status?: unknown } }
@@ -499,27 +306,10 @@ function opencodeFormatLogEvent(event: MarkerStreamEvent): string | null {
       return "[error] session error";
     }
     default:
-      // step_start / step_finish / reasoning — skipped for live logs.
       return null;
   }
 }
 
-/**
- * Build the `opencode run` command.
- *
- * `--format json` emits NDJSON events we capture on stdout. `--agent plan` is
- * OpenCode's read-oriented agent — a sensible default for review (it does not
- * edit). The message (prompt) is the trailing positional arg. `--model` is
- * `provider/model` and is omitted when empty so OpenCode uses the configured
- * default.
- *
- * NO `--dir` (#1609): OpenCode 1.x's `run --dir` means "directory to run in,
- * path on remote server if attaching", and OpenCode v2's `run` rejects the flag
- * outright ("Unrecognized flag: --dir"). We never attach to a remote server, so
- * the working directory is expressed the same way as Pi's: the job's spawn cwd
- * (spawnJob already spawns with the build result's `cwd`). `cwd` is accepted
- * only to match the shared `MarkerEngine["buildArgv"]` signature.
- */
 function opencodeBuildArgv(prompt: string, model?: string, _cwd?: string): string[] {
   const useModel = !!model && model.trim().length > 0;
   return [
@@ -530,24 +320,10 @@ function opencodeBuildArgv(prompt: string, model?: string, _cwd?: string): strin
     "--agent",
     "plan",
     ...(useModel ? ["--model", model] : []),
-    // Message (prompt) is the trailing positional arg.
     prompt,
   ];
 }
 
-// ---------------------------------------------------------------------------
-// Pi engine helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Pi `extractText`: assistant text lives on `message_end` events (the complete
- * message for that turn) as `message.content` blocks with `type: "text"`. We
- * deliberately do NOT also read `message_update` deltas (`text_delta` etc.) —
- * `message_end` already carries the fully-assembled text, so summing both
- * would double the canonical text. Non-assistant messages (the echoed user
- * turn) and non-text content blocks (`thinking`, `toolCall`) contribute
- * nothing here.
- */
 function piExtractText(event: MarkerStreamEvent): string | null {
   if (event.type !== "message_end") return null;
   const message = event.message as { role?: unknown; content?: unknown } | undefined;
@@ -562,19 +338,12 @@ function piExtractText(event: MarkerStreamEvent): string | null {
   return text ? text : null;
 }
 
-/** Strip ANSI SGR escape sequences (color/style codes) from CLI table output. */
 function stripAnsi(text: string): string {
-  // eslint-disable-next-line no-control-regex
   return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 const MAX_PROVIDER_ERROR_CHARS = 500;
 
-/**
- * Project a provider-owned diagnostic into a single bounded, redaction-safe
- * line suitable for AgentJobInfo.error and server logs. The raw NDJSON record
- * is never surfaced: it may be large and can contain provider metadata.
- */
 function sanitizeProviderError(message: unknown, fallback: string): string {
   if (typeof message !== "string") return fallback;
 
@@ -599,7 +368,6 @@ function sanitizeProviderError(message: unknown, fallback: string): string {
   return redacted.slice(0, MAX_PROVIDER_ERROR_CHARS - 1).trimEnd() + "…";
 }
 
-/** Read Pi's final assistant-message outcome contract without trusting it. */
 function piAssistantError(message: unknown): string | null | undefined {
   if (!message || typeof message !== "object") return undefined;
   if (Reflect.get(message, "role") !== "assistant") return undefined;
@@ -615,12 +383,6 @@ function piAssistantError(message: unknown): string | null | undefined {
   return sanitizeProviderError(Reflect.get(message, "errorMessage"), fallback);
 }
 
-/**
- * Extract Pi's exit-0 in-run failure from its documented JSON event stream.
- * The same AssistantMessage is repeated across message_update, message_end,
- * turn_end, and agent_end; accepting each location makes the completed buffer
- * robust to a truncated final event without inspecting arbitrary output text.
- */
 function piExtractError(event: MarkerStreamEvent): string | null | undefined {
   switch (event.type) {
     case "message_update": {
@@ -649,19 +411,6 @@ function piExtractError(event: MarkerStreamEvent): string | null | undefined {
   }
 }
 
-/**
- * Parse `pi --list-models` output into a model catalog. Unlike Cursor/OpenCode,
- * Pi prints a HUMAN TABLE (`provider  model  context  max-out  thinking  images`),
- * not one-model-per-recognizable-token-pattern text — so instead of matching a
- * per-line shape, we first locate the header row (whose first two whitespace-
- * separated columns are literally "provider" and "model") and record its column
- * count. Only subsequent lines with that SAME column count are treated as data
- * rows: this is what lets a non-table message (e.g. "No models available. Run
- * `pi login`...", "No models matching \"x\"") — which has no header at all —
- * fail closed to [] rather than being misparsed into garbage ids. On any header
- * match, `provider` + `model` (the first two columns) become `id: "provider/id"`.
- * Never throws; unparseable input returns [].
- */
 function piParseModels(stdout: string): MarkerModel[] {
   try {
     if (!stdout) return [];
@@ -674,14 +423,14 @@ function piParseModels(stdout: string): MarkerModel[] {
       const cols = l.split(/\s+/);
       return cols[0]?.toLowerCase() === "provider" && cols[1]?.toLowerCase() === "model";
     });
-    if (headerIndex === -1) return []; // no recognizable table — e.g. an error/empty message
+    if (headerIndex === -1) return [];
 
     const columnCount = lines[headerIndex].split(/\s+/).length;
     const models: MarkerModel[] = [];
     const seen = new Set<string>();
     for (const line of lines.slice(headerIndex + 1)) {
       const cols = line.split(/\s+/);
-      if (cols.length !== columnCount) continue; // not a row of this table
+      if (cols.length !== columnCount) continue;
       const [provider, model] = cols;
       if (!provider || !model) continue;
       const id = `${provider}/${model}`;
@@ -695,18 +444,6 @@ function piParseModels(stdout: string): MarkerModel[] {
   }
 }
 
-/**
- * Format one Pi `--mode json` event for the LiveLogViewer. Tool calls surface
- * as `tool_execution_start` (name + a brief args preview); assistant text
- * surfaces once, on `message_end` (same event `piExtractText` reads — the
- * live log and the marker extraction agree on when a turn's text is final).
- * Thinking/reasoning content (`message_update` with a `thinking_*` assistant
- * event, or `type: "thinking"` content blocks) is intentionally NOT surfaced —
- * same posture as Cursor/OpenCode, which only show finalized assistant text,
- * never raw reasoning deltas. Everything else (session header, agent/turn
- * lifecycle, message_start, message_update deltas, tool_execution_update/end)
- * is noise for a live log and is skipped. Unknown event types return null.
- */
 function piFormatLogEvent(event: MarkerStreamEvent): string | null {
   switch (event.type) {
     case "tool_execution_start": {
@@ -724,35 +461,8 @@ function piFormatLogEvent(event: MarkerStreamEvent): string | null {
   }
 }
 
-/**
- * Build the `pi --mode json` command.
- *
- * `--no-approve` is a SECURITY requirement, not a style choice: non-interactive
- * Pi silently applies `defaultProjectTrust` when unset, and an untrusted
- * checkout's `.pi/settings.json` / project extensions / project skills must
- * NEVER be allowed to load for an arbitrary review job. `--no-session` keeps
- * the run ephemeral so background jobs don't accumulate in the user's
- * `~/.pi/agent/sessions`. Pi has NO `--cwd`/`--workspace`/`--dir` flag (unlike
- * Cursor's `--workspace`; OpenCode's run also relies on the spawn cwd) — it always operates on the
- * process's actual working directory, which is exactly the job's spawn cwd
- * (spawnJob already spawns with the build result's `cwd`), so `cwd` is
- * accepted only to match the shared `MarkerEngine["buildArgv"]` signature and
- * is otherwise unused here. The prompt is the trailing positional arg after
- * `-p`. `--model` is omitted when empty/omitted so Pi falls back to its own
- * configured default model.
- *
- * SEMANTICS NOTE (do not "fix" this later): `pi --mode json` exits 0 even when
- * the agent's own run errored or was aborted — the text-mode stopReason check
- * in Pi's print-mode is gated on `mode === "text"`, so JSON mode never sets a
- * non-zero exit for an in-run failure. The marker pipeline is fail-closed;
- * when marker parsing fails, the shared stream reducer preserves Pi's
- * structured assistant error instead of misclassifying it as malformed marker
- * output. Exit 1 here means Pi itself crashed or was misconfigured (bad model,
- * no auth, extension load failure), which is a separate, correctly-surfaced
- * failure mode.
- */
 function piBuildArgv(prompt: string, model?: string, cwd?: string, opts?: MarkerBuildOptions): string[] {
-  void cwd; // no cwd flag exists — spawn cwd is authoritative (see comment above)
+  void cwd;
   const useModel = !!model && model.trim().length > 0;
   return [
     "pi",
@@ -760,70 +470,26 @@ function piBuildArgv(prompt: string, model?: string, cwd?: string, opts?: Marker
     "json",
     "--no-session",
     "--no-approve",
-    // Full read-only (`--tools read,grep,find,ls`) would break these jobs:
-    // the review/guide/tour prompt tells the agent to inspect the diff itself
-    // (git diff/log, gh pr view, etc. per buildAgentReviewUserMessage), which
-    // needs Bash, not just file-read tools. `--exclude-tools edit,write`
-    // instead removes only Pi's purpose-built mutation tools while keeping
-    // every inspection path (Bash included) intact. Bash itself is therefore
-    // still available here — the same residual trust level as Cursor and
-    // OpenCode, whose CLIs offer no tool-restriction flags at all and so run
-    // with Bash unrestricted too. PR jobs additionally run inside disposable
-    // worktrees, bounding the blast radius of anything Bash could still do.
     "--exclude-tools",
     "edit,write",
     ...(useModel ? ["--model", model] : []),
-    // Pi's unified reasoning knob (thinking level) applies to whatever model
-    // is selected; omitted ⇒ Pi's own default (medium).
     ...(opts?.thinking ? ["--thinking", opts.thinking] : []),
-    // Prompt is the trailing positional arg after -p.
     "-p",
     prompt,
   ];
 }
 
-/**
- * Pi reads piped stdin as the message (`readPipedStdin`, in every release
- * since the 0.79.1 peer floor), so `pi … -p <prompt>` runs the same as
- * `pi … -p` with the prompt on stdin.
- */
 function piPromptOnStdin(argv: string[]): { command: string[]; stdin: string } | null {
   if (argv.length < 2 || argv[argv.length - 2] !== "-p") return null;
   return { command: argv.slice(0, -1), stdin: argv[argv.length - 1]! };
 }
 
-// ---------------------------------------------------------------------------
-// Copilot engine helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Copilot `extractText`: assistant text lives on `assistant.message` events
- * (the complete message for that turn) as `data.content`. We deliberately do
- * NOT also read `assistant.message_delta` events — `assistant.message` already
- * carries the fully-assembled text, so summing both would double the canonical
- * text (same shape as Pi's message_update/message_end split). A message that
- * only carries toolRequests has empty content and contributes nothing.
- */
 function copilotExtractText(event: MarkerStreamEvent): string | null {
   if (event.type !== "assistant.message") return null;
   const data = event.data as { content?: unknown } | undefined;
   return typeof data?.content === "string" && data.content ? data.content : null;
 }
 
-/**
- * Parse `copilot help config` output into a model catalog. Copilot has no
- * dedicated model-list command; the config help enumerates the valid values of
- * the `model` setting as an indented block:
- *
- *   `model`: AI model to use for Copilot CLI; ...
- *     - "claude-sonnet-5"
- *     - "gpt-5.5"
- *
- * We locate the `model`: line, then collect consecutive `- "<id>"` lines until
- * the first line that isn't one (the next setting's block). No header found —
- * e.g. a future help rewrite — fails closed to [] (the picker just offers
- * "Default" and the --model flag is omitted).
- */
 function copilotParseModels(stdout: string): MarkerModel[] {
   try {
     if (!stdout) return [];
@@ -835,7 +501,7 @@ function copilotParseModels(stdout: string): MarkerModel[] {
     const seen = new Set<string>();
     for (const line of lines.slice(headerIndex + 1)) {
       const match = /^\s*-\s*"([^"]+)"\s*$/.exec(line);
-      if (!match) break; // end of the model value block
+      if (!match) break;
       const id = match[1];
       if (!id || seen.has(id)) continue;
       seen.add(id);
@@ -847,15 +513,6 @@ function copilotParseModels(stdout: string): MarkerModel[] {
   }
 }
 
-/**
- * Format one `copilot --output-format json` event for the LiveLogViewer. Tool
- * calls surface as `tool.execution_start` (toolName + args preview) and their
- * failures as `tool.execution_complete` errors (a permission denial is worth
- * seeing live); assistant text surfaces once, on `assistant.message` — the same
- * event `copilotExtractText` reads. Session bookkeeping (mcp_servers_loaded,
- * skills_loaded), the echoed user turn, turn lifecycle, and per-character
- * `assistant.message_delta` events are noise and are skipped.
- */
 function copilotFormatLogEvent(event: MarkerStreamEvent): string | null {
   const data = event.data as Record<string, unknown> | undefined;
   switch (event.type) {
@@ -871,7 +528,7 @@ function copilotFormatLogEvent(event: MarkerStreamEvent): string | null {
     case "tool.execution_complete": {
       const error = data?.error as { message?: unknown } | undefined;
       if (error && typeof error.message === "string") return `[tool] ${error.message}`;
-      return null; // success — the start line already showed the call
+      return null;
     }
     case "assistant.message": {
       const text = copilotExtractText(event);
@@ -882,29 +539,6 @@ function copilotFormatLogEvent(event: MarkerStreamEvent): string | null {
   }
 }
 
-/**
- * Build the `copilot -p` command.
- *
- * `--output-format json` emits the JSONL event stream we capture on stdout.
- * `--no-ask-user` disables the ask_user tool (a background job can never
- * answer), and in non-interactive mode any tool without an allow rule is
- * auto-denied rather than prompted — the model receives a clean "denied"
- * result and continues. Read-ONLY-ish posture: `--deny-tool=write` removes the
- * file-mutation tools (deny rules beat every allow rule, per Copilot's
- * permission docs) and the allowlist opens only the VCS/forge inspection
- * commands the review/guide prompts rely on (`git`/`gh`/`glab`/`jj`, plus wc) —
- * the same command families Claude's fine-grained allowlist grants, at
- * first-level-subcommand-wildcard granularity because that's the pattern shape
- * Copilot documents for git/gh. Shell is otherwise auto-denied, which puts
- * Copilot BETWEEN Claude (full subcommand granularity) and Cursor/OpenCode/Pi
- * (Bash unrestricted) on the trust spectrum. `--disable-builtin-mcps` skips the
- * github-mcp-server handshake at startup (PR reads go through the allowlisted
- * `gh` CLI instead); `--no-auto-update` keeps a background job from pausing to
- * download a CLI update. The `=` form is used for the variadic permission
- * flags so they can never greedily consume a following argument. The prompt is
- * the value of `-p`, passed last. `--model` is omitted when empty or `auto`
- * so Copilot picks its own default.
- */
 function copilotBuildArgv(prompt: string, model?: string, cwd?: string): string[] {
   const useModel = !!model && model.trim().length > 0 && model.toLowerCase() !== "auto";
   return [
@@ -916,17 +550,6 @@ function copilotBuildArgv(prompt: string, model?: string, cwd?: string): string[
     "--no-auto-update",
     "--disable-builtin-mcps",
     "--deny-tool=write",
-    // Deny rules take precedence over every allow rule (Copilot's documented
-    // permission model), and match at first-level-subcommand granularity
-    // ("git push", "gh pr create") — probe-verified: with these in place,
-    // `git log` runs while `git push --dry-run` is denied. This keeps the
-    // broad `git:*`/`gh:*` allows below for inspection ergonomics while
-    // structurally blocking the high-consequence verbs a prompt-injected
-    // background job could abuse: remote writes (push), working-tree
-    // destruction (reset/clean/checkout/restore — local reviews run in the
-    // user's REAL working tree, so these mean uncommitted-work loss), and
-    // outward-facing forge writes (PR/MR/issue comments, creation, merges),
-    // which the review methodology already forbids at the prompt level.
     "--deny-tool=shell(git push)",
     "--deny-tool=shell(git reset)",
     "--deny-tool=shell(git clean)",
@@ -950,15 +573,10 @@ function copilotBuildArgv(prompt: string, model?: string, cwd?: string): string[
     "--allow-tool=shell(jj:*)",
     "--allow-tool=shell(wc)",
     ...(useModel ? ["--model", model] : []),
-    // Prompt is the value of -p (copilot reads it from argv, not stdin).
     "-p",
     prompt,
   ];
 }
-
-// ---------------------------------------------------------------------------
-// The four descriptors + registry.
-// ---------------------------------------------------------------------------
 
 const CURSOR_ENGINE: MarkerEngine = {
   id: "cursor",
@@ -1019,29 +637,12 @@ export const MARKER_ENGINES: Record<MarkerEngineId, MarkerEngine> = {
   copilot: COPILOT_ENGINE,
 };
 
-// ---------------------------------------------------------------------------
-// Stream reduction — line-buffered NDJSON reducer, shared across engines.
-// ---------------------------------------------------------------------------
-
 export interface MarkerStreamReduction {
-  /** Canonical assistant/result text — the substrate for marker extraction. */
   canonicalText: string;
-  /** Number of NDJSON records that parsed successfully. */
   recordCount: number;
-  /** Last structured, sanitized provider failure found in the stream. */
   providerError: string | null;
 }
 
-/**
- * Reduce a complete NDJSON stdout buffer into canonical text by calling the
- * engine's `extractText` on every parsed record.
- *
- * Critically line-buffered: only complete lines (terminated by `\n`) are parsed.
- * A trailing partial line with no newline is treated as complete (the process
- * has exited by the time this runs on the accumulated buffer), but mid-stream
- * chunk boundaries never corrupt a record because the whole buffer is joined
- * before splitting on newlines.
- */
 export function reduceMarkerStream(stdout: string, engine: MarkerEngine): MarkerStreamReduction {
   let canonicalText = "";
   let recordCount = 0;
@@ -1057,7 +658,7 @@ export function reduceMarkerStream(stdout: string, engine: MarkerEngine): Marker
     try {
       event = JSON.parse(line) as MarkerStreamEvent;
     } catch {
-      continue; // not a complete/valid NDJSON record — skip
+      continue;
     }
     recordCount++;
 
@@ -1071,17 +672,6 @@ export function reduceMarkerStream(stdout: string, engine: MarkerEngine): Marker
   return { canonicalText, recordCount, providerError };
 }
 
-// ---------------------------------------------------------------------------
-// Marker-block parsing — reduce → take the LAST complete marker block → parse →
-// schema-validate. Returns null on any failure (caller fails the job).
-// ---------------------------------------------------------------------------
-
-/**
- * Extract the content of the LAST complete marker block from canonical text.
- * The open/close tags carry the job nonce, so bare `plannotator-review-json`
- * mentions in the diff or the model's prose (which lack the nonce) are ignored
- * rather than mistaken for delimiters.
- */
 export function extractLastMarkerBlock(text: string, openTag: string, closeTag: string): string | null {
   let result: string | null = null;
   let searchFrom = 0;
@@ -1091,10 +681,6 @@ export function extractLastMarkerBlock(text: string, openTag: string, closeTag: 
     if (open === -1) break;
     const contentStart = open + openTag.length;
     const close = text.indexOf(closeTag, contentStart);
-    // A dangling opener (no matching close) almost always means the model's
-    // final block was truncated mid-stream. Fail closed — return null — rather
-    // than silently falling back to an earlier (draft, or echoed prompt-example)
-    // block, which would mark a truncated review green with the wrong findings.
     if (close === -1) return null;
     result = text.slice(contentStart, close);
     searchFrom = close + closeTag.length;
@@ -1103,17 +689,9 @@ export function extractLastMarkerBlock(text: string, openTag: string, closeTag: 
   return result;
 }
 
-/**
- * Parse a marker engine's NDJSON stdout into a validated review output.
- *
- * Pipeline: line-buffered NDJSON reduce → reconstruct canonical text → take the
- * LAST complete marker block → JSON.parse → schema-validate. Returns null on
- * ANY failure (missing marker, malformed JSON, schema mismatch) so the caller
- * can fail the job.
- */
 export function parseMarkerStreamOutput(stdout: string, engine: MarkerEngine, nonce: string): MarkerReviewOutput | null {
   if (!stdout || !stdout.trim()) return null;
-  if (!nonce) return null; // no expected nonce → cannot trust any block
+  if (!nonce) return null;
 
   const { canonicalText } = reduceMarkerStream(stdout, engine);
   if (!canonicalText) return null;
@@ -1131,15 +709,6 @@ export function parseMarkerStreamOutput(stdout: string, engine: MarkerEngine, no
   return validateMarkerReviewOutput(parsed);
 }
 
-// ---------------------------------------------------------------------------
-// Live log formatter — parse one NDJSON line, hand the event to the engine.
-// ---------------------------------------------------------------------------
-
-/**
- * Format one NDJSON line for the LiveLogViewer using the engine's per-event
- * formatter. Returns a human-readable string, or null if the line should be
- * skipped (unparseable or not log-worthy).
- */
 export function formatMarkerLogEvent(line: string, engine: MarkerEngine): string | null {
   let event: MarkerStreamEvent;
   try {
@@ -1149,13 +718,6 @@ export function formatMarkerLogEvent(line: string, engine: MarkerEngine): string
   }
   return engine.formatLogEvent(event);
 }
-
-// ---------------------------------------------------------------------------
-// Review prompt — investigation-first methodology (shared with Cursor/OpenCode
-// today, byte-identical) split from the marker-block output contract so a custom
-// review profile can replace the methodology while the contract — the only thing
-// that makes marker output parseable — is ALWAYS appended.
-// ---------------------------------------------------------------------------
 
 export const MARKER_REVIEW_METHODOLOGY = `# Code Review
 
@@ -1276,25 +838,6 @@ issues. If no issues are found, return an empty "findings" array with a valid
 summary.`;
 }
 
-/**
- * Compose a marker engine's review prompt.
- *
- * A custom review profile REPLACES the methodology (its own instructions take
- * over). But unlike Claude/Codex — which use a native schema flag — marker
- * engines have NO schema flag, so the marker output contract is the ONLY thing
- * that makes their output parseable. It is therefore ALWAYS appended, even for a
- * custom profile. (This is why we do NOT call composeReviewPrompt directly: that
- * helper REPLACES the whole system prompt for custom profiles, which would strip
- * our contract.)
- *
- * The contract embeds `nonce` in its marker tags; the caller must generate it
- * with makeMarkerNonce() and recover it with extractMarkerNonce() at parse time.
- *
- *   <methodology OR custom profile instructions>
- *   <marker output contract (nonce-tagged)>
- *   ---
- *   <user message>
- */
 export function composeMarkerReviewPrompt(
   profile: ResolvedReviewProfile | undefined,
   userMessage: string,
@@ -1306,19 +849,10 @@ export function composeMarkerReviewPrompt(
   return head + "\n\n" + buildMarkerOutputContract(nonce) + "\n\n---\n\n" + userMessage;
 }
 
-// ---------------------------------------------------------------------------
-// Command builder
-// ---------------------------------------------------------------------------
-
 export interface MarkerCommandResult {
   command: string[];
 }
 
-/**
- * The engine's CLI on PATH: `binary`, else an `altBinaries` name that is the
- * same CLI (Cursor's `agent`, never Grok Build's or another tool's). Null when
- * none is installed. `which` is the runtime's PATH lookup.
- */
 export function resolveMarkerBinary(
   engine: MarkerEngine,
   which: (name: string) => string | null,
@@ -1327,22 +861,13 @@ export function resolveMarkerBinary(
   return resolveProgram({ command: engine.binary, alt: engine.altBinaries, signature: engine.binarySignature }, which, sameProgram);
 }
 
-/**
- * The argv to spawn: when it starts with one of the engine's names, that name
- * is replaced by the one resolveMarkerBinary found. When none was found the
- * argv keeps the engine's own name, so the spawn fails as "not found" rather
- * than starting another program.
- */
 export function withMarkerBinary(command: string[], engine: MarkerEngine, resolved: ResolvedProgram | null): string[] {
   if (!engine.altBinaries?.length) return command;
   const names = [engine.binary, ...engine.altBinaries];
   if (command.length === 0 || !names.includes(command[0]!)) return command;
-  // By name: the spawn looks it up on the same PATH and finds the file that
-  // was checked (on Windows with the same .exe/.cmd extension).
   return [resolved?.name ?? engine.binary, ...command.slice(1)];
 }
 
-/** Build the full argv for a review run with the given engine. */
 export function buildMarkerCommand(
   engine: MarkerEngine,
   prompt: string,
@@ -1353,15 +878,8 @@ export function buildMarkerCommand(
   return { command: engine.buildArgv(prompt, model, cwd, opts) };
 }
 
-// ---------------------------------------------------------------------------
-// Finding transform — marker findings → external annotations. IDENTICAL logic
-// to transformClaudeFindings (classifyFindingPlacement; nothing dropped); only
-// the author differs, supplied by the engine descriptor.
-// ---------------------------------------------------------------------------
-
 export type MarkerReviewAnnotationInput = ReviewAnnotationInput;
 
-/** Transform marker findings into the external annotation format. */
 export function transformMarkerFindings(
   findings: MarkerFinding[],
   source: string,
@@ -1369,7 +887,5 @@ export function transformMarkerFindings(
   cwd?: string,
   pathTransform?: (path: string) => string,
 ): MarkerReviewAnnotationInput[] {
-  // Routing (line / whole-file / general) is shared with Claude in
-  // review-findings.ts — nothing is dropped; only the author differs per engine.
   return transformSeverityFindings(findings, source, author, cwd, pathTransform);
 }

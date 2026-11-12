@@ -1,13 +1,3 @@
-/**
- * Qwen Code's connection to the Inbox (inbox-agents.ts), with a fake `qwen`
- * on a scratch PATH and a scratch home (tests/helpers/fake-agents.ts; the real
- * qwen is never run and the real ~/.qwen never read). Plannotator edits Qwen's
- * settings.json itself (JSON with comments), never through `qwen mcp add`,
- * which writes the person's other servers back with their `${VAR}` values
- * filled in (the fake does too). What is guarded here: only Plannotator's
- * entry ever changes, comments and `${VAR}` included, and a file that does not
- * parse or is read-only is left as it is.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +21,6 @@ import {
 
 const SELF = ["/opt/plannotator/bin/plannotator"];
 
-/** Whether the scratch volume ignores case (macOS and Windows by default; Linux never), looked at, never assumed. */
 const IGNORES_CASE = (() => {
   const probe = mkdtempSync(join(tmpdir(), "plannotator-case-"));
   try {
@@ -67,7 +56,6 @@ function environment(extra: Record<string, string> = {}): AgentEnvironment {
 }
 const options = (extra: Record<string, string> = {}) => ({ dataDir, selfCommand: SELF, environment: environment(extra) });
 const connect = (extra: Record<string, string> = {}) => connectInboxAgents(options(extra));
-/** Every run of the fake qwen, `--version` included, with the folder it ran in. */
 const qwenRuns = (): { args: string[]; cwd: string }[] =>
   existsSync(cwdLog)
     ? readFileSync(cwdLog, "utf8")
@@ -82,10 +70,6 @@ const writeSettings = (text: string, path = settingsPath()) => {
   writeFileSync(path, text);
 };
 const ENTRY = { command: OURS[0], args: ["inbox", "mcp"] };
-/**
- * A person's settings.json as Qwen keeps it: comments, `$version`, and a
- * server whose token comes from the environment (`${GITHUB_TOKEN}`).
- */
 const MINE = `{
   // Mine: the token stays in my environment.
   "$version": 3,
@@ -104,12 +88,10 @@ describe("connecting Qwen Code", () => {
     const report = await connect(SECRET);
     expect(report.added).toEqual(["qwen"]);
     const text = readFileSync(settingsPath(), "utf8");
-    // Byte for byte, the person's text is all still there; the only new text is the entry.
     expect(text).toContain('"GITHUB_TOKEN": "${GITHUB_TOKEN}" } }, // keep');
     expect(text).toContain("// Mine: the token stays in my environment.");
     expect(text).not.toContain(SECRET.GITHUB_TOKEN);
     expect(readAgentEntry("qwen", environment(), [OURS])).toEqual({ kind: "ours", argv: OURS });
-    // `qwen mcp add` writes every server back resolved (the fake does as Qwen 0.26 does): it is never run.
     expect(fake.calls().filter((call) => call.name === "qwen" && call.args[0] === "mcp")).toEqual([]);
     expect(readInboxAgents(dataDir).agents.qwen).toMatchObject({ state: "added", reach: "mcp", path: settingsPath() });
     expect(formatConnectReport(report)[0]).toContain("Qwen Code");
@@ -126,7 +108,6 @@ describe("connecting Qwen Code", () => {
     const runs = qwenRuns();
     expect(runs.length).toBeGreaterThan(0);
     for (const run of runs) expect(run.cwd).toBe(fake.home);
-    // The connect step and the trusted-sender check share one answer.
     expect(runs.filter((run) => run.args[0] === "--version")).toHaveLength(1);
   });
 
@@ -156,7 +137,6 @@ describe("connecting Qwen Code", () => {
     mkdirSync(join(fake.home, ".qwen"), { recursive: true });
     writeFileSync(join(fake.home, ".qwen", ".env"), "# Qwen's own\nexport QWEN_HOME=\"/srv/qwen\" # moved\n");
     expect(qwenDir(environment())).toBe("/srv/qwen");
-    // The environment wins over both files, even empty.
     expect(qwenDir(environment({ QWEN_HOME: "/env/q" }))).toBe("/env/q");
     expect(qwenDir(environment({ QWEN_HOME: "" }))).toBe(join(fake.home, ".qwen"));
   });
@@ -208,7 +188,6 @@ describe("connecting Qwen Code", () => {
 describe("QWEN_HOME is not the same as when the entry was added (set in one shell, not in another)", () => {
   const other = () => join(fake.root, "other-qwen");
   const otherSettings = () => join(other(), "settings.json");
-  /** Connected in ~/.qwen with the person's settings, as the shell without QWEN_HOME left it. */
   const connectedInA = async () => {
     fake.install("qwen");
     writeSettings(MINE);
@@ -239,7 +218,6 @@ describe("QWEN_HOME is not the same as when the entry was added (set in one shel
     expect(existsSync(other())).toBe(false);
     expect(readInboxAgents(dataDir).agents.qwen).toEqual(a.record);
     expect((await connect({ QWEN_HOME: other() })).elsewhere ?? []).toEqual([]);
-    // Off here, where it is, and turning it on moves it.
     expect(await inboxAgentReach("qwen", options({ QWEN_HOME: other() }))).toMatchObject({ on: false, state: "elsewhere", path: "~/.qwen/settings.json" });
     expect(await inboxAgentReach("qwen", options())).toMatchObject({ on: true, state: "connected", path: "~/.qwen/settings.json" });
   });
@@ -249,7 +227,6 @@ describe("QWEN_HOME is not the same as when the entry was added (set in one shel
     const said: number[] = [];
     for (const env of [{ QWEN_HOME: other() }, {}, { QWEN_HOME: other() }, {}, { QWEN_HOME: other() }]) {
       said.push((await connect(env)).elsewhere?.length ?? 0);
-      // An Inbox whose QWEN_HOME is the recorded one never shows "this Inbox looks in …".
       if (!("QWEN_HOME" in env)) expect(readInboxAgents(dataDir).last_report?.elsewhere ?? []).toEqual([]);
     }
     expect(said).toEqual([1, 0, 0, 0, 0]);
@@ -277,7 +254,6 @@ describe("QWEN_HOME is not the same as when the entry was added (set in one shel
       expect((await connect(env)).elsewhere ?? []).toEqual([]);
       expect(await inboxAgentReach("qwen", options(env))).toMatchObject({ on: true, state: "connected" });
     }
-    // Removed by hand, then turned on through the other spelling: an entry is left.
     writeFileSync(join(real, "settings.json"), MINE);
     await connect();
     expect(await setInboxAgentReach("qwen", true, options({ QWEN_HOME: real }))).toBeNull();
@@ -333,7 +309,6 @@ describe("QWEN_HOME is not the same as when the entry was added (set in one shel
 
   test("an entry a move could not take back out is recorded with the old one, and uninstall removes both", async () => {
     await connectedInA();
-    // What a failed rollback leaves (it cannot be forced here: the add and its undo write the same file).
     writeSettings('{\n  "mcpServers": {\n    "plannotator-inbox": { "command": "/opt/plannotator/bin/plannotator", "args": ["inbox", "mcp"] }\n  }\n}\n', otherSettings());
     const agents = JSON.parse(readFileSync(join(dataDir, "inbox", "agents.json"), "utf8"));
     agents.agents.qwen.strays = [{ path: otherSettings(), command: OURS }];
@@ -348,10 +323,6 @@ describe("QWEN_HOME is not the same as when the entry was added (set in one shel
     expect(JSON.parse(readFileSync(otherSettings(), "utf8")).mcpServers).toEqual({});
   });
 
-  /**
-   * A move whose rollback failed, made for real: the old file is read-only (its entry cannot go), and the new one
-   * turns read-only just before the move takes its entry back out. Both entries are left, the new one recorded.
-   */
   const leaveStray = async () => {
     const a = await connectedInA();
     chmodSync(settingsPath(), 0o444);
@@ -388,7 +359,6 @@ describe("QWEN_HOME is not the same as when the entry was added (set in one shel
     const plan = planInboxAgentRemoval(dataDir, environment(), OURS);
     expect(plan.items.map((item) => item.describe)).toEqual([`MCP server plannotator-inbox from Qwen Code (${otherSettings()}, that entry only)`]);
     expect(await plan.items[0]!.apply()).toBeNull();
-    // Plannotator created that file: it goes with its entry.
     expect(existsSync(otherSettings())).toBe(false);
   });
 
@@ -454,12 +424,10 @@ describe("QWEN_HOME is not the same as when the entry was added (set in one shel
     await connect({ QWEN_HOME: other() });
     expect(readInboxAgents(dataDir).last_report?.elsewhere).toHaveLength(1);
     expect(await setInboxAgentReach("qwen", true, options({ QWEN_HOME: other() }))).toBeNull();
-    // The band no longer says to move it.
     expect(readInboxAgents(dataDir).last_report?.elsewhere ?? []).toEqual([]);
     expect(readFileSync(settingsPath(), "utf8")).toBe(MINE);
     expect(JSON.parse(readFileSync(otherSettings(), "utf8")).mcpServers["plannotator-inbox"]).toEqual(ENTRY);
     expect(readInboxAgents(dataDir).agents.qwen).toMatchObject({ state: "added", path: otherSettings() });
-    // Only the new file's entry is left for uninstall, from whichever shell it runs.
     expect(await planInboxAgentRemoval(dataDir, environment(), OURS).items[0]!.apply()).toBeNull();
     expect(existsSync(otherSettings())).toBe(false);
     expect(readFileSync(settingsPath(), "utf8")).toBe(MINE);
@@ -501,7 +469,6 @@ describe("QWEN_HOME is not the same as when the entry was added (set in one shel
     expect(problem).toContain("can't be read");
     expect(problem).toContain("stays connected in ~/.qwen/settings.json");
     expect(readFileSync(settingsPath(), "utf8")).toBe(broken);
-    // The entry it had added there is taken back out (the file it created with it, too).
     expect(existsSync(otherSettings())).toBe(false);
     expect(readInboxAgents(dataDir).agents.qwen).toEqual(a.record);
   });
@@ -569,7 +536,6 @@ describe("Qwen's settings.json is never left broken", () => {
     fake.install("qwen");
     writeSettings(MINE);
     await connect();
-    // Qwen rewrote the file meanwhile (its own format-keeping writer: another key, the entry where it was).
     const rewritten = readFileSync(settingsPath(), "utf8").replace('"$version": 3,', '"$version": 4,\n  "ui": { "theme": "dark" }, // new');
     writeFileSync(settingsPath(), rewritten);
     const plan = planInboxAgentRemoval(dataDir, environment(), OURS);

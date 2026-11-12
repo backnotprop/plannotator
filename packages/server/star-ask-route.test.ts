@@ -1,10 +1,3 @@
-/**
- * The done screen's star ask routes on the Bun plan, review and annotate servers (`handleStarAsk`, shared-handlers.ts;
- * the decisions are packages/shared/star-ask.test.ts). What regresses: a claim at load that uses the ask up (only
- * `shown`, at the decision, may stamp it), a route that runs the check or stamps in remote mode (gh there is the server
- * machine's login, not the person's), a surface recorded under the wrong name, or the route answering paths that are
- * not its own.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { createStarAsk, setStarAskServiceForTests, type GhRunner, type StarAskRecord } from "@plannotator/shared/star-ask";
 import { handleStarAsk } from "./shared-handlers";
@@ -37,7 +30,6 @@ describe("handleStarAsk", () => {
     expect(await (await call("/api/star-ask/shown", "annotate"))!.json()).toEqual({ show: true });
     expect(gh.record()).toMatchObject({ surface: "annotate", canStar: true });
     expect(gh.record()?.shownAt).toBeString();
-    // Shown once: a second page's shown says no.
     expect(await (await call("/api/star-ask/shown", "annotate"))!.json()).toEqual({ show: false });
   });
 

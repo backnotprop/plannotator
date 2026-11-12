@@ -1,9 +1,3 @@
-/**
- * HTTP Range as the Inbox's `video` and `download` routes decide it
- * (inbox-byte-range.ts): one range is a 206, none or several the full 200, a
- * range past the end a 416, and an If-Range that is not this version's ETag
- * the full 200.
- */
 import { describe, expect, test } from "bun:test";
 import { BYTE_RANGE_MAX_ANSWER, byteRangeResponse, decideByteRange, handleRangeStream } from "./inbox-byte-range";
 
@@ -42,14 +36,11 @@ describe("decideByteRange", () => {
     expect(decideByteRange("bytes=10-19", 1000, { ifRange: ETAG, etag: ETAG })).toEqual({ kind: "partial", start: 10, end: 19 });
     expect(decideByteRange("bytes=10-19", 1000, { ifRange: '"1-2-3-5"', etag: ETAG })).toEqual({ kind: "full" });
     expect(decideByteRange("bytes=10-19", 1000, { ifRange: "Wed, 21 Oct 2026 07:28:00 GMT", etag: ETAG })).toEqual({ kind: "full" });
-    // Strong comparison (RFC 9110): a weak form of the same tag does not match.
     expect(decideByteRange("bytes=10-19", 1000, { ifRange: `W/${ETAG}`, etag: ETAG })).toEqual({ kind: "full" });
-    // A stale If-Range never turns an unsatisfiable range into a 416: the full file is the answer.
     expect(decideByteRange("bytes=5000-", 1000, { ifRange: '"old"', etag: ETAG })).toEqual({ kind: "full" });
   });
 });
 
-/** A stand-in file handle: reads resolve when `release` is called, and close is counted (and ignored while a read runs, as Bun's is). */
 function fakeHandle(size: number) {
   const state = { closes: 0, closedWhileReading: 0, reading: 0, release: [] as (() => void)[] };
   const handle = {
@@ -79,7 +70,6 @@ describe("handleRangeStream", () => {
     await tick();
     state.release.shift()!();
     expect((await first).value!.length).toBe(1024 * 1024);
-    // The stream pulls ahead: a second read is now in flight.
     await tick();
     expect(state.reading).toBe(1);
     const cancelled = reader.cancel();
@@ -96,13 +86,11 @@ describe("handleRangeStream", () => {
   test("a stream nobody pulls closes its handle after the idle time; a later pull errors", async () => {
     const { handle, state } = fakeHandle(4 * 1024 * 1024);
     const stream = handleRangeStream(handle, 0, undefined, { idleMs: 40 });
-    // The stream reads its first chunk ahead by itself; then nobody pulls.
     await tick();
     state.release.shift()!();
     await new Promise((resolve) => setTimeout(resolve, 90));
     expect(state.closes).toBe(1);
     const reader = stream.getReader();
-    // The chunk read ahead is still delivered; the next pull finds the handle closed.
     expect((await reader.read()).value!.length).toBe(1024 * 1024);
     await expect(reader.read()).rejects.toThrow(/went unread/);
     expect(state.closes).toBe(1);
@@ -119,7 +107,6 @@ describe("handleRangeStream", () => {
       const { done, value } = await next;
       if (done) break;
       total += value.length;
-      // Slower than the idle time between reads, but each pull re-arms it.
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(total).toBe(3 * 1024 * 1024 + 10);
@@ -136,13 +123,10 @@ describe("the 8 MiB answer cap", () => {
     expect(decideByteRange("bytes=0-", FILM)).toEqual({ kind: "partial", start: 0, end: 8 * MiB - 1 });
     expect(decideByteRange("bytes=100000000-", FILM)).toEqual({ kind: "partial", start: 100000000, end: 100000000 + 8 * MiB - 1 });
     expect(decideByteRange("bytes=0-99999999", FILM)).toEqual({ kind: "partial", start: 0, end: 8 * MiB - 1 });
-    // The last 100 MB: from where that starts, 8 MiB of it.
     expect(decideByteRange("bytes=-100000000", FILM)).toEqual({ kind: "partial", start: FILM - 100000000, end: FILM - 100000000 + 8 * MiB - 1 });
-    // At or under the cap, and near the end of the file, the range is as asked.
     expect(decideByteRange(`bytes=0-${8 * MiB - 1}`, FILM)).toEqual({ kind: "partial", start: 0, end: 8 * MiB - 1 });
     expect(decideByteRange(`bytes=${FILM - 10}-`, FILM)).toEqual({ kind: "partial", start: FILM - 10, end: FILM - 1 });
     expect(decideByteRange("bytes=0-1", FILM)).toEqual({ kind: "partial", start: 0, end: 1 });
-    // No range is the full file, never capped (a plain download).
     expect(decideByteRange(null, FILM)).toEqual({ kind: "full" });
   });
 

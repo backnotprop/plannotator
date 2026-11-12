@@ -1,28 +1,18 @@
-/**
- * The Inbox as an installed app: the manifest names only icons this server
- * serves, each at the size the file really is, in the person's favicon style.
- * The icons are the studio's files, byte for byte.
- */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { INBOX_APP_ICON_PATHS, inboxAppIconResponse, inboxManifest } from "./inbox-app-icons";
 
-// The studio's files. Never redrawn, resized or re-encoded here.
 const ICON_SHA256: Record<string, string> = {
-  // Glass: web/apple-touch-icon.png, web/icon-192.png, web/icon-512.png (the files plannotator.ai ships).
   "glass-180.png": "5f5d84c3c72bf0acbcc6e634e037108754794ff9f9c8e3b596d0e7b7c088f4fb",
   "glass-192.png": "f4616566aad3e00fc8c04ebb1dcae8e4ebcd671af99db7fc50e50eefa09a05a5",
   "glass-512.png": "801d533f995fa75efd4d3521fabeb90e98427a444b61f125d91a471c26745333",
-  // Yellow: the yellow glass set's web/icon-192.png.
   "yellow-192.png": "0e835dfe38d80c017ba035bce675ec5d346262e7ee8e8a2c3c2baedfbad4c99c",
-  // Face: the 256 px build.
   "face-256.png": "4e99a26b076e421f654df83472c6186b62830d5db8fcd8e97d01947dffac28fd",
 };
 
 type Icon = { src: string; sizes: string; type: string };
 const icons = (style: unknown) => inboxManifest(style).icons as Icon[];
 
-/** Width and height from a PNG's IHDR. */
 function pngSize(bytes: Uint8Array): string {
   const view = new DataView(bytes.buffer, bytes.byteOffset);
   return `${view.getUint32(16)}x${view.getUint32(20)}`;

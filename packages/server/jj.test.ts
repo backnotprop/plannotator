@@ -62,8 +62,6 @@ describe("jj compare targets", () => {
       })).resolves.toBe("0123456789abcdef");
     }
 
-    // An unresolvable base degrades to the previous default instead of aborting
-    // review startup, which has no handler for a throw.
     await expect(selectDefaultJjCompareTarget({
       async runJj() {
         return { stdout: "", stderr: "unknown function", exitCode: 1 };
@@ -79,16 +77,7 @@ describe("jj compare targets", () => {
   });
 });
 
-/**
- * Snapshot materialization asks jj for a whole repository tree, so the runtime
- * has to stop READING at the ceiling. Measuring the output after buffering it
- * bounds nothing: the memory is already spent by the time the check runs.
- *
- * Skipped when `jj` is not installed (CI runners do not ship it).
- */
 describe("jj runtime output ceiling", () => {
-  // Bun.spawnSync throws when the executable is missing entirely (ENOENT),
-  // which is exactly the case this gate exists for on CI runners without jj.
   const testIfJj = (() => {
     try {
       return Bun.spawnSync(["jj", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0;

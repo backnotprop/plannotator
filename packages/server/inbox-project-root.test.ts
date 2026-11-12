@@ -1,11 +1,3 @@
-/**
- * Where a path an agent names files its messages (inbox-project-root.ts):
- * the folder, the repository's toplevel, or, for a linked worktree, its main
- * repository. Proved with real git repositories, worktrees, submodules and
- * bare repositories made in temp folders; the cache and the answers an old
- * or missing git gives through a scripted runner. The user's git config is
- * kept out (GIT_CONFIG_GLOBAL=/dev/null, set and restored per test).
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,14 +43,12 @@ const GIT_ENV = {
   GIT_COMMITTER_EMAIL: "test@example.com",
 };
 
-/** Run git in `cwd` for the test's own setup; fails the test when git fails. */
 function git(cwd: string, ...args: string[]): string {
   const result = Bun.spawnSync(["git", "-c", "protocol.file.allow=always", "-c", "init.defaultBranch=main", ...args], { cwd, env: GIT_ENV, stdout: "pipe", stderr: "pipe" });
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
   return result.stdout.toString();
 }
 
-/** git as a runner, for scripted runners that answer some calls themselves. */
 function createRealRunnerFor(): InboxGitRunner {
   return async (args, cwd) => {
     const result = Bun.spawnSync(["git", ...args], { cwd, env: GIT_ENV, stdout: "pipe", stderr: "pipe" });
@@ -72,7 +62,6 @@ function tempRoot(): string {
   return root;
 }
 
-/** A repository with one commit, a subfolder, and a linked worktree beside it (`../<name>-wt`). */
 function repoWithWorktree(root: string, name = "api") {
   const main = join(root, name);
   mkdirSync(join(main, "src"), { recursive: true });
@@ -126,7 +115,6 @@ describe("resolveInboxProjectRoot", () => {
     const { main, worktree } = repoWithWorktree(real);
     symlinkSync(worktree, join(root, "wt-link"));
     expect(await resolveInboxProjectRoot(join(root, "wt-link"))).toMatchObject({ root: main, folder: worktree, worktree });
-    // A worktree made through a symlinked spelling of the main repository.
     symlinkSync(main, join(root, "main-link"));
     const viaLink = join(root, "wt2");
     git(join(root, "main-link"), "worktree", "add", "-q", viaLink, "-b", "second");
@@ -146,12 +134,9 @@ describe("resolveInboxProjectRoot", () => {
     const submodule = join(superproject, "vendor", "library");
     expect(await resolveInboxProjectRoot(submodule)).toMatchObject({ root: submodule, worktree: null });
     expect(await resolveInboxProjectRoot(superproject)).toMatchObject({ root: superproject, worktree: null });
-    // A linked worktree of the submodule's own repository: its main worktree
-    // is the submodule's checkout (git records it as core.worktree).
     const subWorktree = join(root, "library-sub-wt");
     git(submodule, "worktree", "add", "-q", subWorktree, "-b", "sub-feature");
     expect(await resolveInboxProjectRoot(subWorktree)).toMatchObject({ root: submodule, worktree: subWorktree });
-    // The superproject's own worktree carries its own submodule checkout: not folded into anything.
     const appWorktree = join(root, "app-wt");
     git(superproject, "worktree", "add", "-q", appWorktree, "-b", "app-feature");
     expect(await resolveInboxProjectRoot(appWorktree)).toMatchObject({ root: superproject, worktree: appWorktree });
@@ -180,7 +165,6 @@ describe("resolveInboxProjectRoot", () => {
     const { main, worktree } = repoWithWorktree(root);
     const moved = join(root, "api-moved");
     renameSync(main, moved);
-    // The worktree's link points at the old place: git cannot open it, so the folder (its toplevel) is the project.
     expect(await resolveInboxProjectRoot(worktree)).toEqual({ root: worktree, name: "api-wt", folder: worktree, worktree: null, settled: true });
     git(moved, "worktree", "repair", worktree);
     expect(await resolveInboxProjectRoot(worktree)).toMatchObject({ root: moved, worktree });
@@ -202,7 +186,6 @@ describe("resolveInboxProjectRoot", () => {
     expect(await resolveInboxProjectRoot(work)).toMatchObject({ root: work, worktree: null });
     const linked = join(root, "sep-wt");
     git(work, "worktree", "add", "-q", linked, "-b", "s");
-    // Nothing in sep.git names sep-work as its work tree, so nothing is guessed.
     expect(await resolveInboxProjectRoot(linked)).toMatchObject({ root: linked, worktree: null });
   });
 
@@ -215,12 +198,6 @@ describe("resolveInboxProjectRoot", () => {
   });
 });
 
-/**
- * The owner's layout (2026-11-02): `~/workspaces/projects/appnotes` is a plain folder of notes, and its
- * `worktrees` folder holds the repository's checkouts: the main checkout `worktrees/main` and linked
- * worktrees beside it. A session started in `appnotes` made a folder project named "appnotes" next to the
- * repository's, which reads "appnotes" too.
- */
 function appnotesLayout(root: string) {
   const folder = join(root, "workspaces", "projects", "appnotes");
   mkdirSync(join(folder, "worktrees"), { recursive: true });
@@ -239,14 +216,12 @@ function appnotesLayout(root: string) {
 describe("a plain folder that holds one repository's checkouts", () => {
   test("files into that repository's project, as its checkouts do; the folder is kept as the root an older Inbox used", async () => {
     const { folder, main, branch } = appnotesLayout(tempRoot());
-    // Named for the repository ("appnotes"), not the checkout's folder ("main"), as the names read.
     expect(await resolveInboxProjectRoot(folder)).toEqual({ root: main, name: "appnotes", folder, worktree: folder, settled: true });
     expect(await resolveInboxProjectRoot(branch)).toMatchObject({ root: main, worktree: branch });
   });
 
   test("a plain subfolder files where its checkouts folder's holder does, as far as three folders up", async () => {
     const { folder, main } = appnotesLayout(tempRoot());
-    // `appnotes/scripts` and `appnotes/worktrees`: each is its own folder, filed as the one holding the checkouts.
     for (const sub of [join(folder, "scripts"), join(folder, "worktrees")]) {
       expect(await resolveInboxProjectRoot(sub)).toEqual({ root: main, name: "appnotes", folder: sub, worktree: sub, settled: true });
     }
@@ -262,10 +237,8 @@ describe("a plain folder that holds one repository's checkouts", () => {
     const root = tempRoot();
     const { folder, main } = appnotesLayout(root);
     for (const branch of ["billing", "docs"]) git(main, "worktree", "add", "-q", join(folder, "worktrees", branch), "-b", branch);
-    // Four of appnotes (main, agent-pr-plan-box, billing, docs) and one clone of another repository: appnotes speaks for the folder.
     git(root, "init", "-q", join(folder, "worktrees", "stray-clone"));
     expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: main, worktree: folder, settled: true });
-    // A second stray: four of six is no clear majority (four in five are needed), so the folder is its own project.
     git(root, "init", "-q", join(folder, "worktrees", "another-clone"));
     expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
   });
@@ -276,7 +249,6 @@ describe("a plain folder that holds one repository's checkouts", () => {
     mkdirSync(join(dotted, ".worktrees"), { recursive: true });
     const { main } = repoWithWorktree(join(dotted, ".worktrees"), "main");
     expect(await resolveInboxProjectRoot(dotted)).toMatchObject({ root: main, worktree: dotted, settled: true });
-    // `code/api` and `code/api-wt` side by side: `code` is a folder of projects, not the repository.
     const code = join(root, "code");
     mkdirSync(code);
     repoWithWorktree(code);
@@ -300,9 +272,7 @@ describe("a plain folder that holds one repository's checkouts", () => {
     const wrapper = join(root, "wrapper");
     mkdirSync(join(wrapper, "worktrees"), { recursive: true });
     git(wrapper, "init", "-q", join(wrapper, "worktrees", "only"));
-    // A main checkout (an empty repository still has a toplevel git confirms): the folder holds the repository.
     expect(await resolveInboxProjectRoot(wrapper)).toMatchObject({ root: join(wrapper, "worktrees", "only"), worktree: wrapper });
-    // `elsewhere/worktrees/x` is a worktree of `api`, outside `elsewhere`: Codex's `~/.codex/worktrees/<id>` shape.
     const { main } = repoWithWorktree(root);
     const elsewhere = join(root, "elsewhere");
     mkdirSync(join(elsewhere, "worktrees"), { recursive: true });
@@ -320,7 +290,6 @@ describe("a plain folder that holds one repository's checkouts", () => {
     const { folder, main } = appnotesLayout(tempRoot());
     const none: InboxGitRunner = async () => ({ exitCode: 127, stdout: "" });
     expect(await resolveInboxProjectRoot(folder, { git: none })).toMatchObject({ root: folder, worktree: null, settled: true });
-    // The folder's own git answers at once; the checkout's runs past the time limit. A fresh session still has a project.
     const real = createRealRunnerFor();
     const halfway: InboxGitRunner = async (args, cwd) => (cwd === main ? null : real(args, cwd));
     expect(await resolveInboxProjectRoot(folder, { git: halfway })).toMatchObject({ root: main, worktree: folder, settled: true });
@@ -336,7 +305,6 @@ describe("a plain folder that holds one repository's checkouts", () => {
     git(work, "init", "-q", join(work, "web"));
     git(api, "worktree", "add", "-q", join(work, "worktrees", "api-feat"), "-b", "api-feat");
     expect(await resolveInboxProjectRoot(work)).toMatchObject({ root: work, worktree: null, settled: true });
-    // The same when the repository lies anywhere else in the folder (`proj/main` beside `proj/worktrees/x`).
     expect(await resolveInboxProjectRoot(join(work, "worktrees"))).toMatchObject({ root: join(work, "worktrees"), worktree: null });
   });
 
@@ -356,7 +324,6 @@ describe("a plain folder that holds one repository's checkouts", () => {
     for (const folder of [work, notes]) expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null, settled: true });
     expect(await resolveInboxProjectRoot(join(work, "web"))).toMatchObject({ root: join(work, "web") });
     expect(await resolveInboxProjectRoot(join(work, "worktrees", "api-feat"))).toMatchObject({ root: api });
-    // The repository right in the folder is what refuses it: moved out, `work` holds api's checkouts only.
     renameSync(join(work, "web"), join(root, "web"));
     expect(await resolveInboxProjectRoot(work)).toMatchObject({ root: api, worktree: work });
     expect(await resolveInboxProjectRoot(notes)).toMatchObject({ root: api, worktree: notes });
@@ -398,7 +365,6 @@ describe("a plain folder that holds one repository's checkouts", () => {
       expect(await resolveInboxProjectRoot(folder, { home })).toMatchObject({ root: folder, worktree: null, settled: true });
     }
     await expect(createInboxProjectRoots({ home }).resolve(notes)).resolves.toMatchObject({ root: notes, worktree: null });
-    // Any other folder of that shape is a checkouts folder: the home check is what refuses it.
     expect(await checkoutsHolderOf(notes, null)).toBe(home);
     expect(await resolveInboxProjectRoot(notes, { home: null })).toMatchObject({ root: main, worktree: notes });
   });
@@ -418,14 +384,12 @@ describe("a plain folder that holds one repository's checkouts", () => {
     const root = tempRoot();
     const folder = join(root, "tool");
     mkdirSync(join(folder, "worktrees"), { recursive: true });
-    // `worktrees/sep` names its own git dir elsewhere, with no `commondir`: git calls it a toplevel, not a linked worktree.
     const sep = join(folder, "worktrees", "sep");
     git(root, "init", "-q", "--separate-git-dir", join(root, "sep.git"), sep);
     writeFileSync(join(sep, "a.txt"), "a\n");
     git(sep, "add", ".");
     git(sep, "commit", "-qm", "a");
     expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
-    // A linked worktree whose main checkout was moved out of the folder (and repaired): that repository lies elsewhere.
     const other = join(root, "other");
     mkdirSync(join(other, "worktrees"), { recursive: true });
     const { main } = repoWithWorktree(join(other, "worktrees"), "main");
@@ -451,7 +415,6 @@ describe("a plain folder that holds one repository's checkouts", () => {
 });
 
 describe("the real git runner", () => {
-  /** Run `body` with PATH holding only `bin`, restored after. */
   async function withPath<T>(bin: string, body: () => Promise<T>): Promise<T> {
     const previous = process.env.PATH;
     process.env.PATH = bin;
@@ -481,7 +444,6 @@ describe("the real git runner", () => {
     const root = tempRoot();
     const empty = join(root, "empty-bin");
     mkdirSync(empty);
-    // A worktree, so a git that still ran would fold it and the test would see it.
     const { worktree } = repoWithWorktree(root);
     const resolved = await withPath(empty, () => resolveInboxProjectRoot(worktree, { git: inboxGitRunner(2_000) }));
     expect(resolved).toMatchObject({ root: worktree, worktree: null, settled: true });
@@ -500,7 +462,6 @@ describe("the real git runner", () => {
     try {
       expect(await resolveInboxProjectRoot(worktree)).toMatchObject({ root: main, worktree, settled: true });
       expect(inboxProjectRootGitEnv()).not.toHaveProperty("GIT_DIR");
-      // Config injected for one run goes too; the config file pointers stay.
       expect(
         inboxProjectRootGitEnv({
           PATH: "/usr/bin",
@@ -551,7 +512,6 @@ describe("git answers that do not fit", () => {
 });
 
 describe("createInboxProjectRoots", () => {
-  /** A runner that counts calls and can be switched off. */
   function countingGit() {
     const real = createRealRunnerFor();
     const state = { calls: 0, down: false };
@@ -584,9 +544,7 @@ describe("createInboxProjectRoots", () => {
     expect((await roots.resolve(worktree)).root).toBe(main);
     rmSync(main, { recursive: true, force: true });
     now += 200;
-    // Stale: answered from memory at once.
     expect((await roots.resolve(worktree)).root).toBe(main);
-    // The background refresh saw the deleted main repository.
     await Bun.sleep(200);
     expect((await roots.resolve(worktree)).root).toBe(worktree);
   });

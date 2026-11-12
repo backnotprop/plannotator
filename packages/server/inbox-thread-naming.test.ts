@@ -1,13 +1,3 @@
-/**
- * Naming a thread the person started (approval "inbox-agent-names-own-thread"),
- * through the server's real doors: the wake asks the addressed session to name
- * it (`name_thread` on the bridge command, INBOX_NAME_THREAD_LINE in the wake),
- * MCP-only agents learn it from read_thread
- * (`name_this_thread: true` and the hint), send_message's result says when a
- * reply named it or did not, and compose takes a name the person gives
- * (`thread_name`), which no agent replaces and no wake asks about. Every test
- * runs its own Inbox under a temp data dir; connections are plain HTTP.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -88,24 +78,20 @@ describe("an agent names a thread the person started", () => {
     expect(command).toMatchObject({ type: "message", new_thread: true, name_thread: true });
     const lines = inboxWakeText(command!).split("\n");
     expect(lines.slice(0, 3)).toEqual([`Plannotator Inbox: I want to explore what adding a board would look like (${sent.message.id})`, INBOX_NEW_THREAD_INSTRUCTION, INBOX_NAME_THREAD_LINE]);
-    // An older connection that ignores the flag drops only that line.
     const { name_thread: _flag, ...older } = command!;
     expect(inboxWakeText(older)).not.toContain(INBOX_NAME_THREAD_LINE);
 
-    // A reply with no name: the result says the thread can still be named.
     const first = await call(client, "send_message", { body: "On it.", reply_to: sent.message.id, project_path: project, agent_session: "ses-live", agent_host: "claude-code" });
     expect(first.content[0]!.text).toContain("still needs a name from you: pass `thread`");
     expect(first.structuredContent).toMatchObject({ name_this_thread: true, named_thread: null });
     expect(first.structuredContent.naming_refused).toBeUndefined();
 
-    // read_thread (the caller may name it) carries the flag and the hint; another session's read does not.
     const read = await call(client, "read_thread", { thread_id: sent.message.id, agent_session: "ses-live" });
     expect(read.structuredContent.name_this_thread).toBe(true);
     expect(read.content[0]!.text).toContain(INBOX_NAME_THIS_THREAD_HINT);
     const other = await call(client, "read_thread", { thread_id: sent.message.id, agent_session: "ses-other" });
     expect(other.structuredContent.name_this_thread).toBeUndefined();
 
-    // The first name sets the chip; the bold subject stays the short name.
     const named = await call(client, "send_message", {
       body: "Here is a first sketch.",
       reply_to: sent.message.id,
@@ -121,13 +107,11 @@ describe("an agent names a thread the person started", () => {
     expect(opened.subject).toBe("I want to explore what adding a board would look like");
     expect(opened.row.thread_name).toBe("Kanban board");
 
-    // Once: a later name is ignored and nothing mentions naming any more.
     const later = await call(client, "send_message", { body: "More.", reply_to: sent.message.id, thread: "Other", project_path: project, agent_session: "ses-live", agent_host: "claude-code" });
     expect(later.content[0]!.text).not.toContain("Named this thread");
     expect(later.structuredContent.name_this_thread).toBeUndefined();
     expect((await thread(server, sent.message.id)).thread_name).toBe("Kanban board");
 
-    // The person's next reply wakes the agent without the naming line.
     const reply = await fetch(`${base(server)}/api/inbox/messages/${named.structuredContent.message_id}/reply`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -144,7 +128,6 @@ describe("an agent names a thread the person started", () => {
     const { server, client, project } = await setup();
     await poll(server, "ses-live", project);
     const sent = (await (await compose(server, { to: { session: "ses-live" }, body: IDEA, idempotency_key: "c1" })).json()) as { message: InboxMessage };
-    // The agent answers without a name; the person replies.
     const answer = await call(client, "send_message", { body: "Questions first: which columns?", reply_to: sent.message.id, project_path: project, agent_session: "ses-live", agent_host: "claude-code" });
     await fetch(`${base(server)}/api/inbox/messages/${answer.structuredContent.message_id}/reply`, {
       method: "POST",
@@ -173,14 +156,12 @@ describe("an agent names a thread the person started", () => {
     expect(answered.content[0]!.text).not.toMatch(/Named this thread|still needs a name from you/);
     expect((await thread(server, sent.message.id)).thread_name).toBe("Board");
 
-    // A name the person typed is the chip only: another session's send with it starts its own thread.
     const joined = await call(client, "send_message", { body: "elsewhere", thread: "board", project_path: project, agent_session: "ses-x", agent_host: "pi" });
     expect(joined.structuredContent.thread_id).not.toBe(sent.message.id);
   });
 
   test("a name another open thread has is refused, in the reply's result and in compose (409)", async () => {
     const { server, client, project } = await setup();
-    // Session B already posts to "Auth refactor".
     const b = await call(client, "send_message", { body: "B's work", thread: "Auth refactor", project_path: project, agent_session: "ses-b", agent_host: "pi" });
     await poll(server, "ses-live", project);
     const sent = (await (await compose(server, { to: { session: "ses-live" }, body: IDEA, idempotency_key: "c1" })).json()) as { message: InboxMessage };
@@ -189,7 +170,6 @@ describe("an agent names a thread the person started", () => {
     expect(refused.structuredContent).toMatchObject({ named_thread: null, naming_refused: "thread_name_taken", name_this_thread: true });
     expect(refused.content[0]!.text).toContain("Pick another name and reply again with it in `thread`.");
     expect((await thread(server, sent.message.id)).thread_name ?? null).toBeNull();
-    // B's next send still lands in B's thread.
     const again = await call(client, "send_message", { body: "B again", thread: "Auth refactor", project_path: project, agent_session: "ses-b", agent_host: "pi" });
     expect(again.structuredContent.thread_id).toBe(b.structuredContent.thread_id);
 

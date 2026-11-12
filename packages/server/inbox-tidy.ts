@@ -1,17 +1,3 @@
-/**
- * Tidy's routes (owner-approved design, 2026-10-28; packages/core/inbox-tidy.ts):
- *
- * - `GET /api/inbox/tidy?project=&surface=list|board`: who Tidy would ask in
- *   the list's (or the Board's) scope, and the last run's progress.
- * - `POST /api/inbox/tidy { sessions, idempotency_key, project?, surface? }`:
- *   asks the named sessions (each must still be in the plan), writing each
- *   one's Tidy notes. A replay of the key answers the run it wrote.
- *
- * Bun only, like the rest of the Inbox. The window's guards are the server's
- * own (a write from another site is refused before routing; the read is
- * refused here, as the other read routes do).
- */
-
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { inboxId, isInboxId, type InboxSteps, type InboxTidyCombine, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -23,21 +9,15 @@ import { INBOX_WAKE_ONLY_LIVE_MS } from "./inbox-sessions";
 export interface InboxTidyDeps {
   store: InboxStore;
   serverSession: string;
-  /** A session whose connection (or Codex's queue) delivers to it now; null when none does. */
   deliveryConnectionOf: (session: string) => { busy: boolean | null } | null;
-  /** Since when a live session is idle (epoch ms), or null while busy or when it does not say. */
   idleSince: (session: string) => number | null;
-  /** The agents that read the Inbox over MCP only, and when they were last seen. */
   mcpAgents: () => { session: string; last_at: string }[];
   boardOn: () => boolean;
-  /** Thread steps' staleness (inbox-steps.ts `inboxStepsStale`) while the person's switch is on, read per plan; null when off. */
   stepsStale?: () => ((record: InboxSteps) => boolean) | null;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   now?: () => number;
-  /** Projects that are one (inbox-combine-suggestions.ts). */
   combineSuggestions?: () => InboxTidyCombine[];
-  /** Whether repositories are still being read, so `combineSuggestions` may be short of a pair. */
   combineLoading?: () => boolean;
 }
 
@@ -45,9 +25,7 @@ export function createInboxTidy(deps: InboxTidyDeps) {
   const { store } = deps;
   const now = () => deps.now?.() ?? Date.now();
 
-  /** How each session is reached now: woken by its connection, at its next Inbox call (MCP only, seen within the hour), or not (ended). */
   const reachFor = (): ((session: string) => InboxTidyReach | null) => {
-    // Presence is the live sessions' clock (the wall clock), as for every other liveness check.
     const t = Date.now();
     const mcp = new Map(deps.mcpAgents().map((agent) => [agent.session, Date.parse(agent.last_at)]));
     return (session) => {
@@ -74,9 +52,7 @@ export function createInboxTidy(deps: InboxTidyDeps) {
   const plan = (projectId: string | null, surface: InboxTidySurface): InboxTidyPlan => {
     const reachOf = reachFor();
     const found = planFor(projectId, surface, reachOf);
-    // A session that never wrote anywhere has no thread to carry its wake: not offered.
     const agents = found.agents.filter((agent) => inboxTidyWakeThread(store, agent) !== null);
-    // The list's Tidy only, and every project: a project filter does not hide a duplicate of it.
     const combine = surface === "list" ? (deps.combineSuggestions?.() ?? []) : [];
     return {
       serverSession: deps.serverSession,
@@ -94,7 +70,6 @@ export function createInboxTidy(deps: InboxTidyDeps) {
     };
   };
 
-  /** Asks the named sessions; each still in the plan gets its notes. */
   const start = (body: Record<string, unknown>): { run: InboxTidyRun | null; asked: string[] } => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key || key.length > 128) throw new InboxError("validation_error", "idempotency_key: required, at most 128 characters.", { field: "idempotency_key" });
@@ -102,7 +77,6 @@ export function createInboxTidy(deps: InboxTidyDeps) {
       throw new InboxError("validation_error", "sessions: the sessions to ask, by id.", { field: "sessions" });
     }
     const reachOf = reachFor();
-    // A replay: the run this key wrote.
     const replayed = store.tidyNotes().filter((m) => m.idempotency_key === key);
     if (replayed.length > 0) {
       return { run: runNow(reachOf), asked: [...new Set(replayed.map((m) => m.to!.session))] };
@@ -123,11 +97,9 @@ export function createInboxTidy(deps: InboxTidyDeps) {
     return { run: runNow(reachOf), asked };
   };
 
-  /** The routes; null when the path is not one of them. */
   const route = async (req: Request, url: URL): Promise<Response | null> => {
     if (url.pathname !== "/api/inbox/tidy") return null;
     if (req.method === "GET") {
-      // Another site's page must not read who owes the person what.
       if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
         return deps.json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
       }

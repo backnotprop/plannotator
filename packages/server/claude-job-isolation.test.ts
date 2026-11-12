@@ -7,9 +7,6 @@ import { buildTourClaudeCommand } from "./tour/tour-review";
 import { buildGuideClaudeCommand } from "./guide/guide-review";
 import type { ClaudeJobCommandOptions } from "./claude-review";
 
-// #1627: every Claude Code agent job (review, Code Tour, Guided Review) must
-// load no user MCP servers, and must be able to run with Claude Code's sandbox
-// off where it cannot start — without ever widening its read-only posture.
 const builders: Array<[string, (opts?: ClaudeJobCommandOptions) => string[]]> = [
   ["buildClaudeCommand", (opts) => buildClaudeCommand("p", "opus", undefined, opts).command],
   ["buildTourClaudeCommand", (opts) => buildTourClaudeCommand("p", "sonnet", undefined, opts).command],
@@ -68,7 +65,6 @@ describe.each(builders)("%s job isolation (#1627)", (_name, build) => {
   });
 });
 
-// Stream-json lines as `claude -p --output-format stream-json` emits them.
 const bashUse = (id: string, command: string) =>
   JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command } }] } });
 const toolResult = (id: string, content: string, isError: boolean) =>
@@ -77,8 +73,6 @@ const DENIED = "Permission to use Bash has been denied because Claude Code is ru
 const result = (denials: Array<{ tool_name: string; tool_use_id: string; tool_input?: unknown }>) =>
   JSON.stringify({ type: "result", is_error: false, permission_denials: denials });
 
-// The real allowlist a Code Tour job launches with, so the rule is tested
-// against what the runner actually passes.
 const TOUR_ALLOWED = allowedToolsOf(buildTourClaudeCommand("p").command);
 const denial = (id: string, command: string) => ({ tool_name: "Bash", tool_use_id: id, tool_input: { command } });
 
@@ -133,18 +127,12 @@ describe("detectClaudeShellBlocked (#1627)", () => {
   });
 });
 
-// The job allowlist must admit every command the job prompts tell the model to
-// run, or the job fails under dontAsk (the since-base prompt once asked for
-// `git ls-files`, which no allowlist carried). Commands are read out of the
-// real prompt text, so a new instruction that outgrows the allowlist fails.
 describe("Claude job allowlist vs the commands the prompts instruct", () => {
   const command = buildClaudeCommand("p").command;
   const ALLOWED = allowedToolsOf(command);
   const DISALLOWED = disallowedToolsOf(command);
   const admitted = (cmd: string) => claudeRulesAdmit(cmd, ALLOWED, DISALLOWED);
 
-  // Backticked git/jj commands in a prompt, with the prompt's placeholders
-  // filled by literal values the model would substitute.
   const promptCommands = (text: string): string[] =>
     [...text.matchAll(/`((?:git|jj) [^`]+)`/g)]
       .map((m) => m[1].replace("<merge-base>", "8ce0d729").replace("<upstream>", "origin/main"));
@@ -176,7 +164,6 @@ describe("Claude job allowlist vs the commands the prompts instruct", () => {
     for (const cmd of ["git -C api diff", "gh api repos/o/r/pulls/7", "glab api projects", "git branch topic", "git remote add up x"]) {
       expect([cmd, admitted(cmd)]).toEqual([cmd, false]);
     }
-    // Deny rules win over an allowed prefix.
     expect(admitted("git diff --output=review.patch")).toBe(false);
     expect(admitted("git diff HEAD --output review.patch")).toBe(false);
   });
@@ -185,14 +172,11 @@ describe("Claude job allowlist vs the commands the prompts instruct", () => {
     const cmd = "git diff --output=review.patch";
     const stdout = [bashUse("a", cmd), toolResult("a", DENIED, true), result([denial("a", cmd)])].join("\n");
     expect(detectClaudeShellBlocked(stdout, ALLOWED, DISALLOWED)).toBe(false);
-    // The same stdout for an allowed command is the blocked-shell signal.
     const plain = [bashUse("a", "git diff HEAD"), toolResult("a", DENIED, true), result([denial("a", "git diff HEAD")])].join("\n");
     expect(detectClaudeShellBlocked(plain, ALLOWED, DISALLOWED)).toBe(true);
   });
 });
 
-// The marketing guide prints the exact Claude review command; keep its
-// allow/deny lists and setting-sources flag in step with the builder.
 describe("ai-code-review guide documents the real Claude job rules", () => {
   test("guide contains the current allow and deny lists", async () => {
     const doc = await Bun.file(new URL("../../apps/marketing/src/content/docs/guides/ai-code-review.md", import.meta.url)).text();

@@ -1,19 +1,3 @@
-/**
- * An attached HTML page's own document ("Pages only", inbox-pages.ts), tested
- * on the route alone (no Inbox is started). What regresses if these fail:
- * - the page is served without its own sandbox (it would run on the Inbox's
- *   origin when its URL is opened), or without web pictures (`https:` and
- *   plain `http:`, local servers included);
- * - the window's own policy lets a picture in from the web again (a message's
- *   text, a diagram in it, would make the browser call the agent's site);
- * - a page's own video or audio (`<video src="data:video/mp4;base64,…">`, a
- *   blob:) is blocked again: neither the window's policy (a srcdoc page
- *   inherits it) nor the page document's names a media source, so media falls
- *   back to `default-src 'self'`;
- * - a page the Inbox no longer keeps (a restart) leaves the frame blank
- *   instead of telling the window to post it again;
- * - the store grows without bound.
- */
 import { describe, expect, test } from "bun:test";
 import { WINDOW_CSP } from "./inbox";
 import { createInboxPages, INBOX_PAGE_CSP, INBOX_PAGE_GONE_MESSAGE, INBOX_PAGE_MAX_BYTES } from "./inbox-pages";
@@ -60,12 +44,9 @@ describe("an attached page's document", () => {
     const csp = res.headers.get("Content-Security-Policy")!;
     expect(csp).toBe(INBOX_PAGE_CSP);
     const policy = directives(csp);
-    // An opaque origin even opened as a tab: never allow-same-origin.
     expect(policy.get("sandbox")).toEqual(["allow-scripts", "allow-modals"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:", "blob:", "https:", "http:"]);
-    // Its own video and audio play (data: and blob:), as in the window's srcdoc.
     expect(policy.get("media-src")).toEqual(["'self'", "data:", "blob:"]);
-    // Pictures only: nothing else reaches the web.
     for (const [name, values] of policy) {
       if (name === "img-src") continue;
       for (const value of values) expect(value).not.toMatch(/^(https?:|\*)/);
@@ -87,7 +68,6 @@ describe("an attached page's document", () => {
     const text = await gone.text();
     expect(text).toContain(INBOX_PAGE_GONE_MESSAGE);
     expect(gone.headers.get("Content-Security-Policy")).toStartWith("sandbox allow-scripts;");
-    // Posted again, it is served again (under a new id: the key is made per run).
     const again = await restarted.post("<p>one</p>");
     expect(again.answer.id).not.toBe(a.answer.id);
     expect((await restarted.get(again.answer.url)).status).toBe(200);

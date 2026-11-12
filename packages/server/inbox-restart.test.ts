@@ -1,12 +1,3 @@
-/**
- * The restart warning (owner approval "restart-warning", 2026-10-19): which
- * polling agent sessions run an older Plannotator plugin than a restart would
- * load. First the rules alone (packages/server/inbox-restart.ts), then over a
- * real Inbox with a temp data dir and a scratch CLAUDE_CONFIG_DIR holding a
- * fake `plugins/installed_plugins.json`: the sessions route's
- * `asker.connection.outdated`, Settings → Agents' `sessions`, and the list
- * model's `restart_claude_code`. Nothing reads the real ~/.claude.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,7 +39,6 @@ const loaded = (version: string | null, overrides: Partial<LoadedPlugin> = {}): 
   loadedAt: UPDATED_AT + 60_000,
   ...overrides,
 });
-/** The install folder changed when the registry says (a real reinstall), unless a test says otherwise. */
 const judge = (plugin: LoadedPlugin | null, record: ClaudePluginInstall | null, cliVersion = "0.28.25", changedAt: number | null = UPDATED_AT) =>
   claudeSessionOutdated({ loaded: plugin, records: record ? [record] : [], folder: null, cliVersion, pluginsDir: PLUGINS, changedAt: () => changedAt });
 
@@ -75,9 +65,7 @@ describe("claudeSessionOutdated: the rules", () => {
   });
 
   test("lastUpdated moved but the folder did not change (a project-scope install of the same folder): not outdated", () => {
-    // The folder last changed before the session loaded it, though the registry's lastUpdated is later.
     expect(judge(loaded("0.28.25", { loadedAt: UPDATED_AT - 1 }), install("0.28.25"), "0.28.25", UPDATED_AT - 60_000)).toBeNull();
-    // A folder that is gone (no mtime) never reads as reinstalled.
     expect(judge(loaded("0.28.25", { loadedAt: UPDATED_AT - 1 }), install("0.28.25"), "0.28.25", null)).toBeNull();
   });
 
@@ -91,7 +79,6 @@ describe("claudeSessionOutdated: the rules", () => {
   });
 
   test("a new mod that could not read its root or version still sends the field: judged by what it has, never as an old mod", () => {
-    // Nothing read but the load time, loaded after the install: not outdated (an old mod's missing field would be).
     expect(judge(loaded(null, { root: null }), install("0.28.25"))).toBeNull();
   });
 
@@ -100,13 +87,9 @@ describe("claudeSessionOutdated: the rules", () => {
   });
 
   test("the installed plugin is behind this Inbox: update the plugin, not restart", () => {
-    // The session runs the installed (old) plugin: a restart loads the same one.
     expect(judge(loaded("0.28.23"), install("0.28.23"))).toEqual({ loaded: "0.28.23", installed: "0.28.23", fix: "update_plugin", update_command: CLAUDE_PLUGIN_UPDATE_COMMAND });
-    // Older still than the installed one: a restart helps only part way, so the plugin update is the fix.
     expect(judge(loaded("0.28.21"), install("0.28.23"))?.fix).toBe("update_plugin");
-    // No field, installed predates it and is behind this Inbox.
     expect(judge(null, install("0.28.23"))).toMatchObject({ loaded: null, installed: "0.28.23", fix: "update_plugin" });
-    // A development Inbox never says the plugin is behind it.
     expect(judge(loaded("0.28.23"), install("0.28.23"), "dev")).toBeNull();
   });
 
@@ -143,7 +126,6 @@ describe("which record a restart loads", () => {
   });
 
   test("a session in a project with its own install is judged against that install, not the user's", () => {
-    // It runs the project's 0.28.20 from the project's folder: a restart there loads the same, so nothing to say.
     const outdated = claudeSessionOutdated({
       loaded: loaded("0.28.20"),
       records: [user, project],
@@ -181,9 +163,7 @@ describe("real paths on both sides", () => {
       symlinkSync(real, link);
       const viaLink = join(link, "plugins", "cache", "plannotator", "plannotator", "0.28.25");
       expect(realish(viaLink)).toBe(realish(cache));
-      // A folder gone since (an older version's cache) still compares by where it was, through the link.
       expect(realish(join(link, "plugins", "cache", "plannotator", "plannotator", "0.28.20"))).toBe(join(real, "plugins", "cache", "plannotator", "plannotator", "0.28.20"));
-      // The registry names the link, the session loaded the real folder (or the other way round): the same plugin.
       const record = install("0.28.25", { installPath: viaLink });
       for (const [installPath, root2, pluginsDir] of [
         [viaLink, cache, join(link, "plugins")],
@@ -198,7 +178,6 @@ describe("real paths on both sides", () => {
         });
         expect(outdated).toBeNull();
       }
-      // An older folder through the link is still under Claude Code's plugin folder: flagged.
       const old = claudeSessionOutdated({
         loaded: { version: "0.28.23", root: join(link, "plugins", "cache", "plannotator", "plannotator", "0.28.23"), loadedAt: Date.now() },
         records: [{ ...record, installPath: cache }],
@@ -267,8 +246,6 @@ describe("claudeRestartCommand", () => {
   });
 });
 
-// ── Over a real Inbox ──
-
 const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
@@ -289,9 +266,7 @@ async function world(options: { inboxVersion: string; installed: { version: stri
   const project = join(home, "code", "billing-api");
   mkdirSync(project, { recursive: true });
   const installPath = (version: string) => join(pluginsDir, "cache", "plannotator", "plannotator", version);
-  /** Install a plugin version as Claude Code's plugin update does: its folder, then the registry's user record. */
   const install = (installed: { version: string; lastUpdated?: string }) => {
-    // The install folder, written when the registry says it was (a real install's plugin.json).
     const pluginJson = join(installPath(installed.version), ".claude-plugin", "plugin.json");
     mkdirSync(join(pluginJson, ".."), { recursive: true });
     writeFileSync(pluginJson, JSON.stringify({ name: "plannotator", version: installed.version }));
@@ -375,7 +350,6 @@ describe("over a real Inbox", () => {
       engine: "2.1.305",
       restart_command: "cd ~/code/billing-api && claude --resume ses-old",
     });
-    // Another, up to date (loaded after the update, from the installed folder).
     await poll(server, "ses-new", { project_path: project, busy: false, plugin: { version: "0.28.25", root: installPath("0.28.25"), loaded_at: Date.now() }, [INBOX_SEND_NOW_POLL_FIELD]: true });
     const model = await agents(server);
     const cc = model.sessions?.["claude-code"];
@@ -385,7 +359,6 @@ describe("over a real Inbox", () => {
     expect(stale.restart_command).toBe("cd ~/code/billing-api && claude --resume ses-old");
     expect(cc!.sessions.find((s) => s.session === "ses-new")!.outdated).toBeNull();
     expect((await list(server)).restart_claude_code).toBe(1);
-    // It restarts (same session id), now on the installed plugin: the line, the row and the count clear.
     await poll(server, "ses-old", { project_path: project, busy: true, plugin: { version: "0.28.25", root: installPath("0.28.25"), loaded_at: Date.now() } });
     expect((await connection(server, thread.thread_id, "ses-old"))!.outdated).toBeNull();
     expect((await list(server)).restart_claude_code).toBe(0);
@@ -414,15 +387,12 @@ describe("over a real Inbox", () => {
     expect((await connection(server, thread.thread_id, "ses-behind"))!.outdated).toMatchObject({ loaded: "0.28.23", installed: "0.28.23", fix: "update_plugin", update_command: CLAUDE_PLUGIN_UPDATE_COMMAND });
     const cc = (await agents(server)).sessions?.["claude-code"];
     expect(cc?.update_command).toBe("claude plugin marketplace update plannotator && claude plugin update plannotator@plannotator --scope user");
-    // The sidebar's "Reload Claude Code 1", whose Settings → Agents shows the update command, then /reload-plugins.
     expect(await list(server)).toMatchObject({ restart_claude_code: 1, restart_agents: { total: 1, runtimes: { "claude-code": 1 }, update_first: 1 } });
-    // The person runs the two commands: Claude Code installs 0.28.25. Now a reload alone (auto-reload's offer too).
     install({ version: "0.28.25", lastUpdated: new Date().toISOString() });
-    await Bun.sleep(2_200); // the registry is read at most every 2 s
+    await Bun.sleep(2_200);
     await poll(server, "ses-behind", { project_path: project, busy: true, plugin: loaded });
     expect((await connection(server, thread.thread_id, "ses-behind"))!.outdated).toMatchObject({ installed: "0.28.25", fix: "restart" });
     expect((await list(server)).restart_agents).toEqual({ total: 1, runtimes: { "claude-code": 1 } });
-    // /reload-plugins: the session loads 0.28.25 and the row goes away by itself.
     await poll(server, "ses-behind", { project_path: project, busy: true, plugin: { version: "0.28.25", root: installPath("0.28.25"), loaded_at: Date.now() } });
     expect((await connection(server, thread.thread_id, "ses-behind"))!.outdated).toBeNull();
     expect(await list(server)).toMatchObject({ restart_claude_code: 0, restart_agents: { total: 0, runtimes: {} } });

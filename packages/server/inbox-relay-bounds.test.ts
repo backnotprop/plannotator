@@ -1,13 +1,7 @@
-/**
- * The relay never holds a whole large answer: a body over the bound is
- * refused from its Content-Length before a byte is read, and a body without a
- * length is read only until the count passes the bound, then cancelled.
- */
 import { expect, test } from "bun:test";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES } from "@plannotator/shared/diff-paths";
 import { RELAY_BODY_LIMIT, RELAY_WEBSOCKET_MESSAGE_LIMIT, readRelayBody, sealRelayResult } from "./inbox-relay";
 
-/** A stream of `chunks` chunks of `size` bytes that counts what was pulled and whether it was cancelled. */
 function counted(chunks: number, size: number) {
   const seen = { pulled: 0, cancelled: false };
   const stream = new ReadableStream<Uint8Array>({
@@ -31,7 +25,6 @@ test("a Content-Length over the bound is refused before anything is read", async
   const { stream, seen } = counted(100, 1024);
   const answer = new Response(stream, { headers: { "Content-Length": String(RELAY_BODY_LIMIT + 1) } });
   expect(await readRelayBody(answer, RELAY_BODY_LIMIT)).toBeNull();
-  // At most the one chunk a ReadableStream pulls ahead to fill its queue; nothing consumed.
   expect(seen.pulled).toBeLessThanOrEqual(1);
 });
 
@@ -57,6 +50,5 @@ test("a message image at the 10 MB cap fits one result frame: both base64 layers
   const key = Buffer.alloc(32, 7).toString("base64url");
   const frame = await sealRelayResult("dev_x", "cmd_x", 200, "image/png", Buffer.alloc(MAX_REVIEW_IMAGE_PREVIEW_BYTES, 0xab), key);
   expect(Buffer.byteLength(frame)).toBeLessThanOrEqual(RELAY_WEBSOCKET_MESSAGE_LIMIT);
-  // About 16/9 of the body (17.8 MiB): the frame limit has room.
   expect(Buffer.byteLength(frame)).toBeLessThan(18 * 1024 * 1024);
 });

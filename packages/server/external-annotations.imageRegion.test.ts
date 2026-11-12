@@ -1,11 +1,3 @@
-/**
- * `imageRegion` at the external-annotation boundary (#2100), Bun runtime; the
- * Node mirror is apps/pi-extension/server/external-annotations.imageRegion.test.ts.
- * POST and PATCH run the same fail-closed parser the export and the archive
- * run: a region whose box leaves the image, or that is not whole pixels, is
- * refused (400), never stored where the viewer would draw it and the export
- * would hand it to the agent; a PATCH may change a region, never clear it.
- */
 import { describe, expect, test } from "bun:test";
 import { createExternalAnnotationHandler } from "./external-annotations";
 

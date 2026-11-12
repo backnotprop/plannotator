@@ -5,23 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CallFlowInstallStage, CallFlowNodePreflight, CallFlowRuntimeInstallResult } from '@plannotator/shared/call-flow';
 
-// PLANNOTATOR_DATA_DIR is only ever changed INSIDE tests (boot() below) and
-// restored after each one. Module-eval overrides would leak into other test
-// files because Bun runs the suite in one shared process. The config
-// snapshot/restore in afterAll also protects against shared config state.
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 const originalPort = process.env.PLANNOTATOR_PORT;
 const originalPath = process.env.PATH;
 const tempDirs: string[] = [];
 
-// ---------------------------------------------------------------------------
-// Test seams: both runtimes' review servers take the coordinator's own
-// install and Node preflight through the test-only `callFlowInstall` option,
-// so these tests exercise the coordinator + endpoint wiring against a
-// controllable install, and a real install never runs. Nothing is replaced
-// module-wide: other test files in the same process still see the real
-// installCallFlowRuntime and preflightCallFlowNode.
-// ---------------------------------------------------------------------------
 let installCalls = 0;
 let installedTargets: string[] = [];
 let installImpl: (onStage: (stage: CallFlowInstallStage) => void) => Promise<CallFlowRuntimeInstallResult> =
@@ -43,12 +31,6 @@ const callFlowInstall = {
 const { startReviewServer: startBunReviewServer } = await import('./review');
 const { startReviewServer: startPiReviewServer } = await import('../../apps/pi-extension/server');
 
-// Best-effort config hygiene: the /api/review-analysis POSTs below persist
-// { callFlow: true } through the process's frozen config module. When this
-// file runs on its own, that is the developer's real config.json; snapshot
-// it now (env is untouched at this point, so this is the same dir the config
-// module freezes to in an isolated run) and restore it after the suite so a
-// test run never flips a real setting.
 const { getPlannotatorDataDir } = await import('@plannotator/shared/data-dir');
 const realConfigPath = join(getPlannotatorDataDir(), 'config.json');
 let realConfigSnapshot: Buffer | null = null;
@@ -113,7 +95,6 @@ async function waitForInstallState(serverUrl: string, state: string): Promise<In
   throw new Error(`Timed out waiting for install state ${state}`);
 }
 
-/** Write a runtime layout the REAL resolveCallFlowRuntime accepts as installed. */
 function materializeFakeRuntime(): void {
   const runtimeDir = getCallFlowManagedRuntimeDir();
   const packageRoot = join(runtimeDir, 'node_modules', 'calldiff');
@@ -134,7 +115,6 @@ function materializeFakeRuntime(): void {
   }
 }
 
-/** Put a fake `node` that reports v24.0.0 first on PATH (POSIX only). */
 function installFakeNode(): void {
   const binDir = makeTempDir('plannotator-call-flow-fake-node-');
   const nodePath = join(binDir, 'node');
@@ -144,9 +124,6 @@ function installFakeNode(): void {
 }
 
 afterEach(() => {
-  // Restore every process-global this file's tests touched (delete when a
-  // variable was originally unset). Later test files in the same process
-  // must observe exactly the environment they would see standalone.
   if (originalDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
   else process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
   if (originalPort === undefined) delete process.env.PLANNOTATOR_PORT;
@@ -162,14 +139,10 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  // Undo the config writes the advert tests persisted (see the snapshot
-  // comment above): put the original config.json bytes back, or remove the
-  // file when there was none.
   try {
     if (realConfigSnapshot === null) rmSync(realConfigPath, { force: true });
     else writeFileSync(realConfigPath, realConfigSnapshot);
   } catch {
-    // Best effort: an unwritable config dir must not fail the suite.
   }
 });
 
@@ -207,7 +180,6 @@ describe('Call flow install endpoints', () => {
         });
         expect(crossOrigin.status).toBe(403);
         expect(installCalls).toBe(0);
-        // A rejected cross-origin POST leaves the machine idle.
         expect(await getInstallStatus(server.url)).toEqual({ state: 'idle' });
       } finally {
         server.stop();
@@ -257,7 +229,6 @@ describe('Call flow install endpoints', () => {
         emitStage?.('building');
         expect(await getInstallStatus(server.url)).toEqual({ state: 'running', stage: 'building', languageIds: ['javascript-typescript'], currentLanguageId: 'javascript-typescript' });
 
-        // A third POST while running still joins instead of restarting.
         const third = await fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then((response) => response.json() as Promise<InstallStatusBody>);
         expect(third.state).toBe('running');
@@ -288,7 +259,6 @@ describe('Call flow install endpoints', () => {
           languageIds: ['javascript-typescript'],
         });
         expect(installCalls).toBe(0);
-        // The error persists on the status endpoint until the next POST.
         expect(await getInstallStatus(server.url)).toMatchObject({ state: 'error', reason: 'node-unavailable' });
       } finally {
         server.stop();
@@ -380,9 +350,6 @@ describe('Call flow install endpoints', () => {
           return { ok: true, status: 'installed', runtimeDir: getCallFlowManagedRuntimeDir(), languageId: 'javascript-typescript', message: 'installed' };
         };
         try {
-          // Enable Call flow; the runtime is not installed yet, so the advert
-          // is the runtime-missing flavor of unavailable, and this response
-          // also primes the service's 30s runtime probe cache.
           const before = await fetch(`${server.url}/api/review-analysis`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -393,8 +360,6 @@ describe('Call flow install endpoints', () => {
           await fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
           await waitForInstallState(server.url, 'done');
 
-          // Without probe-cache invalidation this re-advertisement would
-          // still read the cached unavailable resolution for up to 30s.
           const after = await fetch(`${server.url}/api/review-analysis`)
             .then((response) => response.json()) as { callFlow?: { state: string; available: boolean } };
           expect(after.callFlow?.state).toBe('available');

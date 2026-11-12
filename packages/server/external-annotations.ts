@@ -1,14 +1,3 @@
-/**
- * External Annotations — Bun server handler.
- *
- * Thin HTTP adapter over the shared annotation store. Handles routing,
- * request parsing, and SSE broadcasting using Bun's Request/Response +
- * ReadableStream APIs.
- *
- * The Pi extension has a mirror handler using node:http primitives at
- * apps/pi-extension/server/external-annotations.ts.
- */
-
 import {
   createAnnotationStore,
   transformPlanInput,
@@ -25,32 +14,18 @@ import {
 
 export type { ExternalAnnotationEvent } from "@plannotator/shared/external-annotation";
 
-// ---------------------------------------------------------------------------
-// Handler interface (matches existing EditorAnnotationHandler pattern)
-// ---------------------------------------------------------------------------
-
 export interface ExternalAnnotationHandler {
   handle: (
     req: Request,
     url: URL,
     options?: { disableIdleTimeout?: () => void },
   ) => Promise<Response | null>;
-  /** Push annotations directly into the store (bypasses HTTP, reuses same validation). */
   addAnnotations: (body: unknown) => { ids: string[] } | { error: string };
-  /** Send an event that is not a store mutation (session-closed) to every open stream. */
   broadcast: (event: ExternalAnnotationEvent<StorableAnnotation>) => void;
 }
 
-// ---------------------------------------------------------------------------
-// Route prefix
-// ---------------------------------------------------------------------------
-
 const BASE = "/api/external-annotations";
 const STREAM = `${BASE}/stream`;
-
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
 
 export function createExternalAnnotationHandler(
   mode: "plan" | "review",
@@ -66,13 +41,11 @@ export function createExternalAnnotationHandler(
       try {
         controller.enqueue(data);
       } catch {
-        // Controller closed — clean up on next iteration
         subscribers.delete(controller);
       }
     }
   };
 
-  // Wire store mutations → SSE broadcast
   store.onMutation(broadcast);
 
   return {
@@ -90,7 +63,6 @@ export function createExternalAnnotationHandler(
       url: URL,
       options?: { disableIdleTimeout?: () => void },
     ): Promise<Response | null> {
-      // --- SSE stream ---
       if (url.pathname === STREAM && req.method === "GET") {
         options?.disableIdleTimeout?.();
 
@@ -101,7 +73,6 @@ export function createExternalAnnotationHandler(
           start(controller) {
             ctrl = controller;
 
-            // Send current state as snapshot
             const snapshot: ExternalAnnotationEvent<StorableAnnotation> = {
               type: "snapshot",
               annotations: store.getAll(),
@@ -110,12 +81,10 @@ export function createExternalAnnotationHandler(
 
             subscribers.add(controller);
 
-            // Heartbeat to keep connection alive
             heartbeatTimer = setInterval(() => {
               try {
                 controller.enqueue(encoder.encode(HEARTBEAT_COMMENT));
               } catch {
-                // Stream closed
                 if (heartbeatTimer) clearInterval(heartbeatTimer);
                 subscribers.delete(controller);
               }
@@ -136,7 +105,6 @@ export function createExternalAnnotationHandler(
         });
       }
 
-      // --- GET snapshot (polling fallback) ---
       if (url.pathname === BASE && req.method === "GET") {
         const since = url.searchParams.get("since");
         if (since !== null) {
@@ -151,7 +119,6 @@ export function createExternalAnnotationHandler(
         });
       }
 
-      // --- POST (add single or batch) ---
       if (url.pathname === BASE && req.method === "POST") {
         try {
           const body = await req.json();
@@ -171,7 +138,6 @@ export function createExternalAnnotationHandler(
         }
       }
 
-      // --- PATCH (update fields on a single annotation) ---
       if (url.pathname === BASE && req.method === "PATCH") {
         const id = url.searchParams.get("id");
         if (!id) {
@@ -183,18 +149,10 @@ export function createExternalAnnotationHandler(
         } catch {
           return Response.json({ error: "Invalid JSON" }, { status: 400 });
         }
-        // Field-level validation with the same validators POST applies:
-        // unknown keys are dropped and a malformed structured value is a 400,
-        // never a stored one that the renderer then reads a property off
-        // (`{"diagramAnchor": null}` used to blank the page).
         const patch = validateAnnotationPatch(mode, body);
         if ("error" in patch) {
           return Response.json({ error: patch.error }, { status: 400 });
         }
-        // A reply must point at an existing, different annotation and must
-        // not close a cycle: the export and the panel treat cycle members as
-        // roots, but the invalid state should not be creatable in the first
-        // place. (POST never carries inReplyTo, so PATCH is the only ingest.)
         if ("inReplyTo" in patch.fields) {
           const problem = validateReplyTarget(store.getAll(), id, patch.fields.inReplyTo);
           if (problem) return Response.json({ error: problem }, { status: 400 });
@@ -206,7 +164,6 @@ export function createExternalAnnotationHandler(
         return Response.json({ annotation: updated });
       }
 
-      // --- DELETE (by id, by source, or clear all) ---
       if (url.pathname === BASE && req.method === "DELETE") {
         const id = url.searchParams.get("id");
         const source = url.searchParams.get("source");
@@ -225,7 +182,6 @@ export function createExternalAnnotationHandler(
         return Response.json({ ok: true, removed: count });
       }
 
-      // Not handled — pass through
       return null;
     },
   };

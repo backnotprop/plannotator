@@ -1,15 +1,3 @@
-/**
- * The annotate file browser over a folder that holds more supported files
- * than PLANNOTATOR_FILE_BROWSER_MAX_FILES: GET /api/reference/files on a real
- * annotate folder session says it left files out (`truncated`, `fileLimit`),
- * lists the folder's top levels first (breadth-first), and never counts the
- * heavy folders. Shared by the Bun suite (file-browser-cap.test.ts) and the Pi
- * mirror (apps/pi-extension/server/file-browser-cap.test.ts).
- *
- * Every test runs under a temp PLANNOTATOR_DATA_DIR; nothing touches the real
- * ~/.plannotator.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,11 +41,6 @@ function filesOf(nodes: TreeNode[]): string[] {
   return nodes.flatMap((node) => (node.type === "file" ? [node.path] : filesOf(node.children ?? [])));
 }
 
-/**
- * README.md, notes.md and docs/{guide,plan}.md near the top; aaa-archive holds
- * 40 files four folders down, named so a name-order depth-first walk would
- * reach it before everything else; node_modules holds 50 that must never count.
- */
 function seedFolder(root: string): void {
   writeFileSync(join(root, "README.md"), "# Top\n");
   writeFileSync(join(root, "notes.md"), "# Notes\n");
@@ -72,11 +55,6 @@ function seedFolder(root: string): void {
   for (let i = 0; i < 50; i++) writeFileSync(join(heavy, `readme-${i}.md`), `# ${i}\n`);
 }
 
-/**
- * `defaultCap`: the cap with PLANNOTATOR_FILE_BROWSER_MAX_FILES unset. Bun
- * keeps 5,000; Pi's file browser never had a cap, so it lists every file
- * unless the variable is set (null).
- */
 export function defineFileBrowserCapScenarios(
   runtime: string,
   start: StartFileBrowserCapServer,
@@ -154,7 +132,6 @@ export function defineFileBrowserCapScenarios(
       expect(files).toHaveLength(10);
       for (const file of ["README.md", "notes.md", "docs/guide.md", "docs/plan.md"]) expect(files).toContain(file);
       expect(files.some((file) => file.startsWith("node_modules/"))).toBe(false);
-      // Breadth-first in name order: the six deep files that fill the rest are the first six by name.
       expect(files.filter((file) => file.startsWith("aaa-archive/"))).toEqual(
         Array.from({ length: 6 }, (_, i) => `aaa-archive/2019/q1/raw/entry-0${i}.md`),
       );

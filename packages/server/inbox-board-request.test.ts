@@ -1,12 +1,3 @@
-/**
- * Compose's Board chip (approval "inbox-compose-board-chip"), through the
- * server's real doors: a Send with `board_request` stores the flag on the
- * person's message and never in its words; everything the agent receives for
- * that message (the delivered turn, read_thread) carries the
- * Board request block once; nothing else does. Every test uses its own temp
- * data dir and decides the Board itself; the connections are plain HTTP calls
- * with the registry's token, never a real agent.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,13 +76,11 @@ describe("Board request", () => {
     const stored = (await (await fetch(`${base(server)}/api/inbox/threads/${sent.message.thread_id}`)).json()) as { thread: InboxThread };
     expect(stored.thread.messages[0]!.body).toBe(WORDS);
 
-    // A connection that polls again before it reports the delivery is handed the same turn: the block once each time.
     for (let round = 0; round < 2; round++) {
       const [command] = await poll(server, "ses-a", project);
       expect(command!.body).toBe(`${WORDS}\n\n${block}`);
       const wake = inboxWakeText(command!);
       expect(count(wake, INBOX_BOARD_REQUEST_OPEN)).toBe(1);
-      // The markers stand on their own lines.
       expect(wake.split("\n")).toContain(INBOX_BOARD_REQUEST_OPEN);
       expect(count(codexQueueMessage(command!), INBOX_BOARD_REQUEST_OPEN)).toBe(1);
     }
@@ -100,7 +89,6 @@ describe("Board request", () => {
     expect(count(text, INBOX_BOARD_REQUEST_OPEN)).toBe(1);
     expect(text).toContain(block);
 
-    // A replayed Send answers the same message: nothing new, still one block.
     const replay = await send(server, { body: WORDS, idempotency_key: "k1", board_request: true });
     expect(replay).toMatchObject({ replayed: true, message: { id: sent.message.id } });
     expect(count(await readThreadText(client, sent.message.thread_id), INBOX_BOARD_REQUEST_OPEN)).toBe(1);
@@ -117,7 +105,6 @@ describe("Board request", () => {
     const first = read.content.map((part) => part.text).join("\n");
     expect(first).toContain(WORDS);
     expect(count(first, INBOX_BOARD_REQUEST_OPEN)).toBe(1);
-    // The JSON keeps the person's words and a flag: a client that prints both reads the block once.
     expect(read.structuredContent.thread.messages.at(-1)).toMatchObject({ body: WORDS, board_request: true });
   });
 
@@ -161,8 +148,6 @@ describe("Board request", () => {
     expect(off.board_request).toBeUndefined();
   });
 
-  // Review of #2249: any session may read the thread again (after compaction, or one the thread moved to).
-  // What regresses: a second reader told to create cards while one already links the thread.
   test.if(INBOX_CARD_ACTION_ON)("a second reader of the thread is told which card in flight already links it, so it makes no other; a shipped one is not named", async () => {
     const { server, client, project } = await setup(true);
     await poll(server, "ses-a", project);
@@ -177,7 +162,6 @@ describe("Board request", () => {
     const second = await readThreadText(client, threadId, "ses-b");
     expect(count(second, INBOX_BOARD_REQUEST_OPEN)).toBe(1);
     expect(second).toContain(`Already on the Board for this thread: ${cardId} (Fuzzy settings search)`);
-    // Shipped, the card is done: new work in the thread gets a new card, so the line no longer names it.
     await client.callTool({ name: "card", arguments: { op: "ship", card_id: cardId, project_path: project, agent_session: "ses-a", agent_host: "claude-code" } });
     const after = await readThreadText(client, threadId, "ses-b");
     expect(count(after, INBOX_BOARD_REQUEST_OPEN)).toBe(1);

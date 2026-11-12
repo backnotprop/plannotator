@@ -5,14 +5,12 @@ import { changedFileOf } from "./inbox-pull-diff-files";
 const file = (path: string, line: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+${line}\n`;
 
 describe("changedFileOf", () => {
-  // Guards the route's answer staying what it was: the same file the full parse finds, and none for a path not changed.
   test("finds what parseDiffToFiles(...).find finds", () => {
     const answer = { patch: file("a.ts", "one") + file("b/c.ts", "two") };
     expect(changedFileOf(answer, "b/c.ts")).toEqual(parseDiffToFiles(answer.patch).find((f) => f.path === "b/c.ts"));
     expect(changedFileOf(answer, "nope.ts")).toBeUndefined();
   });
 
-  // Guards the cost: one diff's many file reads parse its patch once, and a new answer (a new head) is parsed again.
   test("parses one answer once, and a new answer afresh", () => {
     const answer = { patch: file("a.ts", "one") };
     const first = changedFileOf(answer, "a.ts");

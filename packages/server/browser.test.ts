@@ -68,8 +68,6 @@ describe("shouldTryRemoteBrowserFallback", () => {
     expect(shouldTryRemoteBrowserFallback(true)).toBe(true);
   });
 
-  // PLANNOTATOR_BROWSER=none opens nothing at all, so not VS Code either
-  // (before, #756 read it as unset and the IPC fallback ran).
   test("false for remote sessions when PLANNOTATOR_BROWSER says none", () => {
     clearEnv();
     // no-browser-guard: sentinel under test (in process; nothing is launched)
@@ -113,7 +111,6 @@ describe("isPosixBrowserTarget", () => {
     expect(resolvePosixBrowserTarget("/usr/bin/fake-browser")).toBe("/usr/bin/fake-browser");
     expect(resolvePosixBrowserTarget("./browser")).toBe("./browser");
     expect(resolvePosixBrowserTarget("../browser")).toBe("../browser");
-    // A bare name is resolved against the Linux PATH at call time.
     expect(resolvePosixBrowserTarget("sh")).toMatch(/\/sh$/);
   });
 
@@ -126,12 +123,9 @@ describe("isPosixBrowserTarget", () => {
   });
 });
 
-// --- WSL PLANNOTATOR_BROWSER routing (#1472) ---
-
 const realPlatform = process.platform;
 const realRelease = os.release;
 
-/** Pretend to run under WSL: isWSL() reads process.platform and os.release(). */
 function mockWsl() {
   Object.defineProperty(process, "platform", { value: "linux", configurable: true });
   os.release = () => "5.15.90.1-microsoft-standard-WSL2";
@@ -176,9 +170,6 @@ describe("WSL configured browser launch", () => {
     }
   });
 
-  // openBrowser spawns the RESOLVED absolute path, not the bare name: Bun
-  // 1.3's `$` resolves bare command names against the PATH captured at
-  // startup, so a runtime-prepended PATH entry would be invisible to it.
   test("a bare Linux PATH executable name is executed directly", async () => {
     const dir = makeTempDir();
     const log = join(dir, "args.txt");
@@ -198,13 +189,6 @@ describe("WSL configured browser launch", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-
-  // The cmd.exe route itself cannot be execution-tested through Bun's `$` on
-  // a non-Windows host (see the note on the bare-name test above): a bare
-  // cmd.exe shim on a mutated PATH is invisible to Bun 1.3's shell. The Pi
-  // mirror pins it end-to-end in apps/pi-extension/server/network.test.ts
-  // (node:child_process spawn honors a mutated PATH on every Bun version),
-  // and the classifier tests above pin the routing decision.
 
   test("a failing configured browser warns on stderr and still falls back", async () => {
     const dir = makeTempDir();
@@ -236,7 +220,6 @@ describe("tryVscodeIpc, module imported before PLANNOTATOR_DATA_DIR is set (#150
 
   type IpcServer = { port: number; openedUrls: string[] };
 
-  /** Runs `run` against a stand-in for the VS Code extension's IPC listener. */
   async function withIpcServer<T>(run: (ipc: IpcServer) => Promise<T>): Promise<T> {
     const openedUrls: string[] = [];
     const server = Bun.serve({
@@ -256,7 +239,6 @@ describe("tryVscodeIpc, module imported before PLANNOTATOR_DATA_DIR is set (#150
     }
   }
 
-  /** A data dir whose registry routes the current workspace to `port`. */
   function makeDataDirWithRegistry(port: number): string {
     const dir = dataDirEnv.makeTempDir();
     writeFileSync(join(dir, "vscode-ipc.json"), JSON.stringify({ [process.cwd()]: port }));

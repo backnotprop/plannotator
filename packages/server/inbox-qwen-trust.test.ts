@@ -1,11 +1,3 @@
-/**
- * Plannotator as Qwen Code's trusted sender (inbox-qwen-trust.ts): minted
- * when the connect step connects Qwen Code, revoked when Qwen Code is turned
- * off or Plannotator is uninstalled. A fake `qwen` on a scratch PATH keeps
- * its grants in the scratch Qwen home as Qwen does
- * (tests/helpers/fake-agents.ts); the real qwen is never run and the real
- * ~/.qwen never read.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +19,6 @@ import {
 
 const SELF = ["/opt/plannotator/bin/plannotator"];
 
-/** Whether the scratch volume ignores case (macOS and Windows by default; Linux never), looked at, never assumed. */
 const IGNORES_CASE = (() => {
   const probe = mkdtempSync(join(tmpdir(), "plannotator-case-"));
   try {
@@ -60,7 +51,6 @@ function environment(extra: Record<string, string> = {}, platform: NodeJS.Platfo
 }
 const options = (extra: Record<string, string> = {}, dir = dataDir) => ({ dataDir: dir, selfCommand: SELF, environment: environment(extra) });
 const qwenHome = () => join(fake.home, ".qwen");
-/** The grants the fake qwen holds, with their tokens. */
 const grants = (home = qwenHome()): { id: string; label: string; token: string }[] => {
   try {
     return (JSON.parse(readFileSync(join(home, "peer-controllers.json"), "utf8")) as { controllers: { id: string; label: string; token: string }[] }).controllers;
@@ -69,7 +59,6 @@ const grants = (home = qwenHome()): { id: string; label: string; token: string }
   }
 };
 const controllerCalls = (sub: string) => fake.calls().filter((call) => call.name === "qwen" && call.args[0] === "sessions" && call.args[2] === sub);
-/** The person runs `qwen sessions controllers remove <every id>`. */
 const revokeAllInQwen = (home = qwenHome()) => writeFileSync(join(home, "peer-controllers.json"), JSON.stringify({ schemaVersion: 1, controllers: [] }));
 
 describe("Qwen Code's trusted sender", () => {
@@ -91,9 +80,7 @@ describe("Qwen Code's trusted sender", () => {
     expect(file).toMatchObject({ home: qwenHome(), id: grant!.id, token: grant!.token, label: qwenTrustLabel(dataDir) });
     expect(statSync(qwenTrustPath(dataDir)).mode & 0o777).toBe(0o600);
     expect(qwenWakeToken(dataDir, qwenHome())).toBe(grant!.token);
-    // Never presented to another Qwen home.
     expect(qwenWakeToken(dataDir, join(fake.root, "other-qwen"))).toBeNull();
-    // How far it reaches, and how to undo it.
     const said = formatConnectReport(report).join("\n");
     expect(said).toContain("any running Qwen Code session");
     expect(said).toContain("Settings → Agents");
@@ -166,7 +153,6 @@ describe("Qwen Code's trusted sender", () => {
     expect(controllerCalls("remove").map((call) => call.args)).toEqual([["sessions", "controllers", "remove", id!]]);
     expect(grants()).toEqual([]);
     expect(existsSync(qwenTrustPath(dataDir))).toBe(false);
-    // Off stays off: the next run neither connects nor mints.
     await connectInboxAgents(options());
     expect(controllerCalls("add")).toHaveLength(1);
   });
@@ -198,15 +184,12 @@ describe("Qwen Code's trusted sender", () => {
     expect(problem).toContain("tries again at the next start");
     expect(readInboxAgents(dataDir).agents.qwen?.state).toBe("off");
     expect(grants()).toHaveLength(1);
-    // Off means off: the wake has no token now (its only source), and none is on disk.
     expect(qwenWakeToken(dataDir, qwenHome())).toBeNull();
     expect(readFileSync(qwenTrustPath(dataDir), "utf8")).not.toContain(grants()[0]!.token);
     expect(readQwenTrust(dataDir)).toMatchObject({ id, revoke_pending: true });
-    // A run while Qwen still refuses: said once, nothing minted.
     const refused = await connectInboxAgents(options({ FAKE_QWEN_CONTROLLERS_FAIL: "1" }));
     expect(refused.trust_failed?.[0]?.reason).toContain(`qwen sessions controllers remove ${id}`);
     expect((await connectInboxAgents(options({ FAKE_QWEN_CONTROLLERS_FAIL: "1" }))).trust_failed ?? []).toEqual([]);
-    // The next run Qwen allows it: revoked, forgotten, and still nothing minted.
     await connectInboxAgents(options());
     expect(grants()).toEqual([]);
     expect(existsSync(qwenTrustPath(dataDir))).toBe(false);
@@ -263,7 +246,6 @@ describe("Qwen Code's trusted sender", () => {
     expect(grants(other)).toHaveLength(1);
     expect(readQwenTrust(dataDir)).toMatchObject({ home: other, token: grants(other)[0]!.token });
 
-    // Turned off from an environment without QWEN_HOME: revoked where the grant is.
     expect(await setInboxAgentReach("qwen", false, options())).toBeNull();
     expect(grants(other)).toEqual([]);
     expect(existsSync(qwenTrustPath(dataDir))).toBe(false);
@@ -292,7 +274,6 @@ describe("Qwen Code's trusted sender", () => {
     const removal = qwenTrustRemoval(dataDir, environment())!;
     expect(removal.describe).toBe(`Plannotator's trusted-sender token in Qwen Code (qwen sessions controllers remove ${readQwenTrust(dataDir)!.id})`);
     expect(removal.runnable).toBe(true);
-    // Not in the MCP removal plan: the token is its own item, never mistaken for the entry.
     expect(planInboxAgentRemoval(dataDir, environment(), OURS).items.map((item) => item.describe)).toEqual(["MCP server plannotator-inbox from Qwen Code (~/.qwen/settings.json, that entry only)"]);
     expect(await removal.apply()).toEqual({ kind: "revoked" });
     expect(grants()).toEqual([]);
@@ -328,7 +309,6 @@ describe("Qwen Code's trusted sender", () => {
     expect((await ensureQwenTrust(second, environment())).kind).toBe("added");
     expect(controllerCalls("remove")).toEqual([]);
     expect(grants().map((grant) => grant.label).sort()).toEqual([qwenTrustLabel(dataDir), qwenTrustLabel(second)].sort());
-    // The first still holds a grant Qwen lists.
     expect((await ensureQwenTrust(dataDir, environment())).kind).toBe("kept");
     expect(qwenWakeToken(dataDir, qwenHome())).toBe(grants().find((grant) => grant.label === qwenTrustLabel(dataDir))!.token);
   });
@@ -369,16 +349,13 @@ describe("Qwen Code's trusted sender", () => {
   test("a grant waiting to be revoked in another Qwen home is revoked there: at the next run while off, and before a mint when turned on", async () => {
     fake.install("qwen");
     const other = join(fake.root, "other-qwen");
-    // Turned off while Qwen refused: the grant in ~/.qwen waits to be revoked.
     await connectInboxAgents(options());
     await setInboxAgentReach("qwen", false, options({ FAKE_QWEN_CONTROLLERS_FAIL: "1" }));
     expect(readQwenTrust(dataDir)).toMatchObject({ home: qwenHome(), revoke_pending: true });
-    // A run from a shell with another QWEN_HOME: revoked in the grant's own home.
     await connectInboxAgents(options({ QWEN_HOME: other }));
     expect(grants()).toEqual([]);
     expect(existsSync(qwenTrustPath(dataDir))).toBe(false);
 
-    // Again, and this time turned on under the other home: the old one goes before the new one is minted.
     await setInboxAgentReach("qwen", true, options());
     await setInboxAgentReach("qwen", false, options({ FAKE_QWEN_CONTROLLERS_FAIL: "1" }));
     expect(grants()).toHaveLength(1);

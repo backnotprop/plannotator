@@ -1,13 +1,3 @@
-/**
- * send_message on a question that writes its recommendation into a choice
- * label (`- [ ] Foo (Recommended)`) instead of a `Recommended:` line: sent as
- * always, and the result nudges the agent toward the line, never refuses. A
- * running Inbox on loopback (a temp data dir), an agent over MCP.
- *
- * What regresses if this fails: the agent never learns the grammar and keeps
- * writing markers (on a pick-one question with two marked choices the card
- * shows no recommendation), or the nudge fires on a correct block.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

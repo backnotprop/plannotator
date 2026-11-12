@@ -1,14 +1,3 @@
-/**
- * PLANNOTATOR_UPDATE_CHECK=0 stops only the automatic checks, never the
- * person's own way to update (the owner: "we never leave user installs in a
- * state they can't update from"). An Inbox started with checks off showed
- * "0.28.39 is available" in Settings → General with no Update button: Check
- * now fetched the release, but the button's model stayed null.
- *
- * A real Inbox server with an injected clock, a fake GitHub on loopback and a
- * stub installer: never GitHub, never the install script. HOME and the data
- * dir are temp folders.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +45,6 @@ beforeEach(() => {
   ghDown = false;
   tagRequests = [];
   launches = [];
-  // The fake GitHub: the "latest release" redirect and the API, counted.
   gh = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -143,7 +131,6 @@ describe("update checks off (PLANNOTATOR_UPDATE_CHECK=0)", () => {
     await Bun.sleep(100);
     expect(await health(server)).toBeNull();
 
-    // Check now asks (the person's click), even with checks off.
     const checked = (await (await post(server, "/api/inbox/update/check")).json()) as {
       checked: { ok: boolean };
       latest: { version: string } | null;
@@ -154,11 +141,8 @@ describe("update checks off (PLANNOTATOR_UPDATE_CHECK=0)", () => {
     expect(ghRequests).toBeGreaterThan(0);
     expect(checked.latest?.version).toBe("0.28.39");
     expect(checked.check).toMatchObject({ on: false, env: false });
-    // The bug: "0.28.39 is available" with nothing to press. Now the Update is offered,
-    // in the details Settings reads and in health, which the sidebar's button reads.
     expect(checked.update).toMatchObject({ state: "available", version: "0.28.39", current: "0.28.38", action: "script" });
     expect(await health(server)).toMatchObject({ state: "available", version: "0.28.39" });
-    // Its What's new link has notes behind it: Check now fetched them too.
     const notes = await waitFor(
       () => fetch(url(server, "/api/inbox/whats-new?version=0.28.39")).then((r) => r.json() as Promise<{ notes?: string }>),
       (n) => !!n.notes,
@@ -166,7 +150,6 @@ describe("update checks off (PLANNOTATOR_UPDATE_CHECK=0)", () => {
     expect(notes.notes).toContain("Notes for 0.28.39.");
     expect(tagRequests).toEqual(["0.28.39"]);
 
-    // Update: the same verified install path as with checks on (startManualUpdate).
     const res = await post(server, "/api/inbox/update");
     expect(res.status).toBe(200);
     expect(((await res.json()) as { version: string }).version).toBe("0.28.39");

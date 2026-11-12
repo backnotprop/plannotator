@@ -1,8 +1,3 @@
-/**
- * Lossless JSON member edits (json-edit.ts): only the one member's text
- * changes, in the file's own style, and anything that cannot be placed
- * safely is refused.
- */
 import { describe, expect, test } from "bun:test";
 import { addJsonMember, removeJsonMember } from "./json-edit";
 
@@ -59,7 +54,6 @@ describe("JSON with comments (Qwen Code's settings.json)", () => {
     const added = addJsonMember(before, ["mcpServers"], "k", 1, C);
     expect(added).toEqual({ ok: true, changed: true, text: '{\n  // mine\n  "mcpServers": {\n    "a": { "env": { "T": "${T}" } }, // keep\n    "k": 1\n  },\n  /* x */ "z": "http://a//b"\n}\n' });
     expect(removeJsonMember(added.ok ? added.text : "", ["mcpServers"], "k", C)).toEqual({ ok: true, changed: true, text: before });
-    // A comment inside an empty object stays, after the new member.
     expect(addJsonMember('{\n  "m": {\n    // none yet\n  }\n}', ["m"], "k", 1, C)).toEqual({ ok: true, changed: true, text: '{\n  "m": {\n    "k": 1\n    // none yet\n  }\n}' });
   });
 

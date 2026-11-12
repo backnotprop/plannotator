@@ -1,14 +1,3 @@
-/**
- * send_message with pictures in `attachments` that the body does not show
- * (the owner, 2026-11-02: the pictures of a message's options sat at the
- * bottom, away from the words about them). A running Inbox on loopback (a
- * temp data dir), an agent over MCP.
- *
- * What regresses if this fails: the advice stops reaching the agent at the
- * moment it sends, or it turns into friction (the send refused, or the
- * message the person reads changed), or it nags a message that shows its
- * pictures in place.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +27,6 @@ afterEach(async () => {
   }
 });
 
-/** A 1×1 PNG. */
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 
 async function world() {
@@ -71,7 +59,6 @@ test("attached pictures the body does not show: sent as written, and the result 
   expect(text).toStartWith("Sent to the Plannotator Inbox");
   expect(text).toContain(attachedImagesNotInBodyText(2).trim());
   expect(structured.attached_images_not_in_body).toEqual(["shots/a.png", "shots/b.png"]);
-  // The person's message is the one the agent sent: same body, every attachment.
   const thread = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${structured.thread_id}`)).json()) as any;
   const message = thread.thread.messages[0];
   expect(message.body).toBe(body);

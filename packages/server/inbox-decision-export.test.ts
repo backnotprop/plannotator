@@ -1,11 +1,3 @@
-/**
- * Export decisions' route on a real Inbox in a temp folder (`GET /api/inbox/threads/:id/decisions`).
- *
- * What regresses: the download not being an attachment named `decisions-<slug>-<date>.<ext>`; the reader's zone not
- * reaching the file; a picture the message names not embedded in the HTML, or one past the cap embedded anyway; the
- * route answering another site, a missing thread or an unknown format; the phone door (and with it a linked machine's
- * forward) not carrying it.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +13,6 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A 1×1 PNG; `pad` bytes after its end make a file of any size the reader still takes as that picture. */
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
 function seed() {
@@ -61,7 +52,6 @@ test("Markdown and HTML download as attachments named by subject and the reader'
   expect(md.headers.get("content-type")).toStartWith("text/markdown");
   const mdName = /filename="([^"]+)"/.exec(md.headers.get("content-disposition") ?? "")?.[1];
   expect(md.headers.get("content-disposition")).toStartWith("attachment;");
-  // The date is the export's, in the zone the window sent.
   const dayIn = (timeZone: string) => new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   expect(mdName).toBe(`decisions-offline-sync-conflicts-${dayIn("Asia/Tokyo")}.md`);
   expect((await md.text()).split("\n")[0]).toBe(`<!-- plannotator-decisions v1 thread=${world.thread} -->`);
@@ -69,12 +59,10 @@ test("Markdown and HTML download as attachments named by subject and the reader'
   const html = await fetch(`${base(server)}/api/inbox/threads/${world.thread}/decisions?format=html&tz=America/Los_Angeles`);
   expect(html.status).toBe(200);
   expect(html.headers.get("content-disposition")).toStartWith(`attachment; filename="decisions-offline-sync-conflicts-${dayIn("America/Los_Angeles")}.html"`);
-  // Opened in place by mistake, it runs nothing on the Inbox's origin.
   expect(html.headers.get("content-security-policy")).toStartWith("sandbox");
   const page = await html.text();
   const srcs = [...page.matchAll(/<img [^>]*?src="([^"]+)"/g)].map((m) => m[1]!);
   expect(srcs).toEqual([`data:image/png;base64,${PNG.toString("base64")}`]);
-  // The picture past 400 KB shows its alt text.
   expect(page).toContain('<span class="noimg">Side panel</span>');
 
   const json = await fetch(`${base(server)}/api/inbox/threads/${world.thread}/decisions?format=json`);

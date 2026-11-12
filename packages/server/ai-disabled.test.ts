@@ -74,8 +74,6 @@ async function verifyDisabledServers(): Promise<void> {
       import("./review"),
       import("../../apps/pi-extension/server"),
     ]);
-    // The PR-mode server below asks gh for the user, viewed files and PR
-    // context at startup: a fake runtime answers, never the real gh.
     const { setPRCommandRuntimeForTests } = await import("../../apps/pi-extension/server/pr");
     setPRCommandRuntimeForTests(createFakePRRuntime().runtime);
 
@@ -181,10 +179,6 @@ async function runInIsolatedDataDirectory(): Promise<void> {
   };
   delete childEnv.PLANNOTATOR_PORT;
 
-  // storage.ts captures PLANNOTATOR_DATA_DIR at module load, so a child
-  // process is required to keep this test isolated regardless of which
-  // test files Bun evaluated first in the parent process. The test preload
-  // owns the child process's data directory and cleans it up on exit.
   const child = Bun.spawn(
     [process.execPath, "test", fileURLToPath(import.meta.url)],
     {

@@ -1,27 +1,3 @@
-/**
- * Plannotator Inbox: what this computer can tell about the two ways a phone
- * reaches it, for step 1 of "Pair a phone" (design of record
- * `.product/approved/inbox-settings-tabs/`, DESIGN.md section 4.2).
- *
- * `GET /api/inbox/pairing/checks` reads these and turns nothing on. Every
- * answer is advisory: the window shows a failing check with its fix, and the
- * only gate on the pairing code is a way being switched on (the owner's
- * no-loop rule). Nothing here reads the tailnet's other devices (dropped by
- * the owner, decision 4): `tailscale status` runs with `--peers=false`, and
- * the phone side is stated, never guessed.
- *
- * Every probe is asynchronous (child processes, each with its own time limit
- * that kills its whole process group, `runQuietly`), and the whole read has a
- * deadline, so a slow or hung `tailscale` never holds the Inbox's event loop
- * or the read: MCP waits, connection polls and the relay socket keep running
- * while the checks are read. The caller shares one read in flight and keeps
- * its answer a few seconds (inbox-devices.ts).
- *
- * Each probe is a seam (`PairingProbes`, and the Tailscale runner), so tests
- * never run the real `tailscale`, `openssl` or system tools against real
- * state.
- */
-
 import { childEnv, childPath } from "@plannotator/shared/child-env";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -39,74 +15,41 @@ import {
 import { inboxTlsDir, lanAddress } from "./inbox-lan";
 import type { TailnetDoorPort } from "./inbox-tailnet-door";
 
-/** The macOS application firewall: off, on (macOS asks per app), or blocking every incoming connection. Unknown elsewhere. */
 export type FirewallState = "off" | "on" | "block_all" | "unknown";
 
-/**
- * `cli_missing`: no `tailscale` command on PATH and, on a Mac, no
- * /Applications/Tailscale.app whose own CLI could stand in for it.
- * `no_answer`: the command did not answer within its time limit.
- */
 export type TailscaleBackend = "running" | "stopped" | "signed_out" | "needs_approval" | "starting" | "cli_missing" | "no_answer" | "unknown";
 
 export interface PairingChecks {
   wifi: {
-    /** The private address the QR would carry (the same pick as the listener's), or null with no network. */
     address: string | null;
-    /** The Wi-Fi network's name when the system tells it (macOS may hide it without Location permission). */
     network: string | null;
-    /** `openssl` is on PATH, so the certificate can be made. */
     openssl: boolean;
-    /** The certificate already exists (made by an earlier Turn on), so `openssl` is no longer needed. */
     certificate: boolean;
-    /** `dns-sd` (macOS) or `avahi-publish` (Linux) exists: phones nearby list this computer by name. */
     bonjour: boolean;
     firewall: FirewallState;
   };
   tailscale: {
     state: TailscaleBackend;
-    /** The login that owns this computer on the tailnet. */
     login: string | null;
-    /** HTTPS certificates are on for the tailnet (`CertDomains`), which `tailscale serve --https` needs. Null when unknown. */
     https_certs: boolean | null;
-    /** A tailnet port the door may take (8443 to 8450) is free, or already the Inbox's own mapping. Null when unknown (not running, or serve did not answer). */
     port_free: boolean | null;
-    /** The port the door would take (`port_free`), or the door's kept port another mapping now holds (`port_free: false`); null when every port is held or unknown. */
     https_port: number | null;
-    /** What the CLI said when it could not be read, in its own words. */
     error: string | null;
   };
 }
 
-/** The probes the checks run. Every one is replaceable (tests), and none writes anything. */
 export interface PairingProbes {
   lanAddress: () => string | null;
-  /** The Wi-Fi network's name for the interface holding `address`, or null. */
   network: (address: string | null) => string | null | Promise<string | null>;
-  /** The path of a command on PATH, or null. */
   which: (command: string) => string | null;
   firewall: () => FirewallState | Promise<FirewallState>;
 }
 
-/** How the checks run `tailscale`: a sync seam (tests' scripted runners) or the async default. */
 export type PairingTailscaleRunner = (args: string[], timeoutMs: number) => TailscaleRunResult | Promise<TailscaleRunResult>;
 
 const PROBE_TIMEOUT_MS = 2_000;
 const SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
 
-/**
- * A child process run without a shell, its output read, with a hard time
- * limit. `ENOENT` / `ETIMEDOUT` as error codes.
- *
- * The limit holds even when the command is a shell wrapper that runs its
- * real program as a child without `exec` (the Mac app's
- * `/usr/local/bin/tailscale` is one): such a grandchild keeps the pipes open
- * after the wrapper dies. So the child starts in a process group of its own
- * (`detached`), and at the limit the whole group is killed, the pipes are
- * let go, and the answer settles at once, never waiting for the pipes to
- * close. Settling on exit alone would not hold either, for the same reason:
- * `close` waits for the pipes, so only the timer ends a lingering read.
- */
 export function runQuietly(command: string, args: string[], timeoutMs: number, env?: Record<string, string | undefined>): Promise<TailscaleRunResult> {
   const path = command.includes("/") ? (existsSync(command) ? command : null) : Bun.which(command, { PATH: childPath() });
   if (!path) return Promise.resolve({ error: Object.assign(new Error(`${command}: not found on PATH`), { code: "ENOENT" }), status: null, stdout: "", stderr: "" });
@@ -140,7 +83,6 @@ export function runQuietly(command: string, args: string[], timeoutMs: number, e
         if (group && child.pid) process.kill(-child.pid, "SIGKILL");
         else child.kill("SIGKILL");
       } catch {
-        // Already gone.
       }
       child.stdout?.destroy();
       child.stderr?.destroy();
@@ -149,10 +91,6 @@ export function runQuietly(command: string, args: string[], timeoutMs: number, e
   });
 }
 
-/**
- * `value`, or `fallback` once `ms` have passed: no probe (a seam that never
- * answers included) can hold a read of the checks past its deadline.
- */
 function withDeadline<T>(value: T | Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(fallback), ms);
@@ -169,25 +107,14 @@ function withDeadline<T>(value: T | Promise<T>, ms: number, fallback: T): Promis
   });
 }
 
-/** The most one read of the checks takes: past it, a probe that has not answered reads as not answering. */
 export const PAIRING_CHECKS_DEADLINE_MS = 15_000;
 
-/**
- * The default Tailscale runner for the checks: the CLI on PATH, then the Mac
- * app's own CLI (`tailscaleAppFallback`) in a shell-like env
- * (`tailscaleAppEnv`), asynchronously.
- */
 export const runTailscaleQuietly: PairingTailscaleRunner = async (args, timeoutMs) => {
   const onPath = await runQuietly("tailscale", args, timeoutMs);
   const app = tailscaleAppFallback(onPath);
   return app ? checkTailscaleAppAnswer(await runQuietly(app, args, timeoutMs, tailscaleAppEnv(childEnv()))) : onPath;
 };
 
-/**
- * `socketfilterfw --getglobalstate` and `--getblockall`, as macOS prints them
- * ("Firewall is enabled. (State = 1)", "Firewall has block all state set to
- * enabled." or the older "Block all DISABLED!"). Anything else is unknown.
- */
 export function parseFirewallState(globalState: string, blockAll: string): FirewallState {
   const global = globalState.toLowerCase();
   if (/disabled|state = 0/.test(global)) return "off";
@@ -198,7 +125,6 @@ export function parseFirewallState(globalState: string, blockAll: string): Firew
   return "on";
 }
 
-/** The `SSID : <name>` line of `ipconfig getsummary <iface>`; null when absent or redacted. */
 export function parseIpconfigSsid(summary: string): string | null {
   const match = /^\s*SSID\s*:\s*(.+?)\s*$/m.exec(summary);
   const name = match?.[1] ?? "";
@@ -206,11 +132,6 @@ export function parseIpconfigSsid(summary: string): string | null {
   return name;
 }
 
-/**
- * `tailscale status --json`'s `BackendState`, plus the owner's login and
- * whether HTTPS certificates are on (`CertDomains`). An answer that is not
- * a status document is `unknown`.
- */
 export function parseTailscaleBackend(stdout: string): { state: TailscaleBackend; login: string | null; https_certs: boolean | null } {
   let parsed: unknown;
   try {
@@ -237,7 +158,6 @@ export function parseTailscaleBackend(stdout: string): { state: TailscaleBackend
   return { state, login, https_certs: state === "running" ? Array.isArray(certs) && certs.length > 0 : null };
 }
 
-/** The interface that holds `address` (en0 for the Wi-Fi on most Macs). */
 function interfaceOf(address: string): string | null {
   for (const [name, entries] of Object.entries(networkInterfaces())) {
     if ((entries ?? []).some((entry) => entry.address === address)) return name;
@@ -278,16 +198,13 @@ export const defaultPairingProbes: PairingProbes = {
 export interface PairingChecksContext {
   dataDir: string;
   tailscale: PairingTailscaleRunner;
-  /** The tailnet port the door would take, read from `tailscale serve status --json` (inbox-tailnet-door.ts). */
   doorPort: (serveStatus: string) => TailnetDoorPort;
   probes?: Partial<PairingProbes>;
-  /** The whole read's deadline. Default `PAIRING_CHECKS_DEADLINE_MS`. */
   deadlineMs?: number;
 }
 
 async function tailscaleChecks(context: PairingChecksContext): Promise<PairingChecks["tailscale"]> {
   const tailscale: PairingChecks["tailscale"] = { state: "unknown", login: null, https_certs: null, port_free: null, https_port: null, error: null };
-  // `--peers=false`: this computer only; the tailnet's other devices are never read.
   const status = await context.tailscale(["status", "--json", "--peers=false"], TAILSCALE_CLI_TIMEOUT_MS);
   if (status.error) {
     const code = (status.error as NodeJS.ErrnoException).code;
@@ -300,7 +217,6 @@ async function tailscaleChecks(context: PairingChecksContext): Promise<PairingCh
   Object.assign(tailscale, parsed);
   if (parsed.state === "unknown") {
     const said = `${status.stderr}\n${status.stdout}`.trim();
-    // The daemon is not running: the CLI cannot reach it and says so.
     if (/failed to connect|is tailscale(d)? running|not running|connection refused/i.test(said)) tailscale.state = "stopped";
     else tailscale.error = said.split("\n")[0] || null;
   }
@@ -320,7 +236,6 @@ async function tailscaleChecks(context: PairingChecksContext): Promise<PairingCh
   return tailscale;
 }
 
-/** Read every check once, the probes side by side. Turns nothing on, makes no certificate, publishes nothing. */
 export async function readPairingChecks(context: PairingChecksContext): Promise<PairingChecks> {
   const probes = { ...defaultPairingProbes, ...context.probes };
   const address = probes.lanAddress();

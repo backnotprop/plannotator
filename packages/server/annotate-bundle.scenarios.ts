@@ -1,13 +1,3 @@
-/**
- * Several files reviewed as one (`annotate-bundle`), driven over HTTP against
- * a real annotate server. Shared by the Bun suite (annotate-bundle.test.ts)
- * and the Pi mirror (apps/pi-extension/server/serverAnnotate-bundle.test.ts),
- * so both runtimes answer the same scenarios.
- *
- * Every test runs under a temp PLANNOTATOR_DATA_DIR; nothing touches the
- * real ~/.plannotator.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -127,9 +117,7 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       const plan = await (await fetch(`${server.url}/api/plan`)).json();
       expect(plan.mode).toBe("annotate-bundle");
       expect(plan.bundle).toEqual(files());
-      // Labels are relative to the deepest directory holding every file.
       expect(plan.projectRoot).toBe(join(root, "work"));
-      // Each file's comments are also kept under its own path.
       expect(plan.documentDrafts).toBe(true);
     });
 
@@ -149,13 +137,9 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       const outside = join(root, "elsewhere.md");
       writeFileSync(outside, "# Elsewhere\n");
       const server = await openBundle();
-      // A document beside a bundle file opens as a linked document, exactly as
-      // it would from that file opened alone.
       const linked = await fetch(`${server.url}/api/doc?path=unlisted.md&base=${encodeURIComponent(join(root, "work/docs"))}`);
       expect(linked.status).toBe(200);
       expect((await linked.json()).filepath).toBe(sibling);
-      // Outside every root: served to this machine (#2291); doc-any-path.scenarios.ts
-      // covers the readers that keep the roots.
       expect((await doc(server, outside)).status).toBe(200);
     });
 
@@ -166,8 +150,6 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       expect((await status.json()).documents).toEqual([mock, spec, flow]);
     });
 
-    // The failure: the CLI accepts a symlinked file, then /api/doc refuses
-    // it (403) because its real location is outside every root.
     test("a bundle file that is a symlink to elsewhere is served", async () => {
       mkdirSync(join(root, "outside"), { recursive: true });
       writeFileSync(join(root, "outside/real.md"), "# Real\n\nLinked body.\n");
@@ -185,8 +167,6 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       expect((await served.json()).markdown).toContain("Linked body.");
     });
 
-    // Edit Mode: a bundle is several single-file sessions in one review, so
-    // each listed file saves back to disk the way it would opened alone.
     const save = (server: BundleScenarioServer, path: string, text: string, baseHash: string) =>
       post(server, "/api/source/save", { path, text, baseHash, allowMissingBase: true });
 
@@ -198,11 +178,9 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       expect(response.status).toBe(200);
       expect((await response.json()).ok).toBe(true);
       expect(readFileSync(spec, "utf-8")).toBe("# Spec\n\nEdited body.\n");
-      // A stale base is a conflict, never an overwrite.
       const stale = await save(server, spec, "lost", served.sourceSave.hash);
       expect(stale.status).toBe(409);
       expect(readFileSync(spec, "utf-8")).toBe("# Spec\n\nEdited body.\n");
-      // Raw HTML stays read-only, as it is for a single file.
       expect((await (await doc(server, mock)).json()).sourceSave).toMatchObject({ enabled: false });
     });
 
@@ -210,8 +188,6 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       const outside = join(root, "elsewhere.md");
       writeFileSync(outside, "# Elsewhere\n");
       const server = await openBundle();
-      // A document linked from a bundle file is served, but read-only, exactly
-      // as a document linked from a single file is.
       const linked = await (await doc(server, sibling)).json();
       expect(linked.sourceSave?.enabled ?? false).toBe(false);
       const hash = (await (await doc(server, spec)).json()).sourceSave.hash;
@@ -219,7 +195,6 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
         const response = await save(server, target, "# Overwritten\n", hash);
         expect(response.status).toBe(403);
       }
-      // A save without a path names no file at all.
       const noPath = await post(server, "/api/source/save", { text: "x", baseHash: hash });
       expect(noPath.status).toBe(403);
       expect(readFileSync(sibling, "utf-8")).toBe("# Unlisted\n");
@@ -243,22 +218,18 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       });
       servers.push(server);
       const served = await (await doc(server, link)).json();
-      // The capability names the file the link points to.
       expect(served.sourceSave).toMatchObject({ enabled: true, path: real });
       const viaLink = await save(server, link, "# Real\n\nEdited through the link.\n", served.sourceSave.hash);
       expect(viaLink.status).toBe(200);
       const after = await viaLink.json();
       expect(readFileSync(real, "utf-8")).toBe("# Real\n\nEdited through the link.\n");
-      // The real path names the same file, so it saves too.
       const viaReal = await save(server, real, "# Real\n\nAgain.\n", after.hash);
       expect(viaReal.status).toBe(200);
       expect(readFileSync(real, "utf-8")).toBe("# Real\n\nAgain.\n");
-      // The link's directory on the far side is not the bundle: its other files stay read-only.
       expect((await save(server, other, "# Overwritten\n", after.hash)).status).toBe(403);
       expect(readFileSync(other, "utf-8")).toBe("# Other\n");
     });
 
-    // The guards every state-changing endpoint carries, on source save too.
     const saveWith = (server: BundleScenarioServer, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
       fetch(`${server.url}/api/source/save`, {
         method: "POST",
@@ -305,7 +276,6 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       expect(stale.status).toBe(409);
       expect((await stale.json()).code).toBe("session_mismatch");
       expect(readFileSync(spec, "utf-8")).toBe(original);
-      // This session's own nonce saves.
       const own = await saveWith(server, { path: spec, text: "# Spec\n\nOwn.\n", baseHash: hash, serverSession: plan.serverSession });
       expect(own.status).toBe(200);
       expect(readFileSync(spec, "utf-8")).toBe("# Spec\n\nOwn.\n");
@@ -343,14 +313,12 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       const server = await openBundle();
       const hash = await specHash(server);
       rmSync(spec);
-      // A save that does not allow a missing base names nothing on disk.
       const strict = await saveWith(server, { path: spec, text: "# Back\n", baseHash: hash });
       expect(strict.status).toBe(403);
       expect(() => readFileSync(spec, "utf-8")).toThrow();
       const recreated = await saveWith(server, { path: spec, text: "# Back\n", baseHash: hash, allowMissingBase: true });
       expect(recreated.status).toBe(200);
       expect(readFileSync(spec, "utf-8")).toBe("# Back\n");
-      // A file that never belonged to the bundle is not created beside it.
       const stranger = join(root, "work/docs/new.md");
       expect((await saveWith(server, { path: stranger, text: "# New\n", baseHash: hash, allowMissingBase: true })).status).toBe(403);
     });
@@ -359,10 +327,8 @@ export function defineAnnotateBundleScenarios(runtime: string, start: StartBundl
       const server = await openBundle();
       const versions = async (path: string) =>
         (await (await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(path)}`)).json()).versions as unknown[];
-      // Never opened through /api/doc, yet saved.
       expect(await versions(spec)).toHaveLength(1);
       expect(await versions(flow)).toHaveLength(1);
-      // Raw HTML keeps no history in a bundle, as in folder sessions.
       expect(await versions(mock)).toHaveLength(0);
     });
 

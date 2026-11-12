@@ -1,16 +1,3 @@
-/**
- * POST /api/open-in guards, driven over HTTP against real annotate and review
- * servers. Shared by the Bun suite (open-in-guards.test.ts) and the Pi mirror
- * (apps/pi-extension/server/open-in-guards.test.ts), so both runtimes answer
- * the same scenarios.
- *
- * No real app ever launches. While a request is in flight PATH holds ONLY a
- * scratch folder of launcher stubs (`open`, `xdg-open`, `code`) that record
- * their arguments and exit 0; a launcher that is not a stub cannot be found.
- * Requests go through node:http so Origin, Host and Sec-Fetch-Site are exactly
- * the ones under test. Every test runs under a temp PLANNOTATOR_DATA_DIR.
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
@@ -32,7 +19,6 @@ export type StartOpenInScenarioServer = (
 const HTML = "<!doctype html><html><body>open-in-scenario-app</body></html>";
 const LAUNCHERS = ["open", "xdg-open", "code"] as const;
 
-/** The JSON read whose payload advertises `serverSession`. */
 const FIRST_READ: Record<OpenInScenarioKind, string> = {
   annotate: "/api/plan",
   review: "/api/diff",
@@ -112,7 +98,6 @@ export function defineOpenInScenarios(runtime: string, start: StartOpenInScenari
         launchLog = join(stubDir, "launches.log");
         for (const name of LAUNCHERS) {
           const stub = join(stubDir, name);
-          // Builtins only: PATH holds nothing but this folder while it runs.
           writeFileSync(stub, `#!/bin/sh\necho "${name} $*" >> "${launchLog}"\nexit 0\n`);
           chmodSync(stub, 0o755);
         }
@@ -131,7 +116,6 @@ export function defineOpenInScenarios(runtime: string, start: StartOpenInScenari
         return existsSync(launchLog) ? readFileSync(launchLog, "utf8").trim().split("\n").filter(Boolean) : [];
       }
 
-      /** Send with PATH narrowed to the stubs, so nothing real can launch. */
       async function send(headers: Record<string, string>, body: unknown): Promise<Answer> {
         const saved = process.env.PATH;
         process.env.PATH = stubDir;
@@ -152,7 +136,6 @@ export function defineOpenInScenarios(runtime: string, start: StartOpenInScenari
         const foreign: Array<Record<string, string>> = [
           { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
           { origin: "http://127.0.0.1:9999", "sec-fetch-site": "same-site" },
-          // The sandboxed annotated-HTML frame: opaque origin.
           { origin: "null", "sec-fetch-site": "cross-site" },
           { origin: "null", "sec-fetch-site": "same-origin" },
         ];
@@ -188,8 +171,6 @@ export function defineOpenInScenarios(runtime: string, start: StartOpenInScenari
         expect(answer.body).toEqual({ ok: true });
         const lines = launches();
         expect(lines.length).toBe(1);
-        // Reveal, never a plain `open <file>` (mac: `open -R`, linux: the folder).
-        // (The path may come back as its realpath, e.g. /private/var on macOS.)
         if (process.platform === "darwin") {
           expect(lines[0].startsWith("open -R ")).toBe(true);
           expect(lines[0].endsWith("/notes.md")).toBe(true);

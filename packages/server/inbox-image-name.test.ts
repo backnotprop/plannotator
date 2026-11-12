@@ -1,9 +1,3 @@
-/**
- * A picture a message shows (and a Markdown attachment's picture) is served
- * `inline` under the name the body gave it (inboxImageResponse): a browser's
- * Save Image As saves "empty-cart.png", not "image.png" (the route's last
- * segment). The handler is called directly; no Inbox starts.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +10,6 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A PNG's signature and IHDR (2 x 3 px): enough for the sniffer and the dimension read. */
 function png(): Uint8Array {
   const bytes = new Uint8Array(33);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 3, 8, 6, 0, 0, 0]);
@@ -41,7 +34,6 @@ test("a picture in a message's text is served inline under its own file name", a
   const res = await serve(root, "![Empty cart](shots/empty-cart.png)", "shots/empty-cart.png");
   expect(res.status).toBe(200);
   expect(res.headers.get("Content-Disposition")).toBe(`inline; filename="empty-cart.png"; filename*=UTF-8''empty-cart.png`);
-  // HEAD and a revalidation (304) carry the same name.
   expect((await serve(root, "![Empty cart](shots/empty-cart.png)", "shots/empty-cart.png", "HEAD")).headers.get("Content-Disposition")).toContain('filename="empty-cart.png"');
   const etag = res.headers.get("ETag")!;
   const result = await readInboxMessageImageAsync({ body: "![x](shots/empty-cart.png)", root, base: null, path: "shots/empty-cart.png", anywhere: true });

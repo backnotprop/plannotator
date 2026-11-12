@@ -1,10 +1,3 @@
-/**
- * Trims a fetched set's PNG to its picture (a fetchable set's manifest `trim: true`, inbox-icon-set-fetch.ts): sprites
- * often sit small in the middle of a large clear square, so at 16 to 24 px only a speck would show. The clear border
- * goes, and the picture is kept centred in the smallest square that holds it (one clear pixel round it), as an RGBA
- * PNG. Anything it cannot read (interlaced, 16-bit, not a PNG, nothing clear to trim) is kept as it came: null.
- * `node:zlib` only, no dependency.
- */
 import { deflateSync, inflateSync } from "node:zlib";
 
 const SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -24,7 +17,6 @@ const crc32 = (bytes: Uint8Array) => {
   return (c ^ 0xffffffff) >>> 0;
 };
 
-/** The picture's pixels as RGBA, or null when this reader does not take it. */
 export function decodePng(bytes: Uint8Array): { width: number; height: number; rgba: Uint8Array } | null {
   if (bytes.length < 33 || SIGNATURE.some((b, i) => bytes[i] !== b)) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -116,7 +108,6 @@ function chunk(name: string, body: Uint8Array): Uint8Array {
   return out;
 }
 
-/** RGBA pixels as a PNG. */
 export function encodePng(width: number, height: number, rgba: Uint8Array): Uint8Array {
   const raw = new Uint8Array(height * (width * 4 + 1));
   for (let y = 0; y < height; y++) raw.set(rgba.subarray(y * width * 4, (y + 1) * width * 4), y * (width * 4 + 1) + 1);
@@ -134,7 +125,6 @@ export function encodePng(width: number, height: number, rgba: Uint8Array): Uint
   return out;
 }
 
-/** The PNG trimmed to its picture in a square, or null to keep it as it came. */
 export function trimPng(bytes: Uint8Array): Uint8Array | null {
   const image = decodePng(bytes);
   if (!image) return null;

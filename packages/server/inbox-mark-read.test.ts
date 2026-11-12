@@ -1,10 +1,3 @@
-/**
- * Mark read through the Inbox's real doors: `POST /api/inbox/threads/:id/read`
- * and `/unread` on a running Inbox (temp data dir, loopback), the agent side
- * over the official MCP client. Guards as for `/seen`: same origin and the
- * page's serverSession. The set-aside note waits out the Undo window
- * (shortened here) and reaches the agent like a reply.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -68,7 +61,6 @@ async function rowOf(server: InboxServer, threadId: string): Promise<InboxListRo
   return model.sections.flatMap((s) => s.threads).find((r) => r.thread_id === threadId)!;
 }
 
-/** The thread's newest message, as the agent reads it. */
 async function lastMessage(client: Client, threadId: string): Promise<{ body: string }> {
   const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses_mr" } })) as {
     structuredContent: { thread: { messages: { body: string }[] } };
@@ -106,7 +98,6 @@ describe("POST /api/inbox/threads/:id/read and /unread", () => {
     expect(stale.status).toBe(409);
     expect((await fetch(url(server, `/api/inbox/threads/${threadId}/read`))).status).toBe(405);
     expect((await post(server, "/api/inbox/threads/msg_00000000000000000000000000/read", {})).status).toBe(404);
-    // Nothing above changed the thread.
     expect((await rowOf(server, threadId)).section).toBe("stopped");
   });
 
@@ -121,7 +112,6 @@ describe("POST /api/inbox/threads/:id/read and /unread", () => {
   test("after the Undo window the asking agent gets one set-aside note, which read_thread returns", async () => {
     const { server, client, threadId } = await setup();
     await post(server, `/api/inbox/threads/${threadId}/read`, {});
-    // Inside the window nothing was written.
     expect(server.store.thread(threadId)!.messages).toHaveLength(1);
     await Bun.sleep(DELAY + 400);
     const messages = server.store.thread(threadId)!.messages;
@@ -146,7 +136,6 @@ describe("POST /api/inbox/threads/:id/read and /unread", () => {
     await post(server, `/api/inbox/threads/${threadId}/read`, {});
     await post(server, `/api/inbox/messages/${messageId}/resolve`, { resolved: true });
     await Bun.sleep(DELAY + 400);
-    // Archived: nothing goes while the thread is archived.
     expect(server.store.thread(threadId)!.messages).toHaveLength(1);
     await post(server, `/api/inbox/messages/${messageId}/resolve`, { resolved: false });
     await Bun.sleep(DELAY + 400);
@@ -178,7 +167,6 @@ describe("POST /api/inbox/messages/:id/reply with a skip list (approval inbox-ex
     const body = (await res.json()) as { reply: { body: string }; questions: InboxQuestion[] };
     expect(body.reply.body.split("\n")[0]).toBe("Skipped 1 question.");
     expect(body.questions[0]).toMatchObject({ state: "sent", answer: { skipped: true, by_reply: true } });
-    // Decisions were removed: a Send's answer names none.
     expect(Object.keys(body).sort()).toEqual(["message_id", "questions", "replayed", "reply"]);
     expect((await rowOf(server, threadId)).section).toBe("sent");
   });
@@ -191,7 +179,6 @@ describe("POST /api/inbox/messages/:id/reply with a skip list (approval inbox-ex
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ reply: null, nothing_to_send: true });
     expect(server.store.thread(threadId)!.messages).toHaveLength(1);
-    // Without a skip list an empty Send is still refused, as before.
     expect((await post(server, `/api/inbox/messages/${messageId}/reply`, { idempotency_key: "k-3", questions: [] })).status).toBe(422);
   });
 
@@ -274,14 +261,12 @@ describe("POST /api/inbox/threads/:id/mark-unread", () => {
     expect(answer.through_seq).toBe(server.store.messageCursor(messageId));
     expect((await rowOf(server, threadId)).section).toBe("new");
     expect((await questionsOf(server, threadId)).map((q) => q.state)).toEqual(["closed"]);
-    // Mark unread writes nothing to the thread; the Mark read's own note still goes, once.
     expect(server.store.thread(threadId)!.messages).toHaveLength(1);
     await Bun.sleep(DELAY + 400);
     const messages = server.store.thread(threadId)!.messages;
     expect(messages).toHaveLength(2);
     expect(messages[1]!.body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
     expect((await lastMessage(client, threadId)).body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
-    // The agent reading the thread does not make it read for the person.
     expect((await rowOf(server, threadId)).unread).toBe(true);
   });
 
@@ -317,7 +302,6 @@ describe("POST /api/inbox/threads/:id/mark-unread", () => {
     expect((await post(server, `/api/inbox/threads/${threadId}/mark-unread`, { serverSession: "an-older-inbox" })).status).toBe(409);
     expect((await fetch(url(server, `/api/inbox/threads/${threadId}/mark-unread`))).status).toBe(405);
     expect((await post(server, "/api/inbox/threads/msg_00000000000000000000000000/mark-unread", {})).status).toBe(404);
-    // Nothing above changed the look.
     expect((await rowOf(server, threadId)).unseen).toBe(0);
     await post(server, `/api/inbox/messages/${messageId}/resolve`, { resolved: true });
     const archived = await post(server, `/api/inbox/threads/${threadId}/mark-unread`, {});

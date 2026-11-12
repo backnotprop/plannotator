@@ -1,19 +1,3 @@
-/**
- * send_message on questions an agent wrote in a shape that may not ask what
- * it meant. An `id:` label before the question line (an agent whose history
- * was compacted put `id: sd-approach` first) is no mistake: the parser reads
- * the next line as the question and shows the label as context under it, so
- * the person sees the real question and the agent gets no advice. A
- * pick-one block with no choices gets a line saying how to send it again in
- * place of this one. Advice only: the message is sent.
- *
- * What regresses if this fails: the person gets a question titled
- * "id: sd-approach" again; or the agent never hears that its pick-one
- * question has no choices; or the line names ids the resend is refused with.
- *
- * A real store in a temp data dir, driven through sendAgentMessage (the
- * send path send_message runs); no Inbox server, no network.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -57,7 +41,6 @@ test("a pick-one or pick-several block with no choices is named; free text, plai
   expect(inboxQuestionsToCheck(block("question-text", "What should the empty state say?"))).toEqual([]);
   expect(inboxQuestionsToCheck(block("question", "Which approach?", "", "- Rewrite", "- Patch"))).toEqual([]);
   expect(inboxQuestionsToCheck(block("question", "id: sd-approach", "Which approach do we take?", ...CHOICES))).toEqual([]);
-  // The position counts the questions as written.
   const two = [block("question", "Which approach do we take?", ...CHOICES), "", block("question", "Which database?")].join("\n");
   expect(inboxQuestionsToCheck(two).map((q) => q.position)).toEqual([2]);
 });
@@ -67,7 +50,6 @@ test("sent with an id label first: the stored question is the real one, keyed as
   const labelled = await sendAgentMessage(context, project, { body: block("question", "id: sd-approach", "Which approach do we take?", ...CHOICES), agent_host: "claude-code", agent_session: "ses_a" });
   const [question] = labelled.structured.questions as { key: string; prompt: string }[];
   expect(question!.prompt).toBe("Which approach do we take?");
-  // The key builds before this stored for the same block (the label line was the prompt then).
   expect(question!.key).toBe("q-41d641f8");
   expect(labelled.structured.questions_to_check).toBeUndefined();
   expect(questionsToCheckText(String(labelled.structured.message_id), labelled.questionsToCheck)).toBe("");

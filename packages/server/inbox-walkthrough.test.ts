@@ -1,6 +1,3 @@
-/**
- * A walkthrough's read: what an agent names becomes a patch of context lines, or a refusal that says which file.
- */
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -119,7 +116,6 @@ describe("reading a guide", () => {
   });
 });
 
-// The owner: a walkthrough is part of code review, so with Code review off an agent gets nothing about it.
 describe("Code review off: nothing of walkthroughs reaches an agent", () => {
   type Tool = { config: { description: string; inputSchema: { shape: Record<string, { description?: string }> } }; handler: (input: unknown, ctx: unknown) => Promise<{ isError?: boolean; content: { text: string }[] }> };
   const toolsWith = (on: boolean) => {

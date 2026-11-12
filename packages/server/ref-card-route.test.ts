@@ -1,7 +1,3 @@
-/**
- * Bun servers: `GET /api/ref` (the issue / PR / MR hover cards). Scenarios are
- * shared with the Pi mirror (apps/pi-extension/server/ref-card-route.test.ts).
- */
 import { defineRefCardRouteScenarios } from "./ref-card-route.scenarios";
 import { startPlannotatorServer } from "./index";
 import { startAnnotateServer } from "./annotate";
@@ -19,10 +15,8 @@ defineRefCardRouteScenarios(
     return startAnnotateServer({ markdown: "# Notes\n", filePath: docPath, htmlContent, mode: "annotate", refRunner, tailnetPublished });
   },
   {
-    // `--tailscale` exists for review and annotate only (plan review has no such flag).
     tailnet: {
       kinds: ["annotate", "review"],
-      // What the CLI records once `tailscale serve` is up (apps/hook/server/index.ts).
       publish(owner, servedUrl) {
         setSessionTailnetOwners(owner ? [owner] : []);
         setSessionTailnetServedUrl(servedUrl);

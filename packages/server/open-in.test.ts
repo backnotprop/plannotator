@@ -13,10 +13,6 @@ import { delimiter, join } from "node:path";
 import { resolveOpenInTarget } from "@plannotator/shared/html-assets-node";
 import { openFileInApp } from "./open-in";
 
-// resolveOpenInTarget is the security boundary for POST /api/open-in: it decides
-// which absolute file a launch is allowed to touch. Real temp dirs/files are
-// used so the realpath-based symlink containment (isWithinDirectory) actually runs.
-
 const tempDirs: string[] = [];
 function makeDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "open-in-test-"));
@@ -28,7 +24,6 @@ afterAll(() => {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {
-      /* best effort cleanup */
     }
   }
 });
@@ -41,7 +36,6 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
   });
 
   test("empty server roots deny opens while PR checkout warmup is pending", () => {
-    // resolveOpenInRoot returns [] in PR pool warmup; that must deny, not fall back.
     expect(resolveOpenInTarget("notes.md", null, () => [])).toBeNull();
   });
 
@@ -58,7 +52,6 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
   test("a server root overrides a malicious client base", () => {
     const root = makeDir();
     writeFileSync(join(root, "inside.md"), "x");
-    // base "/" would otherwise let anything through; the server root must win.
     expect(resolveOpenInTarget("/etc/passwd", "/", () => root)).toBeNull();
     expect(resolveOpenInTarget("inside.md", "/", () => root)).not.toBeNull();
   });
@@ -70,7 +63,7 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
     try {
       symlinkSync(join(outside, "secret.txt"), join(root, "link.txt"));
     } catch {
-      return; // platform without symlink permission (e.g. Windows CI) — skip
+      return;
     }
     expect(resolveOpenInTarget("link.txt", null, () => root)).toBeNull();
   });
@@ -78,7 +71,6 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
   test("with no server root, an absolute path resolves against its own dir", () => {
     const root = makeDir();
     writeFileSync(join(root, "file.md"), "x");
-    // Documents the default (review supplies resolveAgentCwd; this is the fallback).
     expect(resolveOpenInTarget(join(root, "file.md"), null, undefined)).not.toBeNull();
   });
 
@@ -86,10 +78,7 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
     const a = makeDir();
     const b = makeDir();
     writeFileSync(join(b, "doc.md"), "x");
-    // A linked doc living in root B is allowed because B is one of the roots
-    // (mirrors /api/doc serving from cwd + the source-file dir).
     expect(resolveOpenInTarget(join(b, "doc.md"), null, () => [a, b])).not.toBeNull();
-    // Outside every allowed root → still rejected.
     expect(resolveOpenInTarget("/etc/passwd", null, () => [a, b])).toBeNull();
   });
 
@@ -97,21 +86,14 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
     const a = makeDir();
     const b = makeDir();
     writeFileSync(join(a, "x.md"), "x");
-    // A relative path resolves within a root that contains it.
     expect(resolveOpenInTarget("x.md", null, () => [a, b])).not.toBeNull();
-    // A traversal can't escape one root by landing inside another.
     expect(resolveOpenInTarget("../x.md", null, () => [a, b])).toBeNull();
   });
 });
 
-// Launch semantics for POST /api/open-in: the launcher must be a concurrent
-// side concern of the review session. Each test shims the per-platform
-// launcher command (mac: `open`, linux: the catalog's `code` bin) onto PATH
-// and drives the real openFileInApp. Skipped on Windows (no sh shims).
 const launcherShimName = process.platform === "darwin" ? "open" : "code";
 const launchTest = process.platform === "win32" ? test.skip : test;
 
-/** Write the executable launcher shim into `dir`. */
 function writeShim(dir: string, script: string): void {
   const shim = join(dir, launcherShimName);
   writeFileSync(shim, script);
@@ -132,7 +114,6 @@ async function waitForPidFile(path: string, timeoutMs = 5000): Promise<number> {
       const text = readFileSync(path, "utf-8").trim();
       if (text) return Number.parseInt(text, 10);
     } catch {
-      /* not written yet */
     }
     await Bun.sleep(25);
   }
@@ -165,7 +146,6 @@ describe("openFileInApp app ids", () => {
     try {
       launched = readFileSync(log, "utf-8");
     } catch {
-      /* never written: nothing launched */
     }
     expect(launched).toBe("");
   });
@@ -192,17 +172,11 @@ describe("openFileInApp launch semantics", () => {
         const result = await openFileInApp(target, "vscode");
         const elapsed = Date.now() - started;
 
-        // Regression guard: the request must not be held until the launcher
-        // exits (30s here). It resolves ok at the grace deadline instead.
         expect(result.ok).toBe(true);
         expect(elapsed).toBeLessThan(8000);
 
         childPid = await waitForPidFile(pidFile);
-        // The launcher is still running after we answered ok...
         expect(() => process.kill(childPid!, 0)).not.toThrow();
-        // ...and in its OWN process group, so a signal aimed at this
-        // process's group (agent cancelling the session, terminal close)
-        // cannot take a cold-started editor down with it.
         expect(pgidOf(childPid)).not.toBe(pgidOf(process.pid));
       } finally {
         process.env.PATH = oldPath;
@@ -210,7 +184,6 @@ describe("openFileInApp launch semantics", () => {
           try {
             process.kill(childPid, "SIGKILL");
           } catch {
-            /* already gone */
           }
         }
       }
@@ -235,7 +208,6 @@ describe("openFileInApp launch semantics", () => {
         const result = await openFileInApp(target, "vscode");
         expect(result.ok).toBe(false);
         if (result.ok === false) {
-          // Same failure shape as before the detach: exit code + stderr.
           expect(result.error).toContain("Failed to open");
           expect(result.error).toContain("exit 1");
           expect(result.error).toContain(
@@ -254,9 +226,6 @@ describe("openFileInApp launch semantics", () => {
     async () => {
       const shimDir = makeDir();
       const pidFile = join(shimDir, "child.pid");
-      // Writes far more stderr than a pipe buffer holds, THEN records its pid
-      // and lingers. Without a concurrent drain the shim blocks on the full
-      // pipe and never reaches sleep, and the request never returns.
       writeShim(
         shimDir,
         `#!/bin/sh\nhead -c 200000 /dev/zero | tr '\\0' e >&2\necho $$ > "${pidFile}"\nexec sleep 30\n`,
@@ -280,7 +249,6 @@ describe("openFileInApp launch semantics", () => {
           try {
             process.kill(childPid, "SIGKILL");
           } catch {
-            /* already gone */
           }
         }
       }

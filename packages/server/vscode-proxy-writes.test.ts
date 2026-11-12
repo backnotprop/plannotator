@@ -1,15 +1,3 @@
-/**
- * The VS Code extension panel loads Plannotator through its cookie proxy
- * (apps/vscode-extension/src/cookie-proxy.ts): the page's origin is the
- * proxy's (`http://127.0.0.1:<proxy port>`) and the proxy rewrites Host to the
- * server's. The same-origin guard on the write endpoints must still accept
- * those writes, or VS Code settings, viewed-file progress and the CallDiff
- * install silently stop working, while a page on another site stays refused.
- *
- * Requests go through node:http so the Host and Sec-Fetch-Site headers are
- * exactly what a browser behind the proxy sends. The Pi mirror is
- * apps/pi-extension/vscode-proxy-writes.test.ts.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as http from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -53,11 +41,9 @@ function send(url: string, path: string, headers: Record<string, string>, body: 
   });
 }
 
-/** The write endpoints, each with a body that never starts real work. */
 const WRITES: Array<[string, string]> = [
   ["/api/config", JSON.stringify({ agentTool: true })],
   ["/api/review-progress?snapshot=none", JSON.stringify({})],
-  // Not JSON: the install answers 400 after the origin check, starting nothing.
   ["/api/call-flow/install", "not json"],
 ];
 
@@ -102,10 +88,8 @@ describe("write endpoints behind the VS Code cookie proxy (Bun review server)", 
     try {
       const panelUrl = proxy.rewriteUrl(server.url);
       const panelOrigin = new URL(panelUrl).origin;
-      // No Sec-Fetch-Site: the proxy's Origin rewrite alone must carry it.
       expect(await send(panelUrl, "/api/config", { origin: panelOrigin }, JSON.stringify({ agentTool: true }))).toBe(200);
       expect(loadConfig().agentTool).toBe(true);
-      // A foreign Origin is forwarded untouched and refused.
       expect(await send(panelUrl, "/api/config", { origin: "https://evil.example" }, JSON.stringify({ agentTool: false }))).toBe(403);
       expect(loadConfig().agentTool).toBe(true);
     } finally {

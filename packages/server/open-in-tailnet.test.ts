@@ -1,13 +1,3 @@
-/**
- * A session published over the tailnet (`--tailscale`) is reachable from
- * other devices, so it never launches an app on this machine: the apps list
- * answers unavailable and POST /api/open-in is refused, as in remote mode.
- * Bun only (Pi has no --tailscale).
- *
- * No real app can launch: while a request is in flight PATH holds only a
- * scratch folder of launcher stubs that record their arguments.
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

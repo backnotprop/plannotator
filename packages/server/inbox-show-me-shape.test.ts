@@ -1,21 +1,3 @@
-/**
- * Show me makes a Shape (approval "code-review-launch-build", items 1 and 3),
- * through a running Inbox's real doors: the MCP client for the agent's review,
- * the window's own requests for the Show me, the store the `plannotator shape`
- * command writes to, config.json (this test's temp data dir) for the switches.
- *
- * What regresses:
- *  - the boards or a Show me reachable with Code review on and Shape's own switch
- *    off (approval "code-review-029-shape-off"), or with both off;
- *  - a Show me about a review of another thread, a file the review lacks, or
- *    with words other than the request the agent will read;
- *  - a turn not naming the board the agent stored for it, or naming one a later
- *    Show me, an earlier board or other work on the thread's boards made;
- *  - Show me again's retry from the Ask window being refused, or its board id
- *    not being a board id;
- *  - the old drawings routes coming back;
- *  - Show me reaching anyone with Code review off.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,7 +35,6 @@ async function world() {
   writeFileSync(join(project, "notes.md"), "# Notes\n");
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
-  // The Inbox reads config.json through the env: this test's own, so the switches are the person's file.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const server = await startInboxServer({ dataDir, phones: false, binaryPath: null, askTimes: { connectWaitMs: 0 } });
   servers.push(server);
@@ -71,12 +52,10 @@ async function world() {
     });
   const setCodeReview = (on: boolean) => fromWindow("/api/inbox/settings", { code_review: { on } });
   const setShape = (on: boolean) => fromWindow("/api/inbox/settings", { shape: { on } });
-  /** Show me's two switches: Code review and Shape. */
   const bothOn = async () => {
     expect((await setCodeReview(true)).status).toBe(200);
     expect((await setShape(true)).status).toBe(200);
   };
-  /** The agent's session says it can answer live, so a question is saved. */
   const live = async () => {
     const poll = await fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, {
       method: "POST",
@@ -100,7 +79,6 @@ async function world() {
       show_me: target,
       ...(again ? { again_shape: again } : {}),
     });
-  /** What `plannotator shape update --thread T --through M` writes. */
   const store = createShapeStore({ dataDir });
   const drawBoard = (thread: string, through: string, id?: string, base_?: number) => {
     const made = store.update({ board: BOARD, project: { root: project, name: "ledger" }, thread, through, ...(id ? { id, base: base_ } : {}) } as Parameters<typeof store.update>[0]);
@@ -108,7 +86,6 @@ async function world() {
     return made.id;
   };
   const turnsOf = async (threadId: string) => (await json(await fromWindow(askPath(threadId)))).conversation?.turns ?? [];
-  /** The agent's answer reaches the Inbox: the turn has its end. (No connection here, so none of these turns is running.) */
   const answer = (threadId: string, turnId: string) => updateInboxAskTurn(join(dataDir, "inbox"), threadId, turnId, { answer: "Drew it.", answered_at: new Date().toISOString() });
   return { project, dataDir, server, call, fromWindow, setCodeReview, setShape, bothOn, sendReview, askPath, showMe, drawBoard, turnsOf, answer };
 }
@@ -123,14 +100,12 @@ describe("Show me while Code review and Shape are on", () => {
     await w.setCodeReview(true);
     const review = await w.sendReview();
     const id = w.drawBoard(review.thread_id, review.message_id);
-    // Code review on, Shape off: no board and no Show me.
     expect((await w.fromWindow("/api/shapes")).status).toBe(404);
     expect((await w.fromWindow(`/api/shapes/${id}`)).status).toBe(404);
     const target: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 1 };
     const refused = await w.showMe(review.thread_id, "turn-0001", target, review.guide.title);
     expect([refused.status, (await json(refused)).code]).toEqual([409, "shape_off"]);
     expect(await w.turnsOf(review.thread_id)).toEqual([]);
-    // Both on: as before.
     await w.setShape(true);
     const list = await w.fromWindow("/api/shapes");
     expect(list.status).toBe(200);
@@ -150,18 +125,15 @@ describe("Show me while Code review and Shape are on", () => {
     const title = review.guide.title;
     const lines: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 7, words: "why here" };
 
-    // A board stored before any Show me is nobody's turn's.
     w.drawBoard(review.thread_id, review.message_id);
     await pause();
     const first = await w.showMe(review.thread_id, "turn-0001", lines, title);
     expect(first.status).toBe(200);
-    // The window's round is not believed: the Inbox counts the thread's reviews.
     expect((await json(first)).turn).toMatchObject({ id: "turn-0001", kind: "show_me", show_me: { ...lines, round: 1 } });
     expect((await w.turnsOf(review.thread_id))[0].shape).toBeUndefined();
 
     await pause();
     const board = w.drawBoard(review.thread_id, review.message_id);
-    // Not running and no end kept (the session went away with no words): the board is not this turn's.
     expect((await w.turnsOf(review.thread_id))[0].shape).toBeUndefined();
     await pause();
     w.answer(review.thread_id, "turn-0001");
@@ -215,7 +187,6 @@ describe("Show me while Code review and Shape are on", () => {
     const turn = (await json(again)).turn;
     expect(turn).toMatchObject({ kind: "show_me", again_shape: board });
     expect(turn.question).toContain(`Bring your Shape ${board} up to date`);
-    // What AskChat's retry sends: the kept turn's question, target and board.
     const retry = await w.fromWindow(w.askPath(review.thread_id), { turn_id: turn.id, question: turn.question, kind: "show_me", show_me: turn.show_me, again_shape: turn.again_shape });
     expect(retry.status).toBe(200);
     expect((await json(retry)).turn.id).toBe("turn-0002");
@@ -343,7 +314,6 @@ describe("which board a Show me made (other work on the thread's boards is never
     expect(link([turn("t", 10, { answer: "done", answered_at: at(20) })], [elsewhere, updated])).toEqual({ t: "updated" });
     expect(link([turn("t", 10, { answer: "words only", answered_at: at(11) })], [updated])).toEqual({});
     expect(link([turn("t", 10, { answer: "words only", answered_at: at(11) })], [{ id: "late", versions: [v(1, 12)] }])).toEqual({});
-    // A new board the agent stored with no --through is still what it made.
     expect(link([turn("t", 10, { answer: "done", answered_at: at(20) })], [{ id: "bare", versions: [v(1, 12, null)] }])).toEqual({ t: "bare" });
   });
 
@@ -379,7 +349,6 @@ describe("Code review off", () => {
     const target: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 1 };
     expect((await w.showMe(review.thread_id, "turn-0001", target, review.guide.title)).status).toBe(200);
     expect((await w.setCodeReview(false)).status).toBe(200);
-    // Ask has no switch: it stays on with Code review off, and only Show me is refused.
     expect((await json(await w.fromWindow("/api/inbox/settings"))).ask_ai).toBe(true);
     const refused = await w.showMe(review.thread_id, "turn-0002", target, review.guide.title);
     expect(refused.status).toBe(409);

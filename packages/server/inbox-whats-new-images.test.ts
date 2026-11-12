@@ -1,10 +1,3 @@
-/**
- * Images in the What's new page (inbox-whats-new-images.ts): which URLs the
- * Inbox fetches, the caps on each image, the release check's switch and
- * claim, and the route that serves the copies. GitHub is a fake on loopback,
- * reached the way tests reach the release API (PLANNOTATOR_UPDATE_API_URL);
- * nothing here asks the real GitHub.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +20,6 @@ import {
   releaseImageSources,
 } from "./inbox-whats-new-images";
 
-/** A PNG header naming its size (enough for the sniffer and the pixel cap). */
 function png(width = 2, height = 3, pad = 0): Uint8Array {
   const bytes = new Uint8Array(33 + pad);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
@@ -72,7 +64,6 @@ beforeEach(() => {
       return route ? route() : new Response("not found", { status: 404 });
     },
   });
-  // Another loopback origin: not the one the knob names, so not allowed.
   other = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -107,23 +98,19 @@ describe("which URLs are fetched", () => {
     expect(ok("https://github.com/user-attachments/assets/0b1c-uuid")).toBe(true);
     expect(ok("https://private-user-images.githubusercontent.com/1/2.png?jwt=x")).toBe(true);
     expect(ok("https://user-images.githubusercontent.com/1/2.png")).toBe(true);
-    // Only the hosts release attachments use: not gist., objects., camo. or others.
     expect(ok("https://gist.githubusercontent.com/u/abc/raw/a.png")).toBe(false);
     expect(ok("https://objects.githubusercontent.com/a.png")).toBe(false);
     expect(ok("https://camo.githubusercontent.com/abc")).toBe(false);
     expect(ok("https://avatars.githubusercontent.com/u/1")).toBe(false);
     expect(ok("https://githubusercontent.com/a.png")).toBe(false);
-    // An empty label never passes.
     expect(ok("https://.githubusercontent.com/a.png")).toBe(false);
     expect(ok("https://private-user-images..githubusercontent.com/a.png")).toBe(false);
     expect(ok("https://private-user-images.githubusercontent.com./a.png")).toBe(false);
     expect(ok("https://github.com./user-attachments/assets/a")).toBe(false);
     expect(ok("https://raw.githubusercontent.com/backnotprop/plannotator/main/a.png")).toBe(true);
-    // raw only for this repository; github.com only for attachments.
     expect(ok("https://raw.githubusercontent.com/someone/else/main/a.png")).toBe(false);
     expect(ok("https://github.com/backnotprop/plannotator/raw/main/a.png")).toBe(false);
     expect(ok("https://github.com/user-attachments/files/1/a.zip")).toBe(false);
-    // Lookalikes, other schemes, ports and credentials.
     expect(ok("https://githubusercontent.com.evil.example/a.png")).toBe(false);
     expect(ok("https://evilgithubusercontent.com/a.png")).toBe(false);
     expect(ok("https://example.com/a.png")).toBe(false);
@@ -139,7 +126,6 @@ describe("which URLs are fetched", () => {
     const knob = { PLANNOTATOR_UPDATE_API_URL: "http://127.0.0.1:9999/releases/latest" } as NodeJS.ProcessEnv;
     expect(allowedReleaseImageUrl("http://127.0.0.1:9999/x.png", knob)).not.toBeNull();
     expect(allowedReleaseImageUrl("http://127.0.0.1:9998/x.png", knob)).toBeNull();
-    // A mirror that is not loopback widens nothing.
     const mirror = { PLANNOTATOR_UPDATE_API_URL: "https://mirror.example/releases/latest" } as NodeJS.ProcessEnv;
     expect(allowedReleaseImageUrl("https://mirror.example/x.png", mirror)).toBeNull();
   });
@@ -241,14 +227,11 @@ describe("a release's images", () => {
     const dir = join(dataDir, "update-notes", "0.28.12");
     expect(readdirSync(dir).sort()).toEqual([images[asset("a")]!.file, images[asset("b")]!.file, "images.json"].sort());
     expect(readReleaseNotes("0.28.12", dataDir)?.notes).toStartWith("Hello.");
-    // The claim, with the failure: no second request within 6 h.
     expect(readUpdateState(dataDir).releaseImagesFetch?.["0.28.12"]).toMatchObject({ failedAt: expect.any(Number), error: "HTTP 404" });
     const before = requests.length;
     expect(await fetchReleaseImagesFor(deps())).toEqual({ outcome: "not-due" });
-    // Images keep the notes' back-off, not the hourly release check's.
     expect(await fetchReleaseImagesFor(deps({ now: () => Date.now() + RELEASE_CHECK_RETRY_MS }))).toEqual({ outcome: "not-due" });
     expect(requests.length).toBe(before);
-    // Six hours later only the missing one is asked for again.
     expect(await fetchReleaseImagesFor(deps({ now: () => Date.now() + 6 * 60 * 60 * 1000 + 1 }))).toMatchObject({ outcome: "fetched", stored: [] });
     expect(requests.slice(before).map((r) => r.path)).toEqual(["/user-attachments/assets/gone"]);
   });
@@ -274,13 +257,10 @@ describe("a release's images", () => {
     routes["/user-attachments/assets/a"] = () => new Response(png());
     writeNotes(`![a](${asset("a")})`);
     const start = Date.now();
-    // The first try claims, then its process goes away before any image answers.
     void fetchReleaseImagesFor(deps({ now: () => start, fetchImpl: (() => new Promise<never>(() => {})) as unknown as typeof fetch }));
     expect(readUpdateState(dataDir).releaseImagesFetch?.["0.28.12"]?.attemptedAt).toBe(start);
-    // A concurrent process still waits out the claim (a live fetch takes about 3 min at most)...
     expect(await fetchReleaseImagesFor(deps({ now: () => start + RELEASE_NOTES_PENDING_RETRY_MS - 1 }))).toEqual({ outcome: "not-due" });
     expect(requests).toEqual([]);
-    // ...and asks again 15 minutes after it.
     expect(await fetchReleaseImagesFor(deps({ now: () => start + RELEASE_NOTES_PENDING_RETRY_MS }))).toMatchObject({ outcome: "fetched", stored: [asset("a")] });
     expect(Object.keys(readReleaseImages("0.28.12", dataDir))).toEqual([asset("a")]);
   });
@@ -291,7 +271,6 @@ describe("a release's images", () => {
     writeNotes(`![a](${asset("a")})`);
     const start = Date.now();
     expect(await fetchReleaseImagesFor(deps({ now: () => start }))).toMatchObject({ outcome: "fetched", stored: [asset("a")] });
-    // The release body is edited after publishing: the notes now show a second image.
     writeNotes(`![a](${asset("a")})\n\n![b](${asset("b")})`);
     const before = requests.length;
     expect(await fetchReleaseImagesFor(deps({ now: () => start + RELEASE_NOTES_PENDING_RETRY_MS }))).toEqual({ outcome: "not-due" });

@@ -1,13 +1,3 @@
-/**
- * Combining projects through the Inbox's real doors: `POST
- * /api/inbox/projects/:id/combine` on a running Inbox (temp data dir, loopback),
- * real git repositories in temp folders and the official MCP client for the
- * agents. What can regress: an agent in the combined folder losing sight of the
- * other folder's threads, search or cards, Compose splitting one project in
- * two, a session in the other folder not being offered, Tidy suggesting a
- * guess, the delete rule losing a project, and the route skipping a guard the
- * other window writes have.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,7 +45,6 @@ function git(cwd: string, ...args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
 }
 
-/** A repository with a commit, at `folder`, with `origin` when one is given. */
 function repository(folder: string, origin?: string): string {
   mkdirSync(folder, { recursive: true });
   git(folder, "init", "-q");
@@ -66,7 +55,6 @@ function repository(folder: string, origin?: string): string {
 
 const ORIGIN = "https://github.com/acme/ledger.git";
 
-/** The person's layout: one repository cloned twice, and an unrelated project. */
 async function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-combine-")));
   scratch.push(root);
@@ -96,7 +84,6 @@ const post = (server: InboxServer, path: string, body: Record<string, unknown>, 
   fetch(url(server, path), { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ serverSession: server.serverSession, ...body }) });
 const combine = (server: InboxServer, id: string, into: string | null) => post(server, `/api/inbox/projects/${id}/combine`, { into });
 
-/** A connection polling from `folder`: the session is live for 30 s after it. */
 async function poll(server: InboxServer, session: string, folder: string): Promise<void> {
   const response = await fetch(url(server, INBOX_BRIDGE_POLL_PATH), {
     method: "POST",
@@ -124,7 +111,6 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean): Pr
   throw new Error("the Inbox did not reach the expected state");
 }
 
-/** Both clones, each with one thread, combined: `from` into `into`. */
 async function combined() {
   const w = await world();
   const inLedger = await send(w.client, { project_path: w.ledger, subject: "Ledger migration", body: "Heron carried the ledger.", agent_session: "ses_ledger" });
@@ -153,7 +139,6 @@ describe("POST /api/inbox/projects/:id/combine", () => {
   test("refuses itself, a member of itself, a missing project, a bad id, and requests without the window's guards", async () => {
     const w = await combined();
     const path = `/api/inbox/projects/${w.into}/combine`;
-    // The head into its own member: that would be a loop.
     const loop = await combine(w.server, w.into, w.from);
     expect(loop.status).toBe(422);
     expect(((await loop.json()) as { code: string }).code).toBe("validation_error");
@@ -162,7 +147,6 @@ describe("POST /api/inbox/projects/:id/combine", () => {
     expect((await combine(w.server, w.into, "prj_00000000000000000000000000")).status).toBe(404);
     expect((await combine(w.server, "nope", w.into)).status).toBe(422);
     for (const body of [{}, { into: 42 }, { into: "nope" }]) expect((await post(w.server, path, body)).status).toBe(422);
-    // Another site's page, a tab of an older Inbox, a GET.
     const third = (await send(w.client, { project_path: w.other, body: "Billing.", agent_session: "ses_other" })).project.id as string;
     const thirdPath = `/api/inbox/projects/${third}/combine`;
     const cross = await post(w.server, thirdPath, { into: w.into }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
@@ -170,7 +154,6 @@ describe("POST /api/inbox/projects/:id/combine", () => {
     expect(((await cross.json()) as { code: string }).code).toBe("cross_origin");
     expect((await post(w.server, thirdPath, { into: w.into, serverSession: "an-older-inbox" })).status).toBe(409);
     expect((await fetch(url(w.server, thirdPath))).status).toBe(405);
-    // Nothing above changed anything.
     expect(w.server.store.project(third)?.merged_into).toBeUndefined();
     expect(w.server.store.project(w.into)?.merged_into).toBeUndefined();
   });
@@ -200,7 +183,6 @@ describe("an agent in either folder of a combined project", () => {
       expect(listed.threads.map((row: { id?: string; thread_id?: string }) => row.thread_id ?? row.id).sort()).toEqual([w.inLedger.thread_id, w.inClone.thread_id].sort());
       expect(listed.project.name).toBe("ledger");
     }
-    // Undone: each folder lists its own again.
     await combine(w.server, w.from, null);
     const own = await tool(w.client, "read_thread", { project_path: w.clone, asked_by: "anyone" });
     expect(own.threads).toHaveLength(1);
@@ -216,7 +198,6 @@ describe("an agent in either folder of a combined project", () => {
     const everywhere = await tool(w.client, "search", { query: "carried", all_projects: true });
     expect(everywhere.total).toBe(2);
     expect(new Set(everywhere.results.map((row: { project?: string | { name: string } }) => (typeof row.project === "string" ? row.project : row.project?.name)))).toEqual(new Set(["ledger"]));
-    // Undone: a search from one folder stays in it.
     await combine(w.server, w.from, null);
     expect((await tool(w.client, "search", { query: "heron", project_path: w.clone })).total).toBe(0);
   });
@@ -226,7 +207,6 @@ describe("an agent in either folder of a combined project", () => {
     const fromLedger = await tool(w.client, "card", { op: "create", title: "Move ledger", idempotency_key: "one-card", project_path: w.ledger, agent_session: "ses_ledger", agent_host: "claude-code" });
     const again = await tool(w.client, "card", { op: "create", title: "Move ledger", idempotency_key: "one-card", project_path: w.clone, agent_session: "ses_clone", agent_host: "claude-code" });
     expect(again.card.id).toBe(fromLedger.card.id);
-    // The card is the ledger's; the clone's agent links its own thread to it, and lists it.
     const linked = await tool(w.client, "card", { op: "link", card_id: fromLedger.card.id, thread_id: w.inClone.thread_id, project_path: w.clone, agent_session: "ses_clone", agent_host: "claude-code" });
     expect(linked.card.id).toBe(fromLedger.card.id);
     const listed = await tool(w.client, "card", { op: "list", asked_by: "anyone", project_path: w.clone, agent_session: "ses_clone", agent_host: "claude-code" });
@@ -289,7 +269,6 @@ describe("the window on a combined project", () => {
 
     const removed = await post(w.server, `/api/inbox/projects/${w.into}/delete`, {});
     expect(removed.status).toBe(200);
-    // The clone's thread is not gone, and it has a project again.
     const left = await rows(w.server);
     expect(left.map((row) => [row.thread_id, row.project.id])).toEqual([[w.inClone.thread_id, w.from]]);
     expect(w.server.store.listProjects().map((project: InboxProject) => project.id)).toContain(w.from);
@@ -331,7 +310,6 @@ describe("Tidy's Combine projects", () => {
       },
     });
     servers.push(server);
-    // Past the read of every project's origin at startup, and not in the cache: the Inbox did not resolve this one.
     await Bun.sleep(100);
     server.store.ensureProject({ name: "ledger", root: join(root, "ledger") });
     await tidyPlan(server);
@@ -353,8 +331,6 @@ describe("Tidy's Combine projects", () => {
     expect(board.combine).toBeUndefined();
   });
 
-  // Audit D2: a session started in a plain folder above a repository files there; the repository's own sessions
-  // file under the repository. The folder is offered only when all its agents' work was that repository's.
   test("offers a plain folder whose agents all worked in the one repository inside it, and never an unrelated folder", async () => {
     const w = await world();
     const work = join(w.root, "work");
@@ -362,7 +338,6 @@ describe("Tidy's Combine projects", () => {
     mkdirSync(join(app, "src"));
     const docs = join(w.root, "docs");
     const site = repository(join(docs, "site"), "https://github.com/acme/site.git");
-    // Started in work/ and cd'd into app/src: the send carries the folder it worked in (as the Claude Code mod sends it).
     const above = (await w.client.callTool({
       name: "send_message",
       arguments: { project_path: work, body: "Fixed the importer.", agent_session: "ses_above" },
@@ -370,12 +345,10 @@ describe("Tidy's Combine projects", () => {
     })) as ToolResult;
     expect(above.isError).toBeFalsy();
     await send(w.client, { project_path: app, body: "The importer's tests.", agent_session: "ses_codex" });
-    // docs/: one session worked in docs itself, another in the site repository: other work.
     await send(w.client, { project_path: docs, body: "Launch notes.", agent_session: "ses_docs" });
     await send(w.client, { project_path: site, body: "Site build.", agent_session: "ses_site" });
     const plan = await until(() => tidyPlan(w.server), (found) => found.combine_loading === undefined);
     expect(plan.combine?.map((pair) => [pair.from.root, pair.into.root, pair.why])).toEqual([[work, app, COMBINE_WHY_STARTED_ABOVE]]);
-    // Once the session that wrote in docs also writes in site, its work is the site's: then docs is offered too.
     await send(w.client, { project_path: site, body: "The launch notes, for the site.", agent_session: "ses_docs" });
     const again = await until(() => tidyPlan(w.server), (found) => (found.combine?.length ?? 0) === 2);
     expect(again.combine?.map((pair) => [pair.from.root, pair.into.root]).sort()).toEqual([[docs, site], [work, app]].sort());
@@ -383,13 +356,11 @@ describe("Tidy's Combine projects", () => {
 
   test("never offers a folder of repositories of which only one reached the Inbox yet (review of #2528, F1)", async () => {
     const w = await world();
-    // ~/repos holds a, b and c; only a has Inbox traffic. b is a repository, c holds checkouts in worktrees/.
     const code = join(w.root, "repos");
     const a = repository(join(code, "a"), "https://github.com/acme/a.git");
     repository(join(code, "b"));
     mkdirSync(join(code, "c", "worktrees", "main"), { recursive: true });
     mkdirSync(join(code, "notes"));
-    // The same shape as the offered pair: started in code/, every message the work of a.
     const above = (await w.client.callTool({
       name: "send_message",
       arguments: { project_path: code, body: "Fixed a's importer.", agent_session: "ses_above" },
@@ -399,7 +370,6 @@ describe("Tidy's Combine projects", () => {
     await send(w.client, { project_path: a, body: "a's tests.", agent_session: "ses_above" });
     const plan = await until(() => tidyPlan(w.server), (found) => found.combine_loading === undefined);
     expect(plan.combine?.some((pair) => pair.from.root === code) ?? false).toBe(false);
-    // b alone beside a is enough; and c's checkouts alone too. With neither, only a plain notes folder: offered.
     rmSync(join(code, "c"), { recursive: true });
     expect((await tidyPlan(w.server)).combine?.some((pair) => pair.from.root === code) ?? false).toBe(false);
     rmSync(join(code, "b"), { recursive: true });
@@ -420,10 +390,8 @@ describe("Tidy's Combine projects", () => {
 
   test("through a chain: a project undone out of a group is not offered back to the project that heads it now", async () => {
     const w = await combined();
-    // A third clone goes into the one that went in, so `from` heads nothing and the group's head is two steps away.
     const third = repository(join(w.root, "scratch", "ledger-3"), ORIGIN);
     const fix = (await send(w.client, { project_path: third, body: "Third.", agent_session: "ses_third" })).project.id as string;
-    // Its repository is read: from here on, only the undo can keep it from being offered.
     await until(() => tidyPlan(w.server), (plan) => plan.combine?.some((pair) => pair.from.id === fix) === true);
     expect((await combine(w.server, w.from, null)).status).toBe(200);
     expect((await combine(w.server, fix, w.from)).status).toBe(200);
@@ -438,7 +406,6 @@ describe("Tidy's Combine projects", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-combine-")));
     scratch.push(root);
     const dataDir = join(root, "data");
-    // Two clones already in the store when the Inbox starts: what a stopped Inbox holds.
     const first = await startInboxServer({ dataDir, phones: false, board: true, readProjectRepo: async () => null });
     first.store.ensureProject({ name: "ledger", root: join(root, "a") });
     first.store.ensureProject({ name: "ledger", root: join(root, "b") });
@@ -456,7 +423,6 @@ describe("Tidy's Combine projects", () => {
     });
     servers.push(server);
 
-    // A thin plan with the reads still out says so, right after the start and while they run.
     const early = await tidyPlan(server);
     expect(early.combine_loading).toBe(true);
     expect(early.combine).toBeUndefined();
@@ -481,7 +447,6 @@ describe("Tidy's Combine projects", () => {
   test("offers a project left in another's worktrees folder, read from the store, without touching either", async () => {
     const w = await world();
     const main = (await send(w.client, { project_path: w.ledger, body: "Main.", agent_session: "ses_ledger" })).project.id as string;
-    // What an Inbox made before worktrees folded into their repository.
     const stale = w.server.store.ensureProject({ name: "old-branch", root: join(w.ledger, ".claude", "worktrees", "old-branch") });
     const plan = await until(() => tidyPlan(w.server), (found) => (found.combine?.length ?? 0) > 0);
     expect(plan.combine![0]).toMatchObject({ into: { id: main }, from: { id: stale.id } });

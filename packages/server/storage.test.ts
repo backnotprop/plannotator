@@ -1,9 +1,3 @@
-/**
- * Plan Storage Tests
- *
- * Run: bun test packages/server/storage.test.ts
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, readFileSync, readdirSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -57,13 +51,10 @@ describe("getPlanDir", () => {
     const customPath = join(dir, "custom", "plans");
     const result = getPlanDir(customPath);
     expect(result).toBe(customPath);
-    // Directory should exist
     expect(readdirSync(customPath)).toBeDefined();
   });
 
   test("expands tilde in custom path", () => {
-    // getPlanDir mkdirs its result, and os.homedir() ignores a HOME override, so
-    // expand bare "~": the real home already exists and nothing is created in it.
     const result = getPlanDir("~");
     expect(result).not.toContain("~");
     expect(result).toBe(homedir());
@@ -215,13 +206,6 @@ describe("PLANNOTATOR_DATA_DIR", () => {
 });
 
 describe("resolveHistorySlug", () => {
-  /**
-   * Plan review derives its slug from the plan's H1 plus today's date, and the
-   * same string keys both the archive filename and the version history. These
-   * tests cover the history half: a plan whose review spans midnight must keep
-   * appending to the chain it started, instead of opening a second one that
-   * looks like a plan with no history at all.
-   */
   function withDataDir<T>(fn: (dataDir: string) => T): T {
     const saved = process.env.PLANNOTATOR_DATA_DIR;
     process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
@@ -233,7 +217,6 @@ describe("resolveHistorySlug", () => {
     }
   }
 
-  /** Seed a chain whose versions were written `ageMs` ago (default: just now). */
   function seedChain(dataDir: string, project: string, slug: string, versions: string[], ageMs = 0): void {
     const dir = join(dataDir, "history", project, slug);
     mkdirSync(dir, { recursive: true });
@@ -389,7 +372,6 @@ describe("resolveHistorySlug", () => {
       expect(
         resolveHistorySlug(project, "session-plan-2026-10-04", { current: "session-plan-2026-10-01" })
       ).toBe("session-plan-2026-10-01");
-      // A revision that renames the plan leaves the session's chain.
       expect(
         resolveHistorySlug(project, "renamed-plan-2026-10-04", { current: "session-plan-2026-10-01" })
       ).toBe("renamed-plan-2026-10-04");
@@ -406,11 +388,6 @@ describe("resolveHistorySlug", () => {
 });
 
 describe("resolveHistoryChain", () => {
-  /**
-   * #2197: the Claude Code hosts pass the current folder's project first and
-   * the session root's second. An existing chain is looked for in that order;
-   * a new chain always starts under the first, exactly as before.
-   */
   function withDataDir<T>(fn: (dataDir: string) => T): T {
     const saved = process.env.PLANNOTATOR_DATA_DIR;
     process.env.PLANNOTATOR_DATA_DIR = makeTempDir();

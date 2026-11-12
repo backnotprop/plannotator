@@ -1,12 +1,3 @@
-/**
- * Plan /api/deny carries `answersOnly` through to the decision, and the
- * decision picks the `plan.answered` prompt.
- *
- * What regresses if this fails: the reviewer answers the plan's questions,
- * clicks Send answers, and the agent reads "YOUR PLAN WAS NOT APPROVED"
- * (the flag was dropped on the way to the hook output), or an ordinary deny
- * starts reading as answers (a truthy non-boolean flag was honored).
- */
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,8 +34,6 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  // Plan version history is written through storage.ts, whose data dir is
-  // fixed at import time; remove the slugs these tests created there.
   const project = (await detectProjectName()) ?? "_unknown";
   for (const plan of createdPlans) {
     const versionPath = getPlanVersionPath(project, generateSlug(plan), 1);

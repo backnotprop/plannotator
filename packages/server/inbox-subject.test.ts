@@ -1,14 +1,3 @@
-/**
- * One-line subjects through the server's real doors (a running Inbox on
- * loopback, the MCP SDK client for the agent, `fetch` for the window):
- *  - send_message and submit_guide refuse a subject with leaked tool-call
- *    text or a line break as `validation_error: subject: …` before anything
- *    is written (no project made, no file copied), and a corrected retry under
- *    the same idempotency_key lands once;
- *  - a subject an older Inbox kept verbatim (the owner's
- *    msg_01M5DBNXYNG5TA0DZV6C42PYRQ) is served as shown in the list, the
- *    thread, search, read_thread and the event stream, never raw.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -61,7 +50,6 @@ describe("send_message and submit_guide refuse a subject that is not one line", 
     expect(refused.content[0]!.text).toMatch(/^validation_error: subject: contains tool-call text/);
     expect(refused.content[0]!.text).toContain("subject alone");
     expect(refused.content[0]!.text).toContain("If you meant to write that text, reword it without the angle brackets.");
-    // Nothing written: no project made, no file copied.
     expect(JSON.parse(await get(server, "/api/inbox/projects")).projects).toEqual([]);
     const blobs = join(dataDir, "inbox", "blobs");
     expect(existsSync(blobs) ? readdirSync(blobs) : []).toEqual([]);
@@ -120,7 +108,6 @@ describe("a subject an older Inbox kept verbatim is served as shown", () => {
     expect(thread.subject).toBe(LEAKED_SUBJECT_SHOWN);
     expect(thread.messages[0].subject).toBe(LEAKED_SUBJECT_SHOWN);
 
-    // The event stream's replay of the message line.
     const controller = new AbortController();
     const response = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=0`, { signal: controller.signal });
     const reader = response.body!.getReader();

@@ -1,11 +1,3 @@
-/**
- * The relay push for replaced questions: pushes collapse per thread, so a
- * message that supersedes questions always pushes, even when it asks nothing
- * new (a withdrawal: `question: null`, no lock-screen answers), to replace the
- * older notification; and the summary only ever offers an open question.
- * A local fake relay records each `POST …/push`; the envelope is opened with
- * the phone's own key, as the phone does. No network beyond loopback.
- */
 import { afterEach, expect, test } from "bun:test";
 import { createHmac, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -62,7 +54,6 @@ async function world() {
   cleanup.push(() => client.stop());
   const keys = await deriveRelayKeys(secret, device.id);
   const project = store.ensureProject({ name: "billing-svc", root: "/work/billing-svc" });
-  /** The next push, opened with the phone's key. */
   const nextPush = async (after: number) => {
     for (let i = 0; i < 200 && pushes.length <= after; i++) await Bun.sleep(10);
     const push = pushes[after];
@@ -81,7 +72,6 @@ test("a withdrawal that asks nothing pushes on the thread's collapse id with no 
   w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "Just a note.", reply_to: first.id });
   w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "No longer needed.", reply_to: first.id, supersedes: [first.id] });
   const withdrawn = await w.nextPush(1);
-  // The note sent no push: the withdrawal is the second one.
   expect(w.pushes.length).toBe(2);
   expect(withdrawn.collapse_id).toBe(asked.collapse_id);
   expect(withdrawn.collapse_id).toBe(w.collapseOf(first.thread_id));
@@ -103,9 +93,6 @@ test("a replacement pushes the new open question on the same collapse id", async
   expect(replaced.summary.subject).toBe("How many retries before dead-letter?");
 });
 
-// A thread that came back from the archive: the agent's reply_to after the
-// archive line asks a question the person can answer without unarchiving, so
-// the push offers it on the lock screen; the archive-closed question never is.
 test("a question asked after the archive line is pushed answerable; the archive-closed one is not offered", async () => {
   const w = await world();
   const first = w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Retry a 409?") }).message;
@@ -115,7 +102,6 @@ test("a question asked after the archive line is pushed answerable; the archive-
   const pushed = await w.nextPush(1);
   expect(pushed.summary.message_id).toBe(later.id);
   expect(pushed.summary.question).toMatchObject({ prompt: "Ship it today?", key: later.questions![0]!.key });
-  // The lock-screen answer goes through: the message is answerable while the thread stays resolved.
   const q = w.store.questionsOf(later.id)[0]!;
   w.store.savePicks(later.id, [{ key: q.key, revision: 0, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ["Yes"] } }]);
   expect(w.store.questionsOf(later.id)[0]!.state).toBe("picked");

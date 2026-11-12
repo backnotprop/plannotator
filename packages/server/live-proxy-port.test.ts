@@ -1,13 +1,3 @@
-/**
- * PLANNOTATOR_LIVE_PORT on the Bun live proxy (#2145) and on the Bun annotate
- * server that starts it. The Node/Pi twins are
- * packages/shared/live-proxy-node-port.test.ts and
- * apps/pi-extension/server/serverAnnotate-live-port.test.ts.
- *
- * Busy ports are real listeners this file starts and closes; free ports come
- * from the OS.
- */
-
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   accepts,
@@ -124,8 +114,6 @@ describe("Bun live proxy: PLANNOTATOR_LIVE_PORT", () => {
     }
   });
 
-  // Bun.serve reports a denied port as "Is port N in use?" (EADDRINUSE); the
-  // proxy asks Bun.listen for the real code. Skipped where low ports bind.
   test("a port this user may not bind is one clear line, and a range moves past it", async () => {
     const denied = await deniedLowPort();
     if (denied === null) {
@@ -145,8 +133,6 @@ describe("Bun live proxy: PLANNOTATOR_LIVE_PORT", () => {
       `Plannotator: live app proxy port ${denied} (PLANNOTATOR_LIVE_PORT) could not be used (EACCES: permission denied). Ports below 1024 usually need root. Set PLANNOTATOR_LIVE_PORT to a different port or range.`,
     );
 
-    // A range from the denied port across 1024: it moves past the denied
-    // ports (and any busy one) and lands on 1024 or later.
     process.env.PLANNOTATOR_LIVE_PORT = `${denied}-1060`;
     const proxy = startProxy();
     expect(proxy.port).toBeGreaterThanOrEqual(1024);

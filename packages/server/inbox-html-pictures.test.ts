@@ -1,11 +1,3 @@
-/**
- * An HTML page attached to an Inbox message shows any picture it names,
- * wherever it is on this computer (`../shots/a.png`, `/Users/me/a.png`,
- * `file:///…`) or on the web; every other file outside its folder still does
- * not load, and annotate keeps serving only the page's folder.
- *
- * The registry is driven directly: no Inbox is started.
- */
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,19 +5,12 @@ import { join } from "node:path";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { createInboxHtmlAssets, INBOX_HTML_DOCUMENT_CSP } from "./inbox-attachments";
 
-// A 1×1 PNG.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><script>fetch("/api/inbox/threads")</script><rect width="4" height="4"/></svg>';
 
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-html-pictures-")));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-/**
- *   <tmp>/work/page/page.html   the attached page
- *   <tmp>/work/page/logo.png    in its folder
- *   <tmp>/work/shots/a.png      one folder up
- *   <tmp>/other/b.png, c.svg    in another folder (named by absolute path)
- */
 function layout() {
   const root = mkdtempSync(join(tmp, "case-"));
   const page = join(root, "work", "page");
@@ -55,7 +40,6 @@ async function get(assets: { handle: (req: Request, url: URL) => Promise<Respons
   return response;
 }
 
-/** The value of the first `attr="…"` on the element whose original reference contained `marker`. */
 function attrOf(html: string, tag: string, id: string, attr = "src"): string {
   const element = new RegExp(`<${tag}[^>]*id="${id}"[^>]*>`).exec(html)?.[0] ?? "";
   return new RegExp(`\\s${attr}="([^"]*)"`).exec(element)?.[1] ?? "";
@@ -83,7 +67,6 @@ describe("Inbox: an attached page's pictures from anywhere", () => {
     expect(attrOf(out, "img", "set", "srcset")).toBe(`${up} 1x, ${attrOf(out, "img", "file")} 2x`);
     expect(out).toContain(`url(&quot;${up}&quot;)`);
     expect(out).toContain(`url("${attrOf(out, "img", "file")}")`);
-    // A web picture is left as written: the browser fetches it from its site.
     expect(attrOf(out, "img", "web")).toBe("https://avatars.githubusercontent.com/u/1?v=4");
 
     for (const path of [up, attrOf(out, "img", "abs")]) {
@@ -120,13 +103,11 @@ describe("Inbox: an attached page's pictures from anywhere", () => {
       <img id="link" src="${other}/innocent.png">
     </body></html>`;
     const out = assets.rewriteHtml(html, htmlPath);
-    // Not a picture by name, or a hidden path: left as written, so it reaches nothing.
     expect(attrOf(out, "img", "txt")).toBe(`${other}/notes.txt`);
     expect(attrOf(out, "img", "env")).toBe(`${other}/.env`);
     expect(attrOf(out, "img", "dot")).toBe(`${other}/.cache/d.png`);
     expect(out).toContain(`href="${other}/x.css"`);
     expect(out).toContain('src="../shots/app.js"');
-    // A picture by name whose bytes are not one, or whose realpath is hidden: 404, nothing read out.
     for (const id of ["fake", "html", "link"]) {
       const path = attrOf(out, "img", id);
       expect(path).toMatch(/^\/api\/html-assets\/[0-9a-f]{16}\//);
@@ -134,7 +115,6 @@ describe("Inbox: an attached page's pictures from anywhere", () => {
       expect(response.status).toBe(404);
       expect(await response.text()).not.toContain("not a picture");
     }
-    // A picture's token serves that one file: another name after it is refused.
     const token = /^\/api\/html-assets\/([0-9a-f]{16})\//.exec(attrOf(out, "img", "fake"))![1];
     expect((await get(assets, `/api/html-assets/${token}/notes.txt`)).status).toBe(404);
   });

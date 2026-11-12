@@ -1,12 +1,3 @@
-/**
- * Shape's routes on Bun (the Inbox mounts them; packages/shared/shape/routes.ts
- * is the route core, apps/pi-extension/server/serverShape.ts the node:http
- * mirror). This file adds what a runtime owns: the Response, file bytes,
- * the event feed and code-nav.
- *
- * The caller decides who may reach these (the Inbox: Shape switched on, the
- * owner's window, same-origin writes with its page's session).
- */
 import { createShapeStore, type ShapeStore } from "@plannotator/shared/shape/store";
 import { createShapeWatch, handleShapeRoute, SHAPE_EVENTS_PATH, shapeEventFrame, type ShapeRouteDeps } from "@plannotator/shared/shape/routes";
 import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "@plannotator/shared/repo-file";
@@ -52,7 +43,6 @@ export function createBunShapeRoutes(options: { dataDir: string; heartbeatMs?: n
           try {
             controller.close();
           } catch {
-            // closed
           }
         });
       },
@@ -66,7 +56,6 @@ export function createBunShapeRoutes(options: { dataDir: string; heartbeatMs?: n
   return {
     store,
     watch,
-    /** A Response for a Shape path, else null. */
     async route(req: Request, url: URL): Promise<Response | null> {
       if (url.pathname === SHAPE_EVENTS_PATH) {
         if (req.method !== "GET") return Response.json({ error: "method not allowed" }, { status: 405, headers: NO_STORE });

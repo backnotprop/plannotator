@@ -1,10 +1,3 @@
-/**
- * Plannotator Inbox attachments, proved through the server's real doors: a
- * running Inbox on loopback, the MCP SDK client over streamable HTTP for the
- * agent, and real `fetch` for the window. Every test has its own temp data dir.
- * The browser side (the pane, the viewers, the chip) is proved in
- * tests/e2e/inbox-attachments.spec.ts.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,12 +73,10 @@ test("annotations ride a Send without picks; a sent annotation is closed; the re
   expect(reply.status).toBe(200);
   const body = ((await reply.json()) as { reply: { body: string } }).reply.body;
   expect(body.indexOf("One note.")).toBeLessThan(body.indexOf("Feedback on the attached files"));
-  // Sent: no longer pending, and closed to edits.
   const model = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${sent.thread_id}/attachments`)).json()) as { annotations: unknown[] };
   expect(model.annotations).toHaveLength(0);
   const again = await post(server, "/api/inbox/annotations", { attachment_id: attachmentId, version: "current", annotation: { id: "ann-1", text: "edit" } });
   expect(again.status).toBe(409);
-  // An annotation the thread does not hold cannot ride a Send.
   const stray = await post(server, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "k2", feedback: "x", annotation_ids: ["nope"] });
   expect(stray.status).toBe(404);
 });
@@ -100,7 +91,6 @@ test("the annotation and delete routes refuse another site and a stale tab", asy
   expect((await post(server, `/api/inbox/projects/${sent.project.id}/delete`, {}, crossSite)).status).toBe(403);
   expect((await post(server, "/api/inbox/annotations", { attachment_id: sent.attachments[0].id, version: "current", annotation: { id: "a" } }, crossSite)).status).toBe(403);
   expect((await post(server, `/api/inbox/threads/${sent.thread_id}/delete`, { serverSession: "an-older-inbox" })).status).toBe(409);
-  // A version that is not this attachment's is refused.
   const wrong = await post(server, "/api/inbox/annotations", { attachment_id: sent.attachments[0].id, version: "0".repeat(64), annotation: { id: "a" } });
   expect(wrong.status).toBe(422);
   expect(readdirSync(join(dataDir, "inbox", "blobs"))).toHaveLength(1);
@@ -128,7 +118,6 @@ test("a script attaches as kind code: served as text/plain under the sandbox CSP
   const { project, dataDir } = world();
   const script = "#!/bin/sh\n# replay the failed webhook\ncurl -X POST http://localhost:4242/hooks\n";
   writeFileSync(join(project, "replay.sh"), script);
-  // A source name whose bytes are not text is offered as a download, not refused.
   writeFileSync(join(project, "tool.ts"), new Uint8Array([0x00, 0x61, 0x73, 0x6d]));
   const server = await start(dataDir);
   const client = await agent(server);
@@ -153,7 +142,6 @@ test("a script attaches as kind code: served as text/plain under the sandbox CSP
   expect(annotated.status).toBe(200);
 });
 
-/** A PNG's signature and IHDR (2 x 3 px): enough for the sniffer and the dimension read. */
 function png(): Uint8Array {
   const bytes = new Uint8Array(33);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 3, 8, 6, 0, 0, 0]);
@@ -176,21 +164,17 @@ test("an image in an attached Markdown file loads from the file's own folder, on
   const image = (id: string, path: string, version: string, headers: Record<string, string> = {}) =>
     fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${id}/markdown-image?path=${encodeURIComponent(path)}&version=${version}`, { headers });
 
-  // Relative to docs/, the Markdown file's folder, not the project root.
   const shown = await image(markdown!.id, "shots/before.png", "current");
   expect(shown.status).toBe(200);
   expect(shown.headers.get("content-type")).toBe("image/png");
-  // A file next to it that the Markdown does not show is refused.
   expect((await image(markdown!.id, "shots/unshown.png", "current")).status).toBe(403);
 
-  // The file changes after the send: the current version shows only the new image, the sent version only the old one.
   writeFileSync(join(project, "docs", "plan.md"), "# Plan\n\n![after](shots/after.png)\n");
   expect((await image(markdown!.id, "shots/after.png", "current")).status).toBe(200);
   expect((await image(markdown!.id, "shots/before.png", "current")).status).toBe(403);
   expect((await image(markdown!.id, "shots/before.png", "sent")).status).toBe(200);
   expect((await image(markdown!.id, "shots/after.png", "sent")).status).toBe(403);
 
-  // A linked sibling has its own directory and referenced-image allowlist.
   mkdirSync(join(project, "docs", "sub"));
   writeFileSync(join(project, "docs", "sub", "peer.md"), "# Peer\n\n![shown](../shots/after.png)\n");
   const siblingImage = (document: string, path: string, headers: Record<string, string> = {}) =>
@@ -200,9 +184,7 @@ test("an image in an attached Markdown file loads from the file's own folder, on
   expect((await siblingImage("../outside.md", "../shots/after.png")).status).toBe(403);
   expect((await siblingImage("sub/peer.md", "../shots/after.png", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
 
-  // Only a Markdown attachment shows images this way.
   expect(text!.kind).not.toBe("markdown");
   expect((await image(text!.id, "shots/before.png", "current")).status).toBe(422);
-  // Another site is refused before anything is read.
   expect((await image(markdown!.id, "shots/after.png", "current", { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
 });

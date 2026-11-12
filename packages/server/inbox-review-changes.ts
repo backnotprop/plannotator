@@ -1,8 +1,3 @@
-/**
- * New review's change summary ("3 files +42 -7"): the size of a project's local changes, read with the same git diffs
- * `plannotator review` shows, so the box and the review agree. Read only.
- */
-
 import { inboxReviewPatchSize, type InboxReviewChanges, type InboxReviewChangesAnswer } from "@plannotator/core/inbox-types";
 import { getCurrentBranch, getDefaultBranch, runGitDiff, type DiffType } from "@plannotator/shared/review-core";
 import { runtime } from "./git";

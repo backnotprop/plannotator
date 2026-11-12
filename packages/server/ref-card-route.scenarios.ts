@@ -1,21 +1,3 @@
-/**
- * `GET /api/ref` (the issue / PR / MR hover cards) on the plan, annotate and
- * review servers, driven over HTTP against real servers with a scripted
- * gh / glab runner (`refRunner`), never the real CLIs. Shared by the Bun suite
- * (ref-card-route.test.ts) and the Pi mirror
- * (apps/pi-extension/server/ref-card-route.test.ts), so both runtimes answer
- * the same scenarios.
- *
- * Covered: the card and its `serverSession`; refusals that run nothing (another
- * site, a Host this server does not answer, a url that is no such link, a
- * method other than GET); and the exposure rule: off in remote mode, and in a
- * `--tailscale` session where the runtime has one (Bun annotate and review) on
- * for a tab on this machine and the tailnet owner's tab through serve, off for
- * any other tailnet device. Requests go through node:http so Origin, Host,
- * Sec-Fetch-Site and the serve headers are exactly the ones under test. Every
- * test runs under a temp PLANNOTATOR_DATA_DIR.
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
@@ -42,7 +24,6 @@ const PR_URL = "https://github.com/acme/widgets/pull/12";
 
 const FIRST_READ: Record<RefCardRouteKind, string> = { plan: "/api/plan", annotate: "/api/plan", review: "/api/diff" };
 
-/** gh's answer for acme/widgets#12 (no avatar URL, so nothing is fetched from the network). */
 const GITHUB_PR = {
   data: {
     repository: {
@@ -103,7 +84,6 @@ function send(url: string, method: string, path: string, headers: Record<string,
   });
 }
 
-/** A port nothing listens on right now (remote mode binds a fixed port). */
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer();
@@ -115,11 +95,6 @@ function freePort(): Promise<number> {
   });
 }
 
-/**
- * A runtime with `--tailscale`: which servers have it, and how a test publishes
- * the session (the owner's login and the served URL, as the CLI records them)
- * and forgets it again.
- */
 export interface RefCardRouteTailnet {
   kinds: RefCardRouteKind[];
   publish(owner: string, servedUrl: string): void;
@@ -188,7 +163,6 @@ export function defineRefCardRouteScenarios(
     const docPath = join(root, "notes.md");
     writeFileSync(docPath, "# Notes\n\nSee https://github.com/acme/widgets/pull/12\n");
     server = await start(kind, { root, docPath, htmlContent: HTML, refRunner: run, tailnetPublished: mode.tailnetPublished });
-    // Remote mode binds every interface: talk to it over loopback.
     const base = new URL(server.url);
     host = `127.0.0.1:${base.port}`;
     const first = (await (await fetch(`http://${host}${FIRST_READ[kind]}`)).json()) as { serverSession?: unknown };
@@ -211,7 +185,6 @@ export function defineRefCardRouteScenarios(
         const args = queries()[0].args;
         expect(queries()[0].cli).toBe("gh");
         expect(args[args.indexOf("--hostname") + 1]).toBe("github.com");
-        // A second hover is the server's cache: nothing runs again.
         expect((await get(refPath(PR_URL))).status).toBe(200);
         expect(queries()).toHaveLength(1);
       });
@@ -228,7 +201,6 @@ export function defineRefCardRouteScenarios(
           expect(refused.status).toBe(403);
           expect(refused.body?.code).toBe("cross_origin");
         }
-        // A name that is not this machine's: the Host allowlist answers before any route.
         const rebound = await send(`http://${host}`, "GET", refPath(PR_URL), { host: "attacker.example" });
         expect(rebound.status).toBe(403);
         expect(rebound.headers["x-plannotator-error"]).toBe("host_not_allowed");
@@ -250,7 +222,6 @@ export function defineRefCardRouteScenarios(
 
     const tailnet = options.tailnet;
     for (const kind of tailnet?.kinds ?? []) {
-      /** A request `tailscale serve` proxied from a tailnet device signed in as `login`. */
       const throughServe = (login: string, servedHost = TAILNET_SERVED) =>
         get(refPath(PR_URL), {
           host: servedHost,
@@ -282,15 +253,12 @@ export function defineRefCardRouteScenarios(
         tailnet!.publish(TAILNET_OWNER, `https://${TAILNET_SERVED}`);
         await setUp(kind, { tailnetPublished: true });
         for (const refused of [
-          // Another login on the tailnet.
           await throughServe("someone-else@example.com"),
-          // The owner's login, but not on the served name and port.
           await throughServe(TAILNET_OWNER, `${TAILNET_NAME}:7070`),
         ]) {
           expect(refused.status).toBe(404);
           expect(refused.body?.code).toBe("ref_cards_disabled");
         }
-        // A tagged device (no login) and a funnel request are peers too.
         const tagged = await get(refPath(PR_URL), { host: TAILNET_SERVED, "x-forwarded-for": "100.64.0.9" });
         expect(tagged.status).toBe(404);
         const funnel = await get(refPath(PR_URL), {

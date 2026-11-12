@@ -1,10 +1,3 @@
-/**
- * `--title` (#2289) through the Bun servers: the caller's title reaches the
- * page in the payload it reads at mount (/api/plan for annotate, /api/diff for
- * code review), and a session started without one carries no `title` field at
- * all, so the page builds today's title. The Pi server has no `--title` and
- * never sends the field.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

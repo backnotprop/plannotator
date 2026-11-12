@@ -1,10 +1,3 @@
-/**
- * Codex Review Agent — prompt, command builder, output parser, and finding transformer.
- *
- * Encapsulates all Codex-specific logic for the AI review agent integration.
- * The review server (review.ts) calls into this module via the agent-jobs callbacks.
- */
-
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { appendFile, mkdir, unlink, writeFile, readFile } from "node:fs/promises";
@@ -18,16 +11,11 @@ import {
 import { classifyFindingPlacement } from "@plannotator/shared/external-annotation";
 import { codexAskAiConfigArgs, readCodexConfigTexts } from "@plannotator/ai/providers/ask-ai-env";
 
-// ---------------------------------------------------------------------------
-// Debug log — only active when PLANNOTATOR_DEBUG is set
-// ---------------------------------------------------------------------------
-
 const DEBUG_ENABLED = !!process.env.PLANNOTATOR_DEBUG;
 
 async function debugLog(label: string, data?: unknown): Promise<void> {
   if (!DEBUG_ENABLED) return;
   try {
-    // Resolved per call: PLANNOTATOR_DATA_DIR may change after import.
     const dataDir = getPlannotatorDataDir();
     await mkdir(dataDir, { recursive: true });
     const timestamp = new Date().toISOString();
@@ -35,14 +23,8 @@ async function debugLog(label: string, data?: unknown): Promise<void> {
       ? `[${timestamp}] ${label}: ${typeof data === "string" ? data : JSON.stringify(data, null, 2)}\n`
       : `[${timestamp}] ${label}\n`;
     await appendFile(join(dataDir, "codex-review-debug.log"), line);
-  } catch { /* never fail the main flow */ }
+  } catch { }
 }
-
-// ---------------------------------------------------------------------------
-// Schema — embedded as a string, written to disk on first use.
-// Bun's compiled binary uses a virtual FS that external processes (codex)
-// can't read, so we materialize the schema to a real file.
-// ---------------------------------------------------------------------------
 
 export const CODEX_REVIEW_SCHEMA = JSON.stringify({
   type: "object",
@@ -56,9 +38,6 @@ export const CODEX_REVIEW_SCHEMA = JSON.stringify({
           body: { type: "string" },
           confidence_score: { type: "number" },
           priority: { type: ["integer", "null"] },
-          // Nullable, not omittable: OpenAI strict structured output requires
-          // every property to appear in `required`. A whole-file finding sets
-          // line_range to null; a general finding sets code_location to null.
           code_location: {
             type: ["object", "null"],
             properties: {
@@ -89,21 +68,14 @@ export const CODEX_REVIEW_SCHEMA = JSON.stringify({
   additionalProperties: false,
 });
 
-/** Resolve the materialized schema path for the current data directory. */
 export function getCodexReviewSchemaPath(): string {
   return join(getPlannotatorDataDir(), "codex-review-schema.json");
 }
 
-/** Schema paths this process has already refreshed with its own schema. */
 const materializedSchemaPaths = new Set<string>();
 
-/** Ensure the schema file exists on disk with the current schema and return its path. */
 async function ensureSchemaFile(): Promise<string> {
   const schemaPath = getCodexReviewSchemaPath();
-  // Guarded per resolved path, not per process and not by file existence: the
-  // data directory can change after import (so a process-wide flag would keep
-  // returning the old location), and a stale file left by an older binary must
-  // be overwritten once per process so Codex always gets the current schema.
   if (!materializedSchemaPaths.has(schemaPath)) {
     await mkdir(dirname(schemaPath), { recursive: true });
     await writeFile(schemaPath, CODEX_REVIEW_SCHEMA);
@@ -111,10 +83,6 @@ async function ensureSchemaFile(): Promise<string> {
   }
   return schemaPath;
 }
-
-// ---------------------------------------------------------------------------
-// System prompt — copied verbatim from codex-rs/core/review_prompt.md
-// ---------------------------------------------------------------------------
 
 export const CODEX_REVIEW_SYSTEM_PROMPT = `# Review guidelines:
 
@@ -176,27 +144,12 @@ Ignore non-blocking issues such as style, formatting, typos, documentation, and 
 FORMATTING GUIDELINES:
 The finding description should be one paragraph.`;
 
-// ---------------------------------------------------------------------------
-// Prompt composition
-// ---------------------------------------------------------------------------
-
-/**
- * Compose Codex's review prompt: the immutable system prompt, the resolved
- * profile's Custom Review Profile section (omitted for builtin:default), then
- * the user review message. For builtin:default / no profile the output is
- * byte-identical to today's
- * `CODEX_REVIEW_SYSTEM_PROMPT + "\n\n---\n\n" + userMessage`.
- */
 export function composeCodexReviewPrompt(
   userMessage: string,
   reviewProfile?: ResolvedReviewProfile,
 ): string {
   return composeReviewPrompt(CODEX_REVIEW_SYSTEM_PROMPT, reviewProfile, userMessage);
 }
-
-// ---------------------------------------------------------------------------
-// Command builder
-// ---------------------------------------------------------------------------
 
 export interface CodexCommandOptions {
   cwd: string;
@@ -207,7 +160,6 @@ export interface CodexCommandOptions {
   fastMode?: boolean;
 }
 
-/** Build the `codex exec` argv array. Materializes the schema file on first call. */
 export async function buildCodexCommand(options: CodexCommandOptions): Promise<string[]> {
   const { cwd, outputPath, prompt, model, reasoningEffort, fastMode } = options;
   const schemaPath = await ensureSchemaFile();
@@ -217,7 +169,6 @@ export async function buildCodexCommand(options: CodexCommandOptions): Promise<s
     ...(model ? ["-m", model] : []),
     ...(reasoningEffort ? ["-c", `model_reasoning_effort=${reasoningEffort}`] : []),
     ...(fastMode ? ["-c", "service_tier=fast"] : []),
-    // The Inbox MCP server off: Codex hands a stdio MCP server none of the job's env.
     ...codexAskAiConfigArgs(readCodexConfigTexts(cwd)),
     "exec",
     "--output-schema", schemaPath,
@@ -239,18 +190,13 @@ export async function buildCodexCommand(options: CodexCommandOptions): Promise<s
   return command;
 }
 
-/** Generate a unique temp file path for Codex output. */
 export function generateOutputPath(): string {
   return join(tmpdir(), `plannotator-codex-${crypto.randomUUID()}.json`);
 }
 
-// ---------------------------------------------------------------------------
-// Output parsing — matches Codex's native ReviewOutputEvent schema
-// ---------------------------------------------------------------------------
-
 export interface CodexCodeLocation {
   absolute_file_path: string;
-  line_range?: { start: number; end: number } | null; // null for a whole-file comment
+  line_range?: { start: number; end: number } | null;
 }
 
 export interface CodexFinding {
@@ -258,7 +204,7 @@ export interface CodexFinding {
   body: string;
   confidence_score: number;
   priority: number | null;
-  code_location?: CodexCodeLocation | null; // null for a general (review-level) comment
+  code_location?: CodexCodeLocation | null;
 }
 
 export interface CodexReviewOutput {
@@ -268,7 +214,6 @@ export interface CodexReviewOutput {
   overall_confidence_score: number;
 }
 
-/** Read and parse the Codex -o output file. Returns null on any failure. */
 export async function parseCodexOutput(outputPath: string): Promise<CodexReviewOutput | null> {
   await debugLog("PARSE_OUTPUT_START", { outputPath });
 
@@ -280,8 +225,7 @@ export async function parseCodexOutput(outputPath: string): Promise<CodexReviewO
 
     const text = await readFile(outputPath, "utf-8");
 
-    // Clean up temp file
-    try { await unlink(outputPath); } catch { /* ignore */ }
+    try { await unlink(outputPath); } catch { }
 
     if (!text.trim()) {
       await debugLog("PARSE_OUTPUT_EMPTY");
@@ -303,15 +247,10 @@ export async function parseCodexOutput(outputPath: string): Promise<CodexReviewO
     return parsed as CodexReviewOutput;
   } catch (err) {
     await debugLog("PARSE_OUTPUT_ERROR", err instanceof Error ? err.message : String(err));
-    // Clean up on error too
-    try { await unlink(outputPath); } catch { /* ignore */ }
+    try { await unlink(outputPath); } catch { }
     return null;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Finding → external annotation transform
-// ---------------------------------------------------------------------------
 
 export interface ReviewAnnotationInput {
   source: string;
@@ -325,7 +264,6 @@ export interface ReviewAnnotationInput {
   author: string;
 }
 
-/** Transform review findings (provider-agnostic) into the external annotation format. */
 export function transformReviewFindings(
   findings: CodexFinding[],
   source: string,
@@ -333,8 +271,6 @@ export function transformReviewFindings(
   author?: string,
   pathTransform?: (path: string) => string,
 ): ReviewAnnotationInput[] {
-  // Route every finding by what it carries — nothing is dropped. No usable file
-  // becomes a general comment; a file without a line range, a whole-file comment.
   const annotations = findings.map((f) => {
     const loc = f.code_location;
     const rawFile = loc && typeof loc.absolute_file_path === "string" ? loc.absolute_file_path : "";

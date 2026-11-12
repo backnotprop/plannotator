@@ -1,14 +1,3 @@
-/**
- * #2372 on real Windows: a Pi installed as `pi.cmd` starts through the Bun
- * server's real POST /api/agents/jobs spawn path. A stub `pi.cmd`
- * (tests/helpers/fake-pi-cmd.ts, never a real agent CLI) records what it got:
- * the prompt arrives intact on stdin, every argument stays inside its quotes,
- * and Stop ends the whole tree, not only cmd.exe.
- *
- * Windows only (skipped elsewhere); it runs in the Windows workflow's
- * `pi-extension-ai-runtime-windows` job. The Pi mirror is
- * apps/pi-extension/server/agent-jobs-windows-cmd-shim.test.ts.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -94,7 +83,6 @@ describe.skipIf(process.platform !== "win32")("Bun server: a Pi installed as pi.
       await post();
       const record = await until(readRecord, "the stub's record");
       expect(record.stdin).toBe(HOSTILE_PROMPT);
-      // The same Pi call, prompt moved off the command line.
       expect(record.argv).toEqual(command.slice(1, -1));
       expect(record.argv).toContain(HOSTILE_MODEL);
       expect(existsSync(join(root, "cwd", "broke"))).toBe(false);

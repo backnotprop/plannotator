@@ -334,8 +334,6 @@ export function buildTourUserMessage(
       ].join("\n");
     }
     if (!getPRPlatformCapabilities(prMetadata).agentCliAccess) {
-      // No CLI the job may run can read this platform's PR (Bitbucket), so
-      // the URL alone is not enough: carry the diff inline.
       return [
         prMetadata.url,
         "",
@@ -406,20 +404,14 @@ export function buildTourClaudeCommand(
   };
 }
 
-/** Materialized schema path under the current data directory. */
 function tourSchemaPath(): string {
   return join(getPlannotatorDataDir(), "tour-schema.json");
 }
 
-/** Schema paths this process has already refreshed with its own schema. */
 const materializedTourSchemaPaths = new Set<string>();
 
 async function ensureTourSchemaFile(): Promise<string> {
   const schemaPath = tourSchemaPath();
-  // Guarded per resolved path, not per process and not by file existence: a
-  // PLANNOTATOR_DATA_DIR change after import materializes the schema in the
-  // new location, and a stale file left by an older binary is overwritten
-  // once per process so the agent always gets the current schema.
   if (!materializedTourSchemaPaths.has(schemaPath)) {
     await mkdir(dirname(schemaPath), { recursive: true });
     await writeFile(schemaPath, TOUR_SCHEMA_JSON);
@@ -445,11 +437,9 @@ export async function buildTourCodexCommand(options: {
 
   const command = [
     "codex",
-    // Global flags must precede the "exec" subcommand for the Codex CLI.
     ...(model ? ["-m", model] : []),
     ...(reasoningEffort ? ["-c", `model_reasoning_effort=${reasoningEffort}`] : []),
     ...(fastMode ? ["-c", "service_tier=fast"] : []),
-    // The Inbox MCP server off: Codex hands a stdio MCP server none of the job's env.
     ...codexAskAiConfigArgs(readCodexConfigTexts(cwd)),
     "exec",
     "--output-schema", schemaPath,
@@ -463,8 +453,6 @@ export async function buildTourCodexCommand(options: {
 }
 
 export function parseTourStreamOutput(stdout: string): CodeTourOutput | null {
-  // A tour with no stops isn't a tour — treat as invalid so the UI error state
-  // fires instead of rendering an empty walkthrough.
   return findClaudeStructuredOutput(stdout, (output) => {
     const stops = output && typeof output === 'object' ? (output as { stops?: unknown }).stops : undefined;
     return Array.isArray(stops) && stops.length > 0 ? (output as CodeTourOutput) : null;
@@ -474,15 +462,13 @@ export function parseTourStreamOutput(stdout: string): CodeTourOutput | null {
 export async function parseTourFileOutput(outputPath: string): Promise<CodeTourOutput | null> {
   try {
     const text = await readFile(outputPath, "utf-8");
-    try { await unlink(outputPath); } catch { /* ignore */ }
+    try { await unlink(outputPath); } catch { }
     if (!text.trim()) return null;
     const parsed = JSON.parse(text);
-    // A tour with no stops isn't a tour — treat as invalid so the UI
-    // error state fires instead of rendering an empty walkthrough.
     if (!parsed || !Array.isArray(parsed.stops) || parsed.stops.length === 0) return null;
     return parsed as CodeTourOutput;
   } catch {
-    try { await unlink(outputPath); } catch { /* ignore */ }
+    try { await unlink(outputPath); } catch { }
     return null;
   }
 }
@@ -547,8 +533,6 @@ export function createTourSession(): TourSession {
     async buildCommand({ cwd, patch, diffType, options, prMetadata, config }) {
       const engine = (typeof config?.engine === "string" ? config.engine : "claude") as "claude" | "codex";
       const explicitModel = typeof config?.model === "string" && config.model ? config.model : null;
-      // "sonnet" is a Claude model, so we must NOT pass it to Codex when no model
-      // is explicitly selected. Leave Codex model blank and let its CLI default pick.
       const model = explicitModel ?? (engine === "codex" ? "" : "sonnet");
       const reasoningEffort = typeof config?.reasoningEffort === "string" && config.reasoningEffort ? config.reasoningEffort : undefined;
       const effort = typeof config?.effort === "string" && config.effort ? config.effort : undefined;

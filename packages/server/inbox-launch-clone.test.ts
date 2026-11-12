@@ -1,11 +1,3 @@
-/**
- * Clone from a git URL (approval "launch-create-clone", C1-C17, E1-E11). Each test guards a behaviour the person
- * relies on: where a clone goes with no setting, that nothing is ever overwritten, that git's failures read as the four
- * causes the line names, and, on the real launch module with the fake agent and a local bare repo (git's own
- * `url.<base>.insteadOf`, so no network and no real remote is ever reached), that the Send clones into the folder it
- * names and then starts, that a failure keeps the message and Try again clones again, that Cancel leaves nothing on the
- * machine, and that a repo bringing hooks waits for the person's trust while a plain one starts without asking.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,7 +28,6 @@ describe("where a clone goes, and what git's failures mean", () => {
     const roots = ["/Users/me/work/shop-web", "/Users/me/work/shop-api", "/Users/me/code/web-app", "/Users/me/work/admin"];
     expect(defaultCloneFolder({ home, last: null, projectRoots: roots, isFolder: isFolder(["/Users/me/work", "/Users/me/code"]) })).toBe("/Users/me/work");
     expect(defaultCloneFolder({ home, last: "/Users/me/Documents/Client Work", projectRoots: roots, isFolder: isFolder(["/Users/me/work", "/Users/me/Documents/Client Work"]) })).toBe("/Users/me/Documents/Client Work");
-    // A last folder that is gone, or outside home, or hidden, is no default.
     expect(defaultCloneFolder({ home, last: "/Users/me/gone", projectRoots: [], isFolder: isFolder([]) })).toBe(home);
     expect(defaultCloneFolder({ home, last: "/tmp/x", projectRoots: [], isFolder: isFolder(["/tmp/x"]) })).toBe(home);
     expect(defaultCloneFolder({ home, last: null, projectRoots: ["/Users/me/.cache/x", "/elsewhere/y"], isFolder: isFolder(["/Users/me/.cache", "/elsewhere"]) })).toBe(home);
@@ -69,7 +60,6 @@ describe("where a clone goes, and what git's failures mean", () => {
 });
 
 describe("git asks nothing, in words the lines can read", () => {
-  /** A `git` that writes down the env and the arguments it was run with, then fails as git does (or says nothing). */
   function recordingGit(silent = false) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-clone-env-")));
     restore.push(() => rmSync(root, { recursive: true, force: true }));
@@ -82,7 +72,6 @@ describe("git asks nothing, in words the lines can read", () => {
 
   test("a clone runs with no terminal prompt, no askpass, no credential window, ssh in batch mode, English words, and no other repo's GIT_DIR", async () => {
     const { root, bin } = recordingGit();
-    // The person's own env, as the login shell gave it: a locale, a repo variable, an askpass. None reaches git as is.
     const base = { HOME: root, PATH: `${bin}:/usr/bin:/bin`, LANG: "de_DE.UTF-8", LC_ALL: "de_DE.UTF-8", GIT_DIR: "/elsewhere/.git", GIT_INDEX_FILE: "/elsewhere/index", GIT_ASKPASS: "/usr/bin/ask" };
     const result = await runGitClone({ url: "https://github.com/acme/x.git", folder: join(root, "x"), env: base }).done;
     expect(result).toMatchObject({ ok: false, error: "not_found" });
@@ -93,7 +82,6 @@ describe("git asks nothing, in words the lines can read", () => {
     expect(env.GIT_INDEX_FILE).toBeUndefined();
     const args = readFileSync(join(root, "args"), "utf8").trim().split("\n");
     expect(args).toContain("credential.interactive=false");
-    // The URL and the folder come after `--`: never read as an option.
     expect(args.slice(-3)).toEqual(["--", "https://github.com/acme/x.git", join(root, "x")]);
   });
 
@@ -104,8 +92,6 @@ describe("git asks nothing, in words the lines can read", () => {
   });
 });
 
-// ── On the real launch module, with a local bare repo ──
-
 const gitBase = (home: string) => ({ HOME: home, PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" });
 
 function git(cwd: string, env: Record<string, string>, ...args: string[]) {
@@ -113,7 +99,6 @@ function git(cwd: string, env: Record<string, string>, ...args: string[]) {
   if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
 }
 
-/** A bare repo at `<fixtures>/<slug>.git` with one commit (and, with `hooks`, a `.claude/settings.json` that runs one). */
 function bareRepo(fixtures: string, slug: string, env: Record<string, string>, extra: Record<string, string> = {}) {
   const work = mkdtempSync(join(tmpdir(), "plannotator-clone-work-"));
   restore.push(() => rmSync(work, { recursive: true, force: true }));
@@ -143,7 +128,6 @@ function world(options: { slowGit?: boolean; holdLogin?: boolean } = {}) {
   const env = gitBase(home);
   bareRepo(fixtures, "acme/billing-api", env);
   bareRepo(fixtures, "acme/hooked", env, { ".claude/settings.json": JSON.stringify({ hooks: { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "echo hi" }] }] } }) });
-  // A git that waits first, so a Cancel lands during the clone.
   let path = env.PATH;
   if (options.slowGit) {
     const bin = join(root, "bin");
@@ -153,7 +137,6 @@ function world(options: { slowGit?: boolean; holdLogin?: boolean } = {}) {
     chmodSync(join(bin, "git"), 0o755);
     path = `${bin}:${path}`;
   }
-  // https://github.com/<slug> is the bare repo on disk: git's own rewrite, so nothing leaves this machine.
   const login = { ...env, PATH: path, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `url.file://${fixtures}/.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/" };
   let loginReads = 0;
   let releaseLogin!: () => void;
@@ -168,7 +151,6 @@ function world(options: { slowGit?: boolean; holdLogin?: boolean } = {}) {
     serverSession: "srv",
     homeDir: home,
     platform: "darwin",
-    // `holdLogin`: the start's own shell read (any after the Send's) waits until `releaseLogin`, as a slow login shell does.
     loginEnv: async () => {
       if (options.holdLogin && ++loginReads > 1) await loginGate;
       return login;
@@ -194,7 +176,6 @@ function world(options: { slowGit?: boolean; holdLogin?: boolean } = {}) {
   const record = (id: string) => store.message(id)!.launch!;
   const run = (id: string) => launch.runOf(id);
   const runs: Record<string, string | undefined> = {};
-  /** For `until`: the line's state, read in the background. */
   const runState = (id: string) => (void run(id).then((r) => (runs[id] = r?.state)), runs[id]);
   const post = (id: string, action: string) =>
     launch.route(
@@ -239,7 +220,6 @@ describe("a Send that clones", () => {
     const w = world();
     const answer = (await (await w.get(`/api/inbox/launch/clone?url=${encodeURIComponent("https://github.com/acme/web")}&into=~/code`))!.json()) as Record<string, unknown>;
     expect(answer).toMatchObject({ path: "~/code/web-2", state: "clone", taken: "~/code/web" });
-    // The person picked ~/code/billing-api; something took the name before Send.
     mkdirSync(join(w.home, "code", "billing-api"));
     const root = await w.send("https://github.com/acme/billing-api", "~/code/billing-api");
     expect(w.record(root.id).folder).toBe(join(w.home, "code", "billing-api-2"));
@@ -254,7 +234,6 @@ describe("a Send that clones", () => {
     await until(() => w.record(root.id).clone?.state === "failed");
     expect(await w.run(root.id)).toMatchObject({ state: "clone_failed", clone: { error: "not_found", host: "github.com", slug: "acme/nope" } });
     expect(w.fake.calls).toEqual([]);
-    // Nothing is left behind: the folder the Send made goes with the failure, and Try again makes it again.
     expect(existsSync(join(w.home, "code", "nope"))).toBe(false);
     const retried = await w.post(w.record(root.id).id, "retry");
     expect(retried!.status).toBe(200);
@@ -279,7 +258,6 @@ describe("a Send that clones", () => {
     const accepted: string[] = [];
     w.fake.faults.trusted = () => false;
     w.fake.faults.untrusted = true;
-    // The offer reads the clone's own files, as Claude Code's does.
     w.fake.host.trustOffer = (target) => ({
       folder: target.folder,
       read: () => (existsSync(join(target.folder, ".claude", "settings.json")) ? { warning: "This folder has 1 hook that will run once you trust it.", facts: ["Runs 1 hook"], warns: true } : { warning: null, facts: [], warns: false }),
@@ -311,7 +289,6 @@ describe("a Send that clones", () => {
     }
     expect(w.record(root.id).clone).toMatchObject({ state: "failed", ended_at: ended });
     expect(existsSync(join(w.home, "code", "nope"))).toBe(false);
-    // The person writes again: that reply clones again, once.
     await Bun.sleep(5);
     w.store.sendReply(root.id, { words: "Try the other remote.", idempotency_key: "reply-1" });
     w.launch.sweep(true);
@@ -333,12 +310,10 @@ describe("a Send that clones", () => {
     expect(((await answer!.json()) as { run: { state: string } }).run.state).toBe("clone_cancelled");
     expect(existsSync(join(w.home, "code", "billing-api"))).toBe(false);
 
-    // A second world (a Send waits for a shell read under way): Delete in the same moment.
     const d = world({ holdLogin: true });
     const deleted = await d.send("https://github.com/acme/hooked", "~/code/hooked");
     expect((await d.post(d.record(deleted.id).id, "delete"))!.status).toBe(200);
     expect(d.record(deleted.id).deleted_at).toBeTruthy();
-    // The shell reads end now: neither clone starts after all.
     w.releaseLogin();
     d.releaseLogin();
     await Bun.sleep(1500);
@@ -367,7 +342,6 @@ describe("a Send that clones", () => {
     await until(() => w.record(root.id).clone?.state === "failed");
     expect(w.record(root.id).made_folder).toBeUndefined();
     expect(w.record(root.id).made_inode).toBeUndefined();
-    // The person makes ~/code/nope and works in it; Try again clones into it as it is, and the failure keeps it.
     mkdirSync(join(w.home, "code", "nope"));
     writeFileSync(join(w.home, "code", "nope", "notes.md"), "mine");
     expect((await w.post(w.record(root.id).id, "retry"))!.status).toBe(200);
@@ -375,8 +349,6 @@ describe("a Send that clones", () => {
     expect(readFileSync(join(w.home, "code", "nope", "notes.md"), "utf8")).toBe("mine");
   });
 
-  // Where the file system keeps a birth time: a recorded identity whose inode number came back (ext4 hands a freed one
-  // to the next folder) but whose birth time is another folder's is not the Inbox's folder.
   test.skipIf((folderIdentity(tmpdir()) ?? "").split(":").length < 3)("an inode number that came back with another birth time is not the folder the Inbox made", async () => {
     const w = world({ slowGit: true });
     const root = await w.send("https://github.com/acme/billing-api", "~/code/billing-api");

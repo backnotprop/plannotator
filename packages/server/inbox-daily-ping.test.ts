@@ -1,8 +1,3 @@
-/**
- * The daily ping on a real Inbox, in a temp data dir, against a loopback
- * receiver: a start sends the Inbox's ping (tool "inbox") with no notice and
- * no wait; NO_ANON_PING and the do-not-track convention stop it.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

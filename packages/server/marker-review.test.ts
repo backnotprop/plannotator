@@ -29,28 +29,20 @@ const piInsufficientCreditsStdout = readFileSync(
   "utf8",
 );
 
-// A fixed, valid nonce (pn + 12 hex) for deterministic tests.
 const NONCE = "pn0123456789ab";
 const OPEN = markerOpen(NONCE);
 const CLOSE = markerClose(NONCE);
-
-// ---------------------------------------------------------------------------
-// NDJSON builders, mirroring each engine's real stream shape.
-// ---------------------------------------------------------------------------
 
 function ndjson(obj: unknown): string {
   return JSON.stringify(obj) + "\n";
 }
 
-/** Cursor: a real partial-output assistant delta (timestamp_ms, no model_call_id). */
 function cursorDelta(text: string, ts = 1): string {
   return ndjson({ type: "assistant", timestamp_ms: ts, message: { content: text } });
 }
-/** Cursor: a duplicate flush (model_call_id present) — must be skipped. */
 function cursorDuplicate(text: string, ts = 1): string {
   return ndjson({ type: "assistant", timestamp_ms: ts, model_call_id: "call_1", message: { content: text } });
 }
-/** OpenCode: a finalized text part (the only events carrying assistant text). */
 function opencodeText(text: string): string {
   return ndjson({ type: "text", timestamp: 1, sessionID: "s1", part: { type: "text", text, time: { start: 1, end: 2 } } });
 }
@@ -80,10 +72,6 @@ const validReview: MarkerReviewOutput = {
   summary: { correctness: "Issues Found", explanation: "One important issue.", confidence: 0.85 },
 };
 
-// ===========================================================================
-// buildArgv — both descriptors
-// ===========================================================================
-
 describe("buildMarkerCommand: cursor", () => {
   test("uses the `cursor-agent` binary, read-only flags, prompt as trailing argv", () => {
     const { command } = buildMarkerCommand(cursor, "review this", "gpt-5", "/repo");
@@ -111,10 +99,8 @@ describe("buildMarkerCommand: cursor", () => {
   test("cursorSandbox: false omits the --sandbox pair entirely (escape hatch)", () => {
     const { command } = buildMarkerCommand(cursor, "review this", "gpt-5", "/repo", { cursorSandbox: false });
     expect(command).not.toContain("--sandbox");
-    // The pair is OMITTED, never flipped to `--sandbox disabled`.
     expect(command).not.toContain("enabled");
     expect(command).not.toContain("disabled");
-    // The rest of the read-only posture is unchanged.
     expect(command[command.indexOf("--mode") + 1]).toBe("ask");
     expect(command).not.toContain("--force");
     expect(command).not.toContain("--yolo");
@@ -145,10 +131,6 @@ describe("buildMarkerCommand: opencode", () => {
     expect(buildMarkerCommand(opencode, "p", "", "/repo").command).not.toContain("--model");
   });
 
-  // #1609: OpenCode v2's `run` rejects `--dir` ("Unrecognized flag: --dir in
-  // command opencode run"). The working directory rides the job's spawn cwd
-  // instead (asserted end-to-end in agent-jobs-launch.test.ts), so the argv must
-  // never carry it, with or without a cwd.
   test("never passes --dir, with or without a cwd (#1609)", () => {
     const withCwd = buildMarkerCommand(opencode, "p", "opencode/glm-5.1", "/repo").command;
     expect(withCwd).not.toContain("--dir");
@@ -157,10 +139,6 @@ describe("buildMarkerCommand: opencode", () => {
   });
 });
 
-// #2372: on Windows Pi is a .cmd shim, which a job starts through cmd.exe,
-// and a Guided Review prompt (line breaks, quotes, the diff itself) cannot
-// cross cmd.exe. The failure: the prompt is dropped or cut, or the job is
-// refused, instead of the same run with the prompt on stdin.
 describe("Pi on Windows: the job's prompt moves to stdin for a .cmd shim", () => {
   const piCmd = String.raw`C:\Users\me\.pi\agent\bin\pi.cmd`;
   const prompt = 'Organize this diff.\n\n+const s = "100% & done";';
@@ -201,8 +179,6 @@ describe("buildMarkerCommand: copilot", () => {
     expect(command).toContain("--deny-tool=write");
     expect(command).toContain("--allow-tool=shell(git:*)");
     expect(command).toContain("--allow-tool=shell(gh:*)");
-    // High-consequence verbs are structurally denied even though git:*/gh:*/
-    // glab:* are allowed — deny rules take precedence in Copilot's model.
     expect(command).toContain("--deny-tool=shell(git push)");
     expect(command).toContain("--deny-tool=shell(git reset)");
     expect(command).toContain("--deny-tool=shell(git clean)");
@@ -213,7 +189,6 @@ describe("buildMarkerCommand: copilot", () => {
     expect(command).not.toContain("--allow-all-tools");
     expect(command).not.toContain("--yolo");
     expect(command[command.indexOf("--model") + 1]).toBe("claude-sonnet-5");
-    // Prompt is the VALUE of -p, last in argv.
     expect(command[command.length - 2]).toBe("-p");
     expect(command[command.length - 1]).toBe("review this");
   });
@@ -225,10 +200,6 @@ describe("buildMarkerCommand: copilot", () => {
     expect(buildMarkerCommand(MARKER_ENGINES.copilot, "p").command).not.toContain("-C");
   });
 });
-
-// ===========================================================================
-// parseModels — both descriptors
-// ===========================================================================
 
 describe("parseModels: cursor", () => {
   test("parses `id - Label` lines, skips header/tip, dedupes", () => {
@@ -268,10 +239,6 @@ describe("parseModels: opencode", () => {
     expect(opencode.parseModels("No models configured")).toEqual([]);
   });
 });
-
-// ===========================================================================
-// reduceMarkerStream / extractText — both descriptors
-// ===========================================================================
 
 describe("reduceMarkerStream: copilot", () => {
   test("reads assistant.message content once; deltas and bookkeeping are skipped", () => {
@@ -317,7 +284,7 @@ describe("reduceMarkerStream: cursor", () => {
     const { canonicalText, recordCount } = reduceMarkerStream(stdout, cursor);
     expect(canonicalText).toBe("real text");
     expect(canonicalText).not.toContain("DUP");
-    expect(recordCount).toBe(3); // malformed line not counted
+    expect(recordCount).toBe(3);
   });
 });
 
@@ -385,10 +352,6 @@ describe("reduceMarkerStream: pi", () => {
   });
 });
 
-// ===========================================================================
-// parseMarkerStreamOutput — NDJSON split, last block wins, failure → null
-// ===========================================================================
-
 describe("parseMarkerStreamOutput: last block wins, chunk-safe", () => {
   test("cursor: extracts the LAST complete marker block across messages", () => {
     const stale = { findings: [], summary: { correctness: "Correct", explanation: "draft", confidence: 0.1 } };
@@ -421,8 +384,6 @@ describe("parseMarkerStreamOutput: failure modes → null", () => {
   });
 
   test("cursor: a complete block followed by a truncated block fails closed (no stale fallback)", () => {
-    // Model emitted a draft block, then started a replacement that got cut off.
-    // We must NOT silently return the earlier block.
     const stdout = cursorDelta(
       "Draft:\n" + markerBlock(validReview) + "\nFinal:\n" + `${OPEN}\n{"findings":[`,
     );
@@ -430,9 +391,6 @@ describe("parseMarkerStreamOutput: failure modes → null", () => {
   });
 
   test("cursor: bare static sentinels in prose don't corrupt extraction (real-run regression)", () => {
-    // Reproduces the live failure: reviewing this module, Composer's prose quoted
-    // the bare `<plannotator-review-json>` tag (no nonce) BEFORE its real payload.
-    // The static parser latched onto that mention; the nonce makes it inert.
     const bareOpen = "<plannotator-review-json>";
     const bareClose = "</plannotator-review-json>";
     const stdout = cursorDelta(
@@ -452,7 +410,6 @@ describe("parseMarkerStreamOutput: failure modes → null", () => {
     const prompt = composeMarkerReviewPrompt(undefined, "review the diff", nonce);
     expect(extractMarkerNonce(prompt)).toBe(nonce);
     expect(extractMarkerNonce("no marker here")).toBeNull();
-    // A payload tagged with the real nonce parses only under that nonce.
     const stdout = cursorDelta(`${markerOpen(nonce)}\n${JSON.stringify(validReview)}\n${markerClose(nonce)}`);
     expect(parseMarkerStreamOutput(stdout, cursor, nonce)!.findings).toHaveLength(1);
     expect(parseMarkerStreamOutput(stdout, cursor, "pnffffffffffff")).toBeNull();
@@ -468,10 +425,6 @@ describe("parseMarkerStreamOutput: failure modes → null", () => {
   });
 });
 
-// ===========================================================================
-// validateMarkerReviewOutput — nullable placement schema (mirrors Claude)
-// ===========================================================================
-
 describe("validateMarkerReviewOutput: nullable file/line/end_line", () => {
   test("accepts a line finding, a whole-file finding (line null), and a general note (file+line null)", () => {
     const out = validateMarkerReviewOutput({
@@ -479,7 +432,6 @@ describe("validateMarkerReviewOutput: nullable file/line/end_line", () => {
         { file: "a.ts", line: 5, end_line: 5, severity: "important", description: "line issue", reasoning: "r" },
         { file: "a.ts", line: null, end_line: null, severity: "nit", description: "whole-file", reasoning: "r" },
         { file: null, line: null, end_line: null, severity: "nit", description: "general note", reasoning: "r" },
-        // Absent placement fields are equivalent to null.
         { severity: "nit", description: "general via omission", reasoning: "r" },
       ],
       summary: { correctness: "Issues Found", explanation: "e", confidence: 0.5 },
@@ -496,7 +448,6 @@ describe("validateMarkerReviewOutput: nullable file/line/end_line", () => {
     expect(validateMarkerReviewOutput(null)).toBeNull();
     expect(validateMarkerReviewOutput({ summary: { correctness: "c", explanation: "e", confidence: 1 } })).toBeNull();
     expect(validateMarkerReviewOutput({ findings: [{ severity: "high", description: "d" }], summary: { correctness: "c", explanation: "e", confidence: 1 } })).toBeNull();
-    // line must be number|null — a string is invalid.
     expect(validateMarkerReviewOutput({ findings: [{ file: "a", line: "x", severity: "important", description: "d" }], summary: { correctness: "c", explanation: "e", confidence: 1 } })).toBeNull();
   });
 
@@ -508,10 +459,6 @@ describe("validateMarkerReviewOutput: nullable file/line/end_line", () => {
     expect(out!.findings[0].reasoning).toBe("");
   });
 });
-
-// ===========================================================================
-// formatMarkerLogEvent — both descriptors
-// ===========================================================================
 
 describe("formatMarkerLogEvent", () => {
   test("cursor: init / delta / tool_call / result; skips dup, flush, malformed", () => {
@@ -533,10 +480,6 @@ describe("formatMarkerLogEvent", () => {
   });
 });
 
-// ===========================================================================
-// transformMarkerFindings — classifyFindingPlacement; nothing dropped
-// ===========================================================================
-
 describe("transformMarkerFindings: line/file/general, nothing dropped", () => {
   const findings: MarkerFinding[] = [
     { file: "/repo/packages/server/review.ts", line: 10, end_line: 12, severity: "important", description: "line bug", reasoning: "r" },
@@ -546,7 +489,7 @@ describe("transformMarkerFindings: line/file/general, nothing dropped", () => {
 
   test("cursor: produces line/file/general placements with author Cursor", () => {
     const out = transformMarkerFindings(findings, "agent-x", cursor.author, "/repo");
-    expect(out).toHaveLength(3); // nothing dropped
+    expect(out).toHaveLength(3);
 
     const [line, file, general] = out;
     expect(line.scope).toBe("line");
@@ -568,7 +511,6 @@ describe("transformMarkerFindings: line/file/general, nothing dropped", () => {
     const out = transformMarkerFindings(findings, "src", opencode.author, "/repo", (p) => p ? `child/${p}` : p);
     expect(out[0].author).toBe("OpenCode");
     expect(out[0].filePath).toBe("child/packages/server/review.ts");
-    // general note has no file → transform receives "" and placement stays general
     expect(out[2].scope).toBe("general");
   });
 
@@ -577,10 +519,6 @@ describe("transformMarkerFindings: line/file/general, nothing dropped", () => {
     expect(transformMarkerFindings(f, "src", cursor.author, "/repo")[0].lineEnd).toBe(7);
   });
 });
-
-// ===========================================================================
-// composeMarkerReviewPrompt — contract ALWAYS appended (default AND custom)
-// ===========================================================================
 
 describe("composeMarkerReviewPrompt", () => {
   const userMessage = "Review the diff for branch X.";
@@ -609,10 +547,7 @@ describe("composeMarkerReviewPrompt", () => {
     };
     const prompt = composeMarkerReviewPrompt(custom, userMessage, NONCE);
     expect(prompt).toContain("ONLY look for SQL injection and auth bypasses.");
-    // Custom instructions replace the default methodology...
     expect(prompt).not.toContain("You are a senior engineer reviewing a code change.");
-    // ...but the marker contract is still appended — it's the only thing that
-    // makes marker output parseable.
     expect(prompt).toContain(buildMarkerOutputContract(NONCE));
     expect(prompt).toContain(OPEN);
     expect(prompt.endsWith(userMessage)).toBe(true);

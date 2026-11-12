@@ -1,11 +1,3 @@
-/**
- * Ask, Add and Hand off from the reply box's line (approval "inbox-tag-handoff",
- * option A2), proved through the server's real doors: the reply route's
- * `tags[].mode`, the connections' polls (the wake each session gets), the
- * hand-off's Undo window and its Undo route, the taggable route's owner, and
- * the later replies the store routes to the new owner or the added session.
- * Every test uses its own temp data dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,7 +33,6 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** `undoMs`: the Undo window (the set-aside delay). */
 async function setup(undoMs: number, sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-handoff-")));
   roots.push(root);
@@ -96,7 +87,6 @@ async function thread(server: InboxServer, threadId: string): Promise<InboxThrea
   return ((await (await fetch(`${base(server)}/api/inbox/threads/${threadId}`)).json()) as { thread: InboxThread }).thread;
 }
 
-/** The thread's owner as the taggable route says (the session the person's plain reply goes to). */
 async function owner(server: InboxServer, threadId: string): Promise<string | null> {
   const model = (await (await fetch(`${base(server)}/api/inbox/threads/${threadId}/taggable`)).json()) as { owner: { session: string } | null };
   return model.owner?.session ?? null;
@@ -110,7 +100,6 @@ async function until(check: () => Promise<boolean>, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** The owner asked in plannotator; both sessions are live with the tag capability. */
 async function world(undoMs: number, sessionsNow?: () => number) {
   const env = await setup(undoMs, sessionsNow);
   const asked = await agentSends(env.client, env.project, OWNER, "The pane title is herdr's. Should I add `plannotator inbox whoami --json`?");
@@ -147,12 +136,9 @@ describe("Hand off", () => {
     expect(stored.to).toEqual({ host: "claude-code", session: HERDR });
     expect(stored.handoff).toMatchObject({ from: { host: "claude-code", session: OWNER }, label: "Claude Code (herdr)" });
     expect(stored.handoff!.settled_at ?? null).toBeNull();
-    // The former owner's notice rides as its own recipient entry.
     expect(stored.tags).toEqual([expect.objectContaining({ session: OWNER, handed_away: true, wakes: true })]);
-    // Inside the Undo window nobody is handed anything.
     expect(await poll(server, HERDR, herdr)).toEqual([]);
     expect(await poll(server, OWNER, project)).toEqual([]);
-    // The thread is the new owner's from the Send on.
     expect(await owner(server, asked.thread_id)).toBe(HERDR);
 
     await until(async () => (await poll(server, HERDR, herdr)).length > 0, "the hand-off to settle");
@@ -167,15 +153,12 @@ describe("Hand off", () => {
     expect(told).toHaveLength(1);
     expect(told[0]).toMatchObject({ id: inboxStopNoticeId(stored.id), handed_away: { to: "Claude Code" } });
     expect(told[0]!.body).toBe(inboxHandedAwayLine("Claude Code"));
-    // The former owner is told to stop; it never gets the words meant for the new owner.
     const notice = inboxWakeText(told[0]!);
     expect(notice.split("\n")[1]).toBe(inboxHandedAwayLine("Claude Code"));
     expect(notice).not.toContain("really yours");
 
-    // The former owner writes again: the thread stays with the new owner.
     await agentSends(client, project, OWNER, "Noted, stopping here.", { reply_to: stored.id });
     expect(await owner(server, asked.thread_id)).toBe(HERDR);
-    // The person's next plain reply, to the hand-off reply (the window's choice), goes to the new owner alone.
     const next = await reply(server, stored.id, { idempotency_key: "k2", words: "Ask on focus." });
     expect(next.status).toBe(200);
     const nextId = (next.json.reply as InboxMessageWire).id;
@@ -195,7 +178,6 @@ describe("Hand off", () => {
     expect(message.handoff?.undone_at).toBeString();
     expect(message.tags).toEqual([{ ...HERDR_TAG, wakes: true }]);
     expect(await owner(server, asked.thread_id)).toBe(OWNER);
-    // Delivered at once, as an Ask: no notice, no hand-off wake.
     expect((await poll(server, HERDR, herdr))[0]).toMatchObject({ id, tagged: { owner: "Claude Code" } });
     const ownerCommand = (await poll(server, OWNER, project))[0]!;
     expect(ownerCommand.handed_away).toBeUndefined();
@@ -208,7 +190,6 @@ describe("Hand off", () => {
     const sent = await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours now.", tags: [{ ...HERDR_TAG, mode: "handoff" }] });
     const id = (sent.json.reply as InboxMessageWire).id;
     await until(async () => !!(await thread(server, asked.thread_id)).messages.find((m) => m.id === id)?.handoff?.settled_at, "the hand-off to settle");
-    // The stop notice is not delivered yet (the former owner did not poll): read mid-turn.
     const text = async (args: Record<string, unknown>) =>
       JSON.stringify(await client.callTool({ name: "read_thread", arguments: { project_path: project, agent_session: OWNER, ...args } }));
     const read = await text({ thread_id: asked.thread_id, format: "full" });
@@ -224,22 +205,18 @@ describe("Hand off", () => {
     const { server, project, herdr, asked } = await world(60_000);
     const sent = await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] });
     const id = (sent.json.reply as InboxMessageWire).id;
-    // The reply box answers the held hand-off reply, so the follow-up is addressed to the new owner.
     const follow = await reply(server, id, { idempotency_key: "k2", words: "Creds are in the vault." });
     expect(follow.status).toBe(200);
     const followId = (follow.json.reply as InboxMessageWire).id;
     expect((follow.json.reply as InboxMessageWire).to).toEqual({ host: "claude-code", session: HERDR });
     const handedOff = (await thread(server, asked.thread_id)).messages.find((m) => m.id === id)!;
     expect(handedOff.handoff?.settled_at).toBeString();
-    // In order: the hand-off (with its wake), then the follow-up.
     const commands = await poll(server, HERDR, herdr);
     expect(commands.map((c) => c.id)).toEqual([id, followId]);
     expect(commands[0]!.handoff).toEqual({ from: "Claude Code" });
-    // The former owner is told to stop, and never handed the follow-up.
     const told = await poll(server, OWNER, project);
     expect(told.map((c) => c.id)).toEqual([inboxStopNoticeId(id)]);
     expect(told[0]!.handed_away).toEqual({ to: "Claude Code" });
-    // Undo can no longer send the thread back past a reply the new owner has.
     expect((await post(server, `/api/inbox/messages/${id}/handoff/undo`, {})).status).toBe(409);
     expect(await owner(server, asked.thread_id)).toBe(HERDR);
   });
@@ -249,7 +226,6 @@ describe("Hand off", () => {
     const { server, project, herdr, asked } = await world(100, () => now);
     const stored = (await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] })).json.reply as InboxMessageWire;
     await until(async () => (await poll(server, HERDR, herdr)).length > 0, "the hand-off to settle");
-    // The former owner took its notice.
     const notice = await poll(server, OWNER, project);
     expect(notice.map((c) => c.id)).toEqual([inboxStopNoticeId(stored.id)]);
     const taken = await fetch(`${base(server)}${INBOX_BRIDGE_EVENT_PATH}`, {
@@ -265,12 +241,10 @@ describe("Hand off", () => {
     expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)?.to).toEqual({ host: "claude-code", session: OWNER });
     const words = await poll(server, OWNER, project);
     expect(words.map((c) => c.id)).toEqual([stored.id]);
-    // Its own again: the wake says nothing of another session having had it, and the thread no longer reads handed off.
     expect(words[0]!.handoff).toBeUndefined();
     expect(await poll(server, HERDR, herdr)).toEqual([]);
     const back = (await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)!;
     expect(back.handoff?.undone_at).toBeTruthy();
-    // The thread reads one line for it: no "was told to stop" beside its delivery.
     expect(back.tags ?? []).toEqual([]);
   });
 
@@ -315,7 +289,6 @@ describe("Hand off", () => {
 
   test("refused before anything is written: to an agent that is not woken, to two sessions at once, and to the owner", async () => {
     const { server, client, project, asked } = await world(60_000);
-    // An MCP-only agent the Inbox knows (it wrote, not through a waking connection).
     await client.callTool({
       name: "send_message",
       arguments: { body: "Docs moved.", project_path: project, agent_session: "ses-codex", agent_host: "codex", agent_name: "Codex" },
@@ -339,7 +312,6 @@ describe("Hand off", () => {
 
 describe("a later reply moved when the hand-off's new owner has ended", () => {
   const C = "cc-third";
-  /** The owner handed the thread to `HERDR`, which took it; the person wrote more, and `HERDR` ended. */
   async function handedThenEnded(herdrWrites: boolean) {
     let now = 1_000_000;
     const w = await world(100, () => now);
@@ -354,7 +326,6 @@ describe("a later reply moved when the hand-off's new owner has ended", () => {
     now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(w.server, OWNER, w.project);
     await poll(w.server, C, w.project);
-    /** What the window does with the person's next words: answers `wordsMessage`, as it is addressed. */
     const nextReply = async (key: string) => {
       const at = wordsMessage(await thread(w.server, w.asked.thread_id));
       return (await reply(w.server, at.id, { idempotency_key: key, words: `Next, ${key}.` })).json.reply as InboxMessageWire;
@@ -452,7 +423,6 @@ describe("a later reply moved when the hand-off's new owner has ended", () => {
 
 describe("a reply to an older message while the thread's owner is there", () => {
   const C = "cc-third";
-  /** The asker handed the thread to `HERDR`, which stays; the asker ended. */
   async function formerEnded() {
     let now = Date.now();
     const w = await world(100, () => now);
@@ -461,7 +431,6 @@ describe("a reply to an older message while the thread's owner is there", () => 
     now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(w.server, HERDR, w.herdr);
     await poll(w.server, C, w.project);
-    /** Server and window both say the thread stays with `HERDR`, and the person's next words reach it. */
     const staysWithNewOwner = async () => {
       expect(await owner(w.server, w.asked.thread_id)).toBe(HERDR);
       const words = wordsMessage(await thread(w.server, w.asked.thread_id));
@@ -495,14 +464,12 @@ describe("a reply to an older message while the thread's owner is there", () => 
 describe("a reply to an older message when an agent that reads through MCP wrote last", () => {
   const MCP_ONLY = "mcp-only";
   const C = "cc-third";
-  /** The asker wakes and has ended; `MCP_ONLY` wrote last, and a connection cannot say if it ended. */
   async function askerEndedAfterMcpWrote() {
     let now = Date.now();
     const w = await world(100, () => now);
     const wrote = (await w.client.callTool({ name: "send_message", arguments: { body: "Noted.", reply_to: w.asked.message_id, agent_session: MCP_ONLY, agent_host: "cursor", agent_name: "Cursor" } })).structuredContent as { message_id: string };
     now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(w.server, C, w.project);
-    /** Server and window both keep it with the MCP agent: the person's next reply answers its message, not `C`. */
     const staysWithIt = async () => {
       expect(await owner(w.server, w.asked.thread_id)).toBe(MCP_ONLY);
       const words = wordsMessage(await thread(w.server, w.asked.thread_id));
@@ -548,7 +515,6 @@ describe("Add", () => {
     expect(wake[2]).toBe(inboxAddedLine("Claude Code", first.id));
     expect(await owner(server, asked.thread_id)).toBe(OWNER);
 
-    // The owner answers; the person's plain reply (no tag) reaches the added session too.
     const answer = await agentSends(client, project, OWNER, "Adding whoami now.", { reply_to: first.id });
     const later = await reply(server, answer.message_id, { idempotency_key: "k2", words: "Good, and keep the title short." });
     const second = later.json.reply as InboxMessageWire;

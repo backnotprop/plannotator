@@ -1,22 +1,3 @@
-/**
- * The Files sidebar and Obsidian routes (`/api/reference/files`,
- * `/api/reference/files/stream`, `/api/reference/obsidian/files`,
- * `/api/reference/obsidian/doc`, `/api/obsidian/vaults`), driven over HTTP
- * against real plan and annotate servers. Shared by the Bun suite
- * (reference-readers.test.ts) and the Pi mirror
- * (apps/pi-extension/server/reference-readers.test.ts).
- *
- * Another site's page is refused on every one of them. A page on this machine
- * lists any folder and vault, as before; every reader that may be on another
- * machine (remote mode, a proxy's mark) lists only the session's roots and the
- * vaults Obsidian itself lists here. For every reader, a vault document must
- * be inside the vault after symlink resolution, be Markdown by its real path
- * and fit the 2MB cap.
- *
- * Every test runs under a temp PLANNOTATOR_DATA_DIR and HOME; nothing touches
- * the real ~/.plannotator or the real Obsidian config.
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
@@ -45,7 +26,6 @@ interface Answer {
   text: string;
 }
 
-/** One request; a stream is read only until its first event, then dropped. */
 function get(server: ReferenceScenarioServer, path: string, headers: Record<string, string> = {}): Promise<Answer> {
   const port = new URL(server.url).port;
   return new Promise((resolve, reject) => {
@@ -108,11 +88,8 @@ export function defineReferenceReaderScenarios(runtime: string, start: StartRefe
   let home = "";
   let project = "";
   let docPath = "";
-  /** A folder outside the session's roots (the person's home, say). */
   let elsewhere = "";
-  /** A vault Obsidian lists in its own config on this machine. */
   let vault = "";
-  /** A folder named as a vault that Obsidian does not list. */
   let stranger = "";
   const servers: ReferenceScenarioServer[] = [];
 
@@ -128,7 +105,6 @@ export function defineReferenceReaderScenarios(runtime: string, start: StartRefe
     if (options.codespace) process.env.CODESPACES = "true";
     else delete process.env.CODESPACES;
     if (options.remote) {
-      // Remote mode would otherwise bind the fixed 19432.
       const { start: port, servers: held } = await occupyConsecutivePorts(1);
       await closeServer(held[0]);
       process.env.PLANNOTATOR_PORT = String(port);
@@ -149,11 +125,9 @@ export function defineReferenceReaderScenarios(runtime: string, start: StartRefe
     writeFileSync(join(home, ".ssh/id_ed25519"), "SECRET-SSH-KEY\n");
     writeFileSync(join(vault, "notes/creds.txt"), "SECRET-VAULT-TXT\n");
     writeFileSync(join(vault, "big.md"), `# Big\n\n${"x".repeat(2 * 1024 * 1024 + 16)}\n`);
-    // Vault document names whose real file is outside the vault or not Markdown.
     symlinkSync(join(home, ".ssh/id_ed25519"), join(vault, "key.md"));
     symlinkSync(join(elsewhere, "diary.md"), join(vault, "diary.md"));
     symlinkSync(join(vault, "notes/creds.txt"), join(vault, "creds.md"));
-    // Obsidian's own vault list, where detectObsidianVaults reads it.
     const config = JSON.stringify({ vaults: { a: { path: vault } } });
     for (const configDir of [join(home, "Library/Application Support/obsidian"), join(home, ".config/obsidian")]) {
       mkdirSync(configDir, { recursive: true });
@@ -197,7 +171,6 @@ export function defineReferenceReaderScenarios(runtime: string, start: StartRefe
             expect(answer.body?.code).toBe("cross_origin");
             expect(answer.text).not.toContain(vault);
           }
-          // The session's own page still reads it.
           expect([path, (await get(server, path, { "sec-fetch-site": "same-origin" })).status]).toEqual([path, 200]);
         }
       });
@@ -234,7 +207,6 @@ export function defineReferenceReaderScenarios(runtime: string, start: StartRefe
             expect([path, answer.status]).toEqual([path, 403]);
             expect(answer.text).not.toMatch(/diary|plans\.md|SECRET-/);
           }
-          // A vault Obsidian lists on this machine still opens.
           const listed = await get(server, `/api/reference/obsidian/files?vaultPath=${q(vault)}`, headers);
           expect(listed.status).toBe(200);
           expect(listed.text).toContain("idea.md");
@@ -242,7 +214,6 @@ export function defineReferenceReaderScenarios(runtime: string, start: StartRefe
           expect(doc.status).toBe(200);
           expect(String(doc.body?.markdown)).toContain("VAULT-BODY");
           if (kind === "annotate") {
-            // The session's own roots still list.
             const own = await get(server, `/api/reference/files?dirPath=${q(project)}`, headers);
             expect(own.status).toBe(200);
             expect(own.text).toContain("guide.md");
@@ -265,7 +236,6 @@ export function defineReferenceReaderScenarios(runtime: string, start: StartRefe
           expect(SECRET.test(answer.text)).toBe(false);
           expect(answer.text).not.toContain("xxxxxxxx");
         }
-        // A forwarded reader of a listed vault gets the same refusals.
         const forwarded = await get(server, `/api/reference/obsidian/doc?vaultPath=${q(vault)}&path=key.md`, FORWARDED);
         expect(forwarded.status).toBe(403);
         expect(SECRET.test(forwarded.text)).toBe(false);
@@ -291,7 +261,6 @@ export function defineReferenceReaderScenarios(runtime: string, start: StartRefe
           const answer = await get(server, `/api/reference/obsidian/doc?vaultPath=${q(vault)}&path=fifo.md`, headers);
           expect(answer.status).toBe(403);
         }
-        // The server still answers the next request.
         const next = await get(server, `/api/reference/obsidian/doc?vaultPath=${q(vault)}&path=${q("notes/idea.md")}`);
         expect(next.status).toBe(200);
       });

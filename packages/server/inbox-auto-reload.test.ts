@@ -4,15 +4,6 @@ import { INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_RELOAD_FIELD, parseInboxReloadOffer
 import { claudeSessionOutdated, type ClaudePluginInstall, type LoadedPlugin } from "./inbox-restart";
 import { createInboxLiveSessions } from "./inbox-sessions";
 
-// Auto reload (owner approval "cc-auto-reload"): the Inbox tells a Claude Code
-// session to reload itself with the SAME judgment Settings → Agents shows
-// (`claudeSessionOutdated`), and only when a reload is the fix. The failures
-// this catches: an offer to a session a reload cannot help (the installed
-// plugin is itself behind this Inbox, a --plugin-dir checkout, another host),
-// an offer that outlives the reload (the poll that reports the new version
-// must end it, which also takes the session off the manual notice), and a
-// poll answer the mod would misread.
-
 const PLUGINS = "/scratch-claude/plugins";
 const installAt = (version: string): ClaudePluginInstall => ({
   version,
@@ -69,10 +60,8 @@ describe("what a poll answer carries", () => {
     const live = liveWith([installAt("0.28.51")], "0.28.51");
     await live.pollStarted("ses-a", "claude-code", { plugin: pluginOf("0.28.50") });
     expect(live.reloadAnswerFor("ses-a", { session: "ses-a", [INBOX_AUTO_RELOAD_POLL_FIELD]: true })).toEqual({ [INBOX_RELOAD_FIELD]: { installed: "0.28.51" } });
-    // An older mod (no field), or a field that is not exactly true, is never told: it would not reload, and must not be asked to.
     expect(live.reloadAnswerFor("ses-a", { session: "ses-a" })).toEqual({});
     expect(live.reloadAnswerFor("ses-a", { session: "ses-a", [INBOX_AUTO_RELOAD_POLL_FIELD]: "true" })).toEqual({});
-    // Up to date: nothing, even to a connection that asks.
     await live.pollStarted("ses-a", "claude-code", { plugin: pluginOf("0.28.51") });
     expect(live.reloadAnswerFor("ses-a", { session: "ses-a", [INBOX_AUTO_RELOAD_POLL_FIELD]: true })).toEqual({});
   });

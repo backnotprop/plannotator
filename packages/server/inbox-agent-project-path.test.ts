@@ -1,10 +1,3 @@
-/**
- * The Pi / OpenCode connection (InboxAgentConnection) with an agent-named
- * project_path, against a real Inbox in this process: the thread lands in the
- * named project and relative attachments resolve against it; a path that is
- * not an existing folder is refused before the Inbox is reached (with the
- * Inbox stopped, its start command never runs).
- */
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +22,6 @@ function world() {
   mkdirSync(notes, { recursive: true });
   Bun.spawnSync(["git", "init", "-q"], { cwd: repo, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
   writeFileSync(join(repo, "scripts", "replay.sh"), "#!/bin/sh\necho replay\n");
-  // The command the connection would run to start a stopped Inbox: it only leaves a mark.
   const marker = join(root, "inbox-started");
   const command = join(root, "fake-plannotator");
   writeFileSync(command, `#!/bin/sh\necho "$@" >> '${marker}'\nexit 1\n`);
@@ -77,9 +69,7 @@ test("a project_path that is not an existing folder is refused before the Inbox 
     expect(result.isError, bad).toBe(true);
     expect(result.text).toContain("project_path");
   }
-  // The stopped Inbox was never started for these calls.
   expect(existsSync(w.marker)).toBe(false);
-  // A good path does reach for the Inbox (and starts it, here the fake that only marks).
   await connection.callTool({ action: "send_message", body: "x", project_path: "../api" }, at);
   expect(existsSync(w.marker)).toBe(true);
 });

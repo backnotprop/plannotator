@@ -1,27 +1,3 @@
-/**
- * Thread steps for agents (approval "inbox-thread-steps", 2026-11-03) on a
- * real Inbox, config.json deciding the switch.
- *
- * Off (the default), agents get nothing, and that is proved here for every
- * host's tool text: the Claude Code mod's builder (its contract copy), the
- * shared builder Pi, OpenCode and DeepSeek Harness use (with the wake, and
- * without it for OpenCode 1), and a raw MCP client's tools/list and server
- * instructions. The list served is the bundled default list
- * (INBOX_DEFAULT_TOOLS, which has no steps), each host's text is the one its
- * builder makes from that list, and none holds the word. This is no
- * pre-steps baseline: the builders are today's, so a builder change that
- * added the same text in both would pass the equality, and the word check
- * is the guard. (Review of #2567: measured against the base commit
- * 73e39b6b, the off text was byte-equal on every host.) No wake line, no compaction line, no read_thread lines either,
- * though the store keeps a list. A `steps` call from a session that listed
- * it while on answers steps_off; a send_message that still carries `steps`
- * is sent without them.
- *
- * On: the approved text word for word (pinned on purpose: the owner approved
- * it exactly), the action and the field write the session's list, read_thread
- * shows it, the compaction list says "steps 2/5", a reply's wake carries the
- * approved line, and the entry stays within 5% of the size the window states.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,14 +19,11 @@ import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-too
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_MCP_INSTRUCTIONS } from "./inbox-mcp";
 
-/** The approved agent text, exact (approval "inbox-thread-steps", item 7, amended 2026-11-07 and 2026-11-09). Pinned on purpose. */
 const APPROVED =
   "steps: The person's checklist for this thread, only for multi-step work you're both aligned on. Start one when the person gives the go-ahead on work with several steps. High-level steps, a few plain words each; never your own to-do list. The whole list each call. status: todo, doing, done, waiting (on the person), dropped (say why in note). Update each step as it starts and ends; notifies no one.";
-/** The action's line in the agent tool (the owner, 2026-11-07), so the description stays under Claude Code's 2,048. */
 const ACTION_LINE = "steps: person's checklist for multi-step work you're aligned on (see the steps field).";
 const APPROVED_WAKE = "Your checklist here: 2 of 5 done; doing: Replay the failures in staging. If you're still working on this, keep it current.";
 
-/** The word as an agent would read it: `steps` alone, not inside `diff_steps`. */
 const STEPS_WORD = /(?<![A-Za-z_])steps(?![A-Za-z_])/i;
 
 const roots: string[] = [];
@@ -139,7 +112,6 @@ describe("off, the default: agents get nothing", () => {
       expect({ host, text }).toEqual({ host, text: JSON.stringify({ description: baseline[host as keyof typeof baseline]!.description, schema: baseline[host as keyof typeof baseline]!.inputSchema }) });
       expect({ host, word: STEPS_WORD.test(text) }).toEqual({ host, word: false });
     }
-    // A raw MCP client (Codex, Cursor, any stdio client): the list as served, and the server's instructions.
     expect(STEPS_WORD.test(await w.rawList())).toBe(false);
     const init = (await w.rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } })).result;
     expect(init.instructions).toBe(INBOX_MCP_INSTRUCTIONS);
@@ -207,7 +179,6 @@ describe("on", () => {
     expect(w.server.store.cursor()).toBe(before);
   });
 
-  // Review of #2567, finding 1: the store refuses a list with no agent session; that is checked before the send.
   test("a send_message with steps and no session is refused, and no message is stored", async () => {
     const w = await world();
     await w.setSteps(true);
@@ -220,7 +191,6 @@ describe("on", () => {
     expect(w.server.store.cursor()).toBe(before);
   });
 
-  // Review of #2567, finding 3: a replay answers the first send and never puts back the list it carried.
   test("a replayed send_message leaves the list the session sent since", async () => {
     const w = await world();
     await w.setSteps(true);
@@ -249,9 +219,6 @@ describe("on", () => {
     expect(wake.endsWith(`\n\n${APPROVED_WAKE}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
   });
 
-  // The owner, 2026-11-09: when the person answers the session's questions in a thread where it keeps no checklist,
-  // the wake says when to start one. What regresses: the line on a plain reply, with the switch off, or still there
-  // once the session keeps a list.
   test("a reply that answers the session's questions, with no list of its own there: the wake says when to start one", async () => {
     const w = await world();
     const ask = async (key: string) => {
@@ -268,7 +235,6 @@ describe("on", () => {
       expect(response.status).toBe(200);
       return newest();
     };
-    // The wake for the person's latest message in the thread (found by id, whatever else the poll still holds).
     const newest = async () => {
       const ids = w.server.store.threadMessageIds(w.thread);
       const latest = [...ids].reverse().find((id) => w.server.store.message(id)?.author.kind === "person")!;
@@ -276,21 +242,17 @@ describe("on", () => {
       expect(command).toBeDefined();
       return command!;
     };
-    // Off: nothing, answers or not.
     let command = await answer(await ask("k-ask-off"), "k-answer-off");
     expect(command.steps_start).toBeUndefined();
     expect(inboxWakeText(command)).not.toContain(INBOX_STEPS_START_WAKE_LINE);
     await w.setSteps(true);
-    // On, answers: the line, before the closing line.
     command = await answer(await ask("k-ask-on"), "k-answer-on");
     expect(command.steps_start).toBe(true);
     expect(inboxWakeText(command).endsWith(`\n\n${INBOX_STEPS_START_WAKE_LINE}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
-    // On, a plain reply: nothing.
     expect((await w.personReplies("Thanks.")).status).toBe(200);
     const plain = await newest();
     expect(plain.steps_start).toBeUndefined();
     expect(inboxWakeText(plain)).not.toContain(INBOX_STEPS_START_WAKE_LINE);
-    // The session keeps a list there: its own line, never this one, even once it clears the list.
     await w.call("steps", { ...w.agent, thread_id: w.thread, steps: PLAN });
     command = await answer(await ask("k-ask-list"), "k-answer-list");
     expect(command.steps_start).toBeUndefined();
@@ -310,8 +272,6 @@ describe("on", () => {
     expect(Math.abs(added - INBOX_TOOL_COST_STEPS.bytes) / INBOX_TOOL_COST_STEPS.bytes).toBeLessThanOrEqual(0.05);
   });
 
-  // What regresses: Claude Code cuts a tool description at 2,048 characters, which would drop the wake note and the
-  // help pointer at its end. Steps on, with the Board off and on, both builders (the mod's copy and the shared one).
   test("the description with steps on stays under Claude Code's 2,048 characters, the Board off or on", async () => {
     const w = await world();
     await w.setSteps(true);

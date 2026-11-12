@@ -1,18 +1,3 @@
-/**
- * send_message on a question about pictures written with bare text choices:
- * the pictures sit above the question (a rundown, one per option) and the
- * choices are plain text, so the person cannot pick by picture. The result
- * then tells the agent to send the question again as picture choices,
- * replacing this one. Advice only: the message is sent as written.
- *
- * What regresses if this fails: the agent never hears it and the person
- * keeps picking from bare radio buttons under big screenshots (the clean
- * room: Claude 2/6 without the line, 6/6 with it), or the line fires on a
- * question that is right, or it names ids the resend is refused with.
- *
- * A real store in a temp data dir, driven through sendAgentMessage (the
- * send path send_message runs); no Inbox server, no network.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -57,18 +42,14 @@ test("no advice with one picture above, picture choices, some picture choices, o
   expect(questionsWithoutPictureChoices(body(rundown("forest", "sunset", "ocean"), ask("question", ...PICTURED))).keys).toEqual([]);
   expect(questionsWithoutPictureChoices(body(rundown("forest", "sunset"), ask("question", PICTURED[0]!, BARE[1]!, BARE[2]!))).keys).toEqual([]);
   expect(questionsWithoutPictureChoices(body(rundown("forest", "sunset", "ocean"))).keys).toEqual([]);
-  // A free-text question has no choices to carry pictures.
   expect(questionsWithoutPictureChoices(body(rundown("forest", "sunset"), [":::question-text", "Which theme, and why?", ":::"])).keys).toEqual([]);
 });
 
 test("only pictures outside question blocks and outside code count", () => {
-  // Two pictures, but inside other questions' picture choices: none sits above the bare question.
   const twoAsked = body(ask("question", ...PICTURED), ["", "Then:", ""], ask("question-multi", "- [ ] Light mode", "- [ ] Dark mode"));
   expect(questionsWithoutPictureChoices(twoAsked).keys).toEqual([]);
-  // One real picture and one inside a code fence (drawn as code, not a picture).
   const fenced = body(rundown("forest"), ["```md", "![Sunset](designs/sunset.png)", "```", ""], ask("question", ...BARE));
   expect(questionsWithoutPictureChoices(fenced).keys).toEqual([]);
-  // The same picture twice is one picture.
   const twice = body(rundown("forest", "forest"), ask("question", ...BARE));
   expect(questionsWithoutPictureChoices(twice).keys).toEqual([]);
 });
@@ -89,7 +70,6 @@ test("the sent result names this message and the question's key, and the resend 
   expect(text).toContain(`but 3 pictures sit above it`);
   expect(text).toContain(`reply_to "${messageId}" and supersedes "${messageId}/${key}"`);
 
-  // Doing what it says: the resend lands in the same thread, replaces the question, and gets no advice.
   const again = await sendAgentMessage(context, project, {
     body: body(ask("question", ...PICTURED)),
     reply_to: messageId,

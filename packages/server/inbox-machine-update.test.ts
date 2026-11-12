@@ -1,9 +1,3 @@
-/**
- * Update on a linked machine, both ends without a network: what the far machine does when its door is pressed
- * (inbox-updates.ts: its own answer from GitHub, its lock, its restart, its way of saying nothing changed, and what
- * it tells the other machine), and how this machine draws what it hears (machineUpdateView). The two real Inboxes
- * are in inbox-machines.test.ts, the compiled ones in tests/e2e/inbox-machine-update.spec.ts.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -81,12 +75,10 @@ function farMachine(over: { managed?: boolean; version?: string; sessions?: numb
     facts,
     home,
     dataDir,
-    /** The install script swaps the binary. */
     swap(to: string) {
       facts.onDisk = to;
       writeFileSync(binary, `new ${to}`);
     },
-    /** The wrapper finishes: its result, then the lock goes. */
     finish(exitCode: number, tag = `v${NEWEST}`) {
       writeFileSync(paths.result, JSON.stringify({ version: tag, exitCode }));
       rmSync(paths.lock, { force: true });
@@ -95,7 +87,6 @@ function farMachine(over: { managed?: boolean; version?: string; sessions?: numb
       writeFileSync(paths.lock, String(process.pid));
     },
     async settled() {
-      // A page load's tick: a fresh look at the binary, then the judgement.
       updates.nudge();
       await Bun.sleep(30);
     },
@@ -123,7 +114,6 @@ describe("the far machine, when a linked machine presses Update", () => {
     await far.updates.machineStart();
     far.swap(NEWEST);
     await far.settled();
-    // The script still installs skills and plugins.
     expect(far.updates.current()?.state).toBe("ready");
     expect(far.facts.restarts).toBe(0);
     far.finish(0);
@@ -146,7 +136,6 @@ describe("the far machine, when a linked machine presses Update", () => {
 
   test("a terminal's update that takes the lock while this press asks GitHub is joined, and its ending counts as this press's", async () => {
     let lock = () => {};
-    // Once: with update checks on, the release notes ask again, and a terminal does not take the lock twice.
     const far = farMachine({
       duringCheck: () => {
         lock();
@@ -199,7 +188,6 @@ describe("the far machine, when a linked machine presses Update", () => {
     expect(far.facts.restarts).toBe(0);
     expect(far.updates.noChange()).toBe(NEWEST);
     expect(far.updates.machineRead().failure).toEqual({ exit_code: 0, unchanged: true });
-    // Try Again starts over.
     const again = await far.updates.machineStart();
     expect(again).toEqual({ outcome: "launched" });
     expect(far.updates.noChange()).toBeNull();
@@ -241,7 +229,6 @@ describe("what the far machine tells the other one", () => {
   test("no username and no project name goes over the wire: the log is ~/…, a review is a count", async () => {
     const far = farMachine({ sessions: 2 });
     await far.updates.machineStart();
-    // A failed download whose reason names a folder in the home.
     writeFileSync(autoUpdatePaths(far.dataDir).log, `[t] ${UPDATE_STAGING_PREFIX}the temp folder ${far.home}/tmp is full (ENOSPC)\n[t] update: install.sh exited 75\n`);
     far.finish(75);
     await far.settled();
@@ -286,7 +273,6 @@ describe("what the far machine tells the other one", () => {
   test("a path outside the home folder never carries a name either", () => {
     expect(machinePath("/Users/ramos/.plannotator/update.log", "/Users/ramos")).toBe("~/.plannotator/update.log");
     expect(machinePath("C:\\Users\\ramos\\.plannotator\\update.log", "C:\\Users\\ramos")).toBe("~\\.plannotator\\update.log");
-    // Not the same folder, though it starts the same.
     expect(machinePath("/Users/ramos2/update.log", "/Users/ramos")).toBe("update.log");
     expect(machinePath("/srv/plannotator/ramos/update.log", "/Users/ramos", "/srv/plannotator/ramos")).toBe("$PLANNOTATOR_DATA_DIR/update.log");
     expect(machinePath("/mnt/ramos/update.log", "/Users/ramos", "/srv/x")).toBe("update.log");
@@ -385,12 +371,10 @@ describe("how this machine draws what it hears", () => {
   test("during a press, a new binary on disk is still Updating: the install script is running on, and that machine restarts itself", () => {
     const ready = { state: "ready", version: "0.28.50", action: "script" } as const;
     expect(view({ farUpdate: ready, asked: { from: "0.28.46", at: NOW } }, NOW + 600_000)).toMatchObject({ phase: "updating", target: "0.28.50", from: "0.28.46" });
-    // Nobody pressed (a terminal's update there): it waits for a Restart.
     expect(view({ farUpdate: ready })).toMatchObject({ phase: "ready", target: "0.28.50" });
   });
 
   test("that machine said it is up to date: the word goes, until a newer release or its own answer brings it back", () => {
-    // This Inbox runs a build ahead of GitHub's latest.
     const said = { saidUpToDate: "0.28.49" };
     expect(view(said)).toBeNull();
     expect(view(said, NOW, { current: "0.28.49", latest: "0.28.51" })).toMatchObject({ phase: "behind", target: "0.28.51" });
@@ -411,7 +395,6 @@ describe("how this machine draws what it hears", () => {
     const asked = { from: "0.28.46", at: NOW - 1000 };
     expect(view({ state: "offline", asked }, NOW + 1)).toMatchObject({ phase: "restarting" });
     expect(view({ state: "offline", asked }, NOW + clocks.restartBackMs)).toMatchObject({ phase: "not_back" });
-    // A stale "updating" heard before it went away is not said of a sleeping machine.
     expect(view({ state: "offline", farUpdate: { state: "updating", version: "0.28.50", action: "script" } })).toMatchObject({ phase: "behind" });
   });
 
@@ -425,14 +408,10 @@ describe("how this machine draws what it hears", () => {
     const old = { version: "0.28.44", canUpdate: false };
     const agentAsked = { from: "0.28.44", at: NOW, thread: "thr_1", agent: "Claude Code" };
     expect(view({ ...old, agentAsked }, NOW + 1)).toMatchObject({ phase: "behind", can_update: false, asked: { thread: "thr_1", agent: "Claude Code" } });
-    // Gone after the ask: its restart. Past a restart's time it is only asleep, with the ask still said.
     expect(view({ ...old, agentAsked, state: "offline", since: NOW + 10 }, NOW + 20)).toMatchObject({ phase: "restarting", asked: { agent: "Claude Code" } });
     expect(view({ ...old, agentAsked, state: "offline", since: NOW + 10 }, NOW + 10 + clocks.restartBackMs)).toMatchObject({ phase: "behind", asked: { agent: "Claude Code" } });
-    // Already asleep when it was asked: not a restart.
     expect(view({ ...old, agentAsked, state: "offline", since: NOW - 10 }, NOW + 20)).toMatchObject({ phase: "behind" });
-    // An ask nobody acted on fades, so the dialog offers it again.
     expect(view({ ...old, agentAsked }, NOW + AGENT_ASK_KEPT_MS)).not.toHaveProperty("asked");
-    // Back on the new version, Updated says nothing of the ask.
     expect(view({ ...old, version: "0.28.49", agentAsked: null, updated: { from: "0.28.44", to: "0.28.49", at: NOW } }, NOW + 1)).toMatchObject({ phase: "updated" });
   });
 

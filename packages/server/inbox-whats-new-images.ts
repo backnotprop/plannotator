@@ -1,40 +1,3 @@
-/**
- * Images in the Inbox's What's new page.
- *
- * A release's "What's New" markdown shows images from GitHub
- * (`https://github.com/user-attachments/assets/<uuid>`, which redirects to
- * `private-user-images.githubusercontent.com`). The window never loads a
- * remote image: its CSP is `img-src 'self' data: blob:`, and stays so.
- * Instead the Inbox copies those images once, beside the notes, and the page
- * loads them from `GET /api/inbox/whats-new/image?version=X&src=<as written>`.
- *
- * The rules:
- *  - Only `https:` URLs on the hosts release attachments use are fetched
- *    (`allowedReleaseImageUrl`): `github.com/user-attachments/assets/*`,
- *    `private-user-images.githubusercontent.com`,
- *    `user-images.githubusercontent.com`, and `raw.githubusercontent.com`
- *    for this repository only. Redirects are followed by hand, at most 5, and only to
- *    those hosts. No credentials, no cookies.
- *  - Each image: at most 10 MB and 50 megapixels (code review's caps), its
- *    type sniffed from the bytes, one 15 s deadline across its redirects and
- *    body. At most 12 images per release, the first 12 the notes show.
- *  - The release check's rules: no request while PLANNOTATOR_UPDATE_CHECK is
- *    off, the same user agent, and the notes' claim and back-off per version
- *    (`releaseImagesFetch` in update-state.json: claimed before the request,
- *    then 6 h after a failure and 24 h after an answer; a claim its process
- *    abandoned mid-fetch, 15 minutes after it). A failed image is
- *    left out (logged to update.log); it never fails the notes.
- *  - Stored as `update-notes/<version>/<sha256>.<ext>`, with the src → file
- *    map in `update-notes/<version>/images.json` (its own file, so the release
- *    check rewriting `<version>.json` never drops it). `uninstall --purge`
- *    removes `update-notes/` whole.
- *
- * Inbox only: the shared `update-check.ts` (vendored to Pi) fetches no image.
- * PLANNOTATOR_UPDATE_API_URL pointed at a loopback `http:` origin also lets
- * images from that same origin through, the way the knob lets the release
- * API through, so tests and the screenshot run use a fake GitHub on loopback.
- */
-
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -55,20 +18,14 @@ import {
   type UpdateState,
 } from "@plannotator/shared/update-check";
 
-/** The most images one release keeps. */
 export const RELEASE_IMAGES_MAX = 12;
-/** One image's deadline, across its redirects and its body. */
 export const RELEASE_IMAGE_TIMEOUT_MS = 15_000;
-/** Redirects one image may take, each to an allowed host. */
 export const RELEASE_IMAGE_REDIRECTS_MAX = 5;
-/** The longest `src` the route takes. */
 export const RELEASE_IMAGE_SRC_MAX = 2048;
 
 const REPO_RAW_PREFIX = "/backnotprop/plannotator/";
-/** The githubusercontent hosts release attachments use (user-attachments redirects to the first). */
 const IMAGE_HOSTS = new Set(["private-user-images.githubusercontent.com", "user-images.githubusercontent.com"]);
 const USER_AGENT = "plannotator-update-check";
-/** How many versions `releaseImagesFetch` remembers. */
 const FETCH_REMEMBERED = 10;
 
 const EXTENSIONS: Record<string, string> = {
@@ -81,7 +38,6 @@ const EXTENSIONS: Record<string, string> = {
   "image/x-icon": "ico",
   "image/svg+xml": "svg",
 };
-/** A stored image's file name: content-addressed. */
 export const RELEASE_IMAGE_FILE_RE = /^([0-9a-f]{64})\.(png|jpg|gif|webp|avif|bmp|ico|svg)$/;
 
 function isLoopbackHost(hostname: string): boolean {
@@ -89,7 +45,6 @@ function isLoopbackHost(hostname: string): boolean {
   return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
-/** The loopback `http:` origin PLANNOTATOR_UPDATE_API_URL names (a test's fake GitHub), else null. */
 function loopbackOverrideOrigin(env: NodeJS.ProcessEnv): string | null {
   const raw = env.PLANNOTATOR_UPDATE_API_URL?.trim();
   if (!raw) return null;
@@ -102,14 +57,6 @@ function loopbackOverrideOrigin(env: NodeJS.ProcessEnv): string | null {
   }
 }
 
-/**
- * The URL to fetch a release image from, or null when it is not one the
- * Inbox fetches: `https:` on the default port, no credentials, no empty
- * host label, and `github.com/user-attachments/assets/*`,
- * `private-user-images.githubusercontent.com`,
- * `user-images.githubusercontent.com`, or `raw.githubusercontent.com` for
- * this repository.
- */
 export function allowedReleaseImageUrl(raw: string | URL, env: NodeJS.ProcessEnv = process.env): URL | null {
   let url: URL;
   try {
@@ -122,25 +69,18 @@ export function allowedReleaseImageUrl(raw: string | URL, env: NodeJS.ProcessEnv
   if (override && url.origin === override) return url;
   if (url.protocol !== "https:" || url.port !== "") return null;
   const host = url.hostname.toLowerCase();
-  // No empty label (`.githubusercontent.com`, `a..b`) and no trailing dot.
   if (host.split(".").some((label) => label === "")) return null;
   if (host === "github.com") return url.pathname.startsWith("/user-attachments/assets/") ? url : null;
   if (host === "raw.githubusercontent.com") return url.pathname.startsWith(REPO_RAW_PREFIX) ? url : null;
-  // Where release attachments are served from; never gist., objects., camo. or any other subdomain.
   if (IMAGE_HOSTS.has(host)) return url;
   return null;
 }
 
-/** The images the notes show that the Inbox fetches, as written, in text order, at most RELEASE_IMAGES_MAX. */
 export function releaseImageSources(notes: string, env: NodeJS.ProcessEnv = process.env): string[] {
   return inboxMessageRemoteImageRefsInOrder(notes)
     .filter((src) => src.length <= RELEASE_IMAGE_SRC_MAX && allowedReleaseImageUrl(src, env) !== null)
     .slice(0, RELEASE_IMAGES_MAX);
 }
-
-// ---------------------------------------------------------------------------
-// Storage
-// ---------------------------------------------------------------------------
 
 export interface ReleaseImageEntry {
   file: string;
@@ -160,7 +100,6 @@ export function releaseImagesDir(version: string, dataDir?: string): string | nu
   return v ? join(updateCheckPaths(dataDir).notes, v) : null;
 }
 
-/** The stored images of one release, src → file (only entries whose file name is well formed). */
 export function readReleaseImages(version: string, dataDir?: string): Record<string, ReleaseImageEntry> {
   const dir = releaseImagesDir(version, dataDir);
   if (!dir) return {};
@@ -197,7 +136,6 @@ function writeAtomic(path: string, data: string | Uint8Array): void {
   }
 }
 
-/** The srcs of `notes` that have a stored file: what the page may load. */
 export function storedReleaseImageSources(version: string, notes: string, dataDir?: string, env: NodeJS.ProcessEnv = process.env): string[] {
   const dir = releaseImagesDir(version, dataDir);
   if (!dir) return [];
@@ -207,10 +145,6 @@ export function storedReleaseImageSources(version: string, notes: string, dataDi
     return !!entry && existsSync(join(dir, entry.file));
   });
 }
-
-// ---------------------------------------------------------------------------
-// Fetching one image
-// ---------------------------------------------------------------------------
 
 export type FetchedReleaseImage =
   | { ok: true; bytes: Uint8Array; contentType: string; width?: number; height?: number }
@@ -224,7 +158,6 @@ export interface FetchReleaseImageOptions {
   maxPixels?: number;
 }
 
-/** At most `max + 1` bytes of the body; null when it is longer than `max`. */
 async function readCapped(res: Response, max: number): Promise<Uint8Array | null> {
   if (!res.body) return new Uint8Array(0);
   const reader = res.body.getReader();
@@ -249,7 +182,6 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array | null
   return out;
 }
 
-/** One release image, by hand through its redirects, under every cap. Never throws. */
 export async function fetchReleaseImage(src: string, options: FetchReleaseImageOptions = {}): Promise<FetchedReleaseImage> {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -300,17 +232,8 @@ export async function fetchReleaseImage(src: string, options: FetchReleaseImageO
   }
 }
 
-// ---------------------------------------------------------------------------
-// One release's images
-// ---------------------------------------------------------------------------
-
 type FetchRecord = NonNullable<UpdateState["releaseImagesFetch"]>[string];
 
-/**
- * Once, then after a failure no sooner than 6 h, after an answer no sooner
- * than 24 h (the notes' rule). A claim nobody answered (its process quit
- * mid-fetch) waits 15 minutes, as the notes' does.
- */
 export function isReleaseImagesFetchDue(state: UpdateState, version: string, now: number): boolean {
   const record = state.releaseImagesFetch?.[version];
   const at = record?.attemptedAt;
@@ -327,7 +250,6 @@ export interface ReleaseImagesFetchDeps {
   version: string;
   dataDir?: string;
   now?: () => number;
-  /** The knob (resolveUpdateCheck): off, nothing is asked. */
   enabled: () => boolean;
   fetchImpl?: typeof fetch;
   env?: NodeJS.ProcessEnv;
@@ -339,10 +261,6 @@ export type ReleaseImagesFetchOutcome =
   | { outcome: "fetched"; stored: string[]; failed: { src: string; error: string }[] }
   | { outcome: "failed"; error: string };
 
-/**
- * Copy the images one release's saved notes show that are not stored yet.
- * Never throws; a failed image is left out and logged.
- */
 export async function fetchReleaseImagesFor(deps: ReleaseImagesFetchDeps): Promise<ReleaseImagesFetchOutcome> {
   const env = deps.env ?? process.env;
   const version = normalizeStableVersion(deps.version);
@@ -366,8 +284,6 @@ export async function fetchReleaseImagesFor(deps: ReleaseImagesFetchDeps): Promi
     }, deps.dataDir);
   try {
     if (!isReleaseImagesFetchDue(readUpdateState(deps.dataDir), version, now)) return { outcome: "not-due" };
-    // Claim the attempt before the network call so concurrent processes ask once;
-    // marked in flight until the answer below replaces it.
     record({ attemptedAt: now, inFlight: true });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -401,7 +317,6 @@ export async function fetchReleaseImagesFor(deps: ReleaseImagesFetchDeps): Promi
   }
   if (Object.keys(added).length > 0) {
     try {
-      // Read again before the write: another process may have added images meanwhile.
       const manifest: ReleaseImagesManifest = { v: 1, images: { ...readReleaseImages(version, deps.dataDir), ...added } };
       writeAtomic(join(dir, "images.json"), JSON.stringify(manifest) + "\n");
     } catch (err) {
@@ -419,12 +334,7 @@ export async function fetchReleaseImagesFor(deps: ReleaseImagesFetchDeps): Promi
   return { outcome: "fetched", stored: Object.keys(added), failed };
 }
 
-// ---------------------------------------------------------------------------
-// The route
-// ---------------------------------------------------------------------------
-
 export const INBOX_WHATS_NEW_IMAGE_PATH = "/api/inbox/whats-new/image";
-/** As the Inbox's other image routes: an SVG opened directly never runs. */
 const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
 const GUARD_HEADERS = {
   "X-Content-Type-Options": "nosniff",
@@ -445,11 +355,6 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
   return header.split(",").some((tag) => tag.trim() === "*" || strip(tag) === etag);
 }
 
-/**
- * `GET /api/inbox/whats-new/image?version=X&src=<as written>`: a stored image
- * the release's saved notes still show. Reads only the release's own folder,
- * by a content-addressed file name from its map; never fetches.
- */
 export function whatsNewImageRoute(req: Request, url: URL, dataDir: string, env: NodeJS.ProcessEnv = process.env): Response {
   if (req.method !== "GET" && req.method !== "HEAD") return refuse(405, "method_not_allowed", "Use GET.");
   const site = req.headers.get("sec-fetch-site");
@@ -475,7 +380,6 @@ export function whatsNewImageRoute(req: Request, url: URL, dataDir: string, env:
   } catch {
     return refuse(404, "image_not_stored", "That image is not saved on this computer.");
   }
-  // Content-addressed: the bytes must still be the ones the name says.
   const sha = createHash("sha256").update(bytes).digest("hex");
   if (sha !== match[1]) return refuse(404, "image_not_stored", "That image is not saved on this computer.");
   const contentType = sniffImageContentType(bytes);
