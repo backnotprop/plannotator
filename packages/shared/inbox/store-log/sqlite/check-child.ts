@@ -64,6 +64,7 @@ export function spawnFilesCheck(command: readonly string[], dataDir: string, now
       stdin: "pipe",
       stdout: "pipe",
       stderr: "inherit",
+      windowsHide: true,
     });
   } catch {
     return null;
