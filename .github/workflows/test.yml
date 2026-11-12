@@ -32,14 +32,17 @@ concurrency:
 # for a minute or less, shorter than a rented machine takes to start. A
 # self-hosted runner must never run a fork's code, so only a push, a manual run
 # (both need write access) or a PR whose head branch is in this repository goes
-# to it; a PR from a fork stays on ubuntu-24.04 whatever the variable says.
+# to it; a PR from a fork stays on ubuntu-24.04 whatever the variable says. So
+# does a PR a bot opened (Dependabot, Renovate: the PR author's account type is
+# Bot, whoever pushed last): its freshly bumped packages run their install
+# scripts unreviewed. The push to main that merges one is reviewed code by then.
 jobs:
   # Everything that is not a sharded test file: the checks that used to lead
   # the single test job, and the two DOM steps that must run in processes of
   # their own.
   checks:
     name: Checks (types, packages, own-process DOM tests, lane guards)
-    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
 
     steps:
@@ -151,7 +154,7 @@ jobs:
   # test file always lands in some shard.
   unit:
     name: Unit tests (${{ matrix.lane }})
-    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     # A backstop, not a budget: lanes take about 4-7 min. Some tests run on
     # fake timers, where bun's per-test timeout cannot fire, so a stuck await
     # would otherwise idle until GitHub's 6-hour default.
@@ -200,7 +203,7 @@ jobs:
   # differently across platforms; without it most of the list fails.
   dom:
     name: DOM tests (${{ matrix.lane }})
-    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     # A backstop, not a budget: lanes take about 3-6 min. Some DOM tests run on
     # fake timers, where bun's per-test timeout cannot fire.
     timeout-minutes: 20
@@ -244,7 +247,7 @@ jobs:
 
   opencode-v2:
     name: OpenCode 2 installed package
-    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     # The smoke's own budgets (health 120s, plugin activation 300s) are the real assertion;
     # this is only a backstop so a genuinely wedged runner cannot idle for hours.
     timeout-minutes: 25
