@@ -949,22 +949,22 @@ export const AGENTS: Agent[] = [
     },
     plannotator: {
       plan: {
-        level: 'part',
-        label: 'Not verified in T3',
-        detail: 'The T3 hook doesn’t route plan review. The Claude plugin’s own plan hook is left as it is, and whether it opens from a T3 thread isn’t verified.',
-        src: 'packages/t3-code/README.md:70 (no ExitPlanMode routing; existing plan hooks keep working)',
+        level: 'no',
+        label: 'No',
+        detail: 'T3 owns Plan mode and shows its own plan card. The T3 hook doesn’t route plans to Plannotator.',
+        src: 'packages/t3-code/README.md:70 (no ExitPlanMode routing)',
       },
       review: {
         level: 'part',
         label: 'With the T3 hook',
-        detail: 'Install with `--with-t3` and `/plannotator-review` in a T3 thread sends your comments back to that thread.',
-        src: 'packages/t3-code/README.md:9-15; SH:132',
+        detail: 'Install with `--with-t3`. When Claude in a T3 thread runs `plannotator review` as a Bash command your comments go back to that thread. A `/plannotator-review` you type isn’t routed.',
+        src: 'packages/t3-code/README.md:9-17,50-60,66; packages/t3-code/hook.ts:14-17 (PreToolUse Bash only); apps/skills/claude/plannotator-review/SKILL.md:14 (the skill runs the command itself)',
       },
       annotate: {
         level: 'part',
         label: 'With the T3 hook',
-        detail: 'With the `--with-t3` hook, annotate and last route back to the T3 thread.',
-        src: 'packages/t3-code/README.md:3; packages/t3-code/hook-routing.ts',
+        detail: 'With the `--with-t3` hook, `plannotator annotate` and `plannotator last` route back to the T3 thread when Claude runs them as Bash commands. The slash commands you type aren’t routed.',
+        src: 'packages/t3-code/README.md:50-58,66; packages/t3-code/hook.ts:14-17; packages/t3-code/hook-routing.ts',
       },
       ask: {
         level: 'part',
@@ -1005,8 +1005,8 @@ export const AGENTS: Agent[] = [
       { symptom: 'No Inbox tools outside T3', fix: 'That is how `--t3` works: the server lists its tools only inside a T3 thread.', src: 'INST:377; apps/hook/server/cli.ts:590-591' },
       {
         symptom: 'A review doesn’t go back to the thread',
-        fix: 'Read `t3-code/hook.log` in your Plannotator data folder. A hook added before T3 reported itself as `t3-code` never runs: install with `--with-t3` again. Then start a new thread.',
-        src: 'packages/t3-code/README.md:13,31-33',
+        fix: 'Ask Claude to run `plannotator review` itself: a `/plannotator-review` you type isn’t routed. Otherwise read `t3-code/hook.log` in your Plannotator data folder. A hook added before T3 reported itself as `t3-code` never runs: install with `--with-t3` again. Then start a new thread.',
+        src: 'packages/t3-code/README.md:36,66; packages/t3-code/hook.ts:14-17',
       },
       {
         symptom: 'Sign-in works but nothing arrives',
@@ -1017,12 +1017,20 @@ export const AGENTS: Agent[] = [
     ],
     limits: [
       { text: 'Only Claude threads wake, and only threads with a UUID id.', src: 'packages/server/inbox-t3-wake.ts' },
-      { text: 'The review hook doesn’t route compound commands or subagents or a folder below the project.', src: 'packages/t3-code/hook-routing.ts' },
-      { text: 'The review hook adds about 320 ms to each Bash call in any Agent SDK session.', src: 'packages/t3-code/README.md:13' },
+      {
+        text: 'The review hook routes only a plain `plannotator review` or `annotate` or `last` that Claude runs as a Bash command. A slash command you type and compound commands and subagents and a folder below the project aren’t routed.',
+        src: 'packages/t3-code/README.md:60,66; packages/t3-code/hook.ts:14-17; packages/t3-code/hook-routing.ts',
+      },
+      {
+        text: 'A sign-in lasts 30 days and isn’t renewed. After that replies wait in the Inbox until you sign in again, and only the Inbox log says so.',
+        src: 'packages/t3-code/usage.ts:25; packages/server/inbox-t3-wake.ts:375',
+      },
+      { text: 'Plannotator doesn’t review plans in T3: T3 shows its own plan card.', src: 'packages/t3-code/README.md:70' },
+      { text: 'The review hook adds about 320 ms to each Bash call in any Agent SDK session.', src: 'packages/t3-code/README.md:17' },
       { text: 'No Send now. No row in Settings → Agents yet. Not on Windows yet.', src: 'packages/inbox/components/AgentsSettings.tsx (no t3 row); scripts/install.ps1 (no T3 flag)' },
       { text: 'Tested on T3 Nightly 0.0.46.', src: 'packages/t3-code/README.md' },
     ],
-    examples: ['Run `/plannotator-review` in a T3 thread and send your comments back to it.'],
+    examples: ['Ask Claude in a T3 thread to run `plannotator review`. Your comments go back to that thread.'],
   },
   {
     slug: 'qwen-code',
