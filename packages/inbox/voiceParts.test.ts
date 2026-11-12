@@ -1,8 +1,9 @@
 /**
  * Voice dictation's small parts: the WAV the Inbox receives, the gate, the spacing at the cursor, the announcement's
- * gate, and the transcribe call's address. What regresses: a clip the endpoint can't read (wrong rate or a truncated
- * header), speech missed or silence taken for speech, words glued to their neighbours, the announcement sharing a load
- * with another dialog, audio sent to a linked machine.
+ * gate, the transcribe call's address, and where "Transcribing…" goes. What regresses: a clip the endpoint can't read
+ * (wrong rate or a truncated header), speech missed or silence taken for speech, words glued to their neighbours, the
+ * announcement sharing a load with another dialog, audio sent to a linked machine, the marker run past the field's
+ * padding under the box's buttons or over the words.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { inboxApi } from './api';
@@ -12,6 +13,7 @@ import { createVoiceGate, encodeWav, voiceClock } from './voiceAudio';
 import { spaced } from './voiceField';
 import { voiceIntroMayAsk, voiceIntroWanted, type VoiceIntroLoad } from './voiceIntro';
 import { voiceLine } from './voiceLine';
+import { placeMarker, type MarkerRoom } from './voiceMarker';
 import { VOICE_BARS, VOICE_COUNTDOWN_MS, type VoiceMeter, type VoiceView } from './voiceSession';
 
 describe('encodeWav', () => {
@@ -188,5 +190,33 @@ describe('the clip goes to the Inbox serving this window', () => {
   test('anything else answered, a session mismatch among them, has no voice code', async () => {
     globalThis.fetch = (async () => Response.json({ error: 'stale', code: 'server_session_mismatch' }, { status: 409 })) as unknown as typeof fetch;
     expect(await inboxApi.transcribeVoice(new Blob(['x']), new AbortController().signal)).toMatchObject({ code: null });
+  });
+});
+
+describe('where "Transcribing…" goes', () => {
+  // A phone's reply box: text from 27 to 333 px (its right padding keeps words off the ⌄), two rows of 24.8 px.
+  const room = (change: Partial<MarkerRoom>): MarkerRoom => ({ x: 120, mid: 719, word: 108, line: 24.8, left: 27, right: 333, bottom: 783, rtl: false, nextFree: true, ...change });
+
+  test('with room, on the caret’s line', () => {
+    expect(placeMarker(room({}))).toEqual({ kind: 'line', left: 3, top: 0 });
+    expect(placeMarker(room({ x: 333 - 3 - 108 }))).toMatchObject({ kind: 'line' });
+  });
+
+  test('at the line’s end, it goes to the start of the next line, inside the padding', () => {
+    for (const x of [285, 333]) {
+      const place = placeMarker(room({ x }));
+      expect(place).toEqual({ kind: 'next', left: 27 - x, top: 24.8 });
+    }
+  });
+
+  test('with no free line below, or none left in the field, the still caret stands in', () => {
+    expect(placeMarker(room({ x: 285, nextFree: false }))).toEqual({ kind: 'none' });
+    expect(placeMarker(room({ x: 285, mid: 769 }))).toEqual({ kind: 'none' });
+    expect(placeMarker(room({ x: 30, word: 400 }))).toEqual({ kind: 'none' });
+  });
+
+  test('a right-to-left line: at the caret’s left, and its next line starts at the right', () => {
+    expect(placeMarker(room({ rtl: true, x: 300 }))).toEqual({ kind: 'line', left: -111, top: 0 });
+    expect(placeMarker(room({ rtl: true, x: 104 }))).toEqual({ kind: 'next', left: 333 - 108 - 104, top: 24.8 });
   });
 });
