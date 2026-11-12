@@ -7,7 +7,8 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { installFakeOpenCodeLaunch, type FakeOpenCodeLaunchState } from "../../tests/helpers/fake-opencode-launch";
 import { stubBridge } from "../../tests/helpers/stub-bridge";
 import { createInboxLaunch } from "./inbox-launch";
-import { installedOpenCodePluginVersion, openCodeSpawnEnv } from "./inbox-launch-opencode";
+import { OPENCODE_LAUNCH_ENV } from "@plannotator/shared/inbox/opencode-launch";
+import { installedOpenCodePlugin, openCodeSpawnEnv } from "./inbox-launch-opencode";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -24,10 +25,11 @@ async function until<T>(what: string, check: () => T | null | undefined | false 
   }
 }
 
-const cachedPlugin = (home: string, version: string) => {
-  const dir = join(home, ".cache", "opencode", "npm", "@plannotator", "opencode@latest", "1794443408253", "node_modules", "@plannotator", "opencode");
-  mkdirSync(dir, { recursive: true });
+const cachedPlugin = (home: string, version: string, launches: boolean, generation = "1794443408253") => {
+  const dir = join(home, ".cache", "opencode", "npm", "@plannotator", "opencode@latest", generation, "node_modules", "@plannotator", "opencode");
+  mkdirSync(join(dir, "dist"), { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@plannotator/opencode", version }));
+  writeFileSync(join(dir, "dist", "server.js"), launches ? `const watch = process.env.${OPENCODE_LAUNCH_ENV};` : "export default {};");
 };
 
 function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; withOpenCode?: boolean } = {}) {
@@ -98,7 +100,7 @@ describe("OpenCode through the launch engine, against the fake opencode2", () =>
     expect((await noPlugin.launch.composeBlock())!.not_ready).toContainEqual({ agent: "opencode", name: "OpenCode", code: "plugin_off" });
 
     const oldPlugin = setup();
-    cachedPlugin(oldPlugin.home, "0.28.61");
+    cachedPlugin(oldPlugin.home, "0.28.61", false);
     expect((await oldPlugin.launch.composeBlock())!.not_ready).toContainEqual({ agent: "opencode", name: "OpenCode", code: "too_old" });
 
     const oldOpenCode = setup({ state: { version: "2.0.0" } });
@@ -161,11 +163,11 @@ describe("OpenCode through the launch engine, against the fake opencode2", () =>
     });
   });
 
-  test("a plugin too old in the started server fails the start with how to update it", async () => {
-    const t = setup({ state: { plugin: { version: "0.28.61" } } });
+  test("a plugin that fails to load in the started server fails the start with OpenCode's words, and the server ends", async () => {
+    const t = setup({ state: { plugin: { version: "0.0.0-dev", status: "failed", error: "Cannot find module 'x'" } } });
     const root = await t.send("Hello.");
     const error = await until("the start failed", () => t.store.message(root.id)!.launch!.error);
-    expect(error).toMatchObject({ code: "failed", text: "Plannotator's OpenCode plugin 0.28.61 is older than 0.28.62. Run opencode2 plugin update @plannotator/opencode, then try again." });
+    expect(error).toMatchObject({ code: "failed", text: "Plannotator's OpenCode plugin did not load: Cannot find module 'x'." });
     await until("its server ended", () => t.fake.starts().every((start) => !t.fake.alive(start.pid)));
   });
 });
@@ -184,14 +186,13 @@ describe("OpenCode host pieces", () => {
     });
   });
 
-  test("the installed plugin's version is the newest generation OpenCode installed", () => {
+  test("the installed plugin is the newest generation OpenCode installed, and it launches only when its bundle knows the launch env", () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-opencode-cache-")));
     cleanup.push(() => rmSync(home, { recursive: true, force: true }));
-    expect(installedOpenCodePluginVersion(join(home, ".cache"))).toBeNull();
-    cachedPlugin(home, "0.28.61");
-    const newer = join(home, ".cache", "opencode", "npm", "@plannotator", "opencode@latest", "1794443999999", "node_modules", "@plannotator", "opencode");
-    mkdirSync(newer, { recursive: true });
-    writeFileSync(join(newer, "package.json"), JSON.stringify({ version: "0.28.63" }));
-    expect(installedOpenCodePluginVersion(join(home, ".cache"))).toBe("0.28.63");
+    expect(installedOpenCodePlugin(join(home, ".cache"))).toBeNull();
+    cachedPlugin(home, "0.28.61", false);
+    expect(installedOpenCodePlugin(join(home, ".cache"))).toEqual({ version: "0.28.61", launches: false });
+    cachedPlugin(home, "0.29.0", true, "1794443999999");
+    expect(installedOpenCodePlugin(join(home, ".cache"))).toEqual({ version: "0.29.0", launches: true });
   });
 });

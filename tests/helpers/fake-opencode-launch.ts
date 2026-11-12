@@ -14,7 +14,7 @@ import { join } from "node:path";
 export interface FakeOpenCodeLaunchState {
   /** `opencode2 --version`'s version (default 2.2.7). */
   version?: string;
-  /** The plugin `/api/plugin` lists (default 0.28.62, active); null: none. */
+  /** The plugin `/api/plugin` lists (default active); null: none. */
   plugin?: { version: string; status?: "active" | "failed"; error?: string } | null;
   /** `GET /api/model`'s models (default: two with variants). */
   models?: { providerID: string; id: string; variants: string[] }[];
@@ -146,7 +146,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/info") return send(200, { version: now.version || "2.2.7", pid: process.pid });
   if (url.pathname === "/api/event") { res.writeHead(200, { "content-type": "text/event-stream" }); res.write("data: " + JSON.stringify({ type: "server.connected", data: {} }) + "\n\n"); streams.add(res); req.on("close", () => streams.delete(res)); return; }
   if (url.pathname === "/api/plugin") {
-    const plugin = now.plugin === undefined ? { version: "0.28.62" } : now.plugin;
+    const plugin = now.plugin === undefined ? { version: "0.0.0-dev" } : now.plugin;
     return send(200, { data: plugin ? [{ id: "plannotator", source: { type: "package", version: plugin.version }, state: { status: plugin.status || "active", error: plugin.error } }] : [] });
   }
   if (url.pathname === "/api/model/default") { const m = models()[0]; return send(200, { data: m }); }

@@ -5,7 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { openCodeSessionModel, parseOpenCodeModels } from "@plannotator/core/inbox-launch-choice";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { OPENCODE_LAUNCH_ENV, OPENCODE_LAUNCH_MIN_PLUGIN, OPENCODE_LAUNCH_SESSION_ENV, openCodeSessionIdOk } from "@plannotator/shared/inbox/opencode-launch";
+import { OPENCODE_LAUNCH_ENV, OPENCODE_LAUNCH_SESSION_ENV, openCodeSessionIdOk } from "@plannotator/shared/inbox/opencode-launch";
 import { agentVersionRun, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment } from "./inbox-agents";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
@@ -37,16 +37,15 @@ export function parseOpenCodeVersion(stdout: string): string | null {
   return /(\d+\.\d+\.\d+)/.exec(stdout)?.[1] ?? null;
 }
 
-/** The newest generation OpenCode installed of each plugin spec (`<cache>/opencode/npm/@plannotator/opencode@<spec>/<generation>/…`); the highest version among them. */
-export function installedOpenCodePluginVersion(cacheHome: string): string | null {
+export function installedOpenCodePlugin(cacheHome: string): { version: string; launches: boolean } | null {
   const root = join(cacheHome, "opencode", "npm", "@plannotator");
-  let best: string | null = null;
   let specs: string[] = [];
   try {
     specs = readdirSync(root).filter((name) => name === "opencode" || name.startsWith("opencode@"));
   } catch {
     return null;
   }
+  let best: { version: string; launches: boolean } | null = null;
   for (const spec of specs) {
     let generations: string[] = [];
     try {
@@ -55,10 +54,12 @@ export function installedOpenCodePluginVersion(cacheHome: string): string | null
       continue;
     }
     for (const generation of generations) {
+      const dir = join(root, spec, generation, "node_modules", "@plannotator", "opencode");
       try {
-        const version = (JSON.parse(readFileSync(join(root, spec, generation, "node_modules", "@plannotator", "opencode", "package.json"), "utf8")) as { version?: unknown }).version;
+        const version = (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { version?: unknown }).version;
         if (typeof version !== "string" || !/^\d+\.\d+\.\d+/.test(version)) continue;
-        if (!best || versionAtLeast(version, best)) best = version;
+        const launches = readFileSync(join(dir, "dist", "server.js"), "utf8").includes(OPENCODE_LAUNCH_ENV);
+        if (!best || versionAtLeast(version, best.version)) best = { version, launches };
         break;
       } catch {}
     }
@@ -296,14 +297,10 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     const pluginUntil = Date.now() + pluginMs;
     for (;;) {
       if (s.exited) return fail("");
-      const listed = await json<{ data?: { id?: string; source?: { version?: unknown }; state?: { status?: unknown; error?: unknown } }[] }>(s, "GET", "/api/plugin").catch(() => null);
+      const listed = await json<{ data?: { id?: string; state?: { status?: unknown; error?: unknown } }[] }>(s, "GET", "/api/plugin").catch(() => null);
       const ours = listed?.data?.find((plugin) => plugin.id === "plannotator");
       if (ours?.state?.status === "failed") return fail(`Plannotator's OpenCode plugin did not load: ${String(ours.state.error ?? "")}`);
-      if (ours?.state?.status === "active") {
-        const version = typeof ours.source?.version === "string" ? ours.source.version : null;
-        if (version && !versionAtLeast(version, OPENCODE_LAUNCH_MIN_PLUGIN)) return fail(`Plannotator's OpenCode plugin ${version} is older than ${OPENCODE_LAUNCH_MIN_PLUGIN}. Run ${OPENCODE_PLUGIN_UPDATE}, then try again`);
-        break;
-      }
+      if (ours?.state?.status === "active") break;
       if (Date.now() > pluginUntil) return fail("Plannotator's OpenCode plugin did not load in OpenCode");
       await Bun.sleep(100);
     }
@@ -361,8 +358,8 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       if (!openCodePluginInstalled(e)) return { ok: false, missing: false, reason: "Plannotator's OpenCode plugin is not installed (opencode2 plugin add @plannotator/opencode)", code: "plugin_off" };
       const version = parseOpenCodeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
       if (!version || !versionAtLeast(version, OPENCODE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `OpenCode ${version ?? "?"} is older than ${OPENCODE_LAUNCH_MIN_VERSION}`, code: "too_old" };
-      const plugin = installedOpenCodePluginVersion(cacheHome());
-      if (plugin && !versionAtLeast(plugin, OPENCODE_LAUNCH_MIN_PLUGIN)) return { ok: false, missing: false, reason: `Plannotator's OpenCode plugin ${plugin} is older than ${OPENCODE_LAUNCH_MIN_PLUGIN}`, code: "too_old" };
+      const plugin = installedOpenCodePlugin(cacheHome());
+      if (plugin && !plugin.launches) return { ok: false, missing: false, reason: `Plannotator's OpenCode plugin ${plugin.version} can't start sessions from the Inbox; update it (${OPENCODE_PLUGIN_UPDATE})`, code: "too_old" };
       binName = basename(path);
       choiceKey = `${path}@${version}`;
       return { ok: true, version };
