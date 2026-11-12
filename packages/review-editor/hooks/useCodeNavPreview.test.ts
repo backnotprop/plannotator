@@ -1,8 +1,3 @@
-/**
- * The sentence the code-nav preview shows for a refused file must be true.
- * A file just over the 5 MB cap rounds to "5 MB", which once read
- * "too large to preview (5 MB; the limit is 5 MB)".
- */
 import { describe, expect, test } from "bun:test";
 import { codeNavPreviewErrorMessage } from "./useCodeNavPreview";
 

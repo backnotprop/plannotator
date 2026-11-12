@@ -1,22 +1,3 @@
-/**
- * DOM-gated tests (DOM_TESTS=1) for generated-file default collapse (#1317).
- * Registered in .github/workflows/test.yml's "Run UI seam-contract + DOM
- * tests" step.
- *
- * The behaviors under guard:
- *  - files in `generatedFiles` SEED their CodeView item collapsed (Pierre
- *    renders a collapsed item as its header bar only), other files don't;
- *  - collapse is a VIEW state, never a data filter: a collapsed generated
- *    item still carries its full fileDiff and seeded line annotations;
- *  - the header chevron expands in place (no CodeView remount) and reports
- *    the expansion to the owner so it can outlive remounts;
- *  - a file listed in `expandedGeneratedFiles` seeds expanded — the
- *    remount-survival half of the session contract;
- *  - a collapsed generated card shows the explicit placeholder strip, whose
- *    click expands through the SAME collapse-report funnel as the chevron;
- *  - search-match navigation expands through the funnel too, so a
- *    search-driven expansion survives a diff-switch re-seed.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -26,8 +7,6 @@ import type { DiffFile } from '../types';
 let codeViewMounts = 0;
 let lastCodeViewProps: Record<string, unknown> | null = null;
 
-// Same capture/restore idiom as AllFilesCodeView.lifecycle.test.tsx — the
-// SPREAD is load-bearing (mock.module rewrites the live module record).
 const realPierreDiffs = { ...(await import('@pierre/diffs')) };
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
@@ -229,8 +208,6 @@ describe.if(hasDom)('generated-file default collapse (#1317)', () => {
     const normal = seededItems().find((i) => i.id === 'src/app.ts');
     expect(gen?.collapsed).toBe(true);
     expect(normal?.collapsed).toBeUndefined();
-    // Collapse is a view seed, never a data filter: the collapsed item still
-    // carries the parsed diff and the projected line annotation.
     expect(gen?.fileDiff).toBeDefined();
     expect(gen?.annotations).toHaveLength(1);
   });
@@ -249,15 +226,11 @@ describe.if(hasDom)('generated-file default collapse (#1317)', () => {
 
     await act(async () => chevron!.click());
     expect(reports).toEqual([['gen/schema.sql', false]]);
-    // Expansion is live item state — no CodeView remount (which would lose
-    // scroll/selection state).
     expect(codeViewMounts).toBe(1);
 
-    // The header re-render reflects the expanded item.
     const expandedHeader = await renderHeaderFor('gen/schema.sql');
     expect(expandedHeader.querySelector('button[title="Collapse diff"]')).not.toBeNull();
 
-    // A normal file's header carries no generated tag.
     const normalHeader = await renderHeaderFor('src/app.ts');
     expect(normalHeader.querySelector('[data-pn-generated-badge]')).toBeNull();
   });
@@ -277,19 +250,14 @@ describe.if(hasDom)('generated-file default collapse (#1317)', () => {
     const collapsedHeader = await renderHeaderFor('gen/schema.sql');
     const strip = collapsedHeader.querySelector<HTMLButtonElement>('[data-pn-generated-collapsed-notice]');
     expect(strip).not.toBeNull();
-    // The fold is explicit, not a failed render: the strip carries the file's
-    // +/- counts (server-derived data, so assert the data, not the prose).
     expect(strip!.textContent).toContain('+1');
     expect(strip!.textContent).toContain('-1');
 
     await act(async () => strip!.click());
-    // Same funnel as the chevron: the expansion reports to the owner and the
-    // live item expands in place (no CodeView remount).
     expect(reports).toEqual([['gen/schema.sql', false]]);
     expect(seededItems().find((i) => i.id === 'gen/schema.sql')?.collapsed).toBe(false);
     expect(codeViewMounts).toBe(1);
 
-    // The re-rendered expanded card drops the strip.
     const expandedHeader = await renderHeaderFor('gen/schema.sql');
     expect(expandedHeader.querySelector('[data-pn-generated-collapsed-notice]')).toBeNull();
   });
@@ -300,7 +268,6 @@ describe.if(hasDom)('generated-file default collapse (#1317)', () => {
     await render({ onGeneratedFileCollapsedChange: onChange });
     expect(seededItems().find((i) => i.id === 'gen/schema.sql')?.collapsed).toBe(true);
 
-    // Search navigation lands in the collapsed generated file.
     await render({
       onGeneratedFileCollapsedChange: onChange,
       activeSearchMatch: {
@@ -314,14 +281,8 @@ describe.if(hasDom)('generated-file default collapse (#1317)', () => {
         snippet: 'new',
       },
     });
-    // The expansion reached the owner — before the F1 fix this site mutated
-    // item.collapsed directly and the report was silently dropped, so the
-    // expansion died on the next diff switch.
     expect(reports).toEqual([['gen/schema.sql', false]]);
 
-    // Round trip: the owner feeds the reported expansion back while a diff
-    // switch re-seeds items (new files identity + snapshot id) — the file the
-    // search opened stays open.
     const expanded = new Set(reports.filter(([, collapsed]) => !collapsed).map(([path]) => path));
     await render({
       files: [makeFile('gen/schema.sql'), makeFile('src/app.ts')],

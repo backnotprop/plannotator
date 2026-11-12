@@ -11,17 +11,6 @@ import {
   type ReviewImageSide,
 } from '../utils/reviewImage';
 
-/**
- * Before / After preview for a changed image in code review (#1598).
- *
- * Replaces the "Binary or oversized file" notice for a hunkless chunk whose
- * path is an image, when the server advertises `imagePreviewSupported`. It
- * fetches only the sides that exist (After for an addition, Before for a
- * deletion), only while mounted — the all-files view mounts header slots for
- * the virtual window only — and aborts on unmount. When the server cannot show
- * the file as an image at all, `fallback` (the plain notice) renders instead.
- */
-
 type SideState =
   | { state: 'loading' }
   | { state: 'ok'; image: ReviewImageData }
@@ -31,15 +20,10 @@ export interface ImageDiffPreviewProps {
   filePath: string;
   status: DiffFileStatus;
   snapshotId?: string;
-  /** `all-files` reserves a fixed pane height so the virtualized item is
-   *  measured once rather than again when the image decodes. */
   variant: 'single' | 'all-files';
   compact?: boolean;
-  /** The plain notice, shown when neither side is a displayable image. */
   fallback: React.ReactNode;
-  /** Shown instead of `fallback` when every side is over the byte cap. */
   tooLargeFallback?: React.ReactNode;
-  /** Re-measure hook for the virtualized all-files host. */
   onHeightChange?: () => void;
 }
 
@@ -101,12 +85,8 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     old: initialState(snapshotId, filePath, 'old'),
     new: initialState(snapshotId, filePath, 'new'),
   }));
-  // Natural sizes the <img> reports, for formats without server dimensions (SVG).
   const [natural, setNatural] = useState<Partial<Record<ReviewImageSide, { width: number; height: number }>>>({});
 
-  // Lazy: fetch only once the card is actually near the viewport. The
-  // all-files view mounts header slots for its virtual window, and before
-  // items are measured that window can briefly span dozens of cards.
   const rootRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   useEffect(() => {
@@ -125,8 +105,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     return () => observer.disconnect();
   }, [visible]);
 
-  // Keep every URL this card shows alive until it unmounts, even if the cache
-  // evicts it meanwhile (an <img> may not have loaded it yet).
   const oldUrl = states.old.state === 'ok' ? states.old.image.url : undefined;
   const newUrl = states.new.state === 'ok' ? states.new.image.url : undefined;
   useEffect(() => (oldUrl ? retainReviewImageUrl(oldUrl) : undefined), [oldUrl]);
@@ -152,7 +130,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
           }));
         })
         .catch(() => {
-          // Aborted on unmount / snapshot change: nothing to update.
         });
     }
     return () => controller.abort();
@@ -165,9 +142,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const unchanged = sides.length === 2 && loaded.length === 2 && loaded[0].image.digest === loaded[1].image.digest;
   const dimsOf = (side: ReviewImageSide, image?: ReviewImageData) =>
     image?.width && image?.height ? { width: image.width, height: image.height } : natural[side];
-  // Owner ruling: tall images (and narrow or compact layouts) stack Before
-  // above After; stacked tall panes get more height, which is what makes the
-  // stack worth it.
   const tall = loaded.some(({ side, image }) => {
     const d = dimsOf(side, image);
     return !!d && d.height > d.width * 1.2;
@@ -175,10 +149,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const shownSides = unchanged ? (['new'] as ReviewImageSide[]) : sides;
   const stacked = compact || (tall && shownSides.length === 2);
   const maxPaneHeight = variant === 'all-files' ? (stacked && tall ? 480 : 360) : (stacked && tall ? 640 : 480);
-  // All-files: a fixed box (the virtualized item is measured without waiting
-  // on decode), sized to the tallest image once its header dimensions are
-  // known so a 16px icon does not sit in a 360px pane. Until then a modest
-  // reservation; the ResizeObserver below re-measures the one change.
   const tallestImage = Math.max(0, ...loaded.map(({ side, image }) => dimsOf(side, image)?.height ?? 0));
   const allFilesPaneHeight = loaded.length === 0
     ? Math.min(maxPaneHeight, 200)
@@ -187,8 +157,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
       : maxPaneHeight;
   const paneHeight = variant === 'all-files' ? allFilesPaneHeight : maxPaneHeight;
 
-  // Nothing displayable on any side: the plain notice explains it better than
-  // a row of error lines would (a `.png` that is really a zip, say).
   let mode: 'preview' | 'fallback' | 'too-large' = snapshotId ? 'preview' : 'fallback';
   if (mode === 'preview' && errors.length === sides.length) {
     if (errors.every((e) => e.error.reason === 'not-image')) mode = 'fallback';
@@ -197,9 +165,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     }
   }
 
-  // Re-measure the virtualized item whenever this block's own height changes
-  // (layout flip, error line). Pane heights are fixed, so image decode alone
-  // never changes it. The fallback notices re-measure themselves.
   const lastHeight = useRef<number>(-1);
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -216,7 +181,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     const observer = new ResizeObserver(report);
     observer.observe(el);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   if (mode === 'fallback') return <>{fallback}</>;
@@ -238,8 +202,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
         <figcaption className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</figcaption>
         <div
           className="relative flex items-center justify-center overflow-hidden rounded border border-border bg-background/60 p-2"
-          // All-files reserves the height up front (one measurement); the
-          // single-file view sizes to the image, up to the same cap.
           style={variant === 'all-files' ? { height: paneHeight } : { minHeight: 120 }}
         >
           {state.state === 'loading' && (
@@ -300,8 +262,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
         style={{
           gridTemplateColumns: stacked || shownSides.length === 1
             ? 'minmax(0, 1fr)'
-            // Two columns while each gets at least 240px; narrower hosts wrap
-            // to one column (Before above After) with no JS measurement.
             : 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
         }}
       >

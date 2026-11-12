@@ -1,13 +1,3 @@
-/**
- * The `plannotator` agent tool switch in code review (DOM_TESTS=1): the
- * one-time "turn it on" offer and the Settings row, from the serverConfig on
- * /api/diff. The plan editor's twin is packages/editor/App.agentTool.test.tsx.
- *
- * Regressions guarded: the offer missing from code review on Pi / OpenCode 2
- * or showing where the server reports no tool host; "Yes, turn it on" not posting
- * `{ agentTool: true }` or not retiring the offer; the Settings row missing
- * from code review, or editable under PLANNOTATOR_AGENT_TOOL.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -18,7 +8,6 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 
-// Vite-only virtual module (`?worker&inline`): stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -90,7 +79,6 @@ class StubEventSource {
 let configPosts: unknown[] = [];
 
 function makeFetch(origin: string, agentTool: Record<string, unknown> | undefined): typeof fetch {
-  // SAFETY: the app only ever calls fetch(input, init).
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
     if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
@@ -117,7 +105,6 @@ async function settle(): Promise<void> {
   });
 }
 
-/** Retire every earlier one-time announcement, Ask this session included. */
 function seedEarlierChainSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
@@ -134,7 +121,6 @@ async function mount(origin: string, agentTool: Record<string, unknown> | undefi
   setStorageBackend(memoryBackend);
   configStore.loadFromBackend();
   globalThis.fetch = makeFetch(origin, agentTool);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);

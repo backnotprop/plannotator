@@ -1,10 +1,3 @@
-/**
- * DOM-gated: hovering a Call Flow step's file:line opens the source preview
- * (CodeSnippetPreview) with the step's line marked and context around it.
- * Guards: nothing is loaded before the pointer rests; a removed step shows the
- * OLD side of the file (the reviewed source, not the working tree); leaving
- * before the dwell loads nothing; a view without a loader offers no preview.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

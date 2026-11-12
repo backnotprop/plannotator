@@ -1,11 +1,3 @@
-/**
- * The plan-look notice in code review, with two tabs open (DOM_TESTS=1).
- * Both tabs show the one-time "Plans now open in Clean" notice with Clean
- * preselected. When the other tab picks Grid first, this tab must adopt Grid
- * and write nothing: Escape here, or coming back to this tab, must not put
- * Clean over the Grid picked there. The plan editor's copy of this is in
- * packages/editor/App.planLookNotice.test.tsx.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -16,7 +8,6 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 
-// Vite-only virtual module (`?worker&inline`), stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -68,8 +59,6 @@ class StubEventSource {
   close(): void {}
 }
 
-// SAFETY: the app only ever calls fetch(input, init); the double implements
-// that call signature and not `fetch.preconnect`.
 const stubFetch = (async (input: RequestInfo | URL) => {
   const rawUrl = input instanceof Request ? input.url : String(input);
   if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
@@ -116,7 +105,6 @@ function cleanOption(): HTMLButtonElement {
   return match;
 }
 
-/** A browser that kept Grid on the old chooser; every other one-time dialog already seen. */
 function seedMovedFromGrid(): void {
   memory.set(V1_KEY, "true");
   memory.set(GRID_KEY, "true");
@@ -129,7 +117,6 @@ function seedMovedFromGrid(): void {
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
 
-/** What the other tab writes when its person picks Grid and presses Continue. */
 function otherTabPicksGrid(): void {
   memory.set(GRID_KEY, "true");
   memory.set(V2_KEY, "resolved");
@@ -138,13 +125,11 @@ function otherTabPicksGrid(): void {
 
 async function mountWithNotice(): Promise<void> {
   setStorageBackend(memoryBackend);
-  // One store per process: start from a page load that resolved Clean.
   configStore.seed("gridEnabled", false);
   memory.clear();
   seedMovedFromGrid();
   configStore.loadFromBackend();
   globalThis.fetch = stubFetch;
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);

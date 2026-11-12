@@ -135,10 +135,6 @@ function ArtifactPreview({
   }
 }
 
-/**
- * Visual-first canvas for a PR artifact catalog. Tiles retain only the artifact
- * name and media mark; provenance and review controls stay in the detail view.
- */
 export function PRArtifactGallery({
   artifacts,
   provider,

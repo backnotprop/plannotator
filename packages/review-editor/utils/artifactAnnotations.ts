@@ -6,7 +6,6 @@ import type {
 } from '@plannotator/ui/types';
 import { AnnotationType } from '@plannotator/ui/types';
 
-/** Format a non-negative media timestamp as M:SS or H:MM:SS. */
 export function formatArtifactTimestamp(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
   const hours = Math.floor(total / 3600);
@@ -18,7 +17,6 @@ export function formatArtifactTimestamp(seconds: number): string {
     : `${minutes}:${two(secs)}`;
 }
 
-/** Describe an artifact annotation anchor for review output and note chrome. */
 export function artifactAnchorLabel(anchor: ArtifactAnnotationAnchor): string {
   switch (anchor.kind) {
     case 'document':
@@ -32,7 +30,6 @@ export function artifactAnchorLabel(anchor: ArtifactAnnotationAnchor): string {
   }
 }
 
-/** Preserve a document annotation's durable text offsets as an artifact anchor. */
 export function documentAnchorFromAnnotation(annotation: Annotation): ArtifactAnnotationAnchor {
   return {
     kind: 'document',
@@ -45,7 +42,6 @@ export function documentAnchorFromAnnotation(annotation: Annotation): ArtifactAn
   };
 }
 
-/** Project comment-backed artifact notes into the shared document highlighter shape. */
 export function commentAnnotationAsDocument(annotation: CommentAnnotation): Annotation | null {
   const anchor = annotation.artifact?.anchor;
   if (anchor?.kind !== 'document') return null;
@@ -66,7 +62,6 @@ export function commentAnnotationAsDocument(annotation: CommentAnnotation): Anno
   };
 }
 
-/** Return the most useful quoted context for an artifact annotation, when available. */
 export function artifactAnnotationQuote(meta: ArtifactAnnotationMeta): string | undefined {
   return meta.anchor.kind === 'document' && meta.anchor.originalText
     ? meta.anchor.originalText

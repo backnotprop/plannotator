@@ -7,16 +7,10 @@ import { CommitDescriptionHeader } from '../../components/CommitDescriptionHeade
 import { ImageDiffPreview } from '../../components/ImageDiffPreview';
 import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
 import { PackageChangesCard } from '../../components/PackageChangesCard';
-// Lazy: loaded the first time a Markdown file is previewed.
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('../../components/MarkdownFilePreview')).MarkdownFilePreview }));
 import type { DiffFile } from '../../types';
 import { useReviewState, useReviewStateOptional } from '../ReviewStateContext';
 
-/**
- * A Markdown card's view control. Reads review state itself: Pierre's header
- * slot republishes only on updateItem, but a context consumer inside it still
- * re-renders, so Changes <-> Read updates the label without touching the item.
- */
 function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) {
   const preview = useReviewStateOptional()?.markdownPreview;
   if (!preview) return null;
@@ -36,19 +30,12 @@ function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; 
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
-  // Comments outside the diff live in whole-file views, not on the diff.
   const diffOnlyAnnotations = useMemo(
     () => (state.allAnnotations.some((a) => a.outsideDiff) ? state.allAnnotations.filter((a) => !a.outsideDiff) : state.allAnnotations),
     [state.allAnnotations],
   );
 
-  // A commit diff heads the surface with the full commit message and opens
-  // its files folded — the description gives the "what/why", the collapsed
-  // file list the shape, and each file expands on demand. The card rides
-  // INSIDE the scroller (leadingContent), so it scrolls away with the diff.
   const commitInfo = state.commitInfo;
-  // Before/After previews for changed images (#1598), only when the server
-  // advertised it. Stable per snapshot so header slots do not churn.
   const snapshotId = state.snapshotId;
   const compact = state.isCompactTouchLayout;
   const renderImagePreview = useMemo(
@@ -71,8 +58,6 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     [state.imagePreviewAvailable, snapshotId, compact],
   );
 
-  // Package changes under each package.json and lockfile header, wherever
-  // the server can read the files behind the diff (never a static patch).
   const packageReviewBase = state.reviewBase;
   const renderPackageChanges = useMemo(
     () =>
@@ -91,9 +76,6 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     [state.contextExpansionAvailable, packageReviewBase, snapshotId, compact],
   );
 
-  // Rendered Markdown views (one Source / Changes / Read menu per Markdown
-  // file). The card fetches its own contents, lazily, when CodeView mounts
-  // its header slot.
   const preview = state.markdownPreview;
   const reviewBase = state.reviewBase;
   const reviewSnapshotId = state.feedbackDiffContext?.snapshotId;
@@ -134,9 +116,6 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     [preview, reviewBase, reviewSnapshotId, snapshotId, imagesAvailable],
   );
 
-  // Stable element identity per commit — an inline JSX literal would be a new
-  // object every context re-render and churn the measuring ResizeObserver in
-  // AllFilesCodeView (leadingContent is in its effect deps).
   const leadingContent = useMemo(
     () => (commitInfo ? <CommitDescriptionHeader key={commitInfo.sha} info={commitInfo} /> : undefined),
     [commitInfo],
@@ -189,9 +168,6 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       stageError={state.stageError}
       prUrl={state.prMetadata?.url}
       prDiffScope={state.prDiffScope}
-      // Debounced like ReviewDiffPanel: searchMatches derive from the
-      // debounced query, so painting marks from the raw query mid-debounce
-      // mismatches mark ids and re-walks every rendered item per keystroke.
       searchQuery={state.isSearchPending ? '' : state.debouncedSearchQuery}
       searchMatches={state.searchMatches}
       activeSearchMatchId={state.activeSearchMatchId}
@@ -213,9 +189,6 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       getAIHistoryForFile={state.getAIHistoryForFile}
       defaultCollapsed={!!commitInfo}
       leadingContent={leadingContent}
-      // EXPERIMENTAL edit-to-suggestion mode. This plain all-files panel is
-      // the ONLY surface that opts in (Guided Review's viewport manager
-      // evicts CodeViews, which would destroy an active editor session).
       enableEditSuggestions={state.editSuggestionsEnabled}
       onAddSuggestionsForFile={state.onAddSuggestionsForFile}
       onAddEditorCommentForFile={state.onAddEditorCommentForFile}

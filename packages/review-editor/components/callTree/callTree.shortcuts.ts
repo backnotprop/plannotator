@@ -1,12 +1,5 @@
 import { createShortcutScopeHook, defineShortcutScope } from '@plannotator/ui/shortcuts';
 
-/**
- * Keys inside a Call tree (the tree has keyboard focus). They are bound to
- * the tree element, not the window, and stop there, so the file tree's
- * arrow keys and the All files `C` never see them. Enter opens the line and
- * C comments: the owner's decision of 2026-11-10 (the Paths cards keep their
- * own click-to-comment).
- */
 export const reviewCallTreeShortcuts = defineShortcutScope({
   id: 'review-call-tree',
   title: 'Call tree',

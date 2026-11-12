@@ -4,7 +4,6 @@ import { useVisibleViewportBounds, hasPrimaryCoarsePointer } from '@plannotator/
 import { getPageMarks, holdPageMark } from '@plannotator/ui/utils/pageMarks';
 import { linesOffScreen, placeChooser, readSelectedLines, type ReadLines, type SelectionRange } from './selectionChooserPlace';
 
-/** Selected lines, as a host's selection action receives them. */
 export interface DiffSelection {
   filePath: string;
   lineStart: number;
@@ -12,32 +11,16 @@ export interface DiffSelection {
   side: 'old' | 'new';
 }
 
-/**
- * A host's choices for selected lines, before the comment box (the Inbox's
- * code review: Comment · Ask · Show me). Absent: a selection opens the comment
- * box at once, as always.
- */
 export interface DiffSelectionActions {
-  /** Ask about the lines in words. Absent: no Ask. */
   onAsk?: (selection: DiffSelection) => void;
-  /** Ask for a picture of the lines (offered on the new side only: added or unchanged lines). Absent: no Show me. */
   onShowMe?: (selection: DiffSelection) => void;
 }
 
 const sameLines = (a: ReadLines, b: ReadLines) =>
   a.top === b.top && a.bottom === b.bottom && a.left === b.left && a.shownTop === b.shownTop && a.shownBottom === b.shownBottom && a.roof === b.roof;
 
-/** How long a new selection gets to be painted before the bar makes do with what it can read. */
 const LOOK_FRAMES = 6;
 
-/**
- * The small row a selection opens first when a host passes selection actions.
- * It takes the toolbar's ref, so a press outside it or Escape dismisses it
- * exactly as the comment box is dismissed (no new keys). It sits by the lines
- * it is about (`placeChooser`) and stays with them, in the diff it first found
- * them in. With them off screen or dropped by the diff it hides until they are
- * back; while it shows, the diff's + mark steps aside (comments.css, usePierreTheme).
- */
 export function SelectionChooser({
   toolbarRef,
   position,
@@ -61,8 +44,6 @@ export function SelectionChooser({
   const [bar, setBar] = React.useState({ width: 0, height: 0 });
   const [looked, setLooked] = React.useState(false);
   const { start, end, side, endSide } = range;
-  // Every frame while it is open, as nothing announces what moves the lines: the diff paints a new selection a
-  // frame or two late and redraws its rows after a scroll has ended.
   React.useLayoutEffect(() => {
     const now = { start, end, side, endSide };
     let frames = 0;
@@ -86,10 +67,7 @@ export function SelectionChooser({
     return () => cancelAnimationFrame(id);
   }, [start, end, side, endSide, position, toolbarRef]);
   const gone = dropped || (!!lines && linesOffScreen(lines, bounds));
-  // With `pageMarks` on (ui utils/pageMarks): `<html data-pn-selection-chooser>` while the bar carries
-  // `[data-selection-chooser]`, what comments.css's `html:has([data-selection-chooser])` matches.
   React.useLayoutEffect(() => (gone || !getPageMarks() ? undefined : holdPageMark(document.documentElement, 'data-pn-selection-chooser')), [gone]);
-  // No lines to read: above the pointer where they were picked, never off the screen.
   const placed: React.CSSProperties = lines
     ? placeChooser(lines, bar, { ...bounds, top: Math.max(bounds.top, lines.roof) })
     : {

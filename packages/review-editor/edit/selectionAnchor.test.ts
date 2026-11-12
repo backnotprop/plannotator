@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { mapEditedRangeToPristine, selectionToLineRange } from './selectionAnchor';
 
-/**
- * Anchor mapping for "Make annotation" selections made inside an edit session:
- * edited-buffer line ranges map to PRISTINE (pre-edit, new-side) coordinates,
- * which are what the rendered diff and the feedback export anchor to. See
- * selectionAnchor.ts for the rules under test.
- */
 describe('mapEditedRangeToPristine', () => {
   test('identity when nothing was edited', () => {
     const content = 'a\nb\nc\nd\n';
@@ -19,7 +13,6 @@ describe('mapEditedRangeToPristine', () => {
 
   test('unedited-region selection maps exactly through line shifts from edits above', () => {
     const pristine = 'a\nb\nc\nd\ne\n';
-    // Line 1 replaced by two lines: everything below shifts down by one.
     const edited = 'x\ny\nb\nc\nd\ne\n';
     expect(mapEditedRangeToPristine(pristine, edited, 3, 4)).toEqual({
       lineStart: 2,
@@ -30,7 +23,7 @@ describe('mapEditedRangeToPristine', () => {
 
   test('unedited-region selection maps exactly through line shifts from a deletion above', () => {
     const pristine = 'a\nb\nc\nd\ne\n';
-    const edited = 'a\nd\ne\n'; // b, c deleted
+    const edited = 'a\nd\ne\n';
     expect(mapEditedRangeToPristine(pristine, edited, 2, 3)).toEqual({
       lineStart: 4,
       lineEnd: 5,
@@ -40,7 +33,7 @@ describe('mapEditedRangeToPristine', () => {
 
   test('selection inside a modified region anchors to the pristine lines it replaces', () => {
     const pristine = 'a\nb\nc\nd\n';
-    const edited = 'a\nB1\nB2\nc\nd\n'; // line 2 replaced by two lines
+    const edited = 'a\nB1\nB2\nc\nd\n';
     expect(mapEditedRangeToPristine(pristine, edited, 2, 3)).toEqual({
       lineStart: 2,
       lineEnd: 2,
@@ -80,7 +73,7 @@ describe('mapEditedRangeToPristine', () => {
 
   test('selection spanning unchanged and edited regions covers the union (hunk boundary)', () => {
     const pristine = 'a\nb\nc\nd\ne\n';
-    const edited = 'a\nb\nC\nd\ne\n'; // line 3 modified
+    const edited = 'a\nb\nC\nd\ne\n';
     expect(mapEditedRangeToPristine(pristine, edited, 2, 4)).toEqual({
       lineStart: 2,
       lineEnd: 4,
@@ -90,7 +83,7 @@ describe('mapEditedRangeToPristine', () => {
 
   test('selection spanning two separate edit regions covers both plus the gap', () => {
     const pristine = 'a\nb\nc\nd\ne\n';
-    const edited = 'a\nB\nc\nD\ne\n'; // lines 2 and 4 modified, line 3 untouched
+    const edited = 'a\nB\nc\nD\ne\n';
     expect(mapEditedRangeToPristine(pristine, edited, 2, 4)).toEqual({
       lineStart: 2,
       lineEnd: 4,
@@ -100,8 +93,7 @@ describe('mapEditedRangeToPristine', () => {
 
   test('a deletion strictly inside the selection widens the range and is not exact', () => {
     const pristine = 'a\nb\nc\nd\ne\n';
-    const edited = 'a\nb\nd\ne\n'; // c deleted
-    // Highlighting edited b and d straddles the deleted pristine c.
+    const edited = 'a\nb\nd\ne\n';
     expect(mapEditedRangeToPristine(pristine, edited, 2, 3)).toEqual({
       lineStart: 2,
       lineEnd: 4,
@@ -111,8 +103,7 @@ describe('mapEditedRangeToPristine', () => {
 
   test('a deletion adjacent to (but outside) the selection stays exact', () => {
     const pristine = 'a\nb\nc\nd\ne\n';
-    const edited = 'a\nb\nd\ne\n'; // c deleted
-    // Selection starts AT the line after the deletion: nothing removed inside.
+    const edited = 'a\nb\nd\ne\n';
     expect(mapEditedRangeToPristine(pristine, edited, 3, 4)).toEqual({
       lineStart: 4,
       lineEnd: 5,

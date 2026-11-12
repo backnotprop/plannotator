@@ -1,13 +1,3 @@
-/**
- * Separate context for live agent job logs.
- *
- * Split from ReviewStateContext to prevent high-frequency SSE log updates
- * (every ~200ms) from re-rendering all dockview panels. Only the agent
- * detail panel subscribes to this context.
- *
- * Pattern: Dan Abramov's "split contexts by update frequency" optimization.
- */
-
 import { createContext, useContext } from 'react';
 
 interface JobLogsState {

@@ -3,39 +3,14 @@ import { Menu } from "@base-ui/react/menu";
 import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Ellipsis, Eye, EyeOff, TextSearch, X } from "lucide-react";
 import { Tooltip } from "@plannotator/ui/components/Tooltip";
 
-/**
- * Shared chrome for the left review panels (FileTree, SectionsPanel), approved
- * design record "review-sidebar-aligned".
- *
- * Under the nav rows, two rows stick to the top of the scrolling list while
- * the files scroll beneath them:
- *
- *  - the tools row: Changes N / All files (the caller's `scope`), then Search
- *    in diff and Collapse all as one-click icons, and a "…" menu with Copy all
- *    diffs, Auto-mark viewed, Group by kind, the Viewed button and the Git add
- *    button;
- *  - the progress row: "0 of 12 viewed · 1 staged" in words ("All 12 viewed"
- *    when done), and Hide viewed as a one-click eye at its end.
- *
- * A hairline shows under the block only while files scroll beneath it. One
- * source so both views keep the same tools in the same places. In a narrow
- * panel the icons wrap under the scope instead of drawing over it.
- */
-/** From this panel width the scope and the tools always share one line (they
- *  fit at the default 256 px in either scope); narrower, the tools always
- *  wrap under the scope. Either way switching scope never moves the list. */
 export const TOOLS_ONE_ROW_WIDTH = 256;
 
 export interface PanelControlsProps {
   stagedCount?: number;
   isSearchVisible?: boolean;
   onOpenSearch?: () => void;
-  /** Closes the search a second click on Search in diff finds open. Without
-   *  it the button is a plain button (no pressed state). */
   onCloseSearch?: () => void;
-  /** Keep the scope and the tools on one line (`TOOLS_ONE_ROW_WIDTH`). */
   oneRow?: boolean;
-  /** Tree view only — the sections view has no folders to collapse. */
   onToggleAllFolders?: () => void;
   areAllFoldersExpanded?: boolean;
   collapseDisabled?: boolean;
@@ -50,21 +25,13 @@ export interface PanelControlsProps {
   onToggleShowViewedControls?: () => void;
   showStageControls?: boolean;
   onToggleShowStageControls?: () => void;
-  /** Auto-mark-viewed (`reviewAutoViewed`). Optional: without the handler the
-   *  menu item is not rendered, so hosts that don't have the feature are
-   *  unchanged. */
   autoViewed?: boolean;
   onToggleAutoViewed?: () => void;
-  /** Tree view only: split the tree into Code / Tests / Generated blocks.
-   *  Without the handler the menu item is not rendered. */
   groupByKind?: boolean;
   onToggleGroupByKind?: () => void;
-  /** The tools row's lead: the Changes / All files switch (`ScopeSwitch`).
-   *  Unset: the row is labelled "Files". */
   scope?: React.ReactNode;
 }
 
-/** 24 px icon buttons (WCAG 2.2 target size); pressed is a quiet grey fill. */
 const TOOL =
   "panel-utility-button w-6 h-6 rounded-md text-muted-foreground transition-colors hover:bg-[var(--sidebar-fill)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed";
 const TOOL_PRESSED = "bg-[var(--sidebar-fill-strong)] text-foreground";
@@ -76,8 +43,6 @@ export function copyDiffLabel(status: PanelControlsProps["copyRawDiffStatus"]): 
   return status === "success" ? "Copied all diffs" : status === "error" ? "Could not copy all diffs" : "Copy all diffs";
 }
 
-/** A one-click icon tool with its name as a tooltip. `pressed` makes it a
- *  toggle button (aria-pressed); its name stays the same either way. */
 function ToolButton({
   label,
   tooltip = label,
@@ -109,11 +74,6 @@ function ToolButton({
   );
 }
 
-/**
- * The tools and progress rows, stuck to the top of the list. The block's
- * hairline shows only while files are scrolled under it (`data-stuck`): it
- * marks that rows are hidden, it is not a section line.
- */
 function StickyTools({ children }: { children: React.ReactNode }) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const blockRef = useRef<HTMLDivElement>(null);
@@ -147,8 +107,6 @@ function StickyTools({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Where the review stands, in words, with the Hide viewed eye at the end
- *  (under the "…" button). No bar: at 0 % it read as a divider line. */
 function ProgressRow({
   viewedCount,
   totalCount,
@@ -166,7 +124,6 @@ function ProgressRow({
       className="flex items-center min-h-6 pl-2 pr-1 gap-1.5 text-[12px] text-muted-foreground tabular-nums"
       data-review-progress-caption=""
     >
-      {/* Wraps between its parts, never inside one, in a narrow panel. */}
       <span className="min-w-0 flex flex-wrap items-center gap-x-1.5">
         {showViewedControls && (
           <span data-panel-viewed-controls="" className={`whitespace-nowrap${allViewed ? " text-success" : ""}`}>
@@ -191,8 +148,6 @@ function ProgressRow({
   );
 }
 
-/** The "…" menu: Copy all diffs and the set-and-forget settings. Copy keeps
- *  the menu open so its "Copied all diffs" label is seen. */
 function ListOptionsMenu({
   showViewedControls = true,
   onToggleShowViewedControls,
@@ -274,8 +229,6 @@ function ListOptionsMenu({
                   className={MENU_ITEM}
                   checked={showViewedControls}
                   onCheckedChange={() => {
-                    // Hiding the only filter affordance must never leave the
-                    // file list silently filtered.
                     if (showViewedControls && hideViewedFiles) onToggleHideViewed?.();
                     onToggleShowViewedControls!();
                   }}

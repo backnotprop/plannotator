@@ -1,8 +1,3 @@
-/**
- * Where the bar selected lines open goes. What regresses if these fail: the bar
- * lands on the lines it is about, falls off the screen, or goes above the lines
- * when there is room under them.
- */
 import { describe, expect, test } from 'bun:test';
 import { placeChooser } from './selectionChooserPlace';
 
@@ -26,7 +21,6 @@ describe('placeChooser', () => {
   });
 
   test('exactly enough room below stays below; a pixel less goes above', () => {
-    // 900 - 8 (edge) - 28 (bar) - 6 (gap) = 858.
     expect(placeChooser({ top: 800, bottom: 858, left: 100 }, bar, bounds).top).toBe(864);
     expect(placeChooser({ top: 800, bottom: 859, left: 100 }, bar, bounds).top).toBe(766);
   });
@@ -36,7 +30,6 @@ describe('placeChooser', () => {
   });
 
   test('exactly enough room above goes above; a pixel less takes the bottom edge', () => {
-    // 8 (edge) + 28 (bar) + 6 (gap) = 42.
     expect(placeChooser({ top: 42, bottom: 880, left: 100 }, bar, bounds).top).toBe(8);
     expect(placeChooser({ top: 41, bottom: 880, left: 100 }, bar, bounds).top).toBe(864);
   });
@@ -54,7 +47,6 @@ describe('placeChooser', () => {
   test('the visible viewport, not the window: a phone keyboard or a shifted viewport moves the limits', () => {
     const phone = { top: 16, bottom: 416, left: 16, right: 374 };
     const tall = { width: 230, height: 44 };
-    // 416 - 8 - 44 = 364 is the lowest it goes.
     expect(placeChooser({ top: 300, bottom: 358, left: 40 }, tall, phone).top).toBe(364);
     expect(placeChooser({ top: 300, bottom: 359, left: 40 }, tall, phone).top).toBe(250);
     expect(placeChooser({ top: 300, bottom: 320, left: 300 }, tall, phone).left).toBe(136);

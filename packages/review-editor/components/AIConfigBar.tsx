@@ -14,7 +14,6 @@ interface AIConfigBarProps {
   onModelChange: (model: string) => void;
   onReasoningEffortChange: (effort: string | null) => void;
   hasSession: boolean;
-  /** Optional muted line on how to get "Ask this session" (askSessionSetupHint). */
   setupHint?: string | null;
 }
 
@@ -29,8 +28,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   hasSession,
   setupHint,
 }) => {
-  // "Ask this session": the session that opened Plannotator is the only thing
-  // Ask AI talks to, so the bar shows just its label (one provider, no models).
   const sessionBridge = findSessionBridge(offeredProviders);
   const providers = sessionBridge ? [sessionBridge] : offeredProviders;
   const [showSessionNote, setShowSessionNote] = useState(false);
@@ -39,7 +36,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   const barRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Flash "New chat session" briefly when config changes while a session exists
   useEffect(() => {
     if (showSessionNote) {
       const t = setTimeout(() => setShowSessionNote(false), 2000);
@@ -47,7 +43,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
     }
   }, [showSessionNote]);
 
-  // Close menu on click outside
   useEffect(() => {
     if (!openMenu) return;
     const handler = (e: MouseEvent) => {
@@ -83,9 +78,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   const currentModel = models.find(m => m.id === effectiveModel) ?? defaultModel;
   const currentModelLabel = currentModel?.label;
   const reasoningEfforts = currentModel?.reasoningEfforts ?? [];
-  // With nothing picked the bar shows the model's own default effort, or
-  // "Auto" when the provider reports none (Pi: its default level is the user's
-  // own setting) — never the first listed level, which nothing would send.
   const defaultEffort = currentModel?.defaultReasoningEffort;
   const activeEffort = selectedReasoningEffort ?? defaultEffort ?? '';
 
@@ -117,7 +109,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   return (
     <>
     <div ref={barRef} className="relative border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-      {/* Provider selector */}
       {providers.length > 1 ? (
         <div className="relative">
           <button
@@ -163,7 +154,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         </span>
       )}
 
-      {/* Model selector */}
       {models.length > 1 ? (
         <>
           <span className="text-border/60">·</span>
@@ -224,7 +214,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         </>
       ) : null}
 
-      {/* Reasoning effort — shown when the selected model reports supported efforts */}
       {reasoningEfforts.length > 0 && (
         <>
           <span className="text-border/60">·</span>
@@ -279,10 +268,8 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         </>
       )}
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Session reset note */}
       {showSessionNote && (
         <span className="text-[10px] text-amber-500 animate-pulse">New chat session</span>
       )}

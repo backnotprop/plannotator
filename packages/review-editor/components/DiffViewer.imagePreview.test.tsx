@@ -1,18 +1,3 @@
-/**
- * Before/After image preview in the single-file view (#1598).
- *
- * Regressions guarded:
- *  - a session without the capability advert (static patch, old server, guide
- *    hosts) must issue NO image request and keep the plain notice;
- *  - only the sides that exist are requested (an addition has no Before);
- *  - a file the server cannot show as an image falls back to the notice;
- *  - identical bytes read as "Contents unchanged", not as a change;
- *  - a card unmounted mid-fetch aborts its request (no fetch storm on scroll);
- *  - nothing is fetched until the card is near the viewport.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * isolated diff-renderer step.
- */
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -70,7 +55,6 @@ describe.if(hasDom)('image preview in the single-file view (DOM)', () => {
   let imageRequests: Array<{ url: string; signal?: AbortSignal | null }> = [];
   let intersect: (() => void) | null = null;
 
-  /** An IntersectionObserver the test drives; `autoIntersect` fires on observe. */
   function installObserver(autoIntersect: boolean) {
     globalThis.IntersectionObserver = class {
       private cb: IntersectionObserverCallback;

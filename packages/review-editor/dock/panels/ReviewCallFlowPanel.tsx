@@ -132,12 +132,6 @@ function CallFlowLanguagesMenu({
   );
 }
 
-/**
- * Background setup progress shown only for the runtime-missing flavor of an
- * unavailable advert. Never rendered for unsupported views or while the
- * feature is disabled. The toggle already captured consent, so the idle state
- * informs rather than asking for a second confirmation.
- */
 export function CallFlowInstallFunnel({
   advert,
   install,
@@ -238,10 +232,8 @@ export function ReviewCallFlowPanel() {
   const state = useReviewState();
   const loadNodeSource = useCallFlowNodeSource(state);
   const analysis = state.callFlowAnalysis;
-  // The tab opens on the Call tree (owner, 2026-11-10, once the tree had search); Paths and Raw stay one click away.
   const [view, setView] = useState<'paths' | 'tree' | 'raw'>('tree');
   const callTreeRequest = state.callTreeRequest ?? null;
-  // A hunk's "Call tree" entry shows its tree here.
   useEffect(() => {
     if (callTreeRequest) setView('tree');
   }, [callTreeRequest]);
@@ -259,8 +251,6 @@ export function ReviewCallFlowPanel() {
   };
   const openTreeNode = state.openCallTreeNode ?? openNode;
   if (!state.callFlowAdvert.available) {
-    // The runtime-missing flavor of unavailable is the setup progress surface.
-    // Unsupported views and the disabled state never offer the install.
     if (state.callFlowAdvert.state === 'unavailable' && state.callFlowAdvert.installable && state.callFlowAdvert.installPlan) {
       return <CallFlowInstallFunnel advert={state.callFlowAdvert} install={state.callFlowInstall} />;
     }
@@ -328,7 +318,6 @@ export function ReviewCallFlowPanel() {
         <header className="call-flow-header">
           <div>
             <h2>{data.summary.changedNodes === 0 ? 'No changed call paths' : 'Call paths'}</h2>
-            {/* The items are spaced by CSS gap; the hidden ", " keeps them apart when read aloud. */}
             <p className="call-flow-summary">
               {data.summary.added > 0 && (
                 <span className="call-flow-summary-item call-flow-summary-changed">

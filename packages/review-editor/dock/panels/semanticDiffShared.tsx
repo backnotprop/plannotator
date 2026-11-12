@@ -8,8 +8,6 @@ import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPrevie
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import type { ReviewFileSource, ReviewFileSourceLoader } from '../../hooks/useReviewFileSource';
 
-// `renamed`/`moved` are handled by the early return in getChangeSymbol, so they
-// intentionally have no entry here.
 const changeSymbols: Record<string, string> = {
   added: '⊕',
   deleted: '⊖',
@@ -62,10 +60,6 @@ export function lineSelectionForChange(change: SemanticDiffChange): SelectedLine
   };
 }
 
-/**
- * Orphan = module-level change sem couldn't attach to a named entity. Sem hides
- * these by default (only the summary count surfaces them); we do the same.
- */
 export function isOrphanChange(change: SemanticDiffChange): boolean {
   return change.entityType === 'orphan';
 }
@@ -76,7 +70,6 @@ export interface SemanticDiffGroup {
   binaryChanges: SemanticDiffBinaryChange[];
 }
 
-/** Group changes by file, preserving order and dropping orphan (module-level) rows. */
 export function groupSemanticChangesByFile(
   changes: SemanticDiffChange[],
   binaryChanges: SemanticDiffBinaryChange[],
@@ -104,11 +97,6 @@ export function groupSemanticChangesByFile(
   return groups;
 }
 
-/**
- * One entity row. With a `loadSource`, resting the pointer on (or focusing)
- * the row opens the entity's source: its line range on the side it lives on
- * (the old file for a deletion), through the shared code hover preview.
- */
 function SemanticDiffChangeRow({
   change,
   onOpenChange,
@@ -163,7 +151,6 @@ function SemanticDiffChangeRow({
   );
 }
 
-/** The terminal-style entity rows, shared by the semantic panel and the file-header popover. */
 export function SemanticDiffRows({
   changes,
   binaryChanges,
@@ -175,7 +162,6 @@ export function SemanticDiffRows({
   binaryChanges: SemanticDiffBinaryChange[];
   onOpenChange: (change: SemanticDiffChange) => void;
   onOpenBinary: (change: SemanticDiffBinaryChange) => void;
-  /** Loads an entity's source for its hover preview; absent, rows have no preview (the file-header popover). */
   loadSource?: ReviewFileSourceLoader;
 }) {
   return (

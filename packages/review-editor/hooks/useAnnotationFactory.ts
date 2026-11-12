@@ -6,10 +6,6 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 import { captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 
-/** The active commit diff, if any — stamped onto annotations created while a
- *  commit:<sha> diff is on screen. Mirrors the PR fields: both exist so an
- *  in-place context switch (PR switch / diff-type switch) can't silently
- *  re-anchor old annotations to a diff they weren't made on. */
 export interface CommitAnnotationContext {
   sha: string;
   subject?: string;
@@ -27,13 +23,7 @@ export function useAnnotationFactory(
   diffScope?: PRDiffScope,
   commitContext?: CommitAnnotationContext | null,
   gitButlerContext?: GitButlerAnnotationContext | null,
-  /** Current diff files. PR/local Git line comments record the text of the
-   *  lines they anchor to (#1590), so a draft restored after the diff changed
-   *  can tell which comments still point at the same code. */
   files?: readonly DiffFile[],
-  /** Snapshot id of the diff `files` belong to; stamped on anchored line comments
-   *  so a later diff (push, scope switch, restore) can tell whether their
-   *  coordinates still apply. */
   snapshotId?: string,
   localReviewTarget?: string | null,
 ) {

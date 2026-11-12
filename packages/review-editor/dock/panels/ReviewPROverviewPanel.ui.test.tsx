@@ -7,7 +7,6 @@ import { ReviewStateProvider, type ReviewState } from '../ReviewStateContext';
 
 const hasDom = typeof document !== 'undefined';
 const overviewModule = hasDom ? await import('./ReviewPROverviewPanel') : null;
-// SAFETY: DOM-gated tests never render this component when the dynamic import is absent.
 const ReviewPROverviewPanel = overviewModule?.ReviewPROverviewPanel as
   typeof import('./ReviewPROverviewPanel')['ReviewPROverviewPanel'];
 let root: Root | null = null;

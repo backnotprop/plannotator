@@ -76,7 +76,6 @@ describe('buildPRArtifacts', () => {
         `![shot](${SHOT_URL})`,
       ].join('\n\n'),
     };
-    // Control: the same description yields an artifact on GitHub.
     expect(buildPRArtifacts(githubMetadata, context).length).toBeGreaterThan(0);
     expect(buildPRArtifacts(bitbucketMetadata, context)).toEqual([]);
   });

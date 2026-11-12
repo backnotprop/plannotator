@@ -9,7 +9,6 @@ export interface PreviewData {
   filePath: string;
 }
 
-/** Error body of GET /api/code-nav/file (packages/shared/repo-file.ts). */
 interface CodeNavFileError {
   error?: string;
   reason?: string;
@@ -21,15 +20,12 @@ function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '')} MB`;
 }
 
-/** The plain sentence the preview shows when the server refuses a file. */
 export function codeNavPreviewErrorMessage(body: CodeNavFileError | null): string {
   switch (body?.reason) {
     case 'too-large': {
       if (body.size == null || body.maxBytes == null) return 'This file is too large to preview.';
       const size = formatMegabytes(body.size);
       const limit = formatMegabytes(body.maxBytes);
-      // A file just over the limit rounds to the limit itself ("5 MB; the
-      // limit is 5 MB"), so say "just over" instead of two equal numbers.
       return size === limit
         ? `This file is too large to preview (just over the ${limit} limit).`
         : `This file is too large to preview (${size}; the limit is ${limit}).`;

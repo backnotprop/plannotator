@@ -1,4 +1,3 @@
-/** DOM coverage for a narrow file header (a phone's): the folder kept with `keepsFolder`, the name alone without. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -9,7 +8,6 @@ let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 let realObserver: typeof ResizeObserver | undefined;
 
-/** Every header measures this wide (a 390 px phone's header). */
 const WIDTH = 340;
 
 async function mount(node: React.ReactElement) {
@@ -53,7 +51,6 @@ describe.if(hasDom)('FileHeader, narrow', () => {
     );
     const labels = [...el.querySelectorAll('[data-file-header] span[title]')].map((span) => span.textContent);
     expect(labels).toEqual(['src/admin/Layout.tsx', 'src/settings/Layout.tsx']);
-    // The folder and the name are spans of their own, the folder first (which gives way first is the stylesheet's).
     const folder = el.querySelector<HTMLElement>('[data-file-header-folder]')!;
     expect(folder.textContent).toBe('src/admin/');
     expect(folder.nextElementSibling!.textContent).toBe('Layout.tsx');

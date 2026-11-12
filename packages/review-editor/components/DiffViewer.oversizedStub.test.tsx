@@ -1,18 +1,3 @@
-/**
- * A file over the review size cap must SAY why its card is empty.
- *
- * The review core replaces such files with a contents-free stub patch
- * (`buildOversizedTrackedStub`), which @pierre/diffs renders as a body with no
- * lines. Before this, the card was a bare header with no counts and no reason,
- * and users read it as a broken diff. The stub carries an explicit marker line
- * (`OVERSIZED_REVIEW_STUB_MARKER`) so the UI can tell it apart from a genuine
- * binary file, which must keep rendering exactly as it always did.
- *
- * DOM-gated (DOM_TESTS=1) and run by .github/workflows/test.yml's
- * "Run diff-renderer DOM tests (isolated, real @pierre/diffs)" step — its own
- * process, because a file in the shared DOM step mocks '@pierre/diffs'
- * process-wide and this renders against the real renderer.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -50,8 +35,6 @@ const OVERSIZED_STUB = [
   '',
 ].join('\n');
 
-// A genuine binary file: same shape MINUS the marker. It must not pick up the
-// size-cap explanation, which would be a lie about why it has no diff.
 const REAL_BINARY = [
   'diff --git a/assets/logo.png b/assets/logo.png',
   'index 1111111111aa..2222222222bb 100644',
@@ -101,7 +84,6 @@ describe.if(hasDom)('oversized-file stub presentation (DOM)', () => {
   const originalFetch = globalThis.fetch;
 
   async function render(patch: string, filePath: string) {
-    // No expandable content for a stub; keep the lookup inert either way.
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ oldContent: null, newContent: null }), {
         headers: { 'content-type': 'application/json' },
@@ -132,7 +114,6 @@ describe.if(hasDom)('oversized-file stub presentation (DOM)', () => {
     const notice = el.querySelector(NOTICE_SELECTOR);
     expect(notice).not.toBeNull();
     expect(notice!.textContent).toContain(NOTICE_COPY);
-    // The raw marker is plumbing, never user-facing copy.
     expect(el.textContent).not.toContain(OVERSIZED_REVIEW_STUB_MARKER);
   });
 

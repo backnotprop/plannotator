@@ -1,14 +1,3 @@
-/**
- * "Enter saves a comment" (#1934) on code review's comment composers,
- * against the REAL components (DOM-gated, DOM_TESTS=1): the line-comment
- * toolbar (also the Inbox's guide comments), its expanded dialog, a file
- * comment's edit box, the sidebar's "+ Global comment", and an outdated
- * comment's edit box.
- *
- * Shared cases (off / on / Shift+Enter / Cmd+Enter / IME) come from
- * `describeCommentSubmitKeys`; the extra case here guards the suggested-code
- * field, where Enter must stay a new line whatever the setting says.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -54,8 +43,6 @@ function must<T extends Element>(selector: string): T {
   if (!el) throw new Error(`nothing matches ${selector}`);
   return el;
 }
-
-// --- The line-comment toolbar ---
 
 function Toolbar({ onSubmit, showSuggestedCode = false }: { onSubmit: () => void; showSuggestedCode?: boolean }) {
   const [comment, setComment] = useState('');
@@ -115,8 +102,6 @@ describe('review line comment toolbar: suggested code', () => {
   });
 });
 
-// --- The expanded comment dialog ---
-
 describeCommentSubmitKeys('review expanded comment dialog', async (text) => {
   let saves = 0;
   function Harness() {
@@ -139,8 +124,6 @@ describeCommentSubmitKeys('review expanded comment dialog', async (text) => {
   await typeInto(must<HTMLTextAreaElement>('[role="dialog"] textarea'), text);
   return { field: () => must('[role="dialog"] textarea'), saves: () => saves };
 }, { skip });
-
-// --- A file comment's edit box ---
 
 const FILE_COMMENT: CodeAnnotation = {
   id: 'f1',
@@ -169,8 +152,6 @@ describeCommentSubmitKeys('review file comment edit', async (text) => {
   await typeInto(must<HTMLTextAreaElement>('[data-annotation-id="f1"] textarea'), text);
   return { field: () => must('[data-annotation-id="f1"] textarea'), saves: () => edits.length };
 }, { skip });
-
-// --- The sidebar: "+ Global comment" and an outdated comment's edit box ---
 
 describeCommentSubmitKeys('review sidebar general comment', async (text) => {
   const added: string[] = [];

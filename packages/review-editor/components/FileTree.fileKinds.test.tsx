@@ -1,4 +1,3 @@
-/** DOM coverage for the tree's kind blocks (Code / Tests / Generated). */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -17,7 +16,6 @@ const file = (path: string, additions = 1, deletions = 0): DiffFile => ({
   status: 'modified',
 });
 
-// Parse order mixes the kinds on purpose.
 const mixed: DiffFile[] = [
   file('bun.lock', 5, 1),
   file('src/sync/__tests__/retry.test.ts', 20),
@@ -71,7 +69,6 @@ describe('FileTree kind blocks', () => {
 
     const code = header(el, 'code');
     expect(code.getAttribute('aria-expanded')).toBe('true');
-    // label, file count, viewed/total and +/-
     expect(code.textContent).toContain('Code');
     expect(code.textContent).toContain('1/2');
     expect(code.textContent).toContain('+20');
@@ -122,7 +119,6 @@ describe('FileTree kind blocks', () => {
     }
     const el = await mount(<Controlled />);
     const press = (key: string) => act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key })));
-    // Each block in tree order (folders first): Code, then Tests, then Generated.
     await press('Home');
     await press('j');
     await press('j');
@@ -139,17 +135,14 @@ describe('FileTree kind blocks', () => {
   });
 
   test.skipIf(!hasDom)('a file that becomes active by any route opens its folded block', async () => {
-    // index 0 is bun.lock (Generated). A new file list never opens a block.
     const el = await mount(<Tree activeFileIndex={0} />);
     expect(header(el, 'generated').getAttribute('aria-expanded')).toBe('false');
 
-    // An annotation or search jump: the app changes the active file.
     await act(async () => root?.render(<Tree activeFileIndex={2} />));
     await act(async () => header(el, 'test').click());
     await act(async () => root?.render(<Tree activeFileIndex={1} />));
     expect(header(el, 'test').getAttribute('aria-expanded')).toBe('true');
 
-    // The all-files scroll highlight reaching bun.lock.
     await act(async () => root?.render(<Tree activeFileIndex={1} isAllFilesActive scrollHighlightIndex={2} />));
     expect(header(el, 'generated').getAttribute('aria-expanded')).toBe('false');
     await act(async () => root?.render(<Tree activeFileIndex={1} isAllFilesActive scrollHighlightIndex={0} />));
@@ -160,7 +153,6 @@ describe('FileTree kind blocks', () => {
     const viewed = new Set(['src/sync/__tests__/retry.test.ts', 'tests/e2e/sync.spec.ts']);
     const el = await mount(<Tree hideViewedFiles viewedFiles={viewed} />);
     expect(blocks(el)).toEqual(['code', 'generated']);
-    // The active file stays shown, so its block does too.
     await act(async () => root?.render(<Tree hideViewedFiles viewedFiles={viewed} activeFileIndex={4} />));
     expect(blocks(el)).toEqual(['code', 'test', 'generated']);
   });
@@ -183,10 +175,8 @@ describe('FileTree kind blocks', () => {
     const code = header(el, 'code');
     expect(code.tagName).toBe('BUTTON');
     expect(code.type).toBe('button');
-    // Spoken: the group, its numbers in words, then what it holds.
     expect(code.getAttribute('aria-label')!.startsWith('Code: 2 files, 1 viewed, 20 lines added, 1 removed. ')).toBe(true);
     expect(header(el, 'test').getAttribute('aria-label')!.startsWith('Tests: 2 files, 0 viewed, 24 lines added, 3 removed. ')).toBe(true);
-    // A folded group shows its chevron without a hover.
     expect(header(el, 'generated').hasAttribute('data-collapsed')).toBe(true);
     expect(code.hasAttribute('data-collapsed')).toBe(false);
     await act(async () => code.click());
@@ -197,7 +187,6 @@ describe('FileTree kind blocks', () => {
   test.skipIf(!hasDom)('the numbers line up: every row has the same two columns, sized from the totals', async () => {
     const el = await mount(<Tree />);
     const list = el.querySelector<HTMLElement>('[data-review-views-nav]')!.parentElement!;
-    // Totals +49 -5: three characters each, at least.
     expect(list.style.getPropertyValue('--count-add-w')).toBe('calc(3ch + 2px)');
     expect(list.style.getPropertyValue('--count-del-w')).toBe('calc(3ch + 2px)');
     const rowsWithNumbers = [
@@ -207,7 +196,6 @@ describe('FileTree kind blocks', () => {
     for (const row of rowsWithNumbers) {
       const columns = row.querySelectorAll('[data-count-columns]');
       expect(columns.length).toBe(1);
-      // Two cells always, an empty one included, so the - column never shifts.
       expect(columns[0].children.length).toBe(2);
     }
     const retry = [...el.querySelectorAll('.file-tree-item')].find((r) => r.textContent?.includes('retry.ts'))!;
@@ -217,7 +205,6 @@ describe('FileTree kind blocks', () => {
   });
 
   test.skipIf(!hasDom)('a deep tree keeps its nesting: each folder and its files sit right of their parent, at 256 and 200 px', async () => {
-    // One file at every level, so no folder chain merges into one row.
     const levels = ['src', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     const deep = levels.map((_, i) => file(`${levels.slice(0, i + 1).join('/')}/f${i}.ts`));
     for (const width of [256, 200]) {
@@ -226,12 +213,10 @@ describe('FileTree kind blocks', () => {
       const folders = [...block(el, 'code').querySelectorAll('[data-folder-row]')];
       expect(folders.map((f) => f.textContent?.replace(/[+\-\d]/g, ''))).toEqual(levels);
       for (let i = 1; i < folders.length; i += 1) expect(pad(folders[i])).toBeGreaterThan(pad(folders[i - 1]));
-      // A folder's files sit right of the folder itself.
       for (let i = 0; i < levels.length; i += 1) {
         const row = [...block(el, 'code').querySelectorAll('.file-tree-item')].find((r) => r.getAttribute('title')?.endsWith(`/f${i}.ts`))!;
         expect(pad(row)).toBeGreaterThan(pad(folders[i]));
       }
-      // The hover path is the repository's, not the kind-scoped key.
       expect(folders[1].getAttribute('title')).toBe('src/a');
       await act(async () => root?.unmount());
       root = null;

@@ -1,14 +1,3 @@
-/**
- * TokenHoverCard rendering.
- *
- * Guards what the card is allowed to say. The first mock leaked engineering
- * vocabulary (a source chip, "likely definition", a candidate count, an
- * "rg · 38ms" readout) and the ruling removed all of it: uncertainty is shown
- * by naming the alternative location, never by describing the algorithm. Those
- * are the assertions that catch a drift back, along with the two structural
- * facts the reader depends on: the reference list is capped and says how many
- * it left out, and a location click routes into the References flow.
- */
 import { afterEach, describe, expect, jest, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -98,8 +87,6 @@ describe.skipIf(!hasDom)('TokenHoverCard', () => {
     expect(text).toContain('charge');
     expect(text).toContain('function');
     expect(text).toContain('export function charge(amount, key) {');
-    // The approximate cue is what stops an eyeballed line reading as a parsed
-    // signature.
     expect(text).toContain('// matched line');
     expect(text).toContain('Charges the card.');
     expect(text).toContain('src/pay.js:4');
@@ -170,14 +157,12 @@ describe.skipIf(!hasDom)('TokenHoverCard', () => {
     const text = card.textContent ?? '';
     expect(text).toContain('9 references');
     expect(text).toContain('… 4 more in the References panel');
-    expect(card.querySelectorAll('button').length).toBe(6); // definition + 5 refs
+    expect(card.querySelectorAll('button').length).toBe(6);
   });
 
   test('renders no rank vocabulary, no source chip and no latency readout', async () => {
     const card = await render(
       <TokenHoverCard
-        // Every optional row is present, so the sweep covers the overflow line
-        // and the alternate-location line too, not just the always-on chrome.
         hover={state(response({
           references: Array.from({ length: 5 }, (_, i) => ({
             filePath: `src/f${i}.js`,
@@ -196,13 +181,11 @@ describe.skipIf(!hasDom)('TokenHoverCard', () => {
     );
 
     const text = card.textContent ?? '';
-    // Every optional row really is on screen for this sweep.
     expect(text).toContain('or possibly');
     expect(text).toContain('more in the References panel');
     for (const banned of ['ranked', 'likely', 'candidate', 'confidence', '38ms', 'rg ·']) {
       expect(text.toLowerCase()).not.toContain(banned.toLowerCase());
     }
-    // Em dashes are barred from every string this feature renders.
     expect(text).not.toContain('—');
   });
 
@@ -259,8 +242,6 @@ describe.skipIf(!hasDom)('TokenHoverCard', () => {
       document.body.appendChild(token);
       await act(async () => hover!.onTokenHoverEnter(REQUEST, token));
       await act(async () => { jest.advanceTimersByTime(350); });
-      // Dwell passed, answer not back: still nothing on screen. No skeleton,
-      // no spinner.
       expect(document.querySelector('[data-token-hover-card]')).toBeNull();
 
       await act(async () => {
@@ -271,7 +252,6 @@ describe.skipIf(!hasDom)('TokenHoverCard', () => {
 
       const card = document.querySelector('[data-token-hover-card]');
       expect(card).not.toBeNull();
-      // Portaled out of the React host so it escapes the panel overflow.
       expect(card!.parentElement).toBe(document.body);
       expect(card!.textContent).toContain('src/pay.js:4');
       token.remove();

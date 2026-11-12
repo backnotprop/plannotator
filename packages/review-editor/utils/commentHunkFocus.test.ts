@@ -2,8 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { bitbucketDiffHunk } from '../../shared/pr-bitbucket';
 import { focusCommentHunk } from './commentHunkFocus';
 
-// Same shape as tests/test-fixtures/bitbucket/diff.txt (Bitbucket /diff output):
-// a 40-line new file and a modified file whose hunk removes and adds lines.
 const fileLines = Array.from({ length: 40 }, (_, i) => `const line${i + 1} = ${i + 1};`);
 const PATCH = [
   'diff --git a/src/long.ts b/src/long.ts',
@@ -38,7 +36,7 @@ const cutNew = (line: number) => bitbucketDiffHunk(PATCH, 'src/long.ts', 'RIGHT'
 describe('focusCommentHunk', () => {
   test('new-side comment on line 28 of a new file shows lines 25-28, not 1-5', () => {
     const full = cutNew(28);
-    expect(full.split('\n')[1]).toBe('+const line1 = 1;'); // the full hunk starts at line 1
+    expect(full.split('\n')[1]).toBe('+const line1 = 1;');
     expect(focusCommentHunk(full, { side: 'RIGHT', line: 28 })).toBe(
       '@@ -0,0 +25,4 @@\n+const line25 = 25;\n+const line26 = 26;\n+const line27 = 27;\n+const line28 = 28;',
     );

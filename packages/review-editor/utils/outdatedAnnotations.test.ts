@@ -1,7 +1,3 @@
-/**
- * Outdated PR comments (#1590) in the two outputs a reviewer's comments reach:
- * the agent feedback export and a hosted PR review submission.
- */
 import { describe, expect, test } from 'bun:test';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { exportReviewFeedback, OUTDATED_ANNOTATION_LABEL } from './exportFeedback';
@@ -65,9 +61,6 @@ describe('hosted PR review submission', () => {
   });
 
   test('a comment on a PR whose snapshot this page never saw is posted inline, not as Outdated', () => {
-    // Regression (#1592): PR 42 comment, switch to 43 and comment, back to 42,
-    // reload, restore, Post. After the reload only 42's snapshot is known, and
-    // 43's untouched comment was posted to its body labelled Outdated.
     const OTHER = 'https://github.com/acme/widgets/pull/43';
     const submission = buildReviewSubmission(
       [

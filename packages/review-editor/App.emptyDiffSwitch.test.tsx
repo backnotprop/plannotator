@@ -1,14 +1,3 @@
-/**
- * Switching through an empty diff (DOM_TESTS=1): the diff pane must show the
- * new files at once, with no click on a file and no reload.
- *
- * Regression guarded (the owner's QA item 25): the dock only mounts while the
- * diff has files. Switching to a diff with 0 files unmounted it, but the App
- * kept the disposed dock's API; the next switch with files mounted a new dock
- * and the "open the All files panel" effect ran against the OLD api first,
- * spent its one-shot flag there, and the new dock stayed empty. The tree
- * filled, the centre pane stayed blank.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -19,7 +8,6 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 
-// Vite-only virtual module (`?worker&inline`), stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -52,7 +40,6 @@ const patchFor = (path: string) => [
 
 const HEAD_SHA = "1".repeat(40);
 
-/** Which diff types have files. `merge-base` and the HEAD commit are empty. */
 const PATCHES: Record<string, string> = {
   "since-base": patchFor("src/parse.ts"),
   uncommitted: patchFor("src/parse.ts"),
@@ -90,8 +77,6 @@ class StubEventSource {
 let switchRequests: string[] = [];
 
 function makeFetch(initialDiffType: string): typeof fetch {
-  // SAFETY: the app only ever calls fetch(input, init); the double implements
-  // that call signature and not `fetch.preconnect`.
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
     if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
@@ -163,13 +148,10 @@ async function waitFor(check: () => boolean, what: string): Promise<void> {
   if (!check()) throw new Error(`timed out waiting for ${what}`);
 }
 
-/** The dock's tab titles: the panel the centre pane shows lives in one of them. */
 function dockTabs(): string[] {
   return Array.from(document.querySelectorAll(".dv-tab")).map((el) => el.textContent?.trim() ?? "");
 }
 
-// The every-change dock tab is titled "All changes" (approved design record
-// "review-sidebar-header"), so it never reads like the All files scope.
 const allFilesShown = () => dockTabs().some((title) => title.includes("All changes"));
 const noChangesShown = () => document.body.textContent?.includes("No changes") ?? false;
 
@@ -179,7 +161,6 @@ function panelSegment(label: string): HTMLButtonElement | undefined {
     .find((el) => el.textContent?.trim() === label);
 }
 
-/** Pick a diff type in the sidebar's diff-type menu, the way a reviewer does. */
 async function pickDiffType(label: string): Promise<void> {
   const before = switchRequests.length;
   const trigger = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
@@ -212,7 +193,6 @@ async function mount(initialDiffType: string): Promise<void> {
   configStore.loadFromBackend();
   switchRequests = [];
   globalThis.fetch = makeFetch(initialDiffType);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -249,7 +229,6 @@ describe.if(hasDom)("switching through an empty diff", () => {
 
     await pickDiffType("Uncommitted changes");
     await waitFor(() => !noChangesShown(), "the dock to come back");
-    // The bug: the dock mounted again but no panel was ever added to it.
     await waitFor(allFilesShown, "the All files panel after the empty diff");
   });
 

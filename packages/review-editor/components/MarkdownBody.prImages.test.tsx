@@ -1,19 +1,3 @@
-/**
- * PR comment HTML with private GitHub attachments (#2328), as MarkdownBody
- * renders it with `authenticatedImages` (a PR on github.com).
- *
- * What regresses if this fails:
- *  - an attachment `<img>` in a comment loads directly and shows broken;
- *  - a README-style `<picture>` loses its dark-mode `<source>`, or keeps a
- *    direct URL to a private image in it;
- *  - a non-attachment image is sent to the proxy, which refuses it;
- *  - without `authenticatedImages` (any other PR) a comment's images change.
- *
- * happy-dom's parser drops the `<picture>` wrapper (its `<source>` stays), so
- * the source is found by its `media`.
- *
- * DOM-gated (DOM_TESTS=1, listed in tests/dom-test-list.txt).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,7 +13,6 @@ const COMMENT = [
   `<img src="${BADGE}" alt="badge">`,
 ].join(' ');
 
-/** The proxy URL, compared absolute (the page may build it relative or absolute). */
 const BASE = "http://review.test";
 const absolute = (value: string | null | undefined) =>
   new URL(value ?? "", typeof location !== "undefined" && location.origin !== "null" ? location.origin : BASE).href;

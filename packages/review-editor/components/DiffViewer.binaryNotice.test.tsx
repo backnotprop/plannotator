@@ -1,14 +1,3 @@
-/**
- * A file whose card has no diff in it must SAY so.
- *
- * A patch chunk carrying a binary marker and no hunks renders as an empty
- * body, so the card is a bare header with no counts and no reason. That is
- * what a file dropped by the review size probe looked like (#1167): reviewers
- * saw an empty card and could approve without ever seeing the content.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -38,9 +27,6 @@ const { DiffViewer } = await import('./DiffViewer');
 
 const hasDom = typeof document !== 'undefined';
 
-// The shape the review core emits for a file it declined to read: rename
-// metadata, no hunks. Before the fix a renamed-and-edited file could land here
-// purely because its size probe could not find the worktree blob.
 const STUB_PATCH = [
   'diff --git a/src/Card.tsx b/src/Panel.tsx',
   'similarity index 94%',
@@ -71,8 +57,6 @@ const TEXT_PATCH = [
   '',
 ].join('\n');
 
-// The same shape PLUS the size-cap marker. The specific notice owns this one,
-// so exactly one explanation must appear on the card.
 const MARKED_OVERSIZED_STUB = [
   'diff --git a/assets/blob.pack b/assets/blob.pack',
   OVERSIZED_REVIEW_STUB_MARKER,
@@ -110,7 +94,6 @@ describe.if(hasDom)('contentless binary card presentation (DOM)', () => {
   const originalFetch = globalThis.fetch;
 
   async function render(patch: string, filePath: string) {
-    // There is no expandable content for these shapes; keep the lookup inert.
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ oldContent: null, newContent: null }), {
         headers: { 'content-type': 'application/json' },
@@ -155,8 +138,6 @@ describe.if(hasDom)('contentless binary card presentation (DOM)', () => {
   });
 
   test('a marker-carrying stub is explained once, by the specific notice', async () => {
-    // Specific beats general: the size-cap notice knows WHY the body is empty,
-    // so the fallback must stand down rather than stack a second line on it.
     const el = await render(MARKED_OVERSIZED_STUB, 'assets/blob.pack');
     expect(el.querySelectorAll(OVERSIZED_NOTICE_SELECTOR).length).toBe(1);
     expect(el.querySelectorAll(NOTICE_SELECTOR).length).toBe(0);

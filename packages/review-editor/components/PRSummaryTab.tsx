@@ -11,7 +11,6 @@ interface PRSummaryTabProps {
 export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, metadata, compact = false }) => {
   return (
     <div className={`${compact ? 'px-4' : 'px-8'} py-4 space-y-4 max-w-2xl`}>
-      {/* PR title + state */}
       <div className="space-y-2">
         <div className="flex items-start gap-2">
           <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${
@@ -48,7 +47,6 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
         )}
       </div>
 
-      {/* Labels */}
       {context.labels.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {context.labels.map((label) => (
@@ -66,7 +64,6 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
         </div>
       )}
 
-      {/* Linked issues */}
       {context.linkedIssues.length > 0 && (
         <div className="space-y-1">
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -90,7 +87,6 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
         </div>
       )}
 
-      {/* PR body */}
       {context.body ? (
         <div className="space-y-1">
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">

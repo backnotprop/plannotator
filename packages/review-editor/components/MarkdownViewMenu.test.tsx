@@ -1,13 +1,3 @@
-/**
- * The one control a Markdown file has: a header button naming its view that
- * opens a menu Source / Changes / Read. A real menu for a keyboard and a
- * screen reader (radio items with aria-checked, arrows, Home/End, type-ahead,
- * Escape back to the button); added and deleted files offer Source and Read
- * only; on a phone the same choices, in the same words, open as a sheet.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useState } from 'react';
 import { act } from 'react';

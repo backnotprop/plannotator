@@ -1,16 +1,3 @@
-/**
- * The PR image rewriter (#2328): which image URLs in a PR's text load through
- * the server's `/api/pr-artifact-content` proxy, which reads them with the
- * reviewer's token.
- *
- * What regresses if this fails:
- *  - a private GitHub attachment loads directly again and shows broken;
- *  - any other image (a badge, a CDN, a relative path, a lookalike host) is
- *    sent to the proxy, which refuses it, so it stops loading;
- *  - a GitLab MR or a GitHub Enterprise PR proxies github.com attachments,
- *    which the server answers with 403 there;
- *  - a `<picture>`'s dark-mode `srcset` keeps a direct URL to a private image.
- */
 import { describe, expect, test } from 'bun:test';
 import { prImageSrc, prImageSrcset, proxiesGitHubImages, resolvePRImage } from './prImage';
 
@@ -54,8 +41,6 @@ describe('prImageSrc', () => {
     expect(prImageSrcset(dark)).toBe(proxied(dark));
   });
 
-  // A comma inside a candidate's URL is not a separator: splitting on it
-  // would turn `data:image/png;base64,AAAA 2x` into two broken candidates.
   test('a data: candidate keeps the comma in its URL', () => {
     const dark = 'https://github.com/user-attachments/assets/dark';
     const inline = 'data:image/png;base64,AAAA';

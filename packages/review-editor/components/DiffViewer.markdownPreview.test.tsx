@@ -1,14 +1,3 @@
-/**
- * The single-file Markdown preview in code review: links never navigate the
- * review tab, the header Comment button works in the preview, navigation that
- * targets diff lines switches back to the diff, a deletion previews the old
- * document, images resolve against the file's own folder (or show a
- * placeholder when the server reads no images for the review), and the
- * Source / Changes / Read menu appears only where a rendered view can work.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run diff-renderer DOM tests" step (real @pierre/diffs).
- */
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -85,10 +74,6 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
   let host: HTMLDivElement | null = null;
   const originalFetch = globalThis.fetch;
 
-  // happy-dom fires `error` at once for an <img> whose relative src it cannot
-  // parse against about:blank; give the page an http origin, as the review
-  // app has, so only the error events a test dispatches count. (Image loading
-  // itself stays off in happy-dom.)
   type HappyWindow = { happyDOM?: { setURL?: (url: string) => void } };
   let originalUrl = '';
   beforeAll(() => {
@@ -154,8 +139,6 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     return view != null && view !== 'source';
   }
 
-  // Source <-> rendered (Changes, or Read where a file has no Changes).
-  // Turning a rendered view on waits for its (lazily loaded) view to mount.
   async function togglePreview(el: HTMLElement) {
     const on = isPreviewOn(el);
     await act(async () => {
@@ -226,27 +209,22 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     await togglePreview(el);
     expect(el.querySelector(PREVIEW)).not.toBeNull();
 
-    // A file in this review opens in the review; the click never navigates.
     const setup = linkByText(el, 'the setup')!;
     expect(click(setup).defaultPrevented).toBe(true);
     expect(opened).toEqual(['docs/setup.md']);
 
-    // Any other local path renders inert: no href, nothing to follow.
     const outside = Array.from(el.querySelectorAll('[data-local-link="unavailable"]'))
       .find((node) => node.textContent === 'outside');
     expect(outside).toBeDefined();
     expect(outside!.getAttribute('title')).toBe('Not in this review');
     expect(linkByText(el, 'outside')).toBeUndefined();
 
-    // External links open a new tab, never this one.
     const web = linkByText(el, 'web')!;
     expect(web.getAttribute('target')).toBe('_blank');
     expect(web.getAttribute('rel')).toContain('noopener');
 
-    // An in-page anchor does not change the review tab's location.
     expect(click(linkByText(el, 'section')!).defaultPrevented).toBe(true);
 
-    // Raw HTML links follow the same rule.
     expect(click(linkByText(el, 'raw setup')!).defaultPrevented).toBe(true);
     expect(opened).toEqual(['docs/setup.md', 'docs/setup.md']);
     const rawNope = Array.from(el.querySelectorAll('a')).find((a) => a.textContent === 'raw nope')!;
@@ -292,16 +270,13 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     };
     const el = await render(base, { oldContent: null, newContent: doc });
 
-    // A sidebar jump to a FILE comment stays in the preview (its banner shows there).
     await togglePreview(el);
     await rerender({ ...base, scrollTargetAnnotation: { id: 'file-1', token: 1 } });
     expect(isPreviewOn(el)).toBe(true);
 
-    // A sidebar jump to a LINE comment switches back.
     await rerender({ ...base, scrollTargetAnnotation: { id: 'line-1', token: 2 } });
     expect(isPreviewOn(el)).toBe(false);
 
-    // A search hit in this file switches back.
     await togglePreview(el);
     expect(isPreviewOn(el)).toBe(true);
     await rerender({
@@ -311,7 +286,6 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     });
     expect(isPreviewOn(el)).toBe(false);
 
-    // A semantic-diff / AI scroll-to-lines (a new selection) switches back.
     await togglePreview(el);
     expect(isPreviewOn(el)).toBe(true);
     const range: SelectedLineRange = { start: 1, end: 1, side: 'additions' };
@@ -357,8 +331,6 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
 
   test('stale or missing full contents say so instead of rendering', async () => {
     const doc = '# Fresh\n';
-    // Edited on disk since the diff was captured, to the same length: the
-    // line-count guard used for hunk expansion cannot see it; the preview must.
     const stale = await render({
       patch: addedPatch('doc.md', doc), filePath: 'doc.md', status: 'added',
     }, { oldContent: null, newContent: '# Edited since the diff\n' });
@@ -379,7 +351,6 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     root = null;
     host?.remove();
 
-    // The whole diff is stale (the server refuses the snapshot with 409).
     const staleDiff = await render({
       patch: addedPatch('doc.md', doc), filePath: 'doc.md', status: 'added', reviewSnapshotId: 'old',
     }, 'stale-snapshot');
@@ -429,15 +400,12 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     expect(preview.querySelector('source')).toBeNull();
     expect(preview.querySelector('video')).toBeNull();
     expect(preview.querySelector('img[alt="themed"]')?.getAttribute('src')).toBe(imageUrl('docs/README.md', 'img/light.png'));
-    // Every remaining image goes through the per-revision route or is a placeholder.
     for (const img of Array.from(preview.querySelectorAll('img'))) {
       expect(img.getAttribute('src')!.startsWith('/api/review-markdown-image?')).toBe(true);
     }
     const labels = Array.from(preview.querySelectorAll('[data-image-unavailable]')).map((n) => n.textContent);
     expect(labels).toContain('Video');
 
-    // An image the server refuses (an absolute path, say) shows the
-    // placeholder instead of a broken image once it fails to load.
     const absent = preview.querySelector<HTMLImageElement>('img[alt="absent"]')!;
     await act(async () => {
       absent.dispatchEvent(new Event('error'));
@@ -468,8 +436,6 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
     await togglePreview(el);
 
     const src = (alt: string) => el.querySelector<HTMLImageElement>(`${PREVIEW} img[alt="${alt}"]`)?.getAttribute('src');
-    // The server resolves each against the document's folder at that side
-    // and serves only what the document references.
     expect(src('near')).toBe(imageUrl('docs/guide/README.md', 'img/a.png'));
     expect(src('up')).toBe(imageUrl('docs/guide/README.md', '../top.png'));
     expect(src('root')).toBe(imageUrl('docs/guide/README.md', '/assets/r.png'));
@@ -493,36 +459,30 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
 
   test('the toggle appears only where a preview can work', async () => {
     const doc = '# A\n';
-    // Static patch: no full file behind the diff.
     let el = await render({
       patch: addedPatch('a.md', doc), filePath: 'a.md', status: 'added', contextExpansionAvailable: false,
     }, { oldContent: null, newContent: doc });
     expect(el.querySelector(TOGGLE)).toBeNull();
 
-    // A rename away from Markdown previews nothing.
     await rerender({
       patch: addedPatch('a.txt', doc), filePath: 'a.txt', oldPath: 'a.md', status: 'renamed',
     });
     expect(el.querySelector(TOGGLE)).toBeNull();
 
-    // `.markdown` is Markdown.
     await rerender({ patch: addedPatch('a.markdown', doc), filePath: 'a.markdown', status: 'added' });
     expect(el.querySelector(TOGGLE)).not.toBeNull();
 
-    // So is an extension listed in `markdownExtensions`.
     await rerender({ patch: addedPatch('book.livemd', doc), filePath: 'book.livemd', status: 'added' });
     expect(el.querySelector(TOGGLE)).toBeNull();
     setExtraMarkdownExtensions(['.livemd']);
     await rerender({ patch: addedPatch('book.livemd', doc), filePath: 'book.livemd', status: 'added', isFocused: true });
     expect(el.querySelector(TOGGLE)).not.toBeNull();
 
-    // An added file has no Changes view: rendered means Read.
     await togglePreview(el);
     el = host!;
     expect(el.querySelector(TOGGLE)?.getAttribute('data-markdown-view')).toBe('read');
     expect(el.querySelector('[data-markdown-preview-view]')?.getAttribute('data-markdown-preview-view')).toBe('whole');
 
-    // A server that does not advertise the preview shows no switch.
     await rerender({ patch: addedPatch('a.md', doc), filePath: 'a.md', status: 'added', markdownPreviewSupported: false });
     expect(el.querySelector(TOGGLE)).toBeNull();
   });
@@ -560,7 +520,6 @@ describe.if(hasDom)('Markdown preview (DOM)', () => {
       el.querySelector<HTMLButtonElement>('[data-markdown-preview-anyway]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    // The rendered diff: the old heading struck, the new one added.
     expect(el.querySelector(`${PREVIEW} .plan-diff-added h1`)?.textContent).toBe('Big');
   });
 

@@ -2,15 +2,6 @@ import React, { useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 
-/**
- * One control per Markdown file: a header button naming the view the file is
- * shown in, opening a menu Source / Changes / Read (approved "Menu" variant,
- * 2026-10-12 controls amendment). On a phone the same button (44 px hit area)
- * opens the same menu as a bottom sheet, with the same words in the same
- * order. Kept out of FileHeader so the guides.show viewer, which renders
- * FileHeader read-only, never carries it.
- */
-
 const LABEL: Record<MarkdownFileView, string> = { source: 'Source', changes: 'Changes', read: 'Read' };
 
 function describe(view: MarkdownFileView, status: MarkdownViewMenuProps['status']): string {
@@ -32,18 +23,13 @@ function ViewIcon({ view, className }: { view: MarkdownFileView; className: stri
 }
 
 export interface MarkdownViewMenuProps {
-  /** The file's path (named by the phone sheet and the accessible label). */
   filePath: string;
   view: MarkdownFileView;
-  /** What this file offers (added / deleted: Source and Read). */
   views: readonly MarkdownFileView[];
   onChoose: (view: MarkdownFileView) => void;
   status?: 'added' | 'deleted' | 'renamed' | 'modified';
-  /** A tight desktop header: the icon alone (the name stays in the label and tooltip). */
   iconOnly?: boolean;
-  /** The compact touch shell: a 44 px button and a bottom sheet. */
   touch?: boolean;
-  /** Set while the view cannot change (the file holds the edit session): the button is disabled and says why. */
   disabledReason?: string | null;
 }
 
@@ -67,8 +53,6 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
     : 'Show this Markdown file as Source, Changes or Read. P: next view';
 
   const trigger = touch ? (
-    // Drawn 36 px; the ::after box makes the hit area 44 px (4 px past each
-    // edge), which the 44 px compact header leaves room for.
     <button
       type="button"
       className={`relative ml-1 flex h-9 flex-none items-center gap-1 rounded-md px-2 text-xs transition-colors after:absolute after:-inset-1 after:content-[''] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 disabled:opacity-50 ${
@@ -97,7 +81,6 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
         data-markdown-view={view}
         aria-label={`${LABEL[view]} view of ${name}`}
         title={touch && !disabledReason ? undefined : title}
-        // The header row toggles the file's collapse on click.
         onClick={(event) => event.stopPropagation()}
       >
         <ViewIcon view={view} className="h-3.5 w-3.5 flex-none" />
@@ -115,7 +98,6 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
           align="end"
           sideOffset={4}
           className={touch
-            // The sheet ignores the anchor: pinned to the bottom edge, full width.
             ? 'z-[111] !fixed !inset-x-0 !bottom-0 !left-0 !top-auto !w-full !transform-none outline-none'
             : 'z-50 outline-none'}
         >

@@ -1,23 +1,3 @@
-/**
- * `N` / `Shift+N` in All files step through the changes of every expanded
- * file, in file order (#1543).
- *
- * CodeView is replaced by a stand-in that renders each item through the REAL
- * Pierre `FileDiff` (so the rows carry the `data-line-index` the jump reads)
- * and can leave items out of its rendered window, the way CodeView
- * virtualizes. happy-dom has no layout: a file starts FILE px below the
- * previous one, a row is ROW px, and the view is VIEW px tall. The stand-in's
- * `scrollTo({ type: 'line' })` centres the row it names, like CodeView's.
- *
- * Guards: a change in another file found by line number alone (the first
- * file's row with that number), the key missing files outside the rendered
- * window, collapsed files taking jumps, Shift being swallowed by the other
- * single-letter keys' modifier guard, and the key firing while typing.
- *
- * DOM-gated (DOM_TESTS=1) and run by .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step (`--isolate`: this file mocks
- * '@pierre/diffs/react' and puts it back in afterAll).
- */
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useImperativeHandle, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,13 +9,10 @@ const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme'
 const ROW = 30;
 const FILE = 3000;
 let VIEW = 200;
-/** Space above the first file (the review's leading content). Most tests
- *  start the first change below the middle of the view; one starts at 0. */
 let LEAD = 200;
 
 let scrollTop = 0;
 let lineScrolls: Array<{ id: string; lineNumber: number; side: string }> = [];
-/** Item ids the stand-in leaves out of its rendered window. */
 let notRendered = new Set<string>();
 let collapsedIds = new Set<string>();
 
@@ -158,7 +135,6 @@ function findRow(root: ParentNode | undefined, lineNumber: number, side: string)
   return visit(root);
 }
 
-/** The file wrapper a node sits in (crossing Pierre's shadow root). */
 function fileOffsetOf(el: Element): number | null {
   let node: Node | null = el;
   while (node) {
@@ -175,7 +151,6 @@ function fileOffsetOf(el: Element): number | null {
 const patch = (path: string, body: string[]) =>
   [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, ...body, ''].join('\n');
 
-// Both files change line 2, so a lookup by line number alone finds the wrong one.
 const FILES: DiffFile[] = [
   {
     path: 'a.ts',
@@ -265,7 +240,6 @@ describe.if(hasDom)('AllFilesCodeView change navigation (DOM, real Pierre rows)'
         await new Promise((resolve) => setTimeout(resolve, 25));
       });
     }
-    // Precondition: the real parser gave every file its hunks, and Pierre painted them.
     expect(countRows()).toBeGreaterThanOrEqual(4);
   }
 
@@ -299,10 +273,8 @@ describe.if(hasDom)('AllFilesCodeView change navigation (DOM, real Pierre rows)'
     press('n');
     press('n');
     expect(ids()).toEqual(['a:d2', 'a:d21', 'b:d2', 'c:a2']);
-    // The centred row really is the one named (not file a's line 2).
     expect(scrollTop).toBe(LEAD + 2 * FILE + 1 * ROW - VIEW / 2 + ROW / 2);
 
-    // Past the last change: nothing moves, and the key is left unclaimed.
     expect(press('n').defaultPrevented).toBe(false);
     expect(lineScrolls).toHaveLength(4);
     press('N', { shiftKey: true });
@@ -314,7 +286,6 @@ describe.if(hasDom)('AllFilesCodeView change navigation (DOM, real Pierre rows)'
     LEAD = 0;
     VIEW = 830;
     await mount();
-    // a.ts line 2 (row 1) is on screen, above the middle: N still goes there first.
     press('n');
     press('n');
     expect(ids()).toEqual(['a:d2', 'a:d21']);
@@ -322,7 +293,6 @@ describe.if(hasDom)('AllFilesCodeView change navigation (DOM, real Pierre rows)'
 
   test('collapsed files are skipped; files outside the rendered window are reached', async () => {
     await mount();
-    // Item ids are internal: learn them from one walk.
     press('n');
     press('n');
     press('n');

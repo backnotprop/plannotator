@@ -10,14 +10,10 @@ interface AskAIInputProps {
   onSubmit: (question: string) => void;
   onCancel: () => void;
   isLoading: boolean;
-  /** Pre-filled text from the comment textarea */
   initialText?: string;
-  /** AI messages that overlap the current line selection */
   aiHistory: AIChatEntry[];
   onViewResponse?: (questionId: string) => void;
-  /** Toggle back to comment mode */
   onSwitchToComment?: () => void;
-  /** Props to make the header a drag handle */
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement> & { style?: React.CSSProperties };
 }
 
@@ -77,7 +73,6 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
       />
 
       <div className="flex items-center gap-2 mt-2">
-        {/* Comment toggle — left side, mirrors Ask AI position in comment mode */}
         {onSwitchToComment && (
           <button
             onClick={onSwitchToComment}
@@ -90,7 +85,6 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
           </button>
         )}
 
-        {/* Ask button — right side */}
         <button
           onClick={handleSubmit}
           disabled={!question.trim() || isLoading}
@@ -111,7 +105,6 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
         </button>
       </div>
 
-      {/* Previous AI questions on these lines */}
       {aiHistory.length > 0 && (
         <div className="mt-2 pt-2 border-t border-border/30 space-y-1.5 max-h-40 overflow-y-auto">
           {aiHistory.map(({ question: q, response: r }) => (

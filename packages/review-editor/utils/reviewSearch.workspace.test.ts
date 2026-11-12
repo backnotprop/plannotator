@@ -33,7 +33,6 @@ describe("reviewSearch - workspace mode with repo-prefixed paths", () => {
     ];
     const index = buildSearchIndex(files);
 
-    // All lines should have repo-prefixed file paths
     expect(index.every(line => line.filePath.startsWith("repo-"))).toBe(true);
     expect(index.some(line => line.filePath === "repo-a/src/index.ts")).toBe(true);
     expect(index.some(line => line.filePath === "repo-b/src/index.ts")).toBe(true);
@@ -56,7 +55,6 @@ describe("reviewSearch - workspace mode with repo-prefixed paths", () => {
     ];
     const matches = findReviewSearchMatches(files, "const");
 
-    // Should find matches in both repos
     const repoAMatches = matches.filter(m => m.filePath === "repo-a/src/utils.ts");
     const repoBMatches = matches.filter(m => m.filePath === "repo-b/src/utils.ts");
 
@@ -81,14 +79,12 @@ describe("reviewSearch - workspace mode with repo-prefixed paths", () => {
     ];
     const matches = findReviewSearchMatches(files, "content");
 
-    // Should have separate match entries for each repo
     const repoAIds = matches.filter(m => m.filePath === "repo-a/src/index.ts");
     const repoBIds = matches.filter(m => m.filePath === "repo-b/src/index.ts");
 
-    expect(repoAIds.length).toBe(2); // "old content" and "new content"
+    expect(repoAIds.length).toBe(2);
     expect(repoBIds.length).toBe(2);
 
-    // IDs should be different
     const repoAIdSet = new Set(repoAIds.map(m => m.id));
     const repoBIdSet = new Set(repoBIds.map(m => m.id));
     expect(repoAIdSet.intersection(repoBIdSet).size).toBe(0);
@@ -122,7 +118,6 @@ describe("reviewSearch - workspace mode with repo-prefixed paths", () => {
     const matches = findReviewSearchMatches(files, "hello");
     const groups = groupReviewSearchMatches(files, matches);
 
-    // "hello" appears in both files (repo-a: "hello world", repo-b: "hello there")
     expect(groups).toHaveLength(2);
     const paths = groups.map(g => g.filePath).sort();
     expect(paths).toEqual(["repo-a/src/index.ts", "repo-b/src/other.ts"]);
@@ -137,7 +132,6 @@ describe("reviewSearch - workspace mode with repo-prefixed paths", () => {
     const matches = findReviewSearchMatches(files, "hello");
     const groups = groupReviewSearchMatches(files, matches);
 
-    // Each group should have correct file index
     const groupA = groups.find(g => g.filePath === "repo-a/src/a.ts");
     const groupB = groups.find(g => g.filePath === "repo-b/src/b.ts");
     const groupC = groups.find(g => g.filePath === "repo-c/src/c.ts");
@@ -199,7 +193,6 @@ describe("reviewSearch - workspace mode with repo-prefixed paths", () => {
     ];
     const matches = findReviewSearchMatches(files, "foo");
 
-    // Should find 4 matches (2 on old line, 2 on new line)
     expect(matches.length).toBe(4);
     expect(matches.every(m => m.filePath === "repo-a/src/index.ts")).toBe(true);
   });

@@ -10,12 +10,6 @@ import { FileViewSwitch } from '../../components/FileViewSwitch';
 import { WholeFileView } from '../../components/WholeFileView';
 import { JumpCrumb } from '../../components/JumpCrumb';
 
-/**
- * Thin adapter between dockview's panel API and the existing DiffViewer.
- *
- * Receives `filePath` from dockview params, reads everything else from
- * the ReviewStateContext. The existing DiffViewer component is not modified.
- */
 export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
   const filePath =
     getReviewDiffPanelFilePath(props.params) ??
@@ -23,11 +17,6 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
   return <ReviewDiffBody filePath={filePath} onKeep={undefined} />;
 };
 
-/**
- * One changed file: its diff, or (Changes | Whole file) the whole new side
- * with change bars. Drawn by the diff tab and by a file kept in its own tab.
- * `onKeep` keeps a preview tab when a comment is made in it.
- */
 export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => void }> = ({ filePath, onKeep }) => {
   const state = useReviewState();
   const file = filePath
@@ -47,7 +36,6 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
     },
     [state.allAnnotations, file, state.prMetadata, state.prDiffScope]
   );
-  // Comments outside the diff are drawn in the Whole file view only.
   const diffFileAnnotations = useMemo(
     () => (fileAnnotations.some((a) => a.outsideDiff) ? fileAnnotations.filter((a) => !a.outsideDiff) : fileAnnotations),
     [fileAnnotations],
@@ -84,9 +72,6 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
     );
   }
 
-  // Changes | Whole file: offered where the server reads whole files at the
-  // new side, for a file that has one (not a deletion), and not for Markdown,
-  // whose Read view already shows the whole document.
   const fileView = state.fileViewOf ? state.fileViewOf(file.path) : 'changes';
   const crumb = state.jumpCrumb?.targetPath === file.path ? state.jumpCrumb : null;
   const markdownFile = !!state.markdownPreview?.isPreviewable(file);
@@ -103,10 +88,6 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
     />
   ) : undefined;
 
-  // Keying on reviewBase forces a remount when the user picks a new base.
-  // Otherwise the file-content fetch for the new base can land before the new
-  // patch, and Pierre briefly reconciles old-patch + new-content → "trailing
-  // context mismatch" warnings in the console.
   return (
     <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full flex flex-col">
       {crumb && <JumpCrumb crumb={crumb} onBack={state.navigation?.back} />}
@@ -178,10 +159,6 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
         isStaged={state.stagedFiles.has(file.path)}
         isStaging={state.stagingFile === file.path}
         onStage={() => state.onStage(file.path)}
-        // Per-path gate (falls back to the mode-level flag): in since-base the
-        // single-file header lists committed files too — mode-level canStageFiles
-        // alone would offer a no-op Git Add on them that flips local state.
-        // Mirrors the `a` shortcut and the all-files header.
         canStage={state.canStagePath ? state.canStagePath(file.path) : state.canStageFiles}
         showStageControls={state.showStageControls}
         stageError={state.stageError}

@@ -1,14 +1,3 @@
-/**
- * The control-visibility preferences (#1277) must gate the per-file diff
- * header too: a reviewer who turned the Viewed / Git Add controls off in the
- * list options ("…") menu should not see them anywhere. Guards the flag
- * threading DiffViewer -> FileHeader (each flag hides only its own button,
- * and a visible button still fires its handler). The V / A shortcuts bypass
- * these buttons by design and are not exercised here.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run diff-renderer DOM tests" step.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -180,13 +169,11 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
     await choose('changes');
     await waitFor(() => el.querySelector('.plan-diff-added h1'));
 
-    // The rendered diff: the old heading struck, the new one added.
     expect(el.querySelector('.plan-diff-removed h1')?.textContent).toBe('Old');
     expect(el.querySelector('.plan-diff-added h1')?.textContent).toBe('New');
     expect(el.querySelector('table')).not.toBeNull();
     expect(el.textContent).toContain('Ready');
 
-    // The whole new version, no diff marks; the header menu is the file's only view control.
     await choose('read');
     expect(Array.from(el.querySelectorAll('h1')).map((h) => h.textContent)).toEqual(['New']);
     expect(el.querySelector('.plan-diff-removed, .plan-diff-added')).toBeNull();

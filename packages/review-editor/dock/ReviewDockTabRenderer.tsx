@@ -3,11 +3,9 @@ import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { useReviewStateOptional } from './ReviewStateContext';
 import { isReviewFilePreviewParams } from './reviewPanelTypes';
 
-/** Custom tab renderer with an explicit close button. */
 export const ReviewDockTabRenderer: React.FC<IDockviewPanelHeaderProps> = (props) => {
   const [title, setTitle] = useState(props.api.title ?? props.api.id);
   const state = useReviewStateOptional();
-  // The preview tab (a file opened with a single click) is italic until kept.
   const [preview, setPreview] = useState(() => isReviewFilePreviewParams(props.params));
   useEffect(() => {
     setPreview(isReviewFilePreviewParams(props.params) || isReviewFilePreviewParams(props.api.getParameters()));

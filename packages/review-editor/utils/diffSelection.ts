@@ -19,7 +19,6 @@ export function getSideFromNode(node: Node | null): 'additions' | 'deletions' {
   if (current?.nodeType === Node.TEXT_NODE) current = current.parentNode;
   while (current) {
     if (current instanceof HTMLElement) {
-      // A changed row names its own side (unified view has no per-side column).
       const lineType = current.getAttribute('data-line-type');
       if (lineType === 'change-deletion') return 'deletions';
       if (lineType === 'change-addition') return 'additions';
@@ -70,12 +69,6 @@ export function snapshotDiffSelection(
   };
 }
 
-/**
- * The range a gutter `+` click comments on (#991). With text selected across
- * several lines, a click on a line inside that selection comments on the
- * whole selection; a click elsewhere (another line, the other side) comments
- * on the clicked line as before.
- */
 export function rangeForGutterClick<T extends {
   start: number;
   end: number;

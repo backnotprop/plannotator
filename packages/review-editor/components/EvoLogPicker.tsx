@@ -4,21 +4,12 @@ import type { JjEvoLogEntry } from '@plannotator/shared/types';
 
 interface EvoLogPickerProps {
   entries: JjEvoLogEntry[];
-  /** Currently selected evolog commit ID. */
   selectedCommitId: string;
-  /** The default commit ID (second evolog entry — previous state). */
   detectedCommitId: string;
   onSelect: (commitId: string) => void;
   disabled?: boolean;
 }
 
-/**
- * Picker for jj evolog entries.
- *
- * Shows the evolution history of the current change so the user can pick
- * which previous state to compare against. The newest entry (index 0) is
- * the current `@`; subsequent entries are older states in reverse order.
- */
 export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
   entries,
   selectedCommitId,

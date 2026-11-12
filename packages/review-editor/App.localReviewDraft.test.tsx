@@ -1,5 +1,3 @@
-/** Real App switch wiring: a late response must not release autosave over an
- * unread draft or replace the newer target. Only the Vite worker is stubbed. */
 import { afterEach, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -131,7 +129,6 @@ for (const lateResponse of ['superseded', 'failure', 'success'] as const) {
     await act(async () => button('Restore')!.click());
     await act(async () => button('Commits')!.click());
     await waitFor(() => !!finishOldSwitch);
-    // Commit clicks stay enabled during loading: start a newer switch to C.
     await act(async () => document.querySelector<HTMLButtonElement>(`button[title^="${PARENT}"]`)!.click());
     await waitFor(() => !!finishDraftLoad);
     await act(async () => finishOldSwitch(lateResponse === 'superseded'
@@ -146,11 +143,8 @@ for (const lateResponse of ['superseded', 'failure', 'success'] as const) {
     })));
     await tick(650);
     expect(writes.at(-1)).toEqual({ target: 'local-c', ids: ['local-a', 'local-c'] });
-    // Target loads, saves and decisions must share the same page identity.
     expect(clients.size).toBe(1);
     expect([...clients][0]).toBeTruthy();
-    // Exercise both decision transports: Close must retain the page id AND
-    // upstream's stale-server nonce when composing its query string.
     if (lateResponse === 'failure') {
       await act(async () => document.querySelector<HTMLButtonElement>('[title="Close review without feedback"]')!.click());
       await act(async () => button('Close Anyway')!.click());
@@ -189,7 +183,6 @@ test.skipIf(!hasDom)('a refresh that lands on no draft target resumes saving, an
       decisionClient = url.searchParams.get('client');
       return Response.json({ ok: true });
     }
-    // The git identity could not be read this time: no target, no draftState.
     if (url.pathname === '/api/diff/switch') return Response.json({ ...view('local-a'), localDraftTarget: null, draftState: undefined });
     if (url.pathname === '/api/draft') {
       const target = url.searchParams.get('target');
@@ -218,7 +211,6 @@ test.skipIf(!hasDom)('a refresh that lands on no draft target resumes saving, an
   await tick(650);
   expect(button('Refresh review')).toBeUndefined();
   expect(writes.at(-1)).toBeNull();
-  // Its decision still names the page, so the server clears local-a too.
   await act(async () => document.querySelector<HTMLButtonElement>('[data-decision-primary]')!.click());
   await waitFor(() => decisionClient !== undefined);
   expect(decisionClient).toBe([...draftClients][0]);

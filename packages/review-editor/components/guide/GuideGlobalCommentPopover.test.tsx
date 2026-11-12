@@ -1,4 +1,3 @@
-/** A guide global comment that fails to add keeps its words for the next open (DOM_TESTS=1). */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -25,7 +24,6 @@ async function mount(onAdd: (text: string) => boolean | void, jobId: string) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
-  // First render mounts the anchor; the second shows the popover.
   await act(async () => root!.render(<Harness onAdd={onAdd} jobId={jobId} />));
   await act(async () => root!.render(<Harness onAdd={onAdd} jobId={jobId} />));
 }

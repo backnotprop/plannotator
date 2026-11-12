@@ -5,10 +5,7 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 interface CopyButtonProps {
   text: string;
   className?: string;
-  /** "overlay" (default): absolute-positioned, hover-reveal (parent needs group relative).
-   *  "inline": normal flow, always visible, compact. */
   variant?: 'overlay' | 'inline';
-  /** Optional label shown next to the icon (inline variant only). */
   label?: string;
 }
 
@@ -24,7 +21,6 @@ const CheckIcon = () => (
   </svg>
 );
 
-/** Copy-to-clipboard button with "Copied" flash. */
 export const CopyButton: React.FC<CopyButtonProps> = ({ text, className = '', variant = 'overlay', label }) => {
   const [copied, setCopied] = useState(false);
 

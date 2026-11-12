@@ -45,7 +45,6 @@ test.skipIf(!hasDom)('new local comments acquire anchors; refresh preserves unch
     expect(unchanged[0].outdated).toBeUndefined();
     const changed = reanchorCodeAnnotations(unchanged, parseDiffToFiles(patch('different')), { currentSnapshot: 'edited' });
     expect(changed[0]).toMatchObject({ text: 'why?', anchorText: 'after', lineStart: 1, outdated: true });
-    // Unsupported surfaces/older servers retain the previous annotation shape.
     await act(async () => { root.render(<Harness />); });
     expect(make(annotation)).toEqual(annotation);
   } finally { await act(async () => { root.unmount(); }); }

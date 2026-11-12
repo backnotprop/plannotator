@@ -12,13 +12,8 @@ interface ProgressData {
 type ProgressStatus = 'loading' | 'ready' | 'unsupported' | 'error';
 
 const PROGRESS_TIMEOUT_MS = 5000;
-/** The server refuses more than 5000 changes per POST; stay well under it. */
 const MAX_CHANGES_PER_REQUEST = 1000;
 
-/** Persist explicit mutations, never hydrated state. Requests are serialized so
- * a quick check/uncheck cannot arrive in reverse order. Each captures its own
- * snapshot; neither late loads nor late writes may affect a different review.
- */
 export function useReviewProgress({
   snapshotId, contextKey, enabled, setViewedFiles, setSuppressedFiles,
 }: {
@@ -42,8 +37,6 @@ export function useReviewProgress({
   const writes = useRef(Promise.resolve());
   const [loaded, setLoaded] = useState<{ snapshot: typeof snapshot; status: ProgressStatus } | null>(null);
   const loadedContext = useRef(contextKey);
-  // One toast per failure streak: a success re-arms it, so a later, separate
-  // failure is reported again instead of being swallowed for the page lifetime.
   const warned = useRef(false);
   const warn = useCallback(() => {
     if (warned.current) return;
@@ -74,8 +67,6 @@ export function useReviewProgress({
           signal: AbortSignal.timeout(PROGRESS_TIMEOUT_MS),
         });
         if (response.status === 400) {
-          // The server rejected the update itself (not a transient failure):
-          // retrying the same edits could never succeed, so drop them.
           settle();
           throw new Error('Progress update rejected');
         }
@@ -91,8 +82,6 @@ export function useReviewProgress({
     const version = ++target.loadVersion;
     target.status = 'loading';
     setLoaded({ snapshot: target, status: 'loading' });
-    // Keep current state until a successful load. Failed/unsupported endpoints
-    // retain the draft fallback, and a later mutation or flush retries errors.
     target.loading = fetch(`/api/review-progress?snapshot=${encodeURIComponent(target.id)}`, {
       signal: AbortSignal.timeout(PROGRESS_TIMEOUT_MS),
     })
@@ -117,8 +106,6 @@ export function useReviewProgress({
         const sameContext = loadedContext.current === contextKey;
         loadedContext.current = contextKey;
         setSuppressedFiles(previous => {
-          // An explicit "come back to this" survives an in-session refresh,
-          // even when changed content invalidates the durable viewed mark.
           const suppressed = new Set(sameContext ? [...previous, ...data.suppressedFiles] : data.suppressedFiles);
           for (const [path, checked] of target.edits) {
             if (checked) suppressed.delete(path);
@@ -162,14 +149,10 @@ export function useReviewProgress({
           if (target.status === 'error') load(target);
           await target.loading;
           await writes.current;
-          // A failed POST keeps its pending edits for one retry within this
-          // flush's budget. Existing writes remain ordered and snapshot-bound.
           if (!expired) save(target, target.pending);
           await writes.current;
         })(),
         new Promise<void>(resolve => {
-          // Bound the entire queue, not just each request: several stalled
-          // writes must not hold up switching, submitting or closing a review.
           timer = setTimeout(() => {
             expired = true;
             warn();

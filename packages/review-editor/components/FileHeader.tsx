@@ -7,69 +7,34 @@ import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 
 interface FileHeaderProps {
-  /** Read-only host: no open-in affordance (it probes the review server). */
   readOnly?: boolean;
   filePath: string;
   patch: string;
-  /** Change type — added/deleted/renamed get an icon; modified is undecorated. */
   status?: DiffFileStatus;
-  /** Previous path for renames — rendered as "old → new" (diffshub treatment). */
   oldPath?: string;
   isViewed?: boolean;
   onToggleViewed?: () => void;
-  /** Chrome preference: false hides the Viewed button (the `V` shortcut and
-   *  viewed state are unaffected). */
   showViewedControl?: boolean;
-  /** The review app's keys work here: the Viewed tooltip names its key (V). Off where they do not (the Inbox). */
   viewedKeyHint?: boolean;
   isStaged?: boolean;
   isStaging?: boolean;
   onStage?: () => void;
   canStage?: boolean;
-  /** Same preference for the Git Add button (the `A` shortcut still works). */
   showStageControl?: boolean;
   stageError?: string | null;
   onFileComment?: (anchorEl: HTMLElement) => void;
-  /**
-   * Eager registration of the comment button element on mount/unmount (ref
-   * callback semantics: element on attach, null on detach). Lets keyboard
-   * shortcuts anchor the comment popover without the button ever being
-   * clicked. onFileComment alone only surfaces the element on click.
-   */
   fileCommentButtonRef?: (el: HTMLButtonElement | null) => void;
   collapseToggle?: React.ReactNode;
   onCollapseToggle?: () => void;
-  /** EXPERIMENTAL edit-to-suggestion mode: enter edit mode on this file.
-   * Absent = the feature is off and no edit UI renders. */
   onEditFile?: () => void;
-  /** This file currently hosts the active edit session. Suppresses the Edit
-   * entry button; the session controls live in the EditSessionHud strip the
-   * owner renders below this header, never here. */
   isEditing?: boolean;
-  /** When set, the Edit button is disabled with this tooltip. */
   editDisabledReason?: string | null;
-  /** Compact coarse-pointer treatment. Defaults to the enclosing review state. */
   compactTouchLayout?: boolean;
-  /** Marked `linguist-generated` in `.gitattributes` (#1317) — renders a
-   * "generated" tag next to the +/- counts. Collapse seeding is the owner's
-   * concern; this prop is display-only. */
   isGenerated?: boolean;
-  /** A test file (`fileKind` is 'test'): a flask after the name. Display-only. */
   isTest?: boolean;
-  /**
-   * A Markdown file's view control (Source / Changes / Read), drawn by the
-   * caller so read-only hosts (the guides.show viewer) never carry it.
-   * `iconOnly` on a tight header; `touch` in the compact touch shell.
-   */
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
-  /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
   accessory?: React.ReactNode;
-  /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
   openIn?: React.ReactNode;
-  /**
-   * A narrow header keeps the folder, dimmed and cut from its start, before the whole name, so two files of one name
-   * read apart (the Inbox's PR page on a phone). Off: a narrow header shows the name alone, as before.
-   */
   keepsFolder?: boolean;
 }
 
@@ -90,11 +55,6 @@ function frontEllipsize(text: string, visibleChars: number): string {
   return `...${text.slice(-visibleChars)}`;
 }
 
-/**
- * Change-type letter shown to the right of the +/- counts (matches the file
- * tree): A added · D deleted · R renamed, colored so the critical changes pop.
- * Modified is bare — the +/- counts already say it changed within the file.
- */
 const STATUS_LETTER: Record<DiffFileStatus, { letter: string; className: string; title: string }> = {
   added: { letter: 'A', className: 'text-success', title: 'Added file' },
   modified: { letter: 'M', className: 'text-muted-foreground', title: 'Modified file' },
@@ -103,8 +63,6 @@ const STATUS_LETTER: Record<DiffFileStatus, { letter: string; className: string;
 };
 
 const FileStatusLetter: React.FC<{ status: DiffFileStatus; oldPath?: string }> = ({ status, oldPath }) => {
-  // Match the file tree: only added/deleted/renamed get a badge; modified is
-  // bare (the +/- counts already convey that it changed within the file).
   if (status === 'modified') return null;
   const meta = STATUS_LETTER[status];
   const title = status === 'renamed' && oldPath ? `Renamed from ${oldPath}` : meta.title;
@@ -119,7 +77,6 @@ const FileStatusLetter: React.FC<{ status: DiffFileStatus; oldPath?: string }> =
   );
 };
 
-/** Count +/- lines in a unified patch (ignores the +++/--- file headers). */
 function countChanges(patch: string): { additions: number; deletions: number } {
   let additions = 0;
   let deletions = 0;
@@ -130,7 +87,6 @@ function countChanges(patch: string): { additions: number; deletions: number } {
   return { additions, deletions };
 }
 
-/** Sticky file header with file path, Viewed toggle, Git Add, and Copy Diff button */
 export const FileHeader: React.FC<FileHeaderProps> = ({
   filePath,
   patch,
@@ -171,7 +127,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   const isCompact = headerWidth > 0 && headerWidth < 760;
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
   const narrow = headerWidth > 0 && headerWidth < 560;
-  // Narrow, with keepsFolder: the folder gives way first, from its start (`direction: rtl` puts the ellipsis there).
   const foldedFolder = narrow && keepsFolder && !!directory;
   const showFilenameOnly = narrow && !foldedFolder;
   const truncatedName = showFilenameOnly
@@ -211,8 +166,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           className={`min-w-0 flex items-center text-xs font-semibold leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
           title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
         >
-          {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
-              under tight widths — the icon + tooltip still carry it. */}
           {status === 'renamed' && oldPath && !narrow && !isCompactTouchLayout && (
             <>
               <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
@@ -230,9 +183,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             </>
           )}
           {isCompactTouchLayout ? (
-            /* Match Diffshub's filename treatment: retain the complete path in
-             * the accessible DOM and place the ellipsis at the leading edge so
-             * the basename/extension receive the available phone width. */
             <span
               data-pn-compact-file-path
               className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-foreground [direction:rtl]"
@@ -357,9 +307,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
         <SemanticFileBadge filePath={filePath} />
-        {/* Edit entry lives at the far right of the row, next to the file
-            actions dropdown, so the experimental affordance stays out of the
-            everyday Viewed/Add/Comment cluster. */}
         {onEditFile && !isEditing && (
           <button
             onClick={(e) => {
@@ -381,11 +328,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             {!isVeryTight && <span>Edit</span>}
           </button>
         )}
-        {/* File actions: open in app (when the live checkout matches this
-            snapshot), copy path, copy file diff. Copy actions remain when a
-            PR has no checkout or a committed GitButler layer is selected. */}
-        {/* Icon-only in the header (the picked app's name shows in the dropdown),
-            matching the plan/annotate side. */}
         {openIn}
         {!readOnly && <OpenInAppButton
           filePath={filePath}

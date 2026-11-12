@@ -9,22 +9,12 @@ import { resolveSyntaxTheme, buildLineBgOverrides } from '../hooks/usePierreThem
 import { buildPierreFontCSS } from '../utils/pierreFontCss';
 
 interface DiffHunkPreviewProps {
-  /** Raw diff hunk string (unified diff format). */
   hunk: string;
-  /**
-   * Optional narrower hunk to render while collapsed (e.g. the lines around a
-   * review comment); "Show full context" switches to `hunk`.
-   */
   collapsedHunk?: string;
-  /** Max height in pixels before "Show more" toggle. Default 128. */
   maxHeight?: number;
   className?: string;
 }
 
-/**
- * Build the unsafeCSS string for @pierre/diffs by reading computed CSS variables.
- * Called synchronously so the first render is already themed (no flash on tooltip open).
- */
 function buildPierreCSS(
   mode: 'light' | 'dark',
   fontFamily: string | undefined,
@@ -60,11 +50,6 @@ function buildPierreCSS(
   }
 }
 
-/**
- * Renders a small inline diff hunk using @pierre/diffs.
- * Compact, read-only, no file header. Shares theme + font settings
- * with the main DiffViewer via the same unsafeCSS injection pattern.
- */
 export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   hunk,
   collapsedHunk,
@@ -80,10 +65,6 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   const fileDiff = useMemo(() => {
     if (!shown) return undefined;
     try {
-      // Robustly handle all three hunk formats the tour agent might produce:
-      //   1. Full git diff: starts with "diff --git" — use as-is
-      //   2. File-level diff: starts with "--- " — prepend "diff --git" line only
-      //   3. Bare hunk: starts with "@@ " — prepend full synthetic headers
       const patch = shown.startsWith('diff --git')
         ? shown
         : shown.startsWith('--- ')
@@ -95,17 +76,13 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
     }
   }, [shown]);
 
-  // Initialize synchronously so the very first render (inside a tooltip) is already themed.
-  // The lazy initializer reads computed CSS variables from the document root.
   const [pierreTheme, setPierreTheme] = useState<{ type: 'dark' | 'light'; css: string }>(() => ({
     type: resolvedMode ?? 'dark',
     css: buildPierreCSS(resolvedMode ?? 'dark', state.fontFamily, state.fontSize, lineBgIntensity),
   }));
 
-  // Re-compute on theme / font / intensity changes
   useEffect(() => {
     const rafId = requestAnimationFrame(() => {
-      // A frame after a theme switch: keep the switch's no-fade hold over this redraw too.
       extendThemeSwitch();
       setPierreTheme({
         type: resolvedMode ?? 'dark',
@@ -140,9 +117,6 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
             diffStyle: 'unified',
             disableLineNumbers: true,
             overflow: 'wrap',
-            // A narrowed hunk starts mid-file; Pierre would otherwise spend a
-            // row on an "N unmodified lines" separator for the lines it cut
-            // (which are not even unmodified on a new file).
             ...(shown !== hunk ? { hunkSeparators: 'simple' as const } : {}),
           }}
         />
