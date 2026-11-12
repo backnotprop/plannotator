@@ -178,8 +178,8 @@ const draftStore = new Map<string, { text: string; images: ImageAttachment[] }>(
  * popover clears the draft on submit), so the next open of that composer
  * shows them. A draft typed since is newer and is kept.
  */
-export function restoreCommentDraft(draftKey: string, text: string): void {
-  if (!draftStore.has(draftKey) && text.trim() !== '') draftStore.set(draftKey, { text, images: [] });
+export function restoreCommentDraft(draftKey: string, text: string, images: ImageAttachment[] = []): void {
+  if (!draftStore.has(draftKey) && (text.trim() !== '' || images.length > 0)) draftStore.set(draftKey, { text, images });
 }
 
 /** Whether words (or images) wait as the `draftKey` draft: a closed composer that kept them. */
@@ -394,6 +394,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const initialDraft = draftKey ? draftStore.get(draftKey) : undefined;
   const [text, setText] = useState(initialDraft?.text ?? initialText);
   const [images, setImages] = useState<ImageAttachment[]>(allowImages ? initialDraft?.images ?? [] : []);
+  const [picturesPending, setPicturesPending] = useState(false);
   const [position, setPosition] = useState<CommentPopoverPosition | null>(null);
   // Direction of an open popover that has scrolled out of view, or null when on-screen.
   const [offscreen, setOffscreen] = useState<'above' | 'below' | null>(null);
@@ -738,6 +739,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
   const handleSubmit = useCallback(() => {
     const canSubmitEmpty = allowEmptySubmit && initialText.trim().length > 0;
+    if (picturesPending) return;
     if (hasUnsavedContent || canSubmitEmpty) {
       if (draftKey) draftStore.delete(draftKey);
       const submitImages = allowImages && images.length > 0 ? images : undefined;
@@ -746,7 +748,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       else onSubmit(text, submitImages);
       restoreOpeningFocus();
     }
-  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent, restoreOpeningFocus, mentionSource, mentionAc.mentionIds]);
+  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent, restoreOpeningFocus, mentionSource, mentionAc.mentionIds, picturesPending]);
 
   const handleAskAI = useCallback(async () => {
     const question = text.trim();
@@ -865,8 +867,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   ) : null;
 
   const canSubmit =
-    hasUnsavedContent ||
-    (allowEmptySubmit && initialText.trim().length > 0);
+    !picturesPending &&
+    (hasUnsavedContent ||
+    (allowEmptySubmit && initialText.trim().length > 0));
   const canAskAI = !!onAskAI && !askAIDisabled && text.trim().length > 0;
   const showsSkillMenu = skillAc.menu !== null;
 
@@ -1021,6 +1024,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 images={images}
                 onAdd={(img) => setImages((prev) => [...prev, img])}
                 onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                onPendingChange={setPicturesPending}
                 variant="inline"
               />
             )}
@@ -1219,6 +1223,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                   images={images}
                   onAdd={(img) => setImages((prev) => [...prev, img])}
                   onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                  onPendingChange={setPicturesPending}
                   variant="inline"
                 />
               )}
@@ -1388,6 +1393,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               images={images}
               onAdd={(img) => setImages((prev) => [...prev, img])}
               onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+              onPendingChange={setPicturesPending}
               variant="inline"
             />
           )}

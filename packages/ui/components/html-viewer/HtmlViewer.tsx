@@ -20,6 +20,7 @@ import type { Annotation, EditorMode, HostDraft, ImageAttachment, InputMethod } 
 import { AnnotationType } from "../../types";
 import { copyTextPreservingFocus } from "../../utils/clipboard";
 import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
+import { useHighlightCopy } from "../../utils/highlightCopy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
@@ -1125,6 +1126,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // overlay. Escape still closes it, as its own rung (below).
     const composerShown = !!hook.commentPopover && hook.pinVisible;
     const composerHidden = !!hook.commentPopover && !hook.pinVisible;
+
+    // The composer's textarea has the focus, out of the page's frame, so the
+    // browser's copy has no selection: Ctrl+C copies the selected words (or a
+    // pinned element's text). The person's own selection still wins.
+    useHighlightCopy(!readOnly && composerShown ? hook.commentPopover?.selectedText : null);
 
     useVimDocumentFocus({
       enabled: !readOnly && vimModeEnabled,

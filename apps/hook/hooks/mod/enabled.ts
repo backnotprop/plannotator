@@ -15,7 +15,7 @@
  * may import only its own files); `enabled.test.ts` keeps the two in step.
  */
 
-import { inboxReminderCustomText } from './inbox-contract'
+import { inboxReminderCustomText, inboxReminderRulesText } from './inbox-contract'
 
 /** The env override: true/false, or undefined when it does not decide (unset, empty, unrecognized). */
 export function parseClaudeModEnv(value: string | undefined): boolean | undefined {
@@ -199,6 +199,15 @@ export function resolveInboxReminderCustom(configText: string | null | undefined
   if (!configText) return null
   try {
     return inboxReminderCustomText(JSON.parse(configText), 'claude-code')
+  } catch {
+    return null
+  }
+}
+
+export function resolveInboxReminderRules(configText: string | null | undefined): string | null {
+  if (!configText) return null
+  try {
+    return inboxReminderRulesText(JSON.parse(configText), 'claude-code')
   } catch {
     return null
   }

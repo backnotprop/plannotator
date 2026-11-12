@@ -93,6 +93,7 @@ import {
   resolveClaudeModEnabled,
   resolveInboxReminderCustom,
   resolveInboxReminderEnabled,
+  resolveInboxReminderRules,
   resolveInboxToolEnabled,
   resolvePlanReviewEnabled,
   VSCODE_PANEL_ENTRYPOINT,
@@ -303,6 +304,7 @@ interface Allowed {
   inboxReminder: boolean
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
+  inboxReminderRules: string | null
   /** A chat panel of Claude Code's VS Code extension (`isVsCodePanelSession`): not interactive, a person reading it. */
   panel: boolean
 }
@@ -407,7 +409,7 @@ async function plainReminderAgain($: Engine): Promise<void> {
   if (!reminderWithThreadsSet) return
   reminderWithThreadsSet = false
   if (!allowed) return
-  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom))).catch(() => undefined)
+  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
 }
 
 /**
@@ -581,6 +583,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
+      title: () => title.generatedTitle() ?? '',
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
       ...(options.healed ? { healed: true } : {}),
@@ -758,6 +761,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminder: resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
+    inboxReminderRules: resolveInboxReminderRules(configText),
     panel,
   }
 }
@@ -845,7 +849,7 @@ export function register(on: On) {
       // holds it again after the summary replaced the first prompt's copy. Unset
       // when the reminder is off (a value inherited from a parent Claude Code
       // must not speak for this session).
-      await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom))).catch(() => undefined)
+      await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
     } finally {
       // Decided (or inert): a first prompt the engine may already be raising
       // gets its context now, without waiting for the commands and tools below.
@@ -921,7 +925,7 @@ export function register(on: On) {
   on('session.compact', async ($: Engine, e: any, next: Next) => {
     if (e?.trigger !== 'precompute' && !e?.agentId && reminderOn() && allowed && inboxToolName) {
       try {
-        const reminder = inboxReminderEnvValue(true, inboxToolName, allowed.inboxReminderCustom)
+        const reminder = inboxReminderEnvValue(true, inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules)
         if (reminder) {
           const threads = await readSessionThreads(
             hostOf($, allowed.debugPath),
@@ -1143,7 +1147,7 @@ export function register(on: On) {
         const recorded = resumed && !state.delivered && !isMeta && !command ? await reminderRecorded($, sessionId) : false
         const carries = inboxFirstPromptContext({ delivered: state.delivered, resumed, recorded, isMeta, command })
         const texts: string[] = []
-        if (carries?.reminder) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName))
+        if (carries?.reminder) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName, { rules: settings.inboxReminderRules }))
         if (carries?.threads) {
           const threads = await withinMs($, SESSION_THREADS_RESUME_MS, async () =>
             readSessionThreads(hostOf($, settings.debugPath), settings.dataDir, sessionId, await inboxProjectFolderOf($), toolName),
