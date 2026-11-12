@@ -74,7 +74,7 @@ import { handleHostControl, resolveHostControlToken, type HostControl } from "./
 import { countUnsentDraftComments } from "@plannotator/shared/host-control";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isArchiveDocumentMutation } from "@plannotator/shared/archive-mode";
-import { isThisMachineRequest } from "./this-machine";
+import { isSshTunnelRequest, isThisMachineRequest, notePeer } from "./this-machine";
 import { getAllowedRootPaths, isDocServeAllowed, isPlanLinkedDocPath, readPlanFile } from "@plannotator/shared/doc-resolve";
 import { isReferenceReadPath, referenceReadRefusal } from "@plannotator/shared/reference-reader";
 import { createDocumentDraftStore, documentDraftIndexKey, loadSessionDraftWithDocuments } from "@plannotator/shared/annotate-draft";
@@ -449,6 +449,8 @@ export async function startPlannotatorServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Who sent it (an SSH session answers its own tunnel as local: this-machine.ts).
+          notePeer(req, server);
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
@@ -590,7 +592,7 @@ export async function startPlannotatorServer(
           if (updateRoute) return updateRoute;
 
           // API: a hover card's data for an issue, PR or MR link (GET /api/ref, ref-cards.ts).
-          const refRoute = await refCardRouteResponse(req, url, refCards, { enabled: !isRemote, serverSession });
+          const refRoute = await refCardRouteResponse(req, url, refCards, { enabled: isRemote ? isSshTunnelRequest : true, serverSession });
           if (refRoute) return refRoute;
 
           // API: Update user config (write-back to ~/.plannotator/config.json)

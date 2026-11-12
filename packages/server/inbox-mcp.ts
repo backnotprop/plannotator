@@ -303,6 +303,7 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * reaches it by itself. Never a Codex or Qwen Code wake. Absent: never.
    */
   bridgePolls?: (host: string, session: string) => boolean;
+  sessionName?: (session: string) => string | null;
   /**
    * Whether the Board is on (config.json `inboxBoard`, read on every
    * request). Off: `card` is not in tools/list, and a call (from a session
@@ -1295,7 +1296,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             );
           }
           // Built first, so a refused read (a bad expand, before or after) marks nothing read.
-          const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null }, url);
+          const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null, names: context.sessionName }, url);
           if (!guest) {
             store.markAgentChecked(threadId, readThrough, undefined, reader);
             store.settleReadPast(threadId, reader, shown);
@@ -1305,7 +1306,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           if (reader) store.recordOwnRead(threadId, reader, shown);
           noteSessionRead(store, reader, threadId, clock());
           // The thread's steps (approval "inbox-thread-steps"), the reader's own first: only while the person has steps on.
-          const steps = context.stepsOn?.() ? threadStepsText(store, threadId, reader) : [];
+          const steps = context.stepsOn?.() ? threadStepsText(store, threadId, reader, context.sessionName) : [];
           const lists = steps.length > 0 ? { steps: store.threadSteps(threadId).map(({ agent, steps: list, updated_at }) => ({ agent, steps: list, updated_at })) } : {};
           // The thread's PRs (approval "inbox-pr-binding"), after its open questions: with who added each, and what was removed lately.
           const pulls = threadPullsText(context, threadId, reader);

@@ -77,6 +77,7 @@ export function readProcessInfo(pid: number, now: number = Date.now()): ProcessI
       encoding: "utf8",
       env: { ...process.env, LC_ALL: "C" },
       timeout: 5_000,
+      windowsHide: true,
     });
     if (result.status !== 0 || typeof result.stdout !== "string") return null;
     stdout = result.stdout;

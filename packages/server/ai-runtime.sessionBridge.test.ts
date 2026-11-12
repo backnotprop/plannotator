@@ -326,6 +326,55 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
     expect(result.tokenLeftInEnv).toBeNull();
   }, 15_000);
 
+  // Remote mode only SSH turned on (PLANNOTATOR_REMOTE unset): the bridge is
+  // kept, and answered only for a request whose TCP peer is loopback (the
+  // person's own tunnel); any other address gets what remote mode gives.
+  test("SSH: its own tunnel gets Ask this session, another address gets the SDK providers and no bridge", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-ssh-runtime-"));
+    tempDirs.push(dir);
+    const runner = join(dir, "runner.ts");
+    const runtimeUrl = pathToFileURL(join(import.meta.dir, "ai-runtime.ts")).href;
+    const thisMachineUrl = pathToFileURL(join(import.meta.dir, "this-machine.ts")).href;
+    writeFileSync(runner, `
+      import { createAIRuntime } from ${JSON.stringify(runtimeUrl)};
+      import { notePeer } from ${JSON.stringify(thisMachineUrl)};
+      const runtime = await createAIRuntime({ cwd: ${JSON.stringify(dir)}, getServerPort: () => 4321 });
+      const from = (address, url, init) => {
+        const req = new Request(url, init);
+        notePeer(req, { requestIP: () => ({ address }) });
+        return req;
+      };
+      const caps = async (address) => (await (await runtime.endpoints["/api/ai/capabilities"](from(address, "http://localhost/api/ai/capabilities", { headers: { host: "127.0.0.1:4321" } }))).json()).providers.map((p) => p.id);
+      const poll = async (address) => (await runtime.endpoints["/api/ai/bridge/poll"](from(address, "http://localhost/api/ai/bridge/poll", {
+        method: "POST",
+        headers: { host: "127.0.0.1:4321", authorization: "Bearer " + ${JSON.stringify("k".repeat(43))} },
+        body: JSON.stringify({ status: "ready", waitMs: 0 }),
+      }))).status;
+      const result = { tunnel: await caps("127.0.0.1"), lan: await caps("192.168.1.20"), pollTunnel: await poll("::ffff:127.0.0.1"), pollLan: await poll("192.168.1.20") };
+      runtime.dispose();
+      console.log(JSON.stringify(result));
+    `);
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      PATH: `${dir}:/usr/bin:/bin`,
+      SSH_CONNECTION: "10.0.0.2 51000 10.0.0.1 22",
+      PLANNOTATOR_SESSION_BRIDGE_TOKEN: "k".repeat(43),
+      PLANNOTATOR_SESSION_BRIDGE_HOST: "opencode",
+      PLANNOTATOR_SESSION_BRIDGE_MODES: "turn,transient",
+    };
+    delete env.PLANNOTATOR_REMOTE;
+    const proc = Bun.spawn([process.execPath, runner], { cwd: import.meta.dir, env: env as Record<string, string>, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    expect(exitCode, stderr).toBe(0);
+    const result = JSON.parse(stdout.trim().split("\n").at(-1)!);
+    expect(result.tunnel).toEqual(["session-bridge"]);
+    expect(result.lan).not.toContain("session-bridge");
+    expect(result.lan).toContain("claude-agent-sdk");
+    expect(result.pollTunnel).toBe(200);
+    expect(result.pollLan).toBe(404);
+  }, 15_000);
+
   // The CLI's --tailscale path: the session is reachable from the tailnet, so
   // the host's config is thrown away for the process (not merely cached).
   test("a discarded env config is never served later in the process", async () => {
