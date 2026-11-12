@@ -1,9 +1,3 @@
-/**
- * The Guide tab's code intelligence on the vscode mock: which side a
- * definition is on (a removed line's definition is in the base revision, and
- * never opens on the head), only the guide's files are asked about, and a
- * definition in a changed file is revealed on its own side.
- */
 import { afterAll, afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as vscode from "vscode";
 import { ReaderModel, type ReaderSides } from "../reader-model";
@@ -85,7 +79,6 @@ describe("which version a document is", () => {
     expect(docSideOf(fsSides, baseUri(fsSides, { path: "src/deliver.ts", status: "modified" }))).toEqual({ path: "src/deliver.ts", side: "base" });
     expect(docSideOf(fsSides, baseUri(fsSides, { path: "lib/elsewhere.ts", status: "modified" }))).toEqual({ path: "lib/elsewhere.ts", side: "base" });
     expect(docSideOf(fsSides, vscode.Uri.file("/repo/src/deliver.ts"))).toEqual({ path: "src/deliver.ts", side: "head" });
-    // A head revision's virtual document is the head, not "outside".
     expect(docSideOf(revSides, headUri(revSides, { path: "src/deliver.ts", status: "modified" }))).toEqual({ path: "src/deliver.ts", side: "head" });
     expect(docSideOf(fsSides, vscode.Uri.file("/elsewhere/x.ts"))).toBeNull();
   });
@@ -146,7 +139,6 @@ describe("only the guide's files", () => {
 });
 
 describe("a symlink in the change that leads out of the repository", () => {
-  // The change adds notes.md -> a file outside the repository; deliver.ts is a real file of the change.
   const dir = mkdtempSync(join(tmpdir(), "pn-reader-intel-"));
   const root = join(dir, "repo");
   mkdirSync(join(root, "src"), { recursive: true });
@@ -201,7 +193,6 @@ describe("a symlink in the change that leads out of the repository", () => {
       return p.link;
     };
     expect(await locateLink(link("code:notes.md#L1"), m, sides)).toEqual({ error: "notes.md is not a file inside the repository; not opened." });
-    // Not limited to the guide's files: a link out of the repository anywhere is refused too.
     symlinkSync(join(dir, "credentials"), join(root, "src", "creds.ts"));
     expect(await locateLink(link("code:src/creds.ts"), m, sides)).toMatchObject({ error: expect.stringContaining("not a file inside the repository") });
     expect(await locateLink(link("code:src/deliver.ts#L2"), m, sides)).toMatchObject({ path: "src/deliver.ts", inChange: true });
@@ -210,7 +201,6 @@ describe("a symlink in the change that leads out of the repository", () => {
   it("a symbol: link naming it is refused before any language server is asked or the file is read", async () => {
     installOpen();
     opened.length = 0;
-    // The target outside the repository defines the symbol, so any read of it would find it.
     writeFileSync(join(dir, "credentials"), "function secret() { return 'SECRET'; }\n");
     const reads: string[] = [];
     const asyncRead = spyOn(fsp, "readFile").mockImplementation(((p: unknown, ...rest: unknown[]) => {
@@ -229,11 +219,9 @@ describe("a symlink in the change that leads out of the repository", () => {
       expect(calls).toEqual([]);
       expect(opened).toEqual([]);
       expect(reads).toEqual([]);
-      // The builder's check and a path-less search over every changed path skip it unread too.
       expect(await resolveSymbolForBuilder("secret", "notes.md", root, ["src/deliver.ts", "notes.md"])).toEqual({ status: "missing" });
       expect(await searchDefinitions(root, ["src/deliver.ts", "notes.md"], "secret")).toEqual([]);
       expect(reads.some((r) => r.includes("credentials") || r.endsWith("notes.md"))).toBe(false);
-      // A real file of the change is still read.
       expect(await searchDefinitions(root, ["src/deliver.ts"], "retry")).toEqual([]);
       expect(reads.some((r) => r.endsWith("deliver.ts"))).toBe(true);
     } finally {

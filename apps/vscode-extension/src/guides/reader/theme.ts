@@ -1,11 +1,3 @@
-/**
- * VS Code's theme, as the reader's theme pair: light or dark from the theme's
- * kind (the class VS Code puts on a webview's body), and a Plannotator
- * palette whose syntax colors match the theme's name where one does (a
- * webview cannot read a theme's token colors). Everything else the reader
- * draws takes VS Code's own colors (`reader.css` maps `--vscode-*`).
- */
-
 const NAMED: Array<[RegExp, string]> = [
   [/github/i, "github"],
   [/monokai/i, "monokai-pro"],

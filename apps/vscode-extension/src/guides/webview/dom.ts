@@ -1,5 +1,3 @@
-/** The webview's tiny DOM helpers. */
-
 export type Child = Node | string | null | undefined | false;
 
 export function h(tag: string, attrs: Record<string, string | number | boolean | undefined | null | ((e: Event) => void)> = {}, ...children: Child[]): HTMLElement {

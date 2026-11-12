@@ -2,13 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { checkMermaid, renderMermaid, type MermaidCheck } from "../webview/diagram";
 import { post } from "./bridge";
 
-/**
- * The overview's Mermaid diagram, drawn by Plannotator's diagram engine (the
- * same render the builder's check uses). The agent's `click` lines are taken
- * out of the source and attached to the drawn nodes as guide links: a click
- * follows the link here (a chapter scrolls the reader, code and symbols go to
- * the extension). Loaded lazily: a guide without a diagram never loads Mermaid.
- */
 export default function OverviewDiagram({ source, onChapter }: { source: string; onChapter: (index: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +48,6 @@ export default function OverviewDiagram({ source, onChapter }: { source: string;
   );
 }
 
-/** The builder's render check (the extension asks the open Guide tab): the same engine, off screen. */
 export function checkMermaidHere(source: string): Promise<MermaidCheck> {
   return checkMermaid(source);
 }

@@ -1,8 +1,3 @@
-/**
- * The start flow's automatic-approval toggle, through a scripted Quick Pick
- * on the vscode mock (each step picks the first item whose label matches).
- */
-
 import { afterEach, describe, expect, it } from "bun:test";
 import * as vscode from "vscode";
 import { CLAUDE_CODE, OPENCODE, PI, resolveAgentLaunch, type AgentOptionsCache, type AgentStatus } from "@plannotator/acp-client/agents";
@@ -24,7 +19,6 @@ function scriptQuickPicks(steps: Array<RegExp>): { seen: string[][] } {
       onDidAccept: (cb: () => void) => { accept.push(cb); return { dispose() {} }; },
       onDidHide: () => ({ dispose() {} }),
       show() {
-        // The model step first shows itself busy while the agent's models load; the pick comes at the next show.
         if (qp.busy) return;
         const want = steps.shift();
         if (!want) throw new Error("no scripted step left");

@@ -1,11 +1,3 @@
-/**
- * The guide outside the Guide tab: a status-bar item ("Guide · Chapter 2 of
- * 5 · 1/5 reviewed", which shows the chapter in the Guide tab), and, in a
- * native editor or diff showing a guide file (opened from the Guide tab's
- * "Open in editor" or "Diff"), a chapter-colored gutter mark, the agent's
- * focus lines and a line in the hover for symbols changed in a chapter.
- */
-
 import * as vscode from "vscode";
 import type { ReaderModel, ReaderSides } from "../reader-model";
 import { GUIDE_SCHEME, headPathOf } from "./uris";
@@ -24,7 +16,6 @@ export class ReaderUi implements vscode.Disposable {
   private readonly gutter: vscode.TextEditorDecorationType[];
   private readonly focus: vscode.TextEditorDecorationType;
   private inHover = false;
-  /** A question being answered: the status bar says so, and opens its answer. */
   private answering: { text: string; answerId: string } | null = null;
 
   constructor(private readonly host: ReaderUiHost) {
@@ -51,7 +42,6 @@ export class ReaderUi implements vscode.Disposable {
     });
   }
 
-  /** Redraw everything after the guide, the ticks or the current file changed. */
   refresh(): void {
     this.decorate();
     this.updateStatus();
@@ -75,7 +65,6 @@ export class ReaderUi implements vscode.Disposable {
     }
   }
 
-  /** Say in the status bar that a question is being answered (null: it was). */
   setAnswering(text: string | null, answerId: string | null): void {
     this.answering = text && answerId ? { text, answerId } : null;
     this.updateStatus(this.lastFile);
@@ -106,10 +95,6 @@ export class ReaderUi implements vscode.Disposable {
     this.status.show();
   }
 
-  /**
-   * The language server's own hover stays as it is; this adds one line when
-   * the symbol under the pointer is defined in a file of the guide.
-   */
   private async hover(doc: vscode.TextDocument, pos: vscode.Position, token: vscode.CancellationToken): Promise<vscode.Hover | undefined> {
     const cur = this.host.current();
     if (!cur || this.inHover || intel.askingLanguageServer > 0) return undefined;

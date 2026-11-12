@@ -1,9 +1,3 @@
-/**
- * Code intelligence for overview links and for the builder's checks: the
- * language server first (workspace and document symbols, hover, definition,
- * references), a text search in the changed files when it has nothing.
- */
-
 import * as vscode from "vscode";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
@@ -39,7 +33,6 @@ interface SymbolCandidate {
   container?: string;
 }
 
-/** Workspace symbols named exactly `name` (or ending in `.name`) under `root`. */
 async function workspaceSymbols(name: string, root: string): Promise<SymbolCandidate[]> {
   const short = name.split(".").pop()!;
   let found: vscode.SymbolInformation[] | undefined;
@@ -59,7 +52,6 @@ async function workspaceSymbols(name: string, root: string): Promise<SymbolCandi
   return dedupe(out).filter((c) => !isImportLine(root, c));
 }
 
-/** Workspace symbols include import and re-export aliases: they are not where a symbol is defined. */
 function isImportLine(root: string, c: SymbolCandidate): boolean {
   const real = realFileInside(root, c.path);
   if (!real) return false;
@@ -71,7 +63,6 @@ function isImportLine(root: string, c: SymbolCandidate): boolean {
   }
 }
 
-/** Document symbols of one file named `name`. */
 async function documentSymbols(uri: vscode.Uri, name: string, path: string): Promise<SymbolCandidate[]> {
   let symbols: Array<vscode.DocumentSymbol | vscode.SymbolInformation> | undefined;
   try {
@@ -102,10 +93,8 @@ function dedupe(list: SymbolCandidate[]): SymbolCandidate[] {
   });
 }
 
-/** Where a symbol is, in order: language server, then text search in the changed files. */
 export async function findSymbol(name: string, path: string | undefined, headRoot: string, changedPaths: readonly string[]): Promise<SymbolCandidate[]> {
   if (path) {
-    // A path that leaves the repository (a symlink out of it) is never handed to a language server or read.
     if (!realFileInside(headRoot, path)) return [];
     const fromDoc = await documentSymbols(vscode.Uri.file(join(headRoot, path)), name, path);
     if (fromDoc.length) return fromDoc;
@@ -115,7 +104,6 @@ export async function findSymbol(name: string, path: string | undefined, headRoo
   const fromWorkspace = await workspaceSymbols(name, headRoot);
   if (fromWorkspace.length === 1) return fromWorkspace;
   if (fromWorkspace.length > 1) {
-    // Prefer the definitions in the change when the name is common.
     const inChange = fromWorkspace.filter((c) => changedPaths.includes(c.path));
     return inChange.length ? inChange : fromWorkspace;
   }
@@ -123,7 +111,6 @@ export async function findSymbol(name: string, path: string | undefined, headRoo
   return hits.map((h) => ({ ...h, character: 0 }));
 }
 
-/** The builder's `resolveSymbol` hook. */
 export async function resolveSymbolForBuilder(name: string, path: string | undefined, headRoot: string, changedPaths: readonly string[]): Promise<GuideSymbolResolution> {
   const found = await findSymbol(name, path, headRoot, changedPaths);
   if (found.length === 1) return { status: "found" };
@@ -133,7 +120,6 @@ export async function resolveSymbolForBuilder(name: string, path: string | undef
 
 export interface LinkTarget {
   uri: vscode.Uri;
-  /** Repo-relative, when the link points into the repository. */
   path: string;
   range: vscode.Range;
   inChange: boolean;
@@ -141,13 +127,10 @@ export interface LinkTarget {
   label: string;
 }
 
-/** Where a `code:` or `symbol:` link points in the open guide. */
 export async function locateLink(link: GuideLink, reader: ReaderModel, sides: ReaderSides): Promise<LinkTarget | { error: string }> {
   const headRoot = sides.head.kind === "fs" ? sides.head.root : sides.gitRoot;
   const changed = [...reader.files.keys()];
   const fileFor = (path: string) => reader.files.get(path) ?? { path, status: "modified" };
-  // A file on disk only when it is a regular file inside the repository once symlinks are followed
-  // (the link is the agent's; the change could add a symlink out of the repository).
   const outside = (path: string) => headLeavesRepo(sides, fileFor(path));
   if (link.kind === "code") {
     if (outside(link.path)) return { error: `${link.path} is not a file inside the repository; not opened.` };
@@ -164,7 +147,6 @@ export async function locateLink(link: GuideLink, reader: ReaderModel, sides: Re
     };
   }
   if (link.kind === "symbol") {
-    // Refused before anything is asked or read: the link's own path may be a symlink out of the repository.
     if (link.path && outside(link.path)) return { error: `${link.path} is not a file inside the repository; not opened.` };
     const found = await findSymbol(link.name, link.path, headRoot, changed);
     if (found.length === 0) return { error: `No symbol named ${link.name} was found.` };
@@ -197,7 +179,6 @@ export function hoverText(hovers: vscode.Hover[] | undefined): string | undefine
   return text ? text.slice(0, 6000) : undefined;
 }
 
-/** The column of `name` on a line (so hover and references answer for the symbol, not a keyword). */
 function nameColumn(root: string, path: string, line: number, name: string): number {
   const real = realFileInside(root, path);
   if (!real) return 0;
@@ -211,10 +192,8 @@ function nameColumn(root: string, path: string, line: number, name: string): num
   }
 }
 
-/** Set while the popover asks the language server, so the guide's own hover line stays out of it. */
 export let askingLanguageServer = 0;
 
-/** Run `ask` with the guide's own hover line kept out of the language server's answer. */
 export async function withoutGuideHoverLine<T>(ask: () => Promise<T>): Promise<T> {
   askingLanguageServer++;
   try {
@@ -224,7 +203,6 @@ export async function withoutGuideHoverLine<T>(ask: () => Promise<T>): Promise<T
   }
 }
 
-/** What the overview's hover popover shows for a link (SPEC 3.5). */
 export async function linkInfo(href: string, reader: ReaderModel, sides: ReaderSides): Promise<LinkInfo> {
   const parsed = parseGuideLink(href);
   if (!parsed || !parsed.ok) return { ok: false, label: href, inChange: false, message: parsed && !parsed.ok ? parsed.error : "Not a guide link." };
@@ -254,7 +232,6 @@ export async function linkInfo(href: string, reader: ReaderModel, sides: ReaderS
     ]);
   let [hovers, defs, refs] = await ask().catch(() => [undefined, undefined, undefined] as const);
   if ((!hoverText(hovers) && !defs?.length) || /^\s*(```\w*\s*)?\(loading\.\.\.\)/.test(hoverText(hovers) ?? "")) {
-    // A file the language server just opened (a PR worktree is outside the workspace): it may need a moment.
     await new Promise((r) => setTimeout(r, 1200));
     [hovers, defs, refs] = await ask().catch(() => [undefined, undefined, undefined] as const);
   }
@@ -275,14 +252,11 @@ export async function linkInfo(href: string, reader: ReaderModel, sides: ReaderS
   };
 }
 
-/** The first non-space character of the line, where hover and references answer. */
 async function firstWordPosition(uri: vscode.Uri, at: vscode.Position): Promise<vscode.Position> {
   try {
-    // Open it either way: the language server answers only for documents it has.
     const doc = await vscode.workspace.openTextDocument(uri);
     if (at.character > 0) return at;
     const line = doc.lineAt(Math.min(at.line, doc.lineCount - 1));
-    // The first name on the line that is not a keyword: `export async function deliverWebhook(` → `deliverWebhook`.
     const keywords = /^(export|default|async|function|const|let|var|class|interface|type|enum|public|private|protected|static|readonly|abstract|def|fn|func|pub|struct|impl|return|await|new|import|from|CREATE|TABLE|INDEX|UNIQUE)$/i;
     for (const m of line.text.matchAll(/[A-Za-z_$][\w$]*/g)) {
       if (!keywords.test(m[0])) return new vscode.Position(line.lineNumber, m.index ?? 0);

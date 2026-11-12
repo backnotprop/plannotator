@@ -105,7 +105,6 @@ describe("guides cross between the web app and VS Code", () => {
 
   it("exports a guide kept in memory (guide history off) exactly as the same guide saved", () => {
     const g = saved("test__export-mem");
-    // Each snapshot is stamped with `exportedAt: now`: freeze the clock so the two compare equal.
     setSystemTime(new Date("2026-10-23T12:00:00.000Z"));
     let fromDisk;
     try {

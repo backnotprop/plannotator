@@ -1,13 +1,3 @@
-/**
- * The extension's end of the builder relay (SPEC 4.4): a local pipe the stdio
- * relay script (`dist/guide-mcp.cjs`, started by the agent) connects to. Each
- * connection proves which session it belongs to with that session's random
- * token, then every JSON-RPC line goes to the session's MCP handler and the
- * answer goes back on the same connection.
- *
- * Node only (`net`, `crypto`); no `vscode`, so it is tested at module level.
- */
-
 import { createServer, type Server, type Socket } from "node:net";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -15,21 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMcpMessageHandler, type McpToolHandler } from "./protocol";
 
-/** Env names the relay script reads. */
 export const RELAY_SOCKET_ENV = "PLANNOTATOR_GUIDE_MCP_SOCKET";
 export const RELAY_TOKEN_ENV = "PLANNOTATOR_GUIDE_MCP_TOKEN";
-/** First line the relay script sends. */
 export const RELAY_HELLO = "plannotator-guide-mcp/1";
-/** Lines longer than this many bytes end the connection (the relay never needs more). */
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
-/** A connection that has not proved its session by then is closed. */
 const HELLO_TIMEOUT_MS = 10_000;
 
 export interface RelaySession {
   readonly token: string;
-  /** The env the relay script needs, to put in the ACP `mcpServers` entry. */
   readonly env: Record<string, string>;
-  /** Connections currently open for this session. */
   connectionCount(): number;
   dispose(): void;
 }
@@ -55,8 +39,6 @@ export async function startRelayHost(options: { serverVersion: string; log?: (li
   if (process.platform === "win32") {
     socketPath = `\\\\.\\pipe\\plannotator-guide-${randomBytes(12).toString("hex")}`;
   } else {
-    // A private directory keeps the socket out of reach of other users; the
-    // short name keeps the path under the 104-byte limit on macOS.
     socketDir = mkdtempSync(join(tmpdir(), "pn-g-"));
     socketPath = join(socketDir, "s");
   }
@@ -71,8 +53,6 @@ export async function startRelayHost(options: { serverVersion: string; log?: (li
   };
 
   const server: Server = createServer((socket) => {
-    // Raw bytes: a line is cut at the newline byte and decoded whole, so the
-    // limit counts bytes and a character split across chunks stays intact.
     let pending: Buffer[] = [];
     let pendingBytes = 0;
     let session: SessionEntry | null = null;
@@ -110,7 +90,6 @@ export async function startRelayHost(options: { serverVersion: string; log?: (li
       if (pendingBytes > maxLineBytes) return end();
       if (rest.length) pending.push(Buffer.from(rest));
     });
-    /** Handle one line; false when the connection was closed. */
     const handleLine = (line: string): boolean => {
       if (!line.trim()) return true;
       if (!session) {
@@ -133,7 +112,6 @@ export async function startRelayHost(options: { serverVersion: string; log?: (li
         return true;
       }
       const current = session;
-      // Answer in order: an agent's client may pipeline calls.
       queue = queue.then(async () => {
         let message: unknown;
         try {

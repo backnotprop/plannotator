@@ -1,8 +1,3 @@
-/**
- * The webviews draw Mermaid with the reader build's `diagram.js`, imported
- * from the URL the host puts on the body; without one, a diagram stays as its
- * source (a failure, never a throw).
- */
 import { afterAll, afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +27,6 @@ export async function checkMermaid(source) { return { ok: true }; }`);
 
 describe.skipIf(!hasDom)("without the engine", () => {
   it("a diagram is a failure, not a throw; the render check says it could not check (never a refusal)", async () => {
-    // A fresh copy of the module (no cached load).
     const fresh = (await import(`./diagram-loader?fresh=${Date.now()}`)) as typeof import("./diagram-loader");
     const r = await fresh.renderMermaid("graph TD; A-->B");
     expect(r).toMatchObject({ ok: false, unavailable: true });
@@ -40,7 +34,6 @@ describe.skipIf(!hasDom)("without the engine", () => {
   });
 
   it("an engine URL that does not import is not available either; the engine's own error is a refusal", async () => {
-    // A folder of its own: Bun keeps a folder's listing from its first import.
     const own = mkdtempSync(join(dir, "erroring-"));
     const engine = join(own, "erroring.mjs");
     writeFileSync(engine, `export async function renderMermaid() { return { ok: false, message: "x", line: null }; }

@@ -1,9 +1,3 @@
-/**
- * Running `git` and `gh` for the Guides view. Every data source takes a
- * `Runner`, so tests inject a scripted one and never touch a real repository
- * or the GitHub CLI.
- */
-
 import { spawn } from "node:child_process";
 import { augmentedPath, findExecutable } from "@plannotator/acp-client/which";
 
@@ -18,7 +12,6 @@ export interface RunOptions {
   timeoutMs?: number;
   stdin?: string;
   env?: Record<string, string | undefined>;
-  /** Stop reading stdout past this many bytes (the result is then marked truncated). */
   maxOutputBytes?: number;
 }
 
@@ -27,10 +20,8 @@ export type Runner = (command: string, args: string[], options?: RunOptions) => 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT = 256 * 1024 * 1024;
 
-// Finding programs lives with the ACP client (packages/acp-client/which.ts); kept here for the data sources.
 export { augmentedPath, findExecutable };
 
-/** The real runner: no shell, a timeout that kills the process, bounded output. */
 export const defaultRunner: Runner = (command, args, options = {}) =>
   new Promise((resolve) => {
     const resolved = findExecutable(command) ?? command;

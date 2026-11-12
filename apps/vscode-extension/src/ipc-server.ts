@@ -1,9 +1,5 @@
 import * as http from "http";
 
-/**
- * Lightweight HTTP server on localhost for receiving URLs from the router script.
- * Needed because vscode:// URI handlers don't work reliably on Linux.
- */
 export function createIpcServer(
   onUrl: (url: string) => void,
   preferredPort?: number,

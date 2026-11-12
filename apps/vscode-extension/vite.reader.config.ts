@@ -4,22 +4,6 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { diffsWorkerCatalogs } from "../../build/diffs-worker-catalogs";
 
-/**
- * The Guide tab: Plannotator's guide reader (packages/guide-viewer over
- * review-editor's AllFilesCodeView, the same chain guides.show and the review
- * app render) in a VS Code webview. A multi-file build like guides.show's:
- * `reader.js` / `reader.css` are what the webview loads by name; Shiki's
- * grammars and themes are lazy chunks, the highlight worker is its own file
- * (fetched and started as a blob worker, see apps/guides-show/viewer/portablePool.tsx).
- * `base: './'` keeps chunk URLs relative to the entry, so they resolve under
- * the webview's resource origin.
- */
-/**
- * The Guide tab draws in VS Code's own fonts (reader.css maps `--font-sans` /
- * `--font-mono` to `--vscode-*`), so the web fonts the shared CSS declares
- * (Inter, Geist Mono) are never used: their `@font-face` rules and files are
- * left out of the build.
- */
 function dropWebFonts(): Plugin {
   return {
     name: "plannotator-reader-drop-web-fonts",
@@ -40,19 +24,15 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), dropWebFonts()],
   resolve: {
     alias: {
-      // Pierre runs Shiki's JavaScript regex engine: the Oniguruma WASM is dead weight.
       "shiki/wasm": path.resolve(__dirname, "../../build/shiki-wasm-stub.ts"),
-      // Highlights, Pierre's second highlighter (WASM), never runs. See build/pierre-highlights-stub.ts.
       "@pierre/highlights/themes/loader": path.resolve(__dirname, "../../build/pierre-highlights-stub.ts"),
       "@pierre/highlights": path.resolve(__dirname, "../../build/pierre-highlights-stub.ts"),
       "katex/dist/katex.min.css": path.resolve(__dirname, "../guides-show/viewer/stubs/empty.css"),
-      // Overview diagrams are Mermaid only: Graphviz's 1.3 MB engine stays out (as in the webview build).
       "@viz-js/viz": path.resolve(__dirname, "src/guides/webview/stubs/viz.ts"),
     },
   },
   worker: {
     format: "es",
-    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
     plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: { output: { inlineDynamicImports: true, entryFileNames: "worker.[hash].js" } },
   },
@@ -66,8 +46,6 @@ export default defineConfig({
     chunkSizeWarningLimit: 4_000,
     sourcemap: false,
     rollupOptions: {
-      // `diagram.js`: the Mermaid engine the other Guides webviews load when they draw a
-      // diagram (src/guides/webview/diagram-loader.ts), sharing the reader's chunks.
       input: { reader: path.resolve(__dirname, "src/guides/reader/main.tsx"), diagram: path.resolve(__dirname, "src/guides/webview/diagram.ts") },
       preserveEntrySignatures: "exports-only",
       output: {

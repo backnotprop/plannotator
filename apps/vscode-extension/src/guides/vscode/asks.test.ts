@@ -1,11 +1,3 @@
-/**
- * GuideAsks on the vscode mock with the FAKE ACP agent (never a real one):
- * a second question while the first is getting ready is refused cleanly, and
- * a guide or answer deleted while it is being answered is not written back;
- * the Guide tab asks about selected lines and about a chapter, the answer
- * opens beside it at once, and line answers become markers.
- */
-
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import * as vscode from "vscode";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -34,7 +26,6 @@ let confirmDelete: string | undefined = "Delete";
 beforeAll(async () => {
   work = mkdtempSync(join(tmpdir(), "pn-guides-asks-"));
   relay = await startRelayHost({ serverVersion: "test" });
-  // The extension's `dist/guide-mcp.cjs`, here the relay script run by bun.
   mkdirSync(join(work, "ext", "dist"), { recursive: true });
   writeFileSync(join(work, "ext", "dist", "guide-mcp.cjs"), `require(${JSON.stringify(RELAY_SCRIPT)});\n`);
 });
@@ -51,7 +42,6 @@ beforeEach(() => {
   confirmDelete = "Delete";
   (vscode.window as unknown as Record<string, unknown>).showWarningMessage = async (message: string, ...items: unknown[]) => {
     warnings.push(message);
-    // The Delete confirm (modal): answered by the test.
     if (items.includes("Delete")) return confirmDelete;
     return undefined;
   };
@@ -122,7 +112,6 @@ function world(askTurns: unknown[][], options: { gate?: Promise<void>; rawPatch?
   const sidecarPath = join(process.env.PLANNOTATOR_DATA_DIR!, "guides", REPO_KEY, "vscode", `${GUIDE_ID}.json`);
   const about = { kind: "file" as const, chapter: 0, chapterTitle: "The loop", path: "src/deliver.ts", side: "head" as const };
   const ask = (q: string) => (asks as unknown as { ask(g: LoadedGuide, a: typeof about, q: string, o: object): Promise<void> }).ask(guide, about, q, {});
-// The fake agent may be mid-write: a line that isn't whole JSON yet is skipped, and read again on the next poll.
   const log = () =>
     existsSync(logPath)
       ? readFileSync(logPath, "utf8").split("\n").flatMap((l) => {
@@ -152,7 +141,6 @@ describe("asking from VS Code", () => {
     const gate = new Promise<void>((r) => (open = r));
     const w = world([[answer("One")]], { gate });
     const first = w.ask("Why did this change?");
-    // The first is waiting on its launch (nothing saved yet); the second comes in now.
     await w.ask("What could break?");
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("getting ready to answer another question");
@@ -161,7 +149,6 @@ describe("asking from VS Code", () => {
     await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
     const all = listAnswers(REPO_KEY, GUIDE_ID);
     expect(all.map((r) => r.question)).toEqual(["Why did this change?"]);
-    // The slot is free again: the next question goes through.
     await w.ask("And then?");
     expect(warnings).toHaveLength(1);
     await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).filter((r) => r.status === "answered").length === 2);
@@ -189,7 +176,6 @@ describe("asking from VS Code", () => {
     await w.asks.menu(record.id);
     expect(warnings.some((m) => m.startsWith("Delete the answer to “Why did this change?”"))).toBe(true);
     expect(listAnswers(REPO_KEY, GUIDE_ID).map((r) => r.id)).toEqual([record.id]);
-    // "delete" is not an action a message can ask for directly: it still asks.
     warnings.length = 0;
     await w.asks.menu(record.id, "delete");
     expect(warnings).toHaveLength(1);
@@ -202,7 +188,7 @@ describe("asking from VS Code", () => {
     await w.ask("Why did this change?");
     await waitFor(() => w.log().some((e) => e.event === "prompt"));
     const [record] = listAnswers(REPO_KEY, GUIDE_ID);
-    expect(record.status).toBe("stopped"); // an "answering" file reads as stopped
+    expect(record.status).toBe("stopped");
     await w.asks.menu(record.id);
     await new Promise((r) => setTimeout(r, 1500));
     expect(listAnswers(REPO_KEY, GUIDE_ID)).toEqual([]);
@@ -217,14 +203,12 @@ describe("asking from VS Code", () => {
     const [record] = listAnswers(REPO_KEY, GUIDE_ID);
     await waitFor(() => w.asks.hasPendingPermission(record.id, 1));
     const askPending = (run: string | undefined, id: number | undefined) => w.asks.hasPendingPermission(run, id);
-    // What the controller checks before it writes plannotator.guides.autoApprove.
     expect(approveAlwaysTarget(record.id, 1, { generation: null, askPending })).toBe("ask");
     expect(approveAlwaysTarget(record.id, 2, { generation: null, askPending })).toBeNull();
     expect(approveAlwaysTarget("ans-1-zzzz", 1, { generation: null, askPending })).toBeNull();
     expect(approveAlwaysTarget(record.id, undefined, { generation: null, askPending })).toBeNull();
     expect(w.asks.answerPermission(record.id, 1, "allow-once")).toBe(true);
     await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
-    // Answered: nothing waits any more, so the same ids no longer count.
     expect(approveAlwaysTarget(record.id, 1, { generation: null, askPending })).toBeNull();
     w.asks.dispose();
   });
@@ -234,7 +218,6 @@ describe("asking from the Guide tab", () => {
   it("asks about lines selected in a diff: their code goes with the question, the answer opens beside at once, and the lines get a marker", async () => {
     const w = world([[{ say: "Looking…" }, answer("Why it returns 1")]]);
     await w.asks.askAboutLines("src/deliver.ts", "new", 1, 2, "  Why does it return 1?  ");
-    // The tab opens at once (keeping the focus in the Guide tab) and shows the work.
     expect(w.panels).toHaveLength(1);
     expect(w.panels[0].title).toBe("Answering: Why does it return 1?");
     expect(w.panels[0].preserveFocus).toBe(true);
@@ -244,7 +227,6 @@ describe("asking from the Guide tab", () => {
     expect(record.about).toMatchObject({ kind: "selection", chapter: 0, path: "src/deliver.ts", side: "head", lines: { start: 1, end: 2 } });
     expect(record.about.code).toBe("export function deliver() {\n  return 1;");
     expect(w.asks.lineAnswers(w.guide)).toEqual([{ id: record.id, path: "src/deliver.ts", side: "new", start: 1, end: 2, question: "Why does it return 1?", status: "answered" }]);
-    // The chapter lists it too.
     expect(w.asks.chapterAnswers(w.guide, 0).items.map((i) => i.question)).toEqual(["Why does it return 1?"]);
     w.asks.dispose();
   });
@@ -288,7 +270,6 @@ describe("asking from the Guide tab", () => {
     world(turns, {
       rawPatch: CHANGE,
       files: ["src/deliver.ts", "src/old.ts", "src/link.ts"],
-      // The change adds a symlink out of the repository; the file it points at holds a secret.
       setup: (root) => {
         writeFileSync(join(root, "..", "secret.txt"), "aws_secret_access_key = SECRET\n");
         symlinkSync(join(root, "..", "secret.txt"), join(root, "src", "link.ts"));
@@ -302,10 +283,8 @@ describe("asking from the Guide tab", () => {
     const [record] = listAnswers(REPO_KEY, GUIDE_ID);
     expect(record.about).toMatchObject({ path: "src/deliver.ts", side: "base", lines: { start: 1, end: 2 } });
     expect(record.about.code).toBe('export function deliver() {\n  throw new Error("failed");');
-    // The hash describes the lines asked about (the old version's), never the head file on disk.
     expect(record.about.fileHash).toBeUndefined();
     expect(record.about.codeHash).toBe(linesHash(record.about.code!));
-    // Its marker is on the old side of the diff.
     expect(w.asks.lineAnswers(w.guide)[0]).toMatchObject({ side: "old", start: 1, end: 2 });
     w.asks.dispose();
   });
@@ -408,7 +387,6 @@ describe("asking from the Guide tab", () => {
     await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
     const [record] = listAnswers(REPO_KEY, GUIDE_ID);
     expect(record.about).toMatchObject({ kind: "chapter", chapter: 0 });
-    // A chapter question is not about lines: no marker.
     expect(w.asks.lineAnswers(w.guide)).toEqual([]);
     w.asks.dispose();
   });

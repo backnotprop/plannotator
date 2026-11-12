@@ -3,8 +3,6 @@ import { join } from "node:path";
 import type { GeneratingViewState } from "../webview-protocol";
 import { renderBottlenecks, renderPermissions } from "./approvals";
 
-// A DOM for this file only (the package's run keeps native globals otherwise).
-// The registrator is a dependency of packages/ui (its DOM test preload), so it is resolved from there.
 let registrator: { register(): void; unregister(): Promise<void> } | null = null;
 beforeAll(async () => {
   if (typeof document !== "undefined") return;
@@ -54,7 +52,6 @@ describe("the run view's approvals", () => {
     expect(offer.textContent).toContain("Let the agent work without asking?");
     for (const b of offer.querySelectorAll("button")) (b as HTMLButtonElement).click();
     expect(sent).toEqual([["approveRun", "g1"], ["approveAlways", "g1", 7]]);
-    // No offer without a pending request, or once it is on.
     expect(renderPermissions(state({ offerAutoApprove: true }), () => {})).toEqual([]);
   });
 

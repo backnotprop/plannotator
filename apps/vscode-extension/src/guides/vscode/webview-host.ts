@@ -1,10 +1,3 @@
-/**
- * One Guides webview (a tab): the HTML shell with a strict CSP (scripts only
- * from the extension: its bundle by nonce, the diagram engine from its resources), the state it shows,
- * and the messages it sends. Agent text reaches it only as data, rendered
- * through DOMPurify in the webview.
- */
-
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 import { webviewCsp, type GuidesWebviewMode } from "../webview-csp";
@@ -42,7 +35,6 @@ export interface WebviewHandlers {
   onLinkInfo?(link: string): Promise<LinkInfo>;
 }
 
-/** State, messages and the Mermaid render check for one webview. */
 export class WebviewHost {
   private state: ViewState | null = null;
   private ready = false;
@@ -63,7 +55,6 @@ export class WebviewHost {
     return this.ready;
   }
 
-  /** Render a Mermaid source with the webview's engine (the builder's check). */
   checkMermaid(source: string, timeoutMs = 15_000): Promise<{ ok: boolean; message?: string; line?: number } | null> {
     if (!this.ready) return Promise.resolve(null);
     const reqId = this.nextReq++;
@@ -100,7 +91,6 @@ export class WebviewHost {
       case "mermaidResult": {
         const done = this.mermaidChecks.get(msg.reqId);
         this.mermaidChecks.delete(msg.reqId);
-        // No engine in that webview: it could not check (null, so another one is asked), not a refusal.
         done?.(msg.unavailable === true ? null : { ok: msg.ok === true, message: typeof msg.message === "string" ? msg.message : undefined, line: typeof msg.line === "number" ? msg.line : undefined });
         return;
       }
@@ -109,7 +99,6 @@ export class WebviewHost {
 
   dispose(): void {
     this.subscription.dispose();
-    // Not checked (null), never a silent pass.
     for (const done of this.mermaidChecks.values()) done(null);
     this.mermaidChecks.clear();
   }

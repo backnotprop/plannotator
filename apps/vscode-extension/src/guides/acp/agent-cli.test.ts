@@ -1,10 +1,3 @@
-/**
- * claude-agent-acp and codex-acp run their own bundled Claude / Codex unless
- * CLAUDE_CODE_EXECUTABLE / CODEX_PATH name another one. These start the FAKE
- * ACP agent (tests/helpers/fake-acp-agent.ts, never a real adapter) the way
- * Guides starts an adapter, and read back what the adapter process was given.
- */
-
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +15,6 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const CLI_VARS = ["CLAUDE_CODE_EXECUTABLE", "CODEX_PATH"] as const;
 let saved: Record<string, string | undefined> = {};
 beforeEach(() => {
-  // The adapter inherits this process's environment: start every test without the user's own values.
   saved = Object.fromEntries(CLI_VARS.map((k) => [k, process.env[k]]));
   for (const k of CLI_VARS) delete process.env[k];
 });
@@ -33,10 +25,8 @@ afterEach(() => {
   }
 });
 
-/** Programs "on PATH": the fake adapter for the adapter's command, `<prefix><name>` for the CLIs given. */
 const onPath = (clis: string[], prefix = "/opt/me/bin/") => (name: string) => (name === process.execPath ? name : clis.includes(name) ? `${prefix}${name}` : null);
 
-/** Resolve the agent as Guides does, with the fake adapter as its command. */
 function resolve(agent: AgentDescriptor, find: (name: string) => string | null, platform: NodeJS.Platform = process.platform, choice: CliChoice = {}) {
   const launch = resolveGuidesLaunch(agent, { command: process.execPath, args: [FAKE_AGENT] }, find, () => null, platform, isSameProgram, choice);
   if (!launch.ok) throw new Error(launch.message);
@@ -44,7 +34,6 @@ function resolve(agent: AgentDescriptor, find: (name: string) => string | null, 
 }
 
 let n = 0;
-/** Start the fake adapter with that launch (and a script), and read what it logged. */
 async function startFake(launch: ReturnType<typeof resolve>, script: Record<string, unknown> = { steps: [] }) {
   const scriptPath = join(dir, `script-${++n}.json`);
   const log = join(dir, `agent-${n}.log`);

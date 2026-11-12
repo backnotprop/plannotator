@@ -3,14 +3,6 @@ import { renderMarkdownProse } from "@plannotator/guide-viewer/renderMarkdownPro
 import type { DiffPosition, HoverAnswer, NavigateAction } from "../reader-protocol";
 import { requestReferences } from "./bridge";
 
-/**
- * What the Guide tab's hover card shows, drawn inside the review app's
- * `TokenHoverCard` (its placement, pointer grace and scroll behavior): the
- * language server's hover for the token (signature, then docs), where the
- * symbol is defined, the guide's own line ("Changed in Chapter 1 · …"), and
- * Go to definition / Find references / Open in editor. The references count
- * arrives after the card, since a references search can take a while.
- */
 export function HoverCardContent({
   answer,
   at,
@@ -20,7 +12,6 @@ export function HoverCardContent({
 }: {
   answer: HoverAnswer;
   at: DiffPosition;
-  /** "⌘" or "Ctrl". */
   mod: string;
   onNavigate: (action: NavigateAction) => void;
   onOpenDefinition: () => void;

@@ -80,7 +80,6 @@ describe("a renamed file is not 'changed on disk since the guide'", () => {
     return r.stdout;
   };
 
-  // The guide's patch as the reader's local source makes it (`getWorkingTreeDiffFromBase`): the user's rename config.
   const guideDiff = (dir: string) => git(dir, ["-c", "core.quotePath=false", "diff", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--end-of-options", "HEAD"]);
   const run = (dir: string, files: Array<{ path: string; oldPath?: string }>, max?: number) => changedSinceDiffArgs("HEAD", files, max).map((args) => git(dir, args)).join("");
   const repo = (renames: string | null) => {
@@ -107,7 +106,6 @@ describe("a renamed file is not 'changed on disk since the guide'", () => {
         if (renames === "false") expect(files.map((f) => f.path).sort()).toEqual(["new-name.ts", "old-name.ts", "other.ts"]);
         else expect(files.find((f) => f.path === "new-name.ts")?.oldPath).toBe("old-name.ts");
         expect(changedPatchFiles(guidePatch, run(dir, files))).toEqual([]);
-        // Edited after the guide: changed.
         writeFileSync(join(dir, "new-name.ts"), "export const changed = true;\n");
         expect(changedPatchFiles(guidePatch, run(dir, files))).toContain("new-name.ts");
       } finally {

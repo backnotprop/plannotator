@@ -1,12 +1,5 @@
-/**
- * Lines of the reader's diffs: which side a selection asks about, and the
- * row of a line (for a jump to it). Pierre's `deletions` are base lines,
- * `additions` and unchanged lines head lines. No React.
- */
-
 import type { SelectedLineRange } from "@pierre/diffs";
 
-/** One row of a file's patch, in the order the unified view draws them. */
 interface PatchRow {
   kind: "context" | "deletion" | "addition";
   old?: number;
@@ -38,21 +31,6 @@ function patchRows(filePatch: string): PatchRow[] {
   return rows;
 }
 
-/**
- * The lines a selection asks about, on one side of the diff: Pierre's
- * `deletions` are base lines, `additions` (and unchanged lines) head lines.
- * A selection across removed and added lines is not asked (the lines would
- * not be one stretch of either version).
- *
- * With the file's patch, the patch rows between the two ends decide, whatever
- * side Pierre names for each end: in the unified view an unchanged row is
- * reported as an `additions` line (its new number), so a selection whose ends
- * are both unchanged rows can still hold removed lines between them. Removed
- * lines with unchanged ones are the old version's lines, numbered on that
- * side; removed and added lines together are refused; anything else is the
- * new side. An end the patch does not have is not guessed at (unless neither
- * end is in it and both name the same side).
- */
 export function askLines(range: SelectedLineRange, filePatch?: string): { side: "old" | "new"; start: number; end: number } | null {
   const startSide = range.side === "deletions" ? "old" : "new";
   const endSide = (range.endSide ?? range.side) === "deletions" ? "old" : "new";
@@ -77,7 +55,6 @@ export function askLines(range: SelectedLineRange, filePatch?: string): { side: 
   return { side, start: Math.min(...numbers), end: Math.max(...numbers) };
 }
 
-/** Every root under `shell`, Pierre's shadow roots included. */
 function diffRoots(shell: Element): ParentNode[] {
   const roots: ParentNode[] = [];
   const stack: ParentNode[] = [shell];
@@ -89,15 +66,6 @@ function diffRoots(shell: Element): ParentNode[] {
   return roots;
 }
 
-/**
- * A row's number on one side, or null when the row has none there. A changed
- * row carries its own side's number (`data-line`). An unchanged row carries
- * both, and which attribute is which depends on where Pierre drew it: in the
- * split view's removed column (`[data-deletions]`) `data-line` is the old
- * number and `data-alt-line` the new; elsewhere (the unified view, the split
- * view's added column) `data-line` is the new number and `data-alt-line` the
- * old.
- */
 function rowNumber(el: HTMLElement, side: "old" | "new"): number | null {
   const type = el.getAttribute("data-line-type") ?? "";
   const num = (attr: string) => {
@@ -111,11 +79,6 @@ function rowNumber(el: HTMLElement, side: "old" | "new"): number | null {
   return (side === "old") === lineIsOld ? num("data-line") : num("data-alt-line");
 }
 
-/**
- * A line row of a file's diff, on one side. A changed row of that side wins;
- * else an unchanged row whose number on that side is the line (in the split
- * view, preferably in that side's own column).
- */
 export function findDiffLine(shell: Element, side: "old" | "new", line: number): HTMLElement | null {
   const roots = diffRoots(shell);
   let context: HTMLElement | null = null;
@@ -136,21 +99,12 @@ export function findDiffLine(shell: Element, side: "old" | "new", line: number):
 
 let jumpGeneration = 0;
 
-/** Stop any line jump still waiting for its row (another jump, a chapter jump, Back). */
 export function cancelDiffLineJump(): void {
   jumpGeneration++;
 }
 
-/** What the reader does that means it has moved on: a pending jump then gives up. */
 const MOVED_ON_EVENTS = ["wheel", "keydown", "pointerdown"] as const;
 
-/**
- * Scroll a file's line into the middle of the tab once its diff is drawn (it
- * mounts as it comes into view). Only the latest jump lands: a jump still
- * waiting when another starts (or `cancelDiffLineJump`) gives up, and so does
- * one still waiting when the reader scrolls, presses a key or clicks, so a
- * late row never pulls the view away from where the reader went since.
- */
 export async function scrollToDiffLine(path: string, side: "old" | "new", line: number, opts: { tries?: number; everyMs?: number; firstMs?: number } = {}): Promise<boolean> {
   const generation = ++jumpGeneration;
   const tries = opts.tries ?? 40;

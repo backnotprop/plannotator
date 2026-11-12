@@ -15,8 +15,6 @@ describe("PanelManager", () => {
     spies.length = 0;
   });
 
-  // Stubs createWebviewPanel and returns a handle whose `.html` reflects the
-  // HTML the manager assigns to the panel's webview.
   function stubWebviewPanel(): { html: string } {
     const captured = { html: "" };
     const spy = spyOn(vscode.window, "createWebviewPanel");
@@ -70,9 +68,6 @@ describe("PanelManager", () => {
     expect(captured.html).toContain('"plannotator-clipboard-data"');
   });
 
-  // #1583: the webview sandbox has no allow-popups, so "View on Bitbucket
-  // after submitting" (and every target=_blank link) only works through
-  // vscode.env.openExternal.
   it("opens http(s) links the app frame forwards in the external browser", async () => {
     let onMessage: ((msg: unknown) => Promise<void> | void) | null = null;
     const spy = spyOn(vscode.window, "createWebviewPanel");

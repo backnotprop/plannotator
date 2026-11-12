@@ -1,12 +1,3 @@
-/**
- * The builder's MCP server, minus transport: answers `initialize`, `ping`,
- * `tools/list` and `tools/call` for one session. The relay hands it each
- * JSON-RPC line the agent's MCP client sends through `dist/guide-mcp.cjs`.
- *
- * Hand-written on purpose: four methods, no SDK in the relay path, and the
- * draft stays in the extension (SPEC 4.4, "How the tools reach the agent").
- */
-
 export interface McpToolDefinition {
   readonly name: string;
   readonly title?: string;
@@ -21,7 +12,6 @@ export interface McpToolResult {
 }
 
 export interface McpToolHandler {
-  /** What the server tells the agent it is for (MCP `initialize` instructions); the builder's text when absent. */
   instructions?: string;
   listTools(): readonly McpToolDefinition[];
   callTool(name: string, args: unknown): Promise<McpToolResult>;
@@ -36,7 +26,6 @@ export interface JsonRpcResponse {
   error?: { code: number; message: string };
 }
 
-/** Versions this server knows. A client asking for one gets it back; otherwise the newest here. */
 export const MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
 
 export const MCP_SERVER_NAME = "plannotator-guide-builder";
@@ -47,10 +36,9 @@ export function createMcpMessageHandler(handler: McpToolHandler, serverVersion: 
     const msg = message as { id?: JsonRpcId; method?: unknown; params?: unknown };
     const isRequest = "id" in msg && msg.id !== undefined;
     if (typeof msg.method !== "string") {
-      // A response to something we never sent, or garbage: nothing to answer.
       return isRequest ? errorResponse(msg.id ?? null, -32600, "Invalid request") : null;
     }
-    if (!isRequest) return null; // notifications (initialized, cancelled, …)
+    if (!isRequest) return null;
     const id = msg.id ?? null;
     const params = (msg.params && typeof msg.params === "object" ? msg.params : {}) as Record<string, unknown>;
     switch (msg.method) {
@@ -68,7 +56,6 @@ export function createMcpMessageHandler(handler: McpToolHandler, serverVersion: 
         return result(id, {});
       case "tools/list":
         return result(id, {
-          // Registered as core defines them (name, title, description, inputSchema, annotations).
           tools: handler.listTools().map((t) => ({
             name: t.name,
             ...(t.title && { title: t.title }),

@@ -2,11 +2,6 @@ import React, { useState } from "react";
 import type { ChapterAnswers } from "../reader-protocol";
 import { post } from "./bridge";
 
-/**
- * At the foot of a chapter's prose: "Ask about this chapter…" and the
- * chapter's answers ("Answers · N"). An answer opens as a page beside the
- * guide (the Answer tab). Without an agent to ask, only the answers show.
- */
 export function ChapterAsk({ chapter, agent, busy, answers }: { chapter: number; agent: string | null; busy: boolean; answers: ChapterAnswers["items"] }) {
   const [text, setText] = useState("");
   const ask = () => {

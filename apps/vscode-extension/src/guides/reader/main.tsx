@@ -1,14 +1,3 @@
-/**
- * The Guide tab: Plannotator's guide reader (the guide-viewer chain over
- * review-editor's AllFilesCodeView, the components guides.show and the review
- * app render) hosted in a VS Code webview. The extension is the host: it
- * sends the guide (`init`), answers hovers and references from the language
- * server, opens files and diffs beside, keeps the chapter ticks and asks the
- * agent. This page runs only the extension's own script.
- *
- * Boot order: a memory settings backend before anything reads a setting;
- * then wait for `init`; then the worker pool (best effort) and the reader.
- */
 import "./reader.css";
 import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
@@ -23,14 +12,11 @@ import { ReaderApp } from "./App";
 import { themeSupportsHalf } from "@plannotator/ui/utils/themeRegistry";
 import { vscodeThemeOf as readTheme } from "./theme";
 
-/** The theme, with the palette only when it draws that mode (else Dark+ / Light+). */
 function vscodeThemeOf(body: HTMLElement) {
   const t = readTheme(body);
   return themeSupportsHalf(t.palette, t.mode) ? t : { mode: t.mode, palette: "dark-plus" };
 }
 
-// Settings live in memory for the life of the tab: nothing here is a choice
-// to keep (the editor's theme and font decide the look).
 const memory = new Map<string, string>();
 setStorageBackend({
   getItem: (key) => memory.get(key) ?? null,
@@ -40,7 +26,6 @@ setStorageBackend({
 
 document.documentElement.classList.add("pn-vscode");
 
-/** Follows VS Code's theme: its kind decides light or dark, its name the syntax colors. */
 function VsCodeTheme() {
   const { setMode, setHalfTheme } = useTheme();
   useEffect(() => {
@@ -82,6 +67,5 @@ onMessage((msg) => {
     root.render(shell(factory ? <PortableWorkerPool workerFactory={factory}>{app}</PortableWorkerPool> : app));
   });
 });
-// Start preparing the worker while the guide is on its way.
 workerFactory = preparePortableWorkerFactory();
 post({ type: "ready" });

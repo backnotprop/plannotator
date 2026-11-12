@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import { ANSWER_BOOTSTRAP, answerThemeCss, buildAnswerDocument, readAnswerMessage } from "./answer-frame";
 
-// A DOM for this file only (the package's run keeps native globals otherwise).
 let registrator: { register(): void; unregister(): Promise<void> } | null = null;
 beforeAll(async () => {
   if (typeof document !== "undefined") return;

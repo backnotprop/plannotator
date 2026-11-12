@@ -1,25 +1,4 @@
-/**
- * Theme-bridge precedence tests (issue #1053).
- *
- * The bridge writes INLINE custom properties on <html>, the element
- * ThemeProvider stamps `theme-<palette>` / `light` on. An inline property beats
- * every `.theme-*` rule, so a bridge that paints unconditionally makes the
- * user's own theme choice unreachable: picking Light in a dark IDE used to
- * leave dark VS Code tokens under a `.light` class. These tests pin who wins.
- *
- * The listener is a string of browser JS, so it is evaluated with `window`,
- * `document` and `MutationObserver` passed in as parameters. That shadows the
- * globals, which both isolates each test (its own root element, its own message
- * listeners, its own cookie jar) and keeps the harness honest: only the two
- * DOM surfaces the bridge is allowed to read are provided.
- *
- * Requires DOM_TESTS=1 (happy-dom preload). Run:
- *   DOM_TESTS=1 bun test apps/vscode-extension/src/vscode-theme.test.ts
- */
 /// <reference lib="dom" />
-// DOM types are pulled in for this file alone: the extension host is Node and
-// its tsconfig deliberately ships `lib: ["ESNext"]`, so the source cannot reach
-// for browser globals by accident. Only this harness runs in a DOM.
 import { describe, it, expect } from "bun:test";
 import { buildThemeListenerScript, DEFAULT_THEME_CLASS } from "./vscode-theme";
 import {
@@ -36,7 +15,6 @@ interface ThemeMessage {
   themeKind: string;
 }
 
-/** A dark VS Code theme, as the wrapper page reports it. */
 const IDE_DARK: ThemeMessage = {
   type: "plannotator-vscode-theme",
   themeKind: "vscode-dark",
@@ -46,7 +24,6 @@ const IDE_DARK: ThemeMessage = {
   },
 };
 
-/** A light VS Code theme. */
 const IDE_LIGHT: ThemeMessage = {
   type: "plannotator-vscode-theme",
   themeKind: "vscode-light",
@@ -57,16 +34,12 @@ const IDE_LIGHT: ThemeMessage = {
 };
 
 interface Bridge {
-  /** Stands in for the app's <html>, which ThemeProvider owns. */
   root: HTMLElement;
-  /** Deliver a theme message from the wrapper webview. */
   post: (msg: ThemeMessage) => void;
-  /** Whether the bridge painted a given Plannotator variable. */
   override: (name: string) => string;
   vscodeFlag: () => unknown;
 }
 
-/** Evaluate the injected listener against an isolated DOM. */
 function mountBridge(classes: string, cookie = ""): Bridge {
   const root = document.createElement("html");
   root.className = classes;
@@ -98,7 +71,6 @@ function mountBridge(classes: string, cookie = ""): Bridge {
   };
 }
 
-/** Let a MutationObserver callback run. */
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -109,11 +81,9 @@ describe.skipIf(!hasDom)("theme bridge precedence", () => {
 
     bridge.post(IDE_DARK);
 
-    // The reported bug: dark editor tokens painted over a light surface.
     expect(bridge.override("--background")).toBe("");
     expect(bridge.override("--foreground")).toBe("");
     expect(bridge.override("--muted")).toBe("");
-    // And the class the user's choice produced survives.
     expect(bridge.root.classList.contains("light")).toBe(true);
   });
 
@@ -124,12 +94,10 @@ describe.skipIf(!hasDom)("theme bridge precedence", () => {
 
     expect(bridge.override("--background")).toBe("#1e1e1e");
     expect(bridge.override("--foreground")).toBe("#d4d4d4");
-    // --muted is derived by brightening the editor background for a dark IDE.
     expect(bridge.override("--muted")).toBe("rgb(50,50,50)");
   });
 
   it("never stands in for a palette the user picked", () => {
-    // Modes agree, so only the palette choice keeps the bridge off.
     const bridge = mountBridge("theme-nord", "plannotator-theme=dark");
 
     bridge.post(IDE_DARK);
@@ -142,7 +110,6 @@ describe.skipIf(!hasDom)("theme bridge precedence", () => {
     bridge.post(IDE_DARK);
     expect(bridge.override("--background")).toBe("#1e1e1e");
 
-    // What ThemeProvider.applyThemeClasses does when Light is chosen.
     bridge.root.className = `${DEFAULT_THEME_CLASS} light`;
     await settle();
 
@@ -151,8 +118,6 @@ describe.skipIf(!hasDom)("theme bridge precedence", () => {
   });
 
   it("maps System onto the IDE's theme kind", () => {
-    // Inside VS Code the surrounding system is the IDE, so System defers to it
-    // even though the app rendered dark from its own signal.
     const bridge = mountBridge(DEFAULT_THEME_CLASS, "plannotator-theme=system");
 
     bridge.post(IDE_LIGHT);
@@ -171,8 +136,6 @@ describe.skipIf(!hasDom)("theme bridge precedence", () => {
   });
 
   it("waits for ThemeProvider to mount before deciding", async () => {
-    // The wrapper posts on load, which can beat the app's first render; the
-    // class list is empty until then and must not be read as "default palette".
     const bridge = mountBridge("", "plannotator-theme=dark");
     bridge.post(IDE_DARK);
     expect(bridge.override("--background")).toBe("");
@@ -184,13 +147,9 @@ describe.skipIf(!hasDom)("theme bridge precedence", () => {
   });
 
   it("marks the window so the app knows it runs inside VS Code", () => {
-    // useEditorAnnotations keys off this flag; the bridge is where it is set.
     expect(mountBridge(DEFAULT_THEME_CLASS).vscodeFlag()).toBe(true);
   });
 
-  // The IDE's theme changing swaps classes and tokens outside ThemeProvider.
-  // Without the hold, every element runs theme.css's 150 ms colour transition
-  // and the panel freezes, then fades; a hold that stays stops hover fades.
   it("lands an IDE theme change in one frame, then lets transitions back", async () => {
     const bridge = mountBridge(DEFAULT_THEME_CLASS, "plannotator-theme=system");
 
@@ -203,15 +162,7 @@ describe.skipIf(!hasDom)("theme bridge precedence", () => {
   });
 });
 
-/**
- * The seed and the bridge are correct on their own and were still wrong
- * together: seeding only an ABSENT mode meant an upgraded panel kept the `dark`
- * the app had auto-persisted, and the bridge — correctly — read that as a
- * choice and stayed off. These run the real seeding function into the real
- * bridge, which is the only place that gap is visible.
- */
 describe.skipIf(!hasDom)("panel cookie seed feeding the bridge", () => {
-  /** The jar the proxy hands the page, as a cookie string. */
   function seededCookie(store: Record<string, string>): string {
     return Object.entries(applyPanelCookieDefaults(store))
       .map(([k, v]) => `${k}=${v}`)
@@ -219,8 +170,6 @@ describe.skipIf(!hasDom)("panel cookie seed feeding the bridge", () => {
   }
 
   it("upgrades a legacy dark panel to follow a light IDE (issue #1053)", () => {
-    // A panel that ran before the seeding rules: `dark` in the store, written
-    // by the app on first mount, never chosen by anyone.
     const bridge = mountBridge(
       DEFAULT_THEME_CLASS,
       seededCookie({ "plannotator-theme": "dark" }),

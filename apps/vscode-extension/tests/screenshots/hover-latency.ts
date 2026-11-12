@@ -1,15 +1,3 @@
-/**
- * The Guide tab's hover check (manual, not CI): drives a scratch
- * `code serve-web` (see make-ts-fixture.ts) in headless Chromium, opens the
- * saved guide in the Guide tab, hovers real tokens in its diffs with the
- * mouse (the first hover of each position: cold), then asks the same
- * positions again straight through the reader's bridge (warm, no dwell, no
- * cache), and prints the round trips the reader measured (reader → extension
- * → `vscode.executeHoverProvider` + `executeDefinitionProvider` → reader).
- *
- *   bun tests/screenshots/hover-latency.ts <url> <out dir> [count=50]
- */
-
 import { chromium, type Frame, type Page } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,7 +38,6 @@ async function webviewFrame(page: Page, selector: string, timeoutMs = 30_000): P
       try {
         if (await frame.locator(selector).count()) return frame;
       } catch {
-        // detached
       }
     }
     await sleep(300);
@@ -103,8 +90,6 @@ async function main(): Promise<void> {
   await page.screenshot({ path: join(outDir, "reader-open.png") });
   console.log(`guide tab open: ${openMs} ms; highlighter: ${await reader.evaluate(() => document.documentElement.dataset.pnHighlighter)}`);
 
-  // Cold: real mouse hovers on identifier tokens the pointer can reach (hit-tested through
-  // Pierre's shadow roots), one position each, scrolling down the guide between rounds.
   const frameBox = await (await reader.frameElement()).boundingBox();
   if (!frameBox) throw new Error("no reader frame box");
   const tried = new Set<string>();
@@ -164,7 +149,6 @@ async function main(): Promise<void> {
   type Timing = { ms: number; serverMs: number | null; at: { path: string; side: string; line: number; character: number; token: string }; ok: boolean; signature: string | null; doc: boolean; def: string | null };
   const cold = (await reader.evaluate(() => (window as unknown as { __pnHoverTimings: unknown[] }).__pnHoverTimings.slice())) as Timing[];
   const positions = cold.map((c) => c.at);
-  // Warm: the same positions again, through the bridge (no dwell, no cache in the reader), twice.
   const warm1 = (await reader.evaluate((list) => (window as unknown as { __pnMeasureHover(l: unknown[]): Promise<number[]> }).__pnMeasureHover(list), positions)) as number[];
   const warm2 = (await reader.evaluate((list) => (window as unknown as { __pnMeasureHover(l: unknown[]): Promise<number[]> }).__pnMeasureHover(list), positions)) as number[];
   const all = (await reader.evaluate(() => (window as unknown as { __pnHoverTimings: unknown[] }).__pnHoverTimings.slice())) as Timing[];

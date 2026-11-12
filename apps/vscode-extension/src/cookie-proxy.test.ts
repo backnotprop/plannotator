@@ -11,8 +11,6 @@ import type { CookieProxy } from "./cookie-proxy";
 
 describe("applyPanelCookieDefaults", () => {
   it("seeds System mode for a panel that has never stored one", () => {
-    // Plannotator's own default is Dark; inside VS Code the panel should follow
-    // the IDE instead, which is what System resolves to there (issue #1053).
     expect(applyPanelCookieDefaults({})["plannotator-theme"]).toBe("system");
   });
 
@@ -29,11 +27,6 @@ describe("applyPanelCookieDefaults", () => {
 });
 
 describe("applyPanelCookieDefaults: legacy auto-seeded mode", () => {
-  /**
-   * What a panel opened before the seeding rules existed carries: the app
-   * persisted the mode it resolved on first mount, and its default is Dark.
-   * The user never chose it, and nothing in the store says so.
-   */
   const legacyStore = {
     "plannotator-identity": "tater-42",
     "plannotator-theme": "dark",
@@ -43,7 +36,6 @@ describe("applyPanelCookieDefaults: legacy auto-seeded mode", () => {
   it("re-seeds a legacy dark store to System so the panel follows the IDE again", () => {
     const seeded = applyPanelCookieDefaults(legacyStore);
     expect(seeded["plannotator-theme"]).toBe("system");
-    // Only the mode is reconsidered; the rest of the store is untouched.
     expect(seeded["plannotator-identity"]).toBe("tater-42");
     expect(seeded["plannotator-dark-theme"]).toBe("plannotator");
   });
@@ -54,8 +46,6 @@ describe("applyPanelCookieDefaults: legacy auto-seeded mode", () => {
   });
 
   it("leaves Dark alone once the store has been marked", () => {
-    // The case that must never be clobbered: a Dark the user picked after the
-    // migration already ran. The marker is what tells the two apart.
     const chosen = applyPanelCookieDefaults({
       ...legacyStore,
       [PANEL_SEED_COOKIE]: PANEL_SEED_VERSION,
@@ -64,7 +54,6 @@ describe("applyPanelCookieDefaults: legacy auto-seeded mode", () => {
   });
 
   it("runs at most once: re-seeded, then Dark chosen, then left alone", () => {
-    // The store as it round-trips: seeded jar -> page -> globalState -> jar.
     const migrated = applyPanelCookieDefaults(legacyStore);
     expect(migrated["plannotator-theme"]).toBe("system");
 
@@ -73,8 +62,6 @@ describe("applyPanelCookieDefaults: legacy auto-seeded mode", () => {
   });
 
   it("never re-seeds a mode the auto-seed could not have written", () => {
-    // Dark is the app's default and always has been, so Light and System are
-    // choices no matter how old the store is.
     for (const mode of ["light", "system"]) {
       const seeded = applyPanelCookieDefaults({ ...legacyStore, "plannotator-theme": mode });
       expect(seeded["plannotator-theme"]).toBe(mode);
@@ -157,7 +144,6 @@ describe("createCookieProxy", () => {
   });
 
   it("proxies requests to upstream and injects script into HTML", async () => {
-    // Start a simple upstream server
     const { createServer } = await import("http");
     const upstream = createServer((_, res) => {
       res.writeHead(200, { "content-type": "text/html" });
@@ -174,21 +160,16 @@ describe("createCookieProxy", () => {
         onSaveCookies: () => {},
       });
 
-      // Set upstream by rewriting a URL
       const url = proxy.rewriteUrl(`http://127.0.0.1:${upstreamPort}/`);
       const res = await fetch(url);
       const html = await res.text();
 
-      // Should contain the injected script
       expect(html).toContain("/___ext/cookies");
       expect(html).toContain("/___ext/close");
-      // Should contain the virtual cookie store with saved cookies
       expect(html).toContain('"plannotator-identity":"tater-42"');
       expect(html).toContain('"other-cookie":"ignore"');
-      // Should forward keystrokes to the parent for VS Code keybindings
       expect(html).toContain('type:"plannotator-keydown"');
       expect(html).toContain("var keyBridge=(" + KEY_BRIDGE_SOURCE + ")(window,document,");
-      // Should still contain original content
       expect(html).toContain("<title>Test</title>");
       expect(html).toContain("Hello");
     } finally {
@@ -243,7 +224,6 @@ describe("the upstream connection for a localhost subdomain (#2184)", () => {
     const upstreamPort = (upstream.address() as { port: number }).port;
     try {
       proxy = await createCookieProxy({ loadCookies: () => "", onSaveCookies: () => {} });
-      // A name no resolver needs to know: the pinned address reaches the upstream.
       const res = await fetch(proxy.rewriteUrl(`http://pn-proxy-test-2184.localhost:${upstreamPort}/api/plan`));
       expect(await res.json()).toEqual({ ok: true });
       expect(seenHost).toBe(`pn-proxy-test-2184.localhost:${upstreamPort}`);
@@ -260,13 +240,6 @@ describe("the upstream connection for a localhost subdomain (#2184)", () => {
     });
 });
 
-/**
- * The key forwarder runs in the proxied page. Here it is evaluated from the
- * same source string and installed on a stand-in window: a plain EventTarget
- * (this suite runs without DOM globals), so the test process's own globals are
- * never touched. Keyboard events are plain cancelable Events carrying the
- * fields the forwarder reads.
- */
 describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => {
   type Posted = { type: string; event?: { key: string; metaKey: boolean } };
 
@@ -314,14 +287,11 @@ describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => 
     }) as Event & { key: string; metaKey: boolean };
   }
 
-  /** One task later: when the forwarder decides. */
   const afterDispatch = () => new Promise((r) => setTimeout(r, 0));
   const keydowns = (posted: Posted[]) => posted.filter((m) => m.type === "plannotator-keydown");
 
   it("does not forward a key the app took (the ⌘B / ⌘. / ⌘⇧G double action)", async () => {
     const t = install();
-    // The app's listener is registered after the forwarder, as the review
-    // app's window listeners are (the forwarder runs from <head>).
     t.win.addEventListener("keydown", (e) => {
       const ev = e as Event & { key: string; metaKey: boolean };
       const k = ev.key.toLowerCase();
@@ -338,7 +308,7 @@ describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => 
     const t = install();
     t.win.addEventListener("keydown", () => {});
     t.press({ key: "p", metaKey: true, shiftKey: true, code: "KeyP" });
-    expect(keydowns(t.posted)).toEqual([]); // not before the event finished
+    expect(keydowns(t.posted)).toEqual([]);
     await afterDispatch();
     const sent = keydowns(t.posted);
     expect(sent).toHaveLength(1);
@@ -354,7 +324,6 @@ describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => 
     t.press({ key: "w", metaKey: true, code: "KeyW" });
     t.press({ key: "Tab", ctrlKey: true, code: "Tab" });
     t.press({ key: "Tab", ctrlKey: true, shiftKey: true, code: "Tab" });
-    // Not on the list: the page took them, so VS Code does not get them.
     t.press({ key: "e", metaKey: true, code: "KeyE" });
     t.press({ key: "F", metaKey: true, shiftKey: true, code: "KeyF" });
     t.press({ key: "W", metaKey: true, shiftKey: true, code: "KeyW" });
@@ -364,7 +333,6 @@ describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => 
 
   it("decides on what the page did during dispatch, not before it", async () => {
     const t = install();
-    // A listener that decides late in the same dispatch still counts.
     t.win.addEventListener("keydown", (e) => {
       queueMicrotask(() => {});
       e.preventDefault();
@@ -448,7 +416,7 @@ describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => 
     expect(t.press({ key: "a", ctrlKey: true, altKey: true }).defaultPrevented).toBe(false);
     expect(select).not.toHaveBeenCalled();
     await afterDispatch();
-    expect(keydowns(t.posted)).toHaveLength(1); // Ctrl+Alt+A follows normal key routing.
+    expect(keydowns(t.posted)).toHaveLength(1);
   });
 
   it("page select-all, undo and redo stay native: not prevented, not forwarded", async () => {

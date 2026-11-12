@@ -1,10 +1,3 @@
-/**
- * The Guides webviews (one bundle, three modes): the "Guided Reviews" home
- * tab, the generating view and the answer tab. (The Guide tab is the guide
- * reader, `src/guides/reader/`.) It draws the state the extension sends and
- * reports clicks by name; it runs no agent code.
- */
-
 import "./style.css";
 import type {
   ActivityRow,
@@ -68,10 +61,6 @@ function render(): void {
   if (document.scrollingElement) document.scrollingElement.scrollTop = scrollTop;
 }
 
-// ---------------------------------------------------------------------------
-// Home
-// ---------------------------------------------------------------------------
-
 function renderHome(s: HomeViewState): HTMLElement {
   const repoLine = s.repo
     ? h("div", { class: "pn-meta" }, icon("repo"), ` ${s.repo.name}`, h("span", { class: "pn-dot" }, "·"), icon("git-branch"), ` ${s.repo.branch}`, h("span", { class: "pn-dot" }, "·"), s.repo.host)
@@ -129,7 +118,6 @@ function renderHome(s: HomeViewState): HTMLElement {
     s.waiting.length === 0
       ? h("div", { class: "pn-empty" }, s.ghNote ?? "No pull requests are waiting on your review.")
       : h("div", { class: "pn-rows" }, ...s.waiting.map((w) =>
-          // The row opens the PR's guided review (or starts one); only the small button goes to GitHub.
           h("div", { class: "pn-row pn-row-split" },
             h("button", { class: "pn-row-open", title: w.inThisRepo || !s.repo ? "Open its guided review, or start one" : `${w.sub.split(" · ")[0]} is not open here: Guided Reviews clones it into its own storage`, onclick: () => command("openPullRequest", { number: w.number, url: w.url }) },
               h("div", { class: "pn-row-main" }, h("div", { class: "pn-row-title" }, `#${w.number} ${w.title}`), h("div", { class: "pn-row-sub" }, w.sub)),
@@ -154,10 +142,6 @@ function progress(done: number, total: number): HTMLElement {
   if (total > 0 && done === total) return h("span", { class: "pn-ok" }, "Reviewed");
   return h("span", { class: "pn-progress" }, h("span", { class: "pn-bar" }, h("span", { class: "pn-bar-fill", style: `width:${pct}%` })), ` ${done} of ${total}`);
 }
-
-// ---------------------------------------------------------------------------
-// Generating
-// ---------------------------------------------------------------------------
 
 const CHAPTER_COLORS = ["var(--pn-c1)", "var(--pn-c2)", "var(--pn-c3)", "var(--pn-c4)", "var(--pn-c5)", "var(--pn-c6)"];
 
@@ -253,7 +237,6 @@ function toolIcon(title: string): string {
   return "tools";
 }
 
-/** A tool title with its file locations as links. */
 function toolTitle(a: ActivityRow): Node[] {
   const out: Node[] = [];
   let title = a.title;
@@ -276,11 +259,6 @@ function locationLink(loc: { path: string; line?: number }): HTMLElement {
   return h("a", { class: "pn-loc", href: "#", onclick: (e) => { e.preventDefault(); command("openLocation", loc.path, loc.line ?? null); } }, loc.path);
 }
 
-// ---------------------------------------------------------------------------
-// Answer tab
-// ---------------------------------------------------------------------------
-
-/** The page's frame, kept across renders of the same answer so its scripts keep their state. */
 let answerFrameCache: { key: string; frame: HTMLIFrameElement } | null = null;
 
 function renderAnswer(s: AnswerViewState): HTMLElement {
@@ -334,7 +312,6 @@ function cachedFrame(s: AnswerViewState): HTMLIFrameElement {
   return frame;
 }
 
-/** While the agent works: what it does, what it writes, Stop. Also the end of a run that failed. */
 function answerWork(s: AnswerViewState, live: boolean): HTMLElement {
   const elapsed = h("span", {}, fmtElapsed((s.endedAt ?? Date.now()) - s.startedAt));
   if (live) elapsedTimer = setInterval(() => (elapsed.textContent = fmtElapsed(Date.now() - s.startedAt)), 1000);
@@ -373,10 +350,6 @@ function followUpBox(s: AnswerViewState): HTMLElement {
   return h("div", { class: "pn-ask pn-ask-follow" }, icon("sparkle", "pn-ask-icon"), input, h("span", { class: "pn-muted pn-ask-hint" }, "continues this conversation"));
 }
 
-// ---------------------------------------------------------------------------
-// Links: click opens, hover shows the code-intelligence popover
-// ---------------------------------------------------------------------------
-
 let nextReq = 1;
 const linkRequests = new Map<number, (info: LinkInfo) => void>();
 let popover: HTMLElement | null = null;
@@ -392,7 +365,6 @@ document.addEventListener("click", (e) => {
   const ext = e.target instanceof Element ? e.target.closest("[data-external]") : null;
   if (ext) {
     e.preventDefault();
-    // In an answer tab the link is the agent's: open it only after the confirm (openAnswerExternal).
     if (state?.mode === "answer") command("openAnswerExternal", state.id, ext.getAttribute("data-external"));
     else command("openExternal", ext.getAttribute("data-external"));
     return;

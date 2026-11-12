@@ -1,8 +1,3 @@
-/**
- * The overview diagram's source before it reaches Mermaid: an agent cannot
- * loosen Mermaid's security level or bind a click to anything but a guide link.
- */
-
 import { describe, expect, it } from "bun:test";
 import { splitMermaidClicks } from "./adapter";
 import { MERMAID_CONFIG } from "../../../../../packages/ui/utils/mermaid";
@@ -19,7 +14,6 @@ describe("guide diagram source", () => {
     expect(source).not.toContain("securityLevel");
     expect(source).not.toContain("%%{");
     expect(source).toContain("a-->b");
-    // The renderer's own pin, which the directive would have tried to override.
     expect(MERMAID_CONFIG.securityLevel).toBe("strict");
   });
 

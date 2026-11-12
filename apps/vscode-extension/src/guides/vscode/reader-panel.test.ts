@@ -38,7 +38,6 @@ describe("messages between the Guide tab and the extension", () => {
     const p = new ReaderPanel(vscode.Uri.file("/ext"), "Guide", { init: () => init, onMessage: (m) => void got.push(m), onReady: () => ready++ });
     const page = panels().at(-1)!;
     p.send({ type: "reveal", chapter: 2 });
-    // A hover answer for a page that is not there yet is dropped (the page will ask again).
     p.send({ type: "hover", reqId: 1, answer: null });
     expect(page.posted).toEqual([]);
     page.receive({ type: "ready" });
@@ -57,7 +56,7 @@ describe("messages between the Guide tab and the extension", () => {
     const got: unknown[] = [];
     const p = new ReaderPanel(vscode.Uri.file("/ext"), "Guide", { init: () => init, onMessage: (m) => void got.push(m) });
     const page = panels().at(-1)!;
-    expect(await p.checkMermaid("graph TD; A-->B")).toBeNull(); // not loaded: not checked
+    expect(await p.checkMermaid("graph TD; A-->B")).toBeNull();
     page.receive({ type: "ready" });
     const pending = p.checkMermaid("graph TD; A-->B");
     const ask = page.posted.at(-1) as { type: string; reqId: number; source: string };
@@ -76,7 +75,6 @@ describe("messages between the Guide tab and the extension", () => {
     expect(p.diagramEngineUnavailable).toBe(false);
     page.receive({ type: "mermaidResult", reqId: ask.reqId, ok: false, unavailable: true, message: "Failed to fetch dynamically imported module" });
     expect(await pending).toBeNull();
-    // Said once, so the extension stops asking a tab that has no engine.
     expect(p.diagramEngineUnavailable).toBe(true);
   });
 });

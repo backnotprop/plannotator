@@ -1,18 +1,3 @@
-/**
- * Screenshots of "Ask the agent" in a real VS Code: a scratch `code serve-web`
- * (see make-fixture.ts; the FAKE agent answers with the fixture's ask turn),
- * driven in headless Chromium. It writes a guide, opens chapter 2's diff,
- * selects lines 25–31, and takes: the context menu, the question box under
- * the lines, the box while the agent works, the drawn answer beside the diff,
- * the chapter view's answers, a follow-up in the box, the box's gear, and the
- * box in VS Code's Comments panel. Manual check, not CI:
- *
- *   bun tests/screenshots/ask.ts <url> <out dir>
- *
- * Start serve-web with FAKE_AGENT_ASK_HOLD=6000 so the working state holds
- * long enough to be seen.
- */
-
 import { chromium, type Frame, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -62,7 +47,6 @@ async function webviewFrame(page: Page, selector: string, timeoutMs = 30_000): P
       try {
         if (await frame.locator(selector).count()) return frame;
       } catch {
-        // detached
       }
     }
     await sleep(300);
@@ -76,7 +60,6 @@ async function quickInputVisible(page: Page): Promise<boolean> {
 
 let activePage: Page | null = null;
 
-/** What the box shows: its header, comments, links, buttons, spinners, and where the focus is. */
 async function report(page: Page, widget: ReturnType<Page["locator"]>, name: string): Promise<void> {
   const info = await widget.evaluate((el) => ({
     title: el.querySelector(".head")?.textContent?.trim() ?? "",
@@ -120,10 +103,8 @@ async function main(): Promise<void> {
   await command(page, "View: Close Secondary Side Bar");
   await sleep(800);
 
-  // Write a guide of the PR for this branch (the FAKE agent builds it).
   await page.locator('.activitybar [aria-label^="Guided Reviews"]').first().click();
   await sleep(2500);
-  // Every Guides webview renders the state VS Code's host sends it (a blank view means its messages were dropped).
   const home = await webviewFrame(page, ".pn-home h1", 30_000);
   console.log(`check dashboard renders: ${(await home.locator(".pn-home h1").textContent()) ?? ""}`);
   await command(page, "Guided Reviews: New Guided Review");
@@ -140,11 +121,9 @@ async function main(): Promise<void> {
   console.log(`check guide view renders: ${(await guideTab.locator(".pn-guide h1").textContent()) ?? ""}`);
   await sleep(2500);
 
-  // Chapter 2's first file: deliver.ts.
   const guide = await webviewFrame(page, ".pn-guide", 30_000);
   await guide.locator(".pn-chapter").nth(1).click();
   await sleep(5000);
-  // Close the Guide tab's group clutter: focus the diff, go to line 25, select 25–31.
   const modified = page.locator(".monaco-diff-editor .editor.modified, .monaco-diff-editor .modified-in-monaco-diff-editor").first();
   await modified.click({ position: { x: 300, y: 200 } });
   await page.keyboard.press("Control+G");
@@ -168,14 +147,11 @@ async function main(): Promise<void> {
   const selectionBefore = await page.locator(".statusbar-item", { hasText: /^Ln / }).first().textContent();
   await item.click();
 
-  // The question box: a comment thread under lines 25–31.
   const widget = page.locator(".review-widget").last();
   await widget.waitFor({ timeout: 15_000 });
   await sleep(1500);
   await report(page, widget, "box");
   console.log(`check the reader's selection is kept: before "${selectionBefore}", after "${await page.locator(".statusbar-item", { hasText: /^Ln / }).first().textContent()}"`);
-  // VS Code opens its Comments panel the first time a file shows comments in a window
-  // (`comments.openView`, default "firstFile"); the box is listed there. Shown once, then closed.
   const panelOpened = await page.locator(".part.panel .composite-bar .action-item.checked", { hasText: "Comments" }).count();
   console.log(`check comments panel opened by itself: ${panelOpened > 0}`);
   await shot(page, "2a-first-box-opens-comments-panel");
@@ -183,7 +159,6 @@ async function main(): Promise<void> {
     await page.locator(".part.panel .title-actions [aria-label^='Hide Panel'], .part.panel .global-actions [aria-label^='Hide Panel'], .part.panel [aria-label^='Close Panel']").first().click().catch(() => {});
     await sleep(800);
   }
-  // The field takes one click (no stable API focuses a comment thread's field).
   const reply = widget.locator(".comment-form textarea, .comment-form .monaco-editor").first();
   const folded = widget.locator(".review-thread-reply-button");
   console.log(`check the field shows: ${await folded.isVisible().catch(() => false) ? "folded to its button" : await reply.isVisible().catch(() => false) ? "open" : "NOT SHOWN"}`);
@@ -210,21 +185,18 @@ async function main(): Promise<void> {
   await page.mouse.move(1590, 950);
   await shot(page, "4-answer");
 
-  // The agent's page forges the tab's state from inside its frame: the tab must not change.
   await drawn.evaluate(() => {
     const forged = { mode: "generating", id: "forged", status: "running", statusMessage: null, kicker: "", title: "FORGED", sub: "", agent: "x", modelEffort: "", startedAt: 0, endedAt: null, cost: null, activity: [], chapters: [], unplaced: [], left: [], summary: "", savedGuideId: null, signIn: null, memoryOnly: false, pendingPermissions: [{ id: 1, title: "Run rm -rf ~", kind: "execute", target: null, options: [{ optionId: "a", name: "Allow", kind: "allow_once" }] }], approvals: { auto: false, mode: null }, offerAutoApprove: true, bottlenecks: [] };
     for (const w of [window.parent, window.top]) w?.postMessage({ type: "state", state: forged }, "*");
   });
   await sleep(1500);
   console.log(`check forged state ignored: answer=${await answer.locator(".pn-answer").count()} approval=${await answer.locator(".pn-approval").count()} forgedTitle=${await answer.locator("text=FORGED").count()}`);
-  // A page with a real origin of its own elsewhere in the window (here the workbench itself) walks
-  // every frame and posts a forged state: the tab must not change either.
   await page.evaluate(() => {
     const forged = { mode: "generating", id: "forged2", status: "running", statusMessage: null, kicker: "", title: "FORGED2", sub: "", agent: "x", modelEffort: "", startedAt: 0, endedAt: null, cost: null, activity: [], chapters: [], unplaced: [], left: [], summary: "", savedGuideId: null, signIn: null, memoryOnly: false, pendingPermissions: [{ id: 1, title: "Run rm -rf ~", kind: "execute", target: null, options: [{ optionId: "a", name: "Allow", kind: "allow_once" }] }], approvals: { auto: false, mode: null }, offerAutoApprove: true, bottlenecks: [] };
     const walk = (w: Window, depth: number) => {
       for (let i = 0; i < w.frames.length; i++) {
         const f = w.frames[i];
-        try { f.postMessage({ type: "state", state: forged }, "*"); } catch { /* ignore */ }
+        try { f.postMessage({ type: "state", state: forged }, "*"); } catch { }
         if (depth < 4) walk(f, depth + 1);
       }
     };
@@ -233,13 +205,11 @@ async function main(): Promise<void> {
   await sleep(1500);
   console.log(`check foreign-origin forgery ignored: answer=${await answer.locator(".pn-answer").count()} approval=${await answer.locator(".pn-approval").count()} forgedTitle=${await answer.locator("text=FORGED2").count()}`);
 
-  // The chapter view's ask box and answers.
   const chapter = await webviewFrame(page, ".pn-answers", 30_000);
   await chapter.locator(".pn-answer-row").first().hover();
   await sleep(600);
   await shot(page, "5-chapter-answers");
 
-  // A link in the agent's page opens its code in the diff's group; a chapter link opens the chapter.
   const page2 = await webviewFrame(page, 'a[href="code:src/webhooks/deliver.ts#L25-L31"]', 30_000);
   await page.locator(".statusbar").click({ position: { x: 5, y: 5 } }).catch(() => {});
   await page2.locator('a[href="chapter:4"]').click();
@@ -253,7 +223,6 @@ async function main(): Promise<void> {
   console.log(`check symbol link (tabs): ${tabs.join(" | ")}`);
   await shot(page, "6-after-link");
 
-  // A follow-up in the same box continues the conversation: back to deliver.ts, where the box still is.
   await page.locator(".monaco-list-row", { hasText: "deliver.ts" }).first().click();
   await widget.waitFor({ timeout: 15_000 });
   await sleep(1500);
@@ -271,14 +240,12 @@ async function main(): Promise<void> {
   await sleep(500);
   await shot(page, "7-follow-up");
 
-  // The box's "Open" link reopens the answer (a command link in a trusted comment).
   await page.locator(".tab", { hasText: "Answer:" }).first().locator(".codicon-close").click({ force: true }).catch(() => {});
   await sleep(1000);
   await widget.locator(".comment-body a", { hasText: "Open" }).last().click();
   await webviewFrame(page, ".pn-answer-frame", 20_000);
   console.log(`check Open link reopens the answer: ${(await page.locator(".tab .label-name").allTextContents()).filter((t) => t.startsWith("Answer")).join(" | ")}`);
 
-  // The gear: the agent, model and effort.
   await widget.locator(".head .action-label.codicon-settings-gear, .head [aria-label*='Agent, Model']").first().click();
   await page.locator(".quick-input-widget").waitFor({ state: "visible", timeout: 10_000 });
   console.log(`check gear opens the picker: ${(await page.locator(".quick-input-widget .quick-input-title").textContent().catch(() => "")) ?? ""}`);
@@ -287,13 +254,11 @@ async function main(): Promise<void> {
   await page.keyboard.press("Escape");
   await sleep(800);
 
-  // VS Code lists the box in its Comments panel.
   await command(page, "Comments: Focus on Comments View");
   await sleep(2000);
   console.log(`check comments panel: ${(await page.locator(".comments-panel .monaco-list-row").allTextContents()).slice(0, 4).join(" | ")}`);
   await shot(page, "9-comments-panel");
 
-  // A suggestion link asks at once; the box's Stop link stops it.
   await command(page, "View: Close Panel");
   await sleep(800);
   await page.locator(".monaco-list-row", { hasText: "deliver.ts" }).first().click();
@@ -313,7 +278,6 @@ async function main(): Promise<void> {
   const second = page.locator(".review-widget", { hasText: "deliver.ts 18" }).first();
   await second.waitFor({ timeout: 15_000 });
   await sleep(1200);
-  // (In the zone widget Playwright's pointer click can miss: the link is clicked the way a click lands.)
   await second.locator(".comment-body a", { hasText: "What could break?" }).evaluate((a) => (a as HTMLElement).click());
   await second.locator(".comment-body", { hasText: "Asking Claude Code" }).waitFor({ timeout: 30_000 });
   await report(page, second, "suggestion asked");
@@ -322,7 +286,6 @@ async function main(): Promise<void> {
   await report(page, second, "stopped");
   await shot(page, "10-suggestion-stopped");
 
-  // The file's CodeLens "Ask…" opens a box for the whole file, under its first line.
   await command(page, "View: Close All Editors");
   await sleep(1000);
   await page.locator(".monaco-list-row", { hasText: "deliver.ts" }).first().click();

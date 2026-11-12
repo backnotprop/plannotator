@@ -25,7 +25,6 @@ import {
 import { forgetSameProgramAnswers, isSameProgram, readVersionLine } from "@plannotator/acp-client/same-program";
 import { planSpawn, shimEntry } from "@plannotator/acp-client/spawn-plan";
 
-/** What `npm install -g` writes on Windows for a package bin. */
 const NPM_SHIM = [
   "@ECHO off",
   "GOTO start",
@@ -122,7 +121,6 @@ describe("the agent registry", () => {
   });
 
   it("uses an agent's own permissive mode only for automatic approval: Claude Code acceptEdits, Codex agent", () => {
-    // The first is the mode Guides switches to; the rest are at least as permissive and are never downgraded.
     expect(CLAUDE_CODE.permissiveModes).toEqual(["acceptEdits", "auto", "bypassPermissions"]);
     expect(CODEX.permissiveModes).toEqual(["agent", "agent-full-access"]);
   });
@@ -227,7 +225,6 @@ describe("installing an agent on Windows", () => {
 });
 
 describe("an `agent` on PATH that may not be Cursor's", () => {
-  // Fake programs in a scratch folder: the real CLIs are never run.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "guides-same-program-")));
   const bin = join(root, "bin");
   mkdirSync(bin);
@@ -259,10 +256,8 @@ describe("an `agent` on PATH that may not be Cursor's", () => {
     expect(r).toMatchObject({ ok: false, reason: "agent" });
     expect(!r.ok && r.message).toContain("the `agent` there is another program");
     expect(ran()).toEqual([`${grok} --version`]);
-    // Asked once per file: a second look reads the cached answer.
     resolveAgentLaunch(CURSOR, {}, at({ agent: grok }));
     expect(ran()).toHaveLength(1);
-    // Never started with `acp`.
     expect(ran().some((l) => l.endsWith(" acp"))).toBe(false);
   });
 

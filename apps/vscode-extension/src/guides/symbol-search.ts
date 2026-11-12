@@ -1,14 +1,6 @@
-/**
- * Finding where a symbol is defined by text, in the changed files at the
- * head: the fallback when no language server answers (SPEC 4.4: "or by text
- * search in changed files when no server is running"). Pure apart from
- * reading files.
- */
-
 import { readFile } from "node:fs/promises";
 import { realFileInside } from "./safe-path";
 
-/** Imports and re-exports name a symbol without defining it. */
 const IMPORT_LINE = /^\s*(import\b|export\s*(\*|\{|type\s*\{)|from\s+["'])/;
 
 export interface SymbolHit {
@@ -26,11 +18,6 @@ function definitionPatterns(name: string): RegExp[] {
   ];
 }
 
-/**
- * Definitions of `name` in the given files (repo-relative, read under `root`).
- * A file is read only when it is a regular file inside `root` once symlinks
- * are followed; any other path is skipped unread.
- */
 export async function searchDefinitions(root: string, paths: readonly string[], name: string): Promise<SymbolHit[]> {
   const short = name.includes(".") ? name.split(".").pop()! : name;
   const patterns = definitionPatterns(short);
@@ -53,7 +40,6 @@ export async function searchDefinitions(root: string, paths: readonly string[], 
         continue;
       }
       if (IMPORT_LINE.test(lines[i])) {
-        // A multi-line import or re-export runs until its `from`.
         inImport = /^\s*(import|export)\b.*\{[^}]*$/.test(lines[i]);
         continue;
       }

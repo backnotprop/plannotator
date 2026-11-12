@@ -1,10 +1,3 @@
-/**
- * Documents for the two sides of a guide's diffs. The base side is always a
- * read-only virtual document from git; the head side is the real file when it
- * is on disk (local changes, a PR worktree), so the language server works on
- * it, and a virtual document otherwise.
- */
-
 import * as vscode from "vscode";
 import { join } from "node:path";
 import { showFileAt } from "../sources/git";
@@ -22,20 +15,17 @@ function virtualUri(path: string, query: VirtualQuery): vscode.Uri {
   return vscode.Uri.from({ scheme: GUIDE_SCHEME, path: `/${path}`, query: JSON.stringify(query) });
 }
 
-/** The base side of a file: its old path at the base revision; empty for an added file. */
 export function baseUri(sides: ReaderSides, file: { path: string; oldPath?: string; status: string }): vscode.Uri {
   const path = file.oldPath ?? file.path;
   return virtualUri(path, { root: sides.gitRoot, rev: file.status === "added" ? null : sides.baseRev });
 }
 
-/** The head side of a file: the real file, a revision, or empty for a deleted file. */
 export function headUri(sides: ReaderSides, file: { path: string; status: string }): vscode.Uri {
   if (file.status === "deleted") return virtualUri(file.path, { root: sides.gitRoot, rev: null });
   if (sides.head.kind === "fs") return vscode.Uri.file(join(sides.head.root, file.path));
   return virtualUri(file.path, { root: sides.gitRoot, rev: sides.head.rev });
 }
 
-/** The repo-relative path a document shows, when it belongs to these sides' head. */
 export function headPathOf(sides: ReaderSides, uri: vscode.Uri): string | null {
   if (uri.scheme === GUIDE_SCHEME) {
     try {
@@ -56,12 +46,6 @@ export function headPathOf(sides: ReaderSides, uri: vscode.Uri): string | null {
   return null;
 }
 
-/**
- * Which side of the guide a document belongs to, for any file of the
- * repository (not only the change's): the head (the file on disk, the head
- * revision) or the base revision, with the path it shows there. Null for a
- * document of neither.
- */
 export function docSideOf(sides: ReaderSides, uri: vscode.Uri): { path: string; side: "head" | "base" } | null {
   if (uri.scheme === GUIDE_SCHEME) {
     try {
@@ -77,10 +61,6 @@ export function docSideOf(sides: ReaderSides, uri: vscode.Uri): { path: string; 
   return head ? { path: head, side: "head" } : null;
 }
 
-/**
- * Which side of a guide diff a document is, and the file it shows (the
- * file's path in the change; a renamed file's base side is its old path).
- */
 export function guideSideOf(sides: ReaderSides, uri: vscode.Uri, files: ReadonlyMap<string, { path: string; oldPath?: string }>): { path: string; side: "head" | "base" } | null {
   const head = headPathOf(sides, uri);
   if (head) return { path: head, side: "head" };

@@ -13,7 +13,6 @@ describe("which lines a selection in the Guide tab asks about", () => {
     expect(askLines({ start: 20, end: 13, side: "additions", endSide: "deletions" })).toBeNull();
   });
 
-  // Old 10-15, new 10-14: 10, 11 unchanged; old 12, 13 removed; new 12 added; then unchanged.
   const PATCH = [
     "diff --git a/a.ts b/a.ts",
     "--- a/a.ts",
@@ -34,27 +33,19 @@ describe("which lines a selection in the Guide tab asks about", () => {
   ].join("\n");
 
   it("unchanged rows take the side of the removed lines selected with them (the unified view reports them as new lines)", () => {
-    // Second hunk: old 30 = new 29, old 31 removed, old 32 = new 30, old 33 = new 31.
-    // Both ends are unchanged rows, but the removed line 31 lies between them: the old side, covering it.
     expect(askLines({ start: 29, end: 31, side: "additions", endSide: "additions" }, PATCH)).toEqual({ side: "old", start: 30, end: 33 });
-    // Unchanged rows with nothing removed between them stay on the new side.
     expect(askLines({ start: 30, end: 31, side: "additions", endSide: "additions" }, PATCH)).toEqual({ side: "new", start: 30, end: 31 });
     expect(askLines({ start: 10, end: 12, side: "additions", endSide: "additions" }, PATCH)).toBeNull();
-    // Removed lines only (both ends deletions): the old side.
     expect(askLines({ start: 12, end: 13, side: "deletions", endSide: "deletions" }, PATCH)).toEqual({ side: "old", start: 12, end: 13 });
     expect(askLines({ start: 29, end: 31, side: "additions", endSide: "deletions" }, PATCH)).toEqual({ side: "old", start: 30, end: 31 });
     expect(askLines({ start: 31, end: 31, side: "deletions", endSide: "additions" }, PATCH)).toEqual({ side: "old", start: 31, end: 33 });
-    // Unchanged line above, removed lines (no added line between): the old side, old numbers.
     expect(askLines({ start: 11, end: 13, side: "additions", endSide: "deletions" }, PATCH)).toEqual({ side: "old", start: 11, end: 13 });
   });
 
   it("a selection that holds both removed and added lines is still not asked, patch or not", () => {
-    // From the removed line 12 down to the unchanged line 14 (new 13): the added line 12 lies between.
     expect(askLines({ start: 12, end: 13, side: "deletions", endSide: "additions" }, PATCH)).toBeNull();
-    // An endpoint the patch does not have (an expanded line far away): not guessed.
     expect(askLines({ start: 12, end: 200, side: "deletions", endSide: "additions" }, PATCH)).toBeNull();
     expect(askLines({ start: 29, end: 200, side: "additions", endSide: "additions" }, PATCH)).toBeNull();
-    // Neither end in the patch, one side: the lines as selected.
     expect(askLines({ start: 100, end: 105, side: "additions", endSide: "additions" }, PATCH)).toEqual({ side: "new", start: 100, end: 105 });
   });
 });
@@ -101,7 +92,6 @@ describe.skipIf(typeof document === "undefined")("the row of a line, for a jump 
 
   it("split view: in the removed column data-line is old; in the added column new; each side found in its own column", () => {
     const shell = shellOf(
-      // Removed column: (old 30, new 35) then (old 35, new 40); added column: the same rows, numbers the other way.
       '<div data-deletions><div id="d1" data-line="30" data-alt-line="35" data-line-type="context"></div>' +
         '<div id="d2" data-line="35" data-alt-line="40" data-line-type="context"></div></div>' +
         '<div data-additions><div id="a1" data-line="35" data-alt-line="30" data-line-type="context"></div>' +
@@ -151,7 +141,6 @@ describe.skipIf(typeof document === "undefined")("a jump to a line", () => {
     const first = scrollToDiffLine("late.ts", "new", 7, fast);
     await new Promise((r) => setTimeout(r, 15));
     const second = scrollToDiffLine("now.ts", "new", 3, fast);
-    // The first jump's row turns up only after the second jump landed.
     expect(await second).toBe(true);
     late.appendChild(lateRow.el);
     expect(await first).toBe(false);
@@ -184,7 +173,6 @@ describe.skipIf(typeof document === "undefined")("a jump to a line", () => {
       shell.appendChild(r.el);
       expect(await jump).toBe(false);
       expect(r.scrolled()).toBe(0);
-      // Once it is over, the reader's events stop touching later jumps.
       const next = scrollToDiffLine(`moved-${type}.ts`, "new", 8, fast);
       expect(await next).toBe(true);
       expect(r.scrolled()).toBe(1);

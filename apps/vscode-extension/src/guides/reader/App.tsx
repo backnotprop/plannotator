@@ -24,10 +24,8 @@ import type { MermaidCheck } from "../webview/diagram";
 
 const OverviewDiagram = lazy(() => import("./OverviewDiagram"));
 
-/** The hover card's data: the search card's shape (what `useTokenHover` keys and gates on), carrying the language server's answer. */
 type ReaderHoverData = CodeNavHoverResponse & { reader: { answer: HoverAnswer; at: DiffPosition } };
 
-/** Each hover is keyed by its position, not only its name: the language server answers per position. */
 const POSITION_MARK = "\u0001";
 
 function positionOf(request: CodeNavRequest): DiffPosition {
@@ -44,7 +42,6 @@ const resolveHover: TokenHoverResolver = async (request, signal) => {
     backend: "search",
     source: "search",
     symbol: answer.symbol,
-    // The search card shows a card only with a definition; the language server's hover is enough here.
     definition: {
       filePath: def?.path ?? at.path,
       line: def?.line ?? at.line,
@@ -77,7 +74,6 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
   const [revealFile, setRevealFile] = useState<{ path: string; token: number } | null>(null);
   const revealToken = useRef(0);
-  /** A `reveal` arrived: the opening scroll to the first chapter not reviewed no longer runs. */
   const revealedRef = useRef(false);
   const [asks, setAsks] = useState<{ busy: boolean; markers: AnswerMarker[]; chapters: ChapterAnswers[]; agent: string | null }>({
     busy: false,
@@ -86,7 +82,6 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
     agent: init.askAgent,
   });
   const [back, setBack] = useState<{ label: string; scrollY: number } | null>(null);
-  // A short line at the foot of the tab (an ask that cannot be sent, the extension's notice).
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     if (!notice) return;
@@ -130,19 +125,16 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
           setFileTicks(new Set(msg.fileTicks));
         }
         else if (msg.type === "checkMermaid") {
-          // A chunk that does not load is "cannot check here", never a refusal of the diagram.
           void import("./OverviewDiagram")
             .then((m) => m.checkMermaidHere(msg.source))
             .catch((err: unknown): MermaidCheck => ({ ok: false, unavailable: true, message: err instanceof Error ? err.message : String(err) }))
             .then((r) => post({ type: "mermaidResult", reqId: msg.reqId, ok: r.ok, ...(r.message && { message: r.message }), ...(r.line && { line: r.line }), ...(r.unavailable && { unavailable: true }) }));
         } else if (msg.type === "asks") setAsks({ busy: msg.busy, markers: msg.markers, chapters: msg.chapters, agent: msg.agent });
         else if (msg.type === "reveal") {
-          // A jump asked for before the opening scroll ran wins over it.
           revealedRef.current = true;
           if (msg.path) {
             setBack(backHere(snapshot.guide.sections.length));
             reveal(msg.path);
-            // A jump to a definition lands on its line, once the file's diff is drawn.
             if (msg.line) void scrollToDiffLine(msg.path, msg.side ?? "new", msg.line);
             else cancelDiffLineJump();
           } else if (typeof msg.chapter === "number") scrollToChapter(msg.chapter);
@@ -151,19 +143,15 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
     [reveal, scrollToChapter, snapshot.guide.sections.length],
   );
 
-  // Open on the first chapter not reviewed yet.
   useEffect(() => {
     if (init.startChapter <= 0) return;
     const t = setTimeout(() => {
       if (!revealedRef.current) scrollToChapter(init.startChapter);
     }, 150);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Hover: the extension asks the language server on the real file.
   const hover = useTokenHover(init.guideId, { resolve: resolveHover });
-  // The token under the pointer, for F12 / Shift+F12 (as in an editor).
   const pointedRef = useRef<DiffPosition | null>(null);
   const onTokenHoverEnter = useCallback(
     (props: DiffTokenEventBaseProps, filePath: string) => {
@@ -181,7 +169,6 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
   const navigate = useCallback(
     (at: DiffPosition, action: NavigateAction) => {
       hover.close();
-      // "Back to Chapter N" appears when the extension answers with a jump inside the guide (`reveal`).
       post({ type: "navigate", at, action });
     },
     [hover.close],
@@ -202,7 +189,6 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate]);
 
-  // The selected lines, per file: the selection toolbar's Ask asks about them.
   const [selection, setSelection] = useState<{ path: string; range: SelectedLineRange } | null>(null);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
@@ -254,7 +240,6 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
     }),
     [fontVars, onTokenHoverEnter, onTokenHoverLeave, onCodeNavRequest, onAskAIForFile, onClickAIMarker, asks.busy, init.askAgent, fileTicks, onToggleViewed],
   );
-  // One selection handler per file, kept, so a file's diff does not see a new one on every render.
   const selectionHandlers = useRef(new Map<string, (range: SelectedLineRange | null) => void>());
   const selectionHandler = useCallback((path: string) => {
     let handler = selectionHandlers.current.get(path);
@@ -296,7 +281,6 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
             <OverviewDiagram source={diagram.source} onChapter={scrollToChapter} />
           </Suspense>
         ) : null,
-      // A chapter's Mermaid diagram, drawn like the overview's (each render takes its own drawing id).
       renderChapterDiagram: (diagram) =>
         diagram.kind === "mermaid" ? (
           <Suspense fallback={<pre className="overflow-x-auto whitespace-pre rounded-md bg-muted/50 p-3 font-mono text-[11px] text-muted-foreground">{diagram.source}</pre>}>
@@ -397,7 +381,6 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
 
 const NO_MARKERS: AIChatEntry[] = [];
 
-/** "Back to Chapter 2": where the reader is now, to come back to after a jump. */
 function backHere(count: number): { label: string; scrollY: number } {
   const n = chapterInView(count);
   return { label: n >= 0 ? `Back to Chapter ${n + 1}` : "Back", scrollY: window.scrollY };

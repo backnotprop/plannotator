@@ -1,8 +1,3 @@
-/**
- * What the "Sign in" terminal runs. Kept free of VS Code so the command and
- * its environment are tested directly.
- */
-
 import type { AdapterResolution, AgentDescriptor, LoginCommand } from "@plannotator/acp-client/agents";
 import { planSpawn } from "@plannotator/acp-client/spawn-plan";
 import { findExecutable } from "../sources/runner";
@@ -11,13 +6,6 @@ export type SignInPlan =
   | { ok: true; command: string; args: string[]; env: Record<string, string> }
   | { ok: false; message: string };
 
-/**
- * A sign-in the agent listed (`login`) runs the program that starts the agent
- * with its arguments, and the launch's environment: for claude-agent-acp,
- * `CLAUDE_CODE_EXECUTABLE`, so the sign-in uses the same Claude a guide runs.
- * Without one, the agent's own sign-in command (`claude /login`), else how
- * to sign in.
- */
 export function planSignIn(
   agent: AgentDescriptor,
   launch: AdapterResolution,
@@ -32,7 +20,6 @@ export function planSignIn(
     args = [...launch.args, ...login.args];
   } else {
     const fallback = agent.signIn;
-    // No command of its own: the agent's sign-in is a subcommand of the program that starts it (`cursor-agent login` or `agent login`).
     const found = fallback ? (fallback.command ? find(fallback.command) : launch.ok ? launch.command : null) : null;
     if (!fallback || !found) {
       const shown = fallback ? [fallback.command ?? agent.command, ...fallback.args].join(" ") : "";

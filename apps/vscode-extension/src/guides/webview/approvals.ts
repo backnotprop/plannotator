@@ -1,18 +1,8 @@
-/**
- * The run view's approval and bottleneck panels: a request the agent waits on
- * is always visible with every option it offers, and what in the agent's
- * setup holds the run back is named with the one click that helps.
- */
-
 import type { GeneratingViewState } from "../webview-protocol";
 import { h, icon } from "./dom";
 
 export type Command = (name: string, ...args: unknown[]) => void;
 
-/**
- * Requests the agent is waiting on: never a silent stall. Each shows every
- * option the agent offers; the first time, automatic approval is offered too.
- */
 export function renderPermissions(s: Pick<GeneratingViewState, "id" | "pendingPermissions" | "offerAutoApprove">, command: Command): HTMLElement[] {
   const out = s.pendingPermissions.map((p) =>
     h("section", { class: "pn-approval", role: "alert", "data-permission": p.id },
@@ -36,7 +26,6 @@ export function renderPermissions(s: Pick<GeneratingViewState, "id" | "pendingPe
   return out;
 }
 
-/** What in the agent's setup holds the run back: named plainly, with the one click that helps. */
 export function renderBottlenecks(s: GeneratingViewState, command: Command): HTMLElement[] {
   return s.bottlenecks.map((b) =>
     h("section", { class: "pn-bottleneck", "data-bottleneck": b.key },
