@@ -168,7 +168,7 @@ browser-safe): `requestChanges`, `selfReviewBlocked`, `fileLevelComments`, `view
 Bitbucket's source branch, from the fork URL when `sourceRepo` is set) and `getPRCloneCommand`.
 GitHub/GitLab outputs of all of these are pinned byte-for-byte (`pr-platforms.test.ts`, including the
 draft target keys). Bitbucket specifics: REST API 2.0 over `fetch` (`packages/shared/pr-bitbucket.ts`,
-vendored to Pi), credentials per the `PLANNOTATOR_BITBUCKET_*` rows above; the PR object's 12-char
+vendored to Pi), credentials per the `PLANNOTATOR_BITBUCKET_*` rows above or the config-only `bitbucketTokenCommand` (`environment.md`); the PR object's 12-char
 hashes are resolved to full SHAs and the merge base comes from `/merge-base` (the PR diff is
 three-dot); existing inline threads get a GitHub-shaped `diffHunk` cut from the PR diff (`bitbucketDiffHunk`), since Bitbucket comments carry none; a review posts each line comment as an inline comment
 (`inline: { path, to | from, start_to | start_from }`), THEN the body as one general comment (the

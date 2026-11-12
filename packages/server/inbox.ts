@@ -199,7 +199,7 @@ import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewS
 import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { createRefCards, refCliRunner, type RefRunner } from "./ref-cards";
+import { bitbucketRefReader, createRefCards, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -568,6 +568,8 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: Bitbucket Cloud PRs' cards and states (default: the real API, unless `refRunner` is given). */
+  bitbucketRefReader?: BitbucketRefReader;
   /** Tests: a thread's PRs read their states from this instead of gh / glab (inbox-thread-pulls.ts). */
   threadPullFixture?: () => ThreadPullFixture | null;
   /**
@@ -1277,7 +1279,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  // Bitbucket Cloud PRs through the review app's credentials; a test that runs its own CLIs passes its own reader.
+  const refCards = createRefCards(
+    options.refRunner ? { run: options.refRunner, bitbucket: options.bitbucketRefReader } : { bitbucket: options.bitbucketRefReader ?? bitbucketRefReader },
+  );
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
   const cardRefResolvers = [forgeCardRefResolver(refCards)];
   const cardFavicons = createCardFavicons(options.cardFavicons ?? {});

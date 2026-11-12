@@ -6,7 +6,26 @@
  * server-side commit-avatar lookup classifies remotes with the same rule.
  */
 
-export type ForgePlatform = "github" | "gitlab";
+export type ForgePlatform = "github" | "gitlab" | "bitbucket";
+
+/** How each forge names and addresses its pull requests and issues. */
+export interface ForgeSpec {
+  name: string;
+  /** What the forge calls a pull request. */
+  pullName: "Pull request" | "Merge request";
+  /** The mark before a pull request's number: GitLab writes `!7`. */
+  pullMark: "#" | "!";
+  /** The path between a repository and a pull request's number. */
+  pullPath: string;
+  /** Issues and pull requests are numbered apart, so a ref's key carries its kind. */
+  numbersByKind: boolean;
+}
+
+export const FORGE_SPECS: Readonly<Record<ForgePlatform, ForgeSpec>> = {
+  github: { name: "GitHub", pullName: "Pull request", pullMark: "#", pullPath: "pull", numbersByKind: false },
+  gitlab: { name: "GitLab", pullName: "Merge request", pullMark: "!", pullPath: "-/merge_requests", numbersByKind: true },
+  bitbucket: { name: "Bitbucket", pullName: "Pull request", pullMark: "#", pullPath: "pull-requests", numbersByKind: true },
+};
 
 /**
  * Canonicalize a remote host before classifying it: lowercase, drop a port,
@@ -32,12 +51,14 @@ export function normalizeForgeHost(host: string | null | undefined): string | nu
 /**
  * Classify a remote host by name: exact/prefix github is GitHub (github.com
  * and GitHub Enterprise hosts like `github.acme.com`); gitlab.com, `gitlab.*`
- * and `*.gitlab.*` are GitLab. A structured match, not a bare substring:
- * `mygitlabproxy.example.com` does not qualify. Opaque self-hosted names
- * return null.
+ * and `*.gitlab.*` are GitLab; bitbucket.org is Bitbucket Cloud (Bitbucket
+ * Data Center has another API and is not one). A structured match, not a
+ * bare substring: `mygitlabproxy.example.com` does not qualify. Opaque
+ * self-hosted names return null.
  */
 export function classifyForgeHost(host: string): ForgePlatform | null {
   if (host === "github.com" || host.startsWith("github.")) return "github";
+  if (host === "bitbucket.org") return "bitbucket";
   if (host === "gitlab.com" || host.startsWith("gitlab.") || host.includes(".gitlab.")) {
     return "gitlab";
   }
@@ -59,14 +80,16 @@ export interface ForgeRefLinks {
  *   apps that pass no host, and SSH aliases like `git@work-gh:o/r`).
  * - GitHub-like host → `https://<host>/<path>/issues/N`.
  * - GitLab-like host → `https://<host>/<path>/-/issues/N`.
- * - Any other host → null: a wrong-forge link is worse than no link.
+ * - Bitbucket, or any other host → null: a wrong-forge link is worse than no
+ *   link, and a Bitbucket repository's `#N` may name a pull request or an
+ *   issue (numbered apart, the issue tracker often off).
  */
 export function forgeRefLinks(repo: { display?: string; host?: string }): ForgeRefLinks | null {
   const path = repo.display;
   if (!path || !path.includes("/")) return null;
   const host = normalizeForgeHost(repo.host) ?? "github.com";
   const platform = classifyForgeHost(host);
-  if (!platform) return null;
+  if (platform !== "github" && platform !== "gitlab") return null;
   const base = `https://${host}`;
   const issues = platform === "gitlab" ? `${base}/${path}/-/issues` : `${base}/${path}/issues`;
   return {

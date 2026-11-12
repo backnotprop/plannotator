@@ -62,9 +62,14 @@ export function decisionPostFailure(platform: DecisionPostPlatform, ref: string,
 function prRefOf(key: string, url: string): PRRef | null {
   const ref = inboxThreadPullRefOfKey(key, url);
   if (!ref) return null;
-  return ref.platform === "github"
-    ? { platform: "github", host: ref.host, owner: ref.owner, repo: ref.repo, number: ref.number }
-    : { platform: "gitlab", host: ref.host, projectPath: `${ref.owner}/${ref.repo}`, iid: ref.number };
+  switch (ref.platform) {
+    case "github":
+      return { platform: "github", host: ref.host, owner: ref.owner, repo: ref.repo, number: ref.number };
+    case "gitlab":
+      return { platform: "gitlab", host: ref.host, projectPath: `${ref.owner}/${ref.repo}`, iid: ref.number };
+    case "bitbucket":
+      return { platform: "bitbucket", host: ref.host, workspace: ref.owner, repo: ref.repo, number: ref.number };
+  }
 }
 
 /** Post (or update) a thread's decisions on one of its pull requests. */
