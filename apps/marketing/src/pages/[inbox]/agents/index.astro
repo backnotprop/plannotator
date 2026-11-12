@@ -16,9 +16,6 @@ export function getStaticPaths() {
 
 const title = 'Set up your agent with the Plannotator Inbox';
 const description = 'Setup and troubleshooting for every agent the Plannotator Inbox works with, and what works with each one.';
-// One slot that flips through the agents in place (the brand kit's rule:
-// one agent slot, not a wall of logos). Decoration: the tiles below link.
-const slot = ['claude-code', 'codex', 'pi', 'opencode', 'cursor', 'cline', 'amp', 'copilot-cli', 'droid', 'kiro-cli', 'qwen-code', 'deepseek-harness'];
 ---
 
 <Base title={title} description={description} ogImage="https://plannotator.ai/assets/inbox/inbox-og.jpg">
@@ -27,14 +24,7 @@ const slot = ['claude-code', 'codex', 'pi', 'opencode', 'cursor', 'cline', 'amp'
 
     <main class="ag-main max-w-6xl mx-auto px-6 md:px-8">
       <header class="ag-pick-head">
-        <div class="ag-pick-title">
-          <span class="ag-slot" aria-hidden="true" style={`--n:${slot.length}`}>
-            {slot.map((slug, i) => (
-              <span class="ag-slot-item" style={`--i:${i}`}><AgentMark slug={slug} size={36} /></span>
-            ))}
-          </span>
-          <h1 class="font-display ag-display">Pick your agent</h1>
-        </div>
+        <h1 class="font-display ag-display">Pick your agent</h1>
         <p class="ag-lede">Every agent here writes to your <a class="ag-link" href="/inbox/">Inbox</a>. Pick yours for setup and troubleshooting.</p>
       </header>
 
@@ -91,48 +81,6 @@ const slot = ['claude-code', 'codex', 'pi', 'opencode', 'cursor', 'cline', 'amp'
     display: flex;
     flex-direction: column;
     gap: 1rem;
-  }
-
-  .ag-pick-title {
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-  }
-
-  /* Each mark holds for one beat and clicks to the next: no fade. */
-  .ag-slot {
-    position: relative;
-    flex: 0 0 auto;
-    width: 4.5rem;
-    height: 4.5rem;
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    background: var(--card);
-  }
-
-  .ag-slot-item {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    visibility: hidden;
-    animation: ag-flip calc(var(--n) * 850ms) steps(1, end) infinite;
-    animation-delay: calc(var(--i) * 850ms - var(--n) * 850ms);
-  }
-
-  .ag-slot-item :global(img) { filter: grayscale(1) contrast(1.15); }
-
-  /* One beat of the cycle: 100% / the 12 marks in `slot`. */
-  @keyframes ag-flip {
-    0% { visibility: visible; }
-    8.333% { visibility: hidden; }
-    100% { visibility: hidden; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .ag-slot-item { animation: none; }
-    .ag-slot-item:first-child { visibility: visible; }
   }
 
   .ag-pick {
@@ -274,8 +222,6 @@ const slot = ['claude-code', 'codex', 'pi', 'opencode', 'cursor', 'cline', 'amp'
 
   @media (max-width: 639px) {
     .ag-pick-head { padding: 4.5rem 0 1.75rem; }
-    .ag-slot { width: 3.5rem; height: 3.5rem; border-radius: 13px; }
-    .ag-pick-title { gap: 0.875rem; }
     .ag-tile { min-height: 2.75rem; font-size: 0.875rem; padding-right: 0.875rem; }
     .ag-works { padding-top: 3rem; }
   }
