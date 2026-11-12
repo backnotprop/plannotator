@@ -353,12 +353,13 @@ describe("the device door, on the binary", () => {
 
   test("7.5 to 7.9: the list, projects, a thread, seen (key required), the event stream", async () => {
     const list = (await (await door("threads")).json()) as Json;
-    expect(Object.keys(list).sort()).toEqual(["agents", "cursor", "notice", "pins", "project", "projects", "restart_agents", "restart_claude_code", "sections", "serverSession", "session_labels", "snoozes", "update", "update_check_failing", "updated", "version"]);
+    expect(Object.keys(list).sort()).toEqual(["agents", "cursor", "notice", "pins", "project", "projects", "restart_agents", "restart_claude_code", "sections", "serverSession", "session_labels", "session_titles", "snoozes", "update", "update_check_failing", "updated", "version"]);
     // This Inbox's own agents, one group (inbox-agents-list.ts): the list a linked machine reads them from.
     expect(list.agents).toEqual([{ agents: expect.any(Array), total: expect.any(Number), ended_today: expect.any(Number) }]);
     // A paired phone is the owner's: the door forwards the list's `session_labels` (issue #2450) unchanged.
     expect(list.session_labels).toEqual(expect.any(Object));
     expect(Array.isArray(list.session_labels)).toBe(false);
+    expect(list.session_titles).toEqual(expect.any(Object));
     expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "new", "sent", "quiet"]);
     const row = list.sections.flatMap((s: Json) => s.threads).find((t: Json) => t.thread_id === threadId);
     expect(row).toMatchObject({ section: "waiting", unread: true, questions: { open: 2 } });

@@ -257,7 +257,10 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
                       data-face-choice={f}
                       style={style}
                       onFocus={() => setActive(at)}
-                      onPointerDown={(event: ReactPointerEvent) => event.preventDefault()}
+                      // A pointer's press keeps focus where it is. Never a finger's: Safari (iPhone, iPad) then sends no click.
+                      onPointerDown={(event: ReactPointerEvent) => {
+                        if (event.pointerType !== 'touch') event.preventDefault();
+                      }}
                       onClick={() => (f === OWN_CHOICE ? onOwn() : f === SETS_CHOICE ? onSets() : onChoose(f))}
                     >
                       <span className="am-fan-f" data-kind={f === 'agent' ? 'agent' : f.startsWith('glass') || f === 'yellow' ? 'glass' : f} aria-hidden="true">

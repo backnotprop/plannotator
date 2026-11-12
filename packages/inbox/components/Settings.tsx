@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, InboxStorageModel, MachineView, SettingsModel } from '../api';
+import { tailnetGuest, type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -42,6 +42,8 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'opencode', name: 'OpenCode' },
   { host: 'dsh', name: 'DeepSeek Harness' },
   { host: 'cline', name: 'Cline' },
+  { host: 'openclaw', name: 'OpenClaw' },
+  { host: 'hermes', name: 'Hermes Agent' },
 ];
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
@@ -307,7 +309,7 @@ function GeneralSection({
   onToggleMarkReadWarning,
 }: {
   onToggleCookieHost?: (next: boolean) => void;
-  /** The Mark read warning's switch (absent for a tailnet guest, or from an Inbox without it: no row). */
+  /** The Mark read warning's switch (absent from an Inbox without it: no row). */
   onToggleMarkReadWarning?: (next: boolean) => void;
   onTakeTour?: () => void;
   updateRow?: ReactNode;
@@ -431,7 +433,7 @@ function GeneralSection({
                 <span className="ib-l" id="ib-favicon-label">
                   Favicon
                 </span>
-                <span className="ib-desc">The icon on this tab. Also plan review, code review and annotate.</span>
+                <span className="ib-desc">The icon on this tab and on the installed app. Also plan review, code review and annotate.</span>
               </span>
               <span className="ib-ctl">
                 <span className="ib-seg" role="radiogroup" aria-labelledby="ib-favicon-label">
@@ -844,7 +846,7 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness and Cline send every tool&apos;s definition with each request, so they start
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness, Cline, OpenClaw and Hermes Agent send every tool&apos;s definition with each request, so they start
           off.
         </p>
         {env !== null && (
@@ -872,7 +874,7 @@ function AgentsSection({
         {env === null && (
           <div className="ib-note">
             <Icon name="info" />
-            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts. Sessions already running keep what they started with.
+            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts, and for OpenClaw from its next message. Sessions already running keep what they started with.
           </div>
         )}
       </section>
@@ -1060,6 +1062,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const phonesOn = settings?.phones === true;
   const phones = usePhones(phonesOn);
   const via = settings?.via ?? 'local';
+  const guest = tailnetGuest(settings);
   const { mode } = useInboxTheme();
   const palettes = useInboxPalettes();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -1215,7 +1218,7 @@ export function SettingsPage(props: SettingsPageProps) {
             onToggleCookieHost={props.onToggleCookieHost}
             onTakeTour={props.onTakeTour}
             updateRow={props.updateRow}
-            onToggleMarkReadWarning={settings.guest ? undefined : props.onToggleMarkReadWarning}
+            onToggleMarkReadWarning={props.onToggleMarkReadWarning}
           />
         );
         break;
@@ -1244,6 +1247,7 @@ export function SettingsPage(props: SettingsPageProps) {
             phones={phonesOn ? phones : null}
             tailscale={settings.tailscale}
             via={via}
+            guest={guest}
             tailscaleBusy={tailscaleBusy}
             onToggleTailscale={onToggleTailscale}
             pairing={pairing && phonesOn}
@@ -1252,7 +1256,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'machines':
-        body = <MachinesSection machines={machines} via={via} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
+        body = <MachinesSection machines={machines} guest={guest} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
         break;
       case 'archived':
         body = archived ?? (
