@@ -5055,6 +5055,9 @@ const ReviewApp: React.FC = () => {
   // Mod+Enter handler, and the compact primary row all call this. Platform
   // (PR) mode keeps its own row until PR6.
   const busyWithDecision = isSendingFeedback || isApproving || isExiting;
+  // Bumped by Mod+Shift+Enter so the note composer opens without the caret
+  // (#2913, which brought the chord to plan review and annotate).
+  const [decisionNoteRequest, setDecisionNoteRequest] = useState(0);
 
   const noteDispatchInFlightRef = useRef(false);
   const dispatchPendingNote = useCallback(() => {
@@ -5632,8 +5635,14 @@ const ReviewApp: React.FC = () => {
       if (platformMode) {
         // Platform mode (PR6): Mod+Enter is the header's visible primary,
         // always — including the muted self-approval no-op. Same
-        // runPlatformDecisionAction the header and compact rows call.
+        // runPlatformDecisionAction the header and compact rows call. Shift
+        // changes nothing here: this side has no composer, every action opens
+        // the submission dialog, whose own field is the note.
         runPlatformDecisionAction('primary');
+      } else if (e.shiftKey) {
+        // Mod+Shift+Enter opens the note composer instead of submitting, the
+        // same chord plan review and annotate took in #2913.
+        setDecisionNoteRequest((n) => n + 1);
       } else {
         // Agent mode: Mod+Enter is the header's visible primary, always —
         // the same submitPrimaryDecision the button and compact row call.
@@ -6233,6 +6242,7 @@ const ReviewApp: React.FC = () => {
                       busy={busyWithDecision}
                       isLoading={isSendingFeedback || isApproving}
                       labelBreakpoint="lg"
+                      openNoteRequest={decisionNoteRequest}
                     />
                   </>
                 ) : (
