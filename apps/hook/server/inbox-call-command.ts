@@ -39,7 +39,9 @@
  * `<code>: <message>`. Exit 0 ok, 1 refused or unreachable, 2 bad usage.
  */
 
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
+import { decodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -209,6 +211,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
     return 2;
   }
   if (deps.askAiChild) return refused("inbox_off", "The Plannotator Inbox is off in an agent that Plannotator's Ask AI started.");
+  if (deps.env.PLANNOTATOR_PAIRING) return runPairedCall(parsed, deps, out, err, refused);
   const caller = inboxCallerOf(parsed.session, deps.env);
   if (!caller.ok) return refused(caller.code, caller.message, caller.usage ? 2 : 1);
   const text = parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}");
@@ -245,7 +248,71 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   }
   if (!answer) return refused("inbox_no_answer", "Plannotator Inbox gave no answer.");
   if (answer.error) return refused("inbox_error", answer.error.message ?? "The Inbox refused the call.");
-  const result = answer.result as { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean } | undefined;
+  return printResult(answer.result as CallResult | undefined, out, err);
+}
+
+type CallResult = { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
+
+/** A paired cloud agent's call: the agent door, with the pairing's token. Only on this computer until the relay carries it. */
+async function runPairedCall(
+  parsed: Extract<ParsedCallCommand, { ok: true }>,
+  deps: CallCommandDeps,
+  out: (text: string) => void | Promise<void>,
+  err: (text: string) => void,
+  refused: (code: string, message: string, exit?: number) => number,
+): Promise<number> {
+  const pairing = decodeInboxAgentPairing(deps.env.PLANNOTATOR_PAIRING);
+  if (!pairing) return refused("invalid_pairing", "PLANNOTATOR_PAIRING is not a pairing string from the Inbox's Settings → Devices → Cloud agents.", 2);
+  const door = loopbackDoor(deps.env.PLANNOTATOR_PAIRING_DOOR);
+  if (!door) return refused("pairing_door_needed", "PLANNOTATOR_PAIRING needs PLANNOTATOR_PAIRING_DOOR, the Inbox's address on this computer (http://127.0.0.1:<port>).", 2);
+  if (parsed.session !== null) return refused("invalid_session", "--session is not taken with PLANNOTATOR_PAIRING: the pairing names the agent.", 2);
+  let args: Record<string, unknown>;
+  try {
+    const value = JSON.parse((parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}")).replace(/^\uFEFF/, "")) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments must be one JSON object.", 2);
+    args = value as Record<string, unknown>;
+  } catch (error) {
+    return refused("invalid_json", `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}`, 2);
+  }
+  // Files on this computer go up as bytes: the Inbox never opens a path a cloud agent names.
+  if (Array.isArray(args.attachments)) {
+    try {
+      args.attachments = await Promise.all(
+        args.attachments.map(async (item) => (typeof item === "string" ? { name: basename(item), data: (await readFile(resolve(deps.cwd, item))).toString("base64") } : item)),
+      );
+    } catch (error) {
+      return refused("attachment_unreadable", error instanceof Error ? error.message : String(error));
+    }
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${door}/api/inbox/agent/call`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${pairing.token}` },
+      body: JSON.stringify({ tool: parsed.action, arguments: args }),
+      signal: AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    return refused("inbox_no_answer", `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const answer = (await response.json().catch(() => null)) as { result?: CallResult; code?: string; error?: string } | null;
+  if (!response.ok || !answer?.result) return refused(answer?.code ?? "inbox_error", answer?.error ?? `The Inbox answered ${response.status}.`);
+  return printResult(answer.result, out, err);
+}
+
+/** `http://127.0.0.1:<port>` (or localhost, [::1]) with nothing after the port, else null. */
+function loopbackDoor(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || !url.port || url.pathname !== "/" || url.search || url.username) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+async function printResult(result: CallResult | undefined, out: (text: string) => void | Promise<void>, err: (text: string) => void): Promise<number> {
   const words = (result?.content ?? []).map((part) => part.text ?? "").join("\n");
   if (result?.isError) {
     // The Inbox's refusals are `<code>: <message>`; the MCP layer's (a field the schema does not take) are plain words.

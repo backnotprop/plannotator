@@ -216,6 +216,7 @@ import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
 import { CloudAgentError, createInboxCloudAgents } from "./inbox-cloud-agents";
+import { createInboxAgentDoor, INBOX_AGENT_DOOR_PATH } from "./inbox-agent-door";
 import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
 import {
   claudePluginBehindInbox,
@@ -4166,7 +4167,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     onChange: (agents) => cloudWake.agentsChanged(agents),
     ...(options.cloudWake?.timeoutMs ? { timeoutMs: options.cloudWake.timeoutMs } : {}),
+    devices: () => phones?.agentDevices ?? null,
   });
+  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, baseUrl: () => baseUrl, searchIndex: search.index });
   const cloudWake = createInboxCloudWake({
     store,
     agents: cloudAgents,
@@ -4721,6 +4724,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (via === "tailnet") return localOnly();
       const answer = phones ? await phones.door(req, url) : null;
       if (answer) return answer;
+    }
+
+    // A paired cloud agent's door (inbox-agent-door.ts): this computer only for now, never the tailnet or a browser.
+    if (path === INBOX_AGENT_DOOR_PATH) {
+      if (via === "tailnet") return localOnly();
+      const forwarded = req.headers.get("x-forwarded-for");
+      if (!isLoopbackHostHeader(req.headers.get("host"), port) || (forwarded !== null && !isLoopbackForwardedFor(forwarded)) || req.headers.has("forwarded")) {
+        return json({ error: "The agent door answers only this machine.", code: "forbidden_host" }, 403);
+      }
+      if (origin !== null) return json({ error: "Browser requests are not accepted here.", code: "origin_not_allowed" }, 403);
+      return agentDoor.handle(req);
     }
 
     if (path === "/mcp") {
@@ -5466,7 +5480,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         try {
-          if (path === "/api/inbox/cloud-agents") return json({ agent: cloudAgents.view(cloudAgents.pair(body)), ...cloudView() });
+          if (path === "/api/inbox/cloud-agents") {
+            const paired = cloudAgents.pair(body);
+            return json({ agent: cloudAgents.view(paired.agent), pairing: paired.pairing, ...cloudView() });
+          }
           const match = /^\/api\/inbox\/cloud-agents\/(cloud\.[0-9a-f]{12})\/(test|key|remove)$/.exec(path);
           if (!match) return json({ error: "Not found", code: "not_found" }, 404);
           const [, session, action] = match as unknown as [string, string, "test" | "key" | "remove"];

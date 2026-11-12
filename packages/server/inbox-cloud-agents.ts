@@ -5,14 +5,14 @@
  * Each agent's webhook address and key live in `inbox/cloud-agents.json`
  * (0600), never in config.json, a log, an error, an event frame or an API
  * answer: the window only learns that a key is set. Remove deletes the entry,
- * key and address included, at once.
+ * key and address included, and revokes its agent device, at once.
  *
  * The window's routes, the owner's alone (this computer, or the owner's login
  * over the tailnet; never a tailnet guest, another site's page or the phone's
  * door, whose allowlist has no settings route):
  *
  *   GET  /api/inbox/cloud-agents                   `{ agents, projects }`
- *   POST /api/inbox/cloud-agents                   `{ name, preset, url, key, project_id? }`: pair
+ *   POST /api/inbox/cloud-agents                   `{ name, preset, url, key, project_id? }`: pair; answers the pairing string once
  *   POST /api/inbox/cloud-agents/:session/test     fire the webhook once: `{ test: { started, run_url?, words } }`
  *   POST /api/inbox/cloud-agents/:session/key      `{ key }`: a new key; held wakes go again
  *   POST /api/inbox/cloud-agents/:session/remove   unpair: the key is deleted at once
@@ -32,6 +32,7 @@ import {
   type InboxCloudPreset,
 } from "@plannotator/core/inbox-cloud";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { encodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { writeAgentFileAtomic } from "./agent-files";
 import { postCloudWebhook } from "./inbox-cloud-post";
@@ -49,6 +50,8 @@ export interface InboxCloudAgent {
   created_at: string;
   key_set_at: string;
   key_rejected_at: string | null;
+  /** Its device (inbox/devices.jsonl, platform `agent`): the agent door's token hash and secret live there. */
+  device_id?: string;
 }
 
 interface CloudAgentsFile {
@@ -115,6 +118,8 @@ export function createInboxCloudAgents(options: {
   onChange?: (agents: InboxCloudAgent[]) => void;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** The device door's agent devices (inbox-devices.ts), bound once the door exists. */
+  devices?: () => { mint: (name: string) => { device: { id: string }; token: string; secret: string }; revoke: (id: string) => void } | null;
 }) {
   const { store, dataDir } = options;
   const now = options.now ?? (() => new Date());
@@ -155,7 +160,7 @@ export function createInboxCloudAgents(options: {
     return agent;
   };
 
-  const pair = (body: Record<string, unknown>): InboxCloudAgent => {
+  const pair = (body: Record<string, unknown>): { agent: InboxCloudAgent; pairing: string | null } => {
     const name = typeof body.name === "string" ? body.name.replace(/\s+/g, " ").trim() : "";
     if (!name || name.length > 60) throw new CloudAgentError("validation_error", "Give it a name (up to 60 characters).", "name");
     if (!isInboxCloudPreset(body.preset)) throw new CloudAgentError("validation_error", "Pick what kind of agent it is.", "preset");
@@ -166,6 +171,7 @@ export function createInboxCloudAgents(options: {
     const listed = projects();
     const projectId = typeof body.project_id === "string" && listed.some((p) => p.id === body.project_id) ? body.project_id : (listed[0]?.id ?? null);
     const at = now().toISOString();
+    const minted = options.devices?.()?.mint(name) ?? null;
     const agent: InboxCloudAgent = {
       session: `cloud.${randomBytes(6).toString("hex")}`,
       name,
@@ -176,9 +182,10 @@ export function createInboxCloudAgents(options: {
       created_at: at,
       key_set_at: at,
       key_rejected_at: null,
+      ...(minted ? { device_id: minted.device.id } : {}),
     };
     save([...agents, agent]);
-    return agent;
+    return { agent, pairing: minted ? encodeInboxAgentPairing({ device_id: minted.device.id, token: minted.token, secret: minted.secret }) : null };
   };
 
   const rekey = (session: string, body: Record<string, unknown>): InboxCloudAgent => {
@@ -191,8 +198,10 @@ export function createInboxCloudAgents(options: {
   };
 
   const remove = (session: string): boolean => {
-    if (!agents.some((agent) => agent.session === session)) return false;
-    save(agents.filter((agent) => agent.session !== session));
+    const agent = agents.find((candidate) => candidate.session === session);
+    if (!agent) return false;
+    if (agent.device_id) options.devices?.()?.revoke(agent.device_id);
+    save(agents.filter((candidate) => candidate.session !== session));
     return true;
   };
 
@@ -231,6 +240,7 @@ export function createInboxCloudAgents(options: {
   return {
     list: () => agents,
     agent: (session: string) => agents.find((agent) => agent.session === session) ?? null,
+    byDevice: (deviceId: string) => agents.find((agent) => agent.device_id === deviceId) ?? null,
     view,
     projects,
     pair,
