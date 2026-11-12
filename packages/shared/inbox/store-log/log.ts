@@ -50,6 +50,22 @@ export interface InboxLogState {
   cards: ReadonlyMap<string, { card: InboxCard; heardSeq: number }>;
   /** Each thread's PR adds and removes, oldest first (`pullEventOf`). */
   pullEvents: ReadonlyMap<string, readonly InboxThreadPullEvent[]>;
+  /**
+   * Steps, PRs and initiatives whose latest line fails its check (an old or broken line): the last record that
+   * passed, by `<kind>:<id>`, which the store keeps serving (`apply` skips a failing record and keeps the one before).
+   */
+  kept?: ReadonlyMap<string, unknown>;
+}
+
+/** A dated backup a move between logs left in the inbox folder (`sqlite/backups.ts`): Settings → Storage lists it with Remove. */
+export interface InboxStoreBackup {
+  /** The folder's name (`backup-2026-11-11-jsonl`): what Remove names. */
+  name: string;
+  /** What it holds: the JSONL files from before the move into SQLite, or a database from before a move back. */
+  kind: "jsonl" | "sqlite";
+  /** The day it was made (`YYYY-MM-DD`). */
+  date: string;
+  bytes: number;
 }
 
 /** Settings → Storage: what one project takes on disk. */
@@ -77,6 +93,13 @@ export interface InboxLog {
   cardLines(project: InboxProject, cardId: string): { seq: number; card: InboxCard }[];
   /** What a project takes on disk. */
   usage(project: InboxProject): InboxLogUsage;
+  /**
+   * A log kept in one file (SQLite): that file's bytes, which Storage counts once instead of each project's lines,
+   * and the dated backups beside it. Today's JSONL log leaves it out.
+   */
+  stored?(): { bytes: number; backups: InboxStoreBackup[] };
+  /** Remove one of `stored().backups` by name; false when there is no such backup. */
+  removeBackup?(name: string): boolean;
 }
 
 /** Builds a store's log for its inbox folder (`<dataDir>/inbox`). */
