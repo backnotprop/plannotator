@@ -381,10 +381,9 @@ export interface PlannotatorConfig {
    */
   inboxDebug?: boolean;
   /**
-   * Where the Plannotator Inbox keeps its records: SQLite (`inbox/inbox.db`) or the JSONL files, as
-   * `PLANNOTATOR_INBOX_SQLITE` (which wins). Config-only, read when the Inbox starts. Unset (the default): a new
-   * Inbox starts on SQLite and every existing one stays as it is. `true` moves the files into the database (kept as
-   * a dated backup); `false` keeps the files, moving everything back into them from a database
+   * The Plannotator Inbox keeps its records in SQLite (`inbox/inbox.db`) instead of the JSONL files, as
+   * `PLANNOTATOR_INBOX_SQLITE=1`. Off by default, for everyone. Config-only, read when the Inbox starts: on moves
+   * the files into the database (kept as a dated backup); turned off again, everything goes back into the files
    * (`packages/shared/inbox/store-log/sqlite/open-store.ts`).
    */
   inboxSqlite?: boolean;

@@ -37,8 +37,7 @@ async function world(files: string[] = ["a-labels.png", "b-labels.png"], body = 
   const project = join(root, "shop");
   mkdirSync(project, { recursive: true });
   for (const name of files) writeFileSync(join(project, name), PNG);
-  // On the JSONL files (`sqlite: false`): this test reads the record files or reopens the store on them.
-  const server = await startInboxServer({ sqlite: false, dataDir: join(root, "data") });
+  const server = await startInboxServer({ dataDir: join(root, "data") });
   servers.push(server);
   const client = new Client({ name: "inbox-reply-viewing-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -252,7 +251,7 @@ test("a stored field of another shape reads as no line: the session's poll and r
   expect(after).not.toBe(before);
   writeFileSync(log, after);
 
-  const again = await startInboxServer({ sqlite: false, dataDir: join(root, "data") });
+  const again = await startInboxServer({ dataDir: join(root, "data") });
   servers.push(again);
   const reader = new Client({ name: "inbox-reply-viewing-test", version: "1.0.0" });
   await reader.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${again.port}/mcp`)));

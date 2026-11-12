@@ -53,8 +53,7 @@ async function setup(options: { steps?: boolean | "file" } = {}) {
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
   }
   const steps = options.steps === "file" ? undefined : (options.steps ?? false);
-  // On the JSONL files (`sqlite: false`): this test reads the record files or reopens the store on them.
-  const server = await startInboxServer({ sqlite: false, dataDir, binaryPath: null, board: true, steps, storeNow: () => new Date(Date.now() - clock.behind) });
+  const server = await startInboxServer({ dataDir, binaryPath: null, board: true, steps, storeNow: () => new Date(Date.now() - clock.behind) });
   servers.push(server);
   const client = new Client({ name: "inbox-tidy-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));

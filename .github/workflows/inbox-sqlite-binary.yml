@@ -2,7 +2,7 @@ name: Inbox on SQLite (compiled binary)
 
 # The Plannotator Inbox's SQLite storage, proven on the compiled binary of each
 # OS rather than `bun test` against sources (scripts/inbox-sqlite-proof/run.ts):
-# a new install starting on SQLite, the move of a JSONL Inbox and the way back,
+# a new install turned on to SQLite, the move of a JSONL Inbox and the way back,
 # the move's second process (the binary running itself) again and again, two
 # starters through a long move, hard kills at every step of the move and at
 # random moments, and (Linux only) one 100,000-message move for the timing.

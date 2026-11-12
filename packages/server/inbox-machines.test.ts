@@ -62,7 +62,7 @@ interface Machine {
   calls: string;
 }
 
-const env = (m: Machine) => ({ ...(process.env as Record<string, string>), ...worldEnv(m.w), PLANNOTATOR_UPDATE_CHECK: "0", PLANNOTATOR_INBOX_SQLITE: m.name === "a" ? "0" : "" });
+const env = (m: Machine) => ({ ...(process.env as Record<string, string>), ...worldEnv(m.w), PLANNOTATOR_UPDATE_CHECK: "0", PLANNOTATOR_INBOX_SQLITE: m.name === "a" ? "" : "1" });
 const base = (m: Machine) => `http://127.0.0.1:${registry(m.w).port}`;
 
 function cli(m: Machine, ...args: string[]): { code: number; out: string; err: string } {

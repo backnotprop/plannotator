@@ -63,7 +63,7 @@ export function openInboxDb(dir: string, file: string = INBOX_DB_FILE): { sqlite
 /**
  * Into WAL. Switching a new file's journal needs it to itself, and SQLite answers "database is locked" at once
  * instead of waiting on the busy timeout when another process is opening the same new file (two Inboxes starting
- * together on a new install): tried again for up to about 5 s.
+ * together on a new install with the setting on): tried again for up to about 5 s.
  */
 function walMode(sqlite: Database): void {
   for (let attempt = 0; ; attempt++) {

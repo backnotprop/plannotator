@@ -1069,8 +1069,7 @@ test('Settings: the store size counts the sent files; delete thread removes its 
   await page.locator('[data-store-project="billing-svc"]').getByRole('button', { name: /click again to delete/ }).click();
   await expect(page.locator('[data-store-project="billing-svc"]')).toHaveCount(0);
   expect(readdirSync(join(world.dataDir, 'inbox', 'blobs'))).toHaveLength(0);
-  // The store itself stays: its folder of files, or on SQLite (a new install) its database.
-  expect(existsSync(join(world.dataDir, 'inbox', 'projects')) || existsSync(join(world.dataDir, 'inbox', 'inbox.db'))).toBe(true);
+  expect(existsSync(join(world.dataDir, 'inbox', 'projects'))).toBe(true);
 });
 
 test('no page errors along the way', async () => {

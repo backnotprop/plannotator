@@ -37,8 +37,7 @@ async function world() {
   const other = join(root, "web");
   mkdirSync(project, { recursive: true });
   mkdirSync(other, { recursive: true });
-  // On the JSONL files (`sqlite: false`): this test reads or writes the record files themselves.
-  const server = await startInboxServer({ sqlite: false, dataDir: join(root, "data"), phones: false, board: true });
+  const server = await startInboxServer({ dataDir: join(root, "data"), phones: false, board: true });
   servers.push(server);
   const client = new Client({ name: "inbox-cards-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));

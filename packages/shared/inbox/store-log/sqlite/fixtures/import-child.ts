@@ -5,7 +5,7 @@
  *   bun import-child.ts <dataDir> <now ISO> import                  run the import to the end
  *   bun import-child.ts <dataDir> <now ISO> import:<step>[:<n>]     kill itself at the n-th time it reaches <step>
  *   bun import-child.ts <dataDir> <now ISO> return:<step>[:<n>]     the same, for the way back to the files
- *   bun import-child.ts <dataDir> <now ISO> open                    an Inbox start with the switch unset (`done <log> <why>`)
+ *   bun import-child.ts <dataDir> <now ISO> open                    an Inbox start with the switch on (`done <log> <projects>`)
  *
  * The import checks its files' side in a second run of this file, as the Inbox does with its own program.
  *
@@ -34,8 +34,8 @@ const step = (name: string) => {
 };
 
 if (what === "open") {
-  const opened = await openInboxStore(dataDir, { sqlite: null, now });
-  process.stdout.write(`done ${opened.log} ${opened.why} ${opened.store.listProjects().length}\n`);
+  const opened = await openInboxStore(dataDir, { sqlite: true, now });
+  process.stdout.write(`done ${opened.log} ${opened.store.listProjects().length}\n`);
 } else if (what === "import") {
   const outcome = await importJsonlInbox(dataDir, { now, step, checkFilesCommand: [process.execPath, import.meta.path] });
   process.stdout.write(`done ${outcome.status} ${performance.now()}\n`);

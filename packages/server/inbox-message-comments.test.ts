@@ -38,8 +38,7 @@ function world() {
 }
 
 async function start(dataDir: string): Promise<InboxServer> {
-  // On the JSONL files (`sqlite: false`): this test reads the record files or reopens the store on them.
-  const server = await startInboxServer({ sqlite: false, dataDir });
+  const server = await startInboxServer({ dataDir });
   servers.push(server);
   return server;
 }
@@ -294,7 +293,7 @@ test("over the tailnet a comment on a diagram part goes as a comment on words do
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
   try {
-    const server = await startInboxServer({ sqlite: false, dataDir, binaryPath: null, tailscale: fakeTailscale, publishTailnet: true, phones: false });
+    const server = await startInboxServer({ dataDir, binaryPath: null, tailscale: fakeTailscale, publishTailnet: true, phones: false });
     servers.push(server);
     const client = await agent(server);
     const sent = await sendMessage(client, project);

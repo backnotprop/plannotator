@@ -41,8 +41,7 @@ test("a question an older Inbox stored (default parse) takes the label the windo
   const project = join(root, "ledger");
   mkdirSync(project, { recursive: true });
   const dataDir = join(root, "data");
-  // On the JSONL files (`sqlite: false`): this test reads or writes the record files themselves.
-  const first = await startInboxServer({ sqlite: false, dataDir });
+  const first = await startInboxServer({ dataDir });
   servers.push(first);
   const client = new Client({ name: "inbox-legacy-line-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${first.port}/mcp`)));
@@ -76,7 +75,7 @@ test("a question an older Inbox stored (default parse) takes the label the windo
   servers.splice(servers.indexOf(first), 1);
   expect(readFileSync(join(folder, "questions.jsonl"), "utf8")).toContain('"decision_on_answer":true');
 
-  const server = await startInboxServer({ sqlite: false, dataDir });
+  const server = await startInboxServer({ dataDir });
   servers.push(server);
   const thread = (await (await fetch(url(server, `/api/inbox/threads/${threadId}`))).json()) as { thread: { messages: { questions?: InboxQuestion[] }[] } };
   const question = thread.thread.messages[0]!.questions![0]!;
@@ -107,7 +106,7 @@ test("a new message with the line right under its bullets stores the clean label
   roots.push(root);
   const project = join(root, "ledger");
   mkdirSync(project, { recursive: true });
-  const server = await startInboxServer({ sqlite: false, dataDir: join(root, "data") });
+  const server = await startInboxServer({ dataDir: join(root, "data") });
   servers.push(server);
   const client = new Client({ name: "inbox-legacy-line-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));

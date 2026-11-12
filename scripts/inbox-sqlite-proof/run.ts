@@ -1,13 +1,13 @@
 /**
  * The Plannotator Inbox on SQLite, proven on the COMPILED binary of this OS (CI: `.github/workflows/inbox-sqlite-binary.yml`,
- * on Windows, Linux and macOS). Not `bun test`: every Inbox here is the binary, started and stopped as a person or an
+ * on the six release builds). Not `bun test`: every Inbox here is the binary, started and stopped as a person or an
  * agent does; this script only generates Inboxes and reads what is on disk afterwards (from source).
  *
  *   bun scripts/inbox-sqlite-proof/run.ts <binary> [--big] [--only <phase>,…]
  *
  * Phases (each in its own scratch HOME and data dir; never the person's):
- *   new-install  the switch unset on an empty data dir: SQLite, no backup, Storage counts inbox.db, write and read
- *                back through the server (MCP and HTTP), export, restart
+ *   new-install  no setting on an empty data dir: the files; then the setting on: SQLite, no backup, Storage counts
+ *                inbox.db, write and read back through the server (MCP and HTTP), export, restart
  *   import       a generated JSONL Inbox moved with the switch on (the check run apart, in the binary's second
  *                process), byte-for-byte backup, export equal to the files, then off: everything back into the files
  *   moves        the move again and again, each one checked apart (the second process's lock race, run 4)
@@ -64,12 +64,18 @@ const OFF = { PLANNOTATOR_INBOX_SQLITE: "0" };
 
 async function newInstall(): Promise<void> {
   const s = box("new");
-  const first = await started(s, {}, "a new install");
-  check(last(s, "store_load").log === "sqlite" && last(s, "store_load").why === "new_install", `store_load: ${JSON.stringify(last(s, "store_load"))}`);
+  const plain = await started(s, {}, "a new install");
+  check(last(s, "store_load").log === "jsonl", `store_load: ${JSON.stringify(last(s, "store_load"))}`);
+  check(!existsSync(join(s.inbox, "inbox.db")), "inbox.db on a new install with no setting");
+  await stop(binary, s, plain);
+  proof("new-install", "no setting: starts on the files", `${Math.round(plain.ms)} ms to answer`);
+
+  const first = await started(s, ON, "the setting on");
+  check(last(s, "store_load").log === "sqlite", `store_load: ${JSON.stringify(last(s, "store_load"))}`);
   check(existsSync(join(s.inbox, "inbox.db")), "no inbox.db on a new install");
   check(!existsSync(join(s.inbox, "projects")), "record files on a new install");
   check(backups(s).length === 0, "a backup on a new install");
-  proof("new-install", "starts on SQLite, nothing moved", `${Math.round(first.ms)} ms to answer`);
+  proof("new-install", "the setting on: SQLite, nothing moved", `${Math.round(first.ms)} ms to answer`);
 
   const agent = await agentOn(first, s);
   const a = await agent.send("First message on a new install.");
@@ -93,8 +99,8 @@ async function newInstall(): Promise<void> {
   check(folderDigest(s.dataDir, out) === served, "the export reads differently from the database");
   proof("new-install", "export while running reads exactly as the database");
 
-  const again = await started(s, {}, "the restart");
-  check(last(s, "store_load").why === "database", `restart store_load: ${JSON.stringify(last(s, "store_load"))}`);
+  const again = await started(s, ON, "the restart");
+  check(last(s, "store_load").log === "sqlite", `restart store_load: ${JSON.stringify(last(s, "store_load"))}`);
   const agent2 = await agentOn(again, s);
   const reread = await agent2.thread(a.thread_id);
   check(JSON.stringify(reread) === JSON.stringify(read), "a restart reads the thread differently");
@@ -112,7 +118,7 @@ async function newInstall(): Promise<void> {
 async function warm(s: Sandbox): Promise<void> {
   const files = recordFiles(s.inbox);
   const run = await started(s, {}, "the first start on files");
-  check(last(s, "store_load").log === "jsonl" && last(s, "store_load").why === "files", `unset over files: ${JSON.stringify(last(s, "store_load"))}`);
+  check(last(s, "store_load").log === "jsonl", `unset over files: ${JSON.stringify(last(s, "store_load"))}`);
   await stop(binary, s, run);
   check(!existsSync(join(s.inbox, "inbox.db")) && statSync(join(s.inbox, "projects")).isDirectory(), "the switch unset moved an Inbox on files");
   // Only appended, as on files today: every record file still starts with exactly what it held.
@@ -291,7 +297,7 @@ async function bigMove(): Promise<void> {
   const move = last(s, "store_move");
   check(move.status === "imported" && move.apart === true, `100k: ${JSON.stringify(move)}\n${run.stderr()}`);
   await stop(binary, s, run);
-  const again = await started(s, {}, "the 100k restart");
+  const again = await started(s, ON, "the 100k restart");
   await stop(binary, s, again);
   proof("big", "100,000 messages moved by the binary", `${move.lines} lines in ${move.ms} ms (read ${move.read}, rows ${move.rows}, load ${move.load}, checkDb ${move.checkDb}); first answer ${Math.round(run.ms)} ms; restart ${Math.round(again.ms)} ms; generated in ${made} ms`);
 }

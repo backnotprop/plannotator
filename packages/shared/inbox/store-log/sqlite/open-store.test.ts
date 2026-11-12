@@ -47,13 +47,13 @@ function tree(dir: string): Record<string, string> {
   return out;
 }
 
-test("the switch reads PLANNOTATOR_INBOX_SQLITE first, then config's inboxSqlite; unset by default", () => {
-  expect(resolveInboxSqlite({}, {})).toBeNull();
+test("the switch reads PLANNOTATOR_INBOX_SQLITE first, then config's inboxSqlite; off by default", () => {
+  expect(resolveInboxSqlite({}, {})).toBe(false);
   expect(resolveInboxSqlite({ inboxSqlite: true }, {})).toBe(true);
   expect(resolveInboxSqlite({ inboxSqlite: false }, {})).toBe(false);
   expect(resolveInboxSqlite({ inboxSqlite: true }, { PLANNOTATOR_INBOX_SQLITE: "0" })).toBe(false);
   expect(resolveInboxSqlite({ inboxSqlite: false }, { PLANNOTATOR_INBOX_SQLITE: "on" })).toBe(true);
-  expect(resolveInboxSqlite({ inboxSqlite: "yes" }, { PLANNOTATOR_INBOX_SQLITE: "maybe" })).toBeNull();
+  expect(resolveInboxSqlite({ inboxSqlite: "yes" }, { PLANNOTATOR_INBOX_SQLITE: "maybe" })).toBe(false);
 });
 
 test("the move's test knobs (a hold, a hard stop) do nothing outside the test sandbox", () => {
