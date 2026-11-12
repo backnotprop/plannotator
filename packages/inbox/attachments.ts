@@ -22,6 +22,7 @@ import {
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
 import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks, quickLabelTipLine } from '@plannotator/ui/utils/parser';
 import { whenTime } from './format';
+import { pictureLines, withPictureFiles } from './commentPictureFiles';
 import type { PrototypeNames } from './prototypes';
 
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
@@ -469,6 +470,7 @@ export function guideCommentSections(comments: readonly CodeAnnotation[]): strin
       const prefix = conventionalPrefix(comment);
       if (comment.text) output += `${prefix}${comment.text}\n`;
       else if (prefix) output += `${prefix.trimEnd()}\n`;
+      output += pictureLines(comment);
       output += '\n';
     }
   }
@@ -654,6 +656,7 @@ function messageCommentEntry(annotation: Annotation, number: number): string {
   if (annotation.isQuickLabel) out += quickLabelTipLine(annotation);
   else if (annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
   else if (deletion) out += `> ${MESSAGE_DELETION.line}\n`;
+  out += pictureLines(annotation);
   return `${out}\n`;
 }
 
@@ -760,7 +763,7 @@ export function attachmentFeedback(
       const group = groups.get(label) ?? { annotations: [], blocks: [] };
       groups.set(label, group);
       const { exportLocation: _dropped, ...annotation } = annotationOf(record) as Annotation & { exportLocation?: unknown };
-      group.annotations.push(annotation as Annotation);
+      group.annotations.push(withPictureFiles(annotation as Annotation));
       continue;
     }
     if (attachment.ref !== undefined) inlineImages = true;
@@ -784,7 +787,7 @@ export function attachmentFeedback(
     }
     // Never a client's `exportLocation` (a record from before the store dropped it): only the line computed below prints.
     const { exportLocation: _stored, ...annotation } = annotationOf(record) as Annotation & { exportLocation?: unknown };
-    group.annotations.push(annotation as Annotation);
+    group.annotations.push(withPictureFiles(annotation as Annotation));
   }
   for (const group of groups.values()) {
     const code = codeCommentBlocks(group.annotations);

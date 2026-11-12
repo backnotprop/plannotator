@@ -974,13 +974,13 @@ describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
     expect(((await bad.json()) as Json).code).toBe("validation_error");
   });
 
-  test("the agent note: a dev build keeps no line and always shows it; over the tailnet it never does", async () => {
+  test("the agent note: a dev build keeps no line and always shows it; the owner over the tailnet is shown it as on this computer", async () => {
     const dev = await world({ version: "0.0.0-dev", config: { inboxReveals: { agentNote: { shownFor: ["codex"] } } } });
     expect(((await (await dev.post("/api/inbox/reveal", { id: "agent_note", agents: ["codex"] })).json()) as Json).show).toBe(true);
     const phone = await world({ tailnet: "owner" });
     const answer = await phone.viaTailnet(OWNER, "/api/inbox/reveal", { id: "agent_note", agents: ["pi"] });
-    expect(((await answer.json()) as Json).show).toBe(false);
-    expect(phone.saved().inboxReveals?.dayShownAt).toBeUndefined();
+    expect(((await answer.json()) as Json).show).toBe(true);
+    expect(phone.saved().inboxReveals?.dayShownAt).toMatch(/^\d{4}-/);
   });
 });
 

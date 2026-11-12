@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.23",
+  "version": "0.25.28",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {

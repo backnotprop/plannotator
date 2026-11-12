@@ -162,8 +162,6 @@ export interface InboxTailscaleContext {
   /** A terminal closing a foreground Inbox (SIGHUP) while published: stop cleanly, then exit. */
   onHangup?: () => void;
   maxRequestBodySize?: number;
-  /** The tailnet listener just opened: the window starts compressing its page for it (#2032). */
-  onListen?: () => void;
   /** Published by itself, after an earlier publish failed (Tailscale came back): the windows hear the new state. */
   onRepublished?: () => void;
   /** Tests: the retry's clock. Default: unref'd timers. */
@@ -317,7 +315,6 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       maxRequestBodySize: context.maxRequestBodySize,
       fetch: listenerFetch,
     } as Parameters<typeof Bun.serve>[0]);
-    context.onListen?.();
     return listener.port as number;
   };
 

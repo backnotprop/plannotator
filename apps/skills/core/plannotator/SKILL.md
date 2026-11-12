@@ -83,7 +83,7 @@ Plain `annotate` is feedback-only: it shows **Close** but no **Approve** button.
 Targets:
 
 - Markdown and text files: `.md`, `.mdx`, `.txt`.
-- Plain-text config and data files, rendered as text: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, `.env.example`. `.env` itself is deliberately refused (it commonly holds secrets, and annotate history copies file contents). Source-code files belong to `plannotator review`, not annotate.
+- Plain-text config and data files, rendered as text: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, `.env.example`. A `.env` file opens only on its own, by its explicit path, and nothing of it is kept in Plannotator's data folder; open one only when the person asks for that file. Source-code files belong to `plannotator review`, not annotate.
 - Diagram sources, opened in the full diagram viewer (zoom, pan, popout, click a node/edge/cluster to comment): `.mmd`, `.mermaid` (Mermaid) and `.dot`, `.gv` (Graphviz). The file is the whole diagram — no fence needed — and comments carry the part's id plus its real file line.
 - AsciiDoc files: `.adoc`, `.asciidoc`.
 - HTML files (`.html`, `.htm`): rendered as the raw page by default; `--markdown` converts to markdown instead. `--render-html` is accepted for compatibility; raw rendering is already the default.
@@ -286,5 +286,5 @@ Recommended: Local only, purged after 30 days
 - Do not use `--hook` outside a real hook context; use `--json` when you need structured output.
 - Do not run bare `plannotator` interactively; it is the hook entry point.
 - Do not guess flags. Run `plannotator <command> --help` when unsure; unknown dashed tokens make annotate fail on purpose.
-- Do not point `plannotator annotate` at source-code files or `.env` files; code goes through `plannotator review`, and `.env` is refused.
+- Do not point `plannotator annotate` at source-code files; code goes through `plannotator review`. Open a `.env` file only when the person asks for that file by name: it may hold secrets.
 - Do not start a strict gate (`--require-approval`) unless a human is actually there to review; the session blocks until they act.

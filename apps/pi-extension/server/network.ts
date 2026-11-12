@@ -99,6 +99,15 @@ export function isRemoteSession(): boolean {
 }
 
 /**
+ * Remote mode that only SSH turned on (`PLANNOTATOR_REMOTE` unset): mirrors
+ * packages/server/remote.ts. A loopback request is answered as in a local
+ * session (`isSshTunnelRequest` in this-machine.ts).
+ */
+export function isSshDetectedRemote(): boolean {
+	return getRemoteOverride() === null && Boolean(process.env.SSH_TTY || process.env.SSH_CONNECTION);
+}
+
+/**
  * Get the server ports to try, in order.
  * - PLANNOTATOR_PORT accepts a fixed port or inclusive range
  * - Remote sessions default to 19432 (for port forwarding)
