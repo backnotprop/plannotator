@@ -24,6 +24,7 @@ import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
+import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
@@ -1127,6 +1128,9 @@ export interface InboxLaunchRecord {
    * too): no Full permissions.
    */
   bypass_available?: true;
+  /** Fixed at Send, so Try again and every restart start the same. */
+  model?: string;
+  effort?: string;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
@@ -3338,7 +3342,7 @@ export interface InboxComposeLaunch {
    * the folders the agent does not trust and the owner can trust from here, by project id, the scratch root under
    * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
    */
-  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
+  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted>; choices?: InboxLaunchChoices }[];
   /** `slow`: the project is on a network drive that isn't answering now (approval "inbox-launch-any-folder"). */
   projects: { id: string; name: string; root: string; exists: boolean; slow?: true }[];
   /**
@@ -3478,6 +3482,12 @@ export interface InboxPromptsSettings {
    * `text` null: none (Default). Absent from an older Inbox.
    */
   guide?: { text: string | null; max: number };
+  rules?: {
+    shared: string | null;
+    runtimes: Record<InboxPromptHost, string | null>;
+    room: { shared: number; runtimes: Record<InboxPromptHost, number> };
+    dropped: InboxPromptHost[];
+  };
 }
 
 /**
@@ -3487,7 +3497,8 @@ export interface InboxPromptsSettings {
 export interface InboxPromptsChange {
   inbox?: {
     reminder?: string | null;
-    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
+    rules?: string | null;
+    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null; rules?: string | null }>>;
   };
   guide?: string | null;
 }
