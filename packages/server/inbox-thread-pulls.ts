@@ -14,8 +14,9 @@
  *   review decision and the head commit's checks. `--hostname` is always
  *   named, and a host other than github.com is asked only when this
  *   computer's own gh is signed in to it (#2187's rule).
- * - GitLab: the hover cards' lookup (`RefCards`), with its own cap, cache and
- *   rate-limit hold.
+ * - GitLab and Bitbucket Cloud: the hover cards' lookup (`RefCards`), with its
+ *   own cap, cache and rate-limit hold. Bitbucket reads through the review
+ *   app's API token (`fetchBbPRCard`), since Bitbucket has no CLI.
  * - Only PRs still in play (open, a draft, or not read yet) are read: merged
  *   and closed are final. Only on view: when the window lists threads (the
  *   threads not archived) and when it reads one thread's PRs.
@@ -27,7 +28,7 @@
  *   `setThreadPullState`), so rows paint without a forge call and phones and
  *   the device door see it. Checks and the review verdict are kept here only;
  *   a change to them tells the windows (`onLiveChange`, `event: thread-pulls`).
- * - No gh or glab, signed out, a failure or a timeout: nothing is written, the
+ * - No gh or glab, no Bitbucket token, signed out, a failure or a timeout: nothing is written, the
  *   PR keeps its last state (`unknown` until a first answer), the failure is
  *   kept for 1 min, and nothing nags.
  * - The window's read never waits on a forge: it answers what is known at
@@ -36,7 +37,7 @@
  *   held forever (`createRefSlots`).
  */
 
-import { forgeRefKey, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
+import { forgeRefKey, forgeRefLabel, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import {
   inboxThreadPullGroups,
   inboxThreadPullText,
@@ -94,7 +95,7 @@ export function githubThreadPullRead(node: unknown): ThreadPullRead | null {
   return { state, title: str(n.title), base: str(n.baseRefName), head: str(n.headRefName), checks, review };
 }
 
-/** The hover card's data as a read (GitLab). */
+/** The hover card's data as a read (GitLab, Bitbucket). */
 export function cardDataThreadPullRead(data: ForgeRefCardData): ThreadPullRead | null {
   if (data.kind !== "pull") return null;
   const state: InboxThreadPullState | null = data.state === "open" || data.state === "draft" || data.state === "merged" || data.state === "closed" ? data.state : null;
@@ -226,14 +227,14 @@ export function createThreadPullStates(options: {
     return job;
   };
 
-  const readGitlab = async (key: string, url: string): Promise<void> => {
+  const readCard = async (key: string, url: string): Promise<void> => {
     const result = options.refCards ? await options.refCards.get(url).catch(() => null) : null;
     land(key, result?.ok ? cardDataThreadPullRead(result.data) : null);
   };
 
   const readFixture = (fixture: ThreadPullFixture, pull: InboxThreadPull): void => {
     const ref = parseForgeRefUrl(pull.url);
-    const named = fixture[pull.pull] ?? (ref ? fixture[`${ref.owner}/${ref.repo}${ref.platform === "gitlab" ? "!" : "#"}${ref.number}`] : undefined) ?? fixture[pull.url];
+    const named = fixture[pull.pull] ?? (ref ? fixture[`${ref.owner}/${ref.repo}${forgeRefLabel(ref)}`] : undefined) ?? fixture[pull.url];
     land(
       pull.pull,
       named?.state
@@ -270,7 +271,7 @@ export function createThreadPullStates(options: {
           batch.items.push({ key: pull.pull, number: ref.number });
           githubBatches.set(repoKey, batch);
         } else {
-          jobs.push(readGitlab(pull.pull, pull.url));
+          jobs.push(readCard(pull.pull, pull.url));
         }
       }
       for (const batch of githubBatches.values()) {

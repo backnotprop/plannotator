@@ -67,6 +67,16 @@ describe("thread_pulls", () => {
     expect(w.refreshed).toEqual([["github.com/o/r#1", "gitlab.com/acme/api#7:pull"]]);
   });
 
+  test("a Bitbucket Cloud PR is added by its URL and read back as that URL, never as a GitHub short ref", async () => {
+    const w = world();
+    const url = "https://bitbucket.org/acme/api/pull-requests/3";
+    const result = await w.call({ thread_id: w.thread, add: [`${url}/diff`], ...FILLED });
+    expect(result.isError).toBeUndefined();
+    expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Added ${url}. Nothing was sent to the person.`);
+    expect(w.refreshed).toEqual([["bitbucket.org/acme/api#3:pull"]]);
+    expect(threadPullsText(w.context, w.thread, "ses_a")[1]).toStartWith(`- ${url} `);
+  });
+
   test("a short group/project!n is on the thread's project's own GitLab host, and is shown back as its URL", async () => {
     const asked: string[] = [];
     const w = world(async (projectId) => (asked.push(projectId), "gitlab.acme.dev"));

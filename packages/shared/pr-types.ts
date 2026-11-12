@@ -24,6 +24,11 @@ export interface CommandResult {
  */
 export interface CommandOptions {
   env?: Record<string, string>;
+  /**
+   * When it aborts, the command and everything it started are ended (TERM, then KILL): a command given up on (a
+   * Bitbucket token command that never answered) does not keep running.
+   */
+  signal?: AbortSignal;
 }
 
 /**
