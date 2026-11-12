@@ -92,12 +92,6 @@ describe("parseAnnotateArgs", () => {
     });
   });
 
-  // `@` is the reference-mode marker (Claude Code / OpenCode / Pi convention),
-  // not part of the filename. The parser strips it on `filePath` as the primary
-  // behavior — that's the common case. `rawFilePath` preserves the original
-  // for callers that want to try the literal form as a fallback (scoped-package-
-  // style names). See at-reference.ts for the combined helper.
-
   test("leading @ is stripped (reference-mode primary) and rawFilePath preserves it", () => {
     expect(parseAnnotateArgs("@spec.md --gate")).toEqual({
       filePath: "spec.md",
@@ -248,12 +242,6 @@ describe("parseAnnotateArgs", () => {
     });
   });
 
-  // Regressions from the initial parser: the tokenize-and-rejoin approach
-  // collapsed consecutive whitespace in file paths. Before this branch,
-  // OpenCode and Pi passed the raw args string straight through, so files
-  // with double-spaces or tabs in their names worked fine. These tests pin
-  // that behavior so we don't regress it again.
-
   test("double-space inside a file path is preserved (flag at end)", () => {
     expect(parseAnnotateArgs("My  Notes.md --gate")).toEqual({
       filePath: "My  Notes.md",
@@ -314,11 +302,6 @@ describe("parseAnnotateArgs", () => {
     });
   });
 
-  // OpenCode and Pi don't go through a shell, so users who quote paths
-  // (shell muscle memory, copy-paste from docs) have literal quote
-  // characters reach the parser. Strip them at the tokenization layer
-  // so downstream callers don't have to reason about quoting.
-
   test("wrapping double quotes are stripped from both filePath and rawFilePath", () => {
     expect(parseAnnotateArgs(`"@foo.md" --gate`)).toEqual({
       filePath: "foo.md",
@@ -378,11 +361,6 @@ describe("parseAnnotateArgs", () => {
       static: false,
     });
   });
-
-  // --hook emits hook-native JSON ({"decision":"block","reason":"..."}) for
-  // annotations and empty stdout for approve/close. It implies --gate in the
-  // binary, but the parser is a pure tokenizer — it reports which flags were
-  // present without applying implication logic.
 
   test("--hook alongside --gate", () => {
     expect(parseAnnotateArgs("spec.md --gate --hook")).toEqual({
@@ -519,9 +497,6 @@ describe("parseAnnotateArgs: live flags (--app / --static)", () => {
   });
 
   test("without liveFlags the tokens stay in the path (honest unsupported-flag error downstream)", () => {
-    // A host that cannot act on --app must not silently strip it: leaving the
-    // token in the path preserves the legacy "File not found: --app ..."
-    // failure instead of quietly ignoring the user's flag.
     const parsed = parseAnnotateArgs("http://localhost:5173 --app");
     expect(parsed.filePath).toBe("http://localhost:5173 --app");
     expect(parsed.app).toBe(false);
@@ -530,19 +505,13 @@ describe("parseAnnotateArgs: live flags (--app / --static)", () => {
 });
 
 describe("annotateTargetWords", () => {
-  // Failure caught: a slash command's words reaching the CLI as one path
-  // (". notes.md"), a quoted path with spaces split apart, or a flag word
-  // passed on as a target.
   test("splits like a shell, quotes group, known flags are dropped", () => {
     expect(annotateTargetWords(". notes.md --gate")).toEqual([".", "notes.md"]);
     expect(annotateTargetWords('"my notes.md" \'b c.md\' --markdown')).toEqual(["my notes.md", "b c.md"]);
   });
 
-  // Failure caught: an apostrophe in prose swallowing the rest of the line
-  // into one word, or a Windows path losing its separators.
   test("an unterminated quote is prose, and backslashes are kept", () => {
     expect(annotateTargetWords("notes.md it's the spec")).toEqual(["notes.md", "it's", "the", "spec"]);
-    // Two apostrophes once grouped "s notes.md don" into one word, hiding the file.
     expect(annotateTargetWords("it's notes.md don't touch it")).toEqual(["it's", "notes.md", "don't", "touch", "it"]);
     expect(annotateTargetWords("'my notes.md' it's fine")).toEqual(["my notes.md", "it's", "fine"]);
     expect(annotateTargetWords("C:\\docs\\a.md please")).toEqual(["C:\\docs\\a.md", "please"]);

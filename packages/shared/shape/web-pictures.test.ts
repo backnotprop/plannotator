@@ -1,13 +1,3 @@
-/**
- * Web pictures on a Shape board (approval shape-any-picture). What regresses if these fail:
- * - a board naming an https picture is refused, or keeps the address (so viewing it would call the site);
- * - something that is not a picture (a page, a 404, a huge body) is kept as one;
- * - a board with a built-in logo, a screenshot on this computer and a web picture loses any of them;
- * - a refusal stops saying why (too large, timed out, not an image, the HTTP status, the network's own words), or a
- *   real picture is refused because its address does not decode as a name;
- * - a board of slow pictures keeps the agent waiting past the board's deadline (60 at 15 s each was 225 s).
- * The fetch is a stand-in: nothing here reaches the network.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +20,6 @@ afterEach(() => {
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect width="2" height="2"/></svg>';
 
-/** A stand-in web: each address answers what the table says; every request is recorded. */
 function web(table: Record<string, () => Response>) {
   const asked: string[] = [];
   const fetch = async (input: string | URL) => {
@@ -96,7 +85,6 @@ describe("fetching a board's web pictures", () => {
   });
 
   test("the whole board gets one deadline: past it, the agent hears back about every picture still on its way", async () => {
-    // Six that never answer and never listen to their signal, each allowed 10 s alone; the board, 0.3 s.
     const fetch = async (input: string | URL) => (String(input).endsWith("/ok.png") ? new Response(PNG) : new Promise<Response>(() => {}));
     const names = ["ok", "a", "b", "c", "d", "e", "f"];
     const started = Date.now();
@@ -104,7 +92,6 @@ describe("fetching a board's web pictures", () => {
     expect(Date.now() - started).toBeLessThan(3_000);
     expect([...r.pictures.keys()]).toEqual(["https://example.com/ok.png"]);
     expect(r.errors).toHaveLength(6);
-    // Four were on their way when the time ran out; the rest had not started.
     expect(r.errors.filter((e) => e.includes("timed out: the board's web pictures get 0.3 s in all, and this one was still on its way"))).toHaveLength(4);
     expect(r.errors.filter((e) => e.includes("was not fetched: the board's web pictures get 0.3 s in all"))).toHaveLength(2);
     for (const e of r.errors) expect(e).toEndWith("; download it and name the file, or leave it out");
@@ -130,7 +117,6 @@ describe("a board with a logo, a screenshot and a web picture", () => {
     const r = store.update({ board, project: { name: "p", root: folder }, sourceDir: folder, webPictures: fetched.pictures });
     if (!r.ok) throw new Error(JSON.stringify(r));
     const html = store.read(r.id)!.views.picture!.html;
-    // The logo, as the kit draws it today.
     expect(html).toMatch(/<svg data-brand[^>]*data-logo="stripe"[^>]*viewBox="0 0 24 24"><title>Stripe<\/title><path fill="#[0-9A-Fa-f]{6}" d="/);
     expect(html).not.toContain("https://");
     expect(html).not.toContain("shots/");

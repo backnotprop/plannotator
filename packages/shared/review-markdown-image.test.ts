@@ -1,8 +1,3 @@
-/**
- * The decision table of `/api/review-markdown-image`, against a fake side
- * reader: every refusal, the side and folder each path resolves against,
- * and that a read is never attempted before the cheap checks pass.
- */
 import { describe, expect, test } from "bun:test";
 import type { DiffSide, FileBytesRead } from "./review-core";
 import {
@@ -62,7 +57,6 @@ const PATCH = [
 
 type Store = Record<string, Uint8Array | FileBytesRead>;
 
-/** A fake repository: `${side}:${path}` → bytes (or a read result). */
 function makeRequest(
   query: Record<string, string>,
   store: Store,
@@ -139,9 +133,7 @@ describe("markdownImageRefs", () => {
       "```",
     ].join("\n"));
     expect([...refs]).toEqual(["img/shown.png"]);
-    // An unclosed fence runs to the end of the text, as CommonMark has it.
     expect(markdownImageRefs("```\n![a](a.png)\n").size).toBe(0);
-    // A stray backtick does not swallow the next paragraph's image.
     expect([...markdownImageRefs("A `stray backtick.\n\n![b](b.png) and ` another")]).toEqual(["b.png"]);
   });
 
@@ -209,14 +201,12 @@ describe("handleReviewMarkdownImageRequest", () => {
     const oldSide = await answer({ doc: "docs/guide.md", side: "old", src: "img/a.png" }, STORE);
     expect(oldSide.response.headers["X-Image-Width"]).toBe("2");
 
-    // A renamed document: each side resolves against its own folder.
     const renamedNew = await answer({ doc: "docs/moved/new.md", side: "new", src: "shot.png" }, STORE);
     expect(renamedNew.response.headers["X-Image-Width"]).toBe("6");
     const renamedOld = await answer({ doc: "docs/moved/new.md", side: "old", src: "shot.png" }, STORE);
     expect(renamedOld.response.headers["X-Image-Width"]).toBe("5");
     expect(renamedOld.reads).toEqual(["old:docs/old.md", "old:docs/shot.png"]);
 
-    // `/` is the root; a deleted document's old side; a config extension.
     expect((await answer({ doc: "docs/guide.md", side: "new", src: "/assets/r.png" }, STORE)).response.status).toBe(200);
     expect((await answer({ doc: "gone.md", side: "old", src: "g.png" }, STORE)).response.headers["X-Image-Width"]).toBe("7");
     expect((await answer({ doc: "notes.livemd", side: "new", src: "n.png" }, STORE)).response.status).toBe(200);
@@ -279,7 +269,6 @@ describe("handleReviewMarkdownImageRequest", () => {
     expect(result.reason).toBe("not-referenced");
     expect(result.reads).toEqual(["new:docs/guide.md"]);
 
-    // The old document never showed /assets/r.png.
     expect((await answer({ doc: "docs/guide.md", side: "old", src: "/assets/r.png" }, STORE)).reason).toBe("not-referenced");
   });
 

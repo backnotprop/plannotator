@@ -1,13 +1,3 @@
-/**
- * Snoozes in the store (approval "inbox-snooze"): the person's own state,
- * outside the event log. What can regress: a snooze writing a store line or
- * taking a seq (an agent's cursor would move), an agent's message or new
- * question ending a snooze, the person's reply, Mark read or Archive not
- * ending it, a look ending it before its time, a return's mark lost on a
- * restart, the file left world-readable, and an entry outliving its thread.
- * The property runs a store with snoozes beside a twin that never snoozes and
- * checks every row an agent or the list reads never differs.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { inboxRowAsOf } from "@plannotator/core/inbox-snooze";
 import fc from "fast-check";
@@ -22,7 +12,6 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A clock the test moves. */
 function clock(start = "2026-11-03T14:40:00.000Z") {
   let at = Date.parse(start);
   return { now: () => new Date(at), go: (ms: number) => (at += ms) };
@@ -76,7 +65,6 @@ describe("snoozes in the store", () => {
     expect(untilOf(none)).toBeNull();
 
     expect(code(() => store.setHeldSnooze("msg_nope", at(-HOUR)))).toBe("thread_not_found");
-    // Only a time gone by is forgiven.
     expect(code(() => store.setHeldSnooze(none, at(400 * 24 * HOUR)))).toBe("validation_error");
     expect(store.setHeldSnooze(none, at(HOUR))!.until).toBe(at(HOUR));
   });
@@ -92,7 +80,6 @@ describe("snoozes in the store", () => {
     const file = join(dir, "inbox", "snoozes.json");
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ v: 1, snoozes: [{ thread_id: thread, until, at: t.now().toISOString() }] });
-    // The row agents and the list read is untouched: only the server's list model carries `snoozed`.
     expect(store.listRow(thread)).not.toHaveProperty("snoozed");
     const again = InboxStore.open(dir, { now: t.now });
     expect(again.snoozedThreads()).toEqual(new Set([thread]));
@@ -116,7 +103,6 @@ describe("snoozes in the store", () => {
     store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "More news", thread: "lane" });
     store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: ASK, thread: "lane" });
     expect(store.snoozedThreads().has(thread)).toBe(true);
-    // The question is open for the agent, as it would be without a snooze.
     expect(store.listRow(thread)!.questions.open).toBe(1);
   });
 
@@ -125,7 +111,6 @@ describe("snoozes in the store", () => {
     const { store, project } = open(t.now);
     const root = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "News", thread: "lane" }).message;
     store.setSnooze(root.thread_id, new Date(t.now().getTime() + HOUR).toISOString());
-    // The MCP tool's call: no `by`, an agent's.
     store.resolveThread(root.id, true);
     expect(store.snoozes().map((s) => s.thread_id)).toEqual([root.thread_id]);
     store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "Back again", reply_to: root.id });
@@ -159,25 +144,21 @@ describe("snoozes in the store", () => {
     const { store, project } = open(t.now);
     const write = (name: string, reply_to?: string) => store.sendMessage({ project_id: project.id, author: agent(`ses_${name}`), body: "News", ...(reply_to ? { reply_to } : { thread: name }) }).message;
     const inAnHour = () => new Date(t.now().getTime() + HOUR).toISOString();
-    /** The row by the list's rule: what the window reads. */
     const back = (threadId: string) => {
       const entry = store.snoozes().find((s) => s.thread_id === threadId);
       return inboxRowAsOf({ ...store.listRow(threadId)!, snoozed: entry ? { until: entry.until, at: entry.at } : null }, t.now()).snooze_back ?? null;
     };
 
-    // Never archived.
     const plain = write("plain");
     const plainUntil = inAnHour();
     store.setSnooze(plain.thread_id, plainUntil);
 
-    // The person archives; an agent writes, so the thread is back; the person snoozes it.
     const personArchived = write("person");
     store.resolveThread(personArchived.id, true, "person");
     write("person", personArchived.id);
     const personUntil = inAnHour();
     store.setSnooze(personArchived.thread_id, personUntil);
 
-    // An agent archives a snoozed thread and writes in it while the snooze runs.
     const agentArchived = write("agent");
     const agentUntil = inAnHour();
     store.setSnooze(agentArchived.thread_id, agentUntil);
@@ -235,7 +216,6 @@ describe("snoozes in the store", () => {
     store.markSeen(thread);
     expect(store.snoozedThreads().has(thread)).toBe(true);
     t.go(HOUR + 1000);
-    // Past its time it is no longer snoozed, but the entry stays (the row's clock) until a look, across a restart too.
     expect(store.snoozedThreads().has(thread)).toBe(false);
     expect(InboxStore.open(dir, { now: t.now }).snoozes().map((s) => s.thread_id)).toEqual([thread]);
     store.markSeen(thread);
@@ -312,7 +292,6 @@ describe("snoozes in the store", () => {
             }
             continue;
           }
-          // Snooze operations run on one store only, and move nothing else.
           const cursor = snoozing.store.cursor();
           const id = threads[0]![step.thread];
           if (id && step.kind === "snooze") snoozing.store.setSnooze(id, new Date(t.now().getTime() + step.hours * HOUR).toISOString());

@@ -1,9 +1,3 @@
-/**
- * Tests for the PFM reminder constant and improve-context composer.
- *
- * Run: bun test packages/shared/pfm-reminder.test.ts
- */
-
 import { describe, expect, test } from "bun:test";
 import { PFM_REMINDER, composeImproveContext } from "./pfm-reminder";
 import { parseQuestionBlock } from "./question-block";
@@ -14,8 +8,6 @@ describe("PFM_REMINDER", () => {
   });
 
   test("covers the headline PFM features the renderer actually supports", () => {
-    // If any of these features moves out of the renderer, update both the
-    // reminder and this test together.
     expect(PFM_REMINDER).toContain("Code-file links");
     expect(PFM_REMINDER).toContain("> [!NOTE]");
     expect(PFM_REMINDER).toContain("> [!TIP]");
@@ -30,8 +22,6 @@ describe("PFM_REMINDER", () => {
   });
 
   test("its question block example parses as the renderer parses it", () => {
-    // What regresses: the question grammar changes and the reminder keeps
-    // teaching agents a block the renderer shows as a plain callout.
     const lines = PFM_REMINDER.split("\n");
     const start = lines.indexOf("  :::question");
     expect(start).toBeGreaterThan(-1);
@@ -42,15 +32,12 @@ describe("PFM_REMINDER", () => {
     expect(parsed?.kind).toBe("single");
     expect(parsed?.choices.length).toBe(2);
     expect(parsed?.choices.filter((c) => c.recommended).map((c) => c.label)).toEqual(["Redis"]);
-    // The example models the rule it states: no bare question.
     expect(parsed?.context.trim()).not.toBe("");
     expect(PFM_REMINDER).toContain("Never send a bare question");
     expect(PFM_REMINDER).toContain("- [x]");
   });
 
   test("is static, so a prompt cache prefix never varies between requests", () => {
-    // The reminder is injected on every EnterPlanMode / system transform;
-    // any per-request text (a date, a path, a counter) would break caching.
     const a = composeImproveContext({ pfmEnabled: true, improvementHookContent: null });
     const b = composeImproveContext({ pfmEnabled: true, improvementHookContent: null });
     expect(a).toBe(b);
@@ -58,7 +45,6 @@ describe("PFM_REMINDER", () => {
   });
 
   test("stays small enough to inject on every EnterPlanMode call", () => {
-    // Soft cap so the reminder doesn't drift into a tutorial. Bump if intentional.
     expect(PFM_REMINDER.length).toBeLessThan(3000);
   });
 });
@@ -109,8 +95,6 @@ describe("composeImproveContext", () => {
     expect(pfmIdx).toBeGreaterThanOrEqual(0);
     expect(improveIdx).toBeGreaterThan(pfmIdx);
 
-    // A horizontal rule separates the two sections so the agent reads them
-    // as distinct payloads.
     const between = ctx.slice(pfmIdx, improveIdx);
     expect(between).toContain("\n---\n");
   });

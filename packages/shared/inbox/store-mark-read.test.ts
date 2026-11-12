@@ -1,10 +1,3 @@
-/**
- * Mark read and the Send that skips (design record "inbox-mark-read",
- * approved 2026-10-11, with the owner's later decision that Mark read closes
- * the questions it leaves): the store's rules, proved on a real store in a
- * temp dir, including a replay from disk and a store written before either
- * existed.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +13,6 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A store under a temp dir on a clock the test moves. */
 function open(dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-markread-"))) {
   if (!roots.includes(dir)) roots.push(dir);
   const clock = { now: Date.parse("2026-10-11T15:00:00.000Z") };
@@ -79,7 +71,7 @@ describe("Mark read", () => {
     const row = store.markRead(asked.id, true);
     expect(row.section).toBe("quiet");
     expect(row.read_at).toBe("2026-10-11T15:00:00.000Z");
-    expect(row.unseen).toBe(0); // a Mark read is a look
+    expect(row.unseen).toBe(0);
     expect(row.questions).toMatchObject({ open: 0, picked: 0, stopped: false });
     for (const q of store.questionsOf(asked.id)) {
       expect(q.state).toBe("closed");
@@ -87,9 +79,7 @@ describe("Mark read", () => {
       expect(q.answer!.by_reply).toBeUndefined();
       expect(q.set_aside_at).toBe("2026-10-11T15:00:00.000Z");
     }
-    // Nothing is sent: no message was written.
     expect(store.thread(asked.id)!.messages).toHaveLength(1);
-    // A pick on a closed question is refused until Move back.
     expect(() => store.savePicks(asked.id, [{ key: questions[0].key, revision: 1, answer: pickFor(questions[0], "Cards") }])).toThrow(InboxError);
   });
 
@@ -123,7 +113,6 @@ describe("Mark read", () => {
     const news = store.sendMessage({ project_id: project.id, author: { ...AGENT, session: "ses_b" }, body: "The nightly build is green." }).message;
     expect(rowOf(store, news.id).section).toBe("new");
     expect(store.markRead(news.id, true).section).toBe("quiet");
-    // Undo takes back the look the Mark read counted: the news is news again.
     expect(store.markRead(news.id, false)).toMatchObject({ section: "new", unseen: 1 });
     expect(store.markRead(news.id, true).section).toBe("quiet");
     store.sendReply(news.id, { words: "Thanks.", idempotency_key: "k-1" });
@@ -143,7 +132,6 @@ describe("Mark read", () => {
   test("the asking agent is told once, after the Undo window: one note per asking message, a reply to it", () => {
     const { store, clock, asked } = setup();
     store.markRead(asked.id, true);
-    // Inside the Undo window: nothing goes.
     expect(store.tellSetAside(asked.id, 8_000)).toEqual([]);
     expect(store.setAsideDue(8_000)).toEqual([]);
     clock.now += 8_000;
@@ -156,11 +144,8 @@ describe("Mark read", () => {
     expect(note.body).toContain("- Q1. Which layout should the invoice list use?");
     expect(note.body).toContain("- Q3. Anything the empty state should say?");
     expect(note.set_aside).toHaveLength(3);
-    // Delivered like a reply: the asking session's connection is handed it.
     expect(store.pendingReplies("ses_a").map((m) => m.id)).toEqual([note.id]);
-    // The note does not end the read, and pushes nothing new to the top.
     expect(rowOf(store, asked.id)).toMatchObject({ section: "quiet", last_author: "person" });
-    // Once: no second note for the same Mark read.
     expect(store.tellSetAside(asked.id, 8_000)).toEqual([]);
     expect(store.setAsideDue(0)).toEqual([]);
   });
@@ -190,7 +175,6 @@ describe("Mark read", () => {
     const { store, dir, asked, project } = setup();
     const news = store.sendMessage({ project_id: project.id, author: { ...AGENT, session: "ses_b" }, body: "Nightly build is green." }).message;
     const before = store.listSections().map((s) => [s.id, s.threads.map((t) => t.thread_id)]);
-    // Nothing a pre-Mark-read Inbox would not have written.
     const folder = join(dir, "inbox", "projects", readdirSync(join(dir, "inbox", "projects"))[0]!);
     const text = readFileSync(join(folder, "messages.jsonl"), "utf8") + readFileSync(join(folder, "questions.jsonl"), "utf8");
     expect(text).not.toContain("person_read");
@@ -271,8 +255,6 @@ describe("a Send skips only what the person chose (approval inbox-explicit-skip)
   test("without a skip list the questions stay open", () => {
     const { store, asked } = setup();
     const result = store.sendReply(asked.id, { words: "Redo the design.", idempotency_key: "k-1" });
-    // The words, then the line that keeps the agent from asking again
-    // (approval "inbox-words-only-reply", store-words-only-reply.test.ts).
     expect(result.reply.body).toBe(
       "Redo the design.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.",
     );
@@ -316,10 +298,8 @@ describe("Undo after the agent was told", () => {
     expect(reopened.body.split("\n")[0]).toBe(INBOX_REOPENED_HEADING);
     expect(reopened.body).toContain("- Q2. Should overdue invoices sort to the top?");
     expect(reopened.reopened).toHaveLength(3);
-    // The asking session is handed it like any reply.
     expect(store.pendingReplies("ses_a").map((m) => m.id)).toContain(reopened.id);
     expect(store.questionsOf(asked.id).every((q) => q.state === "open")).toBe(true);
-    // Marked read again: the agent is told again, once.
     store.markRead(asked.id, true);
     clock.now += 10_000;
     expect(store.tellSetAside(asked.id, 10_000)).toHaveLength(1);

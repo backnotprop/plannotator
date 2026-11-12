@@ -1,8 +1,3 @@
-/**
- * `pendingRepliesFor` (the Codex wake's one pass over the messages) answers
- * exactly what `pendingReplies` answers for each session, and stays one pass:
- * 800 Codex threads with 32,000 messages, measured.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +27,6 @@ test("for every session, the same items in the same order as pendingReplies: rep
   store.sendReply(asked[0]!.id, { words: "one", idempotency_key: "r1" });
   store.sendReply(asked[0]!.id, { words: "two", idempotency_key: "r2" });
   store.sendReply(asked[1]!.id, { words: "read", idempotency_key: "r3" });
-  // An agent read thread 2: its reply no longer waits.
   store.markAgentChecked(asked[1]!.thread_id);
   store.sendReply(asked[3]!.id, { words: "tagging", idempotency_key: "r4", tags: [{ host: "codex", session: thread(3), wakes: true }] });
   const set = new Set(sessions);
@@ -43,7 +37,6 @@ test("for every session, the same items in the same order as pendingReplies: rep
   expect(all.get(thread(1))?.length).toBe(2);
   expect(all.has(thread(2))).toBe(false);
   expect(all.get(thread(3))?.length).toBe(1);
-  // A session not asked about is not looked at.
   expect(store.pendingRepliesFor(new Set([thread(1)])).has(thread(3))).toBe(false);
   expect(store.pendingRepliesFor(new Set()).size).toBe(0);
 });
@@ -64,6 +57,5 @@ test("one pass: 800 threads and 32,000 messages answer in well under the per-ses
   const all = store.pendingRepliesFor(sessions, { tags: true });
   const took = performance.now() - started;
   expect([...all.values()].reduce((n, items) => n + items.length, 0)).toBe(16_000);
-  // Measured at about 12 ms on an M-series laptop; one pendingReplies per session took about 2 s for the 800.
   expect(took).toBeLessThan(400);
 }, 120_000);

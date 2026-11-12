@@ -1,13 +1,3 @@
-/**
- * A thread's PRs in the store (approval "inbox-pr-binding", 2026-11-08): an
- * event log in `pulls.jsonl`, one record per (thread, PR). The failures these
- * guard: a 21st PR that gets written; a refused call that half-writes; a PR
- * the person removed that an agent re-adds without the log showing who did
- * what; the person's changes since a moment read wrong (so the wake says the
- * wrong thing); a reader's state line that counts as an add or remove; a
- * list that does not read back after a restart; an older Inbox that could
- * reuse a seq; and a deleted thread whose PRs survive it.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -99,7 +89,6 @@ describe("a thread's PRs", () => {
     expect(error.code).toBe("validation_error");
     expect(error.message).toContain("at most 20");
     expect(store.threadPullEvents(thread).length).toBe(before);
-    // Taking one off makes room: the add and the remove in one call land together.
     const swap = store.changeThreadPulls({ thread_id: thread, add: refs("o/r#100"), remove: refs("o/r#1"), by: PERSON });
     expect(swap.added).toHaveLength(1);
     expect(store.threadPulls(thread)).toHaveLength(INBOX_THREAD_PULLS_MAX);
@@ -118,7 +107,6 @@ describe("a thread's PRs", () => {
     const [back] = store.threadPulls(thread);
     expect(back!.added_by).toEqual(BY_AGENT);
     expect(back!.removed_at).toBeUndefined();
-    // Its last known state stays: the row does not go back to unknown.
     expect(back!.state).toBe("open");
     expect(store.threadPullsRemoved(thread, "2026-11-01T00:00:00.000Z")).toEqual([]);
     expect(store.threadPullEvents(thread).map((e) => [e.op, e.by.kind])).toEqual([

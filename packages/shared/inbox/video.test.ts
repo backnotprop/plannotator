@@ -1,9 +1,3 @@
-/**
- * A film told from its bytes, and an MP4/MOV's length and frame size read
- * from its header by seeking (never the whole file). The films are built in
- * the test (tests/helpers/video-fixtures.ts); a real encoder's output is
- * checked too when ffmpeg is on the PATH.
- */
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,7 +6,6 @@ import { ebml, encodeWithFfmpeg, ffmpegCan, mp4 } from "../../../tests/helpers/v
 import { decideInboxAttachmentKind, INBOX_ATTACHMENT_HEAD_BYTES } from "./attachments";
 import { readMp4VideoMetadata, sniffInboxVideo } from "./video";
 
-/** A reader over bytes that counts what it read: the walk must seek, never read the film. */
 function reader(bytes: Buffer) {
   const reads: { position: number; length: number }[] = [];
   return {
@@ -24,7 +17,6 @@ function reader(bytes: Buffer) {
   };
 }
 
-/** A sparse reader for a film whose `mdat` is too large to build: the head, a hole, and the tail. */
 function sparse(head: Buffer, holeBytes: number, tail: Buffer) {
   const size = head.length + holeBytes + tail.length;
   return {
@@ -46,7 +38,6 @@ describe("sniffInboxVideo", () => {
     expect(sniffInboxVideo(mp4({ major: "mp42", compatible: ["mp42", "isom"] }))).toBe("video/mp4");
     expect(sniffInboxVideo(mp4({ major: "M4V ", compatible: ["M4V ", "M4A ", "mp42"] }))).toBe("video/mp4");
     expect(sniffInboxVideo(mp4({ major: "qt  ", compatible: ["qt  "] }))).toBe("video/quicktime");
-    // A video brand only among the compatible ones still counts.
     expect(sniffInboxVideo(mp4({ major: "XXXX", compatible: ["avc1"] }))).toBe("video/mp4");
   });
 
@@ -72,7 +63,6 @@ describe("readMp4VideoMetadata", () => {
     const r = reader(film);
     const meta = await readMp4VideoMetadata(r.read, film.length);
     expect(meta).toEqual({ hasVideoTrack: true, duration_ms: 461300, width: 1920, height: 1080 });
-    // Never the mdat: each read is a header-sized slice.
     expect(r.reads.every((read) => read.length <= 96)).toBe(true);
     expect(r.reads.reduce((n, read) => n + read.length, 0)).toBeLessThan(1500);
   });
@@ -86,7 +76,6 @@ describe("readMp4VideoMetadata", () => {
 
   test("a 461 MB film: moov after the mdat is reached by seeking past it", async () => {
     const whole = mp4({ duration: 7 * 60 + 41, mdatBytes: 16 });
-    // Rebuild the same layout with a huge mdat: ftyp, an mdat header naming 461 MB, then the moov.
     const ftypEnd = whole.readUInt32BE(0);
     const ftyp = whole.subarray(0, ftypEnd);
     const moov = whole.subarray(ftypEnd + 8 + 16);
@@ -107,7 +96,6 @@ describe("readMp4VideoMetadata", () => {
 
   test("a hostile box size never loops or reads past the end", async () => {
     const film = Buffer.from(mp4());
-    // An mdat that claims to be larger than the file.
     film.writeUInt32BE(0xfffffff0, film.readUInt32BE(0));
     expect(await readMp4VideoMetadata(reader(film).read, film.length)).toBeNull();
   });
@@ -124,13 +112,11 @@ describe("decideInboxAttachmentKind for films", () => {
       width: 640,
       height: 360,
     });
-    // A film named anything: the bytes decide.
     expect(decideInboxAttachmentKind("/x/clip.bin", film, false, film.length, meta).kind).toBe("video");
     expect(decideInboxAttachmentKind("/x/demo.webm", ebml("webm"), false, 600, null)).toEqual({ kind: "video", media_type: "video/webm" });
     expect(decideInboxAttachmentKind("/x/demo.mkv", ebml("matroska"), false, 600, null)).toEqual({ kind: "file" });
     const audio = mp4({ tracks: ["soun"] });
     expect(decideInboxAttachmentKind("/x/voice.mp4", audio, false, audio.length, await readMp4VideoMetadata(reader(audio).read, audio.length))).toEqual({ kind: "audio", media_type: "audio/mp4", duration_ms: 461300 });
-    // Brands alone (no header walked) still say video.
     expect(decideInboxAttachmentKind("/x/cut.mov", mp4({ major: "qt  ", compatible: ["qt  "] }), false, 0, null)).toEqual({ kind: "video", media_type: "video/quicktime" });
     const avif = mp4({ major: "avif", compatible: ["avif", "mif1", "miaf"] });
     expect(decideInboxAttachmentKind("/x/photo.avif", avif, false, avif.length, null).kind).not.toBe("video");

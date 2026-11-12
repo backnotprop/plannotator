@@ -137,7 +137,6 @@ describe("VCS snapshot materialization", () => {
 
   test("materializes the parseable Jujutsu source tree without touching the checkout", async () => {
     const calls: string[][] = [];
-    // The base side is the whole parseable tree at the resolved first parent.
     const basePatch = [
       "diff --git a/alias.ts b/alias.ts",
       "new file mode 120000",
@@ -163,7 +162,6 @@ describe("VCS snapshot materialization", () => {
       "+export const tool = 1;",
       "",
     ].join("\n");
-    // The second side is only what changed between the two revisions.
     const deltaPatch = [
       "diff --git a/alias.ts b/alias.ts",
       "--- a/alias.ts",
@@ -188,7 +186,6 @@ describe("VCS snapshot materialization", () => {
     const jjRuntime = {
       async runJj(args: string[]) {
         calls.push(args);
-        // `@` is a MERGE here, so the old `@-` revset would have been ambiguous.
         if (args.includes("log")) {
           return { stdout: mergeParents.join("\n"), stderr: "", exitCode: 0 };
         }
@@ -220,23 +217,18 @@ describe("VCS snapshot materialization", () => {
       expect(Bun.spawnSync(["git", "show", `${plan.to}:main.ts`], { cwd: plan.cwd }).stdout.toString()).toContain("version = 2");
       expect(Bun.spawnSync(["git", "show", `${plan.from}:alias.ts`], { cwd: plan.cwd }).stdout.toString()).toBe("main.ts");
       expect(Bun.spawnSync(["git", "show", `${plan.to}:alias.ts`], { cwd: plan.cwd }).stdout.toString()).toBe("tool.ts");
-      // The delta never mentions tool.ts contents, so the second side can only
-      // carry them by having been built ON TOP of the base tree.
       expect(Bun.spawnSync(["git", "show", `${plan.to}:tool.ts`], { cwd: plan.cwd }).stdout.toString()).toContain("tool = 1");
       expect(Bun.spawnSync(["git", "cat-file", "-e", `${plan.to}:binary.ts`], { cwd: plan.cwd }).exitCode).not.toBe(0);
       expect(run(["status", "--short"])).toBe("");
 
       const diffs = calls.filter((args) => args.includes("diff"));
-      // Exactly one whole-tree pass; the second side is the changed files only.
       expect(diffs.map((args) => args[args.indexOf("--from") + 1]))
         .toEqual(["root()", mergeParents[0]]);
       expect(diffs.map((args) => args[args.indexOf("--to") + 1]))
         .toEqual([mergeParents[0], "@"]);
-      // Ambiguous parent shorthands must never reach jj.
       expect(calls.flat()).not.toContain("@-");
       expect(calls.flat()).not.toContain("parents(@-)");
       expect(calls.every((args) => args[0] === "--ignore-working-copy")).toBe(true);
-      // Repo-root-anchored, so the review's invocation directory cannot narrow it.
       expect(diffs.every((args) => args.includes('root-glob-i:"**/*.ts"'))).toBe(true);
       expect(diffs.every((args) => args.some((arg) => arg.startsWith("glob-i:")))).toBe(false);
     } finally {
@@ -245,8 +237,6 @@ describe("VCS snapshot materialization", () => {
   });
 
   test("refuses a Jujutsu snapshot whose diff hit the runtime output ceiling", async () => {
-    // A truncated tree would otherwise become a valid-looking snapshot and
-    // CallDiff would report call-graph edges that do not exist.
     let requestedCap: number | undefined;
     const jjRuntime = {
       async runJj(args: string[], options?: { maxOutputBytes?: number }) {
@@ -391,7 +381,6 @@ describe("CallFlowService", () => {
     expect(before.state).toBe("unavailable");
     expect(probes).toBe(1);
 
-    // Without invalidation the 60s TTL would keep reporting unavailable.
     available = true;
     const cached = await service.getAdvert(true, { snapshotSupported: true, rawPatch: "" });
     expect(cached.state).toBe("unavailable");

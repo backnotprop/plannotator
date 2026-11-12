@@ -15,7 +15,6 @@ type Handler = (call: Call) => CommandResult | undefined;
 const ok = (stdout = ""): CommandResult => ({ stdout, stderr: "", exitCode: 0 });
 const fail = (stderr: string): CommandResult => ({ stdout: "", stderr, exitCode: 1 });
 
-/** Fake gh runtime: records every call and answers through `handle`. */
 function ghRuntime(handle: Handler): { runtime: PRRuntime; calls: Call[] } {
   const calls: Call[] = [];
   const answer = (call: Call) => {
@@ -64,7 +63,7 @@ describe("submitGhPRReview file-level comments (#1599)", () => {
 
     const [create, t1, t2, submit] = calls;
     expect(calls).toHaveLength(4);
-    expect(create.input).toEqual({ commit_id: "sha", comments: [LINE] }); // no event: pending
+    expect(create.input).toEqual({ commit_id: "sha", comments: [LINE] });
     for (const [thread, comment] of [[t1, FILE_A], [t2, FILE_GONE]] as const) {
       expect(thread.input.query).toContain("subjectType: FILE");
       expect(thread.input.variables).toEqual({ reviewId: "PRR_99", path: comment.path, body: comment.body });
@@ -136,7 +135,7 @@ describe("submitGhPRReview file-level edge cases", () => {
     await expect(
       submitGhPRReview(runtime, REF, "sha", "comment", "Body", [LINE], [FILE_A]),
     ).rejects.toThrow("A pending review remains on the pull request; submit or discard it on GitHub");
-    expect(calls).toHaveLength(1); // no second review posted on top of it
+    expect(calls).toHaveLength(1);
   });
 
   test("a COMMENT with an empty body gets the placeholder body GitHub requires", async () => {
@@ -172,8 +171,6 @@ describe("submitGhPRReview file-level edge cases", () => {
   });
 });
 
-// The exact shapes `gh api` produces on a GitHub 422: the generic status line
-// on stderr, GitHub's JSON body (with the actual reason) on stdout.
 const DOCS = "https://docs.github.com/rest/pulls/reviews#create-a-review-for-a-pull-request";
 const gh422 = (errors: unknown[], message = "Unprocessable Entity"): CommandResult => ({
   stdout: JSON.stringify({ message, errors, documentation_url: DOCS, status: "422" }),
@@ -254,8 +251,6 @@ describe("submitPRReview on GitLab", () => {
   });
 });
 
-// #1611: every non-approve review used to post as COMMENT, so "Request
-// changes" in the UI never requested changes.
 describe("request_changes review event (#1611)", () => {
   test("single call: posts event REQUEST_CHANGES", async () => {
     const { runtime, calls } = ghRuntime((c) => (isCreate(c) ? ok("{}") : undefined));
@@ -271,7 +266,7 @@ describe("request_changes review event (#1611)", () => {
       if (isSubmit(c)) return ok("{}");
     });
     await submitGhPRReview(runtime, REF, "sha", "request_changes", "", [LINE], [FILE_A]);
-    expect(calls.find(isCreate)!.input.event).toBeUndefined(); // still pending until submit
+    expect(calls.find(isCreate)!.input.event).toBeUndefined();
     expect(calls.find(isSubmit)!.input).toEqual({ event: "REQUEST_CHANGES", body: "See inline comments." });
   });
 

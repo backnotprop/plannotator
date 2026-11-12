@@ -1,5 +1,3 @@
-// --- Vault file tree helpers ---
-
 export const FILE_BROWSER_EXCLUDED = [
 	"node_modules/",
 	".git/",
@@ -44,13 +42,6 @@ export function isFileBrowserExcludedPath(relativePath: string): boolean {
 		.some((part) => FILE_BROWSER_EXCLUDED_NAMES.has(part));
 }
 
-/**
- * Folders only the live-refresh watcher skips, on top of FILE_BROWSER_EXCLUDED.
- * `.jj/` is Jujutsu's store: jj rewrites it on every command, which would
- * refresh the file browser for nothing, and on Linux it would spend directory
- * watches on its object folders. It holds no documents, so the file listing
- * and folder annotate keep FILE_BROWSER_EXCLUDED alone and are not changed.
- */
 const FILE_BROWSER_WATCH_ONLY_EXCLUDED_NAMES = new Set([".jj"]);
 
 export function isFileBrowserWatchExcludedPath(relativePath: string): boolean {
@@ -63,15 +54,11 @@ export function isFileBrowserWatchExcludedPath(relativePath: string): boolean {
 
 export interface VaultNode {
 	name: string;
-	path: string; // relative path within vault
+	path: string;
 	type: "file" | "folder";
 	children?: VaultNode[];
 }
 
-/**
- * Build a nested file tree from a sorted list of relative paths.
- * Folders are sorted before files at each level.
- */
 export function buildFileTree(relativePaths: string[]): VaultNode[] {
 	const root: VaultNode[] = [];
 
@@ -103,7 +90,6 @@ export function buildFileTree(relativePaths: string[]): VaultNode[] {
 		}
 	}
 
-	// Sort: folders first (alphabetical), then files (alphabetical)
 	const sortNodes = (nodes: VaultNode[]) => {
 		nodes.sort((a, b) => {
 			if (a.type !== b.type) return a.type === "folder" ? -1 : 1;

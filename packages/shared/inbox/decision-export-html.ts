@@ -1,34 +1,16 @@
-/**
- * The HTML document of a thread's decisions: v1 JSON in, one self-contained file out. This module is the whole
- * template (markup here, styling in `STYLE`), so a new design replaces this file and nothing else.
- *
- * The look is the redesign's take B (`briefs/2026-11-10/export-decisions-redesign/`, NOTES.md "Ship B"): one quiet
- * column, a compact table overview, the chosen option as the answer, context and trade-offs folded, every other
- * question card in quiet groups after the decisions, and a slim sticky rail of D1…Dn on screens 1180 px and wider.
- *
- * Rules any design keeps (decision-export.test.ts guards them):
- * - Self-contained: a CSP meta allows `data:` images, inline style and the one hashed script; no other request.
- * - Light and dark through `prefers-color-scheme`; print is always light, folds open.
- * - The v1 JSON rides in an inert `<script type="application/json" id="plannotator-decisions">`, `<` escaped. Its
- *   `images` is left empty: the pictures are in the page once (`<img src="data:…">`), so the file stays under its cap.
- * - Every piece of thread text goes through `esc`.
- */
 import { createHash } from "node:crypto";
 import { DECISION_EXPORT_OTHER_STATES, DECISION_EXPORT_STATE_TITLES, decisionExportZone, type DecisionExportItem, type DecisionExportState, type DecisionExportV1 } from "./decision-export";
 
-/** HTML text and attribute escaping: thread text is untrusted. */
 export function esc(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-/** JSON inside a `<script>`: nothing in it can close the element or start a comment. */
 export function jsonForScript(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
 type Other = Exclude<DecisionExportState, "decided">;
 
-/** The one word the overview gives a card that is not a decision. */
 const SHORT: Readonly<Record<Other, string>> = {
   open: "open",
   picked_unsent: "draft",
@@ -194,7 +176,6 @@ a[href^="https:"]::after{content:" (" attr(href) ")";font-size:9pt;color:var(--f
 }
 `;
 
-/** The file's one script (the rail's scroll-spy, and every fold opened for print): allowed by its hash, so nothing injected could run. */
 const SCRIPT = `(()=>{const links=[...document.querySelectorAll('.rail ol a')];
 addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>d.open=true));
 if(!links.length||!('IntersectionObserver' in window))return;
@@ -211,7 +192,6 @@ const DATA_URI = /^data:image\/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=
 const CHECK =
   '<svg class="tick" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-/** Dates as this design writes them: "Nov 8", "Nov 8 14:02", "Nov 8 to 10, 2026", in the export's zone. */
 function dates(tz: string) {
   const timeZone = decisionExportZone(tz);
   const format = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" });
@@ -257,7 +237,6 @@ function answerText(d: DecisionExportItem): string {
   return [...a.selected, ...(a.other ? [a.other] : []), ...(a.text ? [a.text] : [])].join(", ");
 }
 
-/** Plain words for whether the recommendation was taken (already escaped), and the overview's word; null without one. */
 function recLine(d: DecisionExportItem): [string, string] | null {
   const labels = d.recommendation.labels;
   if (labels.length === 0 && !d.recommendation.text) return null;
@@ -368,7 +347,6 @@ function replacement(doc: DecisionExportV1, d: DecisionExportItem): DecisionExpo
 }
 
 function shortState(doc: DecisionExportV1, d: DecisionExportItem): string {
-  // The overview's row for a pick saved and not sent: the posts' own wording (decision-post.ts DECISION_POST_DRAFT).
   if (d.state === "picked_unsent") return "draft, not sent to the agent";
   if (d.state === "replaced") {
     const r = replacement(doc, d);
@@ -437,7 +415,6 @@ function tally(doc: DecisionExportV1): string {
   return [`${doc.decisions.length} decided`, ...groupsOf(doc).map(({ state, items }) => `${items.length} ${SHORT[state]}`)].join(", ");
 }
 
-/** The whole file. */
 export function renderDecisionExportHtml(doc: DecisionExportV1): string {
   const when = dates(doc.tz);
   const t = doc.thread;
@@ -483,5 +460,4 @@ ${restHtml(doc, when)}
 `;
 }
 
-/** This design's dates (stamp "Nov 8 14:02", range "Nov 8 to 10, 2026", footer with the zone), for the posted comment. */
 export { dates as decisionExportDesignDates };

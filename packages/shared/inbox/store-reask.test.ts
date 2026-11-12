@@ -1,10 +1,3 @@
-/**
- * Re-ask in the Inbox store (approval "inbox-reask"): the person asks the
- * session that asked for its open questions again, in one message. The note
- * is the person's reply (append-only, one line), picks not sent go with it
- * as answers, the row sits in Sent until the agent asks again, and the
- * agent's new message replaces the old cards.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,14 +40,11 @@ describe("Re-ask", () => {
     expect(reply.reask).toEqual(ids);
     expect(reply.author.kind).toBe("person");
     expect(reply.reply_to).toBe(second.id);
-    // The body tells the agent what to do with each id, and where to answer.
     for (const id of ids) expect(reply.body).toContain(`- ${id}: `);
     expect(reply.body).toContain("`Replaces: <id>`");
     expect(reply.body).toContain("`supersedes`");
     expect(reply.body).toContain(`reply_to ${reply.id}`);
-    // The old questions stay open until the agent replaces them.
     expect([...qs(store, first.id), ...qs(store, second.id)].every((q) => q.state === "open")).toBe(true);
-    // Rule 1: the row is in Sent while the note is the last message, read or not.
     expect(store.listRow(first.id)?.reask_pending).toBe(true);
     expect(sectionOf(store, first.id)).toBe("sent");
     store.recordDelivery(reply.id, { host: "claude-code", session: "ses_a" });
@@ -139,11 +129,9 @@ describe("Re-ask", () => {
       return null;
     };
     expect(code(() => store.sendReask(once.reply.id, { idempotency_key: "k2" }))).toBe("validation_error");
-    // A reply's key cannot be replayed as a Re-ask.
     store.sendReply(second.id, { idempotency_key: "r1", words: "Thinking about it." });
     expect(code(() => store.sendReask(second.id, { idempotency_key: "r1" }))).toBe("idempotency_key_reused");
     expect(code(() => store.sendReask(second.id, { idempotency_key: "k3", to: null }))).toBe("session_not_live");
-    // Every question answered: nothing to ask again.
     for (const m of [first, second]) {
       for (const q of qs(store, m.id)) store.savePicks(m.id, [{ key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ["No"] } }]);
     }
@@ -169,11 +157,9 @@ describe("Re-ask", () => {
     const { store, project, first, second } = setup();
     const pi = store.sendMessage({ project_id: project.id, author: B, reply_to: first.id, body: `${block("Pin the Node version?")}\n\n${block("Drop Node 18?")}` }).message;
     const forA = store.sendReask(second.id, { idempotency_key: "a" }).reply;
-    // Only A's questions are in a note: B's are still the person's to answer.
     expect(sectionOf(store, first.id)).toBe("waiting");
     store.sendReask(pi.id, { idempotency_key: "b" });
     expect(sectionOf(store, first.id)).toBe("sent");
-    // A answers with one question and replaces nothing: its old questions are no longer in a waiting note.
     store.sendMessage({ project_id: project.id, author: A, reply_to: forA.id, body: block("Backfill ledger first, today?") });
     expect(store.listRow(first.id)?.reask_pending).toBe(false);
     expect(sectionOf(store, first.id)).toBe("waiting");
@@ -183,15 +169,12 @@ describe("Re-ask", () => {
     const { store, project, first, second } = setup();
     store.sendReask(second.id, { idempotency_key: "k1" });
     expect(sectionOf(store, first.id)).toBe("sent");
-    // B asks a Stopped question: it waits on the person.
     const stop = store.sendMessage({ project_id: project.id, author: B, reply_to: second.id, body: [":::question", "Which region first?", "", "Stopped: the deploy waits.", "", "- [ ] East", "- [ ] West", ":::"].join("\n") }).message;
     const row = store.listRow(first.id)!;
     expect(row.section).toBe("stopped");
     expect(row.unread).toBe(true);
-    // The person replies in words to B: B's question is still open and in no note.
     store.sendReply(stop.id, { idempotency_key: "w1", words: "Looking into it." });
     expect(sectionOf(store, first.id)).toBe("stopped");
-    // B supersedes every question A asked (and its own): nothing the note lists is open, so it no longer waits.
     store.sendMessage({ project_id: project.id, author: B, reply_to: stop.id, supersedes: [first.id, second.id, stop.id], body: "Settled in the session; none of these apply." });
     const after = store.listRow(first.id)!;
     expect(after.reask_pending).toBe(false);
@@ -205,7 +188,6 @@ describe("Re-ask", () => {
     expect(reply.to).toEqual({ host: "claude-code", session: "ses_c" });
     expect(reply.body.startsWith("Please ask the 3 open questions Claude Code asked in this thread again")).toBe(true);
     expect(reply.body).not.toContain("your 3 open questions");
-    // The ended session writing does not end it; the session it went to does.
     store.sendMessage({ project_id: project.id, author: A, reply_to: second.id, body: "late" });
     expect(store.listRow(second.thread_id)?.reask_pending).toBe(true);
     store.sendMessage({ project_id: project.id, author: C, reply_to: reply.id, body: block("Backfill ledger first?") });

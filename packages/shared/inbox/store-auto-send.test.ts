@@ -1,14 +1,3 @@
-/**
- * A reply that waits on a busy agent goes into its running turn by itself
- * after `INBOX_AUTO_SEND_AFTER_MS` (owner approval "inbox-busy-agent-reply",
- * 2026-10-21), exactly as if the person pressed Send now: the store's
- * `autoSendDue` marks `deliver_now_at` with `deliver_now_by: "auto"`. The
- * caller (the server) asks only for a session that works now and whose
- * connection can take an item mid-turn, and hands its clock (`clockOf`:
- * started the first time it saw that session busy and able to take it while
- * the item waited; never `created_at`); the store marks what is due once.
- * Proved on a real store in a temp dir with an injected clock.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +20,6 @@ function open(dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-auto-send-")),
   return { store, dir, clock };
 }
 
-/** The server's clocks, as `clockOf` hands them: since when an item waits, and since when it may go in by itself. */
 function clocks() {
   const map = new Map<string, { since: number; autoSince: number | null }>();
   return {
@@ -52,7 +40,6 @@ describe("autoSendDue", () => {
     const { store, clock, asked } = setup();
     const c = clocks();
     const reply = store.sendReply(asked.id, { words: "Parquet.", idempotency_key: "k1" }).reply!;
-    // No clock yet (the session was never seen busy while it waited): never due, however old.
     clock.now += 60 * 60_000;
     expect(store.autoSendDue("ses_a", { afterMs: AFTER, clockOf: c.clockOf })).toEqual([]);
     c.start(reply.id, clock.now);
@@ -70,11 +57,9 @@ describe("autoSendDue", () => {
       wait_started_at: new Date(clock.now - AFTER).toISOString(),
     });
     expect(store.cursor()).toBe(lines + 1);
-    // Never twice: a second look writes nothing, even much later.
     clock.now += 60 * 60_000;
     expect(store.autoSendDue("ses_a", { afterMs: AFTER, clockOf: c.clockOf })).toEqual([]);
     expect(store.cursor()).toBe(lines + 1);
-    // Another session is never handed it, so never marks it.
     expect(store.autoSendDue("ses_b", { afterMs: AFTER, clockOf: c.clockOf })).toEqual([]);
   });
 
@@ -82,16 +67,13 @@ describe("autoSendDue", () => {
     const { store, clock, asked } = setup();
     const c = clocks();
     const reply = store.sendReply(asked.id, { words: "Parquet.", idempotency_key: "k1" }).reply!;
-    // Busy for 20 minutes but unable to take it mid-turn (an older plugin): no countdown.
     c.start(reply.id, clock.now, null);
     clock.now += 20 * 60_000;
     expect(store.autoSendDue("ses_a", { afterMs: AFTER, clockOf: c.clockOf })).toEqual([]);
-    // Reloaded: able now. It does not go in at once; it gets its 5 minutes.
     c.start(reply.id, clock.now - 20 * 60_000, clock.now);
     expect(store.autoSendDue("ses_a", { afterMs: AFTER, clockOf: c.clockOf })).toEqual([]);
     clock.now += AFTER;
     const [marked] = store.autoSendDue("ses_a", { afterMs: AFTER, clockOf: c.clockOf });
-    // "Undelivered N min" counted from when it began to wait on the busy session.
     expect(marked!.wait_started_at).toBe(new Date(clock.now - AFTER - 20 * 60_000).toISOString());
   });
 
@@ -131,16 +113,13 @@ describe("autoSendDue", () => {
     clock.now += AFTER;
     store.autoSendDue("ses_a", { afterMs: AFTER, clockOf: c.clockOf });
     expect(store.message(id)).toMatchObject({ deliver_now_by: "auto" });
-    // The attempt failed (the session ended); the person sends it to session B.
     store.clearDeliverNow(id, "ses_a");
     const moved = store.readdressMessage(id, { host: "claude-code", session: "ses_b" });
     expect(moved).toMatchObject({ deliver_now_at: null, deliver_now_by: null, wait_started_at: null });
-    // B's clock starts when B is seen busy: nothing goes in on B's first look.
     c.start(id, clock.now);
     expect(store.autoSendDue("ses_b", { afterMs: AFTER, clockOf: c.clockOf })).toEqual([]);
     clock.now += AFTER;
     expect(store.autoSendDue("ses_b", { afterMs: AFTER, clockOf: c.clockOf }).map((m) => m.id)).toEqual([id]);
-    // A person's Send now before the move does not carry over either.
     const other = store.startPersonThread({ project_id: project.id, to: { host: "claude-code", session: "ses_a" }, body: "And the docs.", idempotency_key: "p2" });
     store.requestDeliverNow(other.message.id);
     expect(store.readdressMessage(other.message.id, { host: "claude-code", session: "ses_b" })).toMatchObject({ deliver_now_at: null, deliver_now_by: null });
@@ -177,7 +156,6 @@ describe("autoSendDue", () => {
     clock.now += 3 * 60 * 60_000;
     expect(store.autoSendDue("ses_a", { afterMs: AFTER, clockOf: c.clockOf })).toEqual([]);
     expect(store.message(noteId)!.deliver_now_by ?? null).toBeNull();
-    // The row: how long it waited, no countdown, no Send now.
     const d = store.listRow(news.thread_id)!.delivery!;
     expect(d).toMatchObject({ kind: "ack", state: "queued", reason: "working", send_now: false, auto_send_at: null, waiting_since: new Date(c.clockOf(noteId)!.since).toISOString() });
   });
@@ -191,7 +169,6 @@ describe("autoSendDue", () => {
     const [marked] = store.autoSendDue("ses_pi", { afterMs: AFTER, tags: true, clockOf: c.clockOf });
     expect(marked!.tags![0]).toMatchObject({ session: "ses_pi", deliver_now_by: "auto" });
     expect(store.message(reply.id)!.deliver_now_at ?? null).toBeNull();
-    // A connection that does not understand tags is never handed it, so never marks it.
     expect(store.autoSendDue("ses_pi", { afterMs: AFTER, tags: false, clockOf: c.clockOf })).toEqual([]);
     expect(store.autoSendDue("ses_a", { afterMs: AFTER, clockOf: c.clockOf }).map((m) => m.id)).toEqual([reply.id]);
   });
@@ -213,7 +190,6 @@ describe("the row's delivery while it waits on a busy session", () => {
       },
     });
     const reply = store.sendReply(asked.id, { words: "Parquet.", idempotency_key: "k1" }).reply!;
-    // Sent an hour ago for a session that was gone: no clock yet, so no minutes and no countdown.
     clock.now += 60 * 60_000;
     expect(store.listRow(asked.id)!.delivery!.waiting_since).toBeUndefined();
     const started = clock.now;
@@ -227,10 +203,8 @@ describe("the row's delivery while it waits on a busy session", () => {
       steerable: true,
       auto_send_at: iso(started + AFTER),
     });
-    // Its connection cannot take it mid-turn: grey, and it will not go in by itself.
     busy.send_now = false;
     expect(store.listRow(asked.id)!.delivery).toMatchObject({ send_now: false, steerable: false, auto_send_at: null, waiting_since: iso(started) });
-    // Idle: not waiting on a busy agent.
     busy.busy = false;
     expect(store.listRow(asked.id)!.delivery!.waiting_since).toBeUndefined();
 
@@ -274,9 +248,7 @@ describe("the row's delivery while it waits on a busy session", () => {
     expect(inboxDeliveryState({ ...base, autoSendAfterMs: AFTER }).wait!.autoSendAt).toBe("2026-10-21T13:55:00.000Z");
     expect(inboxDeliveryState({ ...base, autoSince: null, autoSendAfterMs: AFTER }).wait!.autoSendAt).toBeNull();
     expect(inboxDeliveryState({ ...base, autoSendAfterMs: AFTER, nowBy: "person" }).wait!.autoSendAt).toBeNull();
-    // Delivered by a person's Send now: no "went in by itself".
     expect(inboxDeliveryState({ ...base, delivered: true, nowBy: "person", nowAt: "2026-10-21T13:50:00.000Z" }).autoAfterMin).toBeUndefined();
-    // Marked just before the session went away: it waits for the session to come back, not "Sending now".
     expect(inboxDeliveryState({ ...base, sendingNow: true, nowBy: "auto", nowAt: "2026-10-21T13:55:00.000Z", connection: null })).toMatchObject({
       state: "queued",
       reason: "away",

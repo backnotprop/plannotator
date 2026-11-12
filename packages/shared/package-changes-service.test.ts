@@ -1,13 +1,3 @@
-/**
- * The package changes service, against a stub host: which names a lookup may
- * send, and what a card shows when a side cannot be read.
- *
- * Privacy rule under test: a name leaves the machine only when every registry
- * setting that could route it elsewhere was read and none does. Settings come
- * from the working tree in a local review (gitignored files count), the PR
- * head in a PR review, the user's own files and the environment; anything
- * that cannot be read withholds every name.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,7 +31,6 @@ const AFTER = manifest({ pg: '^8.16.3', '@acme/billing': '^2.0.0', '@types/node'
 
 interface DiffEntry { status?: DiffFileStatus; old?: string | null | 'throw'; new?: string | null | 'throw' }
 
-/** A host over in-memory diff files. `remote` answers settings reads at the PR head. */
 function host(opts: {
   diff?: Record<string, DiffEntry>;
   settings: PackageSettingsSource;
@@ -69,12 +58,10 @@ function host(opts: {
     settings: () => opts.settings,
     homeDir: () => opts.home,
     lookupEnabled: () => false,
-    // No global npmrc but the one named here: the machine's own stays out of the test.
     env: { npm_config_globalconfig: join(opts.home, 'no-global-npmrc'), PATH: '', ...opts.env },
   };
 }
 
-/** The platform API at the PR head: every read is logged as one call. */
 function remoteSource(files: Record<string, PackageSideRead | 'throw'>, log: string[] = []): PackageSettingsSource {
   return {
     kind: 'remote',
@@ -88,7 +75,6 @@ function remoteSource(files: Record<string, PackageSideRead | 'throw'>, log: str
   };
 }
 
-/** A local checkout holding the head commit: `files` are the commit's files. */
 function commitSource(files: Record<string, string>, log: string[] = []): PackageSettingsSource {
   return {
     kind: 'commit',
@@ -175,11 +161,9 @@ describe('settings: where a private registry can be configured', () => {
     const home = tempDir();
     const h = host({ settings: local(tempDir()), home });
     h.env = { PATH: join(prefix, 'bin') };
-    // Only this test's own folders exist: the machine's /usr/local/etc/npmrc and the like stay out.
     const mine = [prefix, home];
     h.readLocalFile = (path) => (mine.some((d) => path.startsWith(d)) ? readLocalSettingsFile(path) : { kind: 'missing' });
     expect((await analysis(h)).lookup.total).toBe(0);
-    // And without that npmrc the same setup sends the names.
     rmSync(join(prefix, 'etc', 'npmrc'));
     expect((await analysis(h)).lookup.total).toBe(3);
   });
@@ -250,7 +234,6 @@ describe('consent count and reads', () => {
 });
 
 describe('PR reviews: platform calls for settings, per head commit', () => {
-  /** A PR with `n` changed manifests: one at the root, or `n` under packages/. */
   const prDiff = (n: number): Record<string, DiffEntry> => n === 1
     ? { 'package.json': { old: BEFORE, new: AFTER } }
     : Object.fromEntries(Array.from({ length: n }, (_, i) => [`packages/p${i}/package.json`, { old: BEFORE, new: AFTER }]));
@@ -266,7 +249,6 @@ describe('PR reviews: platform calls for settings, per head commit', () => {
       expect(log).toHaveLength(calls);
       expect(log.length).toBeLessThanOrEqual(REMOTE_SETTINGS_READS);
       expect(first.lookup.total).toBe(sent);
-      // A new snapshot of the same head commit reads nothing again.
       snapshot = 's2';
       await service.get({ snapshot: null, base: undefined });
       expect(log).toHaveLength(calls);
@@ -298,7 +280,6 @@ describe('PR reviews: platform calls for settings, per head commit', () => {
     expect(out.cards).toHaveLength(REMOTE_PACKAGE_READS / 2);
     expect(out.lookup.total).toBe(0);
     expect(out.cards.every((c) => c.lookup.names.length === 0)).toBe(true);
-    // The same head commit, a new snapshot: no read again, the budget stays spent.
     h.snapshotId = () => 's2';
     await service.get({ snapshot: null, base: undefined });
     expect(reads).toHaveLength(REMOTE_PACKAGE_READS);
@@ -315,7 +296,6 @@ describe('PR reviews: platform calls for settings, per head commit', () => {
     h.settings = () => commitSource({ '.npmrc': '@acme:registry=https://npm.acme.dev/' });
     const out = (await service.get({ snapshot: null, base: undefined })).body as PackageChangesResponse;
     expect(out.lookup.total).toBe(2);
-    // The second look read through the checkout, not the API.
     expect(log).toHaveLength(4);
   });
 

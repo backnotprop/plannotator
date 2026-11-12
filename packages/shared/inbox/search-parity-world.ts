@@ -1,17 +1,3 @@
-/**
- * A fixed Inbox and a fixed set of searches, for proving that search answers
- * do not move (search-parity.test.ts): the same seeded store, the same
- * queries with filters, "Show all" pages and the recent view, every answer
- * reduced to what the window draws and in what order (ids become stable
- * labels, `took_ms` is dropped).
- *
- * `author.host` (additive, approval "inbox-search-contrast") is left out, so
- * the recording made from main before it existed still compares. Re-record
- * only on purpose, when a change is meant to move results, from the commit
- * whose answers are the reference:
- *
- *   bun packages/shared/inbox/search-parity-world.ts --write packages/shared/inbox/search-parity.recorded.json
- */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +13,6 @@ const PI: Agent = { kind: "agent", host: "pi", session: "ses_parity_p", name: nu
 const OPENCODE: Agent = { kind: "agent", host: "opencode", session: "ses_parity_o", name: "OpenCode" };
 const ask = (prompt: string, choices: string[]) => ["", ":::question", prompt, "", ...choices.map((c) => `- [ ] ${c}`), ":::"].join("\n");
 
-/** The searches: words, prefixes and phrases, every filter, a tie broken by the open project, a "Show all" page, and none at all. */
 function queries(projects: Record<string, string>): Record<string, InboxSearchQuery> {
   return {
     "bookma (prefix)": { q: "bookma" },
@@ -72,7 +57,6 @@ export async function searchParityAnswers(): Promise<Record<string, unknown>> {
       return message;
     };
 
-    // Bookmarks: a stream of saved posts in one named thread, a thread waiting on a question, a file.
     for (const [who, words] of [
       ["@jsnnsa", "stop applying old human-centric patterns to agent tools"],
       ["@mitchellh", "the search overlay landed and it is fast"],
@@ -95,7 +79,6 @@ export async function searchParityAnswers(): Promise<Record<string, unknown>> {
     });
     send("sidebar", { project_id: web.id, author: OPENCODE, subject: "Bookmarks sidebar syncs", thread: "bookmarks-sidebar", body: "The bookmarks sidebar syncs from the same store." });
 
-    // Deploys across every section, a reply from the person, an archived thread.
     const waiting = send("deploy order", { project_id: api.id, author: CLAUDE, subject: "Deploy order", thread: "deploy-order", body: `Deploy order for tonight?${ask("Relay first?", ["Yes", "No"])}` });
     const preview = send("deploy preview", { project_id: web.id, author: PI, subject: "Deploy preview", thread: "deploy-preview", body: "The deploy preview is up." });
     labels.set(store.sendReply(preview.id, { idempotency_key: "parity-1", words: "Thanks, deploy it to production." }).reply.id, "reply deploy it");
@@ -107,7 +90,6 @@ export async function searchParityAnswers(): Promise<Record<string, unknown>> {
     store.resolveThread(rollback.id, true);
     void waiting;
 
-    // A question answered and a reply that names the answer; prefixes and phrases.
     const storm = send("retry storm", { project_id: api.id, author: CLAUDE, subject: "Retry storm", thread: "retry", body: `Phones reconnect at once.${ask("Add jitter?", ["Yes", "No"])}` });
     const q = store.questionsOf(storm.id)[0]!;
     store.savePicks(storm.id, [{ key: q.key, revision: 0, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ["Yes"] } as never }]);
@@ -115,12 +97,9 @@ export async function searchParityAnswers(): Promise<Record<string, unknown>> {
     const rateLimit = send("rate limit", { project_id: pn.id, author: CLAUDE, subject: "Relay: rate limit on mailbox creation", thread: "relay", body: "The relay rate limits mailbox creation to 20 a minute." });
     send("rate limiter", { project_id: api.id, author: PI, subject: "Limiter", thread: "limiter", body: "The rate limiter now counts per key." });
 
-    // Other scripts.
     send("russian", { project_id: api.id, author: CODEX, subject: "Отчёт о миграции", thread: "ru", body: "Отчёт готов: миграция прошла без ошибок." });
     send("japanese", { project_id: api.id, author: PI, subject: "請求サービスの更新", thread: "ja", body: "請求サービスを更新しました。" });
 
-    // Three more threads looked at, so the recent view holds four (with the deploy log) and its order, newest
-    // message looked at first (`person_seen_seq`), is guarded: rate limit, deploy log, videos, thorsten.
     store.markSeen(rateLimit.id);
     store.markSeen(thorsten.id);
     store.markSeen(videos.id);

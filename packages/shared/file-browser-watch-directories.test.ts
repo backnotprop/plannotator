@@ -1,11 +1,3 @@
-/**
- * The per-directory watcher Linux uses (#1439), driven on every platform
- * through the "directories" backend over an in-memory filesystem and a fake
- * fs.watch, so the cap, unreadable folders, failures and scan ordering are
- * proven without real inotify, real permissions or thousands of folders.
- * file-browser-watch-linux.test.ts runs the same paths on a real Linux
- * filesystem.
- */
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { dirname, join, relative } from "node:path";
@@ -36,15 +28,11 @@ function codeError(code: string): Error {
 	return Object.assign(new Error(code), { code });
 }
 
-/** An in-memory folder tree with a fake fs.watch over it. */
 class FakeWorld {
 	private nextIno = 1;
 	readonly nodes = new Map<string, { dir: boolean; ino: number }>();
-	/** Paths whose stat/readdir/watch throw EACCES. */
 	readonly unreadable = new Set<string>();
-	/** path -> error code fs.watch throws for it. */
 	readonly watchErrors = new Map<string, string>();
-	/** Throw ENOSPC once this many watches are live. */
 	systemWatchLimit = Infinity;
 	readonly watchers = new Map<string, FakeWatcher>();
 	readdirDelayMs = 0;
@@ -64,7 +52,6 @@ class FakeWorld {
 		this.nodes.set(path, { dir: false, ino: this.nextIno++ });
 	}
 
-	/** Make `count` nested folders under `parent` ("<prefix>0".."<prefix>N"). */
 	folders(parent: string, prefix: string, count: number): string[] {
 		const out: string[] = [];
 		for (let i = 0; i < count; i += 1) {
@@ -85,14 +72,12 @@ class FakeWorld {
 		return [...this.watchers.values()].filter((w) => !w.closed).map((w) => w.path).sort();
 	}
 
-	/** Deliver an inotify-style event from the watch on `directory`. */
 	emit(directory: string, event: "rename" | "change", name: string | null): void {
 		const watcher = this.watchers.get(directory);
 		if (!watcher || watcher.closed) throw new Error(`no live watch on ${directory}`);
 		watcher.listener(event, name);
 	}
 
-	/** Create a folder and tell its parent's watch, as inotify would. */
 	createDir(path: string): void {
 		this.mkdir(path);
 		this.emit(dirname(path), "rename", relative(dirname(path), path));
@@ -209,7 +194,6 @@ describe("per-directory watcher (Linux backend)", () => {
 
 	test("past the cap it keeps the folders nearest the root, says so once, and keeps refreshing", async () => {
 		const world = new FakeWorld();
-		// 3 top folders, each with 3 children, each with 3 grandchildren: 1 + 3 + 9 + 27.
 		for (const top of world.folders(ROOT, "t", 3)) {
 			for (const mid of world.folders(top, "m", 3)) world.folders(mid, "g", 3);
 		}
@@ -219,20 +203,16 @@ describe("per-directory watcher (Linux backend)", () => {
 			await settled();
 			const watched = world.liveWatches();
 			expect(watched).toHaveLength(10);
-			// Breadth first: the root and every depth-1 and depth-2 folder fit
-			// before any grandchild (1 + 3 + 6 of the 9 at depth 2).
 			expect(watched).toContain(ROOT);
 			for (const top of ["/repo/t0", "/repo/t1", "/repo/t2"]) expect(watched).toContain(top);
 			expect(watched.some((path) => path.split("/").length > 4)).toBe(false);
 			expect(logs.filter((line) => line.includes("folder-watch limit"))).toHaveLength(1);
 
-			// Watching never stopped: a change in a watched folder still refreshes.
 			world.file("/repo/t1/new.md");
 			world.emit("/repo/t1", "rename", "new.md");
 			await waitFor(() => events.length > 0);
 			expect(events.at(-1)).toMatchObject({ type: "changed", reason: "files" });
 
-			// More folders past the cap: still one log line, still 10 watches.
 			world.createDir("/repo/t0/m0/deeper");
 			await settled();
 			expect(world.liveWatches()).toHaveLength(10);
@@ -272,7 +252,6 @@ describe("per-directory watcher (Linux backend)", () => {
 				(path) => !world.liveWatches().includes(path),
 			);
 			expect(skipped).toHaveLength(2);
-			// Remove one watched folder: the retry scan picks a skipped one up.
 			const watchedChild = world.liveWatches().find((path) => path !== ROOT)!;
 			world.remove(watchedChild);
 			world.emit(ROOT, "rename", watchedChild.slice(ROOT.length + 1));
@@ -289,13 +268,12 @@ describe("per-directory watcher (Linux backend)", () => {
 		const world = new FakeWorld();
 		world.mkdir("/repo/docs");
 		world.mkdir("/repo/docs/deep");
-		world.mkdir("/repo/volume"); // owned by another user, as a docker volume
+		world.mkdir("/repo/volume");
 		world.mkdir("/repo/volume/data");
-		world.mkdir("/repo/listonly"); // stat works, listing does not
+		world.mkdir("/repo/listonly");
 		world.mkdir("/repo/zz");
 		world.unreadable.add("/repo/volume");
 		const { registry, events, logs, subscribe, settled } = setup(world);
-		// readdir alone refused for one folder.
 		const readdir = world.fs.readdir;
 		world.fs.readdir = async (path) => {
 			if (path === "/repo/listonly") throw codeError("EACCES");
@@ -359,19 +337,15 @@ describe("per-directory watcher (Linux backend)", () => {
 			await settled();
 			expect(world.liveWatches()).toHaveLength(3);
 			expect(logs.filter((line) => line.includes("ran out of file watches"))).toHaveLength(1);
-			// Not failed: a reload reuses the entry instead of rebuilding every
-			// watch while the system is still at its limit.
 			expect(registry.diagnostics().failedEntries).toBe(0);
 			subscribe("second");
 			await settled();
 			expect(registry.diagnostics()).toMatchObject({ entries: 1, contentWatcherStarts: 1, directoryWatches: 3 });
 
-			// A freed watch lets the skipped folders back in.
 			world.systemWatchLimit = Infinity;
 			const watched = world.liveWatches().find((path) => path !== ROOT)!;
 			world.remove(watched);
 			world.emit(ROOT, "rename", watched.slice(ROOT.length + 1));
-			// Every skipped folder comes back: root + the 5 folders left.
 			await waitFor(() => world.liveWatches().length === 6 && !world.liveWatches().includes(watched));
 		} finally {
 			registry.closeAll();
@@ -420,7 +394,6 @@ describe("per-directory watcher (Linux backend)", () => {
 			subscribe();
 			await settled();
 			expect(world.liveWatches()).toHaveLength(8);
-			// Delete one watched depth-2 folder, five times over.
 			for (let round = 0; round < 5; round += 1) {
 				const victim = world.liveWatches().find((path) => path.split("/").length === 4)!;
 				const rootListingsBefore = world.readdirCalls;
@@ -428,8 +401,6 @@ describe("per-directory watcher (Linux backend)", () => {
 				world.emit(dirname(victim), "rename", victim.slice(dirname(victim).length + 1));
 				await waitFor(() => world.liveWatches().length === 8 && !world.liveWatches().includes(victim));
 				await settled();
-				// The parent's re-list plus the one skipped folder's scan: a few
-				// listings, not the 1 + 4 + 16 a full rescan would take.
 				expect(world.readdirCalls - rootListingsBefore).toBeLessThanOrEqual(3);
 			}
 		} finally {
@@ -450,13 +421,11 @@ describe("per-directory watcher (Linux backend)", () => {
 			subscribe();
 			await settled();
 			expect(world.liveWatches()).toEqual([ROOT, "/repo/a", "/repo/b"]);
-			// c and d were skipped; c is deleted, d moved out of the tree.
 			world.remove("/repo/c");
 			world.emit(ROOT, "rename", "c");
 			world.remove("/repo/d");
 			world.emit(ROOT, "rename", "d");
 			await settled();
-			// Removing b frees one watch and forgets b/y with it.
 			world.remove("/repo/b");
 			world.emit(ROOT, "rename", "b");
 			await waitFor(() => world.liveWatches().includes("/repo/a/x"));
@@ -505,7 +474,6 @@ describe("per-directory watcher (Linux backend)", () => {
 			}
 			const emitMs = performance.now() - started;
 			await settled();
-			// Constant work per event: 20k events take far less than a second.
 			expect(emitMs).toBeLessThan(1_000);
 			expect(world.readdirCalls - before).toBeLessThanOrEqual(2);
 		} finally {
@@ -529,7 +497,6 @@ describe("per-directory watcher (Linux backend)", () => {
 			await waitFor(() => world.liveWatches().length === 2);
 			expect(registry.diagnostics()).toMatchObject({ entries: 1, failedEntries: 0, contentWatcherStarts: 2 });
 
-			// Both the reloaded tab and the tab that was already open hear changes.
 			events.length = 0;
 			world.file("/repo/docs/a.md");
 			world.emit("/repo/docs", "rename", "a.md");
@@ -586,11 +553,10 @@ describe("per-directory watcher (Linux backend)", () => {
 			subscribe();
 			await settled();
 			world.maxReaddirsInFlight = 0;
-			// Create, delete and recreate folders while scans are still running.
 			for (let i = 0; i < 6; i += 1) world.createDir(`/repo/b${i}`);
 			world.remove("/repo/a1");
 			world.emit(ROOT, "rename", "a1");
-			world.mkdir("/repo/b0/inner"); // its parent is still being scanned
+			world.mkdir("/repo/b0/inner");
 			world.remove("/repo/b3");
 			world.emit(ROOT, "rename", "b3");
 			world.emit(ROOT, "rename", null as unknown as string);

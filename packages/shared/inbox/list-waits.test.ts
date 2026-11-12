@@ -1,9 +1,3 @@
-/**
- * The list places a thread by its questions' `Stopped:` and `Holds up:`
- * lines. A line that says "nothing" (`Stopped: no`, written by an agent
- * filling in a template) must leave the thread in Waiting on you, not jump it
- * to Stopped on you. Proved on a real store in a temp dir.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,7 +37,6 @@ test("a `Stopped: no` question sits in Waiting on you, not Stopped on you", () =
   expect(plain.section).toBe("waiting");
   expect(negative.section).toBe("waiting");
   expect(negative.questions[0]!.stopped).toBeNull();
-  // The guard never changes which question it is.
   expect(negative.questions[0]!.key).toBe(plain.questions[0]!.key);
 });
 
@@ -58,7 +51,6 @@ test("a real reason, a negative with a remark, and an empty Stopped: still stop"
   expect(stopped.section).toBe("stopped");
   expect(stopped.questions[0]!.stopped).toBe("no API key yet");
   expect(sectionFor("Stopped: No; I need the DB password first").section).toBe("stopped");
-  // An empty Stopped: is a claim with no why, as Workspaces reads it.
   expect(sectionFor("Stopped:").section).toBe("stopped");
   expect(sectionFor("Holds up: none; the billing export").section).toBe("holding");
 });

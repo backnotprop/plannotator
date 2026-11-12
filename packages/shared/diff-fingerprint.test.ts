@@ -8,8 +8,6 @@ import {
   type ReviewGitRuntime,
 } from "./review-core";
 
-// Real-git runtime against a throwaway repo — fingerprints are only meaningful
-// against actual VCS behavior, so no mocks.
 const runtime: ReviewGitRuntime = {
   async runGit(args, options) {
     const proc = Bun.spawn(["git", ...args], {
@@ -93,8 +91,6 @@ describe("getGitDiffFingerprint", () => {
     writeFileSync(join(repo, "a.txt"), "one\nTWO\nthree\n");
     const afterFirstEdit = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
     expect(afterFirstEdit).not.toBe(before!);
-    // The critical case `git status` alone cannot see: an ALREADY-modified
-    // file modified again.
     writeFileSync(join(repo, "a.txt"), "one\nTWO!\nthree\n");
     const afterSecondEdit = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
     expect(afterSecondEdit).not.toBe(afterFirstEdit!);

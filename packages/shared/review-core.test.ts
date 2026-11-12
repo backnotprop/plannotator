@@ -63,8 +63,6 @@ describe("splitPorcelainRename", () => {
     expect(splitPorcelainRename("src/app.ts")).toEqual(["src/app.ts"]);
   });
   test("does NOT split on ` -> ` inside a quoted filename", () => {
-    // A file literally named `weird -> file.txt` is git-quoted; the internal
-    // separator must be ignored so the real file keeps its entry.
     expect(splitPorcelainRename('"weird -> file.txt"')).toEqual(['"weird -> file.txt"']);
   });
   test("splits a rename whose sides are both quoted and contain the separator", () => {
@@ -147,13 +145,6 @@ function makeRuntime(baseCwd: string): ReviewGitRuntime {
   };
 }
 
-/**
- * Like `makeRuntime`, but routes every command through `prepareGitCommand`
- * and forwards the prepared environment to git — the way the production Bun
- * and Pi runtimes do — so per-command `config` (GIT_CONFIG_*) actually
- * reaches the spawned process. `intercept` lets a test sabotage individual
- * commands (e.g. force the cat-file size probe to fail).
- */
 function makeConfigForwardingRuntime(
   baseCwd: string,
   intercept?: (args: string[]) => GitCommandResult | null,
@@ -278,8 +269,6 @@ describe("review-core", () => {
       { PATH: "/usr/bin" },
     );
 
-    // argv must stay byte-identical to the configless invocation: callers and
-    // test mocks match on the exact argument vector.
     expect(command.args).toEqual([...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--cached"]);
     expect(command.env).toEqual({
       PATH: "/usr/bin",
@@ -403,9 +392,6 @@ describe("review-core", () => {
       deletions: 0,
     });
     expect(isBinaryPatchFile(result.patch, "large build.bin")).toBe(true);
-    // Marked so the UI can say WHY the card is empty. A genuine binary file
-    // produces the same `Binary files ... differ` line, so the marker is the
-    // only thing that tells the two apart.
     expect(isOversizedReviewStubPatch(result.patch)).toBe(true);
   });
 
@@ -413,7 +399,6 @@ describe("review-core", () => {
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
     writeFileSync(join(repoDir, "notes.txt"), "hello\n", "utf-8");
-    // NUL bytes, well under the cap: git calls it binary on its own merits.
     writeFileSync(join(repoDir, "logo.png"), Buffer.from([0, 1, 2, 0, 3]));
 
     const result = await runGitDiff(runtime, "uncommitted", "main");
@@ -454,9 +439,6 @@ describe("review-core", () => {
   test("large tracked text files render as binary in staged and working-tree diffs (#1120)", async () => {
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
-    // Pure text (no NUL bytes), so WITHOUT the size guard git would emit the
-    // whole multi-megabyte text patch — the memory blowup #1120 reports once a
-    // large file is staged into (or modified in) the tracked diff.
     const bigText = "a".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 100);
     writeFileSync(join(repoDir, "artifact.js"), bigText, "utf-8");
     git(repoDir, ["add", "artifact.js"]);
@@ -465,12 +447,9 @@ describe("review-core", () => {
     expect(staged.patch).toContain("diff --git a/artifact.js b/artifact.js");
     expect(staged.patch).toContain("Binary files /dev/null and b/artifact.js differ");
     expect(isBinaryPatchFile(staged.patch, "artifact.js")).toBe(true);
-    // The oversized contents never entered the buffered patch.
     expect(staged.patch).not.toContain("aaaaaaaaaa");
     expect(staged.patch.length).toBeLessThan(1024);
 
-    // The same file, seen through the working-tree views (git diff HEAD /
-    // merge-base), is bounded the same way.
     const uncommitted = await runGitDiff(runtime, "uncommitted", "main");
     expect(isBinaryPatchFile(uncommitted.patch, "artifact.js")).toBe(true);
     expect(uncommitted.patch).not.toContain("aaaaaaaaaa");
@@ -851,20 +830,15 @@ describe("review-core", () => {
 
     const result = await runGitDiff(runtime, "staged", "main", "/repo");
 
-    // The review shows the real diff — not one binary stub per file.
     expect(result.patch).toContain("+new");
     expect(result.patch).not.toContain("Binary files");
     expect(
       calls.some(({ args }) => args.some((arg) => arg.startsWith(":(top,exclude,literal)"))),
     ).toBe(false);
 
-    // The probe is timeout-guarded and noninteractive so a hung git cannot
-    // stall the review server.
     const probe = calls.find(({ args }) => args[0] === "cat-file");
     expect(probe?.options).toMatchObject({ timeoutMs: 5000, interaction: "forbid" });
 
-    // Memory stays bounded by git itself: the rendered diff carries the
-    // core.bigFileThreshold config while argv stays byte-identical.
     const rendered = calls.filter(
       ({ args }) => args[0] === "diff" && !args.includes("--raw"),
     );
@@ -878,10 +852,6 @@ describe("review-core", () => {
   });
 
   test("a probed-oversized object excludes only its path, and a missing one none", async () => {
-    // Per-object evidence stays per-object: one oversized blob costs one path,
-    // never the whole review. An object the probe cannot SIZE is a different
-    // answer from one it sizes above the cap: `missing` is unknown, so that
-    // path keeps rendering under git's own core.bigFileThreshold bound.
     const smallOld = "1".repeat(40);
     const smallNew = "2".repeat(40);
     const missingOld = "3".repeat(40);
@@ -940,8 +910,6 @@ describe("review-core", () => {
     expect(result.patch).toContain("+new");
     expect(result.patch).toContain("Binary files a/huge.bin and b/huge.bin differ");
     expect(excludedPaths).toEqual([":(top,exclude,literal)huge.bin"]);
-    // The unfetchable object's path is not stubbed away: git renders it, and
-    // a git that truly cannot read it fails loudly instead of blanking it.
     expect(result.patch).toContain("+restored");
     expect(result.patch).not.toContain("Binary files a/unfetched.ts");
     expect(result.patch).not.toContain("Binary files a/small.ts");
@@ -962,19 +930,13 @@ describe("review-core", () => {
 
     const result = await runGitDiff(runtime, "staged", "main");
 
-    // The small file's real diff survives — the review is not blanked.
     expect(result.patch).toContain("+after");
-    // git's own core.bigFileThreshold stubs the oversized staged blob.
     expect(result.patch).toContain("Binary files");
     expect(result.patch).not.toContain("aaaaaaaaaa");
     expect(result.patch.length).toBeLessThan(4_000);
   }, 20_000);
 
   test("a failed size probe never lets a textconv driver render an oversized blob (#1206)", async () => {
-    // core.bigFileThreshold only applies when git decides binaryness itself. A
-    // textconv driver skips that decision and formats the whole converted blob,
-    // so on the probe-failure path (no JS-side exclusion) the rendered diff
-    // must turn textconv off to keep the git-native bound.
     const repoDir = initRepo();
     git(repoDir, ["config", "diff.inflate.textconv", "sed p"]);
     writeFileSync(join(repoDir, ".gitattributes"), "*.big diff=inflate\n", "utf-8");
@@ -993,16 +955,12 @@ describe("review-core", () => {
 
     const result = await runGitDiff(runtime, "staged", "main");
 
-    // Length first, so a regression fails without printing megabytes.
     expect(result.patch.length).toBeLessThan(4_000);
     expect(result.patch).toContain("+after");
     expect(result.patch).toContain("Binary files /dev/null and b/huge.big differ");
   }, 20_000);
 
   test("a working size probe keeps textconv for files under the cap", async () => {
-    // The textconv opt-out is for the probe-failure path only: with sizes
-    // known, oversized paths are excluded up front and small textconv'd files
-    // keep rendering through their driver.
     const repoDir = initRepo();
     git(repoDir, ["config", "diff.upper.textconv", "tr a-z A-Z <"]);
     writeFileSync(join(repoDir, ".gitattributes"), "*.up diff=upper\n", "utf-8");
@@ -1023,9 +981,6 @@ describe("review-core", () => {
     git(repoDir, ["add", "big.txt"]);
     git(repoDir, ["commit", "-m", "add big file"]);
 
-    // Dirty working tree: core.bigFileThreshold does NOT bound the worktree
-    // side of a diff (git hashes the file and content-based binary detection
-    // wins), so the stat-based exclusion door must work without the probe.
     writeFileSync(join(repoDir, "big.txt"), "b".repeat(largeSize), "utf-8");
     writeFileSync(join(repoDir, "tracked.txt"), "after\n", "utf-8");
 
@@ -1061,18 +1016,12 @@ describe("review-core", () => {
     writeFileSync(join(repoDir, "big.txt"), "b".repeat(largeSize + 1), "utf-8");
     const second = await getGitDiffFingerprint(runtime, "uncommitted", "main");
 
-    // Best-effort semantics preserved: the probe failing must not turn the
-    // staleness poll into a permanent false all-clear.
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
     expect(second).not.toBe(first);
   }, 20_000);
 
   test("renders a renamed file whose edited worktree blob the probe cannot find", async () => {
-    // Rename/copy detection makes git hash the WORKING-TREE content and print
-    // that hash in --raw output, but the blob is never written to the object
-    // database. The size probe answers `missing` for it. Treating that as
-    // "oversized" dropped the whole renamed file out of the review (#1167).
     const repoDir = initRepo();
     mkdirSync(join(repoDir, "src"));
     const original = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n");
@@ -1096,8 +1045,6 @@ describe("review-core", () => {
   }, 20_000);
 
   test("renders a tracked add whose worktree blob the probe cannot find", async () => {
-    // A delete/add pair also feeds rename detection, so the added path carries
-    // a real-but-unwritten worktree hash in --raw output.
     const repoDir = initRepo();
     const base = git(repoDir, ["rev-parse", "HEAD"]);
     writeFileSync(join(repoDir, "replacement.txt"), "fresh content\n", "utf-8");
@@ -1115,8 +1062,6 @@ describe("review-core", () => {
   }, 20_000);
 
   test("renders a file whose index blob is missing from the object database", async () => {
-    // Partial clones (and pruned object databases) can report `missing` for an
-    // index blob git can still diff perfectly well from the working tree.
     const repoDir = initRepo();
     writeFileSync(join(repoDir, "added.txt"), "content from the index\n", "utf-8");
     git(repoDir, ["add", "added.txt"]);
@@ -1131,9 +1076,6 @@ describe("review-core", () => {
   }, 20_000);
 
   test("still stubs an oversized worktree file whose blob the probe cannot find", async () => {
-    // The size probe cannot bound this file (its hash is missing) and
-    // core.bigFileThreshold does not bound working-tree sides, so the
-    // filesystem stat has to be the authoritative bound.
     const repoDir = initRepo();
     const largeSize = MAX_REVIEW_FILE_CONTENT_BYTES + 1;
     writeFileSync(join(repoDir, "old-big.txt"), "a".repeat(largeSize), "utf-8");
@@ -1353,7 +1295,6 @@ describe("review-core", () => {
     const context = await getGitContext(runtime, repoDir);
     const result = await runGitDiff(runtime, "local-vs-remote", context.defaultBranch, repoDir);
 
-    // Intentional copy pins: these labels are the product terminology shown in the diff picker and header.
     expect(context.diffOptions).toContainEqual({
       id: "local-vs-remote",
       label: "Local vs remote branch",
@@ -1378,7 +1319,6 @@ describe("review-core", () => {
     mkdirSync(subDir, { recursive: true });
     const context = await getGitContext(makeRuntime(subDir), subDir);
 
-    // Patch paths are relative to the top level, not to where the review began.
     expect(context.cwd).toBe(subDir);
     expect(realpathSync(context.root!)).toBe(realpathSync(repoDir));
   });
@@ -1411,9 +1351,6 @@ describe("review-core", () => {
   });
 
   test("uncommitted diff includes untracked files with C-quoted (unicode) names", async () => {
-    // git ls-files C-quotes unusual paths ("caf\303\251.txt"); without
-    // unquoting, the --no-index diff can't access the literal quoted name
-    // and the file silently drops out of the review.
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
 
@@ -1421,17 +1358,11 @@ describe("review-core", () => {
 
     const result = await runGitDiff(runtime, "uncommitted", "main");
 
-    // The content line proves the file was actually read rather than
-    // erroring into an empty diff. The header carries git's C-quoted form
-    // (core.quotePath), so match the escaped bytes there, not "café".
     expect(result.patch).toContain("+accented");
     expect(result.patch).toContain("caf\\303\\251.txt");
   });
 
   test("file-content working-tree side resolves root-relative paths from a subdirectory CWD", async () => {
-    // Patch paths are repo-root-relative; a review launched from a repo
-    // subdirectory must not resolve them against the launch cwd (that
-    // double-prefixes the path and hunk expansion returns null).
     const repoDir = initRepo();
     mkdirSync(join(repoDir, "pkg"), { recursive: true });
     writeFileSync(join(repoDir, "pkg", "mod.ts"), "before\n", "utf-8");
@@ -1444,10 +1375,8 @@ describe("review-core", () => {
     const runtime = makeRuntime(subCwd);
 
     for (const diffType of ["since-base", "uncommitted", "unstaged"] as const) {
-      // A file inside the subdir (would double-prefix: pkg/pkg/mod.ts)…
       const sub = await getFileContentsForDiff(runtime, diffType, "main", "pkg/mod.ts", undefined, subCwd);
       expect(sub.newContent).toBe("after\n");
-      // …and a root-level file (invisible from the subdir entirely).
       const root = await getFileContentsForDiff(runtime, diffType, "main", "tracked.txt", undefined, subCwd);
       expect(root.newContent).toBe("root after\n");
     }
@@ -1462,8 +1391,6 @@ describe("review-core", () => {
     const subCwd = join(repoDir, "pkg");
     const runtime = makeRuntime(subCwd);
 
-    // Root-relative paths, subdirectory cwd — `git add` must run at the
-    // toplevel or it fails with "pathspec did not match".
     await gitAddFile(runtime, "root-new.txt", subCwd);
     await gitAddFile(runtime, "pkg/sub-new.txt", subCwd);
     expect(git(repoDir, ["status", "--porcelain"])).toContain("A  root-new.txt");
@@ -1485,8 +1412,6 @@ describe("review-core", () => {
 
     writeFileSync(join(repoDir, "tracked.txt"), "after\n", "utf-8");
 
-    // Runtime whose default CWD is a subdirectory (simulates a hook process
-    // that inherits an agent CWD inside a monorepo package)
     const subCwd = join(repoDir, "packages", "infra");
     const runtime = makeRuntime(subCwd);
 
@@ -1544,9 +1469,6 @@ describe("review-core", () => {
 
     expect(result.patch).toBe("");
     expect(result.label).toBe("Error: branch");
-    // Error is derived from the argv — assert the meaningful parts rather
-    // than the exact string so harmless argv reorders (e.g. --end-of-options)
-    // don't break it.
     expect(result.error).toContain("git diff");
     expect(result.error).toContain("master..HEAD");
     expect(result.error).not.toContain("core.bigFileThreshold");
@@ -1672,14 +1594,8 @@ describe("review-core", () => {
   });
 
   test("getDefaultBranch falls back to local when origin/HEAD points at an unfetched ref", () => {
-    // Simulates a narrow / partial clone where origin/HEAD is configured but
-    // the target ref was never fetched. Before the verify step, the server
-    // would return "origin/phantom" and every branch/merge-base diff would
-    // fail with "unknown revision". With the verify step we fall back to
-    // local main.
     const repoDir = initRepo();
 
-    // Manually set origin/HEAD → origin/phantom without ever fetching it.
     git(repoDir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/phantom"]);
 
     const runtime = makeRuntime(repoDir);
@@ -1689,11 +1605,6 @@ describe("review-core", () => {
   });
 
   test("getDefaultBranch finds origin/main on feature-only clones (no origin/HEAD, no local main)", async () => {
-    // CI checkouts / `clone --branch feature` / extra worktrees: only the
-    // feature branch exists locally, main lives solely as the fetched
-    // remote-tracking ref. The old chain (origin/HEAD -> local main ->
-    // blind "master") skipped right past it, "master" didn't resolve, and
-    // since-base was suppressed for the whole session.
     const repoDir = initRepo();
     const sha = git(repoDir, ["rev-parse", "HEAD"]);
     git(repoDir, ["checkout", "-b", "feature"]);
@@ -1744,10 +1655,6 @@ describe("review-core", () => {
   });
 
   test("parseWorktreeDiffType recognises every DiffType suffix, including merge-base", () => {
-    // Regression guard: every local diff type must round-trip through the
-    // worktree-prefixed form. Missing `merge-base` here previously routed
-    // "worktree:/path:merge-base" to { path: "/path:merge-base", subType: "uncommitted" }
-    // which pointed git at a non-existent cwd and silently collapsed the diff mode.
     const subTypes = [
       "since-base",
       "local-vs-remote",
@@ -1771,7 +1678,6 @@ describe("review-core", () => {
       path: "/tmp/my-worktree",
       subType: "commit:abc1234",
     });
-    // A non-hex suffix is not a commit sub-type — falls back to the path.
     expect(parseWorktreeDiffType("worktree:/tmp/my-worktree:commit:not-hex")).toEqual({
       path: "/tmp/my-worktree:commit:not-hex",
       subType: "uncommitted",
@@ -1779,9 +1685,6 @@ describe("review-core", () => {
   });
 
   test("rejects a worktree diff type with no path", () => {
-    // An empty path would resolve to an empty cwd; Bun.spawn({ cwd: "" }) runs
-    // git in the server's OWN directory and leaks an unrelated repo's diff.
-    // Every degenerate form must return null so resolveCwd falls back.
     expect(parseWorktreeDiffType("worktree:")).toBeNull();
     expect(parseWorktreeDiffType("worktree::uncommitted")).toBeNull();
     expect(parseWorktreeDiffType("worktree::commit:abc1234")).toBeNull();
@@ -1814,7 +1717,6 @@ describe("jj-commit family", () => {
     expect(commitFamilyId("jj-commit:abc1234")).toBe("abc1234");
     expect(commitFamilyId("worktree:/tmp/wt:commit:abc1234")).toBe("abc1234");
     expect(commitFamilyId("jj-current")).toBeNull();
-    // The rail's hot path skips the jj context recompute too.
     expect(isSameCwdCommitSwitch("jj-current", "jj-commit:abc1234")).toBe(true);
   });
 });
@@ -1844,7 +1746,6 @@ describe("commit diff mode", () => {
     git(repoDir, ["commit", "-m", "second commit"]);
     const secondSha = git(repoDir, ["rev-parse", "HEAD"]);
 
-    // A later commit + dirty working tree must NOT leak into the commit's diff.
     writeFileSync(join(repoDir, "third.txt"), "third\n", "utf-8");
     git(repoDir, ["add", "third.txt"]);
     git(repoDir, ["commit", "-m", "third commit"]);
@@ -1922,14 +1823,6 @@ describe("commit diff mode", () => {
   });
 });
 
-/**
- * Failure backoff for the remote-default probe (#1553). The regression this
- * guards is the one the issue reported: a remote that never answers being
- * retried on the same 60s cadence for the life of the session, which on a
- * smartcard-backed SSH setup is one physical touch prompt per minute. The
- * reset leg matters just as much — a network that comes back must return to
- * the normal cadence rather than stay parked at the cap.
- */
 describe("nextRemoteBaseCheckInterval", () => {
   test("doubles on failure, from the base interval up to the cap", () => {
     const seen: number[] = [];

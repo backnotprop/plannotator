@@ -26,7 +26,6 @@ export type CallFlowPackLock = {
   readonly packages: Readonly<Record<string, unknown>>;
 };
 
-/** Bundled npm locks; each optional grammar has an independent integrity root. */
 export const CALL_FLOW_PACK_LOCKS: Readonly<Record<Exclude<CallFlowLanguageId, "javascript-typescript">, CallFlowPackLock>> = {
   python,
   go,

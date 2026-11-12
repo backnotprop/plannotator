@@ -1,11 +1,3 @@
-/**
- * A thread that came back from the archive (mail apps' rule), on a real store
- * in a temp dir: an agent's reply_to reply after the archive line makes its
- * messages behave as an open thread's (live questions, answerable, Mark read
- * handles them) while the thread stays resolved; the row is back in the list
- * while something there waits, and returns to the archive on its own once
- * handled. All derived from the log: a replay from disk equals the live store.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,19 +21,16 @@ const AGENT: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: "c
 const ASK = (prompt: string, stopped = false) =>
   ["One more call.", "", ":::question", prompt, "", ...(stopped ? ["Stopped: the release waits on this.", ""] : []), "- [ ] Yes", "- [ ] No", ":::"].join("\n");
 
-/** A thread with an unanswered question, archived, then an agent's reply_to after the archive. */
 function cameBack(store: InboxStore, reply = ASK("Ship it today?", true)) {
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const root = store.sendMessage({ project_id: project.id, author: AGENT, body: ASK("Which layout?") }).message;
   store.markSeen(root.id);
   store.resolveThread(root.id, true);
-  // A look while archived rewrites the root line but is not a new archive line.
   store.markSeen(root.id);
   const after = store.sendMessage({ project_id: project.id, author: AGENT, body: reply, reply_to: root.id }).message;
   return { project, root, after };
 }
 
-/** A pick of "Yes" on a question as the store reads it. */
 const yes = (q: { key: string; kind: string; prompt: string }) => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ["Yes"] }) as never;
 
 describe("a thread that came back from the archive", () => {
@@ -58,7 +47,6 @@ describe("a thread that came back from the archive", () => {
     expect(store.messageAnswerable(root.id)).toBe(false);
     const record = store.questionRecord(`${after.id}/${store.questionsOf(after.id)[0]!.key}`)!;
     expect(store.questionWire(record).state).toBe("open");
-    // Derived, so a store read again from disk agrees.
     const replay = InboxStore.open(dir);
     expect(replay.listRow(root.id)).toEqual(row);
     expect(replay.windowThread(root.id)!.archive_seq).toBe(store.windowThread(root.id)!.archive_seq);
@@ -73,12 +61,9 @@ describe("a thread that came back from the archive", () => {
     expect(reply.reply?.reply_to).toBe(after.id);
     expect(store.questionsOf(after.id)[0]!.state).toBe("sent");
     expect(store.listRow(root.id)!.resolved_at).not.toBeNull();
-    // The archive-closed question refuses.
     const closed = store.questionsOf(root.id)[0]!;
     expect(() => store.savePicks(root.id, [{ key: closed.key, revision: 0, answer: yes(closed) }])).toThrow(InboxError);
-    // Still waiting: the agent has not read the reply yet.
     expect(store.listRow(root.id)).toMatchObject({ back_from_archive: true, section: "sent" });
-    // Once the agent read it, nothing waits: back to the archive on its own.
     store.markAgentChecked(root.id);
     const handled = store.listRow(root.id)!;
     expect(handled).toMatchObject({ agent_after_archive: true, back_from_archive: false, section: "quiet" });
@@ -120,9 +105,6 @@ describe("a thread that came back from the archive", () => {
     expect(store.listRow(root.id)).toMatchObject({ agent_after_archive: false, back_from_archive: false, section: "quiet" });
   });
 
-  // The failure this guards: Mark read's set-aside note is a person message the
-  // agent has not read, and counted as a reply waiting on the agent, so about
-  // 10 s after "went back to Archived" the thread left the archive for Quiet.
   test("after Mark read, the set-aside note does not bring it back: it stays archived, live and after replay", () => {
     const { store, dir } = open();
     const { root, after } = cameBack(store);
@@ -136,9 +118,6 @@ describe("a thread that came back from the archive", () => {
     expect(InboxStore.open(dir).listRow(root.id)).toEqual(row);
   });
 
-  // The failure this guards: Unarchive reopened the questions the archive had
-  // closed while the Mark read made on what came back still held the thread
-  // in Quiet "Read", with an open question in it.
   test("Unarchive drops a Mark read made while archived: the reopened thread waits on its open question, live and after replay", () => {
     const { store, dir } = open();
     const { root } = cameBack(store);
@@ -149,7 +128,6 @@ describe("a thread that came back from the archive", () => {
     expect(row.resolved_at).toBeNull();
     expect(row.read_at ?? null).toBeNull();
     expect(store.questionsOf(root.id)[0]!.state).toBe("open");
-    // In Waiting, and not bold: the person has seen every agent message there (the owner, 2026-11-08).
     expect(row).toMatchObject({ section: "waiting", unseen: 0, unread: false });
     expect(InboxStore.open(dir).listRow(root.id)).toEqual(row);
   });

@@ -175,7 +175,6 @@ describe("runPRLayerLocalDiff", () => {
 
   function layerRuntime(opts: {
     missingObjects?: Set<string>;
-    /** Objects that become available after a `fetch origin -- <sha>` */
     fetchable?: Set<string>;
     diffStdout?: string;
     diffExitCode?: number;

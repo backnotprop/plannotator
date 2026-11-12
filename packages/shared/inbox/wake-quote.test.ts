@@ -1,9 +1,3 @@
-/**
- * What the "Replying to your message…" line quotes. The failures this guards:
- * markup or a block's fence reaching the agent as if it were words, a message
- * opening with a question or picture quoting nothing useful, and a quote long
- * enough to weigh on every reply.
- */
 import { expect, test } from "bun:test";
 import { inboxWakeQuote } from "./wake-quote";
 

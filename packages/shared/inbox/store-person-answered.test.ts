@@ -1,10 +1,3 @@
-/**
- * The checklist's waiting rule reads "the person answered since this list" (`personAnsweredSince`; approval
- * "inbox-checklist-spinners-2026-11-07": the amber pause "only while the thread waits on the person"). What regresses:
- * a row and a Board card left amber after the person typed a reply or pressed 👍 Looks good (a 👍's note is never
- * listed in the thread, so a read of the listed messages misses it), or amber gone though the agent rewrote its list
- * after the answer.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -68,7 +61,6 @@ describe("the person answered since a checklist", () => {
     const since = w.setList();
     w.advance(60_000);
     w.store.ackMessage(w.thread, true);
-    // The listed thread never shows a 👍's note; the rule must not depend on it.
     expect(w.store.thread(w.thread)!.messages.some((m) => m.author.kind === "person")).toBe(false);
     expect(w.store.personAnsweredSince(w.thread, since)).toBe(true);
     w.advance(1_000);

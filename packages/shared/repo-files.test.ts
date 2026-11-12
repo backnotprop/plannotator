@@ -22,7 +22,6 @@ describe("repoDirEntries", () => {
       { name: "ab.ts", path: "ab.ts", type: "file" },
       { name: "z.md", path: "z.md", type: "file" },
     ]);
-    // "a/" never takes "ab.ts", a sibling sharing the prefix.
     expect(repoDirEntries(SORTED, "a")).toEqual([
       { name: "b", path: "a/b", type: "dir", files: 2 },
       { name: "e.ts", path: "a/e.ts", type: "file" },

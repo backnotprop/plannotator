@@ -1,11 +1,3 @@
-/**
- * The owner's 2026-10-24 block in the Inbox: the server's question record and
- * the card read the same labels and the same recommendation, so the card's
- * Accept recommended (its recommended choice's label) is a pick the server
- * takes, not `422 "…" is not one of the question's choices`. The card reads
- * the body with `parseQuestionBlock`; the record comes from
- * `parseInboxQuestionBlocks`. On a real store in a temp dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -71,10 +63,6 @@ describe("the owner's block in the Inbox", () => {
   });
 });
 
-// Records an Inbox through 0.28.26 stored, frozen from that build's parser
-// (`parseInboxQuestionBlocks` of the bodies below): a `Context:` line read as
-// the wrapped text of the plain bullet above it, and a recommendation naming
-// the start of a choice kept as a suggestion with no recommended choice.
 const PROMPT = "What happens to a pin when you archive the thread?";
 const OLD_RECORDS: Record<string, { body: string[]; parsed: InboxQuestionRecord["parsed"] }> = {
   wrapped: {
@@ -121,7 +109,6 @@ const OLD_RECORDS: Record<string, { body: string[]; parsed: InboxQuestionRecord[
   },
 };
 
-/** A store whose question carries the frozen 0.28.26 record, as it would after an upgrade. */
 function oldStore(name: keyof typeof OLD_RECORDS) {
   const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-forgiving-old-"));
   roots.push(dataDir);
@@ -149,7 +136,6 @@ describe("records an Inbox through 0.28.26 stored", () => {
       expect(label).toBe(name === "wrapped" ? "Keep it pinned forever" : "Keep it pinned");
       const [picked] = store.savePicks(message.id, [{ key, revision: 0, answer: { v: 1, key, kind: card.kind, prompt: card.prompt, selected: [label] } }]);
       expect(picked!.state).toBe("picked");
-      // Stored under the record's own label, which the card maps back.
       expect(picked!.answer!.selected).toEqual([OLD_RECORDS[name]!.parsed.choices[1]!.label]);
       expect(canonicalQuestionAnswer(card, picked!.answer!).selected).toEqual([label]);
       const sent = store.sendReply(message.id, { idempotency_key: `k-${name}`, questions: [{ key, revision: 1 }] });
@@ -189,11 +175,9 @@ describe("a recommendation that names no choice: the card's recommended row", ()
     const project = store.ensureProject({ name: "inbox-ui", root: "/work/inbox-ui" });
     const message = store.sendMessage({ project_id: project.id, author: AGENT, body: [":::question", ...UNMATCHED, ":::"].join("\n") }).message;
     const q = store.questionsOf(message.id)[0]!;
-    // The row never becomes a choice: the record's labels are the agent's choices only.
     expect(q.choices.map((c) => c.label)).toEqual(["Redis", "Memcached"]);
     expect(q.suggested_text).toBe("SQLite on the box");
     const card = parseQuestionBlock("question", UNMATCHED.join("\n"), { decisionLines: false })!;
-    // What the row stores is what Accept recommended stores.
     const answer = recommendedQuestionAnswer({ line: 1, question: card })!;
     expect(answer).toMatchObject({ selected: [], other: "SQLite on the box" });
     const [picked] = store.savePicks(message.id, [{ key: q.key, revision: 0, answer }]);
@@ -222,11 +206,9 @@ describe("the legacy Context: alias on a stored record", () => {
     checkInboxAnswer(r, { v: 1, key: r.key, kind: "single", prompt: r.prompt, selected: [label] }, "answer");
 
   test("every split point: a bullet whose own words hold \"context:\" still answers to the card's label", () => {
-    // The bullet read `- Keep context: the thread` and a `Context:` line followed.
     const r = record(["Unpin it", "Keep context: the thread Context: an archived thread."]);
     const ok = pick(r, "Keep context: the thread");
     expect(ok.ok && ok.answer.selected).toEqual(["Keep context: the thread Context: an archived thread."]);
-    // The first split (`Keep`) names it too: no other choice has it.
     const first = pick(r, "Keep");
     expect(first.ok && first.answer.selected).toEqual(["Keep context: the thread Context: an archived thread."]);
   });

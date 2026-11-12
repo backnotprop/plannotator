@@ -1,16 +1,3 @@
-/**
- * Integration tests for the prompt pipeline.
- *
- * Each test writes a real ~/.plannotator/config.json (in a temp HOME),
- * then calls prompt functions WITHOUT passing a config parameter —
- * forcing loadConfig() to read from disk. This proves the full path:
- *   config.json on disk → loadConfig() → getConfiguredPrompt() → output
- *
- * Uses the same subprocess isolation pattern as improvement-hooks.test.ts.
- *
- * Run: bun test packages/shared/prompts-integration.test.ts
- */
-
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
@@ -34,7 +21,6 @@ function cleanTestHome() {
 
 async function runScript(script: string): Promise<string> {
   const proc = Bun.spawn(["bun", "-e", script], {
-    // Exercise the fake HOME rather than inheriting the parent test sandbox.
     env: { ...process.env, HOME: TEST_HOME, USERPROFILE: TEST_HOME, PLANNOTATOR_DATA_DIR: "" },
     cwd: PROJECT_ROOT,
     stdout: "pipe",
@@ -58,8 +44,6 @@ describe("prompts integration (config from disk)", () => {
     mkdirSync(CONFIG_DIR, { recursive: true });
   });
   afterEach(cleanTestHome);
-
-  // ── Plan denied ──────────────────────────────────────────────────────
 
   test("plan denied reads generic override from config.json", async () => {
     writeConfig({
@@ -117,7 +101,6 @@ describe("prompts integration (config from disk)", () => {
   });
 
   test("plan denied falls back to hardcoded default when config.json missing", async () => {
-    // No config file written — CONFIG_DIR exists but no config.json
     rmSync(CONFIG_PATH, { force: true });
 
     const result = await runScript(`
@@ -155,8 +138,6 @@ describe("prompts integration (config from disk)", () => {
     expect(result).toContain("YOUR PLAN WAS NOT APPROVED");
   });
 
-  // ── Plan approved ────────────────────────────────────────────────────
-
   test("plan approved reads override from config.json", async () => {
     writeConfig({
       prompts: {
@@ -176,14 +157,12 @@ describe("prompts integration (config from disk)", () => {
   });
 
   test("plan approved uses runtime built-in default when no config", async () => {
-    // No config — opencode should get its built-in "Plan approved!{{doneMsg}}"
     const oc = await runScript(`
       import { getPlanApprovedPrompt } from "./packages/shared/prompts";
       console.log(getPlanApprovedPrompt("opencode", undefined, { doneMsg: " Done." }));
     `);
     expect(oc).toBe("Plan approved! Done.");
 
-    // Pi should get the verbose default
     const pi = await runScript(`
       import { getPlanApprovedPrompt } from "./packages/shared/prompts";
       console.log(getPlanApprovedPrompt("pi", undefined, {
@@ -193,8 +172,6 @@ describe("prompts integration (config from disk)", () => {
     expect(pi).toContain("full tool access");
     expect(pi).toContain("plan.md");
   });
-
-  // ── Plan approved with notes ─────────────────────────────────────────
 
   test("plan approved with notes reads override from config.json", async () => {
     writeConfig({
@@ -230,8 +207,6 @@ describe("prompts integration (config from disk)", () => {
     expect(result).not.toContain("Execute the plan in");
   });
 
-  // ── Plan auto-approved ───────────────────────────────────────────────
-
   test("plan auto-approved reads override from config.json", async () => {
     writeConfig({
       prompts: { plan: { autoApproved: "Auto-OK. Proceed." } },
@@ -244,8 +219,6 @@ describe("prompts integration (config from disk)", () => {
 
     expect(result).toBe("Auto-OK. Proceed.");
   });
-
-  // ── Annotate file feedback ───────────────────────────────────────────
 
   test("annotate file feedback reads override from config.json", async () => {
     writeConfig({
@@ -297,8 +270,6 @@ describe("prompts integration (config from disk)", () => {
     expect(oc).toBe("Generic: fix");
   });
 
-  // ── Annotate message feedback ────────────────────────────────────────
-
   test("annotate message feedback reads override from config.json", async () => {
     writeConfig({
       prompts: {
@@ -317,8 +288,6 @@ describe("prompts integration (config from disk)", () => {
 
     expect(result).toBe("Message review:\n\nWrong output");
   });
-
-  // ── Annotate approved ────────────────────────────────────────────────
 
   test("annotate approved reads override from config.json", async () => {
     writeConfig({
@@ -355,8 +324,6 @@ describe("prompts integration (config from disk)", () => {
     );
   });
 
-  // ── Review denied suffix ─────────────────────────────────────────────
-
   test("review denied suffix reads override from config.json", async () => {
     writeConfig({
       prompts: { review: { denied: "\n\nFix everything now." } },
@@ -370,8 +337,6 @@ describe("prompts integration (config from disk)", () => {
     expect(JSON.parse(result)).toBe("\n\nFix everything now.");
   });
 
-  // ── Cross-section isolation ──────────────────────────────────────────
-
   test("config sections don't bleed into each other", async () => {
     writeConfig({
       prompts: {
@@ -380,7 +345,6 @@ describe("prompts integration (config from disk)", () => {
       },
     });
 
-    // Plan denied should use custom
     const planDenied = await runScript(`
       import { getPlanDeniedPrompt } from "./packages/shared/prompts";
       console.log(getPlanDeniedPrompt("claude-code", undefined, {
@@ -389,14 +353,12 @@ describe("prompts integration (config from disk)", () => {
     `);
     expect(planDenied).toBe("Custom plan denial: fb");
 
-    // Annotate approved should use custom
     const annotateApproved = await runScript(`
       import { getAnnotateApprovedPrompt } from "./packages/shared/prompts";
       console.log(getAnnotateApprovedPrompt("claude-code"));
     `);
     expect(annotateApproved).toBe("Custom annotate approved");
 
-    // Plan approved should still be the default (not set in config)
     const planApproved = await runScript(`
       import { getPlanApprovedPrompt } from "./packages/shared/prompts";
       console.log(getPlanApprovedPrompt("pi", undefined, {
@@ -405,8 +367,6 @@ describe("prompts integration (config from disk)", () => {
     `);
     expect(planApproved).toContain("full tool access");
   });
-
-  // ── Malformed config resilience ──────────────────────────────────────
 
   test("malformed config.json falls back to defaults gracefully", async () => {
     writeFileSync(CONFIG_PATH, "not valid json {{{");
@@ -421,8 +381,6 @@ describe("prompts integration (config from disk)", () => {
     expect(result).toContain("YOUR PLAN WAS NOT APPROVED");
   });
 
-  // ── planDenyFeedback is browser-safe (no Node imports) ────────────────
-
   test("planDenyFeedback() always uses hardcoded default (not config)", async () => {
     writeConfig({
       prompts: {
@@ -435,9 +393,6 @@ describe("prompts integration (config from disk)", () => {
       console.log(planDenyFeedback("Fix auth", "ExitPlanMode"));
     `);
 
-    // planDenyFeedback is self-contained — it does NOT read config.json.
-    // This is intentional: it's imported by the browser SPA bundle, which
-    // cannot access Node APIs. Config-aware denials use getPlanDeniedPrompt().
     expect(result).toContain("YOUR PLAN WAS NOT APPROVED");
     expect(result).toContain("Fix auth");
   });

@@ -5,15 +5,14 @@ import { acceptsGzip, encodeAppHtml, negotiateAppHtmlEncoding, prepareAppHtml } 
 
 describe("negotiateAppHtmlEncoding", () => {
   test.each([
-    // [Accept-Encoding, expected]
     [undefined, "identity"],
     [null, "identity"],
     ["", "identity"],
     ["identity", "identity"],
     ["deflate", "identity"],
     ["zstd", "identity"],
-    ["gzip, deflate, br, zstd", "br"], // Chromium, also on http://localhost
-    ["gzip, deflate", "gzip"], // WebKit over plain http
+    ["gzip, deflate, br, zstd", "br"],
+    ["gzip, deflate", "gzip"],
     ["br", "br"],
     ["BR", "br"],
     ["x-gzip", "gzip"],
@@ -21,10 +20,10 @@ describe("negotiateAppHtmlEncoding", () => {
     ["br;q=0", "identity"],
     ["gzip;q=0", "identity"],
     ["br;q=0, gzip;q=0", "identity"],
-    ["gzip;q=1, br;q=0.5", "gzip"], // client preference is honored
-    ["gzip;q=0.5, br;q=0.5", "br"], // ties prefer br
+    ["gzip;q=1, br;q=0.5", "gzip"],
+    ["gzip;q=0.5, br;q=0.5", "br"],
     ["br;q=0.001", "br"],
-    ["br;q=junk", "identity"], // an unparsable q refuses that coding
+    ["br;q=junk", "identity"],
     ["*", "br"],
     ["*;q=0", "identity"],
     ["*, br;q=0", "gzip"],
@@ -34,7 +33,6 @@ describe("negotiateAppHtmlEncoding", () => {
   });
 });
 
-// A gzip-only body (the Shape page): sent zipped only when the browser takes gzip, whatever it prefers.
 test("acceptsGzip: gzip, x-gzip or * above q=0", () => {
   for (const yes of ["gzip", "gzip, deflate, br", "br;q=1, gzip;q=0.1", "x-gzip", "*", "br, *;q=0.5"]) expect({ yes, ok: acceptsGzip(yes) }).toEqual({ yes, ok: true });
   for (const no of [null, undefined, "", "identity", "br", "gzip;q=0", "br, gzip;q=0", "*;q=0", "*, gzip;q=0"]) expect({ no, ok: acceptsGzip(no) }).toEqual({ no, ok: false });
@@ -72,11 +70,9 @@ describe("prepareAppHtml", () => {
 
   test("each body is compressed once per encoding and then reused", async () => {
     const html = makeAppHtml("cache-unit");
-    // Concurrent first requests share one in-flight compression.
     const [a, b] = await Promise.all([encodeAppHtml(html, "br"), encodeAppHtml(html, "br")]);
     expect(a).toBe(b);
     expect(await encodeAppHtml(html, "br")).toBe(a);
-    // A different body does not collide with the cached one.
     const other = await encodeAppHtml(makeAppHtml("cache-unit-other"), "br");
     expect(other).not.toBe(a);
     expect(await encodeAppHtml(html, "br")).toBe(a);

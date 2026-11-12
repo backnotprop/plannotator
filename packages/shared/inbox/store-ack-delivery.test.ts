@@ -1,13 +1,3 @@
-/**
- * 👍 Looks good reaches the agent (design record "inbox-acknowledge",
- * amended 2026-10-16: "I think we just need to send looks good through").
- * Once the Undo window passes with the ack standing, the store writes the
- * ack's settled line and then one note (a person's reply to the message,
- * `ack_of`, body `inboxAckLine`) that the existing reply delivery hands to
- * the session that wrote the message, exactly once. Proved on a real store
- * in a temp dir, including a replay from disk and a store written before the
- * amendment (its settled acks were never sent and are not sent now).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,7 +53,6 @@ describe("a 👍 sent through", () => {
     expect(note).toMatchObject({ author: { kind: "person" }, reply_to: sent.id, thread_id: sent.id, ack_of: sent.id, body: inboxAckLine(sent.id) });
     expect(store.messageCursor(noteId)).toBe(before + 2);
 
-    // The thread as the person and the agent read it: one message, Quiet, 👍 on the row.
     expect(store.thread(sent.id)!.messages.map((m) => m.id)).toEqual([sent.id]);
     const row = rowOf(store, sent.id);
     expect(row).toMatchObject({ section: "quiet", message_count: 1, last_author: "agent", sent: null });
@@ -80,7 +69,6 @@ describe("a 👍 sent through", () => {
     const shown = store.windowThread(sent.id)!.messages[0]!.ack!;
     expect(shown.delivered_at).toBe("2026-10-16T15:00:11.000Z");
     expect(shown.seen_at).toBe("2026-10-16T15:00:11.000Z");
-    // A second settle writes nothing.
     const lines = store.cursor();
     expect(store.settleAcks(WINDOW)).toEqual([]);
     expect(store.cursor()).toBe(lines);
@@ -95,7 +83,6 @@ describe("a 👍 sent through", () => {
     expect(store.pendingReplies("ses_a")).toHaveLength(1);
     store.ackMessage(sent.id, false);
     expect(store.pendingReplies("ses_a")).toEqual([]);
-    // A new 👍 is a new note.
     store.ackMessage(sent.id, true);
     clock.now += WINDOW;
     store.settleAcks(WINDOW);
@@ -134,7 +121,6 @@ describe("a 👍 sent through", () => {
     store.ackMessage(sent.id, true);
     clock.now += WINDOW;
     store.settleAcks(WINDOW);
-    // Rewrite the file as an older Inbox left it: no note, and the settled ack without `note_id`.
     const projects = join(dir, "inbox", "projects");
     const [key] = readdirSync(projects);
     const file = join(projects, key!, "messages.jsonl");
@@ -168,7 +154,6 @@ describe("a 👍 that can no longer go when its window ends", () => {
     expect(store.cursor()).toBe(before + 1);
     expect(settled!.ack).toMatchObject({ not_sent: "replied", note_id: null, settled_seq: before + 1 });
     expect(store.pendingReplies("ses_a").map((m) => m.id)).toEqual([reply.id]);
-    // No agent ever sees it, and reading the thread never marks it seen.
     expect(store.agentThread(sent.id)!.messages[0]!.ack).toBeNull();
     store.markAcksSeen(sent.id);
     expect(store.message(sent.id)!.ack!.seen_at ?? null).toBeNull();
@@ -185,7 +170,6 @@ describe("a 👍 that can no longer go when its window ends", () => {
     expect(settled!.ack).toMatchObject({ not_sent: "wrote_again", note_id: null });
     expect(store.pendingReplies("ses_a")).toEqual([]);
     expect(store.agentThread(sent.id)!.messages[0]!.ack).toBeNull();
-    // A replay reads the same.
     expect(store.settleAcks(WINDOW)).toEqual([]);
   });
 
@@ -196,7 +180,6 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
     const { store, clock, sent, dir } = setup();
     store.ackMessage(sent.id, true, { emoji: "🦄" });
     clock.now += 4_000;
-    // Changed inside the Undo window: the one it ends on is the one that goes.
     store.ackMessage(sent.id, true, { emoji: "🚀", label: "Ship it" });
     clock.now += WINDOW;
     const [settled] = store.settleAcks(WINDOW);
@@ -226,11 +209,9 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
     const thumbsNote = plain.store.message(thumbs!.ack!.note_id!)!;
     expect(thumbsNote.body).toBe(`The person reacted 👍 Looks good to your message (${plain.sent.id}).`);
     expect(thumbsNote.ack_reaction).toBeUndefined();
-    // An ack always carries a reaction as an agent reads it, 👍 included (addendum 2026-11-07T12:20Z).
     expect(plain.store.agentThread(plain.sent.id)!.messages[0]!.ack).toEqual({ label: "Looks good", at: thumbs!.ack!.at, reaction: { emoji: "👍", label: "Looks good" } });
   });
 
-  // Owner, 2026-11-07: "Reaction should go away after sending and only come back when I can send a new one".
   test("once sent it never changes: another emoji is refused after the window, a delivered one can't be taken back or withdrawn by Move back, and no second note is written", () => {
     const { store, clock, sent } = setup();
     store.ackMessage(sent.id, true, { emoji: "🎉" });
@@ -246,7 +227,6 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
       }
       return "not refused";
     };
-    // Sent, not yet delivered: another emoji (any path: the tray, the … picker, the API) is refused; the same 👍 again writes nothing.
     expect(refused(() => store.ackMessage(sent.id, true, { emoji: "🧪", label: "Add tests" }))).toBe("ack_sent");
     expect(refused(() => store.ackMessage(sent.id, true, null))).toBe("ack_sent");
     const cursor = store.cursor();
@@ -265,7 +245,6 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
     expect([...store.thread(sent.id)!.messages, ...store.pendingReplies("ses_a")].filter((m) => m.ack_of)).toEqual([]);
     expect(store.agentThread(sent.id)!.messages[0]!.ack).toMatchObject({ reaction: { emoji: "🎉" } });
 
-    // The agent's next message takes a new one.
     const next = store.sendMessage({ project_id: sent.project_id, author: AGENT, body: "Tagged 0.29.", reply_to: sent.id }).message;
     store.ackMessage(next.id, true, { emoji: "🧪", label: "Add tests" });
     expect(store.message(next.id)!.ack).toMatchObject({ reaction: { emoji: "🧪", label: "Add tests" }, settled_seq: null });
@@ -278,7 +257,6 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
     store.ackMessage(sent.id, true, { emoji: "🧪", label: "Add tests" });
     expect(store.message(sent.id)!.ack).toMatchObject({ at, reaction: { emoji: "🧪", label: "Add tests" } });
     const before = store.cursor();
-    // The plain call (an older window) leaves the emoji as it is, and writes nothing.
     store.ackMessage(sent.id, true);
     expect(store.cursor()).toBe(before);
     expect(store.message(sent.id)!.ack!.reaction).toEqual({ emoji: "🧪", label: "Add tests" });

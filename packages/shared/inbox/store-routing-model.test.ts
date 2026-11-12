@@ -1,17 +1,3 @@
-/**
- * Thread routing against an independent model (review of #1956): the model
- * below is built from the operations alone, never from the store's lines or
- * its indexes, and predicts the thread every send lands in. Operations cover
- * agents' sends (named and not), threads the person starts in compose (a
- * typed name, compose's suggestion, none), an agent naming one, resolve,
- * "Send to another session" (readdress), delete, and reopening the store
- * from its files.
- *
- * The rule the model holds (and the property says outright): a name the
- * person typed in compose, or compose's suggestion, routes nothing. Another
- * session's named send never lands in a thread the person started, unless an
- * agent named that thread with that name.
- */
 import { afterEach, expect, test } from "bun:test";
 import fc from "fast-check";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -65,12 +51,10 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ op: fc.constant("reload" as const) }),
 );
 
-/** One thread as the model knows it. */
 interface ModelThread {
   id: string;
   project: number;
   person: boolean;
-  /** The current name's key, or null. */
   name: string | null;
   namedBy: "agent" | "person" | "auto" | null;
   resolved: boolean;
@@ -84,8 +68,8 @@ test("an independent model of routing predicts every send; a compose name never 
       roots.push(dir);
       let store = InboxStore.open(dir);
       const projectId = (n: number) => store.ensureProject({ name: `repo${n}`, root: `/work/repo${n}` }).id;
-      const threads: ModelThread[] = []; // in creation order
-      const routes: string[] = []; // thread ids in the order they started routing by name
+      const threads: ModelThread[] = [];
+      const routes: string[] = [];
       let step = 0;
       const key = (name: string) => inboxThreadNameKey(name);
       const byId = (id: string) => threads.find((t) => t.id === id)!;
@@ -102,7 +86,6 @@ test("an independent model of routing predicts every send; a compose name never 
             const open = routes.map(byId).filter((t) => t.project === project && t.name === key(op.name!) && !t.resolved);
             expected = open.at(-1)?.id ?? null;
           }
-          // No name: always a new thread, whatever the session already has open.
           const sent = store.sendMessage({
             project_id: projectId(project),
             author: { kind: "agent", host: "test", session: op.session, name: null },
@@ -116,7 +99,6 @@ test("an independent model of routing predicts every send; a compose name never 
             threads.push({ id: sent.id, project, person: false, name: op.name === null ? null : key(op.name), namedBy: op.name === null ? null : "agent", resolved: false, to: null });
             if (op.name !== null) routes.push(sent.id);
           }
-          // The property, said outright: a named send lands in a person's thread only if an agent named it so.
           const landed = byId(sent.thread_id);
           if (op.name !== null && landed.person) {
             expect(landed.namedBy).toBe("agent");
@@ -146,7 +128,6 @@ test("an independent model of routing predicts every send; a compose name never 
         } else if (op.op === "name") {
           const target = pick(op.target);
           if (!target) continue;
-          // The addressed session replies with `thread`.
           const session = target.person ? target.to! : "ses_a";
           const reply = store.sendMessage({
             project_id: projectId(target.project),
@@ -212,11 +193,9 @@ test("a send with no reply_to and no thread starts a new thread, though the same
   expect(store.listRow(old.thread_id)!.resolved_at).toBeNull();
   expect(next.message.thread_id).toBe(next.message.id);
   expect(next.message.thread_id).not.toBe(old.thread_id);
-  // reply_to and the same `thread` name still add to a thread.
   expect(store.sendMessage({ project_id, author, body: "Follow-up.", reply_to: old.id }).message.thread_id).toBe(old.thread_id);
   const named = store.sendMessage({ project_id, author, body: "Docs, part 1.", thread: "docs" }).message;
   expect(store.sendMessage({ project_id, author, body: "Docs, part 2.", thread: "docs" }).message.thread_id).toBe(named.thread_id);
-  // And a reopened store routes the same.
   const again = InboxStore.open(dir).sendMessage({ project_id, author, body: "After a restart." }).message;
   expect(again.thread_id).toBe(again.id);
 });

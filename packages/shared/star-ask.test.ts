@@ -1,16 +1,3 @@
-/**
- * The "Star the repo" ask's decisions (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts), with a fake gh
- * and an in-memory config.json record: the real gh is never run (an absolute path to a scratch script stands in for it
- * where the spawn itself is tested).
- *
- * What regresses: the ask showing in a dev build, a test or CI; showing to someone in their first week; showing twice
- * (a second surface, a second tab, a surface after an answer, a hand-edited record); the already-starred check reading
- * a 204 as "show it" or anything but a 404 as "gh can star"; a missing gh, a signed-out gh or a gh that never answers
- * holding the ask back (or hanging past the timeout) instead of falling back to the link; starring without a click, or
- * with no shown record, or twice on a double click; a star written as starred when GitHub refused it; a check alone
- * (a done-screen page at load) using the ask up, or running gh again on a later load; two processes both showing it;
- * starring an ask another surface showed; the preview flag beating CI.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +24,6 @@ import {
 
 const ok = (status: number): GhResult => ({ code: status < 300 ? 0 : 1, stdout: `HTTP/2.0 ${status} X\r\nContent-Type: application/json\r\n\r\n`, stderr: status < 300 ? "" : `gh: Not Found (HTTP ${status})` });
 
-/** A fake gh: answers each call from the list, and records the arguments. */
 function fakeGh(...answers: Array<GhResult | "hang">): GhRunner & { calls: string[][] } {
   const calls: string[][] = [];
   const run = ((args: readonly string[]) => {
@@ -85,9 +71,7 @@ describe("who: release builds only", () => {
     expect(starAskEnabled({ PLANNOTATOR_TEST_SANDBOX: "1" }, true)).toBe(false);
     expect(starAskEnabled({ NODE_ENV: "test" }, true)).toBe(false);
     expect(starAskEnabled({ PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_STAR_ASK_PREVIEW: "1" }, false)).toBe(true);
-    // The preview means nothing outside the sandbox: a dev build stays off.
     expect(starAskEnabled({ PLANNOTATOR_STAR_ASK_PREVIEW: "1" }, false)).toBe(false);
-    // CI wins over the preview: a CI runner's gh login can never star it.
     expect(starAskEnabled({ CI: "true", PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_STAR_ASK_PREVIEW: "1" }, true)).toBe(false);
   });
 
@@ -206,7 +190,6 @@ describe("the claim: once, everywhere", () => {
     const gh = fakeGh(ok(404));
     expect((await service(store, gh).claim("inbox")).show).toBe(false);
     expect((await service(store, gh).claim("plan")).show).toBe(false);
-    // No check runs once it was shown.
     expect(gh.calls).toEqual([]);
   });
 
@@ -221,7 +204,6 @@ describe("the claim: once, everywhere", () => {
   test("two processes stamping at once: only the one whose stamp is read back shows it", async () => {
     const store = memoryStore({ checkedAt: "2026-11-06T12:00:00.000Z", canStar: false });
     const write = store.write.bind(store);
-    // The other process writes right after this one: its stamp is what this one reads back.
     store.write = (record) => {
       const ok = write(record);
       if (record.shownAt) store.raw = { ...record, surface: "inbox" };
@@ -291,7 +273,6 @@ describe("the done screens: a check at load, the stamp only when the card draws"
     expect(await service(store, gh).check("plan")).toEqual({ show: true, canStar: true });
     expect(store.raw).toEqual({ checkedAt: NOW.toISOString(), canStar: true });
     expect(starAskOpen(readStarAskRecord({ starAsk: store.raw as StarAskRecord }), store.raw)).toBe(true);
-    // A reload, an abandoned session, goal setup or auto-close: nothing calls show, so it stays open.
     const again = fakeGh(ok(404));
     expect(await service(store, again).check("review")).toEqual({ show: true, canStar: true });
     expect(again.calls).toEqual([]);

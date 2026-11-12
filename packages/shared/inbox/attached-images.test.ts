@@ -1,11 +1,3 @@
-/**
- * send_message's advice about pictures sent only as attachments (the owner,
- * 2026-11-02: the pictures of a message's options sat at the bottom as
- * attachments, away from the words about them). The failures this guards:
- * the advice goes missing for an attached picture the body never shows, or
- * nags an agent that did show the picture in place, or that attached a file
- * that is not a picture.
- */
 import { describe, expect, test } from "bun:test";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "./attached-images";
 
@@ -17,7 +9,6 @@ describe("attachedImagesNotInBody", () => {
       "/tmp/shots/b.JPG",
       "shots/c.webp",
     ]);
-    // The advice counts them and names the syntax that shows a picture in place.
     expect(attachedImagesNotInBodyText(3)).toStartWith(" 3 images are attached");
     expect(attachedImagesNotInBodyText(3)).toContain("`![alt](path)`");
   });
@@ -33,17 +24,14 @@ describe("attachedImagesNotInBody", () => {
       ":::",
     ].join("\n");
     expect(attachedImagesNotInBody(body, ["/work/shots/menu.png", "/tmp/shots/a.png", "shots/b.png"], "/work")).toEqual([]);
-    // A relative path resolves from either base: the attachments' folder and the body's may differ.
     expect(attachedImagesNotInBody("![menu](shots/menu.png)", ["shots/menu.png"], "/work/sub", "/work")).toEqual([]);
     expect(attachedImagesNotInBodyText(0)).toBe("");
   });
 
   test("a picture the window finds through an encoded, queried or differently cased path counts as shown", () => {
-    // macOS names screenshots with spaces; correct CommonMark writes them as %20.
     expect(attachedImagesNotInBody("![x](shots/Screenshot%202026-11-02%20at%2010.34.12.png)", ["shots/Screenshot 2026-11-02 at 10.34.12.png"], "/work")).toEqual([]);
     expect(attachedImagesNotInBody("![x](shots/a.png?v=2)", ["shots/a.png"], "/work")).toEqual([]);
     expect(attachedImagesNotInBody('<img src="shots/a.png#top">', ["/work/shots/a.png"], "/work")).toEqual([]);
-    // One file on a file system that ignores case (macOS, Windows); two files where it does not (Linux).
     expect(attachedImagesNotInBody("![x](shots/Shot.PNG)", ["shots/shot.png"], "/work", "/work", "darwin")).toEqual([]);
     expect(attachedImagesNotInBody("![x](shots/Shot.PNG)", ["shots/shot.png"], "/work", "/work", "linux")).toEqual(["shots/shot.png"]);
   });

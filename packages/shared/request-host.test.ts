@@ -10,9 +10,6 @@ import {
   parseAllowedHosts,
 } from "./request-host";
 
-// The cross-origin write guard's one exception: a plain-HTTP reverse proxy that
-// rewrites Host. Failures it catches: `*` silently turning the write guard off,
-// or a named proxy hostname being refused its own decisions.
 describe("isOriginNamedInAllowedHosts", () => {
   const named = parseAllowedHosts("review.example.com, .corp.example");
   test("an Origin whose hostname is named, exactly or by suffix, passes when the browser sent no fetch metadata", () => {
@@ -75,7 +72,6 @@ describe("isAllowedRequestHost", () => {
     expect(isAllowedRequestHost("devbox.tailnet.ts.net:19432", policy)).toBe(true);
     expect(isAllowedRequestHost("DEVBOX:19432", policy)).toBe(true);
     expect(isAllowedRequestHost("x.devbox.tailnet.ts.net:19432", policy)).toBe(false);
-    // A local --tailscale session: only loopback plus the served name.
     expect(isAllowedRequestHost("devbox.tailnet.ts.net:4443", { remote: false, extraHosts: ["devbox.tailnet.ts.net"] })).toBe(true);
   });
 
@@ -99,7 +95,6 @@ describe("isAllowedRequestHost", () => {
     expect(isAllowedRequestHost("evil.example", policy)).toBe(false);
     expect(isAllowedRequestHost("evil.example", { remote: false, allowed: parseAllowedHosts("*") })).toBe(true);
     expect(parseAllowedHosts(undefined)).toEqual({ any: false, names: [] });
-    // A port on an entry is dropped, not a reason to ignore the entry.
     expect(parseAllowedHosts("proxy.example.com:8443,[fd00::1]:80")).toEqual({ any: false, names: ["proxy.example.com", "fd00::1"] });
   });
 
@@ -112,7 +107,6 @@ describe("isAllowedRequestHost", () => {
       expect([host, isAllowedRequestHost(host, policy)]).toEqual([host, false]);
     }
     expect(isAllowedRequestHost("8080.code.example.com", { remote: false, portHostPatterns: forwardedPortHostPatterns("https://{{port}}.code.example.com") })).toBe(true);
-    // No template in the hostname (path-based proxy), no domain, or not a URL: nothing.
     expect(forwardedPortHostPatterns("./proxy/{{port}}/")).toEqual([]);
     expect(forwardedPortHostPatterns("https://code.example.com/proxy/{{port}}/")).toEqual([]);
     expect(forwardedPortHostPatterns("https://{{port}}/")).toEqual([]);

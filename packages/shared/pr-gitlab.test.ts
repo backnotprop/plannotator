@@ -93,8 +93,6 @@ describe("fetchGlMR", () => {
   });
 });
 
-// --- raw_diffs → JSON /diffs fallback (older self-hosted GitLab + oversized MRs) ---
-
 const REF = { platform: "gitlab" as const, host: "gitlab.com", projectPath: "g/p", iid: 1 };
 
 const DIFF_ENTRIES_JSON = JSON.stringify([
@@ -163,7 +161,7 @@ describe("fetchGlMR raw_diffs fallback", () => {
         new_file: false,
         deleted_file: false,
         renamed_file: true,
-        diff: "", // pure rename — GitLab sends an empty diff
+        diff: "",
       },
       {
         old_path: "src/before.ts",
@@ -205,7 +203,7 @@ describe("fetchGlMR raw_diffs fallback", () => {
         new_file: false,
         deleted_file: false,
         renamed_file: false,
-        diff: "", // modified file with no content = withheld
+        diff: "",
       },
       {
         old_path: "src/old.ts",
@@ -213,7 +211,7 @@ describe("fetchGlMR raw_diffs fallback", () => {
         new_file: false,
         deleted_file: false,
         renamed_file: true,
-        diff: "", // pure rename — complete information, must not flag
+        diff: "",
       },
     ]);
     const { runtime } = gitlabRuntime({
@@ -231,9 +229,6 @@ describe("fetchGlMR raw_diffs fallback", () => {
   });
 
   test("too_large/collapsed flags catch withheld ADDED files (modern GitLab)", async () => {
-    // A too-large added file has new_file:true and an empty diff — without
-    // the explicit flag it would be indistinguishable from a legitimately
-    // empty new file and the upgrade would never be offered.
     const entries = JSON.stringify([
       {
         old_path: "src/huge.ts",
@@ -270,7 +265,7 @@ describe("fetchGlMR raw_diffs fallback", () => {
         renamed_file: false,
         too_large: null,
         collapsed: null,
-        diff: "", // modified file, no content, flags unknown → withheld
+        diff: "",
       },
     ]);
     const { runtime } = gitlabRuntime({
@@ -297,7 +292,7 @@ describe("fetchGlMR raw_diffs fallback", () => {
         renamed_file: false,
         too_large: false,
         collapsed: false,
-        diff: "", // binary — complete information, must not flag
+        diff: "",
       },
       {
         old_path: "src/ok.ts",
@@ -742,8 +737,6 @@ describe("submitGlMRReview", () => {
     });
   });
 
-  // Like Bitbucket: a decision that fails before anything else landed changed
-  // nothing, so it is an error the review stays open on, with no retry locked to it.
   test("throws an approval-only spawn failure, unchanged on retry", async () => {
     const { runtime } = makeSubmissionRuntime(new Set(), { approvalReject: true });
 
@@ -754,7 +747,6 @@ describe("submitGlMRReview", () => {
     }
   });
 
-  // What glab gives when GitLab refuses an author's approval on a project that forbids it.
   const refused: CommandResult = {
     stdout: JSON.stringify({ message: "401 Unauthorized" }),
     stderr: "glab: 401 Unauthorized (HTTP 401)",
@@ -848,8 +840,6 @@ describe("submitGlMRReview", () => {
     });
   });
 
-  // What GitLab before 18.9 answers (the shape gitlab.com gives for an unknown mutation field): HTTP 200 with no
-  // `data`, so nothing ran; glab exits 1, prints the body on stdout and the message on stderr.
   const missingMutation = (extensions = true): CommandResult => ({
     stdout: JSON.stringify({
       errors: [{
@@ -869,7 +859,6 @@ describe("submitGlMRReview", () => {
     await expect(
       submitGlMRReview(runtime, REF, "head", "request_changes", "Please fix", comments),
     ).resolves.toEqual({ status: "complete", postedAs: "comment" });
-    // Every comment went once, and the decision was asked once: nothing to retry.
     expect(postedBodies).toEqual(["Please fix", "First finding", "Second finding"]);
     expect(graphqlInputs).toHaveLength(1);
   });
@@ -931,8 +920,6 @@ describe("submitGlMRReview", () => {
 });
 
 describe("submitGlMRReview positions", () => {
-  // src/keep.ts: line 1 unchanged, old 2 deleted, new 2 added, then an unchanged line (old 3 = new 3).
-  // src/new-name.ts: renamed from src/old-name.ts, with an unchanged line (old 10 = new 11) after an added one.
   const RAW_DIFF = [
     "diff --git a/src/keep.ts b/src/keep.ts",
     "--- a/src/keep.ts",

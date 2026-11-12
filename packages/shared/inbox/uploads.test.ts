@@ -1,9 +1,3 @@
-/**
- * The person's uploads on disk. What can regress: an oversized or aborted
- * upload leaving bytes behind, the sweep dropping a file a draft still names
- * or a blob a message uses, and the store's blob sweep (after a deletion)
- * removing a file that is uploaded but not sent yet.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,7 +46,6 @@ describe("uploads", () => {
     const forgotten = await receiveInboxUpload(inbox, "a.txt", stream("forgotten"), { at: at(old) });
     const drafted = await receiveInboxUpload(inbox, "b.txt", stream("drafted"), { at: at(old) });
     const fresh = await receiveInboxUpload(inbox, "c.txt", stream("fresh"), { at: at(now) });
-    // Sent once (a message uses the blob), and uploaded again: the old pending copy goes, the blob stays.
     const sentBytes = await receiveInboxUpload(inbox, "d.txt", stream("sent"), { at: at(old) });
     const project = store.ensureProject({ name: "repo", root: "/work/repo" });
     store.startPersonThread({

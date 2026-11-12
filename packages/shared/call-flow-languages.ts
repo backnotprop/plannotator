@@ -1,6 +1,5 @@
 import { parseDiffFilePathLines, parseDiffGitHeader } from "./diff-paths";
 
-/** Stable identifier for one CallDiff language family. */
 export type CallFlowLanguageId =
   | "javascript-typescript"
   | "python"
@@ -29,25 +28,14 @@ export interface CallFlowLanguageDefinition {
   readonly id: CallFlowLanguageId;
   readonly label: string;
   readonly extensions: readonly string[];
-  /** Core ships with CallDiff; packs are independently installable. */
   readonly kind: "core" | "pack";
   readonly packageName?: string;
   readonly packageVersion?: string;
-  /** Measured, pruned installed bytes rounded up for honest UI estimates. */
   readonly installSizeBytes: number;
 }
 
 const MB = 1024 * 1024;
 
-/**
- * CallDiff 0.6.0's supported extensions and pinned grammar packages. Perl,
- * new upstream in 0.6.0, is left out: tree-sitter-perl ships no prebuilt
- * binaries, so a pack would need a C compiler on every machine.
- *
- * Size estimates describe Plannotator's pruned managed artifacts, not the
- * much larger npm tarball expansion. They are deliberately rounded up and
- * are re-measured whenever a grammar pin or pruning rule changes.
- */
 export const CALL_FLOW_LANGUAGES = [
   { id: "javascript-typescript", label: "JavaScript and TypeScript", extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"], kind: "core", installSizeBytes: 5 * MB },
   { id: "python", label: "Python", extensions: [".py"], kind: "pack", packageName: "tree-sitter-python", packageVersion: "0.25.0", installSizeBytes: 1 * MB },
@@ -78,21 +66,18 @@ const LANGUAGE_BY_EXTENSION = new Map<string, CallFlowLanguageDefinition>(
   CALL_FLOW_LANGUAGES.flatMap((language) => language.extensions.map((extension) => [extension, language] as const)),
 );
 
-/** Return the pinned definition for a trusted language id. */
 export function getCallFlowLanguage(id: CallFlowLanguageId): CallFlowLanguageDefinition {
   const language = LANGUAGE_BY_ID.get(id);
   if (!language) throw new Error(`Unknown CallDiff language: ${id}`);
   return language;
 }
 
-/** Parse an untrusted language identifier at an HTTP/process boundary. */
 export function parseCallFlowLanguageId(value: unknown): CallFlowLanguageId | null {
   return typeof value === "string" && LANGUAGE_BY_ID.has(value as CallFlowLanguageId)
     ? value as CallFlowLanguageId
     : null;
 }
 
-/** Resolve a repository-relative path to the language CallDiff would load. */
 export function getCallFlowLanguageForPath(filePath: string): CallFlowLanguageDefinition | null {
   const slash = filePath.lastIndexOf("/");
   const dot = filePath.lastIndexOf(".");
@@ -100,7 +85,6 @@ export function getCallFlowLanguageForPath(filePath: string): CallFlowLanguageDe
   return LANGUAGE_BY_EXTENSION.get(filePath.slice(dot).toLowerCase()) ?? null;
 }
 
-/** Extract both sides of every patch file, including quoted and renamed paths. */
 export function getCallFlowPatchFiles(rawPatch: string): string[] {
   const files = new Set<string>();
   for (const chunk of rawPatch.split(/(?=^diff --git )/m)) {
@@ -120,7 +104,6 @@ export interface CallFlowPatchLanguageUsage {
   readonly files: readonly string[];
 }
 
-/** Group supported changed paths by the grammar family they require. */
 export function getCallFlowPatchLanguageUsage(rawPatch: string): CallFlowPatchLanguageUsage[] {
   const filesByLanguage = new Map<CallFlowLanguageId, string[]>();
   for (const filePath of getCallFlowPatchFiles(rawPatch)) {
@@ -136,7 +119,6 @@ export function getCallFlowPatchLanguageUsage(rawPatch: string): CallFlowPatchLa
   });
 }
 
-/** Strict request body for POST /api/call-flow/install. */
 export function parseCallFlowInstallRequest(value: unknown): { languageIds?: CallFlowLanguageId[] } | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -148,11 +130,6 @@ export function parseCallFlowInstallRequest(value: unknown): { languageIds?: Cal
   return { languageIds: [...new Set(parsed as CallFlowLanguageId[])] };
 }
 
-/**
- * Resolve an install POST without mixing the current review's default packs
- * into an explicit Languages-list request. A missing core is the only target
- * the server prepends to an explicit request.
- */
 export function resolveCallFlowInstallTargets(
   requestedIds: readonly CallFlowLanguageId[] | undefined,
   defaultPlanIds: readonly CallFlowLanguageId[] | undefined,

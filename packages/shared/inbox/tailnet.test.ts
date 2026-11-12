@@ -1,9 +1,3 @@
-/**
- * The Inbox over the tailnet, pure parts: who owns this machine (`tailscale
- * status --json`), the identity header serve sets, the owner check, the
- * served-Host check, the Sec-Fetch-Site rule, and the switch's resolution.
- * Nothing here spawns `tailscale`.
- */
 import { describe, expect, test } from "bun:test";
 import { resolveInboxTailscale, resolveInboxTailscaleAllow } from "../config";
 import { decodeTailscaleHeaderValue, parseTailscaleSelfIdentity, serveStatusRoutes, serveTargetIsLoopbackPort } from "../tailscale";

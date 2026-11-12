@@ -1,14 +1,3 @@
-/**
- * Subjects are one line of plain text, at both ends of the store:
- *  - at send, a subject with leaked tool-call text, a line break, a control
- *    or a bidi character is refused with `validation_error: subject: …` and
- *    nothing is written, so a corrected retry under the same idempotency_key
- *    lands once;
- *  - on read, a subject an older Inbox kept verbatim (the owner's
- *    msg_01M5DBNXYNG5TA0DZV6C42PYRQ) is served as shown (displayInboxSubject)
- *    everywhere the store gives it out, while the line on disk stays as it was.
- * Derived and person-started subjects are not affected.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -112,7 +101,6 @@ describe("a subject an older Inbox kept is served as shown", () => {
     expect(store.messageWire(id!)!.subject).toBe(LEAKED_SUBJECT_SHOWN);
     expect(store.threadSummary(id!)!.subject).toBe(LEAKED_SUBJECT_SHOWN);
     expect(store.listRow(id!)!.subject).toBe(LEAKED_SUBJECT_SHOWN);
-    // Append-only: the stored line is not rewritten.
     expect(store.message(id!)!.subject).toBe(LEAKED_SUBJECT);
     expect(messagesOnDisk(dir)).toContain(JSON.stringify(LEAKED_SUBJECT));
   });

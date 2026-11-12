@@ -1,11 +1,3 @@
-/**
- * Pins (approval "inbox-pinned-threads"): window furniture outside the event
- * log. What can regress: a pin writing a store line or taking a seq, a pin
- * moving a row, a section or the routing of a later send, an order dropping a
- * pin or keeping a duplicate, a pin of a missing or non-root thread, and the
- * file outliving its thread. The property runs a store with pins beside a
- * twin that never pins and checks the two never differ in anything but pins.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -82,7 +74,6 @@ describe("pins in the store", () => {
     const { store, project } = open();
     const [a, b, c] = ["One", "Two", "Three"].map((body, i) => store.sendMessage({ project_id: project.id, author: agent(`ses_${i}`), body }).message.thread_id);
     for (const id of [a!, b!, c!]) store.setPinned(id, true);
-    // Tab 1 read [a, b, c]; tab 2 unpins b; tab 1 then moves c to the top with its stale order.
     const stale = [c!, a!, b!];
     store.setPinned(b!, false);
     let told = 0;
@@ -90,7 +81,6 @@ describe("pins in the store", () => {
     store.orderPins(stale);
     expect(store.pins().map((p) => p.thread_id)).toEqual([c, a]);
     expect(told).toBe(1);
-    // An order naming only threads no longer pinned changes nothing.
     store.orderPins([b!]);
     expect(store.pins().map((p) => p.thread_id)).toEqual([c, a]);
     expect(told).toBe(1);
@@ -107,7 +97,6 @@ describe("pins in the store", () => {
     store.restorePin({ thread_id: b!, index: 1, pinned_at: original.pinned_at });
     expect(store.pins().map((p) => p.thread_id)).toEqual([a, b, c]);
     expect(store.pins()[1]!.pinned_at).toBe(original.pinned_at);
-    // A thread pinned again meanwhile keeps its place; an index past the end lands last; a gone thread is refused.
     store.restorePin({ thread_id: b!, index: 0, pinned_at: original.pinned_at });
     expect(store.pins().map((p) => p.thread_id)).toEqual([a, b, c]);
     store.setPinned(a!, false);
@@ -151,7 +140,6 @@ describe("pins in the store", () => {
         const pinned = open();
         const twin = open();
         const threads: [string[], string[]] = [[], []];
-        /** A row as the twin would have it: thread ids replaced by their index. */
         const view = (store: InboxStore, ids: string[]) =>
           store.listRows().map((row) => {
             const { thread_id, project: _p, last_at: _l, waiting_since: _w, ...rest } = row as unknown as Record<string, unknown> & { thread_id: string };
@@ -181,12 +169,10 @@ describe("pins in the store", () => {
             }
             continue;
           }
-          // Pin operations run on one store only.
           const ids = threads[0]!;
           if (step.kind === "pin" && ids[step.thread]) pinned.store.setPinned(ids[step.thread]!, true);
           if (step.kind === "unpin" && ids[step.thread]) pinned.store.setPinned(ids[step.thread]!, false);
           if (step.kind === "order") pinned.store.orderPins(step.picks.map((i) => ids[i]).filter((id): id is string => id !== undefined));
-          // Nothing but the pins moved.
           expect(pinned.store.cursor()).toBe(cursorBefore);
           expect(view(pinned.store, threads[0]!)).toEqual(view(twin.store, threads[1]!));
           const pins = pinned.store.pins().map((p) => p.thread_id);

@@ -7,8 +7,6 @@ import {
 } from "./annotate-bundle";
 
 describe("annotateBundleRoot", () => {
-	// The failure: a string-prefix comparison makes /repo/doc the root of
-	// /repo/docs/a.md and /repo/doc/b.md, so labels lose a path segment.
 	test("is the deepest directory holding every file, compared by segment", () => {
 		expect(annotateBundleRoot(["/repo/docs/a.md", "/repo/docs/sub/b.md"])).toBe("/repo/docs");
 		expect(annotateBundleRoot(["/repo/docs/a.md", "/repo/doc/b.md"])).toBe("/repo");
@@ -36,8 +34,6 @@ describe("parseAnnotateBundle", () => {
 	});
 
 	test("a config file in the review keeps the bundle: its render mode is code", () => {
-		// The failure: the CLI names a .toml `code`, and a validator that does
-		// not know the mode drops the whole review's bundle UI.
 		const files = [
 			{ path: "/r/plan.md", renderAs: "markdown" },
 			{ path: "/r/pyproject.toml", renderAs: "code" },

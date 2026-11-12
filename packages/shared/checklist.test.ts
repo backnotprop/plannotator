@@ -28,11 +28,6 @@ describe("renderCompletedChecklist", () => {
   });
 
   test("a whitespace-only checkbox line never receives another step's marker", () => {
-    // Degenerate plan: blank checkbox placeholders sit between the real
-    // steps. Before hardening, the shared pattern's \s+ crossed the newline,
-    // pairing the blank line's marker with the next real line, and the
-    // first-occurrence `replace("[ ]", ...)` then wrote the [x] into the
-    // blank placeholder instead of the real step's box.
     const content = [
       "# Plan",
       "",

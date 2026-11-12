@@ -5,15 +5,8 @@ import {
   simpleShellCommandWords,
 } from './plannotator-tool'
 
-// The failure these guard: a host answers an agent's shell command itself, so
-// a command taken over that should have run (a strict gate, a pipeline, a flag
-// the tool cannot carry) silently changes what the agent asked for, and a
-// command passed through that could have been taken over blocks the session
-// and gives Ask AI a separate AI instead of the session.
-
 function expectPassThrough(commands: string[]): void {
   for (const command of commands) {
-    // The command rides along so a failure names it.
     expect([command, take(command)]).toEqual([command, null])
   }
 }
@@ -34,7 +27,6 @@ describe('plannotatorCommandToToolInput: taken over', () => {
     expect(take('plannotator review https://github.com/o/r/pull/7')).toEqual({ action: 'review', target: 'https://github.com/o/r/pull/7' })
     expect(take('plannotator review --base main ../wt')).toEqual({ action: 'review', target: '../wt', options: { base: 'main' } })
     expect(take('plannotator review ../wt --base origin/feature/x')).toEqual({ action: 'review', target: '../wt', options: { base: 'origin/feature/x' } })
-    // #1907: an agent waiting for the sign-off; the bare Approve reaches it.
     expect(take('plannotator review --gate --json')).toEqual({ action: 'review', gate: true })
   })
 
@@ -47,7 +39,6 @@ describe('plannotatorCommandToToolInput: taken over', () => {
   test('several file paths become one review of several files, in order', () => {
     expect(take('plannotator annotate spec.md mock.html notes.md')).toEqual({ action: 'annotate', target: ['spec.md', 'mock.html', 'notes.md'] })
     expect(take('plannotator annotate docs/a ~/b.md @c.md --gate --json')).toEqual({ action: 'annotate', target: ['docs/a', '~/b.md', '@c.md'], gate: true })
-    // An exact duplicate collapses; one path left is a plain target.
     expect(take('plannotator annotate a.md a.md')).toEqual({ action: 'annotate', target: 'a.md' })
   })
 
@@ -110,15 +101,12 @@ describe('plannotatorCommandToToolInput: passed through', () => {
       'plannotator claude-mod-plan',
       'plannotator --version',
       'plannotator annotate',
-      // Several targets that are not all file paths: the CLI's tolerant
-      // resolution reads the prose, so the command runs as written.
       'plannotator annotate look at notes.md please',
       'plannotator annotate notes.md https://example.com',
       'plannotator review a.md b.md',
       'plannotator review ../a ../b',
       'plannotator last extra',
       'plannotatorx annotate a.md',
-      // A path is a dev build (or a binary other than the installed one): it runs for real.
       './plannotator review',
       '/tmp/dev/plannotator annotate x.md',
       '~/.local/bin/plannotator annotate a.md',

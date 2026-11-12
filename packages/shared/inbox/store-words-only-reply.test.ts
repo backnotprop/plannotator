@@ -1,10 +1,3 @@
-/**
- * A reply with no answers leaves the questions open (approval
- * "inbox-words-only-reply", 2026-10-13): what the agent gets when the person
- * replies with words or annotations and answers nothing, proved on a real
- * store in a temp dir. A reply that answers at least one question is
- * unchanged ("Answered 1 question, skipped 2.").
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +49,6 @@ describe("a reply that answers nothing", () => {
     expect(result.reply.body).not.toContain("Answers to your questions");
     expect(result.questions.map((q) => q.state)).toEqual(["open", "open", "open"]);
     expect(store.pendingReplies("ses_a").map((m) => m.body)).toEqual([result.reply.body]);
-    // The wake carries the new body verbatim, under its unchanged header.
     const wake = inboxWakeText({ subject: "Before I build the invoice list", id: result.reply.id, thread_id: result.reply.thread_id, body: result.reply.body });
     expect(wake.endsWith(`\n\n${result.reply.body}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
   });
@@ -127,7 +119,6 @@ describe("a session asked, then posted a plain update (the words go to the updat
     const result = store.sendReply(update.id, { words: "Still deciding.", idempotency_key: "k-1" });
     expect(result.reply.body).toBe(`Still deciding.\n\n${STILL_OPEN_3}`);
     expect(store.questionsOf(asked.id).map((q) => q.state)).toEqual(["open", "open", "open"]);
-    // Again, with the old flag a phone or an older window may still send: ignored, the same body.
     expect(store.sendReply(update.id, { words: "Later.", idempotency_key: "k-2", skip_unanswered: true } as never).reply.body).toBe(`Later.\n\n${STILL_OPEN_3}`);
   });
 

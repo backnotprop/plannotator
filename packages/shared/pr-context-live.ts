@@ -77,19 +77,16 @@ const DEFAULT_FAILURE_COOLDOWN_MS = 60_000;
 export const PR_CONTEXT_HEARTBEAT_COMMENT = ": heartbeat\n\n";
 export const PR_CONTEXT_HEARTBEAT_INTERVAL_MS = 15_000;
 
-/** Serialize one PR context stream event using the EventSource wire format. */
 export function serializePRContextSSEEvent(event: PRContextStreamEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
-/** Create a session-local live cache for PR context snapshots and subscribers. */
 export function createPRContextLiveCache(
   options: PRContextLiveCacheOptions,
 ): PRContextLiveCache {
   return new PRContextLiveCache(options);
 }
 
-/** Owns live PR context freshness for one review-server session. */
 export class PRContextLiveCache {
   private readonly fetchContext: (ref: PRRef) => Promise<PRContext>;
   private readonly refreshIntervalMs: number;
@@ -111,18 +108,14 @@ export class PRContextLiveCache {
     this.now = options.now ?? Date.now;
     this.setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
     this.clearTimer = options.clearTimer ?? ((timer) => {
-      // SAFETY: The default setTimer above is the only source of timer handles
-      // when a caller does not provide a matching clearTimer.
       clearTimeout(timer as ReturnType<typeof setTimeout>);
     });
   }
 
-  /** Start a best-effort background refresh without waiting on it. */
   warm(url: string, ref: PRRef): void {
     this.runDetached(this.refresh(url, ref, "warm"), "warm");
   }
 
-  /** Refresh immediately after a successful provider write. */
   refreshAfterWrite(url: string, ref: PRRef): void {
     this.runDetached(
       this.refresh(url, ref, "write", { force: true, queueAfterInflight: true }),
@@ -130,7 +123,6 @@ export class PRContextLiveCache {
     );
   }
 
-  /** Return the latest context, sharing any in-flight provider refresh. */
   async getContext(url: string, ref: PRRef): Promise<PRContext> {
     const entry = this.ensureEntry(url, ref);
     if (!this.shouldRefresh(entry)) {
@@ -147,7 +139,6 @@ export class PRContextLiveCache {
     }
   }
 
-  /** Subscribe to live updates for a PR URL until the returned cleanup runs. */
   watch(url: string, ref: PRRef, subscriber: PRContextSubscriber): () => void {
     const entry = this.ensureEntry(url, ref);
     entry.watchers += 1;
@@ -344,8 +335,6 @@ export class PRContextLiveCache {
     _reason: PRContextRefreshReason,
   ): void {
     void promise.catch(() => {
-      // refresh() records the failure and broadcasts it; no extra logging hook
-      // exists in this shared module.
     });
   }
 }

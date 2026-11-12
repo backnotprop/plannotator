@@ -1,34 +1,3 @@
-/**
- * Plannotator Inbox search: an in-memory inverted index over the store,
- * built lazily on the first search in slices that yield, and kept current
- * from the store's lines. The design of record is the approved "inbox-search"
- * brief (owner approval 2026-10-13; not in this repo); what a build here
- * needs from it is in docs/agent-guides/inbox-notifications-and-agents.md
- * ("Search").
- *
- * What is indexed, one document each:
- *   thread    its subject (the current one, following a replaced question's
- *             subject) and thread name (title fields), its project's name
- *   message   an agent message's body as text (question blocks, images and
- *             link targets dropped; code kept as text), each question's
- *             prompt, context, choice labels and the person's answer, the
- *             agent's name; the person's own reply words (not the generated
- *             "Answered N questions." line, not the answers section); the
- *             Inbox's own notes (set aside, reopened) are not indexed
- *   file      an attachment's name (title) and the last two path segments
- *   guide     a guided review's title
- *   project   its name (title) and root
- *
- * Text rules (normalization, tokens, ranges, snippets) are
- * @plannotator/core/inbox-search, which the window shares.
- *
- * A query's terms must all match, the last one as a prefix. Ranking inside a
- * group: the match tier (the terms as a phrase, then every term as a whole
- * word, then the last as a prefix; inside a tier a match in title fields
- * first), then open before archived, then the project the person searches
- * from (ties only, never a filter), then the newest.
- */
-
 import {
   inboxSearchRanges,
   inboxSearchSnippet,
@@ -66,7 +35,6 @@ import { inboxRowArchived } from "./list";
 import { canPrefixId, fnvString, ID_BUCKETS, ID_PREFIX_KEEP, ID_PREFIX_LENGTH, isIdLikeToken, Postings, Vocabulary } from "./search-vocabulary";
 import type { InboxStore } from "./store";
 
-// The wire (answers, rows, the query) is @plannotator/core/inbox-search's, so the window reads it without this package.
 export {
   INBOX_SEARCH_BROWSE_LIMIT,
   INBOX_SEARCH_CAPS,
@@ -89,14 +57,10 @@ export {
   type InboxSearchThreadRow,
 } from "@plannotator/core/inbox-search";
 
-// ─────────────────────────────── Text ───────────────────────────────
-
 const ANSWERS_HEADING_LINE = new RegExp(`^#{1,6}\\s+${QUESTION_ANSWERS_HEADING}\\s*$`);
 
-/** A line with something `plainInline` rewrites. */
 const INLINE_MARKUP = /[[<*_~`|]/;
 
-/** Inline markdown as plain text: images out, link labels kept (targets dropped), tags and emphasis marks out, code kept. */
 function plainInline(text: string): string {
   return text
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
@@ -108,19 +72,12 @@ function plainInline(text: string): string {
     .replace(/`+/g, "");
 }
 
-/**
- * A message's markdown as the text search reads and snippets show: question
- * blocks out (their prompts, choices and answers are indexed on the
- * question), fences' markers out and their code kept, block marks out,
- * table pipes as spaces, link labels kept and targets dropped, images out.
- */
 export function inboxSearchBodyText(markdown: string): string {
   const out: string[] = [];
   forEachInboxSearchBodyLine(markdown, (line) => out.push(line));
   return out.join("\n").trim();
 }
 
-/** `inboxSearchBodyText`'s lines, one at a time (the index tokenizes them without joining them). */
 export function forEachInboxSearchBodyLine(markdown: string, visit: (line: string) => void): void {
   const skips = markdown.includes(":::question") ? findQuestionBlocks(markdown, { frontmatter: false }).map((b) => [b.startLine, b.endLine] as const) : [];
   let fence: string | null = null;
@@ -148,7 +105,6 @@ export function forEachInboxSearchBodyLine(markdown: string, visit: (line: strin
         continue;
       }
     }
-    // Most lines are prose: only a line that starts with a mark, or holds inline markup, is rewritten.
     const marked = first === 0x23 || first === 0x3e || first === 0x2d || first === 0x2a || first === 0x2b || first === 0x3a || first === 0x7c || first === 0x5f || (first >= 0x30 && first <= 0x39);
     if (marked && (/^:{3,}/.test(line) || /^[-*_]{3,}$/.test(line) || /^\|?\s*:?-{3,}/.test(line))) continue;
     let text = marked ? line.replace(/^#{1,6}\s+/, "").replace(/^>\s?/, "").replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "") : line;
@@ -157,22 +113,13 @@ export function forEachInboxSearchBodyLine(markdown: string, visit: (line: strin
   }
 }
 
-/**
- * The person's own words in a reply: not the generated first line, not the
- * still-open line, not the answers section, and not the skills block the window pastes at the end (a
- * human-only skill's SKILL.md text, which the person did not write; the
- * `$name` they typed stays in their words, so the reply is still found by it).
- */
 export function inboxSearchReplyText(body: string, message?: { reask?: readonly string[] | null }): string {
-  // A Re-ask note carries no words of the person's: its body is the instructions the Inbox wrote for the agent.
   if ((message?.reask?.length ?? 0) > 0) return "";
   return replyWordsText(withoutInboxSkillsBlock(body));
 }
 
-/** inboxSearchReplyText for a body whose skills block is already gone (a windowed long reply). */
 function replyWordsText(body: string): string {
   const lines = body.split(/\r?\n/);
-  // The answers section, or the still-open line the store writes before it (folding.ts replyWords cuts the same).
   const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()) || INBOX_STILL_OPEN_LINE.test(line.trim()));
   const kept = (at >= 0 ? lines.slice(0, at) : lines).join("\n");
   return inboxSearchBodyText(kept.replace(/^\s*(?:Answered \d+ questions?(?:, skipped \d+)?|Skipped \d+ questions?)\.\s*/, ""));
@@ -196,40 +143,26 @@ function extensionOf(name: string): string {
   return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase().slice(0, 8) : "file";
 }
 
-/** Marks as the wire carries them: [start, length]. */
 function toMarks(ranges: readonly [number, number][]): [number, number][] {
   return ranges.map(([a, b]) => [a, b - a]);
 }
-
-// ─────────────────────────────── Index ───────────────────────────────
 
 type DocType = "thread" | "message" | "file" | "guide" | "project";
 
 interface Doc {
   key: string;
   type: DocType;
-  /** The record's id (thread root, message, attachment, guide's message, project). */
   ref: string;
   threadId: string | null;
   projectId: string;
   at: number;
-  /** Who wrote it, for From (a thread's comes from its facts). */
   from: InboxSearchFrom | null;
-  /**
-   * The token sequence as varints (token ids; 0 separates fields, so a phrase
-   * never spans two). Title fields come first. Most ids are small, so most
-   * tokens take one byte.
-   */
   tokens: Uint8Array;
-  /** Tokens in the sequence, separators included. */
   count: number;
-  /** How many leading tokens are the title fields. */
   titleLen: number;
-  /** What the fields were made from (their changeable parts): a re-index that changes nothing is skipped. */
   sig: string;
 }
 
-/** A growable byte buffer for varints. */
 class Bytes {
   buf: Uint8Array;
   len = 0;
@@ -249,13 +182,11 @@ class Bytes {
     }
     this.buf[this.len++] = v;
   }
-  /** The bytes, trimmed to what was written (a copy). */
   take(): Uint8Array {
     return this.buf.slice(0, this.len);
   }
 }
 
-/** Facts of a thread that filters and ranking read, from its list row; cached until a line touches the thread. */
 interface ThreadFacts {
   projectId: string;
   section: InboxSectionId;
@@ -267,7 +198,6 @@ interface ThreadFacts {
   me: boolean;
 }
 
-/** A field: text, or a message body read line by line as `inboxSearchBodyText` reads it. */
 type Field = string | { body: string };
 
 interface FieldSet {
@@ -276,9 +206,7 @@ interface FieldSet {
 }
 
 export interface InboxSearchIndexOptions {
-  /** How long a build slice works before it yields (default 5 ms: the slice that ends with a long message, or a collection, still stays under the brief's 8 ms). */
   sliceMs?: number;
-  /** Yield between slices (default setImmediate, else setTimeout 0). */
   yieldNow?: () => Promise<void>;
   now?: () => number;
 }
@@ -286,19 +214,15 @@ export interface InboxSearchIndexOptions {
 const defaultYield = (): Promise<void> =>
   new Promise((resolve) => (typeof setImmediate === "function" ? setImmediate(resolve) : setTimeout(resolve, 0)));
 
-/** What a build or a flush measured (the window never sees it; tests and the benchmark read it). */
 export interface InboxSearchBuildStats {
   docs: number;
   threads: number;
   tokens: number;
   vocabulary: number;
-  /** Shared ids in use by id-like tokens (hashes, ULIDs, timestamps; see search-vocabulary.ts). */
   idBuckets: number;
-  /** The index's memory, roughly (`indexBytes`). */
   indexBytes: number;
   slices: number;
   longestSliceMs: number;
-  /** Slices that ran past 8 ms (the brief's bound): a collection or a long message at the end of a slice. */
   slicesOver8Ms: number;
   totalMs: number;
 }
@@ -312,11 +236,9 @@ export class InboxSearchIndex {
   private docs: (Doc | null)[] = [];
   private byKey = new Map<string, number>();
   private dead = 0;
-  /** Token ids (0 is the field separator; id-like tokens share buckets) and each id's documents in increasing order (a document number is never reused). See search-vocabulary.ts. */
   private vocab = new Vocabulary();
   private postings = new Postings();
   private facts = new Map<string, ThreadFacts>();
-  /** Project names as indexed into thread documents, to notice a rename. */
   private projectNames = new Map<string, string>();
 
   private built = false;
@@ -332,16 +254,9 @@ export class InboxSearchIndex {
   private unsubscribe: (() => void) | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Query scratch, reused.
   private mark = new Int32Array(0);
   private epoch = 0;
-  /**
-   * Per id, the query terms it matches as bits (a query has at most 8 terms),
-   * and `BUCKET_FLAG` kept on every id bucket: in a document's tokens a bucket
-   * id is followed by the id's two hashes (`put`).
-   */
   private termOf = new Uint16Array(0);
-  /** Ids below this carry their `BUCKET_FLAG`. */
   private termFlagged = 0;
   private seq = new Bytes(4096);
 
@@ -352,7 +267,6 @@ export class InboxSearchIndex {
     this.now = options.now ?? (() => performance.now());
   }
 
-  /** Stop listening to the store. */
   dispose(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -360,12 +274,10 @@ export class InboxSearchIndex {
     this.flushTimer = null;
   }
 
-  /** The index is built and current with the store's last re-read. */
   ready(): boolean {
     return this.built && this.reloadsSeen === this.store.reloadCount() && !this.tooManyDead();
   }
 
-  /** Threads the index covers, or is building over. */
   threadCount(): number {
     return this.building ? this.buildTotal : this.store.threadIds().length;
   }
@@ -374,7 +286,6 @@ export class InboxSearchIndex {
     return this.stats;
   }
 
-  /** Build (or rebuild after a re-read) unless current; one build at a time, every caller awaits it. */
   ensureBuilt(): Promise<void> {
     if (this.ready()) return Promise.resolve();
     if (this.building) return this.building;
@@ -392,7 +303,6 @@ export class InboxSearchIndex {
   private listen(): void {
     if (this.unsubscribe) return;
     const lines = this.store.subscribe((line) => this.noteLine(line));
-    // A reply draft writes no line but moves its thread's section (the status filter reads it).
     const drafts = this.store.onReplyDraftChange((threadId) => this.facts.delete(threadId));
     this.unsubscribe = () => {
       lines();
@@ -400,11 +310,9 @@ export class InboxSearchIndex {
     };
   }
 
-  /** A store line marks what it touches; the next search (or a short timer) re-indexes it. */
   private noteLine(line: InboxLine): void {
     switch (line.kind) {
       case "project":
-        // A new project can change the others' names too ("api" becomes "api · work"): every label is read again.
         for (const project of this.store.allProjects()) this.dirtyProjects.add(project.id);
         break;
       case "message":
@@ -418,7 +326,6 @@ export class InboxSearchIndex {
         break;
       }
       case "annotation":
-        // Not indexed, but a comment waiting for a Send moves its thread's section (`unsent`).
         this.facts.delete(line.record.thread_id);
         return;
       case "card":
@@ -471,12 +378,10 @@ export class InboxSearchIndex {
       await this.yieldNow();
       slices += 1;
       sliceStart = this.now();
-      // A re-read or a newer build while this one waited: this build is void.
       return this.generation === generation && this.store.reloadCount() === reloads;
     };
     for (const project of this.store.allProjects()) this.indexProject(project);
     for (const threadId of threadIds) {
-      // A slice ends between messages, so one thread of long messages never holds the server.
       for (const id of this.store.threadMessageIds(threadId)) {
         const message = this.store.message(id);
         if (message) this.indexMessage(message);
@@ -485,7 +390,6 @@ export class InboxSearchIndex {
       this.indexThread(threadId, false);
       if (!(await maybeYield())) return;
     }
-    // Finish a growth of the word table still under way, then give back the arrays' growth slack, each step in a slice of its own.
     while (!this.vocab.settleGrowth(1 << 16)) {
       if (!(await maybeYield())) return;
     }
@@ -503,7 +407,6 @@ export class InboxSearchIndex {
     if (this.generation !== generation || this.store.reloadCount() !== reloads) return;
     this.reloadsSeen = reloads;
     this.built = true;
-    // Lines that arrived while building touched records already read or not yet: re-index them now.
     this.flush();
     let tokens = 0;
     for (const doc of this.docs) if (doc) tokens += doc.count;
@@ -521,7 +424,6 @@ export class InboxSearchIndex {
     };
   }
 
-  /** Re-index what lines touched since the last flush. Runs before every search. */
   flush(): void {
     if (!this.built) return;
     for (const id of this.dirtyProjects) {
@@ -545,8 +447,6 @@ export class InboxSearchIndex {
     this.dirtyThreads.clear();
   }
 
-  // ── documents ──
-
   private put(key: string, type: DocType, meta: { ref: string; threadId: string | null; projectId: string; at: string; from: InboxSearchFrom | null }, fields: FieldSet, sig: string): void {
     const existing = this.byKey.get(key);
     const at = Date.parse(meta.at) || 0;
@@ -564,7 +464,6 @@ export class InboxSearchIndex {
     seq.len = 0;
     let count = 0;
     let lastWasToken = false;
-    // The document's number, and each token's posting written the first time the token is seen in it (`Postings.add` skips the rest).
     const number = this.docs.length;
     const vocab = this.vocab;
     const postings = this.postings;
@@ -574,9 +473,6 @@ export class InboxSearchIndex {
       lastWasToken = true;
       postings.add(id, number);
       if (vocab.lastWasId) {
-        // An id: what confirms it, or a start of it, without the text (`ID_TAIL_*`). A number's bucket holds the low
-        // bits of its hash and its tail the rest; an id with a letter keeps its first 12 characters, whole when it is
-        // no longer, else with 21 bits of its whole hash.
         const keep = vocab.lastPrefixLength;
         const complete = keep > 0 && vocab.lastIdLength === keep;
         seq.push(keep | (complete ? ID_TAIL_COMPLETE : 0));
@@ -613,12 +509,10 @@ export class InboxSearchIndex {
     this.byKey.set(key, number);
   }
 
-  /** A token's documents (live or not), in increasing order. */
   private postingsOf(id: number): Int32Array {
     return this.postings.list(id);
   }
 
-  /** What the index holds in memory, roughly (typed arrays' capacity, the token sequences, the per-document records). */
   indexBytes(): number {
     let docs = 0;
     for (const doc of this.docs) docs += doc ? 160 + doc.tokens.byteLength + doc.key.length * 2 + doc.sig.length * 2 : 8;
@@ -638,7 +532,6 @@ export class InboxSearchIndex {
     this.put(`p:${project.id}`, "project", { ref: project.id, threadId: null, projectId: project.id, at: project.created_at, from: null }, { title: [project.name], other: [project.root] }, `${project.name}\u0001${project.root}`);
   }
 
-  /** A thread's own document; with `withMessages`, its messages' too (the build). */
   private indexThread(threadId: string, withMessages: boolean): void {
     const root = this.store.message(threadId);
     if (!root || root.thread_id !== threadId) {
@@ -666,7 +559,6 @@ export class InboxSearchIndex {
     const meta = { ref: message.id, threadId: message.thread_id, projectId: message.project_id, at: message.created_at };
     if (message.author.kind === "person") {
       if (isInboxNote(message)) return;
-      // A message's body never changes once stored: its length stands for it.
       this.put(`m:${message.id}`, "message", { ...meta, from: "me" }, { title: [], other: [inboxSearchReplyText(message.body, message)] }, `${message.body.length}`);
       return;
     }
@@ -685,8 +577,6 @@ export class InboxSearchIndex {
     }
     if (message.guide) this.put(`g:${message.id}`, "guide", { ...meta, from: "agent" }, { title: [message.guide.title], other: [] }, message.guide.title);
   }
-
-  // ── facts ──
 
   private factsOf(threadId: string): ThreadFacts | null {
     const cached = this.facts.get(threadId);
@@ -715,8 +605,6 @@ export class InboxSearchIndex {
     return facts;
   }
 
-  // ── query ──
-
   private nextEpoch(): number {
     if (this.mark.length < this.docs.length) {
       const grown = new Int32Array(Math.max(this.docs.length * 2, 1024));
@@ -731,7 +619,6 @@ export class InboxSearchIndex {
     return this.epoch;
   }
 
-  /** An id-like term matched by its whole value: its bucket and what each tail shape compares (null: no id has its bucket). */
   private wholeIdTerm(term: string, bit: number, last: boolean): WholeIdTerm | null {
     const hash = fnvString(term);
     const letter = /[a-z]/.test(term);
@@ -744,14 +631,12 @@ export class InboxSearchIndex {
       chars: Uint8Array.from(term.slice(0, ID_PREFIX_KEEP), (c) => c.charCodeAt(0)),
       length: term.length,
       term,
-      // A number, or an id longer than the 12 characters kept, is told apart by hash bits only.
       hashOnly: !letter || term.length > ID_PREFIX_KEEP,
       bit,
       last,
     };
   }
 
-  /** `termOf` sized for every id, the bucket flag on the ids added since the last query. */
   private prepareTermOf(): Uint16Array {
     const size = this.vocab.size;
     if (this.termOf.length < size) {
@@ -764,15 +649,6 @@ export class InboxSearchIndex {
     return this.termOf;
   }
 
-  /**
-   * Documents holding every term (the last as a prefix), with their tier and
-   * whether the title fields hold them all. An id-like term is matched by its
-   * whole value through its bucket, confirmed by the 32-bit hash kept beside
-   * each occurrence; a last term that may start an id (`canPrefixId`, at least
-   * 7 characters with a letter) also matches ids that start with it, compared
-   * with the first 12 characters kept beside each id, and when it is longer
-   * than 12, the rest is read from those documents' text.
-   */
   private match(terms: readonly string[]): { doc: number; tier: number; title: boolean }[] {
     const n = terms.length;
     const vocab = this.vocab;
@@ -795,7 +671,6 @@ export class InboxSearchIndex {
     const lastBit = 1 << (n - 1);
     const lastIdLike = isIdLikeToken(last);
     const lastExact = lastIdLike ? -1 : vocab.idOf(last);
-    // The words the last term starts, then the buckets that may hold it as an id.
     const prefix = vocab.prefixIds(last);
     const sources = [...prefix];
     if (lastIdLike) {
@@ -809,7 +684,6 @@ export class InboxSearchIndex {
     if (canPrefixId(last)) {
       const bucket = vocab.prefixBucketOf(fnvString(last.slice(0, ID_PREFIX_LENGTH)));
       if (bucket >= 0) {
-        // An id-like last term with a letter is already there: its whole value and its starts share one bucket.
         if (!sources.includes(bucket)) sources.push(bucket);
         ids.prefix = Uint8Array.from(last.slice(0, ID_PREFIX_KEEP), (c) => c.charCodeAt(0));
         ids.prefixBit = lastBit;
@@ -848,7 +722,6 @@ export class InboxSearchIndex {
           candidates = candidates.subarray(0, k);
           if (candidates.length === 0) return [];
         }
-        // The last term: mark its documents, unless they far outnumber the candidates (then each is scanned below anyway).
         let sourcePostings = 0;
         for (const id of sources) sourcePostings += this.postings.count(id);
         if (sourcePostings <= candidates.length * 32) {
@@ -883,7 +756,6 @@ export class InboxSearchIndex {
       const out: { doc: number; tier: number; title: boolean }[] = [];
       let exactEpoch = -1;
       if (n === 1 && !withIds && lastExact >= 0) {
-        // One word: whole when the exact token is in the document.
         exactEpoch = this.nextEpoch();
         const list = this.postingsOf(lastExact);
         for (let i = 0; i < list.length; i++) this.mark[list[i]!] = exactEpoch;
@@ -892,17 +764,13 @@ export class InboxSearchIndex {
         const d = candidates[c]!;
         const doc = this.docs[d]!;
         if (n === 1 && !withIds) {
-          // One word: every candidate holds it, and the title needs only the leading tokens.
           out.push({ doc: d, tier: exactEpoch >= 0 && this.mark[d] === exactEpoch ? 2 : 1, title: scanTitle(doc.tokens, doc.titleLen, termOf) });
           continue;
         }
         const found = scanDocument(doc.tokens, doc.titleLen, termOf, lastExact, lastBit, all, withIds ? ids : null);
         if (found < 0) continue;
-        // The last term only as the start of an id, longer than the 12 characters kept: the text decides.
         if ((found & 8) !== 0 && prefixNeedsText && !this.textHasToken(doc, last, false)) continue;
         let tier = found & 3;
-        // An id told apart by hash bits only matched them (a number, an id longer than 12 characters; rare unless it is
-        // there): the text confirms the exact token. A last term whose whole value is not there may still start an id.
         const hashOnly = found >> 8;
         if (hashOnly !== 0) {
           let holds = true;
@@ -925,18 +793,12 @@ export class InboxSearchIndex {
     }
   }
 
-  /**
-   * Whether the document's text holds the ASCII id `term` as a whole token
-   * (`whole`), or a token starting with it: read only for a document whose
-   * kept hash bits or characters already matched.
-   */
   private textHasToken(doc: Doc, term: string, whole: boolean): boolean {
     const pattern = tokenPattern(term, whole);
     for (const text of this.docTexts(doc)) if (text && pattern.test(text)) return true;
     return false;
   }
 
-  /** The texts a document was indexed from, read again from the store. */
   private docTexts(doc: Doc): string[] {
     switch (doc.type) {
       case "thread": {
@@ -964,10 +826,6 @@ export class InboxSearchIndex {
     }
   }
 
-  /**
-   * Answer a query. The index must be built (`ensureBuilt`); lines since the
-   * last flush are re-indexed first.
-   */
   search(query: InboxSearchQuery): InboxSearchAnswer {
     const started = this.now();
     this.flush();
@@ -975,15 +833,12 @@ export class InboxSearchIndex {
     const terms = inboxSearchTerms(q);
     const filtered = Boolean(query.project || query.status || query.from);
     const base = { q, terms, indexing: false, threads: this.threadCount() };
-    // Every folder, each read as the project it shows under: a combined project's hits name the group.
     const labels = new Map(this.store.allProjects().map((project) => [project.id, { id: this.store.canonicalProjectId(project.id), name: project.name }]));
     if (terms.length === 0 && !filtered) {
       return { ...base, took_ms: this.now() - started, totals: null, groups: null, recent: this.recentThreads(labels) };
     }
     const groups: Record<InboxSearchGroupId, { doc: number; score: number }[]> = { threads: [], messages: [], files: [], projects: [] };
 
-    // A snoozed thread stays in search, but it has left its section, so a Status never finds it. Read here, not in the
-    // cached facts: a snooze writes no line, and it ends by the clock.
     const snoozed = query.status ? this.store.snoozedThreads() : null;
     const statusOk = (facts: ThreadFacts | null, threadId: string | null): boolean => {
       if (!query.status) return true;
@@ -1000,7 +855,6 @@ export class InboxSearchIndex {
     };
     const admit = (doc: Doc): { group: InboxSearchGroupId; facts: ThreadFacts | null } | null => {
       if (query.project && !this.store.sameProject(doc.projectId, query.project)) return null;
-      // A combined project is found through the project it went into: only that one has a page.
       if (doc.type === "project" && this.store.canonicalProjectId(doc.ref) !== doc.ref) return null;
       let group: InboxSearchGroupId;
       switch (doc.type) {
@@ -1015,7 +869,6 @@ export class InboxSearchIndex {
           group = "files";
           break;
         case "project":
-          // A project has no section and no author: any Status or From hides it.
           if (query.status || query.from) return null;
           return { group: "projects", facts: null };
       }
@@ -1028,7 +881,6 @@ export class InboxSearchIndex {
       ((((tier * 2 + (title ? 1 : 0)) * 2 + (archived ? 0 : 1)) * 2 + (current ? 1 : 0)) * 1e13) + Math.max(0, Math.min(at, 9.99e12));
 
     if (terms.length === 0) {
-      // Filters with no words: the matching threads, newest first.
       for (const [key, number] of this.byKey) {
         if (!key.startsWith("t:")) continue;
         const doc = this.docs[number]!;
@@ -1037,8 +889,6 @@ export class InboxSearchIndex {
         groups.threads.push({ doc: number, score: doc.at });
       }
     } else {
-      // Newest, for a project: its threads' latest message (a combined project's too), read once and only when a project
-      // matched; a project with no thread keeps the time it was added.
       let projectLatest: Map<string, number> | null = null;
       const latestOf = (doc: Doc): number => {
         if (doc.type !== "project") return doc.at;
@@ -1058,8 +908,6 @@ export class InboxSearchIndex {
         const admitted = admit(doc);
         if (!admitted) continue;
         const archived = admitted.facts?.archived ?? false;
-        // Newest: by the latest message alone (a thread's latest message, a message's own time, a project's latest
-        // thread); best match ranks first.
         const ranked = query.sort === "newest" ? Math.max(0, latestOf(doc)) : score(hit.tier, hit.title, archived, !!query.current && this.store.sameProject(doc.projectId, query.current), doc.at);
         groups[admitted.group].push({ doc: hit.doc, score: ranked });
       }
@@ -1083,7 +931,6 @@ export class InboxSearchIndex {
     return { ...base, took_ms: this.now() - started, totals, groups: answer, recent: null };
   }
 
-  /** The threads the person looked at last (`person_seen_seq`), newest look first. */
   private recentThreads(labels: Map<string, InboxSearchProjectRef>): InboxSearchThreadRow[] {
     const looked: { id: string; seq: number }[] = [];
     for (const id of this.store.threadIds()) {
@@ -1112,7 +959,6 @@ export class InboxSearchIndex {
     return out;
   }
 
-  /** A result row as the window draws it, with marks only in the fields that matched. */
   private row(doc: Doc, terms: readonly string[], labels: Map<string, InboxSearchProjectRef>): InboxSearchRow | null {
     const project = labels.get(doc.projectId) ?? { id: doc.projectId, name: "" };
     const facts = doc.threadId ? this.factsOf(doc.threadId) : null;
@@ -1186,15 +1032,9 @@ export class InboxSearchIndex {
     }
   }
 
-  /**
-   * The text a message row shows: the field holding every term (the body,
-   * else a question's prompt, its prompt with a choice or the answer, its
-   * context), else the field holding the most of them.
-   */
   private bestMessageText(message: InboxMessage, terms: readonly string[]): { text: string; question: { key: string; replaced: boolean } | null } {
     const candidates: { text: string; question: { key: string; replaced: boolean } | null }[] = [];
     if (message.author.kind === "person") {
-      // A Re-ask note's body is the Inbox's words, not the person's: nothing to draw a row from.
       if ((message.reask?.length ?? 0) === 0) candidates.push({ text: replyWordsText(nearFirstHit(withoutInboxSkillsBlock(message.body), terms)), question: null });
     } else {
       candidates.push({ text: inboxSearchBodyText(nearFirstHit(message.body, terms)), question: null });
@@ -1227,58 +1067,36 @@ export class InboxSearchIndex {
   }
 }
 
-/** `termOf`'s flag on an id bucket: its token is followed by the id's tail (`ID_TAIL_*`). */
 const BUCKET_FLAG = 0x100;
 
-/**
- * After an id bucket's token, the id's tail: a flags byte (the number of
- * characters kept, 0 to 12, plus `ID_TAIL_COMPLETE` when they are the whole
- * id), then for a number (none kept) the bits of its hash above its bucket's,
- * for an id longer than 12 characters the high 21 bits of its hash, both as
- * varints, then the characters.
- */
 const ID_TAIL_KEPT = 0x0f;
 const ID_TAIL_COMPLETE = 0x10;
 
-/** A whole-value id term: its bucket, and what each tail shape compares. */
 interface WholeIdTerm {
   bucket: number;
-  /** The hash above its bucket's bits (a number's tail), and its high 21 bits (a longer id's). */
   high: number;
   hashBits: number;
-  /** The term's first (up to 12) characters, and its length. */
   chars: Uint8Array;
   length: number;
   term: string;
-  /** Matched by hash bits only (a number, an id longer than 12 characters): the text confirms it. */
   hashOnly: boolean;
   bit: number;
   last: boolean;
 }
 
-/** Whether `count` bytes at `at` equal `chars`' first `count`. */
 function sameBytes(bytes: Uint8Array, at: number, chars: Uint8Array, count: number): boolean {
   for (let k = 0; k < count; k++) if (bytes[at + k] !== chars[k]) return false;
   return true;
 }
 
-/** A query's id-like terms (`match`). */
 interface IdQuery {
-  /** Whole values. */
   whole: WholeIdTerm[];
-  /** The last term as the start of an id: its first (up to 12) characters and its bit (0: none). */
   prefix: Uint8Array | null;
   prefixBit: number;
 }
 
-/** What `readIdTail` found: the terms the id matched, and how. */
 const tail = { bits: 0, wholeLast: false, prefix: false, hashOnly: 0 };
 
-/**
- * Read an id's tail at `p` (`ID_TAIL_*`), compare it with the query's id
- * terms into `tail`, and return the position after it. Only bucket tokens
- * come here, so the scanners' loops stay as fast as for words.
- */
 function readIdTail(bytes: Uint8Array, p: number, id: number, ids: IdQuery | null): number {
   const flags = bytes[p++]!;
   const kept = flags & ID_TAIL_KEPT;
@@ -1305,7 +1123,6 @@ function readIdTail(bytes: Uint8Array, p: number, id: number, ids: IdQuery | nul
   if (ids) {
     for (const w of ids.whole) {
       if (w.bucket !== id) continue;
-      // A number by its hash; a short id by all its characters; a longer one by its first 12 and 21 bits of its hash.
       const same =
         kept === 0
           ? high === w.high
@@ -1326,7 +1143,6 @@ function readIdTail(bytes: Uint8Array, p: number, id: number, ids: IdQuery | nul
   return at + kept;
 }
 
-/** Any of the first `titleLen` tokens is a word term (one word, no id terms). */
 function scanTitle(bytes: Uint8Array, titleLen: number, termOf: Uint16Array): boolean {
   let p = 0;
   for (let t = 0; t < titleLen; t++) {
@@ -1349,18 +1165,6 @@ function scanTitle(bytes: Uint8Array, titleLen: number, termOf: Uint16Array): bo
   return false;
 }
 
-/**
- * One pass over a document's tokens for several terms. `termOf[id]` holds,
- * as bits, the terms a word matches (the last term's bit on every word it
- * prefixes); an id bucket's bits come from comparing the hash bits and the
- * first characters after it with the query's (`ids`, `readIdTail`). `run`
- * holds which prefixes of the query end at the current token, so a phrase is
- * found without looking ahead. Returns -1 when a term is missing, else the
- * tier (3 phrase, 2 every term whole, 1 the last as a prefix), plus 4 when
- * the title fields hold every term, plus 8 when the last term matched only as
- * the start of an id, plus the bits of the id terms matched by hash bits only
- * shifted left by 8 (the text confirms those).
- */
 function scanDocument(bytes: Uint8Array, titleLen: number, termOf: Uint16Array, lastExact: number, lastBit: number, all: number, ids: IdQuery | null): number {
   const length = bytes.length;
   let seen = 0;
@@ -1414,29 +1218,14 @@ function scanDocument(bytes: Uint8Array, titleLen: number, termOf: Uint16Array, 
   return (phrase ? 3 : whole ? 2 : 1) | (seenTitle === all ? 4 : 0) | (!lastOther && lastAsIdPrefix ? 8 : 0) | (hashOnly << 8);
 }
 
-/**
- * An ASCII term as a token in text, case-insensitive: a whole token
- * (`whole`), else a token's start. Tokens end at anything but an ASCII letter
- * or digit, as the tokenizer's ASCII scan does.
- */
 function tokenPattern(term: string, whole: boolean): RegExp {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?<![A-Za-z0-9])${escaped}${whole ? "(?![A-Za-z0-9])" : ""}`, "i");
 }
 
-/** A body longer than this is read only around its first hit when a row is drawn. */
 const ROW_TEXT_WINDOW_FROM = 64 * 1024;
 const ROW_TEXT_WINDOW_SIDE = 4096;
 
-/**
- * The part of a long message body a row needs: the whole lines about 4 KB
- * either side of the first place a term appears as a token (case-insensitive;
- * the last term as a token's start, so `re` centres on `retry`, not `there`),
- * so a row for a 2 MB log costs what one for a short message does. The whole
- * body when it is short, when a term is not plain ASCII (folding can match it
- * in ways a case-insensitive search cannot), or when no term is found as
- * written.
- */
 function nearFirstHit(body: string, terms: readonly string[]): string {
   if (body.length <= ROW_TEXT_WINDOW_FROM) return body;
   let first = -1;
@@ -1452,7 +1241,6 @@ function nearFirstHit(body: string, terms: readonly string[]): string {
   return body.slice(start, end < 0 ? body.length : end);
 }
 
-/** The best `k` hits, best first (ties: the older document first, so the order is total). A partial selection when `k` is small. */
 function topOf(list: { doc: number; score: number }[], k: number): { doc: number; score: number }[] {
   const better = (a: { doc: number; score: number }, b: { doc: number; score: number }) => b.score - a.score || a.doc - b.doc;
   if (k > 64 || list.length <= k * 4) return list.sort(better).slice(0, k);
@@ -1474,17 +1262,12 @@ function questionTexts(question: InboxQuestion): string[] {
   return [question.prompt, question.context ?? "", ...question.choices.map((c) => c.label), answerText(question.answer)].filter(Boolean);
 }
 
-/** The kind chip: the file's extension (`md`, `pdf`, `png`, `log`), else its kind. */
 function fileKind(kind: string, name: string): string {
   const extension = extensionOf(name);
   if (extension !== "file") return extension;
   return kind === "markdown" ? "md" : kind;
 }
 
-/**
- * Project names as the person reads them: the store's names (`inboxProjectLabels`:
- * the folder's real name, with its parent folder when two match), never the slug.
- */
 export function projectLabels(projects: readonly InboxProject[]): Map<string, InboxSearchProjectRef> {
   return new Map(projects.map((project) => [project.id, { id: project.id, name: project.name }]));
 }

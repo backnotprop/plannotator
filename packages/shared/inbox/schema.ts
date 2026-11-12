@@ -1,39 +1,3 @@
-/**
- * Plannotator Inbox store: the on-disk layout and the line reader.
- *
- *   inbox/
- *     inbox.json                       the registry (registry.ts)
- *     projects/<key>/project.json      the project's snapshots, one line each:
- *                                      the first, then one per rename or
- *                                      reset (renameProject); the last wins
- *     projects/<key>/messages.jsonl    messages and replies
- *     projects/<key>/questions.jsonl   one record per question block
- *     projects/<key>/decisions.jsonl   an older store's decisions: never applied,
- *                                      only its highest seq counts (Decisions
- *                                      were removed in 2026-10)
- *     projects/<key>/annotations.jsonl the person's annotations on attachments
- *     projects/<key>/cards.jsonl       the Board's cards (approval "inbox-board"):
- *                                      their own records, never read by thread
- *                                      routing or the list
- *     projects/<key>/steps.jsonl       each agent session's steps per thread
- *                                      (approval "inbox-thread-steps"): their
- *                                      own records, read by nothing that
- *                                      routes, lists or notifies
- *     initiatives.jsonl                the Board's initiatives (approval
- *                                      "board-initiatives"): one file for every
- *                                      project, read by the Board only
- *     blobs/<sha256>                  the bytes of each attachment as sent
- *     seq.json                         the highest seq ever written (kept
- *                                      across a deletion, so seq never repeats)
- *
- * Every line is `{ v, seq, at, kind, id, record }`: a full snapshot of one
- * record. The last line per id is current; nothing is rewritten in place.
- * `seq` is one counter across the whole Inbox, recovered at start as the
- * highest seen, so the union of all lines ordered by seq is the event log.
- * Fields are only ever added; readers ignore what they do not know and skip a
- * line that does not parse (a torn last line after a crash).
- */
-
 import { join } from "node:path";
 import type { InboxLine, InboxRecordKind } from "@plannotator/core/inbox-types";
 
@@ -42,20 +6,11 @@ export const INBOX_PROJECTS_DIR = "projects";
 export const PROJECT_FILE = "project.json";
 export const MESSAGES_FILE = "messages.jsonl";
 export const QUESTIONS_FILE = "questions.jsonl";
-/** Decisions were removed (2026-10): an older store keeps this file; only its seqs count. */
 export const LEGACY_DECISIONS_FILE = "decisions.jsonl";
 export const ANNOTATIONS_FILE = "annotations.jsonl";
-/** The Board's cards (approval "inbox-board"): never read by thread routing or the list. */
 export const CARDS_FILE = "cards.jsonl";
-/** Each agent session's steps per thread (approval "inbox-thread-steps"): never read by routing, the list, unread or notifications. */
 export const STEPS_FILE = "steps.jsonl";
-/** Each thread's PRs (approval "inbox-pr-binding"), kind `thread_pull`: never read by routing, the list's sections, unread or notifications. */
 export const PULLS_FILE = "pulls.jsonl";
-/**
- * The Board's initiatives (approval "board-initiatives"): one file in the
- * inbox folder, not per project (an initiative crosses projects), on the
- * store's one seq counter. Never read by routing, the list, unread or notifications.
- */
 export const INITIATIVES_FILE = "initiatives.jsonl";
 export const SEQ_FLOOR_FILE = "seq.json";
 
@@ -65,11 +20,6 @@ export function inboxDir(dataDir: string): string {
 
 const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull"]);
 
-/**
- * One line of a store file, or null when it is not a line this reader can
- * use: not JSON, no numeric `v`, no positive integer `seq`, an unknown kind, or
- * a record whose id is not the line's id.
- */
 export function parseInboxLine(text: string): InboxLine | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -92,7 +42,6 @@ export function parseInboxLine(text: string): InboxLine | null {
   return value as InboxLine;
 }
 
-/** An expected refusal from a store operation, with a stable snake_case code. */
 export class InboxError extends Error {
   constructor(
     readonly code: string,

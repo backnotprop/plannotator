@@ -1,8 +1,3 @@
-/**
- * The PR provider seam (#1583): URL detection, capabilities and the pure
- * helpers every platform shares. GitHub/GitLab behavior is pinned so adding a
- * third platform cannot change it.
- */
 import { describe, expect, test } from "bun:test";
 import {
   getCliName,
@@ -49,7 +44,6 @@ describe("parsePRUrl — Bitbucket Cloud", () => {
   test("rejects non-PR Bitbucket URLs and Bitbucket Data Center's shape", () => {
     expect(parsePRUrl("https://bitbucket.org/ws/repo/src/main/")).toBeNull();
     expect(parsePRUrl("https://bitbucket.org/ws/repo/pull-requests/7abc")).toBeNull();
-    // Data Center: a different URL and API, not supported.
     expect(parsePRUrl("https://git.corp.example/projects/P/repos/r/pull-requests/7")).toBeNull();
   });
 
@@ -105,7 +99,6 @@ describe("local checkout specs", () => {
       remote: "https://bitbucket.org/someone/repo-fork.git",
       ref: "refs/heads/feature/x",
     });
-    // A branch name shaped like a flag is refused before it reaches git.
     expect(() => getPRHeadFetchSpec({ ...bbMeta, headBranch: "--upload-pack=x" })).toThrow("Invalid source branch");
   });
 
@@ -120,7 +113,6 @@ describe("prDraftTargetKey", () => {
   test("GitHub and GitLab keys are pinned: a changed key would orphan every saved PR draft", () => {
     const gh = { platform: "github", host: "github.com", owner: "Acme", repo: "Widgets", number: 42 } as PRMetadata;
     const gl = { platform: "gitlab", host: "gitlab.example.com", projectPath: "Group/Sub/Project", iid: 7 } as PRMetadata;
-    // Values computed with the pre-Bitbucket implementation on main.
     expect(prDraftTargetKey(gh, "layer")).toBe("pr-89a0481ca8626ebf");
     expect(prDraftTargetKey(gh, "full-stack")).toBe("pr-5bafee1d6456631b");
     expect(prDraftTargetKey(gl, "layer")).toBe("pr-a2c74c0e94f2901e");

@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { isSameOriginOrNoOrigin, isStateChangingMethod } from "./request-origin";
 
-// The guard on every state-changing request. Failures it catches: a page on
-// another site writing the user's settings or approving a review, or the VS
-// Code panel (served through a proxy that rewrites Host) being refused its own
-// writes, which the client ignores, so settings silently stop saving.
 describe("isSameOriginOrNoOrigin", () => {
   const host = "localhost:4100";
   const cases: Array<[string, string | null, string | string[] | null, boolean]> = [

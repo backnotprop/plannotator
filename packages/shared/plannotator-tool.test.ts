@@ -28,8 +28,6 @@ function error(value: unknown): string {
 }
 
 describe('plannotator tool: arguments', () => {
-  // The failure: a call maps to argv the slash command would not produce
-  // (a lost flag, a target split in two, a flag order the CLI misreads).
   test('maps each action to the slash command words', () => {
     expect(args({ action: 'annotate', target: 'docs/my notes.md' })).toEqual(['docs/my notes.md'])
     expect(args({ action: 'annotate', target: 'spec.md', gate: true, options: { markdown: true } })).toEqual(['spec.md', '--gate', '--markdown'])
@@ -39,9 +37,6 @@ describe('plannotator tool: arguments', () => {
     expect(args({ action: 'last' })).toEqual([])
   })
 
-  // #1907: a review's gate is the host's (deliver a bare Approve as a
-  // message); passing --gate on would make a CLI older than `review --gate`
-  // refuse the launch.
   test('a gated review is accepted and its gate is never passed to the CLI', () => {
     const parsed = parsePlannotatorToolInput({ action: 'review', gate: true, options: { base: 'main' } })
     expect(parsed).toEqual({ ok: true, input: { action: 'review', gate: true, options: { base: 'main' } } })
@@ -80,12 +75,7 @@ describe('plannotator tool: strict validation', () => {
   })
 })
 
-// #2292: GitHub Copilot's Responses models treat the function as strict, so
-// every property is required and the model fills each one it means to omit
-// with an empty value. The failure: every call is refused ("takes no target")
-// and the model repeats it, so the tool cannot be used on that route at all.
 describe('plannotator tool: empty optional fields from a strict-schema model', () => {
-  // The exact call from the report, sent 17 times in a row.
   const copilotList = { action: 'list', target: '', gate: false, options: { base: '', markdown: false }, session: '' }
 
   test('the reported Copilot list call is the plain list call', () => {
@@ -121,8 +111,6 @@ describe('plannotator tool: empty optional fields from a strict-schema model', (
     expect(tailnet).toEqual({ ok: true, input: { action: 'list' } })
   })
 
-  // The failure: reading empty as absent loosens a required field, and an
-  // empty annotate target or close session is accepted.
   test('a required field sent empty is still missing', () => {
     for (const empty of ['', null, []]) {
       expect(error({ ...copilotList, action: 'annotate', target: empty })).toContain('needs a target')
@@ -133,8 +121,6 @@ describe('plannotator tool: empty optional fields from a strict-schema model', (
     }
   })
 
-  // The failure: the empty-value rule swallows a real value or an unknown
-  // key, and a wrong call slips through instead of being refused.
   test('non-empty values are still checked strictly', () => {
     expect(error({ ...copilotList, target: 'x.md' })).toContain('no target')
     expect(error({ ...copilotList, session: 'pn-3f2a9c' })).toContain('session')
@@ -150,16 +136,11 @@ describe('plannotator tool: empty optional fields from a strict-schema model', (
 })
 
 describe('plannotator tool v2: several targets', () => {
-  // The failure: a list is re-split, reordered, or a list where it means
-  // nothing (review) is silently flattened into one argument.
   test('annotate keeps the list in order, one argument per file, duplicates dropped', () => {
     expect(args({ action: 'annotate', target: ['spec.md', 'mock.html', 'notes.md'] })).toEqual(['spec.md', 'mock.html', 'notes.md'])
     expect(args({ action: 'annotate', target: ['b.md', 'a.md', 'b.md'], gate: true })).toEqual(['b.md', 'a.md', '--gate'])
   })
 
-  // The failure: a bare list entry ("README") reaches the CLI as a word, the
-  // CLI reads the list as prose, and a missing file silently narrows the
-  // review to the files that exist.
   test('a bare list entry is passed as a path, so a missing one fails instead of being read as prose', () => {
     expect(args({ action: 'annotate', target: ['README', 'docs/a.md'] })).toEqual(['./README', 'docs/a.md'])
     expect(args({ action: 'annotate', target: 'README' })).toEqual(['README'])
@@ -179,10 +160,6 @@ describe('plannotator tool v2: several targets', () => {
 })
 
 describe('plannotator tool: reviews of several files', () => {
-  // The failure: a host cannot tell an older CLI's refusal of several paths
-  // from the current CLI's own ambiguity error (a URL among the files), and
-  // either tells the agent to update when it should fix its call, or the
-  // reverse.
   test('an older CLI refusal is the ambiguity error without the bundle hint', () => {
     const older = 'Ambiguous annotate arguments: 2 of them each resolve to an existing target.\n  a.md -> /r/a.md\n  b.md -> /r/b.md\nRe-run with exactly one target: plannotator annotate <...>'
     expect(isOlderCliBundleRefusal(older)).toBe(true)
@@ -210,9 +187,6 @@ describe('plannotator tool v2: list, close, reply', () => {
     expect(one.ok && one.input.session).toBe('pn-3f2a9c')
   })
 
-  // `reply` was reserved for live comments and always errored; it is out of
-  // the contract until the comment loop delivers single comments. A model
-  // that still sends it gets a validation error, not a host-specific refusal.
   test('reply and its fields are not part of the contract', () => {
     expect(error({ action: 'reply', session: 'pn-3f2a9c', comment: 'c3', text: 'Done.' })).toContain('unknown field "comment"')
     expect(error({ action: 'reply', session: 'pn-3f2a9c' })).toContain('action must be')
@@ -228,8 +202,6 @@ describe('plannotator tool v2: list, close, reply', () => {
   })
 })
 
-// The failure (a real report): two files named QUESTIONS.md, and a decision
-// heading that named only the base name, so the agent acted on the other one.
 describe('targets: every heading and opened text can name the full path', () => {
   test('a target follows the heading line; a bundle lists every file; no target keeps the old heading', () => {
     expect(plannotatorDecisionHeading('QUESTIONS.md', 'pn-3f2a9c', 'Approved', '/w/releases-2026-10-04/QUESTIONS.md')).toBe(
@@ -252,14 +224,12 @@ describe('targets: every heading and opened text can name the full path', () => 
         { subject: 'PR #3', target: 'https://github.com/o/r/pull/3' },
       ]),
     ).toEqual(['releases-2026-10-04/QUESTIONS.md', 'releases-2026-09-20/QUESTIONS.md', 'notes.md', 'PR #3'])
-    // Parents with the same name: go up until the paths differ.
     expect(
       plannotatorDistinctSubjects([
         { subject: 'changes in web', target: '/a/app/web' },
         { subject: 'changes in web', target: '/b/app/web' },
       ]),
     ).toEqual(['changes in a/app/web', 'changes in b/app/web'])
-    // The same file twice, or no target: nothing to tell apart.
     expect(
       plannotatorDistinctSubjects([
         { subject: 'QUESTIONS.md', target: '/w/QUESTIONS.md' },
@@ -278,8 +248,6 @@ describe('targets: every heading and opened text can name the full path', () => 
 })
 
 describe('plannotator tool v2: texts name the session id', () => {
-  // The failure: the agent cannot tie a decision message or a list line back
-  // to the review it opened, so it cannot close the right one.
   test('opened text leads with the id; the decision heading carries it', () => {
     expect(plannotatorToolOpenedText('notes.md', 'http://localhost:1', false, 'pn-3f2a9c').split('\n')[0]).toBe('Session: pn-3f2a9c')
     expect(plannotatorToolOpenedText('notes.md', 'http://localhost:1', false)).not.toContain('Session:')
@@ -310,8 +278,6 @@ describe('plannotator tool v2: texts name the session id', () => {
 })
 
 describe('plannotator tool: subjects from the target the CLI opened', () => {
-  // The failure: a subject naming words the CLI dropped ("2 files: ., a.md")
-  // or a full path where one line should carry only names.
   test('annotate: a file name, a URL host, or a bundle of file names', () => {
     expect(plannotatorTargetSubject('annotate', '/work/a.md')).toBe('a.md')
     expect(plannotatorTargetSubject('annotate', '/work/docs/')).toBe('docs')

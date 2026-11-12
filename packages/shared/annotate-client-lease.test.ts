@@ -9,11 +9,6 @@ import {
   createAnnotateClientLeaseTracker,
 } from "./annotate-client-lease";
 
-/**
- * Deterministic virtual clock — tests drive expiry by advancing simulated
- * time instead of sleeping on the real 30s grace period. Timers fire in
- * scheduled order when `advance()` crosses their deadline.
- */
 function createFakeScheduler() {
   let nextId = 1;
   let now = 0;
@@ -114,14 +109,11 @@ describe("annotate client-lease tracker: reconnect cancel", () => {
     scheduler.advance(ANNOTATE_CLIENT_LEASE_GRACE_MS / 2);
     expect(expireCalls).toBe(0);
 
-    // Reconnect cancels the pending timer — advancing past the original
-    // deadline must not fire it.
     const release = tracker.acquire();
     scheduler.advance(ANNOTATE_CLIENT_LEASE_GRACE_MS);
     expect(expireCalls).toBe(0);
     expect(tracker.activeCount()).toBe(1);
 
-    // A fresh disconnect starts its own full grace window.
     release();
     scheduler.advance(ANNOTATE_CLIENT_LEASE_GRACE_MS - 1);
     expect(expireCalls).toBe(0);
@@ -188,7 +180,6 @@ describe("annotate client-lease tracker: cancel", () => {
     scheduler.advance(ANNOTATE_CLIENT_LEASE_GRACE_MS * 5);
     expect(expireCalls).toBe(0);
 
-    // Acquiring after cancel is a safe no-op — it must not resurrect tracking.
     const release = tracker.acquire();
     expect(tracker.activeCount()).toBe(0);
     release();
@@ -241,7 +232,6 @@ describe("annotate client-lease tracker: once", () => {
     scheduler.advance(ANNOTATE_CLIENT_LEASE_GRACE_MS);
     expect(expireCalls).toBe(1);
 
-    // Further time passing, or redundant releases, must not refire it.
     scheduler.advance(ANNOTATE_CLIENT_LEASE_GRACE_MS * 10);
     expect(expireCalls).toBe(1);
     expect(tracker.isExpired()).toBe(true);
@@ -261,7 +251,6 @@ describe("annotate client-lease stream session", () => {
     const session = createAnnotateClientLeaseStreamSession({
       tracker,
       heartbeatMs: ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS,
-      // The fake scheduler is one-shot, so re-arm to emulate setInterval.
       setHeartbeat: (callback, ms) => {
         const repeat = () => {
           scheduler.setTimer(repeat, ms);
@@ -298,8 +287,6 @@ describe("annotate client-lease stream session", () => {
   test("heartbeats on the configured interval while connected", () => {
     const { scheduler, written, tracker, expireCalls } = setup();
 
-    // One advance per interval: the fake scheduler fires only timers that were
-    // already due when it was called, so a re-armed heartbeat needs its own tick.
     scheduler.advance(ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS);
     scheduler.advance(ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS);
     scheduler.advance(ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS);
@@ -354,7 +341,6 @@ describe("annotate client-lease stream session", () => {
     expect(tracker.activeCount()).toBe(0);
     scheduler.advance(ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS * 5);
     expect(written).toEqual([ANNOTATE_CLIENT_LEASE_READY_COMMENT]);
-    // Cancelled means abandonment no longer matters: no expiry may fire.
     scheduler.advance(ANNOTATE_CLIENT_LEASE_GRACE_MS);
     expect(expireCalls()).toBe(0);
   });

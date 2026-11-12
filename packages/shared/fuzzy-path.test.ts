@@ -1,8 +1,3 @@
-/**
- * Go to File's matcher. Regressions guarded: a file name match losing to a
- * folder match, a changed file not winning a tie, a match out of order
- * accepted, and a scan of a large listing too slow to run per keystroke.
- */
 import { describe, expect, test } from 'bun:test';
 import { fuzzySearchPaths, scoreFuzzyPath, prepareFuzzyQuery } from './fuzzy-path';
 
@@ -21,7 +16,6 @@ describe('fuzzySearchPaths', () => {
     expect(fuzzySearchPaths(['tree/view/a.ts', 'src/tree.ts'], 'tree')[0].path).toBe('src/tree.ts');
     const results = fuzzySearchPaths(paths, 'difftree');
     expect(results[0].path).toBe('packages/ui/utils/diffFileTree.ts');
-    // The name the query covers most wins over a longer name holding it.
     const order = results.map((r) => r.path);
     expect(order.indexOf('packages/ui/components/DiffFileTree.tsx')).toBeLessThan(order.indexOf('packages/ui/hooks/useDiffFileTreeExpansion.ts'));
     expect(results.map((r) => r.path)).not.toContain('docs/tree/diff/README.md');
@@ -37,7 +31,6 @@ describe('fuzzySearchPaths', () => {
     const tie = ['a/x/index.ts', 'b/x/index.ts'];
     expect(fuzzySearchPaths(tie, 'index')[0].path).toBe('a/x/index.ts');
     expect(fuzzySearchPaths(tie, 'index', { preferred: new Set(['b/x/index.ts']) })[0].path).toBe('b/x/index.ts');
-    // A clearly better match still beats a preferred one.
     const gap = ['src/review.ts', 'src/r/e/v/i/e/w.ts'];
     expect(fuzzySearchPaths(gap, 'review', { preferred: new Set(['src/r/e/v/i/e/w.ts']) })[0].path).toBe('src/review.ts');
   });
@@ -55,7 +48,6 @@ describe('fuzzySearchPaths', () => {
     const results = fuzzySearchPaths(big, 'feat123comp', { lowerPaths: lower });
     const elapsed = performance.now() - started;
     expect(results.length).toBeGreaterThan(0);
-    // Measured about 40 ms on an Apple M-series laptop; generous for CI.
     expect(elapsed).toBeLessThan(1500);
   });
 });

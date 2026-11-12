@@ -21,8 +21,6 @@ const jjConfig = useScratchJjConfig();
 
 describe("jj diff args", () => {
   test("maps Call flow modes to the revsets used by each visible Jujutsu diff", () => {
-    // Parent hops are counted, never encoded as `@-` / `parents(@-)`: those
-    // resolve to several revisions on a merge and `jj diff` rejects them.
     expect(getJjSnapshotRevsets("jj-current", "trunk()")).toEqual({
       from: { revset: "@", firstParentSteps: 1 },
       to: { revset: "@", firstParentSteps: 0 },
@@ -60,15 +58,12 @@ describe("jj diff args", () => {
       },
     };
 
-    // jj-current: one hop off the merge picks the FIRST parent, not both.
     expect(await resolveJjSnapshotEndpoint(runtime, { revset: "@", firstParentSteps: 1 }))
       .toBe("aaaaaaaaaaaa");
-    // jj-last: two hops stay on the first-parent line.
     expect(await resolveJjSnapshotEndpoint(runtime, { revset: "@", firstParentSteps: 2 }))
       .toBe("cccccccccccc");
     expect(asked).toEqual(["@", "@", "aaaaaaaaaaaa"]);
 
-    // A revision with no parent cannot be a snapshot base.
     expect(resolveJjSnapshotEndpoint(runtime, { revset: "cccccccccccc", firstParentSteps: 1 }))
       .rejects.toThrow();
   });
@@ -170,12 +165,6 @@ describe("jj compare targets", () => {
     ? test
     : test.skip;
 
-  // Every `jj` process below runs against a throwaway JJ_CONFIG. Reading the
-  // developer's real config is banned outright by the Testing Rules
-  // (docs/agent-guides/project-and-development.md), and it is also
-  // what makes these fixtures reproducible: commit signing, a custom
-  // `immutable_heads()` alias or a non-default `git.push-bookmark-prefix` in a
-  // real config would otherwise fail or silently reshape them.
   function createJjSandbox() {
     const root = mkdtempSync(join(tmpdir(), "plannotator-jj-base-"));
     const configPath = join(root, "jj-config.toml");
@@ -245,7 +234,6 @@ describe("jj compare targets", () => {
       jj(["commit", "-m", "feature two"]);
       jj(["bookmark", "create", "feature", "-r", "@-"]);
 
-      // Verify the fixture's configured boundary independently of the code under test.
       expect(jj(["log", "--no-graph", "-r", "roots(reachable(@, mutable()))-", "-T", "bookmarks"], immutable).trim())
         .toBe("development");
       const developmentCommitId = jj(["log", "--no-graph", "-r", "development", "-T", "commit_id"], immutable).trim();
@@ -284,10 +272,6 @@ describe("jj compare targets", () => {
     }
   });
 
-  // A `jj git push --change` stack carries a generated bookmark on every commit
-  // in the line of work. None of them is a base: the review has to start where
-  // the whole stack left immutable history, or the reviewer is shown a slice of
-  // their own work and told it is the baseline.
   testIfJj("keeps the full line of work when the stack carries generated push bookmarks", async () => {
     const sandbox = createJjSandbox();
     const workspace = join(sandbox.root, "repo");
@@ -315,9 +299,6 @@ describe("jj compare targets", () => {
     }
   });
 
-  // The same generated bookmarks reach the fork point itself once a colleague
-  // pushes one: it arrives as an untracked remote bookmark, which is immutable,
-  // so the base commit is correct but its only name is machine noise.
   testIfJj("does not name the base after an untracked remote push bookmark", async () => {
     const sandbox = createJjSandbox();
     const remote = join(sandbox.root, "remote.git");
@@ -349,8 +330,6 @@ describe("jj compare targets", () => {
         .find((name) => name.startsWith("push-"));
       expect(pushBookmark).toBeDefined();
 
-      // The fixture only reproduces the defect while that bookmark is untracked,
-      // which is what makes its commit immutable and a candidate base.
       expect(jj(["bookmark", "list", "--all-remotes", "-T", 'if(remote && !tracked, name ++ "\\n", "")']).trim())
         .toContain(pushBookmark!);
 
@@ -362,8 +341,6 @@ describe("jj compare targets", () => {
       const resolved = await selectDefaultJjCompareTarget(sandbox.runtime(), workspace);
       expect(resolved).not.toContain("push-");
       expect(resolved).toBe(baseCommitId);
-      // And that id has to survive the trip into a revset, or the Line of work
-      // diff resolves to no revisions at all.
       expect(jjLineBaseRevset(resolved)).toBe(`heads(::@ & ::(${baseCommitId}))`);
       expect(jj(["log", "--no-graph", "-r", jjLineBaseRevset(resolved), "-T", "commit_id"]).trim())
         .toBe(baseCommitId);
@@ -372,9 +349,6 @@ describe("jj compare targets", () => {
     }
   });
 
-  // Local bookmarks confer no immutability in jj, so a stacked feature line is
-  // one line of work: the base is where the stack left immutable history, not
-  // the bookmark partway up it.
   testIfJj("treats a stacked local bookmark as part of the line of work", async () => {
     const sandbox = createJjSandbox();
     const workspace = join(sandbox.root, "repo");
@@ -423,8 +397,6 @@ describe("jj compare targets", () => {
         subject: "Develop the feature",
       },
     });
-    // Deliberate pin: the revset IS the behavior under test — `exactly(...)`
-    // vs the old `latest(...)` is the whole fix, so drift here must fail.
     expect(calls).toEqual([[
       "log",
       "--no-graph",
@@ -468,14 +440,10 @@ describe("jj compare targets", () => {
 
     await expect(selectDefaultJjCompareTarget(runtimeFor('[]\\t0123456789abcdef\\t"Base"\\n')))
       .resolves.toBe("0123456789abcdef");
-    // A generated push bookmark is not a usable name, so the id is used instead.
     await expect(selectDefaultJjCompareTarget(runtimeFor('[{"name":"push-vmopwunwxopv","remote":"origin"}]\\t0123456789abcdef\\t"Base"\\n')))
       .resolves.toBe("0123456789abcdef");
   });
 
-  // The only live caller runs on the review startup path with no handler above
-  // it, so an unresolvable base has to degrade to the previous default instead
-  // of aborting `plannotator review`.
   test("falls back to the trunk revset when JJ cannot resolve a line base", async () => {
     const runtimeFor = (stdout: string, stderr = "", exitCode = 0): ReviewJjRuntime => ({
       async runJj() {
@@ -484,9 +452,7 @@ describe("jj compare targets", () => {
     });
 
     await expect(selectDefaultJjCompareTarget(runtimeFor(""))).resolves.toBe("trunk()");
-    // e.g. a jj too old for `fork_point`/`reachable`.
     await expect(selectDefaultJjCompareTarget(runtimeFor("", "unknown function", 1))).resolves.toBe("trunk()");
-    // A repo with no immutable history forks at the all-zero root commit.
     await expect(selectDefaultJjCompareTarget(runtimeFor(`[]\\t${"0".repeat(40)}\\t""\\n`))).resolves.toBe("trunk()");
   });
 
@@ -494,9 +460,7 @@ describe("jj compare targets", () => {
     expect(jjLineBaseRevset("main")).toBe('heads(::@ & ::(bookmarks(exact:"main")))');
     expect(jjLineBaseRevset("main@origin")).toBe('heads(::@ & ::(remote_bookmarks(exact:"main", exact:"origin")))');
     expect(jjLineBaseRevset("trunk()")).toBe("heads(::@ & ::(trunk()))");
-    // A full commit id is a revision, not a bookmark name.
     expect(jjLineBaseRevset("a".repeat(40))).toBe(`heads(::@ & ::(${"a".repeat(40)}))`);
-    // A short hex-looking name still reads as a bookmark.
     expect(jjLineBaseRevset("cafebabe")).toBe('heads(::@ & ::(bookmarks(exact:"cafebabe")))');
   });
 });
@@ -569,7 +533,6 @@ describe("jj evolog", () => {
     };
     const result = await runJjDiff(runtime, "jj-evolog", "");
     expect(result.label).toBe("Evolution diff from def45678");
-    // evolog call + diff call
     expect(callCount).toBe(2);
     const diffCall = calls.find((c) => c[0] === "diff");
     expect(diffCall).toEqual(["diff", "--git", "--from", "def456789012", "--to", "@"]);

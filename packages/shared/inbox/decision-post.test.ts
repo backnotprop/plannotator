@@ -1,11 +1,3 @@
-/**
- * Post decisions' body (decision-post.ts) and the marked-section splice (pr-marked.ts), read by structure.
- *
- * What regresses: thread text opening HTML in the comment, or a second marker the next post would find; the body
- * not shrinking to the forge's limit (the forge then refuses the post); the description's short form carrying HTML
- * (it may become a squash commit's message); a draft (picked, not sent) losing its mark; the splice
- * changing a byte outside the markers, or writing over a section whose end marker is gone.
- */
 import { expect, test } from "bun:test";
 import { marked } from "marked";
 import type { DecisionExportItem, DecisionExportV1 } from "./decision-export";
@@ -62,11 +54,9 @@ test("thread text opens no HTML and plants no second marker, inside the folds or
   expect(body.split("\n")[0]).toBe("<!-- plannotator-decisions v1 thread=msg_THREAD -->");
   expect(body).not.toContain("<img src=x");
   expect(body).not.toContain("</summary></details><");
-  // Every image GitHub would show is the banner.
   const html = marked.parse(body, { async: false }) as string;
   const srcs = [...html.matchAll(/<img [^>]*src="([^"]+)"/g)].map((m) => m[1]);
   expect(srcs).toEqual(["https://plannotator.ai/assets/decisions/v1/banner-light.png"]);
-  // The decision and its nested "other choices" fold, nothing more.
   expect(html.match(/<details>/g)).toHaveLength(2);
 });
 
@@ -98,7 +88,6 @@ test("a pick saved and not sent is posted as a draft: its own mark in the table,
     expect(body).toContain("- **B** · _draft, not sent to the agent_");
     expect(body).not.toContain("- ✓ **B**");
     expect(body).toContain("> a draft note");
-    // Listed once, as a draft: not again under another state.
     expect(body).not.toContain("#### Draft");
   }
 });
@@ -120,8 +109,6 @@ test("the description section: the banner, then everything inside ONE collapsed 
   expect(lines[0]).toStartWith('<a href="https://plannotator.ai/inbox/"><picture>');
   expect(lines[2]).toBe("<details><summary><b>Decisions: Offline sync</b> · 12 decided, 1 open</summary>");
   expect(lines.at(-1)).toBe("</details>");
-  // Nothing of the decisions outside it: before the outer fold only the banner; the outer fold closes last, and every
-  // nested fold (one per decision) opens and closes inside it.
   expect(full.slice(0, full.indexOf("<details>")).trim()).toBe(lines[0]);
   let depth = 0;
   const closesAt: number[] = [];
@@ -130,7 +117,6 @@ test("the description section: the banner, then everything inside ONE collapsed 
     if (depth === 0) closesAt.push(m.index!);
   }
   expect(closesAt).toEqual([full.lastIndexOf("</details>")]);
-  // The outer fold, one per decision, and one nested "other choices" fold in each.
   expect(full.match(/<details>/g)).toHaveLength(1 + 12 * 2);
   expect(full).toContain("<dl>");
   const compact = renderDecisionSection(d, { platform: "github", room: full.length - 1 })!;
@@ -149,7 +135,6 @@ test("no task-list item anywhere in what is posted (GitHub would count them as t
       expect(items.some((i) => i.task)).toBe(false);
     }
   }
-  // The chosen option still reads as chosen: a check and bold.
   expect(renderDecisionComment(d, { platform: "github" })).toContain("- ✓ **A**");
 });
 
@@ -165,7 +150,6 @@ test("the banner never sizes an empty block: the comment opens with it after the
 
 test("an opened decision shows its pick, verdict, note and context; the other choices and the reasoning wait in one nested fold", () => {
   const body = renderDecisionComment(doc([item(1)]), { platform: "github" });
-  // The question is a mini heading in the fold's summary, the answer on its own line under it.
   expect(body).toContain("<details><summary><h3>D1 · Question 1?</h3><br>A</summary>");
   const fold = body.slice(body.indexOf("<details><summary><h3>D1"), body.lastIndexOf("</details>") + 10);
   const nested = fold.indexOf("<details><summary>1 other choice and the reasoning</summary>");
@@ -179,7 +163,6 @@ test("an opened decision shows its pick, verdict, note and context; the other ch
   expect(before).not.toContain("- B");
   expect(inside).toContain("- B<br><sub>+ sturdy</sub>");
   expect(inside).toContain("<dt>Stakes</dt>");
-  // Who asked and when closes the decision, after the nested fold.
   expect(fold.indexOf("asked Nov 8")).toBeGreaterThan(nested);
 });
 
@@ -212,7 +195,6 @@ test("the splice keeps every byte outside the markers, adds after a blank line, 
   expect(spliceMarkedSection(around, SECTION, 1000)).toEqual({ text: "a b  \n<!-- s -->\ndecisions\n<!-- e -->tail​", replaced: true });
   expect(() => spliceMarkedSection("x <!-- s --> left alone", SECTION, 1000)).toThrow(PRMarkedBrokenSectionError);
   expect(() => spliceMarkedSection("x".repeat(990), SECTION, 1000)).toThrow(PRMarkedTooLongError);
-  // The room handed to the body is exact: what it returns at that length fits the limit.
   const fitted = spliceMarkedSection("x".repeat(900), { ...SECTION, body: (room) => "y".repeat(room) }, 1000).text;
   expect(fitted.length).toBe(1000);
 });

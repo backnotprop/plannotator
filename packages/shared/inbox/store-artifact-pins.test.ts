@@ -1,11 +1,3 @@
-/**
- * Artifact pins (approval "inbox-artifact-stars"; the word is Pin): the
- * person's marks on a thread's artifacts, kept outside the event log. What can
- * regress: a pin writing a store line, a pin of something that is not one of
- * the thread's artifacts (another thread's file, the attached twin of an image
- * the text shows), the per-thread order (newest pin first), the file outliving
- * its thread, and artifact pins mixing with the sidebar's thread pins.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,7 +44,6 @@ function code(fn: () => unknown): string {
 }
 
 function lines(dir: string): number {
-  // Every store line: count them all.
   const glob = new Bun.Glob("inbox/**/*.jsonl");
   let n = 0;
   for (const path of glob.scanSync({ cwd: dir })) n += readFileSync(join(dir, path), "utf8").split("\n").filter(Boolean).length;
@@ -73,17 +64,14 @@ describe("artifact pins in the store", () => {
     store.setArtifactPinned(root.thread_id, c.id, true);
     store.setArtifactPinned(root.thread_id, a.id, true);
     expect(store.threadArtifactPins(root.thread_id).map((p) => p.key)).toEqual([a.id, c.id, b.id]);
-    // Pinning again changes nothing (the place and the time stay).
     const at = store.artifactPins().find((p) => p.key === b.id)!.pinned_at;
     store.setArtifactPinned(root.thread_id, b.id, true);
     expect(store.artifactPins().find((p) => p.key === b.id)!.pinned_at).toBe(at);
     store.setArtifactPinned(root.thread_id, c.id, false);
     expect(store.threadArtifactPins(root.thread_id).map((p) => p.key)).toEqual([a.id, b.id]);
-    // Unpinning what is not pinned changes nothing.
     store.setArtifactPinned(root.thread_id, c.id, false);
     expect(store.artifactPins()).toHaveLength(2);
     expect(lines(dir)).toBe(before);
-    // Not the sidebar's thread pins.
     expect(store.pins()).toEqual([]);
     expect(existsSync(join(dir, "inbox", "pins.json"))).toBe(false);
   });
@@ -101,7 +89,6 @@ describe("artifact pins in the store", () => {
     store.setArtifactPinned(x.thread_id, x2.id, true);
     expect(store.threadArtifactPins(x.thread_id).map((p) => p.key)).toEqual([x2.id, x1.id]);
     expect(store.threadArtifactPins(y.thread_id).map((p) => p.key)).toEqual([y1.id]);
-    // Pin order across threads: the oldest first.
     expect(store.artifactPins().map((p) => p.key)).toEqual([x1.id, y1.id, x2.id]);
   });
 

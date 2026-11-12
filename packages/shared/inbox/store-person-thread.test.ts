@@ -1,9 +1,3 @@
-/**
- * Threads the person starts (compose): a root person message addressed to one
- * live session. What can regress: the thread becoming some session's default
- * thread, the agent's answer landing elsewhere, the wrong session being handed
- * it, the list placing it wrong, a replay writing twice, and re-addressing.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,9 +38,7 @@ describe("a thread the person starts", () => {
     const { message, replayed } = store.startPersonThread({ project_id: project.id, body, to: claude, idempotency_key: "k1" });
     expect(replayed).toBe(false);
     expect(message).toMatchObject({ thread_id: message.id, reply_to: null, author: { kind: "person" }, started_by_person: true, to: claude });
-    // The short name a thread the person starts gets (derivePersonThreadSubject): its first sentence, final "." dropped.
     expect(message.subject).toBe("Idea: let the list show which session wrote each thread");
-    // The person's text never becomes question records.
     expect(store.questionsOf(message.id)).toEqual([]);
     const row = store.listRow(message.id)!;
     expect(row).toMatchObject({ section: "sent", unread: false, unseen: 0, waiting_on_person: false, addressee: claude });
@@ -60,7 +52,6 @@ describe("a thread the person starts", () => {
     expect(message.subject).toBe("I want to explore what adding a board would look like");
     expect(message.body).toBe(body);
     expect(store.listRow(message.id)!.subject).toBe("I want to explore what adding a board would look like");
-    // An image-only body is named by its file.
     const image = store.startPersonThread({ project_id: project.id, body: "![](./design/board-mock.png)", to: claude, idempotency_key: "image" });
     expect(image.message.subject).toBe("board-mock.png");
   });
@@ -78,17 +69,14 @@ describe("a thread the person starts", () => {
 
   test("the agent's reply_to answer lands in it; a send without reply_to never joins it", () => {
     const { store, project } = world();
-    // The session already had a thread of its own.
     const own = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "Working on the relay." });
     const { message } = store.startPersonThread({ project_id: project.id, body: "Add a retry budget.", to: claude, idempotency_key: "k" });
     const answer = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "I'll do it after the relay.", reply_to: message.id });
     expect(answer.message.thread_id).toBe(message.id);
     expect(store.listRow(message.id)!.section).toBe("new");
-    // The session's next message without reply_to starts a new thread: neither its own nor the person's.
     const next = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "Relay done." });
     expect(next.message.thread_id).toBe(next.message.id);
     expect(next.message.thread_id).not.toBe(own.message.thread_id);
-    // A session with no thread yet starts a new one rather than joining the person's.
     const fresh = store.sendMessage({ project_id: project.id, author: agent("ses_new"), body: "Hello." });
     expect(fresh.message.thread_id).toBe(fresh.message.id);
   });
@@ -122,14 +110,12 @@ describe("a thread the person starts", () => {
     expect(store.pendingReplies("ses_live")).toEqual([]);
     expect(store.pendingReplies("ses_pi").map((m) => m.id)).toEqual([message.id]);
     expect(store.listRow(message.id)!.addressee).toEqual(pi);
-    // The same session again writes nothing.
     const cursor = store.cursor();
     store.readdressMessage(message.id, pi);
     expect(store.cursor()).toBe(cursor);
     expect(code(() => store.readdressMessage(message.id, null))).toBe("session_not_live");
     store.recordDelivery(message.id, pi);
     expect(code(() => store.readdressMessage(message.id, claude))).toBe("already_delivered");
-    // An agent's message, or a person reply addressed to nobody, is not re-addressable.
     const asked = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "Ship it?" });
     const reply = store.sendReply(asked.message.id, { words: "yes", idempotency_key: "r" });
     expect(code(() => store.readdressMessage(asked.message.id, pi))).toBe("not_addressed");
@@ -143,18 +129,15 @@ describe("a thread the person starts", () => {
     const { store, project } = world();
     const { message } = store.startPersonThread({ project_id: project.id, body: "Add a retry budget.", to: claude, idempotency_key: "k" });
     const more = store.sendReply(message.id, { words: "And log each retry.", idempotency_key: "r1" });
-    // Stamped with where it goes, on the line itself.
     expect(more.reply.to).toEqual(claude);
     expect(store.pendingReplies("ses_live").map((m) => m.id)).toEqual([message.id, more.reply.id]);
     expect(store.pendingReplies("ses_other")).toEqual([]);
-    // Another agent reading the thread settles nothing addressed to this session.
     store.markAgentChecked(message.thread_id);
     expect(store.pendingReplies("ses_live").map((m) => m.id)).toEqual([message.id, more.reply.id]);
     store.recordDelivery(message.id, claude);
     store.readdressMessage(more.reply.id, { host: "pi", session: "ses_pi" });
     expect(store.pendingReplies("ses_live")).toEqual([]);
     expect(store.pendingReplies("ses_pi").map((m) => m.id)).toEqual([more.reply.id]);
-    // An archived thread is not re-addressed.
     store.resolveThread(message.thread_id, true);
     expect(code(() => store.readdressMessage(more.reply.id, claude))).toBe("thread_resolved");
   });

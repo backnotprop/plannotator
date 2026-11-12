@@ -1,14 +1,3 @@
-/**
- * Code-review image preview (#1598): `GET /api/review-image`.
- *
- * Every decision lives here so the Bun server and the Pi mirror only do
- * transport: which requests are allowed (a file in the current patch, with no
- * hunks and an image extension), which side exists, the byte and pixel caps,
- * the content type (sniffed from magic bytes, never the extension), the image
- * header parse, the error mapping, and the response headers. The two servers
- * supply one thing each: how to read a side's bytes in their current mode.
- */
-
 import {
   MAX_REVIEW_IMAGE_PREVIEW_BYTES,
   MAX_REVIEW_IMAGE_PREVIEW_PIXELS,
@@ -26,7 +15,6 @@ import {
 
 export const REVIEW_IMAGE_ENDPOINT = "/api/review-image";
 
-/** Server-side ceiling on concurrent side reads (git spawns, gh/glab calls). */
 export const REVIEW_IMAGE_READ_CONCURRENCY = 4;
 
 export type ReviewImageErrorReason =
@@ -41,29 +29,22 @@ export type ReviewImageErrorReason =
   | "lfs-pointer"
   | "fetch-failed"
   | "aborted"
-  /** `/api/review-markdown-image` only: the source climbs above the repository root. */
   | "outside-repo"
-  /** `/api/review-markdown-image` only: the Markdown file does not show that image. */
   | "not-referenced";
 
 export interface ReviewImageErrorBody {
   reason: ReviewImageErrorReason;
   error: string;
-  /** Size in bytes, on `too-large` when the byte cap was the limit. */
   bytes?: number;
-  /** Dimensions, on `too-large` when the pixel cap was the limit. */
   width?: number;
   height?: number;
 }
 
-/** A transport-neutral HTTP response the servers write out verbatim. */
 export interface ReviewImageResponse {
   status: number;
   headers: Record<string, string>;
   body: Uint8Array | string | null;
 }
-
-// --- Content sniffing ---------------------------------------------------------
 
 const LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
 
@@ -78,7 +59,6 @@ function ascii(bytes: Uint8Array, start: number, end: number): string {
   return out;
 }
 
-/** True when the bytes are a Git LFS pointer rather than the file itself. */
 export function isLfsPointer(bytes: Uint8Array): boolean {
   return ascii(bytes, 0, LFS_POINTER_PREFIX.length) === LFS_POINTER_PREFIX;
 }
@@ -96,11 +76,6 @@ function isIsoBmffAvif(bytes: Uint8Array): boolean {
   return false;
 }
 
-/**
- * SVG: UTF-8 text whose first element is `<svg`, after an optional BOM, XML
- * declaration, comments, processing instructions, and doctype. An HTML file
- * named `.svg` is rejected, so it can never be served as an image.
- */
 function isSvg(bytes: Uint8Array): boolean {
   let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, 64 * 1024));
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
@@ -135,7 +110,6 @@ function isSvg(bytes: Uint8Array): boolean {
   return false;
 }
 
-/** The image content type from magic bytes, or null when it is not an image we serve. */
 export function sniffImageContentType(bytes: Uint8Array): string | null {
   if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
   if (startsWith(bytes, [0xff, 0xd8, 0xff])) return "image/jpeg";
@@ -148,8 +122,6 @@ export function sniffImageContentType(bytes: Uint8Array): string | null {
   if (isSvg(bytes)) return "image/svg+xml";
   return null;
 }
-
-// --- Header dimensions ---------------------------------------------------------
 
 export interface ImageDimensions {
   width: number;
@@ -173,7 +145,6 @@ function jpegDimensions(b: Uint8Array): ImageDimensions | null {
       offset++;
       continue;
     }
-    // Standalone markers carry no length.
     if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
       offset += 2;
       continue;
@@ -197,12 +168,6 @@ function avifDimensions(b: Uint8Array): ImageDimensions | null {
   return null;
 }
 
-/**
- * Dimensions from the image header, read from the first bytes only. Null when
- * the format has no fixed raster size (SVG) or the header is truncated; the
- * caller then serves without the pixel guard (the browser decodes at display
- * size for SVG).
- */
 export function readImageDimensions(bytes: Uint8Array, contentType: string): ImageDimensions | null {
   const b = bytes;
   let dims: ImageDimensions | null = null;
@@ -246,9 +211,6 @@ export function readImageDimensions(bytes: Uint8Array, contentType: string): Ima
   return dims && dims.width > 0 && dims.height > 0 ? dims : null;
 }
 
-// --- Concurrency -----------------------------------------------------------------
-
-/** Thrown for work whose request went away before it ran. */
 export class ReviewImageAbortError extends Error {
   constructor() {
     super("The image request was aborted");
@@ -256,17 +218,10 @@ export class ReviewImageAbortError extends Error {
   }
 }
 
-/** Throw when the request that asked for this work is already gone. */
 export function throwIfReviewImageAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new ReviewImageAbortError();
 }
 
-/**
- * A FIFO semaphore: at most `limit` tasks run at once. A task whose `signal`
- * aborts while it is still queued leaves the queue without ever running, so a
- * burst of cards scrolled past cannot hold the slots (and the `gh api` quota)
- * that the card now on screen is waiting for.
- */
 export function createConcurrencyLimiter(limit: number) {
   let active = 0;
   const queue: Array<{ start: () => void; cancel: () => void; signal?: AbortSignal }> = [];
@@ -314,14 +269,6 @@ export function createConcurrencyLimiter(limit: number) {
   };
 }
 
-// --- Side readers shared by both servers ----------------------------------------
-
-/**
- * PR layer mode: read from the local checkout first (fixed merge-base / head
- * commits, never the pool's worktree, which agents may edit), and fall back to
- * the platform API when the checkout is not ready or lacks the object (the
- * warmup's base fetch is shallow and best effort).
- */
 export async function readPRImageSide(options: {
   gitRuntime: ReviewGitRuntime;
   poolCwd?: string;
@@ -332,7 +279,6 @@ export async function readPRImageSide(options: {
   oldPath?: string;
   maxBytes: number;
   fetchBytes: (sha: string, path: string, maxBytes: number) => Promise<FileBytesRead>;
-  /** The request's abort signal: no platform call is made for a request that is gone. */
   signal?: AbortSignal;
 }): Promise<FileBytesRead> {
   const sha = options.side === "old" ? options.oldSha : options.headSha;
@@ -350,25 +296,13 @@ export async function readPRImageSide(options: {
   return options.fetchBytes(sha, path, options.maxBytes);
 }
 
-// --- The request -------------------------------------------------------------------
-
 export interface ReviewImageRequest {
-  /** Query parameters of the request (`path`, `side`, `snapshot`). */
   params: URLSearchParams;
-  /** `If-None-Match` request header, for the 304 path. */
   ifNoneMatch?: string | null;
-  /** False for static-patch and P4 sessions: nothing is ever read. */
   available: boolean;
-  /** The session's current patch; only its files are servable. */
   patch: string;
-  /** Whether `snapshot` names the snapshot the server is serving right now. */
   isCurrentSnapshot: (snapshot: string) => boolean;
-  /** Aborts when the client goes away; queued and not-yet-started reads are dropped. */
   signal?: AbortSignal;
-  /**
-   * Read one side in the server's current mode. `filePath` / `oldPath` are the
-   * chunk's own display paths (the client never supplies the old path).
-   */
   readSide: (
     side: DiffSide,
     filePath: string,
@@ -380,7 +314,6 @@ export interface ReviewImageRequest {
 
 const IMAGE_RESPONSE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
 
-/** A JSON refusal with the image routes' no-store / nosniff headers. */
 export function reviewImageErrorResponse(status: number, body: ReviewImageErrorBody): ReviewImageResponse {
   return {
     status,
@@ -401,7 +334,6 @@ function isEligibleEntry(entry: PatchFileEntry): boolean {
   return !entry.hasHunks && (isReviewImagePath(entry.newPath) || isReviewImagePath(entry.oldPath));
 }
 
-/** Resolve one `GET /api/review-image` request to a transport-neutral response. */
 export async function handleReviewImageRequest(request: ReviewImageRequest): Promise<ReviewImageResponse> {
   if (!request.available) {
     return reviewImageErrorResponse(400, { reason: "unavailable", error: "Image preview is unavailable for this review" });
@@ -433,7 +365,6 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
 
   let read: FileBytesRead;
   try {
-    // The display path keys the new side; a deleted file's only path is its old one.
     read = await request.readSide(
       side,
       entry.newPath ?? sidePath,
@@ -443,7 +374,6 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
     );
   } catch (error) {
     if (error instanceof ReviewImageAbortError || request.signal?.aborted) {
-      // Nobody is listening; the status only matters to logs.
       return reviewImageErrorResponse(499, { reason: "aborted", error: "The request was aborted" });
     }
     return reviewImageErrorResponse(502, {
@@ -455,13 +385,6 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
   return reviewImageBytesResponse(read, request.ifNoneMatch);
 }
 
-/**
- * The image answer for bytes a side reader returned: the read's own refusals,
- * the byte and pixel caps, the LFS-pointer refusal, the magic-byte content
- * type, the dimension headers, and the sandboxed response headers (with the
- * ETag / 304 path). Shared by `/api/review-image` and the Markdown preview's
- * `/api/review-markdown-image`, so both answer an image exactly alike.
- */
 export function reviewImageBytesResponse(
   read: FileBytesRead,
   ifNoneMatch?: string | null,

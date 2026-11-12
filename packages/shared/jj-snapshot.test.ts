@@ -1,18 +1,3 @@
-/**
- * Real-Jujutsu coverage for Call flow snapshot materialization.
- *
- * The fakes in `call-flow.test.ts` cannot catch the two defects these guard,
- * because both live in what the real `jj` binary accepts:
- *
- *  - `@-` / `parents(@-)` resolve to MORE THAN ONE revision on a merge and jj
- *    rejects the command outright, while the visible `jj diff -r @` review
- *    still renders. Call flow would have been unusable on any merge revision.
- *  - `glob-i:` filesets are relative to the INVOCATION directory, so a review
- *    started from a subdirectory silently dropped every source file above it
- *    and handed CallDiff a partial repository call graph.
- *
- * Skipped when `jj` is not installed (CI runners do not ship it).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,8 +10,6 @@ import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
 const jjConfig = useScratchJjConfig();
 
 function hasJj(): boolean {
-  // Bun.spawnSync throws when the executable is missing entirely (ENOENT),
-  // which is exactly the case this gate exists for on CI runners without jj.
   try {
     return Bun.spawnSync(["jj", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0;
   } catch {
@@ -79,18 +62,6 @@ function jj(args: string[]): string {
   return result.stdout.toString().trim();
 }
 
-/**
- * A workspace whose WORKING COPY is a merge, which is the ordinary jj state
- * while a merge is being resolved:
- *
- *   base -> sideA \
- *                  -> @ (merge)
- *   base -> sideB /
- *
- * `jj-current` compares `@`'s parent to `@`, and `jj-last` compares that
- * parent's own parent to it, so one repository exercises both revset paths
- * with a merge in the way.
- */
 function initMergeWorkspace(): void {
   workspace = mkdtempSync(join(tmpdir(), "plannotator-jj-snapshot-"));
   jj(["git", "init", "."]);
@@ -115,7 +86,6 @@ function initMergeWorkspace(): void {
 
   jj(["new", sideA, sideB, "-m", "merge working copy"]);
   writeFileSync(join(workspace, "merged.ts"), "export const merged = 1;\n");
-  // Record the new file so `--ignore-working-copy` materialization can see it.
   jj(["status"]);
 }
 
@@ -149,7 +119,6 @@ describe("Jujutsu Call flow snapshots against a real repository", () => {
       includedExtensions: [".ts"],
     });
     try {
-      // The base side is the FIRST parent (side A), not both merge parents.
       expect(treeOf(snapshot.cwd, snapshot.from)).toEqual(["a.ts", "base.ts", "sub/deep.ts"]);
       expect(treeOf(snapshot.cwd, snapshot.to))
         .toEqual(["a.ts", "b.ts", "base.ts", "merged.ts", "sub/deep.ts"]);
@@ -157,7 +126,6 @@ describe("Jujutsu Call flow snapshots against a real repository", () => {
       snapshot.cleanup();
     }
 
-    // Materialization must not move the reviewed working copy.
     expect(jj(["log", "--no-graph", "-r", "@", "-T", "commit_id"])).toBe(before);
   });
 
@@ -190,7 +158,6 @@ describe("Jujutsu Call flow snapshots against a real repository", () => {
       includedExtensions: [".ts"],
     });
     try {
-      // Every path stays workspace-relative, including the ones ABOVE the cwd.
       expect(treeOf(fromSubdirectory.cwd, fromSubdirectory.to))
         .toEqual(["a.ts", "b.ts", "base.ts", "merged.ts", "sub/deep.ts"]);
     } finally {

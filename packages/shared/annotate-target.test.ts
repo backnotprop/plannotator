@@ -25,23 +25,14 @@ beforeAll(() => {
   writeFileSync(join(root, "docs/spec.md"), "# Spec");
   writeFileSync(join(root, "docs/page.html"), "<p>hi</p>");
   writeFileSync(join(root, "notes/deep/nested.md"), "# Nested");
-  // Same basename twice for the ambiguous case.
   writeFileSync(join(root, "docs/dup.md"), "# A");
   writeFileSync(join(root, "notes/dup.md"), "# B");
-  // Existing but not annotatable.
   writeFileSync(join(root, "script.py"), "print()");
-  // Exists so that a wrongly split quoted token ("my notes.md" -> "notes.md")
-  // would resolve if token boundaries were not preserved.
   writeFileSync(join(root, "notes.md"), "# Notes");
-  // Wider plain-text set (guards ANNOTATABLE_DOC_REGEX breadth, which the
-  // probe's no-walk cheapness for word tokens relies on).
   writeFileSync(join(root, "notes.txt"), "notes");
   writeFileSync(join(root, "config.yaml"), "a: 1");
-  // Real scoped-package-style directory for the literal-@ fallback.
   mkdirSync(join(root, "@scope"), { recursive: true });
   writeFileSync(join(root, "@scope/README.md"), "# scoped");
-  // Whole-string preference: the un-split input names this file even though
-  // its second token also names an annotatable file on its own.
   writeFileSync(join(root, "Meeting Notes.md"), "# Meeting Notes");
 });
 
@@ -58,10 +49,6 @@ describe("probeAnnotateToken", () => {
   });
 
   test("recognizes wrapped URLs: `@`-prefixed and quoted", () => {
-    // The pipeline strips the `@` reference marker and wrapping quotes
-    // before its own URL check, so the probe must unwrap the same way or
-    // `annotate @https://example.com/page and summarize it` hands off
-    // instead of opening the URL.
     expect(probe("@https://example.com/page")).toBe("https://example.com/page");
     expect(probe('"https://example.com/page"')).toBe("https://example.com/page");
   });
@@ -91,9 +78,6 @@ describe("probeAnnotateToken", () => {
   });
 
   test("resolves a scoped-package-style literal `@` path", () => {
-    // The strip half of the `@` handling is covered above (@plan.md); this
-    // covers the literal fallback: no `scope/README.md` exists, so only the
-    // literal `@scope/README.md` path can match.
     expect(probe("@scope/README.md")).toBe(join(root, "@scope/README.md"));
   });
 
@@ -115,9 +99,7 @@ describe("probeAnnotateToken", () => {
   test("bare directory names only resolve when bareDirectories is allowed", () => {
     expect(probeAnnotateToken("docs", root, { bareDirectories: false })).toBeNull();
     expect(probeAnnotateToken(".", root, { bareDirectories: false })).toBeNull();
-    // Explicit paths keep resolving: a separator marks intent.
     expect(probeAnnotateToken("docs/", root, { bareDirectories: false })).toBe(join(root, "docs"));
-    // Default (sole-argument semantics) is unchanged.
     expect(probeAnnotateToken("docs", root)).toBe(join(root, "docs"));
   });
 });
@@ -127,7 +109,6 @@ describe("annotateInputNamesExistingTarget", () => {
     expect(annotateInputNamesExistingTarget("plan.md", root)).toBe(true);
     expect(annotateInputNamesExistingTarget("docs", root)).toBe(true);
     expect(annotateInputNamesExistingTarget("https://example.com", root)).toBe(true);
-    // Exists but unsupported: pipeline owns its specific error.
     expect(annotateInputNamesExistingTarget("script.py", root)).toBe(true);
   });
 
@@ -138,9 +119,6 @@ describe("annotateInputNamesExistingTarget", () => {
   });
 
   test("the whole un-split string wins over its own tokens", () => {
-    // "Meeting Notes.md" names a real file whose second token ("Notes.md")
-    // also resolves on its own; the pre-pass must prefer the whole string so
-    // OpenCode/Pi keep supporting unquoted paths with spaces.
     expect(probeAnnotateToken("Notes.md", root)).not.toBeNull();
     expect(annotateInputNamesExistingTarget("Meeting Notes.md", root)).toBe(true);
     expect(probeAnnotateToken("Meeting Notes.md", root)).toBe(join(root, "Meeting Notes.md"));
@@ -193,9 +171,6 @@ describe("selectAnnotateTokenTarget", () => {
   });
 
   test("unrecognized dash tokens disable tolerance instead of being skipped", () => {
-    // Known flags are stripped before selection, so any dash token here is a
-    // typo'd flag; skipping it would change behavior (e.g. --no-jna
-    // silently fetching via Jina).
     const typoFlag = selectAnnotateTokenTarget("the aim doc --markdwn", probe);
     expect(typoFlag.kind).toBe("flagged");
     if (typoFlag.kind === "flagged") {
@@ -210,8 +185,6 @@ describe("selectAnnotateTokenTarget", () => {
   });
 
   test("pre-split argv tokens keep quoted arguments whole", () => {
-    // "my notes.md" arrived as ONE argv token; it must be probed as one
-    // token, never re-split so that "notes.md" silently resolves.
     const selection = selectAnnotateTokenTarget(["my notes.md", "runme"], probe);
     expect(selection.kind).toBe("none");
     if (selection.kind === "none") {
@@ -260,11 +233,6 @@ describe("message builders", () => {
   });
 });
 
-// The bundle rule (0.29): several arguments that are ALL existing files named
-// by their paths open as one review. The failure these guard: prose, a URL,
-// a folder or a searched name turning into a bundle (opening something the
-// user did not name), or several real paths still answered with the
-// ambiguity error.
 describe("bundle rule", () => {
   const select = (input: string | string[]) =>
     selectAnnotateTokenTarget(input, (token) => probeAnnotateToken(token, root, { bareDirectories: false }), {
@@ -309,25 +277,17 @@ describe("bundle rule", () => {
   test("a URL, a folder, or a name found only by search among the paths is the ambiguity error", () => {
     expect(select(["notes.md", "https://example.com/page"]).kind).toBe("multiple");
     expect(select(["notes.md", "docs/"]).kind).toBe("multiple");
-    // nested.md exists only as notes/deep/nested.md: found by search, a guess.
     expect(select(["plan.md", "nested.md"]).kind).toBe("multiple");
   });
 
-  // The failure: `annotate a.md typo.md` opened only a.md (the tolerant
-  // fast path), and the host said "Opened 2 files".
   test("a list of file paths with a missing one fails naming it, never narrows", () => {
     expect(select(["notes.md", "typo.md"])).toEqual({ kind: "missing", missing: ["typo.md"] });
     expect(select(["nope/a.md", "plan.md", "~/nope-b.md"])).toEqual({ kind: "missing", missing: ["nope/a.md", "~/nope-b.md"] });
-    // Prose around a path is still the fast path, a folder still the
-    // ambiguity error, and a searched name is not "missing".
     expect(select("look at notes.md please").kind).toBe("single");
     expect(select(["notes.md", "docs/"]).kind).toBe("multiple");
     expect(select(["plan.md", "nested.md"]).kind).toBe("multiple");
   });
 
-  // The failure (#1718 re-review): `annotate . a.md` said "File not found: ."
-  // for a directory that exists. An existing path is never missing: a stray
-  // `.` / `..` keeps the #1182 fast path, an existing folder the ambiguity.
   test("an existing directory among file paths is never reported missing", () => {
     for (const input of [[".", "notes.md"], ["notes.md", ".."], ["docs", "notes.md"]]) {
       const selection = select(input);
@@ -338,7 +298,6 @@ describe("bundle rule", () => {
     const parent = select(["notes.md", ".."]);
     expect(parent.kind === "single" && parent.candidate.value).toBe(join(root, "notes.md"));
     expect(select(["docs/", "notes.md"]).kind).toBe("multiple");
-    // With a real typo beside the directory, only the typo is named.
     expect(select([".", "notes.md", "typo.md"])).toEqual({ kind: "missing", missing: ["typo.md"] });
   });
 

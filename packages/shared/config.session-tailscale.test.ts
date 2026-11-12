@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolveSessionTailscale, sessionTailscaleOptOut } from "./config";
 
-// PLANNOTATOR_TAILSCALE / config.json "tailscale": the per-session `--tailscale`
-// as a default, so a host or agent need not pass the flag on every call.
 describe("resolveSessionTailscale", () => {
   test("the flag turns it on whatever the env var or config say", () => {
     expect(resolveSessionTailscale({ tailscale: false }, { PLANNOTATOR_TAILSCALE: "0" }, true)).toEqual({ on: true, source: "flag" });

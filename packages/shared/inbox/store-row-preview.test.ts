@@ -1,10 +1,3 @@
-/**
- * A list row's grey line is the thread's latest message (approval "inbox-row-latest-preview"), worked out by the
- * store on a real store in a temp dir. Failures to catch: an older message shown while a newer agent message is
- * unread; the Inbox's own reply (an action item's report) shown over agent news the person has not read; the
- * person's reply missing its "You: "; a question, an answer or a files-only message shown as raw markdown or as
- * nothing; an unnamed thread repeating its own title; a line that grows with the body.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +52,6 @@ describe("which message the line shows", () => {
     store.markSeen(root.thread_id);
     const action = store.questionsOf(root.id).find((q) => q.kind === "action")!;
     store.markAction(root.id, action.key, { outcome: "done" });
-    // Agent news lands inside the Undo window, then the Inbox writes the person's report after it.
     send("Pagefind index built: 1.2 MB for 340 pages.", { reply_to: root.id });
     clock.now += 60_000;
     const [report] = store.settleActions(10_000);
@@ -67,7 +59,6 @@ describe("which message the line shows", () => {
     const shown = row(root.thread_id);
     expect(shown.unseen).toBe(1);
     expect(shown.latest_preview).toBe("Pagefind index built: 1.2 MB for 340 pages.");
-    // Once read, the newest message is the report: the person's own words.
     store.markSeen(root.thread_id);
     expect(row(root.thread_id).latest_preview).toStartWith("You: ");
   });

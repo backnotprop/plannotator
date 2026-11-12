@@ -1,22 +1,3 @@
-/**
- * Test-only child entry for live-proxy-node.test.ts.
- *
- * Hosts the Node live proxy in a REAL node process: the transport's runtime
- * is node:http under Pi (jiti on Node), and Bun's node:http shim differs in
- * exactly the place that matters most here — writes to an 'upgrade' event's
- * socket never reach the wire under the shim (verified against Bun 1.x),
- * so an in-process proxy under `bun test` would fail WS passthrough that
- * works in production and vice versa could mask real breakage. The suite
- * builds this file with Bun.build, launches it under `node`, and drives the
- * proxy over the wire.
- *
- * Env contract: LIVE_PROXY_TARGET (required upstream origin),
- * LIVE_PROXY_EDITOR_ORIGINS (comma-separated), LIVE_PROXY_BRIDGE (bridge
- * body). Prints one JSON line { port } once listening, then stays alive
- * until killed; or { error: { name, message } } when the start fails, then
- * exits by itself with code 3 once nothing is left open.
- */
-
 import { startLiveAppProxyNode } from "./live-proxy-node";
 
 const targetUrl = process.env.LIVE_PROXY_TARGET;
@@ -32,9 +13,6 @@ try {
   });
   process.stdout.write(JSON.stringify({ port: proxy.port }) + "\n");
 } catch (error) {
-  // A failed start is reported, and the process is left to end by itself:
-  // it exits only if the failed start left no listener (or other handle)
-  // open, which is what the port tests check.
   const { name, message } = error instanceof Error ? error : new Error(String(error));
   process.stdout.write(JSON.stringify({ error: { name, message } }) + "\n");
   process.exitCode = 3;
