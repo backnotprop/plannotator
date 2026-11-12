@@ -62,7 +62,7 @@ interface Machine {
   calls: string;
 }
 
-const env = (m: Machine) => ({ ...(process.env as Record<string, string>), ...worldEnv(m.w), PLANNOTATOR_UPDATE_CHECK: "0" });
+const env = (m: Machine) => ({ ...(process.env as Record<string, string>), ...worldEnv(m.w), PLANNOTATOR_UPDATE_CHECK: "0", PLANNOTATOR_INBOX_SQLITE: m.name === "a" ? "0" : "" });
 const base = (m: Machine) => `http://127.0.0.1:${registry(m.w).port}`;
 
 function cli(m: Machine, ...args: string[]): { code: number; out: string; err: string } {
@@ -199,6 +199,7 @@ describe("linked machines, on three real Inboxes", () => {
       expect(existsSync(join(m.w.dataDir, "inbox", "outbox"))).toBe(false);
     }
     for (const m of machines) m.id = (await getJson(m, "/api/inbox/health")).inbox_id as string;
+    expect(machines.map((m) => existsSync(join(m.w.dataDir, "inbox", "inbox.db")))).toEqual([false, true, true]);
     // Never linked, Phones off: any device request is the unknown route it always was.
     expect((await fetch(`${base(A)}/api/inbox/device/health`, { headers: { Authorization: "Bearer tok_x" } })).status).toBe(404);
   }, 60_000);
