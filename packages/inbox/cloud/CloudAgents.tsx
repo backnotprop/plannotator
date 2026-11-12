@@ -66,7 +66,7 @@ export function CloudAgentsSection() {
     return () => clearInterval(timer);
   }, [model?.agents.length, live]);
 
-  if (hidden || !model) return null;
+  if (hidden || !model || (model.available === false && model.agents.length === 0)) return null;
 
   const opened = (session: string, setup: InboxCloudSetup | null) => setFresh((all) => ({ ...all, [session]: { setup } }));
   const closed = (session: string) =>

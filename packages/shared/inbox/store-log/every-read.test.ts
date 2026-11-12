@@ -16,47 +16,15 @@ import { join } from "node:path";
 import fc from "fast-check";
 import { InboxStore } from "../store";
 import { jsonlInboxLog } from "./jsonl-log";
-import type { InboxLog, InboxLogFactory } from "./log";
 import { LOGS_UNDER_TEST } from "./logs-under-test";
 import { everyRead } from "./reads";
+import { teeLog } from "./tee-log";
 import { writeInboxWorld } from "./world";
 
 const roots: string[] = [];
 afterAll(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-
-/** Writes go to both logs (today's first, so a refusal there writes nothing to the other); reads come from the first. */
-function teeLog(first: InboxLogFactory, second: InboxLogFactory): InboxLogFactory {
-  return (dir) => {
-    const a = first(dir);
-    const b = second(dir);
-    const both: InboxLog = {
-      read: () => a.read(),
-      append: (line, project) => {
-        a.append(line, project);
-        b.append(line, project);
-      },
-      keyTaken: (key) => a.keyTaken(key) || b.keyTaken(key),
-      createProject: (project, line) => {
-        a.createProject(project, line);
-        b.createProject(project, line);
-      },
-      deleteThread: (project, threadId, messageIds, seq) => {
-        a.deleteThread(project, threadId, messageIds, seq);
-        b.deleteThread(project, threadId, messageIds, seq);
-      },
-      deleteProject: (project, seq) => {
-        a.deleteProject(project, seq);
-        b.deleteProject(project, seq);
-      },
-      cardLines: (project, cardId) => a.cardLines(project, cardId),
-      usage: (project) => a.usage(project),
-    };
-    return both;
-  };
-}
-
 
 const SESSIONS = ["ses_world_a", "ses_world_b", "ses_world_c"];
 

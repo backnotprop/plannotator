@@ -311,7 +311,8 @@ import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
-import { createInboxRelay } from "./inbox-relay";
+import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./inbox-relay";
+import { createInboxCloudGate } from "./inbox-cloud-gate";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
@@ -4209,6 +4210,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return agent !== null && !hasCloudWake(agent);
   };
   store.setCloudPolling(cloudPollsItself);
+  const cloudGate = createInboxCloudGate({ dataDir, relayUrl: () => readRelayFile(dataDir)?.url ?? defaultRelayUrl() });
   const agentSignalsFor = (line: InboxLine): string[] => {
     if (line.kind !== "message" || line.record.author.kind !== "person" || line.at !== line.record.created_at) return [];
     const threadId = line.record.thread_id;
@@ -5586,7 +5588,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!ownerOrLocal(req, via)) return localOnly();
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         const cloudView = () => ({ agents: cloudAgents.list().map(cloudAgents.view), projects: cloudAgents.projects() });
-        if (path === "/api/inbox/cloud-agents" && req.method === "GET") return json(cloudView());
+        if (path === "/api/inbox/cloud-agents" && req.method === "GET") return json({ ...cloudView(), available: await cloudGate.available(cloudAgents.list().length) });
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);

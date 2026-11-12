@@ -1,8 +1,9 @@
 /**
  * A realistic Inbox, written through the store's own write paths from a seeded random walk: agents' messages
- * with questions, action items, attachments and hashtags; the person's picks, Sends, re-asks, comments, reads,
- * archives and New messages; cards, initiatives, steps and PRs; pins, snoozes and reply drafts; project
- * renames and combines; and thread deletions. A refused step (the store's own rules) is skipped, as a person
+ * with questions, action items, attachments and hashtags; the person's picks (typed notes too, a key at a time),
+ * Sends, re-asks, comments, reads, archives and New messages; an agent naming a thread the person started, and
+ * the person sending one on to another session; cards (an agent's drop the person then sees), initiatives, steps
+ * and PRs; pins, snoozes and reply drafts; project renames and combines; and thread deletions. A refused step (the store's own rules) is skipped, as a person
  * or agent would see a refusal and move on.
  *
  * Test-only. Shared by the "every read" test and the size budget, so both run against any record log.
@@ -72,6 +73,8 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
   const store = InboxStore.open(options.dataDir, { now, log: options.log });
   const projects = ["web", "api", "billing"].map((name) => store.ensureProject({ name, root: `/work/${name}` }));
   const roots: string[] = [];
+  /** Threads the person started, with the session each went to. */
+  const personRoots: { id: string; to: Agent }[] = [];
   const agentMessages: string[] = [];
   let n = 0;
 
@@ -119,6 +122,49 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     picked.add(id);
   };
 
+  /** The person types a note on a pick, a few keys at a time: each save a question line. */
+  const personTypes = () => {
+    const id = pick(agentMessages);
+    const q = openQuestions(id).find((x) => x.kind !== "action");
+    if (!q) return;
+    const label = pick(["Yes", "No", "Later"]);
+    const note = words(3);
+    let revision = q.revision;
+    for (let end = 2; end <= note.length; end += 1 + Math.floor(random() * 4)) {
+      const [saved] = store.savePicks(id, [{ key: q.key, revision, answer: { ...answerFor(q, label), note: note.slice(0, end) } }]);
+      if (!saved) return;
+      revision = saved.revision;
+    }
+    picked.add(id);
+  };
+
+  /** The person starts a thread for an agent. */
+  const personStarts = () => {
+    const to = pick(AGENTS);
+    // Sometimes named: typed (holds the name), or compose's suggestion (an agent may still replace it).
+    const named = chance(0.4) ? { thread_name: `mine-${n}`, thread_name_auto: chance(0.5) } : {};
+    const started = store.startPersonThread({ project_id: pick(projects).id, body: words(8), to: addressOf(to), idempotency_key: `p-${n++}`, ...named });
+    if (!roots.includes(started.message.thread_id)) roots.push(started.message.thread_id);
+    personRoots.push({ id: started.message.id, to });
+  };
+
+  /** The agent a person's thread went to replies and names it. */
+  const agentNames = () => {
+    const thread = personRoots.length > 0 ? pick(personRoots) : null;
+    if (!thread || !store.message(thread.id)) return;
+    const sent = store.sendMessage({ project_id: store.message(thread.id)!.project_id, author: thread.to, body: words(6), reply_to: thread.id, thread: `named-${n++}` });
+    agentMessages.push(sent.message.id);
+  };
+
+  /** "Send to another session": a thread the person started, not taken yet, goes to another agent. */
+  const personReaddresses = () => {
+    const thread = personRoots.length > 0 ? pick(personRoots) : null;
+    if (!thread || !store.message(thread.id)) return;
+    const other = AGENTS.find((agent) => agent.session !== thread.to.session && chance(0.5)) ?? AGENTS.find((agent) => agent.session !== thread.to.session)!;
+    store.readdressMessage(thread.id, addressOf(other), { askerEnded: true });
+    thread.to = other;
+  };
+
   /** An agent's follow-up that replaces one of its open questions. */
   const agentReplaces = () => {
     const id = pick(agentMessages);
@@ -148,6 +194,7 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
   const ops: [weight: number, run: () => void][] = [
     [30, agentSends],
     [14, personPicks],
+    [4, personTypes],
     [10, personSends],
     [3, agentReplaces],
     [2, personActs],
@@ -157,7 +204,9 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     [3, () => store.resolveThread(pick(roots), chance(0.8), chance(0.5) ? "person" : "agent")],
     [3, () => store.saveMessageAnnotation(pick(agentMessages), { id: `c-${n++}`, type: "COMMENT", originalText: "the", text: words(4) })],
     [2, () => store.ackMessage(pick(agentMessages), true)],
-    [3, () => store.startPersonThread({ project_id: pick(projects).id, body: words(8), to: addressOf(pick(AGENTS)), idempotency_key: `p-${n++}` })],
+    [3, personStarts],
+    [2, agentNames],
+    [1, personReaddresses],
     [2, () => store.markAgentChecked(pick(roots), Number.POSITIVE_INFINITY, now().toISOString(), pick(AGENTS).session)],
     [3, () => store.setThreadSteps({ thread_id: pick(roots), agent: pick(AGENTS), steps: [{ step: words(3), status: "done" }, { step: words(3), status: pick(["doing", "waiting"]) }] })],
     [2, () => store.changeThreadPulls({ thread_id: pick(roots), add: pullRefs(`o/r#${1 + Math.floor(random() * 5)}`), by: pick(AGENTS) })],
@@ -167,6 +216,12 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
       const card = store.listCards()[0];
       if (card) store.updateCard(card.id, { by: { kind: "person" }, column: pick(["backlog", "todo", "in_progress", "done"]) });
     }],
+    [2, () => {
+      // An agent drops a card; the person later sees it (a seen-only line: not a change to the card).
+      const card = pick(store.listCards().length > 0 ? store.listCards() : [null]);
+      if (card) store.updateCard(card.id, { by: pick(AGENTS), column: "dropped", reason: words(2) });
+    }],
+    [2, () => store.markCardDropsSeen()],
     [1, () => store.setPinned(pick(roots), chance(0.7))],
     [1, () => store.setSnooze(pick(roots), new Date(clock + 3 * 3600_000).toISOString())],
     [2, () => store.saveReplyDraft(pick(roots), { body: words(5), base: null })],
