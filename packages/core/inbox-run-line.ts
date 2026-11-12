@@ -28,6 +28,13 @@
 
 import type { InboxLaunchRecord, InboxRun } from "./inbox-types";
 
+/**
+ * A launched session's turn that ended in an error (approval "inbox-failed-turn-note"): after the agent's name, on its
+ * run line ("Claude Code couldn't answer. Your message is kept.") and in the notification for it
+ * ("<project>: Codex couldn't answer").
+ */
+export const INBOX_TURN_FAILED_WORDS = "couldn't answer";
+
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;
 

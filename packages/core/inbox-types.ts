@@ -647,6 +647,12 @@ export interface InboxMessage {
    */
   sent_again_to?: string | null;
   /**
+   * The Inbox's note for a launched session's turn that ended in an error ("<Agent>'s turn ended with an error: …",
+   * Claude Code, Codex and Pi): the window notifies for it ("<project>: <agent> couldn't answer"). Written only by
+   * the Inbox itself, never by an agent's call. Absent otherwise. Additive.
+   */
+  turn_error?: true;
+  /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
    * every other message and on records older than step 5.
