@@ -110,7 +110,7 @@ async function world(options: WorldOptions = {}) {
   if (options.threads) {
     const store = InboxStore.open(dataDir);
     const project = store.ensureProject({ name: "docs", root: join(root, "docs") });
-    // One session's messages make one thread: a session each.
+    // Each message starts its own thread.
     for (let i = 0; i < options.threads; i++) store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
   }
   const codex = options.codex === null ? null : installFakeCodex(root, options.codex ?? CHATGPT);
@@ -569,12 +569,13 @@ describe("over the tailnet", () => {
     expect((await w.settings()).voice.computer).toBeNull();
   });
 
-  test("the announcement is never claimed from there", async () => {
-    const w = await tailnetWorld({ version: "0.30.0", usedBefore: true });
-    const response = await w.through("/api/inbox/voice/intro", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.session }) });
-    expect(await response.json()).toEqual({ show: false });
-    expect(w.codex.starts()).toBe(0);
-    expect(w.saved().inboxVoiceIntro?.shownAt).toBeUndefined();
+  test("the announcement is claimed from there as on this computer (owner ruling 2026-11-11)", async () => {
+    const claimFrom = async (here: boolean) => {
+      const w = await tailnetWorld({ version: "0.30.0", usedBefore: true });
+      const response = here ? await w.json("/api/inbox/voice/intro", {}) : await w.through("/api/inbox/voice/intro", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.session }) });
+      return { show: ((await response.json()) as { show: boolean }).show, shown: w.saved().inboxVoiceIntro?.shownAt !== undefined };
+    };
+    expect(await claimFrom(false)).toEqual(await claimFrom(true));
   });
 
   describe("a login the owner allowed, who isn't the owner", () => {

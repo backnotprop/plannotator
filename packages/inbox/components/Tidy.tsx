@@ -12,6 +12,7 @@ import { LIST_LOOK_OPTIONS, type ListLook, type MenuLookKey } from '../listLook'
 import { shortProjectNames } from '../projectLabels';
 import { THREAD_PANEL_LABEL } from '../threadPanel';
 import { LIST_VIEW_LABEL, LIST_VIEW_OPTIONS, type ListView } from '../listView';
+import { STARRED_ABOVE_LABEL } from '../starredPills';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -40,6 +41,11 @@ export interface TidyController {
   warm?: () => void;
   /** That read (`warm`) is still out: the plan may be stale, so the menu shows Tidy as while it is first read. */
   pending?: boolean;
+  /**
+   * A list read that brought nothing new (so `version` did not move, App's listSame.ts): it still counts as a list
+   * read, as when every read drew the list again. Read now while shown, else the plan is stale.
+   */
+  listRead?: () => void;
 }
 
 /** How long the window polls a run's progress. */
@@ -105,6 +111,12 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     },
     [warm],
   );
+  const listRead = useCallback(() => {
+    // Not read for this scope yet: its first read is on its way anyway.
+    if (!enabled || readFor.current !== refresh) return;
+    if (open.current) refresh();
+    else stale.current = true;
+  }, [enabled, refresh]);
   const run = plan?.run ?? null;
   // Poll while a run goes, for 10 minutes at most: an agent that cannot say it
   // is done (Codex, MCP only) would otherwise keep it going all day. List and
@@ -135,7 +147,7 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     },
     [scope, surface, refresh],
   );
-  return { surface, scope, plan, run, start, refresh, shown, warm, pending };
+  return { surface, scope, plan, run, start, refresh, shown, warm, pending, listRead };
 }
 
 
@@ -205,6 +217,7 @@ export function TidyMenu({
   threadPanel,
   onCustomize,
   view,
+  starredAbove,
 }: {
   tidy: TidyController;
   phone: boolean;
@@ -220,6 +233,11 @@ export function TidyMenu({
   onCustomize?: () => void;
   /** The list's view (listView.ts), Grouped or List, first of the options. Absent (the Board, the tour): no item. */
   view?: { value: ListView; onChange: (view: ListView) => void };
+  /**
+   * "Keep starred above the list" (starredPills.ts), last in the View group: checked while the starred threads are
+   * pills above the list and not a sidebar section. Absent (the Board, the tour, an Inbox that keeps no stars): no item.
+   */
+  starredAbove?: { on: boolean; onChange: (on: boolean) => void };
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -288,6 +306,7 @@ export function TidyMenu({
                 <>
                   <Menu.Separator className="ib-pm-sep" />
                   <MenuViewChoice view={view.value} onChange={view.onChange} />
+                  {starredAbove && <MenuCheckbox label={STARRED_ABOVE_LABEL} checked={starredAbove.on} onChange={starredAbove.onChange} data-starred-above-option="" />}
                 </>
               )}
               {look && onLook && (
@@ -413,7 +432,7 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
             <li key={agent.session}>
               <label className="ib-tidy-ag" data-tidy-agent={agent.session}>
                 <input type="checkbox" checked={!off.has(agent.session)} onChange={(event) => tick([agent.session], event.target.checked)} />
-                <HostMark host={agent.host} />
+                <HostMark host={agent.host} agent={agent.session} />
                 <span className="ib-tidy-nm">{agent.name}</span>
                 <em>{formatCount(agent.items.length)}</em>
               </label>
@@ -513,7 +532,7 @@ function RunPanel({ run }: { run: InboxTidyRun }) {
         {run.agents.map((agent) => (
           <li key={agent.session} className="ib-tidy-ag ib-tidy-run" data-tidy-run-agent={agent.session} data-state={agent.state}>
             <span />
-            <HostMark host={agent.host} />
+            <HostMark host={agent.host} agent={agent.session} />
             <span className="ib-tidy-nm">{agent.name}</span>
             <em>{runState(agent)}</em>
           </li>

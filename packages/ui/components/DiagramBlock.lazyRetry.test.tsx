@@ -241,6 +241,151 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
 });
 
 /**
+ * Mermaid loads each diagram type (sequence, flowchart, ELK) as a chunk of its
+ * own on that type's first render, after the runtime has loaded; the error
+ * then comes out of `render()`, not the runtime import. What regresses: one
+ * dropped chunk (a flaky link, a proxy hiccup) leaves that diagram on
+ * "Importing a module script failed." for the life of the page, with no
+ * automatic re-attempt and no Retry, as if the source were wrong.
+ */
+describe('Mermaid diagram-type chunk', () => {
+  /** WebKit's words (Safari, every iPad browser) for an import that did not arrive. */
+  const chunkFailed = () => new TypeError('Importing a module script failed.');
+
+  test.skipIf(!hasDom)('a diagram-type chunk that fails once renders after the automatic re-attempt', async () => {
+    let renders = 0;
+    const runtime = {
+      initialize() {},
+      render: async () => {
+        renders += 1;
+        if (renders === 1) throw chunkFailed();
+        return { svg: SVG };
+      },
+    } as never;
+    __setMermaidRuntimeLoaderForTests(() => Promise.resolve(runtime), { retryDelayMs: RETRY_DELAY_MS });
+    const el = await mount(<MermaidBlock block={mermaidBlock} />);
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(renders).toBe(2);
+    expect(el.innerHTML).toContain('data-sentinel="diagram"');
+    expect(el.textContent).not.toContain('Mermaid Error');
+  });
+
+  // Safari keeps the failed fetch for the page, so neither a re-attempt nor a
+  // Retry can recover it: the source stays readable under the quiet Reload
+  // line every other part that could not load uses, never the red panel that
+  // reads as a broken diagram.
+  test.skipIf(!hasDom)('a diagram-type chunk that keeps failing shows the source under the Reload line, not the error panel', async () => {
+    let renders = 0;
+    const runtime = {
+      initialize() {},
+      render: async () => {
+        renders += 1;
+        throw chunkFailed();
+      },
+    } as never;
+    __setMermaidRuntimeLoaderForTests(() => Promise.resolve(runtime), { retryDelayMs: RETRY_DELAY_MS });
+    const el = await mount(<MermaidBlock block={mermaidBlock} />);
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(renders).toBe(2);
+    expect(el.querySelector('[data-lazy-load-failed]')).not.toBeNull();
+    expect(el.querySelector('pre')?.textContent).toBe(mermaidBlock.content);
+    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Rendering diagram');
+  });
+});
+
+/**
+ * Mermaid renders into a temporary `#d{id}` node on `document.body` and, on a
+ * parse failure (a diagram-type chunk that did not load is reported the same
+ * way) or a draw error, throws without removing it, with its "Syntax error in
+ * text" graphic inside. What regresses: that graphic piles up at the bottom of
+ * the page, under the app, one per failed render (the Inbox on an iPad).
+ * The stand-in leaves the node exactly where Mermaid 12.2 leaves it.
+ */
+describe('Mermaid failure leaves nothing outside the block', () => {
+  test.skipIf(!hasDom)('failed renders of several diagrams leave no node on document.body', async () => {
+    const leaky = {
+      initialize() {},
+      render: async (id: string) => {
+        const div = document.createElement('div');
+        div.id = `d${id}`;
+        div.textContent = 'Syntax error in text';
+        document.body.appendChild(div);
+        throw new Error('Parse error on line 2');
+      },
+    } as never;
+    __setMermaidRuntimeLoaderForTests(() => Promise.resolve(leaky), { retryDelayMs: RETRY_DELAY_MS });
+    const before = Array.from(document.body.children);
+    const el = await mount(
+      <>
+        <MermaidBlock block={mermaidBlock} />
+        <MermaidBlock block={{ ...mermaidBlock, id: 'm2' }} />
+      </>,
+    );
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(el.textContent).toContain('Parse error on line 2');
+    const added = Array.from(document.body.children).filter((node) => !before.includes(node) && node !== el);
+    expect(added.map((node) => node.id)).toEqual([]);
+    expect(document.body.textContent).not.toContain('Syntax error in text');
+  });
+});
+
+/**
+ * `sourceOnError` (opt-in; the Inbox's guide overview): a source that does not
+ * render shows its plain fence, never the red panel; a renderer that could
+ * not load still shows the panel and its Retry, which recovers the diagram.
+ * What regresses: a load failure left as a bare fence with no way back (the
+ * `runtimeUnavailable` exception dropped), or a parse error back on the panel.
+ */
+describe('Mermaid sourceOnError', () => {
+  test.skipIf(!hasDom)('a renderer that does not load keeps the panel and Retry, and Retry draws the diagram', async () => {
+    let healthy = false;
+    let calls = 0;
+    __setMermaidRuntimeLoaderForTests(
+      () => {
+        calls += 1;
+        return healthy ? Promise.resolve(fakeMermaid) : Promise.reject(new Error('chunk failed'));
+      },
+      { retryDelayMs: RETRY_DELAY_MS },
+    );
+    const el = await mount(<MermaidBlock block={mermaidBlock} readOnly sourceOnError />);
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(el.textContent).toContain('Mermaid Error');
+    expect(el.textContent).toContain(mermaidBlock.content);
+    const retry = el.querySelector<HTMLButtonElement>('button[title="Retry loading the diagram renderer"]');
+    expect(retry).not.toBeNull();
+
+    healthy = true;
+    const before = calls;
+    await act(async () => {
+      retry!.click();
+    });
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(calls).toBe(before + 1);
+    expect(el.innerHTML).toContain('data-sentinel="diagram"');
+    expect(el.textContent).not.toContain('Mermaid Error');
+  });
+
+  test.skipIf(!hasDom)('a source that does not render shows the plain fence, no panel and no Retry', async () => {
+    const broken = { initialize() {}, render: () => { throw new Error('Parse error'); } } as never;
+    __setMermaidRuntimeLoaderForTests(() => Promise.resolve(broken), { retryDelayMs: RETRY_DELAY_MS });
+    const el = await mount(<MermaidBlock block={mermaidBlock} readOnly sourceOnError />);
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(el.querySelector('pre')?.textContent).toBe(mermaidBlock.content);
+    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Parse error');
+    expect(el.textContent).not.toContain('Rendering diagram');
+    expect(el.querySelector('button[title="Retry loading the diagram renderer"]')).toBeNull();
+  });
+});
+
+/**
  * A host that redirects Mermaid's `katex` import to `utils/mermaid-math-slot`
  * gets `$$` labels typeset through the math slot, which is only useful if the
  * slot is filled by the time Mermaid renders. What regresses: the block stops

@@ -3,10 +3,10 @@
  * a typed path, from the folder listing's answers. Each case guards a rule the person relies on: a folder that is
  * there always leads (Enter never forces them deeper, except at home); a name that isn't there becomes Create, last
  * and quiet while a folder still starts with it; only the last folder can be made; a file, a folder that can't be
- * opened, one that can't be written, a hidden one or one outside home is said, never offered.
+ * opened, one that can't be written, a hidden or system one is said, never offered; a drive's root is started in.
  */
 import { describe, expect, test } from 'bun:test';
-import { cleanPastedPath, cloneAt, folderBrowserView, looksLikePath, needsNameRead, type CloneTargetRead, type FolderRead } from './homeFolders';
+import { cleanPastedPath, cloneAt, folderBrowserView, folderChild, homeRelative, looksLikePath, needsNameRead, splitFolderPath, type CloneTargetRead, type FolderRead } from './homeFolders';
 
 const CODE: FolderRead = {
   exists: true,
@@ -89,9 +89,21 @@ describe('folderBrowserView', () => {
     expect(kinds(view)).toEqual(['folder:2023', 'folder:2024']);
   });
 
-  test('A11: hidden or outside home: one line', () => {
+  test("A11: a hidden folder is one line, on a drive too; a system one is the server's to say", () => {
     expect(folderBrowserView({ typed: '~/.config/x', read: null, nameRead: null }).note).toBe("Hidden folders aren't offered.");
-    expect(folderBrowserView({ typed: '/etc', read: null, nameRead: null }).note).toBe('Only folders inside your home folder.');
+    expect(folderBrowserView({ typed: '/Volumes/Studio SSD/.Trashes', read: null, nameRead: null }).note).toBe("Hidden folders aren't offered.");
+    expect(folderBrowserView({ typed: '/etc', read: null, nameRead: null, error: "System folders aren't offered." }).note).toBe("System folders aren't offered.");
+  });
+
+  // Any folder but a system or hidden one (approval "inbox-launch-any-folder").
+  test("a drive's root leads with Start in <drive>; the folder drives are in, and a folder above home, never start", () => {
+    const ssd: FolderRead = { exists: true, state: 'folder', folders: ['footage', 'renders'], writable: true };
+    expect(kinds(folderBrowserView({ typed: '/Volumes/Studio SSD/', read: ssd, nameRead: null }))).toEqual(['start:Studio SSD', 'folder:footage', 'folder:renders']);
+    const volumes: FolderRead = { exists: true, state: 'folder', folders: ['Backup', 'Studio SSD'], start: false, writable: false };
+    expect(kinds(folderBrowserView({ typed: '/Volumes/', read: volumes, nameRead: null }))).toEqual(['folder:Backup', 'folder:Studio SSD']);
+    // The disk's top: "/Volumes" typed exactly is a folder to go into, never to start in.
+    const top: FolderRead = { exists: true, state: 'folder', folders: ['Users', 'Volumes'], nostart: ['Users', 'Volumes'], start: false, writable: false };
+    expect(kinds(folderBrowserView({ typed: '/Volumes', read: top, nameRead: null }))).toEqual(['folder:Volumes']);
   });
 
   test('A12: one Backspace back to a folder that is there: Create goes, Start comes back', () => {
@@ -178,5 +190,42 @@ describe('folderBrowserView, cloning into another folder', () => {
     expect(view.note).toBe("Can't clone into ~/Documents/Archive: no permission.");
     expect(cloneKinds(view)).toEqual(['folder:2019', 'folder:2020']);
     expect(folderBrowserView({ typed: '~/Documents/Archive/new', read: archive, nameRead: missing, clone: { repo: 'billing-api', target: null } }).note).toBe("Can't clone into ~/Documents/Archive: no permission.");
+  });
+});
+
+describe('a Windows machine (its home is C:\\Users\\…)', () => {
+  const home = 'C:\\Users\\Administrator';
+  test('its home typed any way Windows takes it reads as ~/…', () => {
+    expect(homeRelative('C:\\Users\\Administrator\\code\\web', home)).toBe('~/code/web');
+    expect(homeRelative('c:/users/administrator/code', home)).toBe('~/code');
+    expect(homeRelative('~\\code\\web', home)).toBe('~/code/web');
+    expect(homeRelative('C:\\Users\\Administrator\\', home)).toBe('~/');
+  });
+  test("another drive or a system folder keeps its letter, for that machine to answer (never \"That isn't a full path.\")", () => {
+    expect(homeRelative('D:\\x', home)).toBe('D:/x');
+    expect(homeRelative('C:\\Windows', home)).toBe('C:/Windows');
+    expect(splitFolderPath('D:/x')).toEqual({ parent: 'D:/', tail: 'x' });
+    expect(splitFolderPath('C:/Windows/System32')).toEqual({ parent: 'C:/Windows', tail: 'System32' });
+    expect(folderChild('D:/', 'x')).toBe('D:/x');
+  });
+  test("a pasted Windows path keeps its backslashes (they're its own, not Terminal's escapes)", () => {
+    expect(cleanPastedPath('"C:\\Users\\Administrator\\My Code"', home)).toBe('~/My Code');
+    expect(cleanPastedPath('C:\\Users\\Administrator\\code', null)).toBe('C:\\Users\\Administrator\\code');
+    expect(cleanPastedPath('file:///C:/Users/Administrator/code', home)).toBe('~/code');
+    expect(looksLikePath('C:\\Users\\x')).toBe(true);
+    expect(looksLikePath('c:/users/x')).toBe(true);
+    expect(looksLikePath('~\\code')).toBe(true);
+    expect(looksLikePath('C: drive')).toBe(false);
+  });
+  test('a Mac or Linux home reads as before: a backslash is an escape, a drive letter is a name', () => {
+    expect(homeRelative('/Users/ramos/code', '/Users/ramos')).toBe('~/code');
+    expect(cleanPastedPath('~/Documents/Client\\ Work', '/Users/ramos')).toBe('~/Documents/Client Work');
+    expect(homeRelative('C:\\x', '/Users/ramos')).toBe('C:\\x');
+  });
+  test('a folder there but not offered (Windows marks AppData hidden, no dot): its words, no Create row', () => {
+    const view = folderBrowserView({ typed: '~/AppData', read: HOME, nameRead: null, nameRefused: "Hidden folders aren't offered." });
+    expect(view.note).toBe("Hidden folders aren't offered.");
+    expect(kinds(view).some((k) => k.startsWith('create'))).toBe(false);
+    expect(folderBrowserView({ typed: '~/AppData', read: HOME, nameRead: null }).note).toBeNull();
   });
 });

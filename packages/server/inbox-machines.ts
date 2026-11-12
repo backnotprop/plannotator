@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { inboxRowArchived, isInboxId, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -123,7 +123,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean } };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
 
 /** How the window draws a machine's version (approval "inbox-machine-update"). */
 export interface MachineUpdateView {
@@ -134,6 +134,8 @@ export interface MachineUpdateView {
   can_update: boolean;
   /** Its copy was installed by the install script. */
   self_update: boolean;
+  /** The person asked an agent there to update it (an older door): the thread (null while held) and the agent. Absent otherwise. */
+  asked?: { thread: string | null; agent: string; at: string };
 }
 
 /** How long "Updated" stays on the row, how long a machine has to come back, how long Update waits for its first answer (it asks GitHub first). */
@@ -142,6 +144,8 @@ const RESTART_BACK_MS = 3 * 60_000;
 const UPDATE_START_MS = 45_000;
 /** A press whose first `updating` has not arrived yet still reads as updating, for this long. */
 const UPDATE_ASKED_GRACE_MS = 10_000;
+/** How long an ask to an agent there is said ("Asked Claude Code on Mini"): an agent that never acts on it lets the dialog offer it again. */
+export const AGENT_ASK_KEPT_MS = 30 * 60_000;
 
 /**
  * What the window draws about a linked machine's version. That machine's own state first; when it has no newer version
@@ -149,6 +153,23 @@ const UPDATE_ASKED_GRACE_MS = 10_000;
  * Inbox never offers an update to a machine that is ahead of it or level with the newest known.
  */
 export function machineUpdateView(
+  peer: Pick<PeerLink, "state" | "since" | "version" | "farUpdate" | "noChange" | "asked" | "saidUpToDate" | "updated" | "canUpdate" | "selfUpdate"> & Partial<Pick<PeerLink, "agentAsked">>,
+  own: { current: string; latest: string | null } | null,
+  now: number,
+  clocks: { updatedShownMs: number; restartBackMs: number },
+): MachineUpdateView | null {
+  const view = pressView(peer, own, now, clocks);
+  // An agent there was asked to update it (an older door): said beside whatever the machine shows, for a while.
+  const ask = peer.agentAsked && now - peer.agentAsked.at < AGENT_ASK_KEPT_MS ? peer.agentAsked : null;
+  if (!ask || !view || view.phase === "updated") return view;
+  const asked = { thread: ask.thread, agent: ask.agent, at: new Date(ask.at).toISOString() };
+  // Gone since the ask: that agent's restart, for as long as a restart takes. Never "not back": a machine that sleeps
+  // after an ask nobody acted on is only asleep.
+  if (peer.state !== "online" && peer.since >= ask.at && now - peer.since < clocks.restartBackMs && view.phase === "behind") return { ...view, phase: "restarting", asked };
+  return { ...view, asked };
+}
+
+function pressView(
   peer: Pick<PeerLink, "state" | "since" | "version" | "farUpdate" | "noChange" | "asked" | "saidUpToDate" | "updated" | "canUpdate" | "selfUpdate">,
   own: { current: string; latest: string | null } | null,
   now: number,
@@ -244,6 +265,11 @@ export interface MachineView {
    * start agents there"). Null for this Inbox, whose own launch block says.
    */
   launch: boolean | null;
+  /**
+   * Its store takes a Delete on an agent message's words (its health's `message_deletions`). Not: a Delete it refuses
+   * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
+   */
+  message_deletions: boolean;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -311,7 +337,7 @@ const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
-/** A tailnet guest of this Inbox, acting on another machine or on what waits for one. */
+/** A tailnet guest of this Inbox, starting or trusting an agent on another machine, or updating one. */
 const OWNER_ONLY_BODY = { error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" } as const;
 /** Of a forwarded read's query, what a guest never passes on: `sessions`' folder-trust facts. */
 const GUEST_STRIPPED = ["trust_agent", "trust_project"] as const;
@@ -420,6 +446,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       list_cursor: null,
       snoozes: true,
       launch: null,
+      message_deletions: true,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -439,6 +466,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         snooze_old: peer?.list ? !peer.list.snoozes : false,
         update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
+        message_deletions: peer?.messageDeletions ?? false,
       } satisfies MachineView;
     }),
   ];
@@ -462,6 +490,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const due = [...peers.values()].flatMap((peer) => [
       ...(peer.updated ? [peer.updated.at + updatedShownMs] : []),
       ...(peer.asked ? [peer.state === "online" ? peer.asked.at + UPDATE_ASKED_GRACE_MS : peer.since + restartBackMs] : []),
+      ...(peer.agentAsked ? [peer.agentAsked.at + AGENT_ASK_KEPT_MS, ...(peer.state === "online" ? [] : [peer.since + restartBackMs])] : []),
     ]).filter((at) => at > now);
     if (due.length === 0) return;
     updateClock = setTimeout(machinesChanged, Math.min(...due) - now + 20);
@@ -492,7 +521,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onChange: machinesChanged,
       // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onSnoozes: () => emit({ event: "snoozes", data: {} }),
-      onDeliveries: ({ sessions }) => emit({ event: "deliveries", data: sessions ? { sessions: true } : {} }),
+      onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
     });
     peers.set(link.id, peer);
@@ -782,8 +811,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
       }
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
-    // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
-    if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
     // Rule 8's table decides, by route: a write it has not classified, or calls `local`, never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
@@ -810,6 +837,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox.
     const body = await context.readBody(req);
     if (checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    // A guest the allow list let onto this Inbox answers the owner's other machines' threads as it answers this one's
+    // (owner ruling 2026-11-11), Stop and Delete included; starting or trusting an agent there stays the owner's, as here.
+    if (context.isGuest(req, via) && startsAgentThere(route, body) && !/\/(stop|delete)$/.test(route)) return json(OWNER_ONLY_BODY, 403);
     // A press in this Inbox's window (its own Origin and this run's page session), said to the other machine with the
     // write: it answers a permission prompt, or starts, stops or trusts an agent there, only for one (remote launch).
     // An agent's or a script's bare call is still the owner's for every other write, as before.
@@ -962,11 +992,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return json({ waiting: waiting.map(outboxView), notices: outbox.notices().map(outboxView) });
     }
     // Cancel a write still waiting that never left (a launch held for a machine that is asleep): it is never sent.
-    // The owner's, from any of their devices; a held launch only from a window, as the forward took it.
+    // Any window's, as the write itself was (a guest's too); a held launch only from a window, as the forward took it.
     const cancel = /^\/api\/inbox\/outbox\/([^/]+)\/cancel$/.exec(path);
     if (cancel) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
       const body = await context.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
@@ -984,12 +1013,28 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const dismiss = /^\/api\/inbox\/outbox\/([^/]+)\/dismiss$/.exec(path);
     if (dismiss) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
       const stale = staleTab(await context.readBody(req));
       if (stale) return stale;
       const entry = outbox.dismiss(decodeURIComponent(dismiss[1]!));
       if (!entry) return json({ error: "No such write.", code: "not_found" }, 404);
       return json({ entry: outboxView(entry) });
+    }
+    // The window asked an agent on an older machine to update it (its New message went through the forward, as any
+    // compose does): remembered here so that machine's row says so, then Restarting and Updated when it comes back newer.
+    const askedMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/update\/asked$/.exec(path);
+    if (askedMatch) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
+      const body = await context.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      const peer = peers.get(askedMatch[1]!);
+      if (!peer) return json({ error: "That machine is not linked.", code: "machine_not_linked" }, 404);
+      const thread = typeof body.thread_id === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(body.thread_id) ? body.thread_id : null;
+      const agent = typeof body.agent === "string" ? body.agent.replace(/\s+/g, " ").trim().slice(0, 60) : "";
+      peer.agentAsked = { from: peer.version, at: Date.now(), thread, agent: agent || "An agent" };
+      machinesChanged();
+      return json({ ok: true, update: updateView(peer) });
     }
     // Update on another machine. Its own route, like its accounts: never the forward and never the outbox
     // (an update that waits days and runs when a machine wakes is not what anyone pressed).
@@ -1047,7 +1092,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const unlinkMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/unlink$/.exec(path);
     if (path === "/api/inbox/machines/offer" || path === "/api/inbox/machines/link" || unlinkMatch) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (via !== "local") return json({ error: "Linking machines works only on this computer's own screen.", code: "local_only" }, 403);
+      // This computer's, and its owner's from any of their own devices over the tailnet (owner ruling 2026-11-11); never a guest's.
+      if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can link machines.", code: "owner_only" }, 403);
       const body = await context.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
@@ -1079,6 +1125,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   const rows = (): (InboxListRow & { machine: string })[] => [...peers.values()].flatMap((peer) => peer.list?.rows ?? []);
   const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
+  /** Each linked machine's agents, as its list last said (kept in memory while it is away, like its rows); none from an older Inbox. */
+  const agents = (): InboxAgentsGroup[] => [...peers.values()].flatMap((peer) => (peer.list?.agents ? [peer.list.agents] : []));
+  const sessionNames = (): { labels: Record<string, string>; titles: Record<string, string> } => {
+    const labels = Object.create(null) as Record<string, string>;
+    const titles = Object.create(null) as Record<string, string>;
+    for (const peer of peers.values()) {
+      if (!peer.list) continue;
+      Object.assign(labels, peer.list.session_labels);
+      Object.assign(titles, peer.list.session_titles);
+    }
+    return { labels, titles };
+  };
   const projectOwner = (projectId: string): string | null => {
     for (const peer of peers.values()) if (peer.list?.projects.some((p) => p.id === projectId)) return peer.id;
     return null;
@@ -1111,6 +1169,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     machinesView,
     rows,
     projects,
+    agents,
+    sessionNames,
     projectOwner,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */

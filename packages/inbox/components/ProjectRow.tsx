@@ -66,8 +66,8 @@ export interface ProjectRowProps {
  * Home/End, type-ahead, Escape and Tab close, focus back to ⋯). No new
  * shortcut: the platform's context-menu key reaches the row by itself.
  *
- * "+" (`newSession`) sits beside ⋯ and shows with it (hover, keyboard focus, the menu open; always on a phone, each a
- * 44 px target): a new session in this project, with no new key (Tab reaches it, Enter or Space presses it).
+ * "+" (`newSession`) sits beside ⋯ and shows with it (hover, keyboard focus, the menu open; a phone draws no "+",
+ * only ⋯): a new session in this project, with no new key (Tab reaches it, Enter or Space presses it).
  *
  * Rename… (after a separator) turns the row into a field holding its name:
  * Enter saves, Escape or leaving the field cancels, and an empty name is not
@@ -93,6 +93,8 @@ export function ProjectRow(props: ProjectRowProps) {
     more.current?.focus();
   }, [renaming]);
   const { project } = props;
+  // A computer only: a phone's rows show ⋯ alone (the owner, 2026-11-10: "not necessary right now").
+  const newSession = props.phone ? undefined : props.newSession;
   const onRename = props.onRename;
   // Letter marks (letterMarks.tsx): the project's mark before its name, while Settings → Rows shows project marks.
   const { marks } = useRowMarks();
@@ -102,7 +104,7 @@ export function ProjectRow(props: ProjectRowProps) {
     <div
       className="ib-projrow"
       data-project={project.id}
-      data-plus={props.newSession ? '' : undefined}
+      data-plus={newSession ? '' : undefined}
       data-menu={menuOpen || contextOpen ? '' : undefined}
       data-held={props.held ? '' : undefined}
       data-renaming={renaming ? '' : undefined}
@@ -193,9 +195,9 @@ export function ProjectRow(props: ProjectRowProps) {
           {props.count > 0 && <span className="ib-n">{formatCount(props.count)}</span>}
         </button>
       </ProjectTip>
-      {props.newSession && (
-        <Tip content={props.newSession.tip}>
-          <button type="button" className="ib-pplus" aria-label={props.newSession.tip} onClick={props.newSession.onPress} data-pplus={project.id}>
+      {newSession && (
+        <Tip content={newSession.tip}>
+          <button type="button" className="ib-pplus" aria-label={newSession.tip} onClick={newSession.onPress} data-pplus={project.id}>
             <Icon name="plus" size={16} />
           </button>
         </Tip>
@@ -315,8 +317,11 @@ function folderName(root: string): string {
  * (approval "project-combine"): one line under the field, Cancel and Combine, no Keep both. Enter combines and
  * Escape cancels. A name several projects answer to ("acme", two clones) offers one button for each, and
  * Enter leaves the choice to the person.
+ *
+ * An agent's sidebar row uses it too (agents/AgentsSection.tsx): `label` names the field, nothing combines, and
+ * `emptyResets` saves an empty name as "" instead of refusing it.
  */
-function ProjectNameField(props: {
+export function ProjectNameField(props: {
   name: string;
   folder: string;
   announce?: (text: string) => void;
@@ -324,6 +329,10 @@ function ProjectNameField(props: {
   onCombine?: (into: LabeledProject) => Promise<boolean>;
   onSave: (name: string) => Promise<boolean>;
   onCancel: (refocus: boolean) => void;
+  /** The field's spoken name; "Project name" when absent. */
+  label?: string;
+  /** An empty name is saved (as "") rather than refused. */
+  emptyResets?: boolean;
 }) {
   const [value, setValue] = useState(props.name);
   const [busy, setBusy] = useState(false);
@@ -368,7 +377,7 @@ function ProjectNameField(props: {
     }
   };
   const save = async () => {
-    if (typed === '') return refuse('A name cannot be empty.');
+    if (typed === '' && !props.emptyResets) return refuse('A name cannot be empty.');
     if ([...typed].length > INBOX_PROJECT_NAME_MAX) return refuse(`A name can be at most ${INBOX_PROJECT_NAME_MAX} characters.`);
     if (typed === props.name) return close(true);
     if (matches.length === 1) return combine(matches[0]!);
@@ -405,7 +414,7 @@ function ProjectNameField(props: {
         ref={input}
         type="text"
         className="ib-proj-rename"
-        aria-label="Project name"
+        aria-label={props.label ?? 'Project name'}
         aria-describedby={hint}
         aria-invalid={refused ? true : undefined}
         placeholder={props.folder}

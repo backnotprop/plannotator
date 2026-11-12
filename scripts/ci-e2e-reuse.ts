@@ -34,13 +34,13 @@
  *    the update specs and the phone door's proofs).
  *
  * A run is always full on a schedule or by hand, for a PR from a fork, when the
- * PR has the `ci:e2e-all` label (with `ci:full`, which every PR run needs), with no earlier run of the same key, and when
+ * PR has the `ci:e2e-all` label, with no earlier run of the same key, and when
  * anything here fails (the plan never fails the job: it falls back to full).
  *
  * What a left-out spec does not prove: that it still passes with the newer
  * main the PR was merged with. That is the same as a PR that merges without
- * merging main first, which the merge loop already allows; the nightly run on
- * main and every other PR's run cover main itself.
+ * merging main first, which the merge loop already allows; the two-hourly run
+ * on main covers main itself.
  *
  * scripts/ci-e2e-reuse.test.ts checks the key, the report reading, the pass
  * records, the lookup and the plan, its fallback included.
@@ -269,7 +269,7 @@ export function findEarlier(key: string, scratch: string, ctx: { repo: string; h
   const { repo, headRef, runId } = ctx;
   const runs = github.api(`repos/${repo}/actions/workflows/inbox-e2e.yml/runs?event=pull_request&branch=${encodeURIComponent(headRef)}&per_page=30`) as { workflow_runs: Run[] };
   const earlier = runs.workflow_runs
-    // A run that skipped every job (a push before the PR had ci:full, another label) has nothing to give.
+    // A run that skipped every job (a push before the PR had ci:e2e, another label) has nothing to give.
     .filter((r) => String(r.id) !== runId && r.event === 'pull_request' && r.head_branch === headRef && r.head_repository?.full_name === repo && r.conclusion !== 'skipped')
     .slice(0, LOOKBACK_RUNS);
   for (const run of earlier) {

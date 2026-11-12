@@ -242,8 +242,8 @@ test('the header: icons on the right with component tooltips, Artifacts with its
   await expect(button).toHaveAttribute('aria-label', 'Artifacts, 11');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
   await expect(button).not.toHaveAttribute('title');
-  // The read button is an icon (approval "inbox-thread-header"): its words are its name.
-  await expect(header().locator('[data-mark-read]')).toHaveAccessibleName('Mark read');
+  // No read button in the bar (it leads the ⋯ menu, the owner 2026-11-11).
+  await expect(header().locator('.ib-readbtn')).toHaveCount(0);
   // Expand all is an icon now, named by its label.
   const expand = header().locator('[data-expand-all]');
   await expect(expand).toHaveAttribute('aria-label', /Expand all messages|Fold the earlier messages/);
@@ -251,11 +251,11 @@ test('the header: icons on the right with component tooltips, Artifacts with its
   // The order: the thread's full screen and its hairline lead (approval "inbox-files-tabs", amendment 2026-10-30, B);
   // at the right Artifacts, Expand, Archive, a hairline, the close.
   const order = await header().evaluate((head) =>
-    [...head.querySelectorAll('[data-full-in], [data-artifacts-button], [data-expand-all], [data-thread-more], .ib-vsep, [aria-label="Close the thread"]')].map(
-      (el) => el.hasAttribute('data-full-in') ? 'full' : el.getAttribute('data-artifacts-button') !== null ? 'artifacts' : el.hasAttribute('data-expand-all') ? 'expand' : el.hasAttribute('data-thread-more') ? 'more' : el.classList.contains('ib-vsep') ? '|' : 'close',
+    [...head.querySelectorAll('[data-artifacts-button], [data-expand-all], [data-thread-more], .ib-vsep, [aria-label="Close the thread"]')].map(
+      (el) => el.getAttribute('data-artifacts-button') !== null ? 'artifacts' : el.hasAttribute('data-expand-all') ? 'expand' : el.hasAttribute('data-thread-more') ? 'more' : el.classList.contains('ib-vsep') ? '|' : 'close',
     ),
   );
-  expect(order).toEqual(['full', '|', 'artifacts', 'expand', 'more', '|', 'close']);
+  expect(order).toEqual(['artifacts', 'expand', 'more', '|', 'close']);
   await button.hover();
   await expect(page.locator('[data-pn-tooltip]')).toContainText('Artifacts: every file, image and guided review in this thread');
   await shot(page, '01-thread-header-desktop');

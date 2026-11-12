@@ -12,6 +12,7 @@ import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords } from '../relativeTime';
 import { forgeBody } from './descriptionLinks';
 import { ForgeMarkdown, PullDescription } from './PullDescription';
+import { Face } from './Face';
 
 /**
  * The details of one PR, read again when `stamp` moves or `retry` asks (the server keeps them a minute); a failure says
@@ -57,9 +58,8 @@ function useReached(at: number | null): boolean {
 
 const REVIEW_WORDS: Record<InboxPullReviewState, string> = { approved: 'Approved', changes: 'Changes requested', commented: 'Commented', waiting: 'Waiting' };
 const REVIEW_ORDER: InboxPullReviewState[] = ['changes', 'approved', 'commented', 'waiting'];
-const DELETED = 'A deleted account';
-const initial = (login: string) => (login.includes('/') ? login.split('/')[1]! : login).replace(/\[bot\]$/, '').slice(0, 1).toUpperCase();
-const shortName = (login: string) => login.replace(/\[bot\]$/, '');
+export const DELETED = 'A deleted account';
+export const shortName = (login: string) => login.replace(/\[bot\]$/, '');
 const checkName = (check: InboxPullCheck) => (check.workflow ? `${check.workflow} / ${check.name}` : check.name);
 /** A bot that only commented says nothing about where the review stands: it follows the people who were asked. */
 const quietBot = (r: InboxPullReviewer) => !!r.bot && r.state === 'commented';
@@ -78,42 +78,6 @@ export function reviewWords(all: readonly InboxPullReviewer[]) {
   if (reviewers.some((r) => r.state === 'changes')) return 'Changes requested';
   const approved = reviewers.filter((r) => r.state === 'approved').length;
   return approved ? `${approved} approved` : reviewers.some((r) => r.state === 'commented') ? 'Commented' : 'Waiting';
-}
-
-/**
- * A person's picture, round: the initial while it loads and when it cannot, a grey person for a deleted account. An app
- * or a team is a soft square, as on the forge; a team has no picture to ask for.
- */
-function Face({ login, host, size, bot, team, state }: { login: string; host: string; size: number; bot?: boolean; team?: boolean; state?: InboxPullReviewState }) {
-  const [shown, setShown] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const isTeam = team || login.includes('/');
-  const square = bot || isTeam || login.endsWith('[bot]');
-  return (
-    <span className="ib-prd-face" data-square={square ? '' : undefined} data-gone={login ? undefined : ''} style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }} aria-hidden="true">
-      <span className="ib-prd-pic">
-        {!login ? <Icon name="user" size={Math.round(size * 0.6)} /> : !shown && initial(login)}
-        {login && !isTeam && !failed && (
-          <img
-            src={inboxApi.pullAvatarUrl(host, login)}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            draggable={false}
-            data-shown={shown ? '' : undefined}
-            onLoad={(event) => (event.currentTarget.naturalWidth > 1 ? setShown(true) : setFailed(true))}
-            onError={() => setFailed(true)}
-          />
-        )}
-      </span>
-      {state && state !== 'waiting' && (
-        <span className="ib-prd-pip" data-state={state}>
-          <Icon name={state === 'approved' ? 'check' : state === 'changes' ? 'x' : 'comment'} size={8} />
-        </span>
-      )}
-    </span>
-  );
 }
 
 const CheckMark = ({ state, quiet }: { state: InboxPullCheckState; quiet?: boolean }) =>

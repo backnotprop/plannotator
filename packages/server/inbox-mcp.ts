@@ -15,24 +15,27 @@ import { realpathSync } from "node:fs";
 import { basename, isAbsolute } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
-import { findQuestionBlocks, QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
+import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
-import { inboxQuestionKeysWithRecommendedMarker, inboxQuestionsToCheck, parseInboxQuestionBlocks, type InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
+import { inboxQuestionKeysWithRecommendedMarker, inboxQuestionsToCheck, parseInboxQuestionBlocks, type InboxQuestionToCheck, type PrototypeAppTarget } from "@plannotator/core/inbox-questions";
+import { checkSendPrototypes } from "./inbox-prototypes";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
-import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { readInboxAttachmentQuestions } from "@plannotator/shared/inbox/attachment-questions";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
-import type { InboxAttachment, InboxListRow } from "@plannotator/core/inbox-types";
+import type { InboxAttachment, InboxListRow, InboxLiveSiteRef } from "@plannotator/core/inbox-types";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
@@ -48,8 +51,10 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
+import { quietHint } from "./inbox-mcp-hints";
+import { changePullsAsAgent, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "get_guide_brief", "submit_guide", "card", "steps"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
@@ -84,7 +89,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "",
   INBOX_AGENT_RULES,
   "",
-  "- send_message posts markdown. Messages join your session's thread until the person resolves it; pass `thread` (a short name) to keep separate work apart, or reply_to (an id from the Inbox, never from memory) to answer a message. Question syntax: send_message's description.",
+  "- send_message posts markdown. With no reply_to or thread, a message starts a new thread; to add to a thread, reply_to its latest message (an id from the Inbox, never from memory) or use the same `thread` name. Question syntax: send_message's description.",
   "- attachments: files to open beside the thread (link one: `[the mock](mock.html)`); pictures go in the body, `![alt](path)`.",
   "- send_message's result says whether the reply arrives in this session by itself. When it does not, go on and read the thread later.",
   "- read_thread reads one thread (thread_id); without an id it lists yours (asked_by \"anyone\": all), and `unread` marks a thread the person wrote in. search finds older messages by words. resolve_message archives the thread, only when nothing in it is left for the person to read or answer.",
@@ -100,7 +105,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
  * own description, and the guide's rules on WHAT to ask still reach the model.
  */
 export const SEND_MESSAGE_DESCRIPTION = [
-  "Message the person in the Plannotator Inbox (markdown), in your session's open thread (see `thread`). One message per real need.",
+  "Message the person in the Plannotator Inbox (markdown). With no reply_to or thread, it starts a new thread. One message per real need.",
   "",
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
@@ -159,6 +164,29 @@ export const INBOX_CONTRACT_EXAMPLE = [
 ].join("\n");
 
 /**
+ * Option lines (approval "inbox-question-tradeoffs"): Pros, Cons and a
+ * prototype per option, one a running app and one an attached file. The help
+ * carries it (`plannotator inbox --help`, "Trade-offs and prototypes").
+ */
+export const INBOX_TRADEOFFS_EXAMPLE = [
+  ":::question",
+  "Which checkout should ship?",
+  "",
+  "- [ ] A · Classic — today's layout",
+  "    Pros: no retraining",
+  "    Cons: Pay sits below the fold on a phone",
+  "    Prototype: http://localhost:5173/checkout?v=a",
+  "- [ ] B · Total first — the amount and Pay at the top",
+  "    Pros: the amount due and Pay are seen first",
+  "    Cons: accounting checks a new layout; a long invoice runs to two pages",
+  "    Prototype: proto/checkout-b.html",
+  "",
+  "Recommended: B · Total first",
+  "Why: in the pilot, people paid faster with B.",
+  ":::",
+].join("\n");
+
+/**
  * send_message's `body`, as an agent reads it. The `Stopped:` and `Holds up:`
  * lines live here, not in QUESTION_AUTHORING_GUIDE (shared with plan review,
  * where they mean nothing) and not in send_message's own description (cut at
@@ -184,6 +212,8 @@ export const SEND_BODY_DESCRIPTION = [
   "- `Shows: ![alt](path)` or `Shows: [name](file)`: the one picture or file the decision is about (put long detail in that file, not the block).",
   "- `Why: <one line>`, on its own line after `Recommended:`: why you recommend it.",
   "- `Reversible: no — <why>`: only when the answer cannot be taken back.",
+  INBOX_OPTION_LINES_RULE,
+  INBOX_DELEGATED_OPTIONS_RULE,
   "",
   INBOX_CONTRACT_EXAMPLE,
   "",
@@ -194,7 +224,7 @@ export const SEND_BODY_DESCRIPTION = [
 ].join("\n");
 
 const AGENT_SESSION_DESCRIPTION =
-  "Your session id. The `plannotator inbox mcp` shim fills it. send_message joins your session's thread by it; read_thread's asked_by \"me\" matches on it.";
+  "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.";
 
 /**
  * The fields every sending tool takes beside its content (send_message and
@@ -202,12 +232,12 @@ const AGENT_SESSION_DESCRIPTION =
  */
 export const SEND_ROUTING_FIELDS = {
   project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
-  subject: z.string().optional().describe("A short one-line subject when this starts a thread (ignored when it joins one). Plain text: no line breaks. Default: the first question's prompt, else the first line."),
+  subject: z.string().optional().describe("A short one-line subject when this starts a thread. Plain text: no line breaks. Default: the first question's prompt, else the first line."),
   thread: z
     .string()
     .optional()
     .describe(
-      `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). Without it, your messages join your session's open thread in this project (a new one the first time, or once the person resolved it; a thread keeps its first subject). With it, the same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). Use it to split separate work, or to join another session's thread. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's \`thread\` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.`,
+      `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). The same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's \`thread\` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.`,
     ),
   reply_to: z.string().optional().describe(`A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`),
   supersedes: z
@@ -240,6 +270,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * attachments are refused.
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
+  /**
+   * A question's running-app prototypes (`Prototype: http://localhost:…`): checked and probed before anything is
+   * written (inbox-live.ts `checkPrototypeApps`); a refusal names the question and the option. Absent: a body that
+   * names one is refused.
+   */
+  checkPrototypeApps?: (apps: readonly PrototypeAppTarget[], probing?: boolean) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
   /** The clock (epoch ms) send_message's "not read since" line compares with (inbox-session-reads.ts). Default: Date.now. Tests inject. */
   now?: () => number;
   /** The ⌘K search index (packages/server/inbox-search.ts), for the agents' read-only search tool. */
@@ -268,6 +304,7 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * reaches it by itself. Never a Codex or Qwen Code wake. Absent: never.
    */
   bridgePolls?: (host: string, session: string) => boolean;
+  sessionName?: (session: string) => string | null;
   /**
    * Whether the Board is on (config.json `inboxBoard`, read on every
    * request). Off: `card` is not in tools/list, and a call (from a session
@@ -283,6 +320,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    */
   stepsOn?: () => boolean;
   /**
+   * A thread's PRs (approval "inbox-pr-binding"): the state reader, for what
+   * it knows now (checks) and a read of the PRs an agent just added. Absent:
+   * the states as stored, and nothing is read.
+   */
+  pulls?: InboxPullsMcpLive;
+  /**
    * Whether Bro mode is on (config.json `inboxBro`, read on every request; approval "bro-mode"). On: send_message's
    * `body` field carries the line (`INBOX_BRO_LINE`). Off or absent: the field is `SEND_BODY_DESCRIPTION`, unchanged.
    */
@@ -294,6 +337,19 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * Absent: off.
    */
   codeReviewOn?: () => boolean;
+  /** The New review box started this thread as a walkthrough: every guide sent in it is one. */
+  walkthroughThread?: (threadId: string) => boolean;
+  /**
+   * Whether Shape is on (config.json `inboxShape`, read on every request). With Code review on, get_guide_brief names
+   * the overview's drawing only while this is on too (approval "code-review-029-shape-off"). Absent: off.
+   */
+  shapeOn?: () => boolean;
+  /**
+   * Whether Chapter diagrams is on (Settings → Capabilities, config.json `inboxChapterDiagrams`, on unless false; read
+   * on every request). With Code review on and this off, get_guide_brief and submit_guide name no chapter diagram.
+   * Absent: on.
+   */
+  chapterDiagramsOn?: () => boolean;
 }
 
 
@@ -671,30 +727,10 @@ export function recommendedInLabelText(count: number): string {
 }
 
 /**
- * Questions asked about pictures with bare text choices (the owner,
- * 2026-11-06): an agent wrote a rundown with each option's picture above the
- * question, then asked with plain choices, so the person could not pick by
- * picture. The keys of the pick-one and pick-several questions whose choices
- * all lack a picture, when two or more pictures (`![alt](src)` or `<img>`,
- * each once, outside code) sit in the body outside every question block;
- * else no keys. Pure; never throws.
+ * Questions asked about pictures with bare text choices, where the pictures
+ * are the options (`inbox-picture-choices.ts` says how they are matched).
  */
-export function questionsWithoutPictureChoices(body: string): { keys: string[]; pictures: number } {
-  const none = { keys: [], pictures: 0 };
-  if (typeof body !== "string" || !body.includes(":::question")) return none;
-  const bare = parseInboxQuestionBlocks(body)
-    .filter((q) => (q.kind === "single" || q.kind === "multi") && q.parsed.choices.length > 0 && q.parsed.choices.every((c) => !c.image))
-    .map((q) => q.key);
-  if (bare.length === 0) return none;
-  // The body with every question block blanked (its lines kept), so only the pictures outside them count.
-  const lines = body.split("\n");
-  for (const block of findQuestionBlocks(body, { frontmatter: false })) {
-    for (let i = block.startLine - 1; i < block.endLine && i < lines.length; i++) lines[i] = "";
-  }
-  const outside = lines.join("\n");
-  const pictures = inboxMessageImageRefsInOrder(outside).length + inboxMessageRemoteImageRefsInOrder(outside).length;
-  return pictures >= 2 ? { keys: bare, pictures } : none;
-}
+export { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 
 /**
  * The send_message result's advice for each such question: send it again as
@@ -766,8 +802,19 @@ export async function sendAgentMessage(
     const base = here && isAbsolute(here) ? here : project.root;
     attachments = await context.recordAttachments(input.attachments, project, base);
   }
+  // The question blocks inside attached Markdown files (issue #2828): answerable in the window like the body's.
+  const attachmentQuestions = attachments && attachments.length > 0 ? await readInboxAttachmentQuestions(store.dir, attachments) : [];
   const fromProject = await senderProject(context, input.project_path, project);
   const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
+  // A question's prototypes (`Prototype:` lines): each file one of these attachments, each running app checked and
+  // probed, before anything is written. A replay of a message already sent probes nothing: an app stopped since the
+  // first send must not make a retry read as "not sent".
+  const prototypes = await checkSendPrototypes(input.body, {
+    attachments: attachments ?? [],
+    bases: [here && isAbsolute(here) ? here : project.root, basePath ?? "", project.root],
+    checkApps: context.checkPrototypeApps,
+    probing: !(input.idempotency_key && store.agentMessageByKey(project.id, input.idempotency_key)),
+  });
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
@@ -797,7 +844,9 @@ export async function sendAgentMessage(
       idempotency_key: input.idempotency_key ?? null,
       thread: input.thread ?? null,
       attachments,
+      ...(attachmentQuestions.length > 0 ? { attachment_questions: attachmentQuestions } : {}),
       inline_images: captured?.images,
+      ...(prototypes.liveSites.length > 0 ? { live_sites: prototypes.liveSites } : {}),
       guide: guide ?? null,
       base_path: basePath,
       from_project: fromProject,
@@ -814,7 +863,8 @@ export async function sendAgentMessage(
   else await captured?.commit();
   const message = result.message;
   const landed = store.project(message.project_id)!;
-  const questions = (message.questions ?? []).filter((q) => q.kind !== "action").map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt }));
+  // A question inside an attached file (issue #2828) names the file it is in.
+  const questions = (message.questions ?? []).filter((q) => q.kind !== "action").map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt, ...(q.attachment ? { file: q.attachment.name } : {}) }));
   // Action items (`:::action`): their keys, so the agent can mark one done later.
   const actions = (message.questions ?? []).filter((q) => q.kind === "action").map((q) => ({ key: q.key, prompt: q.prompt }));
   const superseded = store.supersededBy(message.id);
@@ -853,7 +903,7 @@ export async function sendAgentMessage(
   } catch {
     toCheck = [];
   }
-  // A question with bare text choices under two or more pictures: send_message advises sending it again as picture choices.
+  // A question with bare text choices, two or more of them each shown by a picture outside it: send_message advises sending it again as picture choices.
   const choicesWithoutPictures = questionsWithoutPictureChoices(message.body);
   return {
     imagesNotShown: notShown,
@@ -1080,8 +1130,10 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .array(z.string())
             .optional()
             .describe(
-              `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its frames load from its folder; its images from anywhere on this computer, or the web) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.`,
+              `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its frames load from its folder; its images from anywhere on this computer, or the web) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread; ${INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE}`,
             ),
+          // A thread's PRs (approval "inbox-pr-binding"): added to the thread the message lands in. Always on.
+          pulls: PULLS_FIELD.optional(),
           // Thread steps (approval "inbox-thread-steps"): a message and its list together, only while the person has steps on.
           ...(context.stepsOn?.() ? { steps: STEPS_FIELD.optional() } : {}),
         })
@@ -1096,9 +1148,11 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           if (!context.stepsOn?.()) throw new InboxError("steps_off", INBOX_STEPS_OFF_TEXT.replace(/^steps_off: /, ""));
           checkStepsInput(withSteps, stepsAgent(input));
         }
+        // PRs that do not read are refused before anything is sent, so a message never lands without them.
+        const pullRefs = input.pulls ? checkPullRefs(input.pulls, "pulls") : [];
         const project = await sendProject(context, input);
         const wakes = await senderWakes(context, ctx, input);
-        const { steps: _steps, ...message } = input as typeof input & { steps?: unknown };
+        const { steps: _steps, pulls: _pulls, ...message } = input as typeof input & { steps?: unknown };
         const sent = await sendAgentMessage(context, project, { ...message, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
         // A replay (the same idempotency key) answers the first send and writes nothing: a list the session sent
         // since (the steps action) is never put back to this older one.
@@ -1109,8 +1163,20 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
                 const { record } = store.setThreadSteps({ thread_id: String(sent.structured.thread_id), agent: stepsAgent(input), steps: withSteps });
                 return record && record.steps.length > 0 ? ` Steps saved: ${stepsProgressText(record)}.` : " Steps cleared.";
               })();
+        // The PRs join the thread the message landed in; the sender is in it now. A refusal here (the thread's
+        // 20) never undoes the send: the result says so. Not on a replay (the first answer stands).
+        let pullsLine = "";
+        if (pullRefs.length > 0 && !sent.replayed) {
+          try {
+            const change = await changePullsAsAgent(context, { thread_id: String(sent.structured.thread_id), add: pullRefs, remove: [], actor: pullsActor(input) });
+            const done = pullsChangeText({ ...change, missing: [] });
+            pullsLine = done ? ` PRs: ${done}` : "";
+          } catch (error) {
+            pullsLine = ` PRs not added (${error instanceof InboxError ? `${error.code}: ${error.message}` : String(error)})`;
+          }
+        }
         // Named a thread (reply_to, or a thread name) this session has not looked at for hours (or ever):
-        // one line naming its subject. Not for a message routed to the session's own thread by default,
+        // one line naming its subject. Not for a message that starts a new thread,
         // never on a replay (the first answer stands), and it never blocks the send.
         const named = !!input.reply_to?.trim() || !!input.thread?.trim();
         const stale = sent.replayed || !named ? null : staleThreadOf(store, String(sent.structured.message_id), input.agent_session, clock());
@@ -1120,6 +1186,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           (sent.actions > 0 ? `${sent.questions > 0 ? " and" : " with"} ${sent.actions} action item${sent.actions === 1 ? "" : "s"}` : "") +
           supersededWords(sent.structured.superseded as string[]) +
           (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "");
+        // The picture-choices advice, on every send it holds for: it fires only when the choices are shown by pictures outside the question.
+        const pictureChoices = choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures);
         // The hints after the sent line, in this order, each "" when it has nothing to say.
         // The ones that start with a space join the sent line; the question-opener warnings
         // follow them, each a line of its own (so no hint is glued onto a warning).
@@ -1129,12 +1197,18 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),
           questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck),
-          choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures),
+          pictureChoices,
           questionOpenersWithTextText(sent.questionOpenersWithText),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
+        // The quiet hints (inbox-mcp-hints.ts): at most one, once per session, last and on a line of its own.
+        const quiet = quietHint(store, { session: input.agent_session, threadId: String(sent.structured.thread_id), body: input.body, replayed: sent.replayed, now: clock() });
+        if (quiet) {
+          hints.push(`\n${quiet.line}`);
+          sent.structured.hint = quiet.line;
+        }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),
@@ -1202,7 +1276,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             );
           }
           // Built first, so a refused read (a bad expand, before or after) marks nothing read.
-          const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null }, url);
+          const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null, names: context.sessionName }, url);
           if (!guest) {
             store.markAgentChecked(threadId, readThrough, undefined, reader);
             store.settleReadPast(threadId, reader, shown);
@@ -1212,9 +1286,12 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           if (reader) store.recordOwnRead(threadId, reader, shown);
           noteSessionRead(store, reader, threadId, clock());
           // The thread's steps (approval "inbox-thread-steps"), the reader's own first: only while the person has steps on.
-          const steps = context.stepsOn?.() ? threadStepsText(store, threadId, reader) : [];
+          const steps = context.stepsOn?.() ? threadStepsText(store, threadId, reader, context.sessionName) : [];
           const lists = steps.length > 0 ? { steps: store.threadSteps(threadId).map(({ agent, steps: list, updated_at }) => ({ agent, steps: list, updated_at })) } : {};
-          return okComplete(windowedThreadText(result, order, naming?.line ?? "", steps), { ...result, ...(naming?.structured ?? {}), ...lists });
+          // The thread's PRs (approval "inbox-pr-binding"), after its open questions: with who added each, and what was removed lately.
+          const pulls = threadPullsText(context, threadId, reader);
+          const prs = pulls.length > 0 ? { pulls: store.threadPulls(threadId).map(({ pull: _key, id: _id, ...rest }) => rest) } : {};
+          return okComplete(windowedThreadText(result, order, naming?.line ?? "", [...pulls, ...steps]), { ...result, ...(naming?.structured ?? {}), ...lists, ...prs });
         }
         if (input.expand || input.before !== undefined || input.after !== undefined) {
           throw new InboxError("validation_error", "expand, before and after read one thread: pass thread_id (or message_id).");
@@ -1298,6 +1375,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
 
   // Snooze, when the person asks an agent to: packages/server/inbox-mcp-snooze.ts.
   registerInboxSnoozeTool(server, context);
+
+  // A thread's PRs (approval "inbox-pr-binding"): packages/server/inbox-mcp-pulls.ts. Always served.
+  registerInboxThreadPullsTool(server, context);
 
   // Guided reviews (step 5): packages/server/inbox-guides.ts.
   registerInboxGuideTools(server, context);

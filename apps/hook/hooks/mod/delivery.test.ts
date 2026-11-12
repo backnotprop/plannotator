@@ -185,5 +185,19 @@ describe('splitShellWords', () => {
     expect(splitShellWords(`"my file.md" 'it''s' a\\ b`)).toEqual(['my file.md', 'its', 'a b'])
     expect(splitShellWords('"say \\"hi\\"" $HOME *.md')).toEqual(['say "hi"', '$HOME', '*.md'])
     expect(splitShellWords('--base "feature one"')).toEqual(['--base', 'feature one'])
+    // Windows: a backslash is a path separator, never an escape.
+    expect(splitShellWords('C:\\Users\\me\\plan.md docs\\a.md', { windows: true })).toEqual(['C:\\Users\\me\\plan.md', 'docs\\a.md'])
+    expect(splitShellWords('"C:\\My Docs\\plan.md" \\\\srv\\share', { windows: true })).toEqual(['C:\\My Docs\\plan.md', '\\\\srv\\share'])
+    expect(splitShellWords('C:\\Users\\me\\plan.md')).toEqual(['C:Usersmeplan.md'])
+  })
+
+  test("Windows: a single quote is part of the name (O'Brien), and only double quotes group words", () => {
+    const path = "C:\\Users\\Administrator\\O'Brien [x]\\{a,b}\\plan.md"
+    // Typed bare, it splits only at its space, every character kept, the apostrophe included.
+    expect(splitShellWords(path, { windows: true })).toEqual(["C:\\Users\\Administrator\\O'Brien", '[x]\\{a,b}\\plan.md'])
+    expect(splitShellWords(`"${path}" --gate`, { windows: true })).toEqual([path, '--gate'])
+    expect(splitShellWords("docs\\Bob's notes.md 'x y'", { windows: true })).toEqual(["docs\\Bob's", 'notes.md', "'x", "y'"])
+    // macOS and Linux keep the shell's single quotes, as before.
+    expect(splitShellWords("'x y' it's'", {})).toEqual(['x y', 'its'])
   })
 })

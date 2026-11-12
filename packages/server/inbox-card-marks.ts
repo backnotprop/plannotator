@@ -33,7 +33,7 @@
 
 import { forgeRefKey, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import type { InboxCardMark, InboxCardMarkState, InboxCardRef } from "@plannotator/core/inbox-types";
-import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
+import { createRefSlots, REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
 
 export const CARD_MARK_FRESH_MS = 5 * 60_000;
 export const CARD_MARK_FAILURE_MS = 60_000;
@@ -95,20 +95,9 @@ export function createCardMarks(options: { run?: RefRunner; now?: () => number; 
   const pending = new Map<string, Promise<void>>();
   const holdUntil = new Map<string, number>();
   let hosts: { at: number; ttl: number; set: Promise<Set<string>> } | null = null;
-  let running = 0;
-  const waiting: (() => void)[] = [];
-
-  const slot = async <T>(job: () => Promise<T>): Promise<T> => {
-    if (running >= CARD_MARKS_MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
-    else running++;
-    try {
-      return await job();
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else running--;
-    }
-  };
+  // At most CARD_MARKS_MAX_CONCURRENT gh at once; never stuck (createRefSlots): a stalled queue reads as unknown for a while.
+  const slots = createRefSlots(CARD_MARKS_MAX_CONCURRENT);
+  const slot = <T>(job: () => Promise<T>): Promise<T> => slots.run(job);
 
   const signedIn = (): Promise<Set<string>> => {
     if (hosts && now() - hosts.at < hosts.ttl) return hosts.set;

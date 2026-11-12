@@ -220,7 +220,8 @@ test("the header's ⋯: Copy thread copies every message, the answer on its ques
   await page.locator('[data-thread-more]').click();
   await expect(threadMenu(page)).toBeVisible();
   // Off a phone Snooze is the header's clock (approval "inbox-thread-header"), not in this menu.
-  await expect(threadMenu(page).getByRole('menuitem')).toHaveText(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Request guided review', 'Archive thread']);
+  // The read action and Snooze lead the menu (the owner, 2026-11-11); the rest follows in this order.
+  await expect(threadMenu(page).locator('[role="menuitem"]:not(:is([data-thread-read-item], [data-thread-move-back-item], [data-thread-unread-item], [data-thread-snooze-item], [data-thread-unsnooze-item]))')).toHaveText(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Add a pull request…', 'Export decisions', 'Request guided review', 'Archive thread']);
   await shot(page, 'desktop-light-thread-menu-open.png');
   await threadMenu(page).locator('[data-copy-item="thread"]').click();
   await expect(toast(page)).toContainText('Thread copied');

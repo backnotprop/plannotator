@@ -85,13 +85,15 @@ import { isHtmlEmbedLanguage, isSvgFenceLanguage } from './html-embed/languages'
 import type { HtmlEmbedHost } from './html-embed/HtmlEmbedBlock';
 import { getIdentity } from '../utils/identity';
 import { type QuickLabel } from '../utils/quickLabels';
-import type { SelectionAction } from '../utils/selectionActions';
+import type { SelectionAction, SelectionActionContext } from '../utils/selectionActions';
 import type { MentionSource } from '../utils/mentions';
 import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBadges';
 import { legacyBadgesMaxWidth } from './docBadgesWidth';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
-import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
+import { useClickWord } from '../hooks/useClickWord';
+import { getClickAWord } from '../utils/clickAWordPolicy';
+import { useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
 import { getVisibleCommentDrafts } from '../utils/commentCardPolicy';
 import { shelveCommentDraft, shelvedCommentDrafts } from '../utils/commentDraftShelf';
 import { CommentDraftBadges } from './CommentDraftBadges';
@@ -134,6 +136,18 @@ export interface ViewerProps {
    *  both toolbars. Absent → the package's own wand. */
   selectionActionsIcon?: React.ReactNode;
   /**
+   * Opt-in host capability, passed to the text-selection toolbar only: its
+   * "Side" button, which hands the host the selected text and its context
+   * (AnnotationToolbar `onSide`). Absent → no button: unchanged.
+   */
+  onSide?: (text: string, context: SelectionActionContext) => void;
+  /**
+   * Opt-in host capability: how that button is drawn (AnnotationToolbar
+   * `sideButton`: an icon-only button with the host's glyph and tooltip).
+   * Absent → the two bubbles and the word "Side": unchanged.
+   */
+  sideButton?: { icon?: React.ReactNode; label: string };
+  /**
    * Whether the package's quick labels are offered on the selection toolbars
    * (default true). `false` hides the Zap picker and the Alt+digit label
    * shortcuts; the 👍 button is unaffected.
@@ -155,6 +169,12 @@ export interface ViewerProps {
   selectedAnnotationId: string | null;
   mode: EditorMode;
   inputMethod?: InputMethod;
+  /**
+   * Click a word (Select input method): one click on a word highlights it.
+   * Absent: `configurePlannotatorUI({ clickAWord })`, default on. This prop
+   * wins over that.
+   */
+  clickAWord?: boolean;
   taterMode: boolean;
   globalAttachments?: ImageAttachment[];
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
@@ -320,6 +340,18 @@ export interface ViewerProps {
    *  Plannotator Inbox passes true. The prompt, key, choices and numbering
    *  are the same either way. */
   questionContractLines?: boolean;
+  /** Whether `:::question` cards read option lines (core
+   *  `ParseQuestionBlockOptions.optionLines`): `Pros:`, `Cons:` and
+   *  `Prototype:` indented under a `- [ ]` choice, and a question's own
+   *  `Prototype:` line. A card whose choices have Pros or Cons then draws a
+   *  closed "Trade-offs" line under Why that opens into a table (see
+   *  `QuestionBlock`). Default false: each line shows as text, as before
+   *  (today's card). The Plannotator Inbox passes true. */
+  questionOptionLines?: boolean;
+  /** Host content right after a question's choices (the Plannotator Inbox's
+   *  "Try prototype" tab; see `QuestionBlock` `renderAfterChoices`). Absent:
+   *  today's card. */
+  renderQuestionAfterChoices?: (question: IndexedQuestion) => React.ReactNode;
   /** Whether picture choices (`- [ ] Label — ![alt](path)`) draw as picture
    *  tiles (default true; see `QuestionBlock` `pictureChoices`). False: text
    *  rows. */
@@ -430,6 +462,19 @@ export interface ViewerProps {
    * The label picker stays off. Absent → unchanged.
    */
   textDeletions?: boolean;
+  /**
+   * Opt-in, with `textComments`: question cards take comments too, as they do
+   * in plan review: the prompt, its context, and each choice's label and
+   * description are ordinary text for the selection toolbar and the
+   * highlights; the card's own controls (the radios and checkboxes,
+   * "Other…", the footer, a picture choice's picture) stay out. A click on a
+   * choice still picks it at once; a drag across its words, or a double-click
+   * on one, selects them and never picks (the card's own guard). For a host
+   * whose reader comments on a whole message, questions included (the
+   * Plannotator Inbox). A host's own card (`renderQuestionCard`) stays out.
+   * Absent → unchanged (cards are left out of selection).
+   */
+  questionTextComments?: boolean;
   /**
    * Opt-in: words a text-selection comment box opens with, for the selected
    * text (a host's suggested comment, kept with one press or written over).
@@ -834,9 +879,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   selectedAnnotationId,
   mode,
   inputMethod = 'drag',
+  clickAWord: clickAWordProp,
   taterMode,
   selectionActions,
   selectionActionsIcon,
+  onSide,
+  sideButton,
   quickLabels,
   mentionSource,
   globalAttachments = [],
@@ -886,6 +934,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionDecisionScope,
   questionDecisionLines = true,
   questionContractLines = false,
+  questionOptionLines = false,
+  renderQuestionAfterChoices,
   questionPictureChoices = true,
   questionPictureBadge,
   onQuestionPictureZoom,
@@ -906,6 +956,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   htmlEmbeds,
   textComments = false,
   textDeletions = false,
+  questionTextComments = false,
   suggestComment,
   vimModeEnabled = false,
   vimHudEnabled = false,
@@ -1017,9 +1068,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // annotations that carry `questionAnswer` (matched by question key, so an
   // answer follows its question across re-parses).
   const questionIndex = useMemo(() => {
-    const list = indexQuestionBlocks(blocks, { decisionLines: questionDecisionLines, contractLines: questionContractLines });
+    const list = indexQuestionBlocks(blocks, { decisionLines: questionDecisionLines, contractLines: questionContractLines, ...(questionOptionLines ? { optionLines: true } : {}) });
     return { byBlock: new Map(list.map((q) => [q.blockId, q])), total: list.length };
-  }, [blocks, questionDecisionLines, questionContractLines]);
+  }, [blocks, questionDecisionLines, questionContractLines, questionOptionLines]);
   // A host that keeps answers itself (`questionAnswers`) replaces the
   // annotation-derived map; each entry is validated like any other reader.
   const answersByKey = useMemo(
@@ -1344,6 +1395,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onCodeBlockClick: hostComposes ? noHostCodeBlockClick : handlePinpointCodeBlockClick,
   });
   clearPinpointHoverRef.current = clearPinpointHover;
+  // Click a word, part of Select: one click on a word highlights it; a drag is the browser's own
+  // selection, as always. Off with the `clickAWord` prop, else `configurePlannotatorUI({ clickAWord })`.
+  // Redline makes nothing of a click: a stray click must not delete a word. Pinpoint owns its
+  // clicks; off under read-only, a plan diff and vim focus.
+  const [clickAWordDefault] = useState(getClickAWord);
+  useClickWord({
+    containerRef,
+    enabled: (clickAWordProp ?? clickAWordDefault) && inputMethod !== 'pinpoint' && selectionCommentsOn && !(isPlanDiffActive ?? false) && !(vimModeActive && vim.focused),
+    clicksEnabled: mode !== 'redline',
+    snapDrags: false,
+    annotationUiOpen: !!(toolbarState || hookCommentPopover || viewerCommentPopover || hookQuickLabelPicker || codeBlockQuickLabelPicker),
+    onSelectRange: hostComposes ? hostPinpointRange : highlightRange,
+  });
   const vimOwnsHudTarget = vimHudEnabled
     && vim.state.phase !== 'inactive'
     && (vim.focused || vim.state.phase === 'action');
@@ -1468,28 +1532,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     return () => window.clearTimeout(timer);
   }, [blocks, locationHash, scrollToAnchor, scrollViewport]);
 
-  // Use the native copy event so clipboard writes are synchronous (Safari
-  // rejects the async navigator.clipboard API outside the user-gesture window).
-  // web-highlighter clears the DOM selection on mouseup, so the browser has
-  // nothing to copy by the time Cmd+C fires — we inject the captured text here.
-  useEffect(() => {
-    const handleCopy = (e: ClipboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      // A live selection where nothing is annotated (an Inbox action item's text) is
-      // the person's own: the browser copies it, never an older toolbar's text.
-      const live = window.getSelection();
-      if (live && !live.isCollapsed && live.rangeCount > 0 && containerRef.current && rangeInsideExcluded(containerRef.current, live.getRangeAt(0))) return;
-
-      if (toolbarState?.selectionText) {
-        e.preventDefault();
-        e.clipboardData?.setData('text/plain', toolbarState.selectionText);
-      }
-    };
-
-    document.addEventListener('copy', handleCopy);
-    return () => document.removeEventListener('copy', handleCopy);
-  }, [toolbarState]);
+  // Ctrl+C / Cmd+C with the toolbar up or the selection's composer open is
+  // `useAnnotationHighlighter`'s (`utils/highlightCopy`): the native copy
+  // event, so the clipboard write stays synchronous inside the key press.
 
   // `ViewerHandle.reopenComment`: a comment being written that the host kept
   // when its file closed, back in its composer. A global comment opens the
@@ -2166,6 +2211,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionStatusTag={questionStatusTag}
                   questionStatusLabel={questionStatusLabel}
                   renderQuestionBelowPrompt={renderQuestionBelowPrompt}
+                  renderQuestionAfterChoices={renderQuestionAfterChoices}
                   questionContractLines={questionContractLines}
                   questionPictureChoices={questionPictureChoices}
                   questionPictureBadge={questionPictureBadge}
@@ -2174,9 +2220,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 />
               );
               // `textComments`: a question card's words are not commented on
-              // (its own controls already are excluded); a box-less wrapper
-              // keeps its layout.
-              if (question && textCommentsOnly) {
+              // (its own controls already are excluded) unless the host asks
+              // for them (`questionTextComments`); a box-less wrapper keeps
+              // its layout.
+              if (question && textCommentsOnly && !questionTextComments) {
                 return (
                   <div key={group.block.id} className="annotation-exclude" style={{ display: 'contents' }}>
                     {rendered}
@@ -2202,6 +2249,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onQuickLabel={handleQuickLabel}
               selectionActions={selectionActions}
               selectionActionsIcon={selectionActionsIcon}
+              onSide={onSide}
+              sideButton={sideButton}
               quickLabels={quickLabels}
               copyText={toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}

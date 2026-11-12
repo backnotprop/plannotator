@@ -1,3 +1,5 @@
+import { createContext } from 'react';
+
 /**
  * Host-overridable image upload transport.
  *
@@ -22,7 +24,12 @@ export interface UploadResult {
 
 export interface UploadTransport {
   /** Upload one image file and resolve to its stored reference. */
-  upload(file: File): Promise<UploadResult>;
+  upload(file: File, options?: UploadOptions): Promise<UploadResult>;
+}
+
+export interface UploadOptions {
+  onProgress?: (loaded: number, total: number) => void;
+  signal?: AbortSignal;
 }
 
 /** Default transport — Plannotator's `/api/upload` multipart POST, verbatim. */
@@ -54,3 +61,5 @@ export function resetUploadTransport(): void {
 export function getUploadTransport(): UploadTransport {
   return uploadTransport;
 }
+
+export const CommentUploadContext = createContext<UploadTransport | null>(null);

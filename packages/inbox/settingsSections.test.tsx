@@ -491,6 +491,26 @@ test.skipIf(!hasDom)('Capabilities → Experimental: Bro mode is off by default;
   }
 });
 
+test.skipIf(!hasDom)('Capabilities → Experimental: Float reply drafts is off by default; its switch saves config.json inboxFloatDrafts both ways', async () => {
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Float reply drafts') !== null, 'the Float reply drafts switch');
+  expect(el.querySelector('[data-settings-experimental]')!.contains(switchNamed(el, 'Float reply drafts'))).toBe(true);
+  expect(readConfig(current!).inboxFloatDrafts).toBeUndefined();
+  expect(switchNamed(el, 'Float reply drafts')!.getAttribute('aria-checked')).toBe('false');
+  try {
+    act(() => switchNamed(el, 'Float reply drafts')!.click());
+    await until(() => readConfig(current!).inboxFloatDrafts === true, 'config.json inboxFloatDrafts true');
+    await until(() => switchNamed(el, 'Float reply drafts')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Float reply drafts')!.click());
+    await until(() => readConfig(current!).inboxFloatDrafts === false, 'config.json inboxFloatDrafts false');
+    await until(() => switchNamed(el, 'Float reply drafts')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    // The world is shared across this file's tests: back to never set.
+    const { inboxFloatDrafts: _float, ...rest } = readConfig(current!);
+    writeFileSync(join(current!.dataDir, 'config.json'), JSON.stringify(rest));
+  }
+});
+
 // Code review (approval "inbox-code-review-direction") and Shape (approval "shape-inbox-placement"), held until the
 // next big release (owner decision 2026-11-04; packages/server/inbox.ts `heldSwitch`): a person who never turned them on sees no row;
 // one who has them on keeps the row and can turn it off (the row then goes at the next load); PLANNOTATOR_INBOX_PREVIEW=1
@@ -786,15 +806,15 @@ test.skipIf(!hasDom)('a code another window replaced reads as replaced, not as t
   expect(el.querySelector('[data-pair-trouble]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('phones off (the released default): Devices is Over your tailnet only, and #settings/devices/pair opens no flow', async () => {
+test.skipIf(!hasDom)('phones off (the released default): Devices is Over your tailnet, Cloud agents stay hidden while the relay never answered, and #settings/devices/pair opens no flow', async () => {
   current = plainServer;
   const el = await renderApp('#settings/devices/pair');
   await until(() => el.querySelector('[data-settings-tailscale]') !== null, 'Over your tailnet');
+  await new Promise((done) => setTimeout(done, 300));
   expect(el.querySelector('[data-settings-phones]')).toBeNull();
   expect(el.querySelector('[data-pair-flow]')).toBeNull();
   expect(buttonText(el, 'Pair a phone')).toBeNull();
-  // Over your tailnet is the section's only group.
-  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => g.hasAttribute('data-settings-tailscale'))).toEqual([true]);
+  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => (g.hasAttribute('data-settings-tailscale') ? 'tailnet' : g.hasAttribute('data-settings-cloud') ? 'cloud' : 'other'))).toEqual(['tailnet']);
 });
 
 test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section opens with ‹ Settings, which goes back to the list', async () => {

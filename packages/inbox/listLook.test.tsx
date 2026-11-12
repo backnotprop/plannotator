@@ -667,8 +667,10 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect(narrowLines(el, 'msg_unread')).toEqual({ 'ib-l1': ['title(Name of msg_unread)', 'time'], 'ib-l2 ib-l2-lead': ['from', 'ib-lend'] });
     expect([...el.querySelector('.ib-nrow[data-thread-id="msg_unread"] .ib-lend')!.children].map(part)).toEqual(['ib-c ib-qn']);
     const stop = el.querySelector<HTMLElement>('.ib-nrow[data-thread-id="msg_stop"]')!;
+    // Its two open questions on a stopped row are one filled question mark (approval "inbox-question-mark"): the
+    // badge and the count in one, after the snooze's return.
     expect(stop.querySelector('.ib-l3')).toBeNull();
-    expect([...stop.querySelector('.ib-l2 > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-badge', 'ib-zwhen', 'ib-c']);
+    expect([...stop.querySelector('.ib-l2 > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-zwhen', 'ib-badge']);
     // The pin's and the badge's words still reach a screen reader.
     expect(stop.querySelector(':scope > .ib-sr')!.textContent).toBe(', starred');
     expect(document.getElementById(stop.getAttribute('aria-describedby')!)!.textContent).toBeTruthy();
@@ -679,7 +681,7 @@ describe.if(hasDom)('the rows in each mode', () => {
     // The pin goes with the counts to line 2, never to line 1 before the time.
     const pstop = phone.querySelector<HTMLElement>('.ib-mrow[data-thread-id="msg_stop"]')!;
     expect(pstop.querySelector('.ib-m3')).toBeNull();
-    expect([...pstop.querySelector('.ib-m1-lead > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-badge', 'ib-zwhen', 'ib-c']);
+    expect([...pstop.querySelector('.ib-m1-lead > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-zwhen', 'ib-badge']);
     expect(pstop.querySelector('.ib-m1:not(.ib-m1-lead) > .ib-pinmark')).toBeNull();
   });
 
@@ -695,6 +697,16 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect(narrowLines(remount('narrow'), 'msg_unread')).toEqual({ 'ib-l1': ['title(Name of msg_unread)', 'from', 'time'], 'ib-l3': ['ib-c ib-qn'] });
     expect(phoneLines(remount('phone'), 'msg_unread').rest).toEqual(['ib-m3']);
     expect(document.querySelector('.ib-lend')).toBeNull();
+  });
+
+  // Pull requests (approval "inbox-rows-settings-page"): shown unless the look says `hidePulls`, on every shape.
+  test("a row's PR mark shows for every look saved before `hidePulls`, and goes from every shape once it is on", () => {
+    const sections: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [row('msg_pr', { pulls: { count: 3, headline: { key: 'github.com/acme/app#7', state: 'open' } } }), row('msg_plain')] }];
+    for (const [rows, marks] of [[['smallNames'], 1], [[], 1], [['compact', 'hideAgents', 'statusMark'], 1], [['smallNames', 'hidePulls'], 0]] as const) {
+      resetListLookForTests();
+      adoptSavedRows([...rows], 1, -1);
+      for (const shape of ['narrow', 'phone', 'wide'] as const) expect([rows, shape, remount(shape, { sections }).querySelectorAll('.ib-prmark').length]).toEqual([rows, shape, marks]);
+    }
   });
 
   // The time, the questions and the warnings always show: no option hides them, on any shape.

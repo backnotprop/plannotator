@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo } from "react";
+import React, { createContext, useContext, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
@@ -6,7 +6,7 @@ import { useHoverPreview } from "../hooks/useHoverPreview";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
-import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import { CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -402,13 +402,29 @@ function emitPlainTextWithBareUrls(
  * restored comment starting right after the image), `insertBefore` throws
  * and the whole document unmounts. A loaded image's DOM is unchanged.
  */
+function imgTagAttributes(tag: string): { src: string; alt: string; width?: number; height?: number } {
+  const read = (name: string): string | undefined => {
+    const found = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>"']+))`, 'i').exec(tag);
+    const raw = found ? (found[1] ?? found[2] ?? found[3]) : undefined;
+    return raw?.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  };
+  const size = (name: string): number | undefined => {
+    const value = read(name);
+    return value && /^\d{1,5}$/.test(value) && Number(value) > 0 ? Number(value) : undefined;
+  };
+  return { src: read('src')?.trim() ?? '', alt: read('alt') ?? '', width: size('width'), height: size('height') };
+}
+
 const HostResolvedImage: React.FC<{
   src: string;
   alt: string;
+  /** The original's width when `src` is a smaller copy (`ImageResolution.width`). */
+  width?: number;
+  height?: number;
   /** The src as written in the markdown (`data-image-src`, read by the image viewer's region comments). */
   writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
-}> = ({ src, alt, writtenSrc, onImageClick }) => {
+}> = ({ src, alt, width, height, writtenSrc, onImageClick }) => {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = failedSrc === src;
   return (
@@ -422,12 +438,16 @@ const HostResolvedImage: React.FC<{
         key="image"
         src={src}
         alt={failed ? '' : alt}
+        width={width}
+        height={height}
         data-image-src={writtenSrc}
         data-image-failed={failed ? '' : undefined}
         hidden={failed || undefined}
         aria-hidden={failed || undefined}
         className={failed ? undefined : 'max-w-full rounded my-2 cursor-zoom-in'}
         loading="lazy"
+        // Only for a host's smaller copy (`width`): the default stays as it was for every other host.
+        decoding={width ? 'async' : undefined}
         onError={() => setFailedSrc(src)}
         onClick={(e) => {
           e.stopPropagation();
@@ -464,6 +484,45 @@ export function resetDigitHexIssueRefs(): void {
 export function getDigitHexIssueRefs(): boolean {
   return digitHexIssueRefs;
 }
+
+/**
+ * Whether, and on which host, an `owner/repo#123` ref links when the caller
+ * names no repo of its own (no `githubRepo`). `false` (the default): such refs
+ * stay plain text, exactly as before. `true`: they link on github.com
+ * (`forgeRefLinks`' rule for a repo with no host). `{ host }`: they link on
+ * that host by the same rule (GitLab's `/-/issues/N`; a host `forgeRefLinks`
+ * cannot form a link for leaves them plain). A caller that names its repo is
+ * unchanged either way (that repo's forge host decides). The Plannotator
+ * Inbox turns it on through `configurePlannotatorUI({ crossRepoRefsWithoutRepo })`
+ * with the host most of its projects use: a thread whose project has no git
+ * origin still links the refs agents are told to write. Changing it re-renders
+ * every mounted `InlineMarkdown`.
+ */
+export type CrossRepoRefsWithoutRepo = boolean | { host: string };
+let crossRepoDefault: { host?: string } | null = null;
+const crossRepoListeners = new Set<() => void>();
+
+export function setCrossRepoRefsWithoutRepo(on: CrossRepoRefsWithoutRepo): void {
+  const next = on === false ? null : on === true ? {} : { host: on.host };
+  if (next?.host === crossRepoDefault?.host && (next === null) === (crossRepoDefault === null)) return;
+  crossRepoDefault = next;
+  for (const listener of crossRepoListeners) listener();
+}
+
+export function resetCrossRepoRefsWithoutRepo(): void {
+  setCrossRepoRefsWithoutRepo(false);
+}
+
+export function getCrossRepoRefsWithoutRepo(): CrossRepoRefsWithoutRepo {
+  if (!crossRepoDefault) return false;
+  return crossRepoDefault.host === undefined ? true : { host: crossRepoDefault.host };
+}
+
+function subscribeCrossRepoDefault(listener: () => void): () => void {
+  crossRepoListeners.add(listener);
+  return () => crossRepoListeners.delete(listener);
+}
+const crossRepoDefaultSnapshot = () => crossRepoDefault;
 
 /**
  * Scanner that walks a text string and emits React nodes for inline markdown:
@@ -511,12 +570,15 @@ export const InlineMarkdown: React.FC<{
   const resolveLocalLink = useLocalLinkResolver();
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
+  const inlineImageTags = useContext(InlineImageTagsContext);
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
-  // Cross-repo `owner/repo#123` refs: only for a caller that names its
-  // project's repo (it knows the forge); otherwise they stay plain text, never
-  // a guessed github.com link. With a code-file handler, an `owner/repo` that
-  // is a code path not known to be missing stays the file (`src/app.js#12`).
-  const crossRepoProject = githubRepo ? { host: repoHost } : null;
+  // Cross-repo `owner/repo#123` refs: for a caller that names its project's
+  // repo (it knows the forge); otherwise they stay plain text, unless the
+  // host opted in (`crossRepoRefsWithoutRepo`: the host it names, else
+  // github.com). With a code-file handler, an `owner/repo`
+  // that is a code path not known to be missing stays the file (`src/app.js#12`).
+  const crossRepoFallback = useSyncExternalStore(subscribeCrossRepoDefault, crossRepoDefaultSnapshot, crossRepoDefaultSnapshot);
+  const crossRepoProject = githubRepo ? { host: repoHost } : crossRepoFallback;
   const crossRepoAccept = (ref: CrossRepoRef): boolean =>
     !(onOpenCodeFile && isCodeFilePathStrict(ref.path) && gateCodePath(ref.path, validation ?? null).render !== 'plain');
   const parts: React.ReactNode[] = [];
@@ -1015,6 +1077,25 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
+    match = inlineImageTags && resolveImage ? remaining.match(/^<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/i) : null;
+    if (match) {
+      const tag = imgTagAttributes(match[0]);
+      const resolved = tag.src ? resolveImage!(tag.src) : null;
+      const shown = resolved?.kind === 'src' ? resolved.src : !resolved && /^https?:\/\//i.test(tag.src) ? tag.src : null;
+      if (shown) {
+        parts.push(<HostResolvedImage key={key++} src={shown} alt={tag.alt} width={tag.width ?? (resolved?.kind === 'src' ? resolved.width : undefined)} height={tag.height} writtenSrc={tag.src} onImageClick={onImageClick} />);
+      } else if (tag.src) {
+        parts.push(
+          <span key={key++} className={UNAVAILABLE_IMAGE_CLASS} title={resolved?.kind === 'unavailable' ? resolved.title : undefined} data-image-unavailable="">
+            {tag.alt || 'Image'}
+          </span>,
+        );
+      }
+      remaining = remaining.slice(match[0].length);
+      previousChar = '>';
+      continue;
+    }
+
     // Images: ![alt](path)
     match = remaining.match(/^!\[([^\]]*)\]\(([^)]+)\)/);
     if (match) {
@@ -1047,7 +1128,7 @@ export const InlineMarkdown: React.FC<{
         resolveImage ? (
           // With a host resolver, an image that fails to load becomes the
           // same placeholder instead of a broken-image icon.
-          <HostResolvedImage key={key++} src={imgSrc} alt={alt} writtenSrc={src} onImageClick={onImageClick} />
+          <HostResolvedImage key={key++} src={imgSrc} alt={alt} width={resolvedImage?.kind === 'src' ? resolvedImage.width : undefined} writtenSrc={src} onImageClick={onImageClick} />
         ) : (
           <img
             key={key++}

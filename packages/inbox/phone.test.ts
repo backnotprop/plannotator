@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PHONE_QUERY, isIOSWebKit, keyboardLayout, stripHeight, trackKeyboard } from './phone';
+import { PHONE_QUERY, isIOSWebKit, keyboardInset, keyboardLayout, stripHeight, trackKeyboard } from './phone';
 
 describe('the keyboard on a phone', () => {
   test('the keyboard up, unzoomed: the window takes the height above it and undoes the pan', () => {
@@ -38,6 +38,16 @@ describe('the keyboard on a phone', () => {
     expect(stripHeight({ height: 660, scale: 1 }, 660, true)).toBeNull();
     expect(stripHeight({ height: 330, scale: 2 }, 660, true)).toBeNull();
     expect(stripHeight({ height: 582, scale: 1 }, 660, false)).toBeNull();
+  });
+
+  test('what the keyboard covers, for a sheet that pads its own bottom: the layout height less what shows; nothing for a pinch or a desktop window', () => {
+    // The owner's iPhone: 660 of layout, 257 left above the keyboard.
+    expect(keyboardInset({ height: 257, scale: 1 }, 660, true)).toBe(403);
+    // A hardware keyboard's bar counts too: Send must end above it.
+    expect(keyboardInset({ height: 581.6, scale: 1 }, 660, true)).toBe(78);
+    expect(keyboardInset({ height: 660, scale: 1 }, 660, true)).toBe(0);
+    expect(keyboardInset({ height: 330, scale: 2 }, 660, true)).toBe(0);
+    expect(keyboardInset({ height: 257, scale: 1 }, 660, false)).toBe(0);
   });
 });
 
@@ -174,6 +184,8 @@ describe('trackKeyboard', () => {
       w.vv.fire('resize');
       w.flush();
       expect(w.style.get('--ib-vvh')).toBe('257px');
+      // New message's sheet runs under the keyboard and pads its bottom by what the keyboard covers.
+      expect(w.style.get('--ib-kbd-inset')).toBe('403px');
       expect(w.root.dataset.ibKeyboard).toBe('');
       expect(w.root.dataset.ibKeyboardPin).toBe('tight');
       expect(w.scrolls.at(-1)).toEqual([0, 0]);
@@ -191,6 +203,7 @@ describe('trackKeyboard', () => {
       w.doc.fire('visibilitychange');
       w.flush();
       expect(w.style.has('--ib-vvh')).toBe(false);
+      expect(w.style.has('--ib-kbd-inset')).toBe(false);
       expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
       expect(w.doc.has('touchmove')).toBe(false);
       stop();

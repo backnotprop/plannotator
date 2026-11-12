@@ -873,10 +873,16 @@ test("a linked machine's thread offers no button, on any surface", async () => {
 });
 
 const composeDialog = (p: Page) => p.locator('dialog[data-compose]');
-/** Leaves New message with files in it: the window asks about a draft, and Discard says no. */
+/**
+ * Leaves New message with files in it, keeping nothing: Escape closes it and keeps a draft (approval
+ * "inbox-compose-escape-keeps"), so the toast's Reopen and the draft's Delete draft throw it away.
+ */
 const discardCompose = async (p: Page) => {
   await p.keyboard.press('Escape');
-  await composeDialog(p).getByRole('button', { name: 'Discard' }).click();
+  await expect(composeDialog(p)).toHaveCount(0);
+  await p.locator('[data-inbox-toast] [data-toast-action]', { hasText: 'Reopen' }).click();
+  await expect(composeDialog(p)).toBeVisible();
+  await composeDialog(p).locator('[data-compose-delete]').click();
   await expect(composeDialog(p)).toHaveCount(0);
 };
 const openNewMessage = async (p: Page) => {

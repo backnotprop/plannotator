@@ -230,6 +230,8 @@ export function createInboxCompose(options: {
         board_request: body.board_request === true && boardOn(),
         // Settings -> Decision data's Ask: the agent also receives how to answer it (INBOX_DECISION_ASK_BLOCK).
         decision_ask: body.decision_ask === true,
+        // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
+        rows_ask: body.rows_ask === true,
         ...(guest ? { by_guest: true } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
       });
@@ -421,6 +423,7 @@ export function createInboxCompose(options: {
       const keep = inboxDraftUploadIds(store.dir);
       // A reply draft's files (long pastes too) are kept as a compose draft's files are, at any age.
       for (const id of store.replyDraftUploadIds()) keep.add(id);
+      for (const id of store.commentPictureUploadIds()) keep.add(id);
       sweepInboxUploads(store.dir, { keep, usedBlobs: store.usedBlobs(), now: now().getTime() });
     } catch {
       // Best effort: the next sweep tries again.

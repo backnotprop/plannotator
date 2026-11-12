@@ -26,6 +26,7 @@
  * Node-only (node:fs + global fetch), vendored to Pi.
  */
 
+import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "./data-dir";
@@ -542,13 +543,39 @@ export interface ReleaseHighlight {
   text: string;
 }
 
+/** One line of a release's TL;DR (`- **New:** Start an agent in a new folder`). */
+export interface TldrLine {
+  /** One of TLDR_LABELS as written there; any other label as written; "" for a line with none. */
+  label: string;
+  /** The line's words: links reduced to their text, bold dropped, `code` kept. */
+  text: string;
+}
+
+/** The labels a TL;DR line may carry (the release skill's set), in their canonical spelling. */
+export const TLDR_LABELS = ["New", "Changed", "Fixed", "Removed", "Off by default"] as const;
+/** More lines than this are dropped (the release skill asks for 3 to 5). */
+export const TLDR_MAX_LINES = 8;
+const TLDR_MAX_TEXT = 300;
+
 export interface ReleaseNotes {
   version: string;
   publishedAt?: string;
-  /** Markdown: the release body from "## What's New in" up to "## Install / Update", capped. */
+  /** Markdown: the release body from "## What's New in" up to "## Install / Update", capped, without its TL;DR. */
   notes: string;
   /** The release body's "Missed recent releases?" table, newest first. */
   highlights: ReleaseHighlight[];
+  /**
+   * The `### TL;DR` right under "What's New in vX" (splitTldr); empty when the
+   * body has none. Absent from notes an older version saved: read from the
+   * notes then.
+   */
+  tldr?: TldrLine[];
+  /**
+   * A hash of the release body these notes were read from (releaseBodyStamp).
+   * The Inbox's release list compares it to tell a body edited since (a TL;DR
+   * added to an older release). Absent from notes an older version saved.
+   */
+  stamp?: string;
 }
 
 /** Cut a byte cap on a code point boundary. */
@@ -558,9 +585,62 @@ function capUtf8(text: string, maxBytes: number): string {
   return new TextDecoder().decode(bytes.slice(0, maxBytes)).replace(/�+$/, "");
 }
 
+/** A TL;DR line's words as plain text: links to their text, bold and italics markers dropped, `code` kept. */
+function tldrText(raw: string): string {
+  return raw
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*|__/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, TLDR_MAX_TEXT);
+}
+
+/**
+ * The TL;DR at the top of a release's notes, and the notes without it. The
+ * section is a `### TL;DR` heading as the first thing under "What's New in
+ * vX", then a list of `- **Label:** text` lines (labels: TLDR_LABELS, matched
+ * without regard to case; any other label is kept as written; a line with no
+ * bold label keeps its words with an empty label). The list ends at the first
+ * line that is neither blank nor an item. A heading with no list under it,
+ * or a TL;DR anywhere else, is not one: the notes stay as they are.
+ */
+export function splitTldr(notes: string): { tldr: TldrLine[]; notes: string } {
+  const text = notes.replace(/\r\n/g, "\n").replace(/^\s+/, "");
+  const head = /^#{2,4}[ \t]+TL;?DR[ \t]*:?[ \t]*(?:\n|$)/i.exec(text);
+  if (!head) return { tldr: [], notes };
+  const lines = text.slice(head[0].length).split("\n");
+  const tldr: TldrLine[] = [];
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.trim() === "") continue;
+    const item = /^\s{0,3}[-*+][ \t]+(.*)$/.exec(line);
+    if (!item) break;
+    const labelled = /^(?:\*\*|__)([^*_]{1,40}?)[ \t]*:?[ \t]*(?:\*\*|__)[ \t]*:?[ \t]*(.*)$/.exec(item[1]!);
+    const rawLabel = labelled ? labelled[1]!.trim() : "";
+    const words = tldrText(labelled ? labelled[2]! : item[1]!);
+    if (!words) continue;
+    const known = TLDR_LABELS.find((l) => l.toLowerCase() === rawLabel.toLowerCase());
+    if (tldr.length < TLDR_MAX_LINES) tldr.push({ label: known ?? rawLabel, text: words });
+  }
+  if (tldr.length === 0) return { tldr: [], notes };
+  return { tldr, notes: lines.slice(i).join("\n").trim() };
+}
+
+/** A short, stable hash of a release body (ReleaseNotes.stamp). */
+export function releaseBodyStamp(body: unknown): string {
+  return createHash("sha256").update(typeof body === "string" ? body.replace(/\r\n/g, "\n") : "").digest("hex").slice(0, 16);
+}
+
+/** The notes to save for a release GitHub answered with. */
+export function releaseNotesFrom(version: string, release: Pick<FetchedRelease, "publishedAt" | "body">): ReleaseNotes {
+  const { notes, highlights, tldr } = extractReleaseNotes(release.body);
+  return { version, ...(release.publishedAt && { publishedAt: release.publishedAt }), notes, highlights, tldr, stamp: releaseBodyStamp(release.body) };
+}
+
 /** The part of a release body a person reads as "what's new". */
-export function extractReleaseNotes(body: unknown): { notes: string; highlights: ReleaseHighlight[] } {
-  if (typeof body !== "string") return { notes: "", highlights: [] };
+export function extractReleaseNotes(body: unknown): { notes: string; highlights: ReleaseHighlight[]; tldr: TldrLine[] } {
+  if (typeof body !== "string") return { notes: "", highlights: [], tldr: [] };
   const text = body.replace(/\r\n/g, "\n");
   const highlights: ReleaseHighlight[] = [];
   for (const m of text.matchAll(/^\|\s*\[v?(\d+\.\d+\.\d+)\]\([^)]*\)\s*\|\s*(.+?)\s*\|\s*$/gm)) {
@@ -575,7 +655,8 @@ export function extractReleaseNotes(body: unknown): { notes: string; highlights:
     const end = notes.search(/^## Install \/ Update\b/m);
     if (end >= 0) notes = notes.slice(0, end);
   }
-  return { notes: capUtf8(notes.trim(), RELEASE_NOTES_MAX_BYTES), highlights };
+  const split = splitTldr(notes.trim());
+  return { notes: capUtf8(split.notes, RELEASE_NOTES_MAX_BYTES), highlights, tldr: split.tldr };
 }
 
 function notesPath(version: string, dataDir?: string): string | null {
@@ -598,15 +679,27 @@ export function readReleaseNotes(version: string, dataDir?: string): ReleaseNote
   try {
     const raw = JSON.parse(readFileSync(path, "utf-8")) as Partial<ReleaseNotes>;
     if (!raw || typeof raw.notes !== "string" || normalizeStableVersion(raw.version) === null) return null;
+    // Notes saved before the TL;DR was read apart keep it at their top: read it from there.
+    const split = Array.isArray(raw.tldr)
+      ? {
+          notes: raw.notes,
+          tldr: raw.tldr
+            .filter((l): l is TldrLine => !!l && typeof l.label === "string" && typeof l.text === "string" && l.text.trim() !== "")
+            .slice(0, TLDR_MAX_LINES)
+            .map((l) => ({ label: l.label.slice(0, 40), text: l.text.slice(0, TLDR_MAX_TEXT) })),
+        }
+      : splitTldr(raw.notes);
     return {
       version: normalizeStableVersion(raw.version)!,
       ...(typeof raw.publishedAt === "string" && { publishedAt: raw.publishedAt }),
-      notes: capUtf8(raw.notes, RELEASE_NOTES_MAX_BYTES),
+      notes: capUtf8(split.notes, RELEASE_NOTES_MAX_BYTES),
       highlights: Array.isArray(raw.highlights)
         ? raw.highlights.filter(
             (h): h is ReleaseHighlight => !!h && typeof h.version === "string" && typeof h.text === "string",
           )
         : [],
+      tldr: split.tldr,
+      ...(typeof raw.stamp === "string" && { stamp: raw.stamp }),
     };
   } catch {
     return null;
@@ -837,6 +930,62 @@ export async function fetchReleaseByTag(version: string, fetchImpl: typeof fetch
   return { ok: true, release: result.release };
 }
 
+/** How many releases the Inbox's release list asks for (one request). */
+export const RELEASE_LIST_SIZE = 20;
+
+/**
+ * The newest releases (`…/releases?per_page=20`): the release API URL with
+ * its last segment (`latest`) removed, so PLANNOTATOR_UPDATE_API_URL points
+ * this request at the same fake or mirror as the others.
+ */
+export function releaseListApiUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const url = new URL(releaseApiUrl(env));
+  url.pathname = url.pathname.replace(/\/+$/, "").replace(/\/[^/]*$/, "");
+  url.search = `?per_page=${RELEASE_LIST_SIZE}`;
+  url.hash = "";
+  return url.toString();
+}
+
+export type FetchReleaseListResult = { ok: true; releases: FetchedRelease[] } | Extract<FetchReleaseResult, { ok: false }>;
+
+/**
+ * One unauthenticated GET of the newest releases, with the same client rules
+ * as the release check (user agent, timeout, rate limit). Drafts,
+ * pre-releases and tags that are not X.Y.Z are left out; the tags come back
+ * canonical (`0.28.53`).
+ */
+export async function fetchReleaseList(url: string = releaseListApiUrl(), fetchImpl: typeof fetch = fetch): Promise<FetchReleaseListResult> {
+  try {
+    const res = await fetchImpl(url, {
+      headers: { accept: "application/vnd.github+json", "user-agent": "plannotator-update-check" },
+      signal: AbortSignal.timeout(RELEASE_CHECK_TIMEOUT_MS * 2),
+    });
+    if (res.status === 403 || res.status === 429) {
+      const wait = rateLimitWaitMs(res.headers);
+      return { ok: false, error: `HTTP ${res.status}`, rateLimited: true, ...(wait !== undefined && { retryAfterMs: wait }) };
+    }
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const body = (await res.json()) as unknown;
+    if (!Array.isArray(body)) return { ok: false, error: "the answer is not a list of releases" };
+    const releases: FetchedRelease[] = [];
+    for (const item of body.slice(0, 100)) {
+      if (!item || typeof item !== "object") continue;
+      const r = item as { tag_name?: unknown; draft?: unknown; prerelease?: unknown; published_at?: unknown; body?: unknown };
+      if (r.draft === true || r.prerelease === true) continue;
+      const tag = normalizeStableVersion(r.tag_name);
+      if (!tag) continue;
+      releases.push({
+        tag,
+        ...(typeof r.published_at === "string" && { publishedAt: r.published_at }),
+        ...(typeof r.body === "string" && { body: r.body }),
+      });
+    }
+    return { ok: true, releases };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export interface ReleaseCheckDeps {
   dataDir?: string;
   now?: () => number;
@@ -990,8 +1139,7 @@ export async function runReleaseCheck(deps: ReleaseCheckDeps): Promise<ReleaseCh
   }
   if (source === "api") {
     try {
-      const { notes, highlights } = extractReleaseNotes(release.body);
-      writeReleaseNotes({ version, ...(release.publishedAt && { publishedAt: release.publishedAt }), notes, highlights }, dataDir);
+      writeReleaseNotes(releaseNotesFrom(version, release), dataDir);
     } catch (err) {
       updateLog(`could not save the release notes: ${err instanceof Error ? err.message : String(err)}`, dataDir);
     }
@@ -1086,7 +1234,8 @@ export function scheduleReleaseCheck(deps: ReleaseCheckDeps, then?: (outcome: Re
 // ---------------------------------------------------------------------------
 
 /** How many versions `notesFetch` remembers. */
-const NOTES_FETCH_REMEMBERED = 10;
+/** Versions whose notes fetch is remembered: the Inbox may fetch any release its release list names (about 20). */
+const NOTES_FETCH_REMEMBERED = 30;
 
 /** The record names a release young enough for the quick retry (a clock far off either way does not). */
 function isYoungRelease(record: NotesFetchRecord, now: number): boolean {
@@ -1132,6 +1281,8 @@ export interface ReleaseNotesFetchDeps {
   /** The knob (resolveUpdateCheck): off, nothing is asked. */
   enabled: () => boolean;
   fetchRelease?: (version: string) => Promise<FetchReleaseResult>;
+  /** The person's Try again on What's new: ask now, whatever the per-version throttle says (`enabled` still applies). */
+  force?: boolean;
 }
 
 export type ReleaseNotesFetchOutcome =
@@ -1168,7 +1319,7 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
   let state: UpdateState;
   try {
     state = readUpdateState(dataDir);
-    if (!isNotesFetchDue(state, version, now)) return { outcome: "not-due" };
+    if (!deps.force && !isNotesFetchDue(state, version, now)) return { outcome: "not-due" };
     // Claim the attempt before the network call so concurrent processes ask
     // once. Marked in flight, so an attempt that never finished (the process
     // quit) is tried again on the quick cadence, not in a day.
@@ -1196,8 +1347,8 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
     return { outcome: "failed", error };
   }
   const release = result.release;
-  const { notes, highlights } = extractReleaseNotes(release.body);
-  const saved: ReleaseNotes = { version, ...(release.publishedAt && { publishedAt: release.publishedAt }), notes, highlights };
+  const saved = releaseNotesFrom(version, release);
+  const notes = saved.notes;
   try {
     writeReleaseNotes(saved, dataDir);
   } catch (err) {

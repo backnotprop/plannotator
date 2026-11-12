@@ -36,12 +36,14 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { createInboxContinuations, parseInboxContinues } from "./inbox-continuations";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
@@ -59,8 +61,23 @@ export interface InboxLiveSession {
   wrote_thread: boolean;
   /** Its connection can deliver into a running turn (Send now); false when it does not say. */
   send_now: boolean;
-  /** The session's label (issue #2450), on the window's route for this computer's owner only; absent when it has none. */
+  /** The session's label (issue #2450), on the window's route; absent when it has none. */
   label?: string;
+}
+
+/** A session the Agents section may list (`agentSessions`): live, or ended and heard from today. Times in ms. */
+export interface InboxAgentSession {
+  session: string;
+  host: string;
+  /** The project root its `project_path` resolved to; null when it sent none. */
+  root: string | null;
+  startedAt: number;
+  /** The last poll, state change or Inbox tool call. */
+  lastSeen: number;
+  live: boolean;
+  /** A turn runs now (live only); null when the connection does not say, or it is not live. */
+  busy: boolean | null;
+  label: string | null;
 }
 
 /**
@@ -151,6 +168,8 @@ interface SeenSession {
   tags: boolean;
   /** The title its latest poll sent (`label`, cleaned). Display only: nothing routes on it, and no MCP call reaches it. */
   label?: string | null;
+  /** The title its host generated, as its latest poll sent it (INBOX_TITLE_POLL_FIELD, cleaned as `label`). Display only: list rows. */
+  title?: string | null;
   /** Its poll said it can answer Ask AI live (`ask`). */
   ask?: boolean;
   /** The working folder its poll named (`project_path`), as sent; null when it sent none. */
@@ -172,6 +191,7 @@ interface SeenSession {
    * thread is not known to have ended. Its id, for that check.
    */
   wakeOnly?: string;
+  pinned?: boolean;
 }
 
 /**
@@ -336,6 +356,8 @@ export function createInboxLiveSessions(options: {
   wakeOnlyStatus?: (session: string) => "alive" | "dead" | null;
   /** The items of a session the Inbox wakes itself that may not have reached it (a `codex queue` that ran out of time). */
   uncertainItemsOf?: (session: string) => string[];
+  /** Each poll, with the sessions its conversation continues (nearest first): the agent icons' faces link it (inbox-agent-faces.ts). */
+  onPoll?: (session: string, continues: readonly string[]) => void;
 }) {
   const { store, serverSession } = options;
   const now = options.now ?? Date.now;
@@ -363,7 +385,7 @@ export function createInboxLiveSessions(options: {
     const entry = mcpEntry(session);
     entry.lastSeen = now();
     if (typeof who.host === "string" && who.host.trim() && who.host.length <= 64) entry.host = who.host.trim();
-    if (typeof who.name === "string" && who.name.trim() && who.name.length <= 80) entry.name = inboxStoredAgentName(who.name) ?? undefined;
+    if (typeof who.name === "string" && who.name.trim()) entry.name = inboxStoredAgentName(who.name) ?? undefined;
   };
   /**
    * project_path to its project's root. The Inbox passes its shared
@@ -429,7 +451,7 @@ export function createInboxLiveSessions(options: {
       return;
     }
     if (entry.busy !== true && !clocks) return;
-    const pending = store.pendingReplies(session, { tags: entry.tags });
+    const pending = pendingOf(session, { tags: entry.tags }).map((item) => item.message);
     if (clocks) {
       const ids = new Set(pending.map((item) => item.id));
       for (const id of [...clocks.keys()]) if (!ids.has(id)) clocks.delete(id);
@@ -452,7 +474,7 @@ export function createInboxLiveSessions(options: {
     for (const [session, entry] of sessions) trackWaitsOf(session, entry, t);
   };
   /** The clock of an item waiting on `session` (ms), or null. */
-  const waitClockOf = (session: string, itemId: string): WaitClock | null => waits.get(session)?.get(itemId) ?? null;
+  const waitClockOf = (session: string, itemId: string): WaitClock | null => waits.get(standInOf(session)?.session ?? session)?.get(itemId) ?? null;
   /** The same, as the rows read it (ISO). */
   const waitOf = (session: string, itemId: string): { since: string; autoSince: string | null } | null => {
     const clock = waitClockOf(session, itemId);
@@ -474,8 +496,8 @@ export function createInboxLiveSessions(options: {
   /**
    * Every session's label as its latest poll sent it (issue #2450: the `@` picker, the list rows' agents, a
    * message's author): live sessions and the ones that ended while this Inbox ran, so a finished thread keeps
-   * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it, nothing is
-   * stored, and no MCP read carries it. The routes give it to this computer's owner only (`isOwnerRequest`).
+   * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it and nothing is
+   * stored; an agent reads it only beside a session's id.
    * No prototype, so a session id like "__proto__" or "constructor" is a plain key.
    */
   const labels = (): Record<string, string> => {
@@ -483,8 +505,14 @@ export function createInboxLiveSessions(options: {
     for (const [session, entry] of sessions) if (entry.label) out[session] = entry.label;
     return out;
   };
+  const titles = (): Record<string, string> => {
+    const out = Object.create(null) as Record<string, string>;
+    for (const [session, entry] of sessions) if (entry.title) out[session] = entry.title;
+    return out;
+  };
   /** One session's label (`labels`); null when it has none. */
   const labelOf = (session: string): string | null => sessions.get(session)?.label ?? null;
+  const titleOf = (session: string): string | null => sessions.get(session)?.title ?? null;
   /** Bumped each time a poll changes a label: the windows read the rows again (`event: deliveries`, `labels`). */
   let labelChanges = 0;
   const labelVersion = () => labelChanges;
@@ -512,10 +540,17 @@ export function createInboxLiveSessions(options: {
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
+    // Sent on every poll, so the latest stands: a poll without it withdraws the claim.
+    const continues = parseInboxContinues(body[INBOX_CONTINUES_POLL_FIELD], session);
+    continuations.claim(session, continues);
+    options.onPoll?.(session, continues);
     // Sent on every poll, so the latest stands: empty clears it, and an older connection never has one.
     const label = cleanInboxSessionLabel(body.label);
     if ((entry.label ?? null) !== label) labelChanges += 1;
     entry.label = label;
+    const title = cleanInboxSessionLabel(body[INBOX_TITLE_POLL_FIELD]);
+    if ((entry.title ?? null) !== title) labelChanges += 1;
+    entry.title = title;
     entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
@@ -558,8 +593,53 @@ export function createInboxLiveSessions(options: {
 
   const isLive = (entry: SeenSession) =>
     entry.wakeOnly !== undefined
-      ? now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
+      ? (entry.pinned === true || now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS) && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
       : entry.holding > 0 || now() - entry.lastSeen <= INBOX_SESSION_LIVE_MS;
+
+  /**
+   * A conversation that goes on under a new session id (inbox-continuations.ts): a poll's `continues` names the
+   * ids it continues, and while one of those does not poll, the continuing session stands in for it.
+   */
+  const continuations = createInboxContinuations({
+    isLive: (session) => {
+      const entry = sessions.get(session);
+      return !!entry && isLive(entry);
+    },
+  });
+  /** The entry that answers for `session` now: its own while it is live, else that of the live session continuing it. */
+  const standInOf = (session: string): { session: string; entry: SeenSession } | null => {
+    const own = sessions.get(session);
+    if (own && isLive(own)) return { session, entry: own };
+    const heir = continuations.heirOf(session);
+    const entry = heir === null ? undefined : sessions.get(heir);
+    return heir !== null && entry ? { session: heir, entry } : null;
+  };
+  /**
+   * What waits for `session`'s connection: its own items, then those of the sessions it stands in for, oldest
+   * first. `as` is the session an item waits for (the one its delivery is recorded for).
+   */
+  const pendingOf = (session: string, options: { tags?: boolean } = {}): { message: InboxMessage; as: string }[] => {
+    const own = store.pendingReplies(session, options).map((message) => ({ message, as: session }));
+    const inherited = continuations.inheritedBy(session);
+    if (inherited.length === 0) return own;
+    const seen = new Set(own.map((item) => item.message.id));
+    const out = [...own];
+    for (const [as, list] of store.pendingRepliesFor(new Set(inherited), options)) {
+      for (const message of list) {
+        if (seen.has(message.id)) continue;
+        seen.add(message.id);
+        out.push({ message, as });
+      }
+    }
+    const seqOf = (id: string) => store.messageCursor(id) ?? 0;
+    return out.sort((a, b) => seqOf(a.message.id) - seqOf(b.message.id));
+  };
+  /** The session `session`'s connection acts as for item `itemId`: itself, or the session it stands in for that the item goes to. */
+  const actingFor = (session: string, itemId: string): string => {
+    const message = store.message(itemId);
+    if (!message || store.isFor(message, session)) return session;
+    return continuations.inheritedBy(session).find((old) => store.isFor(message, old)) ?? session;
+  };
 
   /**
    * A session the Inbox wakes itself (Codex) called an Inbox tool: it is live
@@ -594,6 +674,33 @@ export function createInboxLiveSessions(options: {
     sessions.set(session, entry);
   };
 
+  const pinCloud = (session: string, root: string | null, name: string, host = "cloud"): void => {
+    if (root === null) {
+      if (sessions.get(session)?.pinned) sessions.delete(session);
+      return;
+    }
+    const at = now();
+    const known = sessions.get(session);
+    sessions.set(session, {
+      host,
+      root,
+      startedAt: known?.startedAt ?? at,
+      lastSeen: at,
+      holding: 0,
+      busy: null,
+      idleSince: null,
+      sendNow: false,
+      cwd: null,
+      folder: null,
+      plugin: null,
+      engine: null,
+      tags: true,
+      label: name,
+      wakeOnly: session,
+      pinned: true,
+    });
+  };
+
   /** How a session the Inbox wakes itself is connected: it takes the item as its next turn; nothing else is known. */
   const wakeOnlyConnection = (): InboxRecipientConnection => ({
     busy: null,
@@ -626,6 +733,8 @@ export function createInboxLiveSessions(options: {
     const recent = (entry: { holding?: number; lastSeen: number } | undefined) =>
       !!entry && ((entry.holding ?? 0) > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
     if (recent(sessions.get(session)) || recent(mcpSeen.get(session))) return true;
+    // Its conversation goes on under another session id, and that one polls.
+    if (continuations.heirOf(session) !== null) return true;
     const steered = steering.get(session);
     if (steered !== undefined && now() - steered <= INBOX_ASKER_STEER_GRACE_MS) return true;
     return now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS;
@@ -752,6 +861,42 @@ export function createInboxLiveSessions(options: {
   };
 
   /**
+   * The sessions the Agents section can list (packages/server/inbox-agents-list.ts): every live one, and every one
+   * last heard at or after `since` (the start of today) that has ended. In memory, so a restart forgets the ended.
+   * A launch's permission prompt (`perm:…`) is no session of its own.
+   */
+  const agentSessions = (since: number): InboxAgentSession[] => {
+    const out: InboxAgentSession[] = [];
+    for (const [session, entry] of sessions) {
+      const live = isLive(entry);
+      const heard = Math.max(entry.lastSeen, mcpSeen.get(session)?.lastSeen ?? 0);
+      if ((!live && heard < since) || isInboxPermissionSession(session)) continue;
+      out.push({
+        session,
+        host: entry.host,
+        root: entry.root,
+        startedAt: entry.startedAt,
+        lastSeen: heard,
+        live,
+        busy: live ? entry.busy : null,
+        label: entry.label ?? null,
+      });
+    }
+    return out;
+  };
+
+  /**
+   * What the Agents section reads from the sessions, as one string (`event: deliveries`' `agents`): which are listed,
+   * live, busy or idle, and where they work. Never the time they were last heard, which every poll moves, nor a label:
+   * a label's change says `labels` to the windows (which read the list for it).
+   */
+  const agentsSignature = (since: number): string =>
+    agentSessions(since)
+      // Which ids its conversation continues: an agent is listed once for them all (inbox-agents-list.ts).
+      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
+      .join("|") + `#${continuations.signature()}`;
+
+  /**
    * The agents that read the Inbox through MCP only, newest first: every
    * session whose latest message did not come through a waking connection,
    * and every session an MCP tool call named with its host or name, within
@@ -800,7 +945,6 @@ export function createInboxLiveSessions(options: {
    */
   const tagTargets = (value: unknown): InboxTag[] => {
     if (!Array.isArray(value)) throw new InboxError("validation_error", "tags: a list of { host, session }.", { field: "tags" });
-    if (value.length > INBOX_TAGS_MAX) throw new InboxError("validation_error", `tags: at most ${INBOX_TAGS_MAX} sessions.`, { field: "tags" });
     const out: InboxTag[] = [];
     const old: string[] = [];
     const missing: string[] = [];
@@ -874,9 +1018,11 @@ export function createInboxLiveSessions(options: {
   };
 
   /** How a session is connected now (live, no grace), or null when its connection does not poll. */
-  const connectionOf = (session: string): InboxRecipientConnection | null => {
-    const entry = sessions.get(session);
-    if (!entry || !isLive(entry)) return options.wakeOnlyStatus?.(session) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(session) } : null;
+  const connectionOf = (asked: string): InboxRecipientConnection | null => {
+    // A session whose conversation goes on under another id is connected as that one is.
+    const stand = standInOf(asked);
+    if (!stand) return options.wakeOnlyStatus?.(asked) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(asked) } : null;
+    const { session, entry } = stand;
     return {
       busy: entry.busy,
       idle_since: entry.busy === false && entry.idleSince !== null ? iso(entry.idleSince) : null,
@@ -911,8 +1057,8 @@ export function createInboxLiveSessions(options: {
 
   /** The fields a list row's delivery reads (`InboxStore.setDeliveryPresence`): `connectionOf` without its plugin checks. */
   const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true } | null => {
-    const entry = sessions.get(session);
-    if (!entry || !isLive(entry)) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false } : null;
+    const entry = standInOf(session)?.entry;
+    if (!entry) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false } : null;
     return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}) };
   };
 
@@ -922,7 +1068,7 @@ export function createInboxLiveSessions(options: {
    * (`sessions` on `event: deliveries`). A turn starting, an MCP call or its window running out does not change it.
    */
   const presenceSignature = (): string => {
-    const known = new Set([...sessions.keys(), ...mcpSeen.keys(), ...steering.keys()]);
+    const known = new Set([...sessions.keys(), ...mcpSeen.keys(), ...steering.keys(), ...continuations.claimed()]);
     const there = [...known].filter((session) => options.store.hasWakingMessage(session) && askerLive(session)).sort();
     return [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", ...there].join("|");
   };
@@ -937,7 +1083,7 @@ export function createInboxLiveSessions(options: {
    */
   const deliverySignature = (): string => {
     const t = now();
-    const parts: string[] = [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", String(deliveryChanges)];
+    const parts: string[] = [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", String(deliveryChanges), `c:${continuations.signature()}`];
     for (const [id, entry] of sessions) {
       const recent = entry.holding > 0 || t - entry.lastSeen <= INBOX_ASKER_GRACE_MS;
       if (!recent) continue;
@@ -972,7 +1118,7 @@ export function createInboxLiveSessions(options: {
     extra: (host: InboxToolHostId) => { installed: string | null; update_command: string | null },
   ): Partial<Record<InboxToolHostId, InboxHostSessions>> => {
     const out: Partial<Record<InboxToolHostId, InboxHostSessions>> = {};
-    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
+    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes"];
     for (const [session, entry] of [...sessions].sort((a, b) => b[1].startedAt - a[1].startedAt)) {
       if (!isLive(entry) || !(hosts as readonly string[]).includes(entry.host)) continue;
       const host = entry.host as InboxToolHostId;
@@ -1022,35 +1168,47 @@ export function createInboxLiveSessions(options: {
     return offer ? { [INBOX_RELOAD_FIELD]: offer } : {};
   };
 
-  /** Live Claude Code sessions a restart brings up to date: the sidebar's "Reload Claude Code N". */
+  /**
+   * Whether the sidebar's row counts this outdated Claude Code session: a
+   * reload brings it up to date (`restart`), or its plugin on disk is itself
+   * behind this Inbox (`update_plugin`: the update first, then the reload;
+   * Settings → Agents, which the row opens, carries both steps). Once nothing
+   * updates the plugin by itself, nothing else in plain view says so.
+   */
+  const claudeRowFix = (fix: string | undefined): boolean => fix === "restart" || fix === "update_plugin";
+
+  /** Live Claude Code sessions the sidebar's "Reload Claude Code N" counts (claudeRowFix). */
   const restartCount = (): number => {
     let count = 0;
     for (const entry of sessions.values()) {
-      if (entry.host === "claude-code" && isLive(entry) && outdatedOf(entry)?.fix === "restart") count += 1;
+      if (entry.host === "claude-code" && isLive(entry) && claudeRowFix(outdatedOf(entry)?.fix)) count += 1;
     }
     return count;
   };
 
   /**
-   * Live sessions a reload alone brings up to date, per runtime (owner
-   * approval "reload-hosts"): Claude Code's `restart`, and Pi's, Oh My Pi's
-   * and OpenCode 2's `reload`. An update first (`update_plugin`,
-   * `update_extension`) is not counted, as before: the Update button and
-   * Settings carry it.
+   * Live sessions the sidebar's row counts, per runtime (owner approval
+   * "reload-hosts"): Claude Code's `restart` and `update_plugin` (its plugin
+   * on disk is behind this Inbox, so the update comes first: `update_first`),
+   * and Pi's, Oh My Pi's and OpenCode 2's `reload`. Pi's and OpenCode 2's
+   * `update_extension` is not counted, as before: Settings carries it.
    */
   const restartAgents = (): InboxRestartAgents => {
     const runtimes: InboxRestartAgents["runtimes"] = {};
     let total = 0;
+    let updateFirst = 0;
     for (const entry of sessions.values()) {
       if (!isLive(entry)) continue;
       const fix = outdatedOf(entry)?.fix;
-      if (fix !== "restart" && fix !== "reload") continue;
+      const claude = entry.host === "claude-code" && claudeRowFix(fix);
+      if (!claude && fix !== "restart" && fix !== "reload") continue;
       const runtime = runtimeOf(entry.host, entry.plugin);
       if (!runtime) continue;
       runtimes[runtime] = (runtimes[runtime] ?? 0) + 1;
       total += 1;
+      if (claude && fix === "update_plugin") updateFirst += 1;
     }
-    return { total, runtimes };
+    return { total, runtimes, ...(updateFirst > 0 ? { update_first: updateFirst } : {}) };
   };
 
   /** Whether a session is live now (no grace: compose sends only to a session that polls). */
@@ -1095,31 +1253,27 @@ export function createInboxLiveSessions(options: {
     });
 
   /**
-   * The window's routes; null when the path is not one of them. `owner`: this computer's owner asks (this
-   * computer, the owner's tailnet login, their phone): only then does a session carry its `label`.
+   * The window's routes; null when the path is not one of them.
    * `byGuest`: the request is a tailnet guest's (`isGuest`), so a new message it writes is marked `by_guest`.
    */
-  const route = async (req: Request, path: string, owner = false, byGuest = false): Promise<Response | null> => {
+  const route = async (req: Request, path: string, byGuest = false): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
       const found = liveFor(sessionsMatch[1]!);
       // Send to another session's rows (issue #2450): the label, absent when the session has none.
-      const live = owner
-        ? {
-            ...found,
-            sessions: found.sessions.map((session) => {
-              const label = labelOf(session.session);
-              return label ? { ...session, label } : session;
-            }),
-          }
-        : found;
+      const live = {
+        ...found,
+        sessions: found.sessions.map((session) => {
+          const label = labelOf(session.session);
+          return label ? { ...session, label } : session;
+        }),
+      };
       const asker = new URL(req.url).searchParams.get("asker");
       const recipients = (new URL(req.url).searchParams.get("recipients") ?? "")
         .split(",")
         .map((session) => session.trim())
-        .filter((session) => session !== "")
-        .slice(0, INBOX_TAGS_MAX);
+        .filter((session) => session !== "");
       return answer({
         serverSession,
         home: homedir(),
@@ -1224,13 +1378,26 @@ export function createInboxLiveSessions(options: {
     pollStarted,
     stateChanged,
     seenWakeOnly,
+    pinCloud,
     liveFor,
     askerLive,
+    pendingOf,
+    actingFor,
+    /** The sessions `session` stands in for now (its conversation continues them, and they do not poll). */
+    inheritedBy: continuations.inheritedBy,
+    /** The live session standing in for `session` now, or null (the Agents list: one agent for one conversation). */
+    continuedBy: continuations.heirOf,
+    /** Every session id `session`'s conversation continues, nearest first. */
+    continuesOf: continuations.lineOf,
     stuck,
     replyTarget,
     seenOverMcp,
     route,
     allLive,
+    agentSessions,
+    agentsSignature,
+    /** The sessions' clock (ms): "today" for the Agents section is by it. */
+    clock: now,
     isSessionLive,
     runStateOf,
     pollsNow,
@@ -1259,7 +1426,9 @@ export function createInboxLiveSessions(options: {
     tagTargets,
     wakesTagged,
     labels,
+    titles,
     labelOf,
+    titleOf,
     labelVersion,
   };
 }

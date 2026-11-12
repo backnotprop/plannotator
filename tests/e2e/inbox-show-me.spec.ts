@@ -4,7 +4,8 @@
  * compiled binary. The agent is scripted (tests/helpers/inbox-ask-agent.ts: a real
  * connection and the real pull client, never a real agent CLI); it does what the
  * request says, with the real `plannotator shape` and a seeded whiteboard board.
- * Code review is on and Shape's own switch is off, the whole way.
+ * Code review and Shape are both on (Show me rides Shape's own switch too, approval
+ * "code-review-029-shape-off"), but for one test that turns Shape off and finds no Show me.
  *
  * Proves, in order:
  *  1. Selecting lines offers Comment · Ask · Show me; Show me opens the box naming
@@ -55,6 +56,7 @@ import { startScriptedAskAgent, type ScriptedAskAgent } from '../helpers/inbox-a
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { diffRowBox } from './diff-row-box';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -351,7 +353,7 @@ async function pickChapter(page: Page, row: number | 'overview'): Promise<void> 
 /** A real crop of a diff's lines, from the first added line down, for the scripted agent's board. */
 async function cropLines(page: Page, shell: Locator, path: string): Promise<void> {
   await shell.scrollIntoViewIfNeeded();
-  const line = (await shell.locator('[data-line-type="change-addition"]').first().boundingBox())!;
+  const line = await diffRowBox(shell.locator('[data-line-type="change-addition"]').first());
   const box = (await shell.boundingBox())!;
   await page.screenshot({ path, clip: { x: box.x + 6, y: line.y, width: box.width - 12, height: Math.min(200, box.y + box.height - line.y) } });
 }
@@ -376,8 +378,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
-  // Code review on; Shape's own switch stays off.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: false }));
+  // Code review and Shape on: Show me needs both.
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: true }));
   // Nothing here may reach the real gh, glab or tailscale.
   const trap = join(root, 'trap');
   mkdirSync(trap);
@@ -524,7 +526,6 @@ test('Show me on selected lines: the popover, the box, the agent makes a Shape, 
   expect(asked).toContain(`(${round1.message_id}): "What happens after the third failure?"`);
   expect(asked).toContain('`plannotator shape --help`');
   expect(asked).toContain(`--thread ${round1.thread_id} --through ${round1.message_id}`);
-  // Turning Code review on is enough: the help the request names is there with Shape's own switch off.
   // The request says how a part lands on its code; Shape's own help, which people with Code review off read too, does not.
   expect(asked).toContain('data-code="path#L42"');
   const help = world.shape(['--help']);
@@ -793,29 +794,69 @@ test('a phone at 390 px: the popover, the board, a part lands on its line', asyn
   }
 });
 
-test("an older agent's `review draw` is refused and pointed at Shape; Shape's own places stay on Shape's switch", async () => {
+test("Shape off with Code review on: no Show me, no Overview picture, no Shape place, and an older agent's `review draw` is the review parse's", async () => {
+  test.setTimeout(150_000);
   const { page } = world;
-  for (const args of [['review', 'draw', '--file', 'x.json', '--review', round1.message_id, '--turn', 'turn_x'], ['review', 'drawings', round1.message_id], ['review', 'draw', '--help']]) {
+  const drawArgs = [['review', 'draw', '--file', 'x.json', '--review', round1.message_id, '--turn', 'turn_x'], ['review', 'drawings', round1.message_id], ['review', 'draw', '--help']];
+  // Both on: refused and pointed at Shape.
+  for (const args of drawArgs) {
     const run = spawnSync(binary, args, { env: world.env, cwd: world.project, encoding: 'utf8', timeout: 30_000 });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('`plannotator shape --help`');
     expect(run.stdout).toBe('');
   }
-  // The row and the grid are Shape's: off here, whatever the boards.
-  await page.goto(`${world.url}#shapes`);
-  await expect(page).not.toHaveURL(/#shapes/);
-  await expect(page.locator('[data-shape-nav]')).toHaveCount(0);
-  // So are `/shape` and ⌘K's Shape group: Code review offers its own skills, and finds no board.
-  const skills = await page.evaluate(async () => ((await (await fetch('/api/inbox/skills')).json()) as { skills: { name: string }[] }).skills.map((skill) => skill.name));
-  expect(skills.length).toBeGreaterThan(0);
-  expect(skills).not.toContain('shape');
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
-  const palette = page.locator('dialog[data-search-palette]');
-  await expect(palette).toBeVisible();
-  await palette.getByRole('combobox').or(palette.locator('input')).first().fill('After the third failure');
-  await page.waitForTimeout(800);
-  await expect(palette.getByText('Shape', { exact: true })).toHaveCount(0);
-  await page.keyboard.press('Escape');
+  const configPath = join(world.dataDir, 'config.json');
+  const setShape = (on: boolean) => writeFileSync(configPath, JSON.stringify({ ...(JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>), inboxShape: on }));
+  setShape(false);
+  try {
+    // In a folder that is no repository: the review parse answers at once, nothing is reviewed.
+    for (const args of drawArgs) {
+      const run = spawnSync(binary, args, { env: world.env, cwd: world.root, encoding: 'utf8', timeout: 30_000 });
+      expect(run.status, run.stderr).not.toBeNull();
+      expect(run.stderr).not.toContain('review_draw_gone');
+      expect(run.stderr).not.toContain('plannotator shape');
+    }
+    const help = world.shape(['--help']);
+    expect([help.status, help.stdout]).toEqual([1, '']);
+    expect(help.stderr).toContain('shape_off');
+
+    // The review: Comment and Ask on selected lines, no Overview picture and no Show me in its heading, no board.
+    await page.goto(`${world.url}#thread=${round1.thread_id}`);
+    await page.reload();
+    await openReview(page, round1.thread_id);
+    await pickChapter(page, 2);
+    await selectLines(page, WORKER, 16, 18);
+    await expect(chooser(page)).toBeVisible();
+    await expect(chooser(page).getByRole('button')).toHaveText(['Comment', 'Ask']);
+    await page.mouse.click(4, 4);
+    await expect(chooser(page)).toHaveCount(0);
+    await pickChapter(page, 'overview');
+    await expect(page.locator('[data-guide-overview]')).toBeVisible();
+    await expect(page.locator('[data-overview-figure]')).toHaveCount(0);
+    await expect(page.locator('[data-guide-overview-diagram]')).toHaveCount(0);
+    await expect(page.locator('[data-overview-show-me]')).toHaveCount(0);
+    await expect(board(page)).toHaveCount(0);
+    await expect(page.locator('[data-shape-pebble]')).toHaveCount(0);
+
+    // Shape's own places: the row, the grid, `/shape` and ⌘K's Shape group.
+    await page.goto(`${world.url}#shapes`);
+    await expect(page).not.toHaveURL(/#shapes/);
+    await expect(page.locator('[data-shape-nav]')).toHaveCount(0);
+    const skills = await page.evaluate(async () => ((await (await fetch('/api/inbox/skills')).json()) as { skills: { name: string }[] }).skills.map((skill) => skill.name));
+    expect(skills).toContain('review-curate');
+    expect(skills).not.toContain('shape');
+    expect((await page.request.get(`${world.url}api/shapes`)).status()).toBe(404);
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
+    const palette = page.locator('dialog[data-search-palette]');
+    await expect(palette).toBeVisible();
+    await palette.getByRole('combobox').or(palette.locator('input')).first().fill('After the third failure');
+    await page.waitForTimeout(800);
+    await expect(palette.getByText('Shape', { exact: true })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+  } finally {
+    setShape(true);
+  }
+  await page.reload();
 });
 
 test('a board drawn on an earlier review lands where its code is now, or says it changed; never on its old numbers', async () => {
@@ -1144,7 +1185,10 @@ test('a Change it while the session answers another thread: no storm of requests
     const readsBefore = reads.length;
     await second.waitForTimeout(7_000);
     expect(posts.length).toBeLessThanOrEqual(3);
-    expect(reads.length - readsBefore).toBeLessThanOrEqual(6);
+    // The window's readers share one read of the thread's Ask per event (ask/askReads.ts): each try is one read (its
+    // look, whose answer the wake reuses), and the three posts allow two tries here; two more for news that comes
+    // while a try is on its way (the other readers read once then). CI measures 2.
+    expect(reads.length - readsBefore).toBeLessThanOrEqual(4);
     expect(wakes()).toBe(0);
 
     // That turn ends: the person's Change it goes through, once.

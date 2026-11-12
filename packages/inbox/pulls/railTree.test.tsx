@@ -69,3 +69,17 @@ test.if(hasDom)('middleCut keeps the end that tells rows apart', () => {
   expect(middleCut('shared_chunk_ids.rs')).toEqual(['shared_chunk', '_ids.rs']);
   expect(middleCut('mod.rs')).toEqual(['mod.rs', '']);
 });
+
+test.if(hasDom)("a row counts other people's open threads on its file, apart from the person's own comments, and says it to a screen reader", () => {
+  const { files, tree, loose } = reviewFiles([file('src/a.ts', 1, 0), file('src/b.ts', 1, 0)].join(''));
+  act(() =>
+    root.render(<RailTree tree={tree} loose={loose} files={files} viewed={new Set()} commentCount={(path) => (path === 'src/a.ts' ? 2 : 0)} threadCount={(path) => (path === 'src/a.ts' ? 6 : 0)} onSelect={() => {}} onToggleViewed={() => {}} />),
+  );
+  const a = host.querySelector('[data-review-file="src/a.ts"]')!;
+  expect(a.querySelector('[data-pull-file-threads]')!.textContent).toBe('6');
+  expect(a.querySelector('.ib-prp-c')!.textContent).toBe('2');
+  expect(a.getAttribute('aria-label')).toBe('src/a.ts, 6 open threads');
+  const b = host.querySelector('[data-review-file="src/b.ts"]')!;
+  expect(b.querySelector('[data-pull-file-threads]')).toBeNull();
+  expect(b.getAttribute('aria-label')).toBe('src/b.ts');
+});

@@ -109,11 +109,20 @@ jobs:
           # or this one was rerun): deploy that newer tree instead of this
           # older one, which would overwrite it. It contains this commit, and
           # the diff from this run's base covers this commit's changes too.
+          # "Newer" means the commit contains this one (GitHub's compare says
+          # "ahead"), not only a later Test run: a run id is no proof of order
+          # on main, and deploying an older tree would put old pages live.
           NEWEST_ID="$(jq -r '.workflow_runs[0].id // 0' <<< "$RUNS")"
-          if (( NEWEST_ID > TEST_RUN_ID )); then
-            CURRENT_SHA="$(jq -r '.workflow_runs[0].head_sha' <<< "$RUNS")"
-            echo "Test run ${NEWEST_ID} passed on a newer main commit; deploying its tree ${CURRENT_SHA}."
-            git fetch --no-tags --depth=1 origin "$CURRENT_SHA"
+          NEWEST_SHA="$(jq -r '.workflow_runs[0].head_sha // empty' <<< "$RUNS")"
+          if (( NEWEST_ID > TEST_RUN_ID )) && [[ -n "$NEWEST_SHA" && "$NEWEST_SHA" != "$CURRENT_SHA" ]]; then
+            ORDER="$(gh api "repos/${REPOSITORY}/compare/${CURRENT_SHA}...${NEWEST_SHA}" --jq '.status' || echo unknown)"
+            if [[ "$ORDER" == "ahead" ]]; then
+              CURRENT_SHA="$NEWEST_SHA"
+              echo "Test run ${NEWEST_ID} passed on a newer main commit; deploying its tree ${CURRENT_SHA}."
+              git fetch --no-tags --depth=1 origin "$CURRENT_SHA"
+            else
+              echo "Test run ${NEWEST_ID} is on ${NEWEST_SHA}, which is ${ORDER} of this commit, not ahead; deploying this commit."
+            fi
           fi
           echo "sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
           echo "Changes ${BEFORE_SHA}..${CURRENT_SHA}"
@@ -167,17 +176,23 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      # The site's videos are not in the repository: they are uploaded by hand
+      # to assets/ in this bucket. The excludes keep --delete from removing
+      # them (an excluded key is neither uploaded nor deleted). See "Videos" in
+      # docs/agent-guides/project-and-development.md.
       - name: Deploy to S3
-        run: aws s3 sync apps/marketing/dist/ s3://plannotator-marketing/ --delete
+        run: >-
+          aws s3 sync apps/marketing/dist/ s3://plannotator-marketing/ --delete
+          --exclude "assets/*.mp4" --exclude "assets/*.webm"
 
-      # The sync guesses text/markdown with no charset for .md; re-upload the
-      # Inbox install prompt (/inbox/prompt.md) with an explicit charset.
       - name: Set the Inbox prompt's content type
         run: |
-          if [ -f apps/marketing/dist/inbox/prompt.md ]; then
-            aws s3 cp apps/marketing/dist/inbox/prompt.md s3://plannotator-marketing/inbox/prompt.md \
-              --content-type "text/markdown; charset=utf-8"
-          fi
+          for page in prompt.md cloud-agent.md; do
+            if [ -f "apps/marketing/dist/inbox/$page" ]; then
+              aws s3 cp "apps/marketing/dist/inbox/$page" "s3://plannotator-marketing/inbox/$page" \
+                --content-type "text/markdown; charset=utf-8"
+            fi
+          done
 
       - name: Invalidate CloudFront
         run: |

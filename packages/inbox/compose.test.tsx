@@ -4,9 +4,10 @@
  * (its own process, tests/helpers/inbox-dom-server.ts), the window's fetches
  * carried to it over loopback, and agent sessions made live by real bridge
  * polls with the registry's token. What is proved: with no live agent, Send
- * sends nothing and says so; closing with words asks Keep draft / Discard
- * (Escape asks too, and a second Escape goes back); Discard keeps nothing;
- * Keep draft makes the sidebar's Drafts row and the Drafts page row; delete
+ * sends nothing and says so; Escape with words keeps them as a draft with no
+ * question (approval "inbox-compose-escape-keeps"), and the toast's Reopen
+ * brings it back as it was; an emptied compose keeps nothing; a kept draft
+ * makes the sidebar's Drafts row and the Drafts page row; delete
  * has Undo; with a live session To is prefilled and Send starts the thread
  * addressed to it (the list row draws that agent, "To <agent>").
  *
@@ -191,7 +192,7 @@ async function drafts(): Promise<{ id: string; body: string; status: string }[]>
   return (JSON.parse((await loopback('/api/inbox/drafts')).text) as { drafts: { id: string; body: string; status: string }[] }).drafts;
 }
 
-test.skipIf(!hasDom)('no live agent: Send sends nothing and says so; Escape asks Keep draft / Discard, a second Escape goes back; Discard keeps nothing', async () => {
+test.skipIf(!hasDom)('no live agent: Send sends nothing and says so; Escape keeps the words as a draft with no question, Reopen brings them back, Delete draft and an emptied compose keep nothing', async () => {
   const el = await renderApp();
   await openCompose(el);
   await until(() => dialog()!.querySelector('[data-compose-to="none"]') !== null, 'the no-agent state');
@@ -214,12 +215,30 @@ test.skipIf(!hasDom)('no live agent: Send sends nothing and says so; Escape asks
   expect(dialog()!.querySelector('[data-compose-error]')?.textContent).toBe('Nothing sent: no live agent is chosen. Save it as a draft.');
   expect(posted.some((p) => p.path === '/api/inbox/messages')).toBe(false);
 
+  // One Escape leaves and keeps the words: nothing asks first.
   key('Escape');
-  expect(dialog()!.querySelector('[data-compose-question]')?.textContent).toContain('Keep this message as a draft?');
+  await until(() => dialog() === null, 'compose closed');
+  const kept = await drafts();
+  expect(kept.map((d) => d.body)).toEqual(['Rename the Quiet section to Done?']);
+  const toast = document.querySelector('[data-inbox-toast]')!;
+  expect(toast.textContent).toContain('Draft saved');
+  const reopen = toast.querySelector('[data-toast-action]') as HTMLButtonElement;
+  expect(reopen.textContent).toBe('Reopen');
+  // Reopen: the same draft, as it was.
+  act(() => reopen.click());
+  await until(() => dialog()?.querySelector('textarea') != null, 'compose reopened');
+  expect((dialog()!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Rename the Quiet section to Done?');
+  // Unchanged, it closes on Escape saving nothing new; Delete draft throws it away.
+  act(() => (dialog()!.querySelector('[data-compose-delete]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'compose closed');
+  await until(() => document.querySelector('[data-inbox-toast]')?.textContent?.includes('Draft saved') !== true, 'the delete toast');
+  expect(await drafts()).toEqual([]);
+
+  // Written, then emptied: Escape closes and keeps nothing.
+  await openCompose(el);
+  type('Never mind.');
+  type('');
   key('Escape');
-  expect(dialog()!.querySelector('[data-compose-question]')).toBeNull();
-  key('Escape');
-  act(() => (dialog()!.querySelector('[data-compose-discard]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   expect(await drafts()).toEqual([]);
   // The Drafts row counts only the seeded world's unsent replies (a picked
@@ -234,7 +253,6 @@ test.skipIf(!hasDom)('Keep draft: the sidebar\'s Drafts row and the Drafts page 
   await openCompose(el);
   type('Idea: group the list by session.');
   key('Escape');
-  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   // The Drafts row counts the threads holding unsent work too (the world's picks not sent, approval "inbox-reply-drafts").
   const replies = (JSON.parse((await loopback('/api/inbox/drafts')).text) as { replies?: unknown[] }).replies?.length ?? 0;
@@ -340,7 +358,6 @@ test.skipIf(!hasDom)('a plain New message opens with To empty and focus on To; S
 
   // Kept as a draft: reopened, it names the session it was for, focus in the message.
   key('Escape');
-  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   act(() => (el.querySelector('[data-drafts-nav]') as HTMLButtonElement).click());
   await until(() => el.querySelector('[data-draft-id] .ib-draft-open') !== null, 'the draft row');
@@ -501,8 +518,9 @@ test.skipIf(!hasDom)('git too slow to tell the project (project_unresolved): the
   }
   expect(dialog()!.querySelector('[data-compose-error]')!.textContent).toBe('Could not tell which project that session works in: git did not answer in time. Nothing was sent; press Send again.');
   expect((dialog()!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Plan the retry budget.');
+  // Emptied, Escape closes keeping nothing (no draft left behind for the next test).
+  type('');
   key('Escape');
-  act(() => (dialog()!.querySelector('[data-compose-discard]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
 });
 
@@ -600,7 +618,6 @@ test.skipIf(!hasDom)('the thread chip follows the message until typed in; typed,
 
   // A draft of a chip that follows the message keeps no name; reopened, it is worked out again.
   key('Escape');
-  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   let saved = (JSON.parse((await loopback('/api/inbox/drafts')).text) as { drafts: { id: string; thread_name?: string }[] }).drafts;
   expect(saved.map((d) => d.thread_name)).toEqual([undefined]);
@@ -612,7 +629,6 @@ test.skipIf(!hasDom)('the thread chip follows the message until typed in; typed,
   // A typed name is kept by the draft, as typed.
   fillChip('Kanban board');
   key('Escape');
-  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   saved = (JSON.parse((await loopback('/api/inbox/drafts')).text) as { drafts: { id: string; thread_name?: string }[] }).drafts;
   expect(saved.map((d) => d.thread_name)).toEqual(['Kanban board']);
@@ -686,11 +702,16 @@ test.skipIf(!hasDom)('a typed name another open thread has: refused (409) and sa
   act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
   await until(() => chipError() !== null, 'the refusal on the chip');
   expect(chipError()!.textContent).toContain('Another open thread in this project has this name.');
-  expect(chip().hasAttribute('data-invalid')).toBe(true);
+  // The Inbox's refusal names the thread that has it, so the way through is offered, with that thread's own name.
+  expect(dialog()!.querySelector('[data-compose-thread-pill]')!.getAttribute('aria-label')).toBe('Relay budget, with Claude Code');
+  expect(dialog()!.querySelector('[data-compose-thread-name-join]')).not.toBeNull();
+  // With the way through it is an offer: the chip is marked, not as an error.
+  expect(chip().hasAttribute('data-offer')).toBe(true);
+  expect(chip().hasAttribute('data-invalid')).toBe(false);
   expect(dialog()!.querySelector('[data-compose-error]')).toBeNull();
   // Editing the name clears the mark and the message.
   fillChip('Relay budget v2');
-  expect(chip().hasAttribute('data-invalid')).toBe(false);
+  expect(chip().hasAttribute('data-offer')).toBe(false);
   expect(chipError()).toBeNull();
   act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'sent');
@@ -788,7 +809,6 @@ test.skipIf(!hasDom)('Create thread kept as a draft: the draft keeps the card; s
   await until(() => dialog()?.querySelector('[data-compose-to="ses_draft_card"]') != null, 'compose to the live session');
   type('Draft card link\n\nWhich of the two search modes?');
   key('Escape');
-  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'kept as a draft');
   const kept = (await drafts()).find((d) => d.body.startsWith('Draft card link')) as unknown as { id: string; card?: { id: string; title: string } };
   expect(kept.card).toEqual({ id: made.card.id, title: 'Draft card link' });
@@ -892,7 +912,6 @@ test.skipIf(!hasDom)('Board chip: a draft keeps it, whatever the browser chose s
   act(() => boardChip()!.click());
   type('Chip draft kept\n\nLater.');
   key('Escape');
-  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'kept as a draft');
   const kept = (await drafts()).find((d) => d.body.startsWith('Chip draft kept')) as unknown as { id: string; board_request?: boolean };
   expect(kept.board_request).toBe(true);

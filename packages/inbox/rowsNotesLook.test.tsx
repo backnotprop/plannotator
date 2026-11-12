@@ -189,8 +189,8 @@ describe('the options in the look', () => {
     expect(inboxRowsCanonical(['compact', 'timeBelow', 'dividers', 'statusMark', 'boldNames'])).toEqual(['compact', 'timeBelow', 'dividers', 'statusMark', 'boldNames']);
   });
 
-  test.if(hasDom)('no preset turns one on (presets come later), so picking a preset turns them off', () => {
-    for (const preset of ROWS_PRESETS) expect([preset.look.timeBelow, preset.look.dividers, preset.look.statusMark, preset.look.boldNames]).toEqual([false, false, false, false]);
+  test.if(hasDom)('Minimal, Balanced and Detailed turn none on, so picking one turns them off; only Dense (approval "inbox-rows-settings-page") has lines and one mark', () => {
+    expect(Object.fromEntries(ROWS_PRESETS.map((preset) => [preset.id, (['timeBelow', 'dividers', 'statusMark', 'boldNames'] as const).filter((key) => preset.look[key])]))).toEqual({ balanced: [], dense: ['dividers', 'statusMark'], minimal: [], detailed: [] });
   });
 });
 
@@ -225,8 +225,8 @@ describe.if(hasDom)('the notes-list look on the rows', () => {
           expect(foot!.firstElementChild!.classList.contains('ib-t')).toBe(true);
           expect(third!.querySelector('.ib-badge, .ib-c')).toBeNull();
         }
-        // The Stopped triangle and the counts moved to the time's line, nothing lost.
-        expect(lines(rowOf(el, 'msg_stop')).foot!.querySelector('[data-row-badge="stopped"]')).not.toBeNull();
+        // The Stopped mark and the counts moved to the time's line, nothing lost.
+        expect(lines(rowOf(el, 'msg_stop')).foot!.querySelector('.ib-qn[data-wait-step="stop"]')).not.toBeNull();
         expect(lines(rowOf(el, 'msg_wait')).foot!.querySelector('.ib-qn')).not.toBeNull();
         unmount();
       }
@@ -248,22 +248,26 @@ describe.if(hasDom)('the notes-list look on the rows', () => {
       const el = mount(shape);
       const mark = (id: string) => rowOf(el, id).querySelector('.ib-stm')?.getAttribute('data-status') ?? null;
       expect(['msg_stop', 'msg_hold', 'msg_wait', 'msg_new', 'msg_sent', 'msg_quiet', 'msg_acked', 'msg_working'].map(mark)).toEqual(['waiting', 'waiting', 'waiting', null, null, 'done', 'done', 'done']);
-      // In place of the counts: no `?N`, no action pill, on any row.
-      expect(el.querySelectorAll('.ib-qn, [data-action-count]').length).toBe(0);
+      // In place of the counts: no open `?N`, no open action pill, on any row (a blocked row keeps its filled mark).
+      expect(el.querySelectorAll('.ib-qn[data-wait-step="open"], [data-action-count][data-wait-step="open"]').length).toBe(0);
+      expect(rowOf(el, 'msg_wait').querySelectorAll('.ib-qn, [data-action-count]').length).toBe(0);
       if (shape === 'wide') expect(rowOf(el, 'msg_wait').querySelector(':scope > .ib-cq .ib-stm')).not.toBeNull();
       else expect(lines(rowOf(el, 'msg_wait')).third!.querySelector('.ib-stm')).not.toBeNull();
       unmount();
     }
   });
 
-  test('Status mark: questions and action items still show, the count in its name; Stopped and Holds up keep their triangles', () => {
+  test('Status mark: questions and action items still show, the count in its name; Stopped and Holds up keep their filled marks', () => {
     look('statusMark', 'timeBelow');
     for (const shape of SHAPES) {
       const el = mount(shape);
       expect(rowOf(el, 'msg_wait').querySelector('.ib-stm .ib-sr')!.textContent!.trim()).toBe('Waiting on you: 2 questions, 1 action item');
       expect(rowOf(el, 'msg_wait').querySelector('.ib-stm')!.getAttribute('data-status-count')).toBe('3');
-      expect(rowOf(el, 'msg_stop').querySelector('[data-row-badge="stopped"]')).not.toBeNull();
-      expect(rowOf(el, 'msg_hold').querySelector('[data-row-badge="holds"]')!.textContent).toContain('1');
+      expect(rowOf(el, 'msg_stop').querySelector('.ib-qn[data-wait-step="stop"]')).not.toBeNull();
+      const hold = rowOf(el, 'msg_hold').querySelector('.ib-qn[data-wait-step="hold"]')!;
+      expect(hold.querySelector('.ib-sr')!.textContent!.trim()).toBe('Holding up work: 1 question');
+      // Before the status mark.
+      expect(hold.compareDocumentPosition(rowOf(el, 'msg_hold').querySelector('.ib-stm')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       // The mark is never hidden from a screen reader: it is the count.
       expect(rowOf(el, 'msg_wait').querySelector('.ib-stm')!.closest('[aria-hidden="true"]')).toBeNull();
       // With the time under the preview it sits on the time's line, after the time, and not beside the preview.

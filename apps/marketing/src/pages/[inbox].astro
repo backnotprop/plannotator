@@ -5,6 +5,7 @@ import Footer from '../components/Footer.astro';
 import InboxShot from '../components/inbox/InboxShot.astro';
 import InboxPhone from '../components/inbox/InboxPhone.astro';
 import { INBOX_LAUNCHED, INBOX_POST_ID } from '../lib/inbox-launch';
+import { videoUrl } from '../lib/media';
 import installPrompt from '../lib/inbox-prompt.md?raw';
 
 // /inbox/ is generated only once the Inbox launches: until then the deployed
@@ -170,8 +171,7 @@ const steps = [
                       when Claude Code starts, once the Inbox has run, and your replies arrive as Claude's next turn.
                     </p>
                     <p class="ib-step-note">
-                      Claude Code 2.1.287 or newer on macOS or Linux. On Windows, use the MCP command under Other MCP
-                      agent.
+                      Claude Code 2.1.287 or newer.
                     </p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-pi" aria-labelledby="ib-t-pi" hidden>
@@ -267,7 +267,7 @@ const steps = [
             height="1080"
             aria-label="The Plannotator Inbox film"
           >
-            <source src="/assets/inbox-film.mp4" type="video/mp4" />
+            <source src={videoUrl('inbox-film.mp4')} type="video/mp4" />
           </video>
           <button type="button" class="ib-film-play" aria-label="Play the Inbox film" data-film-play hidden>
             <span class="ib-film-play-dot" aria-hidden="true">
@@ -462,10 +462,9 @@ const steps = [
         <InboxPhone name="phone-prototype" alt="The invoices prototype with numbered comments on a phone" />
       </div>
 
-      <!-- ── 8. Hosted ── -->
+      <!-- ── 8. Teams ── -->
       <p class="ib-hosted">
-        <span class="ib-soon font-mono text-[0.6875rem] rounded bg-primary/15 text-primary border border-primary/30 leading-none">coming</span>
-        The same inbox hosted.
+        Want to see the version of this that helps your team? <a href="/workspaces/">Sign up for Workspaces</a>.
       </p>
 
       <!-- The post, linked here because /blog redirects to the docs' Learn page. -->
@@ -1370,7 +1369,7 @@ const steps = [
     color: var(--ib-dim);
   }
 
-  /* ── Hosted line ── */
+  /* ── Workspaces line ── */
   .ib-hosted {
     margin: 4rem 0 0;
     padding: 1.5rem 0;
@@ -1383,11 +1382,14 @@ const steps = [
     text-wrap: balance;
   }
 
-  .ib-soon {
-    padding: 2px 6px;
-    margin-right: 0.5rem;
-    vertical-align: 1px;
+  .ib-hosted a {
+    color: var(--foreground);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--primary) 55%, transparent);
+    text-underline-offset: 3px;
   }
+
+  .ib-hosted a:hover { text-decoration-color: var(--primary); }
 
   .ib-post {
     margin-top: 2.5rem;

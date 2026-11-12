@@ -15,7 +15,8 @@ import {
 import { plural } from '@plannotator/core/inbox-format';
 import { holdingsOf } from '@plannotator/core/inbox-folding';
 import { inboxReviewTitleLine } from '@plannotator/core/inbox-review';
-import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, type PullFilter } from './model';
+import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, requestedParts, type PullFilter } from './model';
+import { person, wordsText, type Words } from './words';
 import { startLayer } from './topology';
 import { hostLabel } from '../compose/model';
 
@@ -61,7 +62,10 @@ export interface ReviewRowLine {
   kind: 'local' | 'pr' | 'stack';
   lead: string;
   agent: { host: string | null; name: string } | null;
+  /** Why it is where it is, as one string (a reader's and the tests' words). */
   status: string;
+  /** The same words in parts: the people it names are drawn with their faces (`words.ts`). */
+  parts: Words;
   tone: 'ok' | 'warn' | null;
 }
 
@@ -73,51 +77,54 @@ function focusOf(stack: InboxPullStack): InboxPull {
   return open.find((pull) => (pull.requested || pull.assigned) && !pull.mine) ?? startLayer(stack) ?? open[0] ?? stack.layers[stack.layers.length - 1]!;
 }
 
-const whose = (pull: InboxPull) => (pull.mine ? 'yours' : (pull.author ?? 'a deleted account'));
+const whose = (pull: InboxPull) => (pull.mine ? 'yours' : pull.author ? person(pull.author) : 'a deleted account');
 
 /** "yours · checks passed", "tomas · draft": a listed PR's words. */
-function listedWords(pull: InboxPull): string {
+function listedWords(pull: InboxPull): Words {
   const checks = checksWords(pull);
-  return [whose(pull), pull.state === 'draft' ? 'draft' : checks ? lower(checks) : null].filter(Boolean).join(' · ');
+  const state = pull.state === 'draft' ? 'draft' : checks ? lower(checks) : null;
+  return state ? [whose(pull), ` · ${state}`] : [whose(pull)];
 }
 
-function statusOf(row: InboxReviewRow): { status: string; tone: ReviewRowLine['tone'] } {
+function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['tone'] } {
   const stack = row.stacks[0];
   const pull = stack ? focusOf(stack) : null;
   const checks = pull ? checksWords(pull) : null;
   switch (row.reason) {
     case 'review_ready':
-      return { status: 'Review ready', tone: null };
+      return { status: ['Review ready'], tone: null };
     case 'curating':
-      return { status: 'Curating…', tone: null };
+      return { status: ['Curating…'], tone: null };
     case 'feedback_sent': {
       const verdict = row.review?.verdict;
-      if (verdict?.verdict !== 'changes_requested') return { status: 'You answered', tone: null };
-      return { status: verdict.comments > 0 ? `Changes requested · ${plural(verdict.comments, 'comment')}` : 'Changes requested', tone: 'warn' };
+      if (verdict?.verdict !== 'changes_requested') return { status: ['You answered'], tone: null };
+      return { status: [verdict.comments > 0 ? `Changes requested · ${plural(verdict.comments, 'comment')}` : 'Changes requested'], tone: 'warn' };
     }
     case 'approved':
-      return { status: `You approved${checks ? ` · ${lower(checks)}` : ''}`, tone: 'ok' };
+      return { status: [`You approved${checks ? ` · ${lower(checks)}` : ''}`], tone: 'ok' };
     case 'requested':
-      return { status: pull?.author ? `${pull.author} asked for your review` : 'Your review was asked for', tone: null };
+      return { status: requestedParts(pull?.author), tone: null };
     case 'assigned':
-      return { status: 'assigned to you', tone: null };
+      return { status: ['assigned to you'], tone: null };
     case 'changes':
-      return { status: 'Changes requested', tone: 'warn' };
+      return { status: ['Changes requested'], tone: 'warn' };
     case 'failing':
-      return { status: 'Checks failed', tone: 'warn' };
+      return { status: ['Checks failed'], tone: 'warn' };
     case 'checks_running':
-      return { status: 'You approved · checks running', tone: null };
+      return { status: ['You approved · checks running'], tone: null };
     case 'draft':
-      return { status: 'You approved · draft', tone: null };
+      return { status: ['You approved · draft'], tone: null };
     case 'forge_review': {
       const reviewer = pull?.reviewers[0];
-      return { status: reviewer ? `Waiting on ${reviewer}’s review` : 'Waiting on a review', tone: null };
+      return { status: reviewer ? ['Waiting on ', person(reviewer, '’s'), ' review'] : ['Waiting on a review'], tone: null };
     }
     case 'others':
     case 'not_reviewed':
-      return { status: pull ? listedWords(pull) : '', tone: null };
+      return { status: pull ? listedWords(pull) : [], tone: null };
   }
 }
+
+const reviewIsWalkthrough = (row: InboxReviewRow) => !!row.review?.walkthrough || row.started?.kind === 'walkthrough';
 
 /** The landing a row speaks for: a link's own PR only, since an agent's guide may name another that merged. */
 export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][number] | null {
@@ -130,24 +137,29 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
   const agent = row.reviewed && name ? { host, name } : null;
-  const { status, tone } = statusOf(row);
+  const said = statusOf(row);
+  const { tone } = said;
+  // A walkthrough has nothing to review: Ready once it's in, Writing… while the agent writes it.
+  const parts: Words = reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
+  const status = wordsText(parts);
+  if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status, parts, tone };
   if (stack) {
     const many = stack.layers.length > 1;
     if (many) {
       const open = openLayers(stack);
       const merged = stack.layers.filter((pull) => pull.state === 'merged').length;
-      return { kind: 'stack', lead: `${open.length} open${merged > 0 ? `, ${merged} merged` : ''}`, agent, status, tone };
+      return { kind: 'stack', lead: `${open.length} open${merged > 0 ? `, ${merged} merged` : ''}`, agent, status, parts, tone };
     }
-    return { kind: 'pr', lead: inboxPullLabel(focusOf(stack)), agent, status, tone };
+    return { kind: 'pr', lead: inboxPullLabel(focusOf(stack)), agent, status, parts, tone };
   }
   const landing = reviewRowLanding(row);
-  if (landing) return { kind: 'pr', lead: `${landing.platform === 'gitlab' ? '!' : '#'}${landing.number} ${landing.state}`, agent, status, tone };
+  if (landing) return { kind: 'pr', lead: `${landing.platform === 'gitlab' ? '!' : '#'}${landing.number} ${landing.state}`, agent, status, parts, tone };
   // The PR the person handed it: an agent's words about another PR don't change where a Post goes.
   const linked = row.started?.pull;
-  if (linked) return { kind: 'pr', lead: `${linked.platform === 'gitlab' ? '!' : '#'}${linked.number}`, agent, status, tone };
+  if (linked) return { kind: 'pr', lead: `${linked.platform === 'gitlab' ? '!' : '#'}${linked.number}`, agent, status, parts, tone };
   const source = row.review?.source;
-  if (source?.pr?.number) return { kind: 'pr', lead: `${source.pr.platform === 'gitlab' ? '!' : '#'}${source.pr.number}`, agent, status, tone };
-  return { kind: 'local', lead: source?.branch ?? row.started?.branch ?? '', agent, status, tone };
+  if (source?.pr?.number) return { kind: 'pr', lead: `${source.pr.platform === 'gitlab' ? '!' : '#'}${source.pr.number}`, agent, status, parts, tone };
+  return { kind: 'local', lead: source?.branch ?? row.started?.branch ?? '', agent, status, parts, tone };
 }
 
 /** The line over a review thread's title: "charges · Local changes on retry-jitter, against main". */
@@ -156,7 +168,7 @@ export function reviewContextLine(row: InboxReviewRow, projectName: string | nul
   const line = reviewRowLine(row);
   const started = row.started;
   const what =
-    line.kind !== 'local'
+    line.kind !== 'local' || reviewIsWalkthrough(row)
       ? line.lead
       : source?.branch
         ? `Local changes on ${source.branch}${source.base ? `, against ${source.base.replace(/^origin\//, '')}` : ''}`
@@ -177,12 +189,21 @@ export interface ReviewView {
   kind: 'local' | 'pr';
   /** The review's title, once one arrived. */
   title: string | null;
+  /**
+   * The name the thread's bar shows instead of the thread's own: the review's title, which the Reviews row and the
+   * heading show (`reviewRowTitle`), so the bar does not keep New review's name once the guide lands. Null for a PR
+   * row (its row is the PR's title) and before a review arrived (the row shows the thread's name then).
+   */
+  name: string | null;
   /** The first review: the messages before it stay out of this view (`reviewEarlierHidden`). Null when the thread was started for the review. */
   firstReviewId: string | null;
   /** The latest review: open in this view however long ago it was read. */
   latestReviewId: string | null;
-  /** An agent is still curating the first review: the thread says so under the request. */
-  curating: boolean;
+  /**
+   * An agent is still writing the first review: what the thread says under the request ("Curating the review…", for a
+   * walkthrough "Writing the walkthrough…"). Null once a review arrived.
+   */
+  curating: string | null;
   /** New review's own label on the request: "New review · Guided review". */
   asked: string | null;
   /** The thread the review came from, when it was an ordinary one. */
@@ -266,10 +287,11 @@ export function reviewViewOf(
     context: reviewContextLine(row, options.projectName),
     kind: line.kind === 'local' ? 'local' : 'pr',
     title: row.review ? inboxReviewTitleLine(row.review.title) : null,
+    name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason === 'curating',
-    asked: ask ? `New review · ${ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
+    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,

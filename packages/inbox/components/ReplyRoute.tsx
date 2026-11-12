@@ -323,7 +323,7 @@ export function RouteChoice({
               onChange={() => onSelect(row.live.session)}
               onKeyDown={onRadioKey}
             />
-            <HostMark host={row.live.host} />
+            <HostMark host={row.live.host} agent={row.live.session} />
             <span>
               <span className="ib-t">
                 {hostName(row.live.host)} · {row.asker ? 'the session that asked' : `started ${whenTime(row.live.started_at)}`}

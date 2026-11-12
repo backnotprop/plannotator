@@ -54,6 +54,12 @@ export interface InboxAskTurn {
   question: string;
   /** The text the person selected, when the question is about a passage. */
   passage?: string;
+  /**
+   * Where the words a Side quoted came from (packages/inbox/ask/sideSource.ts), one bracketed line per quote:
+   * the window sends it as the question's `contextPreamble` (useAIChat), which leads the message the agent gets.
+   * The transcript shows only `question`.
+   */
+  source?: string;
   answer?: string;
   answered_at?: string;
   /** The person stopped the answer. */
@@ -361,8 +367,8 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
 }
 
 /** The checks on an ask's input, before anything is written. */
-export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknown; passage?: unknown }): { id: string; question: string; passage?: string } {
-  const { turn_id: id, question, passage } = input;
+export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknown; passage?: unknown; source?: unknown }): { id: string; question: string; passage?: string; source?: string } {
+  const { turn_id: id, question, passage, source } = input;
   if (typeof id !== "string" || !TURN_ID.test(id)) {
     throw new InboxError("validation_error", "turn_id: 8 to 80 letters, digits, dashes or underscores, made by the window.", { field: "turn_id" });
   }
@@ -372,7 +378,10 @@ export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknow
   if (passage !== undefined && (typeof passage !== "string" || passage.length > INBOX_ASK_TEXT_MAX)) {
     throw new InboxError("validation_error", `passage: at most ${INBOX_ASK_TEXT_MAX} characters.`, { field: "passage" });
   }
-  return { id, question, ...(passage ? { passage } : {}) };
+  if (source !== undefined && (typeof source !== "string" || source.length > INBOX_ASK_TEXT_MAX)) {
+    throw new InboxError("validation_error", `source: at most ${INBOX_ASK_TEXT_MAX} characters.`, { field: "source" });
+  }
+  return { id, question, ...(passage ? { passage } : {}), ...(source ? { source } : {}) };
 }
 
 /** The saved turn with this id, when there is one: what a retried POST answers. */
@@ -414,7 +423,7 @@ function cutToFit(answer: string, room: number): string {
  * answer takes only the room the file has left, and says so when that cuts it.
  * A file that cannot be read throws, as every read here does.
  */
-export function updateInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string, patch: Partial<Omit<InboxAskTurn, "id" | "question" | "passage">>): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
+export function updateInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string, patch: Partial<Omit<InboxAskTurn, "id" | "question" | "passage" | "source">>): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
   const conversation = readInboxAsk(inboxDirPath, threadId);
   const turn = conversation?.turns.find((candidate) => candidate.id === turnId);
   if (!conversation || !turn) return null;

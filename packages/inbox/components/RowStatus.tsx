@@ -4,7 +4,7 @@
  *
  *  - Waiting on you: the row has an open question or action item (`questions.open`), whatever its section (Stopped on
  *    you, Holding up work, Waiting on you; a draft too). The counts' words are its name and its tooltip ("Waiting on
- *    you: 2 questions, 1 action item"), so the count is never lost. Stopped and Holds up keep their own triangles.
+ *    you: 2 questions, 1 action item"), so the count is never lost. Stopped and Holds up keep their filled mark beside it.
  *  - Done: the row is in Quiet (archived, marked read, or read with nothing new), even with a question still open: a
  *    Mark read put it there, and its counts never showed (review of #2872).
  *  - Nothing otherwise: New (news, nothing asked) and Sent (the agent's turn, a Re-ask note waiting on it included).

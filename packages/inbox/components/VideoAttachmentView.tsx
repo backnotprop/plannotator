@@ -1,5 +1,5 @@
-import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { formatInboxVideoTime, inboxVideoMeta, readInboxVideoTime, type InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type RefObject, type SyntheticEvent } from 'react';
+import { formatInboxVideoTime, inboxAttachmentKindLabel, inboxVideoMeta, readInboxAttachmentKind, readInboxVideoTime, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
@@ -16,6 +16,8 @@ import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 import { useRowDraft } from '../fileCommentDrafts';
+import { markImageComposer } from '../pageMarks';
+import { AudioScrub, useAudioPeaks } from './AudioPlayer';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -74,6 +76,11 @@ interface Frame {
  * On a phone the comments list under the rail, and the row opens from
  * "Comment at 1:42" at the foot.
  *
+ * A recording (`audio`; the owner's ask, 2026-11-09) is the same view with a
+ * player card in place of the film: play / pause, the waveform to scrub
+ * (AudioPlayer.tsx), the time, and the same rail, comment row, panel and
+ * contract. It has no frame, so no Mark up; its comments carry only the moment.
+ *
  * Mark up works as on an image (approval "inbox-markup-flow"): the drawing
  * screen's ✓ adds the marked-up frame to the reply at once, as a comment at
  * the pinned moment, with the window's toast and its Undo; the row keeps the
@@ -107,7 +114,9 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const fullComposer = useContext(FullScreenComposerContext);
   const source = useInboxFileSource();
   const suggested = useRef(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  /** A recording: the player card instead of the film, and no frame to grab or draw on. */
+  const audio = readInboxAttachmentKind(attachment.kind) === 'audio';
+  const videoRef = useRef<HTMLMediaElement | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const [duration, setDuration] = useState<number | null>(attachment.duration_ms ? attachment.duration_ms / 1000 : null);
   const enterSavesComment = useConfigValue('enterSavesComment');
@@ -115,6 +124,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [ratio, setRatio] = useState(attachment.width && attachment.height ? attachment.width / attachment.height : 16 / 9);
   const [failed, setFailed] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [playing, setPlaying] = useState(false);
   // Words, the pinned moment, its frame and a drawing the row held when this file last closed: back in it, and
   // read again as it closes.
   const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null }));
@@ -148,8 +158,11 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [saving, setSaving] = useState(false);
   /** A phone opens the row from "Comment at 1:42" (open already when it holds kept words). */
   const [composing, setComposing] = useState(waiting !== null);
-  // The `#t` fragment asks for the first frame, a free poster.
-  const src = `${source.videoUrl(attachment, version)}#t=0.001`;
+  // The `#t` fragment asks for the first frame, a free poster (a recording has none).
+  const mediaUrl = source.videoUrl(attachment, version);
+  const src = audio ? mediaUrl : `${mediaUrl}#t=0.001`;
+  // A recording's waveform: its peaks once decoded (a small file), else the plain bar.
+  const peaks = useAudioPeaks(audio ? mediaUrl : '', audio ? (attachment.current?.size ?? attachment.size) : Number.POSITIVE_INFINITY);
 
   // A frame's local URL is let go once it is replaced or the view goes.
   const frameRef = useRef<Frame | null>(null);
@@ -214,11 +227,12 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     video?.pause();
     const time = videoTimeOf(video?.currentTime ?? current);
     setPinned(time);
-    const blob = await captureVideoFrame(video);
+    // A recording has no frame: its comment carries the moment only.
+    const blob = audio ? null : await captureVideoFrame(video as HTMLVideoElement | null);
     const next = blob ? { blob, url: URL.createObjectURL(blob) } : null;
     replaceFrame(next);
     return next;
-  }, [pinned, current, replaceFrame]);
+  }, [pinned, current, replaceFrame, audio]);
 
   const reset = () => {
     setText('');
@@ -310,12 +324,12 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       <div className="ib-docscroll" data-download-card="" data-video-unplayable="">
         <div className="ib-att-t ib-dlcard">
           <span className="ib-fi">
-            <Icon name="film" size={18} />
+            <Icon name={audio ? 'music' : 'film'} size={18} />
           </span>
           <span className="ib-att-text">
             <FileName name={attachment.name} className="ib-nm" wrap />
             <span className="ib-kd">
-              {formatBytes(attachment.current?.size ?? attachment.size)}. This video&rsquo;s format can&rsquo;t play here; download it to open it.
+              {formatBytes(attachment.current?.size ?? attachment.size)}. This {audio ? 'recording' : 'video'}&rsquo;s format can&rsquo;t play here; download it to open it.
             </span>
           </span>
           {source.writes && (
@@ -404,14 +418,16 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           }
         }}
       />
-      <Tip content="Draw on this frame (pen, arrow, circle)">
-        <button type="button" className="ib-btn ib-cbtn" onClick={() => void openMarkup()} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
-          <Icon name="pen" size={15} />
-          <span className="ib-cbtn-l" aria-hidden="true">
-            {markup || kept ? 'Redraw' : 'Mark up'}
-          </span>
-        </button>
-      </Tip>
+      {!audio && (
+        <Tip content="Draw on this frame (pen, arrow, circle)">
+          <button type="button" className="ib-btn ib-cbtn" onClick={() => void openMarkup()} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
+            <Icon name="pen" size={15} />
+            <span className="ib-cbtn-l" aria-hidden="true">
+              {markup || kept ? 'Redraw' : 'Mark up'}
+            </span>
+          </button>
+        </Tip>
+      )}
       {phone && !fullComposer && (
         <button type="button" className="ib-btn ib-ccancel" onClick={reset} data-video-cancel="">
           Cancel
@@ -426,7 +442,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const composer = fullComposer ? (
     <FullScreenComposer
       value={fullComposer}
-      noun="video"
+      noun={audio ? 'recording' : 'video'}
       comment={
         readOnly ? null : (
           <div className="ib-fcomp-comment" data-video-composer="" data-image-composer="">
@@ -438,91 +454,162 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   ) : (
     !readOnly &&
     (!phone || composing) && (
-      <div className="ib-imgcompose ib-vidcompose" data-video-composer="" data-image-composer="">
+      <div ref={markImageComposer} className="ib-imgcompose ib-vidcompose" data-video-composer="" data-image-composer="">
         {commentCard}
       </div>
     )
   );
 
-  const meta = inboxVideoMeta(attachment);
+  // A recording's length is the one its header gave, else the one the player learned.
+  const meta = inboxVideoMeta(attachment) || (audio && span !== null ? formatInboxVideoTime(span) : '');
+
+  // The film's and the recording's events alike: the length, the moment, the suggestion on the first pause, a format
+  // that can't play.
+  const mediaProps = {
+    src,
+    preload: 'metadata',
+    'aria-label': attachment.name,
+    'data-video-player': '',
+    onLoadedMetadata: (event: SyntheticEvent<HTMLMediaElement>) => {
+      const media = event.currentTarget;
+      if (Number.isFinite(media.duration) && media.duration > 0) setDuration(media.duration);
+      if (media instanceof HTMLVideoElement && media.videoWidth && media.videoHeight) setRatio(media.videoWidth / media.videoHeight);
+    },
+    onDurationChange: (event: SyntheticEvent<HTMLMediaElement>) => {
+      const d = event.currentTarget.duration;
+      if (Number.isFinite(d) && d > 0) setDuration(d);
+    },
+    onTimeUpdate: (event: SyntheticEvent<HTMLMediaElement>) => setCurrent(event.currentTarget.currentTime),
+    onPlay: () => {
+      setPlaying(true);
+      // Playing on after a drawing went into the reply: the row follows the film again (the comment stays);
+      // never while a redraw that failed to save waits in the row.
+      if (kept && text.trim() === '' && !markup) reset();
+    },
+    onPause: () => {
+      setPlaying(false);
+      // The first pause, with nothing written yet: the suggestion fills the box, and the moment pins.
+      // A phone shows the row only from "Comment at", or in full screen's composer (always there).
+      if (!suggestion || suggested.current || readOnly || text.trim() !== '' || (phone && !fullComposer)) return;
+      suggested.current = true;
+      setText(suggestion.comment);
+      void pin();
+    },
+    onEnded: () => setPlaying(false),
+    onSeeked: (event: SyntheticEvent<HTMLMediaElement>) => setCurrent(event.currentTarget.currentTime),
+    onError: (event: SyntheticEvent<HTMLMediaElement>) => {
+      const code = event.currentTarget.error?.code;
+      // Aborted by the person (code 1) is not a format problem.
+      if (code !== 1) setFailed(true);
+    },
+  };
+
+  const phoneMeta = phone && (
+    <div className="ib-vmeta" data-video-meta="">
+      <span>{meta}</span>
+      <span className="ib-sp" />
+      <span>{plural(sorted.length, 'comment')}</span>
+    </div>
+  );
+
+  // One dot per comment at its moment (a click seeks there and selects it), the comment being written, the playhead.
+  const rail = (
+    <div className="ib-vrail" role="group" aria-label="Comments on the timeline" data-video-rail="">
+      {span !== null &&
+        sorted.map((annotation) => {
+          const time = readInboxVideoTime(annotation)!;
+          return (
+            <Tip key={annotation.id} content={`${formatInboxVideoTime(time)}: ${annotation.text ?? ''}`}>
+              <button
+                type="button"
+                className={`ib-vdot${annotation.id === selectedId ? ' ib-on' : ''}`}
+                style={{ left: at(time) }}
+                onClick={() => {
+                  seek(time);
+                  onSelect(annotation.id);
+                }}
+                aria-label={`Go to the comment at ${formatInboxVideoTime(time)}`}
+                data-video-dot={annotation.id}
+              />
+            </Tip>
+          );
+        })}
+      {span !== null && pinned !== null && <span className="ib-vdot ib-draft" style={{ left: at(pinned) }} aria-hidden="true" data-video-draft-dot="" />}
+      {span !== null && !audio && <span className="ib-vplay" style={{ left: at(current) }} aria-hidden="true" />}
+    </div>
+  );
+
+  /** Play or pause the recording (its own button: the `<audio>` has no controls of its own). */
+  const togglePlay = () => {
+    const media = videoRef.current;
+    if (!media) return;
+    if (media.paused) void media.play().catch(() => {});
+    else media.pause();
+  };
+
+  /** A press or a drag on the recording's bar: the moment moves there, and it plays on if it was playing. */
+  const scrubTo = (time: number) => {
+    const media = videoRef.current;
+    if (!media) return;
+    try {
+      media.currentTime = time;
+    } catch {
+      // Not seekable yet: the metadata is still loading.
+    }
+    setCurrent(time);
+  };
+
+  const stageBody = audio ? (
+    <div className="ib-audbox" data-audio-player="">
+      <audio ref={videoRef as RefObject<HTMLAudioElement>} {...mediaProps} />
+      {/* Its name (a phone in full screen shows no header), and its type and length (a phone's length is in the line under the bar). */}
+      <div className="ib-audtop">
+        <span className="ib-audic" aria-hidden="true">
+          <Icon name="music" size={16} />
+        </span>
+        <span className="ib-audnm">
+          <FileName name={attachment.name} />
+        </span>
+        <span className="ib-audmeta">{[inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), phone ? '' : meta].filter(Boolean).join(' · ')}</span>
+      </div>
+      <div className="ib-audrow">
+        <button type="button" className="ib-audplay" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} data-audio-play={playing ? 'playing' : 'paused'}>
+          <Icon name={playing ? 'pause' : 'play'} size={18} />
+        </button>
+        <div className="ib-audtrack">
+          <AudioScrub name={attachment.name} peaks={peaks} current={current} span={span} onSeek={scrubTo} onFocusChange={setFocused}>
+            {span !== null && <span className="ib-vplay" style={{ left: at(current) }} aria-hidden="true" />}
+          </AudioScrub>
+          {rail}
+        </div>
+        <span className="ib-audtime" data-video-time-now="">
+          {formatInboxVideoTime(current)}
+          {span !== null && <span className="ib-mut"> / {formatInboxVideoTime(span)}</span>}
+        </span>
+      </div>
+      {phoneMeta}
+    </div>
+  ) : (
+    <div className="ib-vidbox" style={{ '--ib-ar': String(ratio) } as CSSProperties}>
+      <video
+        ref={videoRef as RefObject<HTMLVideoElement>}
+        className="ib-video"
+        {...mediaProps}
+        controls
+        poster={poster}
+        playsInline
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+      />
+      {phoneMeta}
+      {rail}
+    </div>
+  );
 
   return (
-    <div className={`ib-vidview${phone ? ' ib-vidphone' : ''}`} data-video-view={attachment.id}>
-      <div className="ib-vidstage" data-claims-arrows={focused ? 'true' : undefined}>
-        <div className="ib-vidbox" style={{ '--ib-ar': String(ratio) } as CSSProperties}>
-          <video
-            ref={videoRef}
-            className="ib-video"
-            src={src}
-            controls
-            preload="metadata"
-            poster={poster}
-            playsInline
-            aria-label={attachment.name}
-            data-video-player=""
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            onLoadedMetadata={(event) => {
-              const video = event.currentTarget;
-              if (Number.isFinite(video.duration) && video.duration > 0) setDuration(video.duration);
-              if (video.videoWidth && video.videoHeight) setRatio(video.videoWidth / video.videoHeight);
-            }}
-            onDurationChange={(event) => {
-              const d = event.currentTarget.duration;
-              if (Number.isFinite(d) && d > 0) setDuration(d);
-            }}
-            onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)}
-            onPlay={() => {
-              // Playing on after a drawing went into the reply: the row follows the film again (the comment stays);
-              // never while a redraw that failed to save waits in the row.
-              if (kept && text.trim() === '' && !markup) reset();
-            }}
-            onPause={() => {
-              // The first pause, with nothing written yet: the suggestion fills the box, and the moment pins.
-              // A phone shows the row only from "Comment at", or in full screen's composer (always there).
-              if (!suggestion || suggested.current || readOnly || text.trim() !== '' || (phone && !fullComposer)) return;
-              suggested.current = true;
-              setText(suggestion.comment);
-              void pin();
-            }}
-            onSeeked={(event) => setCurrent(event.currentTarget.currentTime)}
-            onError={(event) => {
-              const code = event.currentTarget.error?.code;
-              // Aborted by the person (code 1) is not a format problem.
-              if (code !== 1) setFailed(true);
-            }}
-          />
-          {phone && (
-            <div className="ib-vmeta" data-video-meta="">
-              <span>{meta}</span>
-              <span className="ib-sp" />
-              <span>{plural(sorted.length, 'comment')}</span>
-            </div>
-          )}
-          <div className="ib-vrail" role="group" aria-label="Comments on the timeline" data-video-rail="">
-            {span !== null &&
-              sorted.map((annotation) => {
-                const time = readInboxVideoTime(annotation)!;
-                return (
-                  <Tip key={annotation.id} content={`${formatInboxVideoTime(time)}: ${annotation.text ?? ''}`}>
-                    <button
-                      type="button"
-                      className={`ib-vdot${annotation.id === selectedId ? ' ib-on' : ''}`}
-                      style={{ left: at(time) }}
-                      onClick={() => {
-                        seek(time);
-                        onSelect(annotation.id);
-                      }}
-                      aria-label={`Go to the comment at ${formatInboxVideoTime(time)}`}
-                      data-video-dot={annotation.id}
-                    />
-                  </Tip>
-                );
-              })}
-            {span !== null && pinned !== null && <span className="ib-vdot ib-draft" style={{ left: at(pinned) }} aria-hidden="true" data-video-draft-dot="" />}
-            {span !== null && <span className="ib-vplay" style={{ left: at(current) }} aria-hidden="true" />}
-          </div>
-        </div>
+    <div className={`ib-vidview${phone ? ' ib-vidphone' : ''}${audio ? ' ib-audview' : ''}`} data-video-view={attachment.id} data-audio-view={audio ? attachment.id : undefined}>
+      <div className={`ib-vidstage${audio ? ' ib-audstage' : ''}`} data-claims-arrows={focused ? 'true' : undefined}>
+        {stageBody}
         {phone && sorted.length > 0 && (
           <div className="ib-vlist" data-video-list="">
             <div className="ib-vlbl">Comments</div>

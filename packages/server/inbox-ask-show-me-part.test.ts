@@ -76,4 +76,8 @@ describe("a Show me from a board, at the ask route", () => {
   test("with Shape and Code review both off it is refused", async () => {
     expect(await (route({ codeReview: false, boards: false }))(BOARD)).toEqual({ status: 409, code: "code_review_off" });
   });
+
+  test("with Code review on and Shape off it is refused: Code review brings no boards (approval code-review-029-shape-off)", async () => {
+    expect(await (route({ codeReview: true, boards: false }))(BOARD)).toEqual({ status: 409, code: "shape_off" });
+  });
 });

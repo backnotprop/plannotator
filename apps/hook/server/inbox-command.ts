@@ -10,6 +10,10 @@
  *                                   detached first when it is not running;
  *                                   print the URL, exit 0 (never blocks: what
  *                                   the /plannotator-inbox commands run)
+ *   plannotator inbox --open <thread>
+ *                                   show that thread in the Inbox window open
+ *                                   on this computer (the one used last), or
+ *                                   open one at it; print its URL, exit 0
  *   plannotator inbox --tailscale   also publish it over the tailnet for this
  *                                   run (with any of the above; a running
  *                                   Inbox is asked to publish), for the
@@ -24,6 +28,8 @@
  *   plannotator inbox link …        link this Inbox with another machine's,
  *   plannotator inbox unlink …      or remove the link (inbox-link-command.ts)
  *   plannotator inbox projects …    list, combine and undo (inbox-projects-command.ts)
+ *   plannotator inbox export …      the Inbox as JSONL files (inbox-export-command.ts)
+ *   plannotator inbox icon set …    hand an animated icon back ("Animate it"; inbox-icon-command.ts)
  *
  * The status, stop and restart commands follow rmohta's port
  * (rmohta/plannotator, branch feat/plan-library), rebuilt on today's stop
@@ -34,6 +40,10 @@
  * auto-update back forever); its own registry is `inbox/inbox.json`.
  */
 
+import { runInboxRowsCommand } from "./inbox-rows-command";
+import { runInboxExportCommand } from "./inbox-export-command";
+import { runInboxIconCommand } from "./inbox-icon-command";
+import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT, LIVE_BRIDGE_BOOTSTRAP } from "@plannotator/ui/components/html-viewer/bridge-script";
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, utimesSync } from "node:fs";
 import { homedir } from "node:os";
@@ -55,6 +65,9 @@ import {
   type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
+import { INBOX_IMPORT_SLOW_MS, INBOX_UPGRADE_WAIT_MAX_MS, INBOX_UPGRADING_LINE, inboxUpgradeRunning } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
+import { resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
+import { loadConfig } from "@plannotator/shared/config";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
@@ -64,10 +77,11 @@ import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } fro
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
-import { getCliVersion } from "./cli";
+import { getCliVersion, hasHelpFlag } from "./cli";
 import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
+import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from "./inbox-connection-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
@@ -134,12 +148,49 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
   return out;
 }
 
-/** Wait for the Inbox to answer as running; null on timeout. */
+/**
+ * Wait for the Inbox to answer as running; null on timeout. With the SQLite switch on (off for everyone), an Inbox
+ * still moving its records into SQLite is waited for past the usual 20 s, for as long as the move runs (up to
+ * `INBOX_UPGRADE_WAIT_MAX_MS`) and the usual wait again after it (the start goes on once the move is done), and
+ * past 2 s the move is said once on stderr: the window cannot, the server is not listening yet.
+ */
 function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
-  return waitForInbox(async () => {
-    const next = await inboxStatus(dataDir, 1000);
-    return next.state === "running" ? next.entry : null;
-  }, START_TIMEOUT_MS);
+  const started = Date.now();
+  const timeout = startTimeoutMs();
+  const sqlite = resolveInboxSqlite(loadConfig(), process.env);
+  let movedAt = 0;
+  const upgrading = () => {
+    if (!sqlite || Date.now() - started >= INBOX_UPGRADE_WAIT_MAX_MS) return false;
+    if (!inboxUpgradeRunning(dataDir)) return false;
+    movedAt = Date.now();
+    return true;
+  };
+  const keepWaiting = () => upgrading() || (movedAt > 0 && Date.now() - movedAt < timeout);
+  let told = false;
+  return waitForInbox(
+    async () => {
+      const next = await inboxStatus(dataDir, 1000);
+      if (next.state === "running") return next.entry;
+      if (!told && Date.now() - started > INBOX_IMPORT_SLOW_MS && upgrading()) {
+        told = true;
+        process.stderr.write(`${INBOX_UPGRADING_LINE}\n`);
+      }
+      return null;
+    },
+    timeout,
+    100,
+    keepWaiting,
+  );
+}
+
+/**
+ * How long a starter waits for a detached Inbox: `START_TIMEOUT_MS`, or under the test sandbox only,
+ * `PLANNOTATOR_INBOX_START_TIMEOUT_MS` (so a test can outlast it without waiting 20 s).
+ */
+export function startTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.PLANNOTATOR_TEST_SANDBOX ? env.PLANNOTATOR_INBOX_START_TIMEOUT_MS?.trim() : undefined;
+  const ms = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : START_TIMEOUT_MS;
 }
 
 /**
@@ -251,6 +302,42 @@ async function publishRunningInbox(entry: InboxRegistryEntry): Promise<void> {
   }
 }
 
+/**
+ * The thread `--open` names: a thread or message id (`msg_…`), or a link
+ * with `#thread=` (the Inbox's own, or the one the agent tools hand out).
+ * Null when it is none of these.
+ */
+export function inboxThreadRef(arg: string): string | null {
+  const value = arg.trim();
+  const hash = value.indexOf("#");
+  const id = hash === -1 ? value : new URLSearchParams(value.slice(hash + 1)).get("thread");
+  return id && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : null;
+}
+
+/**
+ * `--open <thread>`: ask the running Inbox to show the thread in the window
+ * the person used last on this computer, through its token-guarded
+ * connection route. `shown: false`: no window is open (or the Inbox predates
+ * the route), and the caller opens one at the thread. `unknown`: no such
+ * thread, in words for stderr.
+ */
+async function showInRunningInbox(entry: InboxRegistryEntry, thread: string): Promise<{ shown: boolean; thread: string | null; unknown: string | null }> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/show`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ thread }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await response.json().catch(() => ({}))) as { shown?: unknown; thread?: unknown; code?: unknown; error?: unknown };
+    if (body.code === "thread_unknown") return { shown: false, thread: null, unknown: typeof body.error === "string" ? body.error : `No thread ${thread} in this Inbox.` };
+    if (!response.ok) return { shown: false, thread: null, unknown: null };
+    return { shown: body.shown === true, thread: typeof body.thread === "string" ? body.thread : null, unknown: null };
+  } catch {
+    return { shown: false, thread: null, unknown: null };
+  }
+}
+
 /** What connecting the agents did, on stderr (stdout is unchanged). Nothing when nothing changed. */
 function reportConnect(report: InboxConnectReport | undefined): void {
   if (!report) return;
@@ -321,6 +408,8 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       dataDir,
       version: getCliVersion() ?? "dev",
       htmlContent,
+      // Live sites (packages/server/inbox-live.ts): the live bridge's sources, as annotate's live sessions get them.
+      liveBridge: { bridgeScript: BRIDGE_SCRIPT, bridgeBootstrap: LIVE_BRIDGE_BOOTSTRAP, annotationCss: ANNOTATION_HIGHLIGHT_CSS },
       selfCommand: selfCommand(),
       publishTailnet: tailscale,
       // Testing knob: how long a reply waits on a busy agent before it goes in by itself (default 5 minutes).
@@ -659,6 +748,15 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.exit(0);
   }
 
+  if (args[0] === "connection") {
+    if (hasHelpFlag([...args.slice(1)])) {
+      await writeWholeToStdout(`${INBOX_CONNECTION_USAGE}\n`);
+      process.exit(0);
+    }
+    assertTestHome();
+    process.exit(await runInboxConnectionCommand(args.slice(1), { dataDir, env: process.env, lines: stdinLines(), write: (line) => void process.stdout.write(line) }));
+  }
+
   if (args[0] === "status") {
     if (args.length > 1) usageError(`Unknown inbox status option: ${args[1]} (status takes only --json)`);
     process.exit(await statusCommand(dataDir, assets.json === true));
@@ -685,6 +783,19 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
   }
 
+  if (args[0] === "export") {
+    process.exit(await runInboxExportCommand(args.slice(1), { dataDir, cwd: process.env.PLANNOTATOR_CWD || process.cwd(), json: assets.json === true }));
+  }
+
+  if (args[0] === "rows") {
+    const session = inboxHostSessionFromEnv(process.env);
+    process.exit(await runInboxRowsCommand(args.slice(1), { json: assets.json === true, by: session ? { host: session.host, session: session.session } : null, ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
+  if (args[0] === "icon") {
+    process.exit(await runInboxIconCommand(args.slice(1), { json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
   if (args[0] === "link" || args[0] === "unlink") {
     process.exit(await runInboxLinkCommand(args, () => ensureInboxRunning(dataDir)));
   }
@@ -697,11 +808,22 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   let background = false;
   let noOpen = false;
   let open = false;
+  /** `--open <thread>`: the thread to show (a thread or message id, or a `#thread=` link). */
+  let thread: string | null = null;
   let tailscale = false;
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
     if (arg === "--background") background = true;
     else if (arg === "--no-open") noOpen = true;
-    else if (arg === "--open") open = true;
+    else if (arg === "--open") {
+      open = true;
+      const next = args[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        thread = inboxThreadRef(next);
+        if (!thread) usageError(`--open takes a thread id, a message id or a #thread= link, not ${next}`);
+        i++;
+      }
+    }
     else if (arg === "--tailscale") tailscale = true;
     else if (arg === "--notes") usageError("--notes goes first and alone: plannotator inbox --notes codex,gemini");
     else usageError(`Unknown inbox option: ${arg}`);
@@ -720,13 +842,25 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       // Stdout stays the local URL alone (agents read it); the tailnet goes to stderr.
       if (tailscale && (before.state === "running" || before.state === "busy")) await publishRunningInbox(entry);
       else reportTailnet(readInboxRegistry(dataDir)?.tailscale ?? entry.tailscale, tailscale);
+      // --open <thread>: the window open on this computer shows the thread; with none open, a new one opens at it.
+      let url = entry.url;
+      let opened = false;
+      if (open && thread) {
+        const shown = await showInRunningInbox(entry, thread);
+        if (shown.unknown) {
+          process.stderr.write(`${shown.unknown}\n`);
+          process.exit(1);
+        }
+        url = `${entry.url}#thread=${encodeURIComponent(shown.thread ?? thread)}`;
+        opened = shown.shown;
+      }
       // --open: the person asked for the window (the /plannotator-inbox
       // commands). The opener is never waited for: a browser it starts may
       // hold its output open for as long as it runs.
-      if (open && (await openBrowserDetached(entry.url, { isRemote: isRemoteSession() })) === "remote") {
+      if (open && !opened && (await openBrowserDetached(url, { isRemote: isRemoteSession() })) === "remote") {
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
-      process.stdout.write(`${entry.url}\n`);
+      process.stdout.write(`${url}\n`);
       process.exit(0);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

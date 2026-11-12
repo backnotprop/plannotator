@@ -1581,8 +1581,8 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       expect((await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) })).status).toBe(201);
       const onB = await mcp(b.port);
       const project = scratch("plannotator-snooze-agent-restart-project-");
-      const asked = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string } };
-      const reply = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "More news" } })) as { structuredContent: { thread_id: string; message_id: string } };
+      const asked = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string; message_id: string } };
+      const reply = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "More news", reply_to: asked.structuredContent.message_id } })) as { structuredContent: { thread_id: string; message_id: string } };
       const thread = asked.structuredContent.thread_id;
       expect(reply.structuredContent.thread_id).toBe(thread);
       await onB.close();
@@ -1657,7 +1657,7 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
   });
 });
 
-describe("the forward takes no write from a tailnet guest", () => {
+describe("a tailnet guest through the forward: it answers, it never starts an agent there", () => {
   const MAGIC = "laptop.tail0000.ts.net";
   const OWNER = "owner@example.com";
   const GUEST = "guest@example.com";
@@ -2061,7 +2061,7 @@ describe("the forward takes no write from a tailnet guest", () => {
     }
   });
 
-  test("a tailnet guest of this machine never writes to a linked machine, though it reads; the owner writes from every path: this window, another device, a plain local call", async () => {
+  test("a tailnet guest of this machine answers a linked machine's thread as here, but never starts an agent there; the owner writes from every path: this window, another device, a plain local call", async () => {
     const w = await linkedPair("plannotator-machines-forward-owner-", false);
     try {
       const { a, mini, asked } = w;
@@ -2070,21 +2070,14 @@ describe("the forward takes no write from a tailnet guest", () => {
       expect(read.status).toBe(200);
       const cursor = ((await read.json()) as Json).cursor as number;
 
-      // The guest, from A's own page: every write to B is refused, and none reaches B.
-      for (const [route, body] of [
-        [`messages/${asked.message_id}/reply`, { idempotency_key: "guest-reply", words: "Guest says retry.", seen_through_seq: cursor }],
-        [`messages/${asked.message_id}/picks`, await w.pickBody("guest-pick", "Retry")],
-        [`threads/${asked.thread_id}/read`, { idempotency_key: "guest-read" }],
-        [`threads/${asked.thread_id}/snooze`, { idempotency_key: "guest-snooze", until: tomorrow() }],
-      ] as const) {
-        const answer = await w.throughServe(GUEST, `/api/inbox/m/${mini}/${route}`, body);
-        expect([route, answer.status, ((await answer.json()) as Json).code]).toEqual([route, 403, "owner_only"]);
-      }
-      const upload = await w.uploadThroughServe(GUEST, "guest-up");
-      expect([upload.status, ((await upload.json()) as Json).code]).toEqual([403, "owner_only"]);
-      expect(await w.personOnB()).toHaveLength(0);
-      expect(((await w.onB()).messages[0].questions as Json[])[0]!.state).toBe("open");
-      expect(existsSync(join(w.dataA, "inbox", "outbox", `${mini}.jsonl`))).toBe(false);
+      // The guest, from A's own page (owner ruling 2026-11-11): its reply and its file reach B as the owner's do.
+      const guestReply = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, { idempotency_key: "guest-reply", words: "Guest says retry.", seen_through_seq: cursor });
+      expect(await delivered(guestReply)).toEqual([200, "delivered"]);
+      expect((await w.uploadThroughServe(GUEST, "guest-up")).status).toBe(200);
+      // Starting an agent on B stays the owner's, as it is on A: refused, and nothing is held for B.
+      const start = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages`, { idempotency_key: "guest-start", body: "Fix it.", to: { launch: { agent: "claude-code", project_id: "prj_x" } } });
+      expect([start.status, ((await start.json()) as Json).code]).toEqual([403, "owner_only"]);
+      expect(await w.personOnB()).toHaveLength(1);
 
       // The owner keeps everything through the forward, each answer delivered to B once.
       // The owner's window on this machine.
@@ -2117,16 +2110,17 @@ describe("the forward takes no write from a tailnet guest", () => {
       });
       expect(bareUpload.status).toBe(200);
       const landed = (await w.personOnB()).map((m) => m.body as string);
-      expect(landed).toHaveLength(3);
-      expect(landed[0]).toStartWith("From the MacBook's window.");
-      expect(landed[1]).toStartWith("From the owner's phone browser.");
-      expect(landed[2]).toStartWith("From a script on the MacBook.");
+      expect(landed).toHaveLength(4);
+      expect(landed[0]).toStartWith("Guest says retry.");
+      expect(landed[1]).toStartWith("From the MacBook's window.");
+      expect(landed[2]).toStartWith("From the owner's phone browser.");
+      expect(landed[3]).toStartWith("From a script on the MacBook.");
     } finally {
       await w.stop();
     }
   }, 60_000);
 
-  test("a tailnet guest can't cancel or dismiss what waits for another machine, nor list its folders; the owner cancels from another device", async () => {
+  test("a tailnet guest cancels what waits for another machine as the owner does, but never lists its folders", async () => {
     const w = await linkedPair("plannotator-machines-forward-cancel-", false);
     try {
       const { a, b, mini, asked } = w;
@@ -2140,16 +2134,12 @@ describe("the forward takes no write from a tailnet guest", () => {
       });
       const held = await w.throughServe(OWNER, `/api/inbox/m/${mini}/threads/${asked.thread_id}/read`, { idempotency_key: "owner-held-read" });
       expect(held.status).toBe(202);
-      for (const action of ["cancel", "dismiss"]) {
-        const guest = await w.throughServe(GUEST, `/api/inbox/outbox/owner-held-read/${action}`, {});
-        expect([action, guest.status, ((await guest.json()) as Json).code]).toEqual([action, 403, "owner_only"]);
-      }
       const waiting = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/outbox`)).json()) as Json;
       expect((waiting.waiting as Json[]).map((e) => e.key)).toEqual(["owner-held-read"]);
-      // The owner's phone browser over the tailnet: Cancel works there too.
-      const owner = await w.throughServe(OWNER, "/api/inbox/outbox/owner-held-read/cancel", {});
-      expect(owner.status).toBe(200);
-      expect(((await owner.json()) as Json).entry.state).toBe("cancelled");
+      // A guest's page over the tailnet: Cancel works there too.
+      const guest = await w.throughServe(GUEST, "/api/inbox/outbox/owner-held-read/cancel", {});
+      expect(guest.status).toBe(200);
+      expect(((await guest.json()) as Json).entry.state).toBe("cancelled");
     } finally {
       await w.stop();
     }

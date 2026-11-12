@@ -19,7 +19,7 @@
  * and never opens once the settings say the feature is on.
  */
 import { useEffect, useRef, useState } from 'react';
-import type { InboxListRow, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxListRow, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type InboxRevealClaimId, type InboxRevealId } from './api';
 import { LIST_INTRO_SETTLED_MS } from './listIntro';
 import { newUuid } from './uuid';
@@ -28,6 +28,11 @@ import { newUuid } from './uuid';
 export const REVEAL_TIMES = {
   /** The page has been loaded this long. */
   pageAgeMs: 60_000,
+  /**
+   * The tab icon and the "themes" dialogs' own page age (the owner, 2026-11-10: "Fifteen seconds after the inbox
+   * opens"): their moment needs no leave and no stillness (`soonMayClaim`).
+   */
+  soonPageAgeMs: 15_000,
   /** The thread was open this long before the person left it: they read it. */
   readMs: 5_000,
   /** The Inbox page settled this long, without a break. */
@@ -40,6 +45,13 @@ export const REVEAL_TIMES = {
   claimRetryMs: 1_500,
   /** Bro mode's moment: the long agent message was open this long before the person went back to the list. */
   broReadMs: 20_000,
+  /** The line is read again this long after the moment the Inbox named, so the moment has passed there too (`useLineLatch`). */
+  lineReadSlackMs: 1_000,
+  /**
+   * A dialog outside the line's hooks (the Board's welcome, the star ask's card) holds the reveals back this long
+   * after it showed: the Inbox's gap between two dialogs (shared/inbox/reveals.ts `REVEAL_SPACING_MS`, 40 minutes).
+   */
+  otherDialogMs: 40 * 60_000,
 };
 
 /**
@@ -47,15 +59,27 @@ export const REVEAL_TIMES = {
  * person who keeps a thread open beside the list never makes: App counts idle only while one of them is armed (and
  * the list options' update-day dialog, which waits for the list the same way).
  */
-export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro']);
+export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro', 'grill_me_tip']);
 
 /**
  * App's idle clock runs (`useIdleClock` `enabled`): a reveal that takes idle is armed on this load (`next`, or List view
  * `ahead`), or the list options' update-day dialog is due.
  */
-export function idleClockArmed(armed: Pick<RevealArmed, 'next' | 'ahead'> | null, listIntroDue: boolean): boolean {
+export function idleClockArmed(armed: (Pick<RevealArmed, 'next' | 'ahead'> & { aside?: readonly InboxRevealId[] }) | null, listIntroDue: boolean): boolean {
   if (armed === null) return false;
-  return (armed.next !== null && IDLE_REVEALS.has(armed.next)) || armed.ahead.some((id) => IDLE_REVEALS.has(id)) || listIntroDue;
+  return (armed.next !== null && IDLE_REVEALS.has(armed.next)) || armed.ahead.some((id) => IDLE_REVEALS.has(id)) || (armed.aside ?? []).some((id) => IDLE_REVEALS.has(id)) || listIntroDue;
+}
+
+/**
+ * The need of a dialog that opens soon after the page does (the tab icon dialog, the "themes" dialog; the owner,
+ * 2026-11-10, after the themes dialog never came up for them: it had waited for 60 s and then for a page left still):
+ * the list loaded and not the first-run screen, the page `soonPageAgeMs` (15 s) old, and the tab visible. With `atOnce`
+ * (`RevealMomentInput`) that is the whole moment: no thread read and left, and no stillness, so a pointer that never
+ * rests does not postpone it. What still holds it back is the at-once path's own guards, the ones Code review's offer
+ * has: the Inbox page clear (`clear`), nothing typed or open (`heldBack`), no toast, and the settling wait.
+ */
+export function soonMayClaim(gate: { listLoaded: boolean; firstRun: boolean }, pageAge: number): boolean {
+  return gate.listLoaded && !gate.firstRun && pageAge >= REVEAL_TIMES.soonPageAgeMs && (typeof document === 'undefined' || document.visibilityState === 'visible');
 }
 
 /** One visit to a thread: which, and when it opened. */
@@ -119,16 +143,20 @@ function listKey(rows: readonly InboxListRow[]): string {
  * The leave tracker, the settling wait, the claim and the opening, for one reveal. `target`: the thread just left.
  */
 /**
- * Another one-time dialog showed on this load (the Board's first visit, the star ask's card): App's `revealBlocked`
- * reads it, so Snooze, the Board and the Checklist reveals hold back for the rest of the load. Nothing is stamped: the
- * line and every day stay as they are.
+ * Another one-time dialog showed on this load a moment ago (the Board's first visit, the star ask's card): App's
+ * `revealBlocked` reads it, so the reveals hold back for the gap (`REVEAL_TIMES.otherDialogMs`; until 2026-11-09, for
+ * the rest of the load). Nothing is stamped here.
  */
-let otherOneTimeDialog = false;
+let otherOneTimeDialogAt: number | null = null;
 export function noteOneTimeDialogShown(): void {
-  otherOneTimeDialog = true;
+  otherOneTimeDialogAt = Date.now();
 }
 export function oneTimeDialogShownThisLoad(): boolean {
-  return otherOneTimeDialog;
+  return otherOneTimeDialogAt !== null && Date.now() - otherOneTimeDialogAt < REVEAL_TIMES.otherDialogMs;
+}
+/** A test starts each case as a fresh load. */
+export function resetOneTimeDialogShownForTests(): void {
+  otherOneTimeDialogAt = null;
 }
 
 export function useRevealMoment(input: RevealMomentInput) {
@@ -268,6 +296,8 @@ export interface RevealThreadFacts {
   mostFromOneAgent: number;
   /** Words in its last agent message. */
   lastAgentWords: number;
+  /** Question blocks the person answered in it: an answer sent at its latest revision, not a skip. */
+  answered: number;
 }
 
 const threadFacts = new Map<string, RevealThreadFacts>();
@@ -276,14 +306,26 @@ const threadFacts = new Map<string, RevealThreadFacts>();
 export function noteRevealThread(thread: InboxThread): void {
   const counts = new Map<string, number>();
   let lastAgentWords = 0;
+  let answered = 0;
   for (const message of thread.messages) {
     if (message.author.kind !== 'agent') continue;
+    for (const question of message.questions ?? []) if (revealQuestionAnswered(question)) answered += 1;
     const who = `${message.author.host ?? ''}\0${message.author.session ?? message.author.name ?? ''}`;
     counts.set(who, (counts.get(who) ?? 0) + 1);
     const body = message.body.trim();
     lastAgentWords = body === '' ? 0 : body.split(/\s+/).length;
   }
-  threadFacts.set(thread.thread_id, { mostFromOneAgent: Math.max(0, ...counts.values()), lastAgentWords });
+  threadFacts.set(thread.thread_id, { mostFromOneAgent: Math.max(0, ...counts.values()), lastAgentWords, answered });
+}
+
+/**
+ * The person answered this question block (the server's rule, shared/inbox/grill-me-tip.ts `grillMeTipAnswered`): an
+ * answer sent at its latest revision, not a skip; never an action item, nor a replaced or set-aside question.
+ */
+function revealQuestionAnswered(question: InboxQuestion): boolean {
+  if (question.kind === 'action' || question.superseded_by || question.set_aside_at) return false;
+  const answer = question.answer;
+  return !!answer && !answer.skipped && question.revision > 0 && question.sent_revision === question.revision;
 }
 
 /** What the window knows of a thread it loaded on this page, or null. */
@@ -291,7 +333,7 @@ export function revealThreadFactsOf(threadId: string): RevealThreadFacts | null 
   return threadFacts.get(threadId) ?? null;
 }
 
-/** What a load arms, read once from settings: the reveal that is next, and whether that is Snooze's announcement. */
+/** What a load arms, from one settings read (`useLineLatch` keeps it): the reveal that is next, and whether that is Snooze's announcement. */
 export interface RevealArmed {
   next: InboxRevealId | null;
   /** Snooze's own `due`, armed only while it is next. */
@@ -312,6 +354,59 @@ export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ah
   return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [], aside: settings.reveal?.aside ?? [] };
 }
 
+/**
+ * What a load arms of the line (App's latch), and the one timer that keeps it true on a tab left loaded.
+ *
+ * The line moves while a tab stays loaded: the gap after a dialog ends, tenure passes. A latch read once at load left
+ * a tab that began while the line was held arming nothing for the rest of its life (the owner, 2026-11-09). So:
+ *
+ *  - The latch is the newest settings read, each time one arrives (the page reads settings on its event stream for
+ *    other reasons anyway). `frozen` (the tour or an update was on screen on this load) keeps the first read, as before.
+ *  - No polling. The Inbox says when a date can next change the line (settings `reveal.again_in`, shared/inbox/reveals.ts
+ *    `revealAgainAt`: the end of the gap, of a Not now's three days, of a tenure); App keeps it as a time on the
+ *    page's clock (`againAt`). One timeout waits for that moment and then calls `reread` once; the read's answer
+ *    brings the next moment, or none. With no moment ahead nothing is scheduled at all.
+ *  - The timeout exists only while the tab is visible: hidden (or the page going away, `pagehide`) clears it, and
+ *    coming back in front arms it again, at once when the moment has passed. Unmounting clears it and both listeners.
+ *
+ * The Inbox still decides every claim (the gap; three days after a Not now).
+ */
+export function useLineLatch<T>(input: { read: T | null; frozen: boolean; againAt: number | null; reread: () => void }): T | null {
+  const held = useRef<T | null>(null);
+  if (input.read !== null && (held.current === null || !input.frozen)) held.current = input.read;
+  const reread = useRef(input.reread);
+  reread.current = input.reread;
+  const againAt = held.current !== null && !input.frozen ? input.againAt : null;
+  useEffect(() => {
+    if (againAt === null) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const clear = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    };
+    const arm = () => {
+      clear();
+      if (document.visibilityState !== 'visible') return;
+      timer = setTimeout(
+        () => {
+          timer = null;
+          reread.current();
+        },
+        Math.max(0, againAt - Date.now()) + REVEAL_TIMES.lineReadSlackMs,
+      );
+    };
+    arm();
+    document.addEventListener('visibilitychange', arm);
+    window.addEventListener('pagehide', clear);
+    return () => {
+      clear();
+      document.removeEventListener('visibilitychange', arm);
+      window.removeEventListener('pagehide', clear);
+    };
+  }, [againAt]);
+  return held.current;
+}
+
 /** The Board reveal's need: the list holds this many rows or more (the approval: "the list has 5 rows or more"). */
 export const BOARD_REVEAL_MIN_ROWS = 5;
 /** And they are in this many projects or more (approval "inbox-one-time-dialogs": "5+ open threads, 2+ projects"). */
@@ -319,9 +414,9 @@ export const BOARD_REVEAL_MIN_PROJECTS = 2;
 /** The Checklist's moment: the thread just left has this many messages or more from one agent ("a long agent run"). */
 export const STEPS_REVEAL_MIN_RUN = 5;
 
-/** What one load knows for the Board reveal (read once: `due`) and what holds now. */
+/** What one load knows for the Board reveal (`due`: the load's latch, `useLineLatch`) and what holds now. */
 export interface BoardRevealInput {
-  /** The Inbox has the Board next for this page (settings `reveal.next === 'board'`), read once per load. */
+  /** The Inbox has the Board next for this page (settings `reveal.next === 'board'`), as the load's latch holds it. */
   due: boolean;
   listLoaded: boolean;
   firstRun: boolean;
@@ -413,6 +508,20 @@ export function broRevealIdleCounts(thread: string | null): boolean {
 }
 
 /**
+ * The grill-me tip's moment (Bro mode's two moments, keyed to answering): back on the list after
+ * `REVEAL_TIMES.readMs` (5 s) or more on a thread where the person answered a question block (the thread as this page
+ * last loaded it). The Inbox decides who (shared/inbox/grill-me-tip.ts `revealGrillMeGap`).
+ */
+export function grillMeTipLeaveCounts(visit: RevealVisit, now: number, next: string | null): boolean {
+  return next === null && now - visit.at >= REVEAL_TIMES.readMs && (revealThreadFactsOf(visit.threadId)?.answered ?? 0) > 0;
+}
+
+/** The grill-me tip's idle moment: the page idle (20 s, idleClock.ts) on a thread where the person answered a question block. */
+export function grillMeTipIdleCounts(thread: string | null): boolean {
+  return thread !== null && (revealThreadFactsOf(thread)?.answered ?? 0) > 0;
+}
+
+/**
  * The Board reveal: at the calm moment it claims `board` (the claim only stamps it), then opens the Board's existing
  * first-visit dialog (`BoardIntro`) as an offer: "Turn it on" or "Not now" (the owner, 2026-11-04: opt-in).
  */
@@ -484,9 +593,9 @@ export function useStepsReveal(input: StepsRevealInput) {
 /** What a registered offer of the line brings: its id, its moment and its need (the line does the rest). */
 export interface LineRevealInput {
   /** Its id in the line (`INBOX_REVEALS`, and `lineOffers` on the server). */
-  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip'>;
+  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip' | 'sidebar_tip'>;
   /**
-   * The Inbox has it for this page, read once per load: `reveal.next === id`, or (an `ahead` offer such as List view)
+   * The Inbox has it for this page, as the load's latch holds it (`useLineLatch`): `reveal.next === id`, or (an `ahead` offer such as List view)
    * `reveal.ahead` names it, so it goes at its own moment even while another offer is next.
    */
   due: boolean;
@@ -587,7 +696,7 @@ export function useStarReveal(input: StarRevealInput) {
       return answer.show;
     },
   });
-  // The card is up: the other reveals hold back for the rest of this load (App's `revealBlocked`), without a stamp.
+  // The card is up: the other reveals hold back for the gap (App's `revealBlocked`, `REVEAL_TIMES.otherDialogMs`); the Inbox keeps the same gap from its stamp.
   useEffect(() => {
     if (moment.stage === 'open') noteOneTimeDialogShown();
   }, [moment.stage]);

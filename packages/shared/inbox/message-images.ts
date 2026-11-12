@@ -92,7 +92,7 @@ export function inboxMessageImageRefs(body: string): Set<string> {
 }
 
 /** Fenced code blocks and inline code spans, blanked to spaces (line breaks kept) so the image grammar never matches inside them. */
-function blankCode(body: string): string {
+export function blankCode(body: string): string {
   const blank = (text: string) => text.replace(/[^\n]/g, " ");
   const lines = body.split("\n");
   let fence: string | null = null;

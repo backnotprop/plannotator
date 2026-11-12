@@ -24,6 +24,7 @@ import type { SessionAskAction } from '@plannotator/ui/components/ai/SessionAskN
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { inboxApi, type InboxAskTurnWire, type InboxShowMeAsk } from '../api';
 import { onAskChange } from '../ask/askEvents';
+import { readAsk } from '../ask/askReads';
 import { askTurnNote } from '../ask/askModel';
 import { errorText } from '../toastError';
 import { focusBoardTitle } from '../shape/boardFocus';
@@ -119,7 +120,7 @@ export function useShowMe({
   const agent = agentIn ?? agentRead;
   const reload = useCallback(() => {
     if (!enabled) return;
-    inboxApi.askRead(threadId).then(
+    readAsk(threadId).then(
       (model) => {
         setTurns(model.conversation?.turns ?? []);
         setRunning(model.running);

@@ -14,7 +14,7 @@ import { isLocalOnlyAdvertisedUrl } from "@plannotator/shared/advertised-url";
 import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
-import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { faviconBody, faviconIcoBody } from "@plannotator/shared/favicon";
 import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine, saveToNotion } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult } from "./integrations";
@@ -215,24 +215,24 @@ export function handleApiNotFound(path: string): Response {
 /**
  * Serve the app favicon. Used by all 3 servers (plus goal-setup).
  *
- * Reads the persisted style so a classic user's first painted frame is already
- * classic. Without this the static route always answered Totman and the
- * preference only landed once React mounted, i.e. a visible flash on every load.
+ * Reads the persisted style (Glass, Face or P; Glass when nothing is
+ * stored) so the first painted frame already shows the person's icon. Without
+ * this the static route always answered one icon and the preference only
+ * landed once React mounted, i.e. a visible flash on every load.
  *
- * The route is one URL with two possible payloads, so the response declares its
- * real type and is not cached: the entry HTML's <link rel="icon"> deliberately
- * carries no `type`/`sizes` (see apps/hook/index.html), leaving Content-Type the
- * single source of truth, and a day-long cache would re-paint the old icon after
- * a switch. loadConfig() is a small unmemoized JSON read, once per page load.
+ * Two URLs, each with three possible payloads: `/favicon.ico` (what every
+ * entry HTML links, see apps/hook/index.html: Glass's multi-size .ico, so the
+ * tab shows its hand-pixelled 16 or 32 frame) and `/favicon.png` (one PNG, for
+ * anything that links it and for the Inbox's tab-count badge). The response
+ * declares its type and is not cached: a day-long cache would re-paint the old
+ * icon after a switch. loadConfig() is a small unmemoized JSON read, once per
+ * page load.
  */
-export function handleFavicon(): Response {
-  if (getServerConfig(null).favicon === "classic") {
-    return new Response(CLASSIC_FAVICON_SVG, {
-      headers: { "Content-Type": "image/svg+xml", "Cache-Control": "no-cache" },
-    });
-  }
-  return new Response(FAVICON_PNG_BYTES, {
-    headers: { "Content-Type": "image/png", "Cache-Control": "no-cache" },
+export function handleFavicon(pathname = "/favicon.png"): Response {
+  const style = getServerConfig(null).favicon;
+  const { body, contentType } = pathname === "/favicon.ico" ? faviconIcoBody(style) : faviconBody(style);
+  return new Response(body, {
+    headers: { "Content-Type": contentType, "Cache-Control": "no-cache" },
   });
 }
 

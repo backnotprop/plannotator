@@ -161,6 +161,13 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^health$/, window: () => "/api/inbox/health" },
   { method: "GET", route: /^threads$/, window: () => "/api/inbox/threads" },
   { method: "GET", route: /^projects$/, window: () => "/api/inbox/projects" },
+  // What's new (public release notes, read only): the release list, a release's notes and their saved images, so a
+  // phone reads them as the window does (owner ruling 2026-11-11: one person, the same app on every device).
+  { method: "GET", route: /^whats-new$/, window: () => "/api/inbox/whats-new" },
+  { method: "GET", route: /^whats-new\/releases$/, window: () => "/api/inbox/whats-new/releases" },
+  { method: "GET", route: /^whats-new\/image$/, window: () => "/api/inbox/whats-new/image" },
+  // A project's picture (a logo, read only): a linked machine's window shows that machine's project rows with it.
+  { method: "GET", route: /^projects\/([^/]+)\/picture$/, window: (m) => `/api/inbox/projects/${m[1]}/picture` },
   // The archived threads (Settings' Archived block), read only; before threads/:id, which would also match it.
   { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
@@ -169,6 +176,10 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^threads\/([^/]+)\/(read|unread|mark-unread)$/, window: (m) => `/api/inbox/threads/${m[1]}/${m[2]}` },
   // Snooze and Unsnooze (approval "inbox-snooze"): a snooze lives on the thread's home machine.
   { method: "POST", route: /^threads\/([^/]+)\/snooze$/, window: (m) => `/api/inbox/threads/${m[1]}/snooze`, fromMachine: `?${INBOX_SNOOZE_HELD}` },
+  // Star and Unstar (`threads/:id/pin`), and the stars' order or Unstar's Undo (`pins`): contract 7.65, approval
+  // "inbox-starred-pills". A star stays on the computer the phone reaches (DOOR_WRITES `local`): never forwarded.
+  { method: "POST", route: /^threads\/([^/]+)\/pin$/, window: (m) => `/api/inbox/threads/${m[1]}/pin` },
+  { method: "POST", route: /^pins$/, window: () => "/api/inbox/pins" },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
   // `reask`: Re-ask, the agent asks its open questions again in one message (7.61).
@@ -181,12 +192,14 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // The thread's reply draft (the words typed on the computer and not sent), read only: contract 7.62.
   { method: "GET", route: /^threads\/([^/]+)\/draft$/, window: (m) => `/api/inbox/threads/${m[1]}/draft` },
   { method: "GET", route: /^threads\/([^/]+)\/attachments$/, window: (m) => `/api/inbox/threads/${m[1]}/attachments` },
+  // Export decisions: the thread's decisions as a download (`?format=md|html|json&tz=`), read only, from what the thread read serves.
+  { method: "GET", route: /^threads\/([^/]+)\/decisions$/, window: (m) => `/api/inbox/threads/${m[1]}/decisions` },
   { method: "GET", route: /^attachments\/([^/]+)\/view$/, window: (m) => `/api/inbox/attachments/${m[1]}/view` },
-  // An image's bytes, a video's (by Range) and any kind's download (by Range
+  // An image's bytes, a video's or a recording's (by Range) and any kind's download (by Range
   // too): the window's own routes, so the phone gets the same dotenv refusal,
   // sniffed type and headers. Of the phone's request headers the door forwards
   // Range, If-Range and If-None-Match (and Last-Event-ID to the event stream).
-  { method: "GET", route: /^attachments\/([^/]+)\/(image|video|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
+  { method: "GET", route: /^attachments\/([^/]+)\/(image|video|audio|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
   { method: "GET", route: /^markups\/([^/]+)$/, window: (m) => `/api/inbox/markups/${m[1]}` },
   // An image a message's body shows (`?path=<src as written>`, a question
   // block's context included): the window's own route, so the phone gets the
@@ -230,6 +243,7 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A pending pasted-text upload's words (approval "inbox-paste-attachment"), read only: a linked machine's
   // window puts a long paste back in a reply to this machine's thread, as it uploaded it here.
   { method: "GET", route: /^uploads\/([^/]+)\/text$/, window: (m) => `/api/inbox/uploads/${m[1]}/text` },
+  { method: "GET", route: /^uploads\/([^/]+)\/image$/, window: (m) => `/api/inbox/uploads/${m[1]}/image` },
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
@@ -372,6 +386,8 @@ export interface InboxDoorMachines {
 
 /** The platform a linked Inbox pairs as. */
 export const MACHINE_PLATFORM = "machine";
+/** A paired cloud agent's device (section 13 of the contract): minted by this computer, served by the agent door only. */
+export const AGENT_PLATFORM = "agent";
 /** Machine offers kept, open or redeemed (a CLI offer and a link-back can be open at once). */
 const MACHINE_OFFERS_KEPT = 8;
 
@@ -386,6 +402,7 @@ function computerName(): string {
   if (named) return named.slice(0, 64);
   if (process.platform === "darwin") {
     try {
+      // windows-hide-guard: macOS only (scutil).
       const out = spawnSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000, env: childEnv() });
       const name = out.status === 0 ? out.stdout.trim() : "";
       if (name) return name;
@@ -942,6 +959,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
         if (device.refusal_owed_until !== undefined) refusalAnswered(device.id);
         return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
       }
+      if (device.platform === AGENT_PLATFORM) return refuse(403, "agent_not_accepted_here", "A cloud agent's pairing opens the agent door only.");
       // A machine reaches this door over the tailnet only, never the Wi-Fi's listener.
       if (device.platform === MACHINE_PLATFORM && via === "wifi") return refuse(403, "machine_not_accepted_here", "Machines reach this Inbox over the tailnet, not the Wi-Fi.");
       return await serve(req, url, route, device);
@@ -969,6 +987,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const device = devices.get(deviceId);
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
       if (device.revoked_at !== null) return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
+      if (device.platform === AGENT_PLATFORM) return refuse(403, "agent_not_accepted_here", "A cloud agent's pairing opens the agent door only.");
       if (input.method !== "GET" && input.method !== "POST") return refuse(404, "device_route_not_found", "Not a phone route.");
       let url: URL;
       try {
@@ -1425,7 +1444,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
     if (path === "/api/inbox/devices") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-      return json({ devices: devices.list().map(publicDevice) });
+      return json({ devices: devices.list().filter((d) => d.platform !== AGENT_PLATFORM).map(publicDevice) });
     }
     const revokeMatch = /^\/api\/inbox\/devices\/([A-Za-z0-9_]+)\/revoke$/.exec(path);
     if (revokeMatch) {
@@ -1497,5 +1516,37 @@ export function createInboxDevices(context: InboxDevicesContext) {
     computerName: () => computer().name,
   };
 
-  return { door, asDevice, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices, machineDoor };
+  /** Cloud agents' devices: minted here because the person asked on this computer, so no offer is redeemed. */
+  const agentDevices = {
+    mint: (name: string): { device: InboxDevice; token: string; secret: string } => {
+      const token = `tok_${randomBytes(32).toString("base64url")}`;
+      const secret = randomBytes(32).toString("base64url");
+      const at = now().toISOString();
+      const device = devices.add({ id: inboxId("dev"), name, platform: AGENT_PLATFORM, token, secret, at });
+      devices.setCarriage(device.id, false, at);
+      return { device: devices.get(device.id) ?? device, token, secret };
+    },
+    relay: async (device: InboxDevice): Promise<{ url: string; mailbox_id: string } | null> => (await context.relay?.paired(device)) ?? null,
+    byToken: (token: string): InboxDevice | null => {
+      const device = devices.byToken(token);
+      return device?.platform === AGENT_PLATFORM ? device : null;
+    },
+    byId: (id: string): InboxDevice | null => {
+      const device = devices.get(id);
+      return device?.platform === AGENT_PLATFORM ? device : null;
+    },
+    /** A phone's or a machine's token, which the agent door refuses by name. */
+    isOtherDevice: (token: string): boolean => {
+      const device = devices.byToken(token);
+      return device !== null && device.platform !== AGENT_PLATFORM;
+    },
+    touch: (id: string) => devices.touch(id, now().toISOString()),
+    seenAt: (id: string): string | null => devices.get(id)?.last_seen_at ?? null,
+    revoke: (id: string) => {
+      const device = devices.get(id);
+      if (device?.platform === AGENT_PLATFORM && device.revoked_at === null) revoke(device);
+    },
+  };
+
+  return { door, asDevice, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices, machineDoor, agentDevices };
 }

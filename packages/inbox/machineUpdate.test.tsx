@@ -9,11 +9,12 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MachineUpdateDetails, MachineUpdateView, MachineView } from './api';
+import type { InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-const { MachineSidebarWord, MachineUpdateButton, MachineUpdateDialog, UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL } = (hasDom ? await import('./components/MachineUpdate') : {}) as typeof import('./components/MachineUpdate');
+const { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineSidebarWord, MachineUpdateButton, MachineUpdateDialog, UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL } = (hasDom ? await import('./components/MachineUpdate') : {}) as typeof import('./components/MachineUpdate');
 const { MachinesSection } = (hasDom ? await import('./components/Machines') : {}) as typeof import('./components/Machines');
-const { ThreadSnooze } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
+const { ThreadMore } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
 const { machineNotice } = await import('./machines');
 
 const MAC = `ibx_01K${'0'.repeat(22)}M`;
@@ -255,12 +256,12 @@ test.skipIf(!hasDom)('the word in the sidebar opens the dialog; the press never 
 test.skipIf(!hasDom)('Settings: the row has its button for each state that needs one, and none on a page that offers no updates', async () => {
   const machines = [machine(null, { id: SELF, name: 'Mac', self: true }), machine(view('behind'))];
   let pressed = '';
-  await draw(<MachinesSection machines={machines} via="local" onChanged={() => {}} onMachineUpdate={(id) => (pressed = id)} />);
+  await draw(<MachinesSection machines={machines} guest={false} onChanged={() => {}} onMachineUpdate={(id) => (pressed = id)} />);
   await act(async () => document.querySelector<HTMLButtonElement>('[data-machine-update="update"]')!.click());
   expect(pressed).toBe(MAC);
   act(() => root?.unmount());
   host?.remove();
-  await draw(<MachinesSection machines={machines} via="tailnet" onChanged={() => {}} />);
+  await draw(<MachinesSection machines={machines} guest onChanged={() => {}} />);
   expect(document.querySelector('[data-machine-update]')).toBeNull();
   act(() => root?.unmount());
   host?.remove();
@@ -271,8 +272,10 @@ test.skipIf(!hasDom)('Settings: the row has its button for each state that needs
 
 test.skipIf(!hasDom)('Snooze on an older machine stays, and its press opens the dialog instead of a list of times', async () => {
   let pressed = 0;
-  await draw(<ThreadSnooze snooze={{ snoozed: false, onPick: () => {}, onUnsnooze: () => {}, blocked: { name: 'Studio', onPress: () => pressed++ } }} />);
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-snooze-blocked]')!.click());
+  const thread = { thread_id: 'msg_a', subject: 'Which index?', messages: [] } as unknown as InboxThread;
+  await draw(<ThreadMore thread={thread} linkOf={() => ''} phone={false} snooze={{ snoozed: false, onPick: () => {}, onUnsnooze: () => {}, blocked: { name: 'Studio', onPress: () => pressed++ } }} />);
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-thread-more]')!.click());
+  await act(async () => document.querySelector<HTMLElement>('[data-snooze-blocked]')!.click());
   expect(pressed).toBe(1);
   expect(document.querySelector('[data-snooze-choice]')).toBeNull();
 });
@@ -292,4 +295,123 @@ test.skipIf(!hasDom)('Not back offers to put back the version it ran, with each 
     act(() => root?.unmount());
     host?.remove();
   }
+});
+
+// "Ask an agent on <machine> to update it" (the owner's call, 2026-11-08): an older machine's dialog sends an agent
+// there the ask, the same New message compose sends to a live session on a linked machine.
+
+/** A live session as that machine's `GET sessions` lists it. */
+const session = (id: string, host: string, busy: boolean | null, seen: string) => ({ session: id, host, started_at: seen, last_seen_at: seen, busy, idle_since: null, last_thread: null });
+/** That machine's live sessions, through the forward. */
+let thereSessions: { projects: { project: { id: string | null; name: string; root: string }; sessions: ReturnType<typeof session>[] }[] } = { projects: [] };
+let sendAnswer: { status: number; body: Record<string, unknown> } = { status: 200, body: {} };
+
+function routeFetch() {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    sent.push({ url, method, body: typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null });
+    if (method === 'GET' && url.startsWith(`/api/inbox/m/${MAC}/sessions`)) return new Response(JSON.stringify({ serverSession: 's', home: '~', ...thereSessions }));
+    if (method === 'GET') return new Response(JSON.stringify({ too_old: true, current: '0.28.46' }));
+    if (url === `/api/inbox/m/${MAC}/messages`) return new Response(JSON.stringify(sendAnswer.body), { status: sendAnswer.status });
+    return new Response(JSON.stringify({ ok: true, update: null }));
+  }) as typeof fetch;
+}
+/** Lets the sessions read (and a Send) land. */
+async function settle() {
+  for (let i = 0; i < 5; i++) await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+}
+const askButton = () => document.querySelector<HTMLButtonElement>('[data-machine-ask-go]');
+const tooOldView = (extra: Partial<MachineUpdateView> = {}) => view('behind', { can_update: false, ...extra });
+
+test.skipIf(!hasDom)('an older machine with an agent running: one press sends that agent the ask in a new thread there, never an update press', async () => {
+  routeFetch();
+  thereSessions = {
+    projects: [
+      { project: { id: 'prj_a', name: 'billing', root: '~/billing' }, sessions: [session('ses-busy', 'claude-code', true, '2026-11-08T10:05:00Z')] },
+      { project: { id: 'prj_b', name: 'site', root: '~/site' }, sessions: [session('ses-idle', 'codex', false, '2026-11-08T09:00:00Z')] },
+    ],
+  };
+  sendAnswer = { status: 200, body: { thread_id: 'thr_01Kask', message: {}, replayed: false } };
+  await dialog(tooOldView());
+  await settle();
+  expect(askButton()!.disabled).toBe(false);
+  await act(async () => askButton()!.click());
+  await settle();
+  const sends = starts().filter((call) => call.url === `/api/inbox/m/${MAC}/messages`);
+  expect(sends).toHaveLength(1);
+  // The idle agent reads it sooner than the busy one.
+  expect(sends[0]!.body).toMatchObject({ to: { host: 'codex', session: 'ses-idle' }, body: ASK_AGENT_TO_UPDATE, thread_name: ASK_AGENT_TO_UPDATE_THREAD });
+  expect(starts().find((call) => call.url === `/api/inbox/machines/${MAC}/update/asked`)?.body).toMatchObject({ thread_id: 'thr_01Kask', agent: 'Codex' });
+  expect(starts().some((call) => call.url === `/api/inbox/machines/${MAC}/update`)).toBe(false);
+  // Sent: who was asked, the thread, no second ask; the commands stay as the fallback.
+  expect(document.querySelector('[data-machine-ask="sent"]')?.textContent).toContain('Asked Codex on Studio');
+  expect(document.querySelector('[data-machine-ask-thread]')?.getAttribute('href')).toBe('#thread=thr_01Kask');
+  expect(askButton()).toBeNull();
+  expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL]);
+});
+
+test.skipIf(!hasDom)('a Send that machine has not confirmed yet says it is on its way, and the row hears of it with no thread', async () => {
+  routeFetch();
+  thereSessions = { projects: [{ project: { id: 'prj_a', name: 'billing', root: '~/billing' }, sessions: [session('ses-a', 'claude-code', false, '2026-11-08T10:00:00Z')] }] };
+  sendAnswer = { status: 202, body: { outbox: { key: 'k1', machine: MAC, state: 'queued' }, machine: null } };
+  await dialog(tooOldView());
+  await settle();
+  await act(async () => askButton()!.click());
+  await settle();
+  expect(document.querySelector('[data-machine-ask="sent"]')?.textContent).toContain('Sending to Studio');
+  expect(document.querySelector('[data-machine-ask-thread]')).toBeNull();
+  expect(starts().find((call) => call.url === `/api/inbox/machines/${MAC}/update/asked`)?.body).toMatchObject({ thread_id: null, agent: 'Claude Code' });
+});
+
+test.skipIf(!hasDom)('no agent running there: it says so, offers to start one only where an agent can start there, and otherwise opens the commands', async () => {
+  routeFetch();
+  thereSessions = { projects: [] };
+  let started = '';
+  await draw(<MachineUpdateDialog machine={machine(tooOldView(), { launch: true })} snooze={false} onClose={() => {}} onStartAgent={(id) => (started = id)} />);
+  await settle();
+  expect(document.querySelector('[data-machine-ask="none"]')).not.toBeNull();
+  expect(askButton()).toBeNull();
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-machine-ask-start]')!.click());
+  expect(started).toBe(MAC);
+  expect(document.querySelector<HTMLDetailsElement>('details.ib-mhand')!.open).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+  // Launch off there (or too old to say): nothing to start, so the commands are the way, open.
+  await draw(<MachineUpdateDialog machine={machine(tooOldView(), { launch: null })} snooze={false} onClose={() => {}} onStartAgent={() => {}} />);
+  await settle();
+  expect(document.querySelector('[data-machine-ask-start]')).toBeNull();
+  expect(document.querySelector<HTMLDetailsElement>('details.ib-mhand')!.open).toBe(true);
+  expect(starts()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('an ask the row already carries (another tab, a reopened dialog): said with its thread, and nothing to press twice', async () => {
+  routeFetch();
+  thereSessions = { projects: [{ project: { id: 'prj_a', name: 'billing', root: '~/billing' }, sessions: [session('ses-a', 'claude-code', false, '2026-11-08T10:00:00Z')] }] };
+  const asked = { thread: 'thr_9', agent: 'Claude Code', at: '2026-11-08T10:00:00Z' };
+  await dialog(tooOldView({ asked }));
+  await settle();
+  expect(document.querySelector('[data-machine-ask="sent"]')?.textContent).toContain('Asked Claude Code on Studio');
+  expect(askButton()).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  await draw(<MachineUpdateButton machine={machine(tooOldView({ asked }))} onPress={() => {}} />);
+  expect(document.querySelector('[data-machine-update]')?.textContent).toBe('Asked');
+  expect(starts()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('an older machine that is asleep: no read and no send, and it says to wake it', async () => {
+  routeFetch();
+  await dialog(tooOldView(), { state: 'offline' });
+  await settle();
+  expect(sent).toEqual([]);
+  expect(document.querySelector('[data-machine-ask="asleep"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('the ask runs the update before the restart, and the restart only after it worked', () => {
+  const update = ASK_AGENT_TO_UPDATE.indexOf('`plannotator update`');
+  const restart = ASK_AGENT_TO_UPDATE.indexOf('`plannotator inbox restart`');
+  expect(update).toBeGreaterThan(-1);
+  expect(restart).toBeGreaterThan(update);
+  expect(ASK_AGENT_TO_UPDATE).toContain('only if step 1 succeeds');
 });

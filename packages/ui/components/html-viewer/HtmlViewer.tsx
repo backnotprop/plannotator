@@ -20,6 +20,7 @@ import type { Annotation, EditorMode, HostDraft, ImageAttachment, InputMethod } 
 import { AnnotationType } from "../../types";
 import { copyTextPreservingFocus } from "../../utils/clipboard";
 import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
+import { useHighlightCopy } from "../../utils/highlightCopy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
@@ -30,7 +31,7 @@ import {
   type VimHudCommand,
 } from "../../utils/vimHud";
 import { AnnotationToolbar } from "../AnnotationToolbar";
-import type { SelectionAction } from "../../utils/selectionActions";
+import type { SelectionAction, SelectionActionContext } from "../../utils/selectionActions";
 import type { MentionSource } from "../../utils/mentions";
 import { AttachmentsButton } from "../AttachmentsButton";
 import {
@@ -51,6 +52,7 @@ import {
   MAX_PAGE_URL_LENGTH,
   checkBridgeProtocolVersion,
   formatBridgeProtocolWarning,
+  bridgeWindowOf,
   rejectsLiveMessage,
   resolveFrameScale,
   useHtmlAnnotation,
@@ -220,6 +222,14 @@ const REOPEN_ANSWER_MS = 3000;
 
 export interface HtmlViewerProps {
   rawHtml: string;
+  /**
+   * Optional: a `sandbox` for the live (`src`) frame. Absent: no sandbox, as
+   * annotate's live mode has always run. A host that passes one keeps the
+   * app working with `allow-scripts allow-same-origin allow-forms` and takes
+   * away what it leaves out (`allow-top-navigation`: the app cannot navigate
+   * the host's window).
+   */
+  liveSandbox?: string;
   /** Live proxied-app mode: render `src` (no sandbox, no srcdoc) instead of
    *  rawHtml. The caller must also set `fullViewport` and `liveSession`. */
   src?: string;
@@ -327,6 +337,14 @@ export interface HtmlViewerProps {
   /** Opt-in host capability: the glyph on the `selectionActions` button.
    *  Absent → the package's own wand. */
   selectionActionsIcon?: ReactNode;
+  /** Opt-in host capability: the selection toolbar's "Side" button, which
+   *  hands the host the selected text and its context (AnnotationToolbar
+   *  `onSide`). Absent → no button: unchanged. */
+  onSide?: (text: string, context: SelectionActionContext) => void;
+  /** Opt-in host capability: how that button is drawn (AnnotationToolbar
+   *  `sideButton`: an icon-only button with the host's glyph and tooltip).
+   *  Absent → the two bubbles and the word "Side": unchanged. */
+  sideButton?: { icon?: ReactNode; label: string };
   /** Opt-in host capability, forwarded to BOTH comment composers this viewer
    *  mounts (the pinpoint/selection composer and the global one): the `@`
    *  mention source for the composer's picker. The picked ids ride onto the
@@ -496,6 +514,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
   (
     {
       rawHtml,
+      liveSandbox,
       src,
       liveSession,
       currentPageUrl,
@@ -533,6 +552,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       maxAdditionalTargets,
       selectionActions,
       selectionActionsIcon,
+      onSide,
+      sideButton,
       mentionSource,
       scrollBehavior,
       scrollClear,
@@ -600,7 +621,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     /** Single choke point for direct-to-bridge posts: live sessions get the
      *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
     const postToBridge = useCallback((msg: Record<string, unknown>) => {
-      const win = iframeRef.current?.contentWindow;
+      const win = bridgeWindowOf(iframeRef.current, liveSessionRef.current);
       if (!win) return;
       const live = liveSessionRef.current;
       if (live) {
@@ -926,7 +947,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // WebKit runner, the Inbox surface's proof).
     useLayoutEffect(() => {
       function handler(e: MessageEvent<unknown>) {
-        if (e.source !== iframeRef.current?.contentWindow) return;
+        if (!e.source || e.source !== bridgeWindowOf(iframeRef.current, liveSessionRef.current)) return;
         // Live sessions verify origin + token before reading anything.
         const live = liveSessionRef.current;
         if (live && rejectsLiveMessage(live, e.origin, e.data)) return;
@@ -1105,6 +1126,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // overlay. Escape still closes it, as its own rung (below).
     const composerShown = !!hook.commentPopover && hook.pinVisible;
     const composerHidden = !!hook.commentPopover && !hook.pinVisible;
+
+    // The composer's textarea has the focus, out of the page's frame, so the
+    // browser's copy has no selection: Ctrl+C copies the selected words (or a
+    // pinned element's text). The person's own selection still wins.
+    useHighlightCopy(!readOnly && composerShown ? hook.commentPopover?.selectedText : null);
 
     useVimDocumentFocus({
       enabled: !readOnly && vimModeEnabled,
@@ -1570,14 +1596,14 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             )}
             {/* Live proxied-app mode navigates a real loopback origin: no
                 sandbox (the user's own app needs cookies, storage, and
-                same-origin XHR) and no srcdoc. A host-served frame
+                same-origin XHR) and no srcdoc, unless a host passes `liveSandbox`. A host-served frame
                 (`frameUrl`) keeps the srcdoc frame's sandbox. Srcdoc mode is
                 unchanged. */}
             <iframe
               ref={iframeRef}
               allowFullScreen
               {...(src
-                ? { src }
+                ? { src, ...(liveSandbox ? { sandbox: liveSandbox } : {}) }
                 : servesFrame
                   ? { src: servedUrl, sandbox: srcdocSandbox(sandbox, hostNavigates) }
                   : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
@@ -1648,6 +1674,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               commentOnly
               selectionActions={selectionActions}
               selectionActionsIcon={selectionActionsIcon}
+              onSide={onSide}
+              sideButton={sideButton}
               onQuickLabel={(label) => {
                 if (label.id === THUMBS_UP_LABEL.id) hook.handleQuickLabel(label);
               }}
