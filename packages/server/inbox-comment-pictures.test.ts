@@ -111,7 +111,6 @@ test("a waiting comment keeps its picture past the upload sweep's day; a removed
   const upload = await uploadPicture(server, "legend.png");
   await commentWithPicture(server, asked.message_id, upload);
   const ageOut = () => {
-    // The sweep runs as the Inbox starts.
     const record = JSON.parse(readFileSync(pendingFile(dataDir, upload.upload_id), "utf8")) as InboxUpload;
     writeFileSync(pendingFile(dataDir, upload.upload_id), JSON.stringify({ ...record, created_at: new Date(Date.now() - 2 * 86_400_000).toISOString() }));
   };

@@ -1,10 +1,3 @@
-/**
- * A picture on a comment, against the compiled binary: added in the comment box, it shows there, and Send carries
- * it as an attachment of the reply, named under the comment in what the agent reads.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -29,7 +22,6 @@ interface World {
 
 let world: World;
 
-/** Drag across `phrase` in the message the way a person does. */
 async function dragSelect(page: Page, messageId: string, phrase: string): Promise<void> {
   await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
   const points = await page.evaluate(

@@ -29,7 +29,6 @@ interface ImageAnnotatorProps {
   escapeCancels?: boolean;
   /** Optional: the line under the image in place of "Press Esc or Enter or click outside to accept". */
   hint?: React.ReactNode;
-  /** Accepted as is when nothing is drawn, instead of a fetch of `imageSrc` (a page whose CSP refuses blob: fetches). */
   sourceBlob?: Blob;
 }
 

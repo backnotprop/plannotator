@@ -62,5 +62,4 @@ export function getUploadTransport(): UploadTransport {
   return uploadTransport;
 }
 
-/** A per-subtree transport for comment pictures; see README "Comment picture uploads per subtree". */
 export const CommentUploadContext = createContext<UploadTransport | null>(null);

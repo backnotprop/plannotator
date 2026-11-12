@@ -496,7 +496,6 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
           initialName={annotatorInitialName}
           onAccept={handleAnnotatorAccept}
           onClose={handleAnnotatorClose}
-          // The Inbox's connect-src refuses a fetch of the blob: URL.
           sourceBlob={hostUpload ? annotatorImage?.file : undefined}
         />,
         document.body
