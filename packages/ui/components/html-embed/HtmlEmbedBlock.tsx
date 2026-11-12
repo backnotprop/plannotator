@@ -143,6 +143,7 @@ function EmbedFrame({
   return (
     <iframe
       ref={ref}
+      allowFullScreen
       src={src}
       sandbox={EMBED_SANDBOX}
       referrerPolicy="no-referrer"
