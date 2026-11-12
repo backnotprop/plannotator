@@ -1,10 +1,6 @@
 /**
- * What Escape and a click outside do in the drawing screen (DOM_TESTS=1).
- * Default (plan review, and any host that passes nothing): Escape, Enter and a
- * click outside all accept the drawing, under "Press Esc or Enter or click
- * outside to accept". With `escapeCancels` (the Inbox): Escape closes and
- * accepts nothing, Enter accepts, and a click outside closes only an empty
- * drawing, so strokes are never lost to a stray click.
+ * With `escapeCancels` (the Inbox): Escape closes and accepts nothing, Enter accepts, and a
+ * click outside closes only an empty drawing, so strokes are never lost to a stray click.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -91,7 +87,6 @@ test.skipIf(!hasDom)('by default a click outside accepts the drawing', async () 
 test.skipIf(!hasDom)('with escapeCancels, Escape closes and accepts nothing; Enter accepts', async () => {
   const events = await open({ escapeCancels: true, hint: 'Enter or ✓ adds to your reply · Esc cancels' });
   expect(host!.querySelector('[data-pn-image-annotator-hint]')!.textContent).toBe('Enter or ✓ adds to your reply · Esc cancels');
-  // The ✓ no longer names Escape, which now cancels.
   expect(host!.querySelector('[data-pn-image-annotator-toolbar] button[title^="Save"]')!.getAttribute('title')).toBe('Save (Enter)');
   await draw();
   await press('Escape');
@@ -108,7 +103,6 @@ test.skipIf(!hasDom)('with escapeCancels, a click outside keeps a drawing open a
   await clickOutside();
   expect(events).toEqual([]);
   expect(backdrop()).not.toBeNull();
-  // Undo the stroke: now empty, a click outside closes without accepting.
   await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true })));
   await clickOutside();
   expect(events).toEqual(['close']);

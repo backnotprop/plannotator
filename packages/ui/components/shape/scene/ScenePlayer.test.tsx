@@ -1,17 +1,3 @@
-/**
- * The scene player in the DOM (DOM_TESTS=1). What regresses if these fail:
- * - under reduced motion a scene moves by itself, or shows a moment between two beats
- *   (Next, a drag of the time slider, Play), so a person who asked for no motion sees it;
- * - under reduced motion a scene whose first beat comes after 0 opens on a moment that is no beat,
- *   or the slider's arrow keys snap back to the same beat, so a keyboard user can't move on;
- * - `plannotator shape frame`'s page (frame.ts) no longer stands the scene still at the moment asked;
- * - the player's own controls reach past its shadow root into the drawing, or the drawing's
- *   pieces are not put back when the player goes;
- * - two counts come back on screen (a beat number in the caption and a clock in the scene's unit
- *   by the slider) and disagree: "10/15" next to "step 9 of 15" read as a bug to the person.
- * happy-dom has no SVG geometry, so places and paths are not checked here (timeline.test.ts does
- * them on their own); a look such as opacity is.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -58,7 +44,6 @@ async function mount(reduce: boolean, scene: ShapeScene = SCENE) {
   await act(async () => {
     root!.render(<ScenePlayers board={board} drawnKey={0} scenes={{ lamp: scene }} reduce={reduce} />);
   });
-  // The player is a lazy chunk: wait for it to land.
   for (let i = 0; i < 50 && !board.querySelector('[data-shape-player]')?.shadowRoot?.querySelector('.ssc'); i++) {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -146,7 +131,6 @@ describe.skipIf(!hasDom)('the scene player', () => {
   });
 
   test('a scene counted in steps shows one count, the caption\'s beat, at every beat, between beats and at the end', async () => {
-    // Beats on whole steps from 0 (the old clock read "step 0" at beat 1) and one half way (it read the step before).
     const says = ['Start.', 'One road.', 'A shorter road.', 'Half way there.', 'Done.'];
     const steps: ShapeScene = {
       ...SCENE,
@@ -157,7 +141,6 @@ describe.skipIf(!hasDom)('the scene player', () => {
     const p = await mount(false, steps);
     const check = (i: number) => {
       expect(p.count()).toBe(`${i + 1} of 5`);
-      // The caption is the beat's words alone: no number of its own to disagree with the count.
       expect(p.caption().trim()).toBe(says[i]!);
       expect(p.slider().getAttribute('aria-valuetext')).toBe(`Beat ${i + 1} of 5: ${says[i]}`);
       // Exactly one count on screen (the screen reader's live line, hidden, says the same words as the slider).
@@ -171,7 +154,6 @@ describe.skipIf(!hasDom)('the scene player', () => {
       expect(Number(p.slider().value)).toBe(t);
       check(i);
     }
-    // Back and Next keep the count with the caption too.
     await p.press('Back one beat');
     check(4);
     await p.press('Back one beat');

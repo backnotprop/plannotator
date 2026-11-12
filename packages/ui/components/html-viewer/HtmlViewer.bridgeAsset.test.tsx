@@ -1,14 +1,3 @@
-/**
- * HtmlViewer on the `bridgeScriptUrl` path (DOM-gated).
- *
- * Guards: the srcdoc carries a `<script src>` instead of the inline literal
- * only when the prop is set; a ready without the protocol stamp (a cached
- * asset from an older package) produces one console warning naming both
- * versions plus the surface's error banner and host callback; a missing
- * ready within `bridgeReadyTimeoutMs` produces the timeout banner and a
- * late ready clears it; and the inline path runs no timer and shows no
- * banner, so Plannotator's surface is unchanged.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -50,10 +39,6 @@ const DEFAULT_HTML = "<html><head><title>t</title></head><body><p>Target</p></bo
 async function mount(props: MountProps) {
   if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
   const HtmlViewer = htmlViewerModule.HtmlViewer;
-  // happy-dom parses the srcdoc and, with script file loading disabled,
-  // reports the <script src> as a NotSupportedError through console.error.
-  // That is the environment, not the viewer (a browser fetches the asset):
-  // keep it out of the test output. Restored in afterEach.
   if (props.bridgeScriptUrl) console.error = () => {};
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -124,10 +109,8 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
     expect(typeof handle.current?.print).toBe('function');
   });
 
-  // The owner's rule: a new sheet per section only for a page that carries
-  // the host-theme marker (Plannotator's own explainers). An arbitrary page
-  // of many short sections must not print one per sheet; every page still
-  // gets the no-clip rule.
+  // An arbitrary page of many short sections must not print one per sheet; every page still gets
+  // the no-clip rule.
   test('section page breaks are injected only into a document with the host-theme marker', async () => {
     const body = '<body><section>One</section><section>Two</section></body></html>';
     const marked = await mount({
@@ -171,8 +154,6 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
   });
 
   test("a relative URL is resolved against the PARENT document, so a page's own <base href> cannot redirect it", async () => {
-    // happy-dom's document lives at about:blank; give the PARENT a real base
-    // the way a host page has one, and remove it afterwards.
     const parentBase = document.createElement('base');
     parentBase.setAttribute('href', 'http://host.test:4000/workspace/');
     document.head.appendChild(parentBase);
@@ -223,7 +204,6 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
     expect(unavailable).toEqual([
       { kind: 'version-mismatch', url: ASSET_URL, expectedVersion: BRIDGE_PROTOCOL_VERSION, reportedVersion: undefined },
     ]);
-    // Not a refusal: the parent still configures the older bridge.
     expect(postedToIframe.some((m) => m.type === 'plannotator-bridge-sync-annotations')).toBe(true);
   });
 
@@ -287,7 +267,6 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
     expect(dismiss).not.toBeNull();
     await act(async () => { dismiss!.click(); });
     expect(banner()).toBeNull();
-    // Dismissing hides the strip only: the host was told exactly once.
     expect(unavailable.length).toBe(1);
 
     const timedOut = await mount({ bridgeScriptUrl: ASSET_URL, bridgeReadyTimeoutMs: 20 });
@@ -296,9 +275,7 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
     expect(timedOut.host.querySelector('[data-bridge-error-dismiss]')).toBeNull();
   });
 
-  // 0.34.0: a host that renders its own notice from onBridgeUnavailable
-  // could not suppress the package strip, so both showed. What regresses:
-  // 'none' still renders a strip (double banner), or 'none' also mutes the
+  // What regresses: 'none' still renders a strip (double banner), or 'none' also mutes the
   // callback or the version-mismatch console warning the host relies on.
   test("bridgeErrorDisplay='none' renders no strip while the callback and the mismatch warning still fire", async () => {
     const warnings = captureWarnings();

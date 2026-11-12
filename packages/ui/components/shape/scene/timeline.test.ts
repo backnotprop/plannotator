@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import type { ShapeScene, ShapeSceneKey } from '@plannotator/core/shape-scene';
 import { beatAt, colourCss, eased, lookAt, nextBeatTime, places, reducedTime, type Geo } from './timeline';
 
-// A straight wire from (0,0) to (100,0) bent at (100,0) down to (100,100): a point along it is not on the chord.
 const geo: Geo = {
   home: (id) => (id === 'job' ? { x: 5, y: 5 } : id === 'box' ? { x: 50, y: 80 } : null),
   along: (id, p) => (id === 'wire' ? (p <= 0.5 ? { x: 200 * p, y: 0 } : { x: 100, y: 200 * (p - 0.5) }) : null),

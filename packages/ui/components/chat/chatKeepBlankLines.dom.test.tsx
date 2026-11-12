@@ -1,8 +1,6 @@
 /**
- * `keepUserBlankLines` on `ChatTranscript`: the person's text as typed, as the
- * Inbox draws a person's reply. Off is today's behavior. Runs the real sanitizer
- * over `tests/helpers/chat-sanitizer-dom.ts`, because without it every text
- * draws as plain text. Requires DOM (DOM_TESTS=1).
+ * Runs the real sanitizer over `tests/helpers/chat-sanitizer-dom.ts`, because without it every
+ * text draws as plain text.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -60,10 +58,8 @@ describe.if(hasDom)('keepUserBlankLines', () => {
     expect(shape('a')).toEqual(folded);
 
     render({ messages, keepUserBlankLines: true });
-    // Three blank lines: the paragraph gap plus two lines, then the single break kept.
     expect(shape('u')).toEqual(['p', 'br', 'br', 'p', 'br']);
     expect(document.querySelector('[data-message-id="u"]')!.textContent!.replace(/\s/g, '')).toBe('HelloSecondline');
-    // The agent's text is drawn as it was.
     expect(shape('a')).toEqual(folded);
   });
 });

@@ -1,8 +1,3 @@
-/**
- * The message box: controlled, sends on Enter, and keeps its Enter from bubbling
- * to a page's own window or document listeners.
- * Requires DOM (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -56,7 +51,6 @@ function type(text: string) {
   });
 }
 
-/** Everything a page could hear above the box, in the bubble phase. */
 function listenAbove() {
   const heard: string[] = [];
   const onWindow = () => heard.push('window');

@@ -75,7 +75,7 @@ describe.if(hasDom)('Ask this session notices in the document chat panel', () =>
       onSessionAskAction,
     });
     const buttons = buttonsIn(el, '[data-session-ask-actions="busy"]');
-    // Action labels are deliberate (owner decision 4), so they are pinned here.
+    // Action labels are deliberate, so they are pinned here.
     expect(buttons.map((b) => b.textContent)).toEqual(['Ask when it finishes', 'Interrupt and ask now']);
     act(() => buttons[0].click());
     act(() => buttons[1].click());
@@ -104,8 +104,6 @@ describe.if(hasDom)('Ask this session notices in the document chat panel', () =>
     expect(el.querySelector('[data-session-ask-actions]')).toBeNull();
   });
 
-  // The failure this guards: a taken-over answer rendered as an error, which
-  // replaces the partial answer the reviewer already read.
   test('taken over: the partial answer stays, with the note under it', () => {
     const el = render({ messages: [entry({ text: 'Because of X', notice: 'NOTE-SENTINEL' })] });
     expect(el.textContent).toContain('Because of X');

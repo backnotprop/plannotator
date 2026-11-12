@@ -1,13 +1,6 @@
 /**
- * A page that uses history or storage while it builds itself renders in the
- * viewer's sandboxed frame (sandboxShim.ts).
- *
- * The frame below follows what Chromium does in a frame sandboxed with
- * scripts and without allow-same-origin (checked in Chrome against the Inbox
- * with the prototype that showed blank): a srcdoc document (`about:srcdoc`)
- * may change only its fragment, the URL a page passes resolves against the
- * viewer's `<base href>`, a served page may move within its origin, and
- * reading `localStorage` / `sessionStorage` throws a SecurityError.
+ * A page that uses history or storage while it builds itself renders in the viewer's sandboxed
+ * frame (sandboxShim.ts).
  */
 import { describe, expect, test } from "bun:test";
 import vm from "node:vm";
@@ -63,7 +56,6 @@ function opaqueFrame(documentUrl: string, globals: Record<string, unknown> = {})
   };
 }
 
-/** The boot of the prototype that rendered blank: read the hash and storage, write the hash, then draw. */
 const PROTOTYPE_BOOT = `
   var theme = localStorage.getItem('theme') || 'light';
   history.replaceState(null, '', '#state=C4&theme=' + theme + '&vp=phone');
@@ -142,7 +134,6 @@ describe("where the shim runs", () => {
 });
 
 describe("the bridge (hosts that load it by URL get the shim from it)", () => {
-  // The bridge needs a DOM past its first lines; the shim runs before that, so what it left behind is read after the throw.
   const runBridge = (frame: ReturnType<typeof opaqueFrame>) => {
     try { frame.run(BRIDGE_SCRIPT); } catch {}
   };

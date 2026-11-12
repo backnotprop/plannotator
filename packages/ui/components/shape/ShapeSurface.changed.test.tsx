@@ -1,12 +1,3 @@
-/**
- * `views.changed` on the board: once What's changed, now never shown (approval "shape-whats-changed-removed";
- * DOM-gated, tests/dom-test-list.txt). What regresses:
- * - a board that carries it gets a What's changed tab again, or any of its words or the review's facts and buttons;
- * - a board whose only view is `views.changed` crashes or shows an empty tab;
- * - a host that turns the Code view off still gets a Code tab, or a host that does not loses it;
- * - with no Code view, a drawn part's place in code stops opening the review, or a host whose `open` throws or rejects
- *   leaves an unhandled error or no file viewer.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -46,7 +37,6 @@ function host(views: ShapeVersion['views'], reads: string[] = []): ShapeHost {
   };
 }
 
-/** A review whose `open` records each place, and answers as asked (false: a file it does not change). */
 function review(opened: ShapeReviewAt[], answer = true): ShapeSurfaceReview {
   return { label: '#12', files: 3, additions: 20, deletions: 4, open: async (at) => (opened.push(at), answer) };
 }

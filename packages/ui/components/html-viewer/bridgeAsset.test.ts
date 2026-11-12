@@ -1,18 +1,3 @@
-/**
- * The bridge-as-asset seam, package side (no DOM registration needed):
- *
- * - the generated `bridge-script.asset.js` is byte-for-byte `BRIDGE_SCRIPT`
- *   and the generated `bridge-script.lite.ts` carries the other exports
- *   unchanged with the literal stubbed (a generator that drifts from the
- *   source module would ship a bridge that disagrees with the parent);
- * - the package manifest wires both files (exports subpaths, `files`,
- *   `prepack`) so `bun pm pack` ships them and a `?url` import resolves;
- * - the srcdoc injection has ONE bridge script element: inline by default,
- *   `<script src>` on the URL path, with no `crossorigin` and no CSP meta;
- * - the real bridge, executed in an isolated window, posts a `ready` that
- *   carries `BRIDGE_PROTOCOL_VERSION`, and the parent's check accepts exactly
- *   that and rejects a stamp-less ready (a stale asset).
- */
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,7 +35,6 @@ describe("generated bridge assets", () => {
       const asset = readFileSync(join(dir, BRIDGE_ASSET_FILENAME));
       expect(asset.equals(Buffer.from(BRIDGE_SCRIPT, "utf8"))).toBe(true);
 
-      // Determinism: a second run produces the same bytes.
       writeBridgeAssets(dir);
       expect(readFileSync(join(dir, BRIDGE_ASSET_FILENAME)).equals(asset)).toBe(true);
 
@@ -64,9 +48,8 @@ describe("generated bridge assets", () => {
     }
   });
 
-  // A stale local artifact (generated before a bridge edit) would ship a
-  // bridge that disagrees with the parent. Only checked when present: the
-  // files are gitignored and exist after `prepack`.
+  // A stale local artifact (generated before a bridge edit) would ship a bridge that disagrees
+  // with the parent.
   test.skipIf(!existsSync(join(BRIDGE_ASSET_DIR, BRIDGE_ASSET_FILENAME)))(
     "an already-generated asset in the package matches the current source",
     () => {
@@ -87,11 +70,9 @@ describe("generated bridge assets", () => {
     expect(pkg.exports["./components/html-viewer/bridge-script.lite"]).toBe(
       `./components/html-viewer/${BRIDGE_LITE_FILENAME}`,
     );
-    // `files` covers components/ and nothing excludes the generated names.
     expect(pkg.files).toContain("components");
     expect(pkg.files.some((entry) => entry.startsWith("!") && /bridge-script/.test(entry))).toBe(false);
     expect(pkg.scripts.prepack).toContain("build:bridge-assets");
-    // The generated directory is the source module's own directory.
     expect(BRIDGE_ASSET_DIR).toBe(dirname(resolve(import.meta.dir, "bridge-script.ts")));
   });
 });
@@ -113,8 +94,6 @@ describe("srcdoc bridge script tag", () => {
     const url = "https://host.example/assets/bridge-script.abc123.js";
     const injection = buildSrcdocInjection({ ...base, bridgeScriptUrl: url });
     const inline = buildSrcdocInjection(base);
-    // Same prefix (the style block), same position: the tag replaces the
-    // inline element rather than being added beside it.
     const stylePrefix = inline.slice(0, inline.indexOf("<script"));
     expect(injection.startsWith(stylePrefix)).toBe(true);
     expect(injection.slice(stylePrefix.length)).toBe(`<script src="${url}"></script>`);
@@ -132,11 +111,8 @@ describe("srcdoc bridge script tag", () => {
     expect(resolveBridgeScriptUrl("/assets/bridge.abc.js", parent)).toBe("https://host.example/assets/bridge.abc.js");
     expect(resolveBridgeScriptUrl("./bridge.js", parent)).toBe("https://host.example/workspace/doc/bridge.js");
     expect(resolveBridgeScriptUrl("https://cdn.example/b.js", parent)).toBe("https://cdn.example/b.js");
-    // Unparsable input is passed through rather than thrown at render.
     expect(resolveBridgeScriptUrl("http://[bad", "not a url")).toBe("http://[bad");
 
-    // A page carrying its own <base href> still precedes the injected tag
-    // (end of <head>); the resolved src is absolute and unaffected by it.
     const page = '<html><head><base href="https://attacker.example/"><title>t</title></head><body></body></html>';
     const doc = injectIntoHead(page, buildSrcdocInjection({
       ...base,
@@ -152,17 +128,12 @@ describe("srcdoc bridge script tag", () => {
       const doc = injectIntoHead(page, buildSrcdocInjection({ ...base, bridgeScriptUrl }));
       expect(doc).not.toMatch(/<meta[^>]*http-equiv/i);
     }
-    // Nor does the bridge itself write one at runtime.
     expect(BRIDGE_SCRIPT).not.toMatch(/http-equiv/i);
     expect(BRIDGE_SCRIPT).not.toMatch(/content-security-policy/i);
   });
 });
 
 describe("bridge protocol version", () => {
-  /** Run the real bridge in an isolated happy-dom window whose `parent` is a
-   * spy, so the test sees exactly what a srcdoc frame would post. happy-dom
-   * is reached through the registrator's own dependency so no new package
-   * dependency is needed; the global document (if any) is untouched. */
   async function runBridgeIsolated(): Promise<unknown[]> {
     const registrator = Bun.resolveSync("@happy-dom/global-registrator", uiRoot);
     const happyDom = Bun.resolveSync("happy-dom", dirname(registrator));
@@ -198,7 +169,6 @@ describe("bridge protocol version", () => {
     ) as { protocolVersion?: unknown } | undefined;
     expect(ready).toBeDefined();
     expect(ready!.protocolVersion).toBe(BRIDGE_PROTOCOL_VERSION);
-    // The parent's check accepts the real bridge's ready as-is.
     expect(checkBridgeProtocolVersion(ready).ok).toBe(true);
   });
 
@@ -211,7 +181,6 @@ describe("bridge protocol version", () => {
     });
     expect(other.ok).toBe(false);
     expect(other.reported).toBe(BRIDGE_PROTOCOL_VERSION + 1);
-    // Non-numeric stamps are not a version.
     expect(checkBridgeProtocolVersion({ type: "plannotator-bridge-ready", protocolVersion: "1" }).ok).toBe(false);
 
     const warning = formatBridgeProtocolWarning(other, "https://h/bridge.js");

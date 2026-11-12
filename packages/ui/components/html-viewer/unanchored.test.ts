@@ -1,10 +1,3 @@
-/**
- * The unanchored union is what a host renders its "Unanchored" chip from,
- * so the failures to catch are: a textless page row going unreported, a
- * document-level comment being flagged, a swapped-out local id leaking into
- * the host's set, and (the byte-identity guard for existing consumers) the
- * union NOT equalling the bridge list when nothing needs completing.
- */
 import { describe, expect, test } from "bun:test";
 import { AnnotationType, type Annotation } from "../../types";
 import { isTextlessPageAnnotation, mergeUnanchoredIds } from "./unanchored";

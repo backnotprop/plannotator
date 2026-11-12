@@ -1,39 +1,3 @@
-/**
- * The diagram viewer over a REAL rendered svg with REAL geometry: the svg is
- * mermaid's own output for test-setup/fixtures/diagrams/06-flowchart-
- * review-decision (captured from a headless Chromium, render id
- * "diagram-fixture"); the numbers beside it are the `getBBox()` and
- * `getScreenCTM()` Chromium measured for every element.
- *
- * Three browser APIs happy-dom does not have are stood in, and nothing
- * else: (a) the layout engine's answer for a rendered diagram — the captured
- * svg is handed to the viewer through the package's public host slot
- * (`setMermaidRuntime(runtime, "host")`), so `renderDiagram` runs the real
- * slot code over the real bytes and only the layout step is Chromium's;
- * (b) `SVGGraphicsElement.getBBox` and `getScreenCTM`, installed from the
- * captured numbers, keyed by the element's rendered id suffix; (c) the
- * DOMPurify parse step, which happy-dom cannot host (the scrub still runs).
- * Pointer capture is a no-op stand-in.
- *
- * What regresses if these fail:
- * - rings and badges are placed from stored pixels instead of the current
- *   CTM, so they drift off their nodes on the first zoom or pan;
- * - hover and click describe the wrong part (a marker, a label group, the
- *   background) or the wrong node;
- * - Enter does not hand the host the anchor: the Mermaid id, the label, the
- *   DOCUMENT source line (offset applied), the additional targets;
- * - badge numbers do not follow the `comments` array order;
- * - a comment whose part is gone is not reported unanchored, or one whose
- *   id is gone but whose label survives is (restore step 2 runs first);
- * - a drag pans instead of opening the composer, or a plain click on the
- *   background does not close an open draft;
- * - keyboard zoom loses a manual zoom on the next render;
- * - the Source pane: typing does not preview after the debounce, Save does
- *   not hand the host the draft, a stale answer does not show Reload while
- *   keeping the draft, Discard does not restore the baseline.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { EditorView } from '@codemirror/view';
 import { readFileSync } from 'node:fs';
@@ -63,8 +27,6 @@ interface CapturedElement {
 const GEOMETRY = JSON.parse(readFileSync(join(FIXTURES, `${FIXTURE}.geometry.json`), 'utf8')) as {
   elements: Record<string, CapturedElement>;
 };
-/** Captured entries keyed by the id suffix after the render id, so they
- * apply whatever render id the viewer minted. */
 const CAPTURED = Object.entries(GEOMETRY.elements).map(([id, entry]) => [id.slice(CAPTURE_ID.length), entry] as const);
 function capturedFor(el: Element): CapturedElement | null {
   const found = CAPTURED.find(([suffix]) => el.id.endsWith(suffix));
@@ -83,8 +45,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let restoreParser: (() => void) | null = null;
 let renderCalls: string[] = [];
-// happy-dom defines the two geometry methods on SVGGraphicsElement, which
-// would shadow a stub on SVGElement; install where the engine defines them.
 const svgProto = (hasDom ? ((globalThis as { SVGGraphicsElement?: typeof SVGElement }).SVGGraphicsElement ?? SVGElement).prototype : {}) as unknown as Record<string, unknown>;
 const elementProto = (hasDom ? Element.prototype : {}) as unknown as Record<string, unknown>;
 const saved = { getBBox: svgProto['getBBox'], getScreenCTM: svgProto['getScreenCTM'] };
@@ -107,7 +67,6 @@ beforeAll(() => {
   elementProto['releasePointerCapture'] ??= noop;
   elementProto['hasPointerCapture'] ??= () => false;
   svgProto['getBBox'] = function (this: Element) {
-    // The svg root's content bounds: the whole-diagram ring.
     if (this.tagName.toLowerCase() === 'svg') return { x: 0, y: 0, width: 452, height: 182 };
     const captured = capturedFor(this);
     if (captured === null) throw new Error(`no captured geometry for ${this.id}`);
@@ -191,7 +150,6 @@ function pointer(type: string, target: Element, init: { x: number; y: number; sh
     clientY: init.y,
     button: 0,
     shiftKey: init.shift ?? false,
-    // The platform modifier, whichever platform happy-dom reports.
     metaKey: init.mod ?? false,
     ctrlKey: init.mod ?? false,
     ...(Ctor !== MouseEvent ? { pointerId: init.pointerId ?? 1 } : {}),
@@ -199,7 +157,6 @@ function pointer(type: string, target: Element, init: { x: number; y: number; sh
   target.dispatchEvent(event);
 }
 
-/** A finger on node D (or on `on`): the first one down is the primary pointer, as in a browser. */
 function touch(type: string, x: number, { pointerId = 7, isPrimary = true, y = 10, on = undefined as Element | undefined } = {}): void {
   const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
   const event = new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, ...(Ctor !== MouseEvent ? { pointerId, pointerType: 'touch', isPrimary } : {}) } as MouseEventInit);
@@ -215,7 +172,6 @@ async function clickPart(target: Element, shift = false): Promise<void> {
   });
 }
 
-/** The canvas transform's translate and scale, to a thousandth (a pinch's steps multiply in floating point). */
 function expectView(wrapper: HTMLElement, x: number, y: number, scale: number): void {
   const match = /translate\((-?[\d.e-]+)px, (-?[\d.e-]+)px\) scale\(([\d.e-]+)\)/.exec(wrapper.style.transform);
   expect(match).not.toBeNull();
@@ -246,21 +202,15 @@ describe.if(hasDom)('restore and paint', () => {
     expect(host!.querySelector('[data-diagram-badge="a3"]')).toBeNull();
     expect(unanchored[unanchored.length - 1]).toEqual(['a3']);
 
-    // The ring for node D: Chromium measured the node's box at
-    // (-58.76, -59.26, 118.52 x 118.52) in user units under a CTM that
-    // translates by (207.36, 93.59) and scales by 0.99996, so the screen
-    // rectangle is (148.6, 34.3, 118.5 x 118.5); the ring pads it by 3px.
     const ring = q<HTMLElement>('[data-diagram-mark="a1"] > div');
     expect(Number.parseFloat(ring.style.left)).toBeCloseTo(148.6 - 3, 0);
     expect(Number.parseFloat(ring.style.top)).toBeCloseTo(34.3 - 3, 0);
     expect(Number.parseFloat(ring.style.width)).toBeCloseTo(118.5 + 6, 0);
     expect(Number.parseFloat(ring.style.height)).toBeCloseTo(118.5 + 6, 0);
-    // The label fallback ring (a2) sits on node R, not on D.
     const ringR = q<HTMLElement>('[data-diagram-mark="a2"] > div');
     expect(Number.parseFloat(ringR.style.left)).toBeCloseTo(339.3 - 3, 0);
     expect(Number.parseFloat(ringR.style.top)).toBeCloseTo(120.8 - 3, 0);
 
-    // Array order is the number: swap the first two rows.
     await rerender(viewer({ comments: [rows[1]!, rows[0]!, rows[2]!], onUnanchoredChange }));
     await waitFor(() => {
       expect(q('[data-diagram-badge="a2"]').textContent).toBe('1');
@@ -302,8 +252,6 @@ describe.if(hasDom)('the projection', () => {
 
 describe.if(hasDom)('hover, click, compose', () => {
   test('a plain mouse-over highlights nothing; the ring under the pointer appears only with the platform modifier held', async () => {
-    // Owner feedback: hover targeting read as messy and fought the pan
-    // hand, so nothing paints on a plain move.
     await mount(viewer({ onCreateComment: noop }));
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
     await act(async () => {
@@ -324,9 +272,6 @@ describe.if(hasDom)('hover, click, compose', () => {
   });
 
   test('a click on an edge\'s widened hit path, or on its label, opens the composer for that edge', async () => {
-    // Owner feedback: a 1–2 px stroke was only catchable at random spots,
-    // and the label painted over the edge (where a person clicks it) was
-    // not a target at all.
     const created: Array<{ anchor: DiagramAnchor }> = [];
     await mount(viewer({ onCreateComment: (anchor) => { created.push({ anchor }); } }));
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
@@ -334,8 +279,6 @@ describe.if(hasDom)('hover, click, compose', () => {
     const hits = Array.from(host!.querySelectorAll('[data-diagram-hit-layer] > [data-diagram-hit]'));
     expect(hits.length).toBe(edges.length);
     expect(hits.length).toBe(3);
-    // The pointer lands on the widened path (what a click 6 px off the
-    // visible stroke hits in a browser); the canvas resolves the edge.
     const edgeDM = q('[id$="-L_D_M_0"]');
     await clickPart(hits[edges.indexOf(edgeDM)]!);
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
@@ -349,7 +292,6 @@ describe.if(hasDom)('hover, click, compose', () => {
     await waitFor(() => expect(created).toHaveLength(1));
     expect(created[0]!.anchor).toMatchObject({ kind: 'edge', from: 'D', to: 'M', label: 'Yes' });
 
-    // The label "No" is the D → R edge.
     const labelNo = Array.from(host!.querySelectorAll('g.edgeLabel')).find((g) => g.textContent?.trim() === 'No')!;
     await clickPart(labelNo.querySelector('p, span, text') ?? labelNo);
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
@@ -357,8 +299,6 @@ describe.if(hasDom)('hover, click, compose', () => {
   });
 
   test('where an edge meets a node the node wins: targets resolve by priority over everything under the pointer', async () => {
-    // The hit layer sits above the nodes, so at an edge's end both are under
-    // the pointer; the topmost element alone would pick the edge.
     await mount(viewer({ onCreateComment: noop }));
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
     const hit = host!.querySelector('[data-diagram-hit-layer] > [data-diagram-hit]')!;
@@ -375,21 +315,16 @@ describe.if(hasDom)('hover, click, compose', () => {
   });
 
   test('a press on the zoom strip over a node opens nothing; 1 px outside it the node opens the composer', async () => {
-    // Owner report: the controls are painted over the canvas and are not in
-    // the svg, so the `elementsFromPoint` walk stepped past them to the part
-    // behind — pressing Zoom out over a node opened the composer on it.
     await mount(viewer({ onCreateComment: noop }));
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
-    // Fit is the control to press here: it is already the current viewport
-    // after mount, so a press that (wrongly) reaches the diagram cannot also
-    // churn the transform and make this test about something else.
+    // Fit is the control to press here: it is already the current viewport after mount, so a press
+    // that (wrongly) reaches the diagram cannot also churn the transform and make this test about
+    // something else.
     const fitButton = q<HTMLButtonElement>('[data-diagram-zoom-strip] [aria-label="Fit diagram"]');
     const nodeShape = nodeD().querySelector('polygon, rect, path') ?? nodeD();
     const canvas = q('[data-diagram-canvas]');
     const doc = host!.ownerDocument as Document & { elementsFromPoint?: (x: number, y: number) => Element[] };
     const original = doc.elementsFromPoint;
-    // What Chromium reports for the two points: inside the strip the button
-    // is topmost with the node still under it; 1 px outside, only the node.
     const STRIP_X = 300;
     doc.elementsFromPoint = (x: number) => (x === STRIP_X ? [fitButton, nodeShape, canvas] : [nodeShape, canvas]);
     try {
@@ -425,8 +360,6 @@ describe.if(hasDom)('hover, click, compose', () => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
     await waitFor(() => expect(created).toHaveLength(1));
-    // No id; the label is the first source line; the range is the whole
-    // source, offset into the host's document.
     expect(created[0]!.anchor).toEqual({ v: 1, family: 'flowchart', kind: 'diagram', label: 'flowchart LR', sourceLine: [11, 14] });
 
     // Restored, it rings the content bounds and is never unanchored.
@@ -452,8 +385,6 @@ describe.if(hasDom)('hover, click, compose', () => {
     const composer = q('[data-diagram-composer]');
     expect(composer.textContent).toContain('Approve?');
     expect(composer.textContent).toContain('node D');
-    // The declaring line of D in the source is 2; the host's offset makes
-    // it a document line.
     expect(composer.textContent).toContain('line 12');
     const textarea = q<HTMLTextAreaElement>('[data-diagram-composer] textarea');
     await act(async () => {
@@ -495,7 +426,6 @@ describe.if(hasDom)('hover, click, compose', () => {
     await waitFor(() => expect(created).toHaveLength(1));
     expect(created[0]!.additional).toEqual([{ family: 'flowchart', kind: 'edge', from: 'D', to: 'M', label: 'Yes' }]);
 
-    // The default cap: a shift-click extends nothing.
     await rerender(viewer({ onCreateComment: noop }));
     await clickPart(nodeD());
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
@@ -519,7 +449,6 @@ describe.if(hasDom)('hover, click, compose', () => {
     expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
     expect(wrapper.style.transform).not.toBe(before);
     expect(wrapper.style.transform).toContain('translate(20px, 0px)');
-    // A slightly moving press (under the 4 px threshold) is still a click.
     await act(async () => {
       pointer('pointerdown', nodeD(), { x: 10, y: 10 });
       pointer('pointermove', nodeD(), { x: 12, y: 11 });
@@ -609,7 +538,6 @@ describe.if(hasDom)('the Source pane', () => {
 
     await type(SOURCE + '  R --> Q[Queued]\n');
     await waitFor(() => expect(host!.querySelector('[data-diagram-draft-state]')).not.toBeNull());
-    // The preview lands after the debounce, once, with the draft.
     await settle(PREVIEW_DEBOUNCE_MS + 40);
     await waitFor(() => expect(renderCalls.length).toBe(rendersBefore + 1));
     expect(renderCalls[renderCalls.length - 1]).toContain('Q[Queued]');
@@ -649,7 +577,6 @@ describe.if(hasDom)('the Source pane', () => {
       buttons().find((b) => b.textContent === 'Reload')!.click();
     });
     await waitFor(() => expect(host!.querySelector('[data-diagram-reload-strip]')).toBeNull());
-    // The dirty draft stays; the baseline moved, so Save is live again.
     expect(editor().state.doc.toString()).toBe(SOURCE + '  R --> Q\n');
     expect(buttons().find((b) => b.textContent === 'Save')!.disabled).toBe(false);
     await act(async () => {
@@ -695,7 +622,6 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
       expect(event.defaultPrevented).toBe(false);
     }
     expect(wrapper.style.transform).toBe(before);
-    // The bare key still works.
     await act(async () => {
       canvas.dispatchEvent(new KeyboardEvent('keydown', { key: '-', bubbles: true, cancelable: true }));
     });
@@ -757,7 +683,6 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
     const wrapper = q<HTMLElement>('[data-diagram-svg]');
     expect(wrapper.style.transform).toBe('translate(0px, 0px) scale(1)');
-    // Fingers 30 px apart spread to 90 px about the same midpoint (25, 10): three times the scale, the midpoint's part stays put.
     await act(async () => {
       touch('pointerdown', 10);
       touch('pointerdown', 40, { pointerId: 8, isPrimary: false });
@@ -765,13 +690,11 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
       touch('pointermove', 70, { pointerId: 8, isPrimary: false });
     });
     expectView(wrapper, -50, -20, 3);
-    // Both fingers move down 30 px together: the diagram follows, the scale holds.
     await act(async () => {
       touch('pointermove', -20, { y: 40 });
       touch('pointermove', 70, { pointerId: 8, isPrimary: false, y: 40 });
     });
     expectView(wrapper, -50, 10, 3);
-    // One finger lifts: the other drags the diagram on, and lifting it opens nothing.
     await act(async () => {
       touch('pointerup', 70, { pointerId: 8, isPrimary: false, y: 40 });
       touch('pointermove', -10, { y: 40 });
@@ -788,7 +711,6 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
     const wrapper = q<HTMLElement>('[data-diagram-svg]');
     const lastId = () => (drafts.at(-1)?.anchor as { id?: string } | undefined)?.id;
-    // A synchronous act runs no timer: what it shows is what the pointer events themselves did.
     act(() => {
       touch('pointerdown', 10);
       touch('pointerup', 10);
@@ -822,7 +744,6 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
       await settle(400);
       return host!.querySelector('[data-diagram-composer]');
     };
-    // Alone, it comments on the whole diagram once the window has passed.
     act(emptyTap);
     expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
     expect(await composerAfterTheWindow()).not.toBeNull();
@@ -830,7 +751,6 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
       canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     });
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).toBeNull());
-    // A pan.
     act(() => {
       emptyTap();
       touch('pointerdown', 100, { on: canvas, pointerId: 9 });
@@ -838,7 +758,6 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
       touch('pointerup', 140, { on: canvas, pointerId: 9 });
     });
     expect(await composerAfterTheWindow()).toBeNull();
-    // A pinch.
     act(() => {
       emptyTap();
       touch('pointerdown', 100, { on: canvas, pointerId: 9 });
@@ -849,7 +768,6 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
       touch('pointerup', 100, { on: canvas, pointerId: 9 });
       touch('pointerup', 160, { on: canvas, pointerId: 10, isPrimary: false });
     });
-    // A control on the canvas (the zoom strip), and a press outside it (an expand button, a badge's host page).
     act(() => {
       emptyTap();
       press(q('[aria-label="Zoom in"]'));

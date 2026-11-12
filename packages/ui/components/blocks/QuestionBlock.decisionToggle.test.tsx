@@ -1,17 +1,3 @@
-/**
- * Host-controlled decision recording and status tag on question cards
- * (Workspaces lets the reviewer switch a `Decision: when answered` question's
- * recording off, and draws its own status tag).
- *
- * What regresses if this fails: the "Records a decision" tag stops being a
- * real toggle (no button, no aria-pressed, the host never hears the click);
- * switching recording off still shows "Answering this records a decision";
- * a read-only card lets the reviewer flip it; `statusTag: 'none'` takes the
- * decision tag with it; or a card given none of these props changes markup
- * (Plannotator passes none of them).
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useState } from 'react';
 import { act } from 'react';
@@ -21,7 +7,6 @@ import { parseMarkdownToBlocks } from '../../utils/parser';
 import { BlockRenderer } from '../BlockRenderer';
 
 const hasDom = typeof document !== 'undefined';
-// Viewer reads the DOM at module scope; load it only under DOM_TESTS.
 const viewerModule = hasDom ? await import('../Viewer') : null;
 
 const DOC = `:::question
@@ -74,7 +59,6 @@ function Cards({ extra = {}, readOnly = false }: { extra?: Props; readOnly?: boo
   );
 }
 
-/** A host that keeps the recording state itself, keyed by question key. */
 function ToggleHost({ toggles, readOnly = false }: { toggles: Array<[string, boolean]>; readOnly?: boolean }) {
   const [off, setOff] = useState<Record<string, boolean>>({});
   const blocks = parseMarkdownToBlocks(DOC);
@@ -148,15 +132,13 @@ describe('QuestionBlock decision recording toggle', () => {
     await click(button);
     expect(toggles).toEqual([[flagged.dataset.questionKey!, false]]);
 
-    // Off: the same toggle, unpressed and drawn off; the row is gone.
     const off = cards(el)[0];
     const offButton = toggle(off)!;
     expect(offButton.getAttribute('aria-pressed')).toBe('false');
     expect(offButton.textContent).toBe(button.textContent);
     expect(offButton.style.outlineStyle).toBe('dotted');
-    // Faded through its color (text, icon and outline are all currentColor),
-    // never by `opacity`, which would also fade the focus ring. The color is a
-    // color-mix(), which happy-dom drops, so it is checked in Chromium, not here.
+    // Faded through its color (text, icon and outline are all currentColor), never by `opacity`,
+    // which would also fade the focus ring.
     expect(offButton.style.opacity).toBe('');
     expect(decisionRow(off) === null).toBe(true);
     expect(off.dataset.questionDecision).toBe('on-answer');
@@ -174,9 +156,6 @@ describe('QuestionBlock decision recording toggle', () => {
     expect(toggle(linked) === null).toBe(true);
     expect(linked.dataset.questionDecisionRecording).toBeUndefined();
     expect(decisionRow(linked) !== null).toBe(true);
-    // The handler alone does not reach a question with no decision line; the
-    // `'any'` scope plus a recording state does
-    // (QuestionBlock.decisionAnyQuestion.test.tsx).
     const handlerOnly = await mount(<Cards extra={{ onToggleQuestionDecisionRecording: () => {} }} />);
     const plain = cards(handlerOnly)[2];
     expect(toggle(plain) === null).toBe(true);
@@ -215,7 +194,6 @@ describe('QuestionBlock decision recording toggle', () => {
     const html = (el: HTMLElement) => el.innerHTML.replace(/(q-(?:prompt|context|suggest|note)-|question-)[A-Za-z0-9_«»]+/g, '$1#');
     const plainEl = await mount(<Cards />);
     const before = html(plainEl);
-    // Defaults spelled out are the same card: the new props add nothing unless set.
     const el2 = document.createElement('div');
     document.body.appendChild(el2);
     const root2 = createRoot(el2);
@@ -223,8 +201,6 @@ describe('QuestionBlock decision recording toggle', () => {
     expect(html(el2)).toBe(before);
     await act(async () => root2.unmount());
     el2.remove();
-    // Sentinels of the unchanged card: the tag is a plain span, there is no
-    // recording attribute and the flagged row shows.
     const flagged = cards(plainEl)[0];
     expect(toggle(flagged) === null).toBe(true);
     expect(tagWith(flagged, 'Records a decision')!.getAttribute('style') === null).toBe(true);
@@ -242,7 +218,6 @@ describe('QuestionBlock statusTag', () => {
     }
     expect(tagWith(flagged, 'Records a decision') !== null).toBe(true);
     expect(tagWith(linked, 'Decision') !== null).toBe(true);
-    // The status itself is still on the card for the host to read.
     expect(plain.dataset.questionStatus).toBe('open');
 
     const shown = await mount(<Cards />);
@@ -293,10 +268,6 @@ describe('Viewer question host props', () => {
 });
 
 describe('Viewer questionDecisionLines', () => {
-  // What regresses if this fails: a host that records no decisions (the
-  // Plannotator Inbox) still draws a "Records a decision" tag or a decision
-  // link for an older agent's `Decision:` line, or loses the line's text; or
-  // the default (every other host) stops reading the lines.
   test.skipIf(!hasDom)('false shows each `Decision:` line as context and draws no decision tag or row; the default keeps them', async () => {
     const Viewer = viewerModule!.Viewer;
     const blocks = parseMarkdownToBlocks(DOC);

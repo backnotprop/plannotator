@@ -1,10 +1,3 @@
-/**
- * "Follow an example": the step on now. What regresses: next or back running
- * past an example's ends (a card with no step), "Step through" not starting at
- * the first step, a new version with fewer examples leaving the card on one
- * that is gone, and a jump or a hand-off read as the wrong direction (the
- * output flying into a step it never reached).
- */
 import { describe, expect, test } from 'bun:test';
 import type { ShapeExample } from '@plannotator/core/shape';
 import { followCardCut, followDir, followFileFit, followReduce, followSignature, followSignatureFit, type FollowPhase } from './followState';

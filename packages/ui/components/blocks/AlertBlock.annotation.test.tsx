@@ -1,13 +1,6 @@
 /**
- * The alert title row carries chrome the reader cannot see: the visually
- * hidden "<Type>: " span that keeps the alert's type in its accessible name
- * (#1511). It sits inside `[data-block-id]`, so without `annotation-exclude`
- * it joins the annotation text stream — a drag that starts over the icon
- * quotes a word the reviewer never selected, and that quote is what the panel
- * shows, what the agent is handed, and what a share link has to find again by
- * text search (a search whose stream skips excluded nodes, so it cannot).
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
+ * The alert title row carries chrome the reader cannot see: the visually hidden "<Type>: " span
+ * that keeps the alert's type in its accessible name.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
@@ -76,17 +69,13 @@ async function mount(
   return resultRef;
 }
 
-/** Whitespace-free comparison: the painted marks carry no separator between
- *  elements while the selection string does. */
 const compact = (value: string): string => value.replace(/\s+/g, '');
 
-/** Everything the highlighter painted, in document order. */
 const paintedText = (): string =>
   Array.from(document.querySelectorAll('mark.annotation-highlight'))
     .map((el) => el.textContent ?? '')
     .join('');
 
-/** The text node holding a piece of the rendered document. */
 const textNodeWith = (selector: string, needle: string): Text => {
   const walkerRoot = Array.from(document.querySelectorAll(selector))
     .find((el) => (el.textContent ?? '').includes(needle));
@@ -99,7 +88,6 @@ const textNodeWith = (selector: string, needle: string): Text => {
   throw new Error(`Fixture no longer holds "${needle}" in one text node`);
 };
 
-/** The hidden "<Type>: " span that rides the alert's title row. */
 const hiddenTypeWord = (): Text => {
   const node = document.querySelector('.alert-title .sr-only')?.firstChild;
   if (!node || node.nodeType !== Node.TEXT_NODE) {
@@ -118,8 +106,6 @@ afterEach(async () => {
   if (hasDom) document.body.innerHTML = '';
 });
 
-/** A drag that starts at the left edge of the title row (over the icon, where
- *  the hidden type word lives) and ends at the end of the title. */
 function titleRowRange(): Range {
   const srOnly = document.querySelector('.alert-title .sr-only');
   const titleText = Array.from(document.querySelectorAll('.alert-title span'))
@@ -165,10 +151,6 @@ describe('alert title annotations', () => {
   });
 
   test.skipIf(!hasDom)('a drag from the icon through the body paints the title too', async () => {
-    // web-highlighter never enters an excluded subtree, so a range that STARTS
-    // in the hidden span used to leave every run before the last one
-    // unpainted: the reviewer dragged over title and body and got the body
-    // alone, with the invisible word still in the quote.
     const added: Annotation[] = [];
     const hook = await mount(added);
     const body = textNodeWith('.alert-body p', 'Safari');
@@ -184,9 +166,6 @@ describe('alert title annotations', () => {
   });
 
   test.skipIf(!hasDom)('a title carrying inline markup is painted whole', async () => {
-    // The title row is several text nodes once it holds a code span, so this
-    // is the shape a start-of-range fix has to cover rather than the
-    // single-text-node title that works by accident.
     const added: Annotation[] = [];
     const hook = await mount(added, { body: '**Browser `quirks` here**\n\nSafari drops the label when ALPHA happens.' });
     const lastTitleText = textNodeWith('.alert-title', ' here');
@@ -201,10 +180,6 @@ describe('alert title annotations', () => {
   });
 
   test.skipIf(!hasDom)('body prose that repeats the type word keeps it', async () => {
-    // The quote repair used to remove the FIRST match of the excluded text
-    // anywhere in the quote. With real prose reading "Tip: " ahead of the
-    // alert, it removed the reviewer's own words, failed its own check and
-    // reverted - leaving the invisible word in after all.
     const added: Annotation[] = [];
     const hook = await mount(added, { lead: 'Tip: read the lead-in first.' });
     const lead = textNodeWith('p[data-block-id="p-0"]', 'lead-in');
@@ -216,7 +191,6 @@ describe('alert title annotations', () => {
     await act(async () => { hook.current!.handleCommentSubmit('tie these together'); });
 
     expect(paintedText()).toBe('Tip: read the lead-in first.Browser quirks');
-    // The reviewer's own "Tip: " survives; the hidden one does not.
     expect(added[0]!.originalText).toContain('Tip: read the lead-in first.');
     expect(compact(added[0]!.originalText)).toBe(compact(paintedText()));
   });
@@ -226,8 +200,6 @@ describe('alert title annotations', () => {
     const first = await mount(added);
     await act(async () => { first.current!.highlightRange(titleRowRange()); });
     await act(async () => { first.current!.handleCommentSubmit('tighten this'); });
-    // A share payload carries the quote and nothing else — the recipient's
-    // restore is a text search over the rendered document.
     const shared = fromShareable(toShareable(added));
     await act(async () => { root!.unmount(); });
     root = null;

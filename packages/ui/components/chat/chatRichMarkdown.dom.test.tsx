@@ -1,11 +1,4 @@
-/**
- * `richMarkdown`, the one switch a host turns on to draw what the Workspaces
- * transcript draws: images, strikethrough, task checkboxes, link titles and list
- * start numbers. Off is today's behavior, and it stays the default because an
- * image loads a remote address from model text. Every guard holds in both modes.
- * Runs the real sanitizer over `tests/helpers/chat-sanitizer-dom.ts`. Requires DOM
- * (DOM_TESTS=1).
- */
+/** Runs the real sanitizer over `tests/helpers/chat-sanitizer-dom.ts`. */
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -46,7 +39,6 @@ const rich = (text: string) => parsed(richMarkdownHtml(text));
 const richPerson = (text: string) => parsed(richMarkdownHtml(text, { literalHtml: true }));
 const attributesOf = (element: Element | null) => element?.getAttributeNames().sort();
 
-/** Run with every look at the clock a second later, so the budget is gone at once. */
 function withBudgetGone<Result>(run: () => Result): Result {
   let now = 0;
   const clock = spyOn(Date, 'now').mockImplementation(() => (now += 1_000));
@@ -72,7 +64,6 @@ describe.if(hasDom)('each gap', () => {
     expect(rich(text).querySelector(selector)).not.toBeNull();
   });
 
-  // A person's message is markdown too: in Workspaces only their raw HTML is literal.
   test.each(gaps)('%s draws for a person with the switch on', (_name, text, selector) => {
     expect(richPerson(text).querySelector(selector)).not.toBeNull();
   });
@@ -102,8 +93,6 @@ describe.if(hasDom)('each gap', () => {
 });
 
 describe.if(hasDom)('which addresses an image may have', () => {
-  // The list Workspaces has today, which is DOMPurify's own rule for `src`. A
-  // narrower list would come back as a failed comparison, so it is pinned here.
   test.each([
     ['https', 'https://example.test/a.png'],
     ['http', 'http://example.test/a.png'],
@@ -445,8 +434,6 @@ describe.if(hasDom)('the limits, with the switch on', () => {
     expect(parsed(render(`${image} **b**`, false)).querySelector('img')).not.toBeNull();
   });
 
-  // The pattern that finds raw tags runs on the whole of a block of raw HTML, past
-  // every check inside `marked`. These are the shapes that would make it quadratic.
   test.each([
     ['unclosed tags', '<img '.repeat(50_000)],
     ['unclosed quotes', '<img a="'.repeat(30_000)],
@@ -463,9 +450,7 @@ describe.if(hasDom)('the limits, with the switch on', () => {
 });
 
 describe.if(hasDom)('the proof', () => {
-  // Each case gets its own copy of the module, because a sanitizer proves itself
-  // once. Each breaks the DOM as a partial one can be broken, and the same text
-  // must then go out with none of its markup.
+  // Each case gets its own copy of the module, because a sanitizer proves itself once.
   let fresh = 0;
   const freshModule = async () => (await import(`./chatMarkdown?proof=${(fresh += 1)}`)) as typeof Markdown;
   const text = '![a](https://example.test/a.png)\n\n**b** ~~c~~\n\n- [ ] d\n';
@@ -563,7 +548,6 @@ describe.if(hasDom)('the switch on the transcript', () => {
     return host;
   }
 
-  /** The folder's documented way to paint into a text part. */
   const ownMarkdown = (overrides: { richMarkdown?: boolean } = {}) =>
     (part: ChatMessage['parts'][number], { message, index }: ChatPartContext) =>
       part.type === 'text' ? (
@@ -617,8 +601,6 @@ describe.if(hasDom)('the switch on the transcript', () => {
   });
 
   // Both are public, so a host can draw them with no `ChatTranscript` around them.
-  // There the context's own default decides, and an image is a request the host
-  // never asked for. These roots are their own, outside every Provider.
   describe('with no transcript around it', () => {
     function bare(element: React.ReactElement) {
       host ??= document.createElement('div');
@@ -647,10 +629,6 @@ describe.if(hasDom)('the switch on the transcript', () => {
     });
   });
 
-  // An image is the first content that grows with no change to `messages`, so
-  // nothing else tells the pane its text moved. `load` does not bubble: a listener
-  // has to catch it on the way down. Chromium proves the same with a real image in
-  // `tests/e2e/chat-window.spec.ts`.
   describe('an image that arrives late', () => {
     function pane(view: HTMLElement, scrollHeight: number, clientHeight: number) {
       const element = view.querySelector<HTMLElement>('[role="region"]')!;

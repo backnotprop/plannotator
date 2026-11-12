@@ -1,25 +1,3 @@
-/**
- * A drawn view is an agent's HTML (DOM-gated, DOM_TESTS=1). What regresses if
- * these fail:
- * - the agent's markup runs script, loads from outside the board, or keeps
- *   its own <style> (every payload of the review's probe, in
- *   tests/fixtures/shape-outside-loads.ts, comes out neutered; the board's
- *   own files, fragments, data images and https links stay);
- * - the view's css escapes its frame (`:host { position: fixed }` over the app),
- *   or a part opens in the top layer (a popover, a dialog, a select's picker);
- * - the view's css leaks out of its shadow root, or css that loads from
- *   outside the board is kept;
- * - a bubble for a reference the board does not have shows as a dead number;
- * - a part's `data-code` no longer reaches the host, so a diagram outside the
- *   board (code review's "show me how this works") cannot open the code;
- * - while pointing (Change it / Ask), a marked part opens the code instead of
- *   being picked, or a bad `data-code` reaches the host;
- * - an icon, logo or drawn thing `shape update` stamped loses strokes, colour or
- *   its motion to the sanitizer, or keeps moving when motion is reduced;
- * - a drawing's `#…` link changes the host page's hash (the Inbox's route), or
- *   its https link opens in the same tab (leaving the Inbox), or an image map's
- *   `<area href>` gets past either.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -35,9 +13,9 @@ const drawnModule = hasDom ? await import('./ShapeDrawn') : null;
 let root: Root | null = null;
 let unbridge: (() => void) | null = null;
 
-// happy-dom cannot host DOMPurify as it stands; the chat folder's bridge makes
-// it, and if the bridge stops working the sanitizer fails its proof and the
-// drawings come out empty, which fails these tests.
+// happy-dom cannot host DOMPurify as it stands; the chat folder's bridge makes it, and if the
+// bridge stops working the sanitizer fails its proof and the drawings come out empty, which fails
+// these tests.
 beforeAll(() => {
   if (hasDom) unbridge = bridgeSanitizerDom();
 });
@@ -77,7 +55,6 @@ describe.skipIf(!hasDom)('a drawn view', () => {
     expect(kettle.getAttribute('data-code')).toBe('src/kettle.ts#L1');
     expect(board.innerHTML).not.toMatch(/onclick|onmouseover|<script|<iframe|<style|evil\.invalid/);
     expect(board.querySelector('rect')).not.toBeNull();
-    // HTML inside a foreignObject stays in a browser; happy-dom parses its namespace differently.
     expect(board.querySelector('a')?.getAttribute('href')).toBe('https://example.com/pr/1');
   });
 
@@ -111,7 +88,6 @@ describe.skipIf(!hasDom)('a drawn view', () => {
   test('the frame contains the drawing, so its css cannot lay it over the app', async () => {
     await draw({ html: '<p>Kettle</p>', css: ':host { position: fixed !important; inset: 0; z-index: 2147483647; }' });
     const frame = container!.querySelector<HTMLElement>('.shp-drawn')!;
-    // Containment makes the frame the box a fixed host is placed in; the clip keeps it within 24px of the frame.
     expect(frame.style.contain).toBe('layout');
     expect(frame.style.clipPath).toBe('inset(-24px)');
     expect(frame.contains(container!.querySelector('.shp-drawn-host'))).toBe(true);
@@ -137,7 +113,6 @@ describe.skipIf(!hasDom)('a drawn view', () => {
     expect(bad!.hasAttribute('tabindex')).toBe(false);
   });
 
-  // Code review's redrawn Overview tags the parts that changed; a Show me of an earlier round tags the parts whose code moved on.
   test("a host's tags land on the fresh and the stale parts only, and leave with them", async () => {
     const { NO_MARKS, ShapeDrawn } = drawnModule!;
     // c carries the drawing's own `stale` class and a padding note it wrote: a host's tags leave both alone.
@@ -148,7 +123,6 @@ describe.skipIf(!hasDom)('a drawn view', () => {
     expect([tagOf('a'), tagOf('b'), tagOf('c')]).toEqual(['changed', 'changed since asked', null]);
     expect(board.querySelector('[data-mark="b"]')!.classList.contains('shp-stale')).toBe(true);
     expect(board.querySelector('[data-mark="c"]')!.classList.contains('stale')).toBe(true);
-    // The tag sits inside its part, with room made above the part's words; an untagged part keeps its layout.
     const padOf = (id: string) => board.querySelector<HTMLElement>(`[data-mark="${id}"]`)!.style.paddingTop;
     expect([padOf('a'), padOf('b'), padOf('c')]).toEqual(['28px', '28px', '']);
     await act(async () => {
@@ -207,7 +181,6 @@ describe.skipIf(!hasDom)('a drawn view', () => {
     const map = '<img src="files/a.png" usemap="#m"><map name="m"><area shape="rect" coords="0,0,10,10" href="#settings"><area href="files/a.png"></map>';
     expect(shapeHtmlProblems(map)).toEqual(expect.arrayContaining(['<area> is not allowed', '<map> is not allowed']));
     expect(drawnModule!.sanitizeShapeHtml(map)).not.toMatch(/<area|<map/i);
-    // A board from a host that skipped the store: an element with an href reaching the drawing still moves nothing.
     window.location.hash = '#thread=msg_keep';
     try {
       const { board } = await draw({ html: '<p id="settings">Kettle</p>' });
@@ -231,7 +204,6 @@ describe.skipIf(!hasDom)('a drawn view', () => {
 });
 
 describe.skipIf(!hasDom)('icons, logos and drawn things by name (stamped by `shape update`)', () => {
-  // Inside a drawing's own <svg>, as a board has them.
   const STAMPED = expandShapeStamps(
     '<svg viewBox="0 0 900 400"><svg data-icon="database" x="10" y="10" width="28" height="28" style="color:var(--blue)"/><svg data-logo="stripe" x="60" y="10"/><svg data-logo="github" x="110" y="10"/>'
       + '<svg data-draw="database" x="10" y="80" width="140" height="120" data-label="Postgres"/><svg data-draw="queue" x="200" y="80" width="200" height="60" data-label="jobs"/>'
@@ -293,7 +265,6 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
   });
 
   test('only a caller that asks for it pans a narrow canvas; anything else shrinks to fit', async () => {
-    // This DOM measures 0 wide, which is narrow; its padding has to read as a number.
     const real = window.getComputedStyle;
     window.getComputedStyle = ((el: Element) => { const cs = real.call(window, el); return new Proxy(cs, { get: (t, k) => (String(k).startsWith('padding') ? '0px' : Reflect.get(t, k)) }); }) as typeof window.getComputedStyle;
     try {
@@ -311,7 +282,6 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     }
   });
 
-  // A real board cut off at 390 px showed its left zone and no sign there was more to the right.
   test('a panning drawing shows which way there is more: that side fades, and a track follows the scroll', async () => {
     const real = window.getComputedStyle;
     window.getComputedStyle = ((el: Element) => { const cs = real.call(window, el); return new Proxy(cs, { get: (t, k) => (String(k).startsWith('padding') ? '0px' : Reflect.get(t, k)) }); }) as typeof window.getComputedStyle;
@@ -331,13 +301,11 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
       expect(fades()).toEqual(['0px', '28px']);
       scrollTo(200);
       expect(fades()).toEqual(['28px', '28px']);
-      // The track stays in the middle of what shows, and its thumb is where you are.
       expect(track.style.left).toBe(`${200 + (360 - 56) / 2}px`);
       expect(parseFloat((track.firstElementChild as HTMLElement).style.left)).toBeCloseTo((200 / 770) * 100, 3);
       scrollTo(410);
       expect(fades()).toEqual(['28px', '0px']);
       expect(track.hidden).toBe(false);
-      // A drawing that fits its frame does not pan: no track, no fade.
       Object.defineProperty(frame, 'scrollWidth', { configurable: true, get: () => 360 });
       scrollTo(0);
       expect(track.hidden).toBe(true);
@@ -387,10 +355,8 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     });
     const svg = shadow.querySelector('svg')!;
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    // Every part drawn after the span is still in the SVG, as SVG.
     expect(svg.querySelector('[data-mark="diff"] rect')?.namespaceURI).toBe(SVG_NS);
     expect(svg.querySelector('#last')?.namespaceURI).toBe(SVG_NS);
-    // One number each, in the SVG, in the words it follows.
     for (const [n, words] of [[1, 'Queue'], [2, 'Diff']] as const) {
       const spots = shadow.querySelectorAll(`[data-ref="${n}"]`);
       expect(spots.length).toBe(1);
@@ -400,7 +366,6 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
       expect(spot.classList.contains('shp-rb')).toBe(true);
       expect(spot.closest('text')?.textContent?.startsWith(words)).toBe(true);
     }
-    // A shape that is a number stays that shape.
     expect(shadow.querySelector('[data-ref="3"]')?.localName).toBe('circle');
   });
 
@@ -414,7 +379,6 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     const one = shadow.querySelectorAll('[data-ref="1"]');
     expect(one.length).toBe(1);
     expect(one[0]!.closest('text')?.textContent).toBe('Label1');
-    // No drawn words: a bubble just after the SVG, not one inside <defs>.
     const two = shadow.querySelectorAll('[data-ref="2"]');
     expect(two.length).toBe(1);
     expect(shadow.querySelector('#tucked')?.textContent).toBe('tucked');
@@ -432,12 +396,10 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
 
   test('darkContrast on a dark board: edges on zones that draw no line, a tile behind each kept SVG picture (never a logo or a framed one), and a light board left exactly as drawn', async () => {
     const { holdDarkBoard, releaseDarkBoard } = await import('./darkContrast');
-    // A stand-in for the canvas: happy-dom resolves the variables below to plain rgb().
     const paint = (color: string) => {
       const m = /^rgba?\((\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(color);
       return m ? ([Number(m[1]), Number(m[2]), Number(m[3])] as const) : null;
     };
-    // `.board.board`: above Sharp's own quieter zone fills (color-mix, which the stand-in cannot paint).
     const palette = (dark: boolean) => dark
       ? '.board.board { --paper: rgb(8 13 22); --ink: rgb(218 222 229); --grey: rgb(150 156 166); --surface: rgb(22 28 40); --rule: rgb(55 61 72); --blue: rgb(94 140 191); --blue-soft: rgb(13 24 39); --amber: rgb(193 147 86); --amber-soft: rgb(36 33 30); --green: rgb(90 170 120); --green-soft: rgb(12 30 25); --plum: rgb(180 100 150); --plum-soft: rgb(28 18 30); --alert: rgb(241 77 76); --alert-soft: rgb(38 16 20); }'
       : '.board.board { --paper: rgb(245 246 248); --ink: rgb(20 24 32); --grey: rgb(90 96 106); --surface: rgb(255 255 255); --rule: rgb(220 222 226); --blue: rgb(40 90 150); --blue-soft: rgb(225 233 243); --amber: rgb(150 100 20); --amber-soft: rgb(248 236 215); --green: rgb(30 110 70); --green-soft: rgb(222 240 230); --plum: rgb(130 50 100); --plum-soft: rgb(243 226 236); --alert: rgb(200 30 30); --alert-soft: rgb(250 225 225); }';
@@ -447,32 +409,25 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     const dark = await draw({ html, css: palette(true), resolveSrc: (src) => `/assets/${src}`, darkContrast: true });
     expect(holdDarkBoard(dark.board, paint)).toBe(true);
     expect(dark.board.classList.contains('dark-hold')).toBe(true);
-    // Every structural colour it set reads at 3:1 or more on what it meets (the rule itself: darkContrast.test.ts).
     expect(dark.board.style.getPropertyValue('--rule')).toMatch(/^rgb\(/);
     expect(dark.board.style.getPropertyValue('--shp-edge-blue')).toMatch(/^rgb\(/);
-    // A zone rect draws Sharp's own 1 px edge (`--shp-zone-blue`, held by sharpContrast), so it is left as it is;
-    // a zone Sharp gives no edge (another shape, an HTML box) gets one.
     expect(dark.shadow.getElementById('zone')?.hasAttribute('data-shp-edge')).toBe(false);
     expect(getComputedStyle(dark.shadow.getElementById('zone')!).strokeWidth).toBe('1px');
     expect(dark.shadow.getElementById('blob')?.getAttribute('data-shp-edge')).toBe('blue');
     expect(dark.shadow.getElementById('hz')?.getAttribute('data-shp-edge')).toBe('amber');
-    // A zone that draws its own line keeps it (and its --rule is lifted instead).
     expect(dark.shadow.getElementById('lined')?.hasAttribute('data-shp-edge')).toBe(false);
     const tiles = [...dark.shadow.querySelectorAll('rect.shp-pic-tile')];
     expect(tiles).toHaveLength(1);
     expect(tiles[0]!.nextElementSibling?.getAttribute('href')).toBe('/assets/files/shot.png');
     expect(['x', 'y', 'width', 'height'].map((k) => Number(tiles[0]!.getAttribute(k)))).toEqual([4, 14, 112, 62]);
-    // It turns and draws in with its picture.
     expect(tiles[0]!.getAttribute('transform')).toBe('rotate(3)');
     expect(tiles[0]!.getAttribute('data-step')).toBe('2');
     expect(dark.shadow.querySelector('svg[data-brand] image')?.hasAttribute('data-shp-pic')).toBe(false);
-    // Taken back, nothing of it stays.
     releaseDarkBoard(dark.board);
     expect(dark.board.classList.contains('dark-hold')).toBe(false);
     expect(dark.board.getAttribute('style') ?? '').not.toMatch(/--rule|--surface|--grey|--shp-edge/);
     expect(dark.shadow.querySelectorAll('rect.shp-pic-tile, [data-shp-edge]')).toHaveLength(0);
 
-    // A light board: the same drawing, with the opt-in and without, is the same DOM (but the pictures' own mark).
     const light = await draw({ html, css: palette(false), resolveSrc: (src) => `/assets/${src}`, darkContrast: true });
     const before = light.board.outerHTML;
     expect(holdDarkBoard(light.board, paint)).toBe(false);
@@ -537,14 +492,11 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
 
 
 /**
- * Sharp, the only look (approval "shape-board-sharp-only"): the frame's CSS restyles every board, a stored one
- * included, with no prop from the host, and rewrites none of it. What regresses: a board losing its 2 px corners
- * (3 canvas units) or its 1 px lines at any zoom, an arrowhead drawn as an outline, a drop shadow coming back, or the
- * light over a followed line drawn heavier than the line.
+ * What regresses: a board losing its 2 px corners (3 canvas units) or its 1 px lines at any
+ * zoom, an arrowhead drawn as an outline, a drop shadow coming back, or the light over a
+ * followed line drawn heavier than the line.
  */
 describe.skipIf(!hasDom)('Sharp', () => {
-  // A board as an agent stores it: a kit box and arrow with an elbow, a zone the agent drew, a chip, a card, and an
-  // arrow drawn by an older kit (a rounded elbow, an open head).
   const OLD_ARROW = '<path id="old" d="M160 200L248 200Q260 200 260 212L260 260" class="line" fill="none" stroke-width="2.5"/><path id="old-head" d="M251 251L260 260L269 251" class="line" fill="none" stroke-width="2.5"/>';
   const STORED =
     '<svg viewBox="0 0 600 300"><rect x="10" y="10" width="300" height="200" rx="18" style="fill:var(--blue-soft)"/>' +
@@ -571,7 +523,6 @@ describe.skipIf(!hasDom)('Sharp', () => {
     expect(l.zone).toEqual({ rx: '3px', width: '1px' });
     expect(l.chip).toBe('2px');
     expect(l.card).toEqual({ rx: '3px', shadow: 'none' });
-    // An older board keeps the elbow and the open head it was drawn with, in Sharp's thin line.
     expect(l.old).toEqual({ width: '1px', scale: 'non-scaling-stroke', head: '1px' });
     expect(board.querySelector('#old')?.getAttribute('d')).toContain('Q260 200');
   });
@@ -583,13 +534,10 @@ describe.skipIf(!hasDom)('Sharp', () => {
     expect(l.wire.width).toBe('1px');
   });
 
-  // The line hold at run time (sharpContrast.ts through ShapeDrawn): a palette whose box border falls short gets the
-  // fix on `.board`, and only that one; a change on <html> that moves no colour does not redo it, and one that moves a
-  // colour does. What regresses: the hold never reaching the board (a renamed token, an early return), or every
+  // What regresses: the hold never reaching the board (a renamed token, an early return), or every
   // <html> write (a viewport height on a phone) re-reading every board's colours.
   test('the line colours that fall short are fixed on the board, and held again only when a colour moves', async () => {
     const zones = ['blue', 'amber', 'green', 'plum', 'alert'].map((z) => `--${z}: rgb(30 80 160); --${z}-soft: rgb(240 244 250); --shp-zone-${z}: rgb(30 80 160);`).join(' ');
-    // `.board.board`: above Sharp's own mixes (color-mix, which happy-dom does not paint). The paper comes from <html>.
     const css = `.board.board { --background: rgb(255 255 255); --paper: var(--t-paper, rgb(255 255 255)); --surface: rgb(255 255 255); --ink: rgb(20 20 20); --shp-hair: rgb(235 235 235); --shp-wire: rgb(60 60 60); ${zones} }`;
     const html = document.documentElement;
     const frame = () => act(() => new Promise((r) => setTimeout(r, 40)));
@@ -599,15 +547,12 @@ describe.skipIf(!hasDom)('Sharp', () => {
       const hair = board.style.getPropertyValue('--shp-hair');
       expect(hair).toMatch(/^#[0-9a-f]{6}$/);
       expect(hair).not.toBe('#ebebeb');
-      // The rest hold as drawn: nothing set for them.
       expect(board.style.getPropertyValue('--shp-wire')).toBe('');
       expect(board.style.getPropertyValue('--shp-zone-blue')).toBe('');
-      // A write on <html> that moves no colour: the hold is not redone (a mark left on the board stays).
       board.style.setProperty('--shp-hair', 'kept');
       html.classList.add('shp-test-unrelated');
       await frame();
       expect(board.style.getPropertyValue('--shp-hair')).toBe('kept');
-      // The paper moves: the hold runs again and puts its own colour back.
       html.style.setProperty('--t-paper', 'rgb(250 250 250)');
       // happy-dom keeps an element's computed style (here, inside the board's shadow root) across a change on <html>
       // until its cache is collected, which a browser never does; a stylesheet added to the page drops that cache.
@@ -621,8 +566,8 @@ describe.skipIf(!hasDom)('Sharp', () => {
     }
   });
 
-  // Follow an example over a kit arrow (followPainter): the light is as thin as the line, a touch heavier, and the
-  // filled head lights filled. What regresses: a 2.2-unit light over a 1 px line, an outline triangle over a filled head.
+  // Follow an example over a kit arrow (followPainter): the light is as thin as the line, a touch
+  // heavier, and the filled head lights filled.
   test("Follow an example: the light matches the line, and the filled head lights filled", async () => {
     const { FollowPainter } = await import('./followPainter');
     const html = `<svg viewBox="0 0 600 300"><g data-mark="a">${box(40, 40, 120, 60)}</g><g data-edge="e">${arrow([[160, 70], [260, 70], [260, 150]])}</g><g data-mark="b">${box(200, 150, 120, 60)}</g></svg>`;

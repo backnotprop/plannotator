@@ -116,8 +116,6 @@ describe.if(hasDom)('AIProviderBar setup hint (#1814)', () => {
     return host.querySelector('[data-ai-ask-session-setup-hint]');
   };
 
-  // Sentinel text: what matters is that the line appears in both states and is
-  // absent without a hint, not its wording (askSessionSetupHint owns that).
   test('renders under the provider picker and under the empty state', async () => {
     expect((await render([providerWithEffort], 'HINT-SENTINEL'))?.textContent).toBe('HINT-SENTINEL');
     act(() => root?.unmount());

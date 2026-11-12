@@ -1,12 +1,3 @@
-/**
- * A diagram part's comment card (`configurePlannotatorUI({ commentCard })`), its own drafts (DOM_TESTS=1).
- *
- * Failures to catch:
- * - words left on a part show up on a part of the same name in another document (thread or file);
- * - a Comment the host refused drops the words, so the chevron ("your words are kept") keeps nothing;
- * - a question Ask AI took comes back as a draft on the next open of that part;
- * - the words of a part closed with the chevron are not back on its next open.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -85,7 +76,6 @@ describe.if(hasDom)('DiagramComposer as the comment card', () => {
     await show({ scope: 'doc', label });
     await type('Say why.');
     await act(async () => document.querySelector<HTMLButtonElement>('[data-comment-card-submit]')!.click());
-    // The host refuses: an error shows and the box stays; the chevron closes it.
     await show({ scope: 'doc', label, error: 'Could not save.' });
     await hide();
     await show({ scope: 'doc', label });

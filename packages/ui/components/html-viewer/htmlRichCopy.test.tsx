@@ -1,12 +1,3 @@
-/**
- * The rich-text Copy on HTML surfaces (DOM-gated, DOM_TESTS=1): the parent
- * asks the bridge for the pending range's markup when the button is pressed.
- *
- * Failures to catch: the button appearing for a host that did not opt in,
- * markup requested before the press, a forged or late answer reaching the
- * clipboard, a fallback that writes outside the click (a rejected html
- * promise, a second write), and a tooltip that misstates what was copied.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -38,7 +29,6 @@ function override(target: object, key: string, value: unknown): void {
   });
 }
 
-/** A clipboard whose ClipboardItem keeps its (promised) blobs; every write is recorded resolved. */
 function fakeClipboard() {
   const writes: Array<Record<string, string>> = [];
   class TestClipboardItem {
@@ -214,7 +204,6 @@ describe.if(hasDom)('Rich-text Copy on HTML surfaces', () => {
     const { fromBridge, requests } = await mount();
     await fromBridge(selection);
     await press();
-    // 200,007 characters in; each "&" serializes as "&amp;": over a megabyte out.
     await fromBridge(answer(requests()[0].id, { html: `<p>${'&'.repeat(200_000)}</p>`, text: 'amps' }));
     await settle();
     expect(clipboard.write).toHaveBeenCalledTimes(1);

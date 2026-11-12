@@ -1,12 +1,3 @@
-/**
- * AlertBlock title line: a bold-only first body line (optionally led by one
- * emoji, optionally trailed by `<!-- icon: name -->`) renders as the alert's
- * title on the icon row; the emoji takes the icon slot; the comment never
- * renders; the body is indented under the title. An alert with no title line
- * renders exactly as before (the control cases pin that DOM shape).
- *
- * Requires DOM (happy-dom) — runs under bun test (preloaded via bunfig.toml).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -54,9 +45,9 @@ describe('AlertBlock title line', () => {
 
   test.skipIf(!hasDom)('B: a bold-only first line becomes the title in place of the type word', async () => {
     const el = await render('important', '**Read before you deploy**\n\nThe env still names D1.');
-    // Visible text is the title alone; the accessible name keeps the type word
-    // through a visually hidden span (an aria-label on the generic div is
-    // prohibited by ARIA and dropped by WebKit, so VoiceOver lost the type word).
+    // Visible text is the title alone; the accessible name keeps the type word through a visually
+    // hidden span (an aria-label on the generic div is prohibited by ARIA and dropped by WebKit,
+    // so VoiceOver lost the type word).
     expect(titleRow(el).textContent).toBe('Important: Read before you deploy');
     expect(srOnly(el)).toBe('Important: ');
     expect(titleRow(el).querySelector('svg')).not.toBeNull(); // type icon stays
@@ -84,18 +75,14 @@ describe('AlertBlock title line', () => {
     expect(paragraphs(el)).toEqual(['The sentence.']);
   });
 
-  // DELIBERATE, and a behaviour change against pre-#1509 renders, where the
-  // emoji stayed a paragraph of its own inside the body: an emoji-led first
-  // line is an icon, which is the whole point of admitting an emoji without a
-  // bold title. The grammar's other guards keep it narrow — the emoji must be
-  // the entire line and the next line must be blank — so decorative prose is
-  // untouched. Do not "fix" this by requiring a bold title.
+  // DELIBERATE, and a behaviour change against pre- renders, where the emoji stayed a paragraph of
+  // its own inside the body: an emoji-led first line is an icon, which is the whole point of
+  // admitting an emoji without a bold title.
   test.skipIf(!hasDom)('E: an emoji alone becomes the icon and keeps the type word as the title', async () => {
     const el = await render('warning', '🚧\n\nThe preview domain is bound to the old database.');
     expect(titleRow(el).querySelector('.alert-emoji')?.textContent).toBe('🚧');
     expect(titleRow(el).textContent).toBe('🚧Warning');
     expect(srOnly(el)).toBeNull();
-    // The line is relocated, not duplicated: it is gone from the body.
     expect(el.querySelector('.alert-body')?.textContent).not.toContain('🚧');
     expect(paragraphs(el)).toEqual(['The preview domain is bound to the old database.']);
   });

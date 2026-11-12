@@ -1,11 +1,3 @@
-/**
- * What a stack badge's card lists and which lines its file shows (approval "stack-show-me", addendum 2026-11-06).
- * What regresses if these fail:
- * - the code popup labelled "from #12" shows another PR's hunks of the same file, or nothing when the agent's lines
- *   miss every hunk;
- * - a file row's counts disagree with what the agent wrote, or with the lines the popup shows;
- * - "Also changed here by" names the PR the card is already about, or one that did not change the part.
- */
 import { expect, test } from 'bun:test';
 import type { ShapeStack } from '@plannotator/core/shape';
 import { stackCard, stackFileCounts, stackFileName, stackFilePatch } from './stackModel';

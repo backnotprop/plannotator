@@ -1,8 +1,3 @@
-/**
- * The floating window's behavior: where it can go, what a narrow frame does to
- * it, who it tells, and that it listens to no key unless a host asks.
- * Requires DOM (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -28,7 +23,6 @@ afterEach(() => {
   else delete (globalThis as Record<string, unknown>).ResizeObserver;
 });
 
-/** A frame with a real size, which happy-dom cannot lay out: fires once on observe. */
 function sizedFrame(width: number, height: number) {
   host = document.createElement('div');
   Object.defineProperty(host, 'clientWidth', { configurable: true, value: width });
@@ -82,7 +76,6 @@ function pointer(
   });
 }
 
-/** happy-dom has no pointer capture; the frame only needs the call to exist. */
 function capturable(el: HTMLElement) {
   el.setPointerCapture = () => {};
 }
@@ -94,7 +87,6 @@ function drag(el: HTMLElement, from: [number, number], to: [number, number]) {
   pointer(el, 'pointerup', ...to);
 }
 
-/** One gesture through several points: the press, each move, and the release on the last. */
 function sweep(el: HTMLElement, from: [number, number], ...moves: [number, number][]) {
   capturable(el);
   pointer(el, 'pointerdown', ...from);
@@ -288,7 +280,6 @@ describe.if(hasDom)('window limits', () => {
 });
 
 describe.if(hasDom)('a frame that changes size changes the picture, not the choice', () => {
-  /** A frame the test can resize, telling the window as a real one would. */
   function resizableFrame(width: number, height: number) {
     const frame = sizedFrame(width, height);
     let tell = () => {};
@@ -427,7 +418,6 @@ describe.if(hasDom)('forced fullscreen on a narrow frame', () => {
     expect(handle()).toBeNull();
     expect(button('Fullscreen')).toBeNull();
     expect(button('Exit fullscreen')).toBeNull();
-    // Runtime only: the store's own wish is untouched for a wider frame.
     expect(store.fullscreen).toBe(false);
   });
 
@@ -622,7 +612,6 @@ describe.if(hasDom)('focus return', () => {
     act(() => root!.render(<HostWithLauncher store={store} />));
     document.querySelector<HTMLElement>('[data-composer]')!.focus();
 
-    // From the store, as a host's own gesture would.
     act(() => store.setMinimized(true));
     await act(async () => {
       await new Promise((resolve) => requestAnimationFrame(resolve));

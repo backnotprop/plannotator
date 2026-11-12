@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { SCENE_FIT, sceneSize, type SceneRoom } from './fit';
 
-// The player under the drawing (caption, key, controls) is about 150 px; the Shape page's view at
-// 1440x900 leaves about 760 px of room, at 1280x720 about 580, and a phone (390x844) about 640.
 const room = (over: Partial<SceneRoom>): SceneRoom => ({ slotW: 1300, room: 760, others: 150, lead: 0, vbW: 900, vbH: 420, label: 13, ...over });
 const fits = (r: SceneRoom, s = sceneSize(r)) => s.height + r.others + r.lead <= Math.max(r.room, SCENE_FIT.floor + r.others + r.lead + 4);
 
@@ -13,7 +11,6 @@ describe('a scene fits the window', () => {
     expect(s.scale).toBe(1);
     expect(s.width).toBe(900);
     expect(s.pan).toBe(false);
-    // A small drawing may grow, but only to 640 px wide.
     expect(sceneSize(room({ vbW: 320, vbH: 120 })).width).toBe(640);
   });
 

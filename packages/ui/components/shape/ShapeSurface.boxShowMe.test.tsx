@@ -1,9 +1,3 @@
-/**
- * Show me in a dragged box (DOM-gated, tests/dom-test-list.txt). The box picks whole parts; its Show me asks for a new
- * board of them, with the box's picture. What regresses if these fail: a box shows two Show me buttons (the board's
- * and a stand-in), several parts go out under one part's name or none, one part loses its own name or its code, the
- * picture is dropped, or a host with no Show me (the standalone page) gets the button.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -55,7 +49,6 @@ let rect: PropertyDescriptor | undefined;
 let computed: typeof window.getComputedStyle | undefined;
 beforeAll(() => {
   if (!hasDom) return;
-  // happy-dom computes no opacity: a part reads as hidden, and a box could take none.
   computed = window.getComputedStyle;
   window.getComputedStyle = ((el: Element, pseudo?: string | null) => {
     const style = computed!.call(window, el, pseudo);
@@ -112,13 +105,11 @@ async function drag(from: [number, number], to: [number, number]) {
     window.dispatchEvent(at('pointermove', to));
     window.dispatchEvent(at('pointerup', to));
   });
-  // The drag eats the click that ends it, for 60 ms.
   await act(() => new Promise((r) => setTimeout(r, 80)));
 }
 
 test.skipIf(!hasDom)('a box over two parts: one Show me, on "A part of the board" with both parts named, and the box’s picture', async () => {
   const asked: ShapeShowMeInput[] = [];
-  // The old box option's own Show me, given anyway: the host's is the box's, and only one shows.
   await mount(host((_id, input) => asked.push(input)), STAND_IN);
   await drag([5, 5], [150, 160]);
   expect(popover()).not.toBeNull();

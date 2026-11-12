@@ -1,7 +1,3 @@
-/**
- * #1981: where the Ask AI panel offers "New chat", and when it can be used.
- * Requires DOM (preloaded via bunfig.toml).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,7 +25,6 @@ function entry(text: string, isStreaming = false): AIChatEntry {
   };
 }
 
-/** A busy "Ask this session" answer still offering its choice. */
 function busyAnswer(text: string): AIChatEntry {
   return {
     question: { id: `q-${text}`, prompt: text, createdAt: 1 },
@@ -37,7 +32,6 @@ function busyAnswer(text: string): AIChatEntry {
   };
 }
 
-/** Unavailable: still focusable, clicks ignored, and the reason is its description. */
 function expectBlocked(button: HTMLButtonElement, reason: RegExp) {
   expect(button.disabled).toBe(false);
   expect(button.getAttribute('aria-disabled')).toBe('true');
@@ -104,9 +98,8 @@ describe.if(hasDom)('Ask AI "New chat"', () => {
     expect(calls).toBe(0);
   });
 
-  // Pinned on purpose (approved card for #1981): with "Ask this session" the
-  // agent still remembers earlier questions, so the button must not promise a
-  // fresh context.
+  // Pinned on purpose: with "Ask this session" the agent still remembers earlier questions, so the
+  // button must not promise a fresh context.
   test('"Ask this session" says it only clears the panel', () => {
     const button = render({ messages: [entry('a')], aiProviders: [BRIDGE], onNewChat: () => {} });
     const bridge = buttonModule!.newChatLabels(true);

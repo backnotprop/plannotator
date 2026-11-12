@@ -1,16 +1,3 @@
-/**
- * `:::question` blocks rendered as answer cards, driven the way a host drives
- * them: answers live in the annotation list (`upsertQuestionAnswerAnnotation`)
- * and the block is re-rendered from it.
- *
- * What regresses if this fails: a pick does not reach the annotation (so the
- * answer never exports), an edit leaves a stale annotation behind, a drag
- * across option text picks the option instead of only selecting text, a quick
- * tap on another card's answer is dropped as a double-click, or an
- * unparseable block stops falling back to the plain callout.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useState } from 'react';
 import { act } from 'react';
@@ -118,7 +105,6 @@ afterEach(async () => {
   window.getSelection()?.removeAllRanges();
 });
 
-/** The note field (the card's Other field is a textarea too). */
 const NOTE = 'textarea[placeholder="Context for the agent…"]';
 const cards = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLFieldSetElement>('fieldset[data-question-key]'));
 const answerOf = (n: number): QuestionAnswer | undefined => {
@@ -149,7 +135,6 @@ describe('QuestionBlock', () => {
     const el = await mount(<Harness markdown={DOC} />);
     expect(cards(el).map((c) => c.getAttribute('data-question-status'))).toEqual(['open', 'open', 'open', 'settled']);
     expect(cards(el)[0].textContent).toContain('Question 1 of 4');
-    // The block with no prompt keeps today's directive rendering.
     const callout = el.querySelector('[data-directive-kind="question"]:not(fieldset)');
     expect(callout).not.toBeNull();
     expect(callout!.textContent).toContain('a block with no prompt is not a question');
@@ -167,9 +152,6 @@ describe('QuestionBlock', () => {
     expect(cards(el)[0].getAttribute('data-question-status')).toBe('answered');
   });
 
-  // The owner's 0.28.17 report: a choice longer than 200 characters was cut
-  // to 200 when the answer was read back, so it never showed as picked here
-  // and the Inbox refused it as "not one of the question's choices".
   const LONG_CHOICE =
     'Spike first. Find out what the sign-in grants (a Claude subscription paying for turns the platform runs?) and whether Anthropic allows it for a third-party product; the placeholder stays off the product until both answers are in';
   for (const [form, line] of [
@@ -217,13 +199,9 @@ describe('QuestionBlock', () => {
 
     await click(button(cards(el)[2], 'Accept recommended')!);
     expect(answerOf(2)?.text).toBe('Two phones, one offline.');
-    // A settled question has no Accept recommended.
     expect(button(cards(el)[3], 'Accept recommended')).toBeUndefined();
   });
 
-  // The owner's 2026-10-27 report: an agent wrote `(recommended)` into a
-  // label (Claude Code's AskUserQuestion habit) with no `Recommended:` line,
-  // and the card showed it as label text with no tag and no Accept.
   test.skipIf(!hasDom)('a recommendation marked in a label: the tag, a plain label and Accept recommended', async () => {
     const md = [':::question', 'Should a broken config block uninstall?', '', '- [ ] Only block on ours (Recommended) — a stray file stays a warning', '- [ ] Block on any', ':::'].join('\n');
     const el = await mount(<Harness markdown={md} />);
@@ -234,9 +212,6 @@ describe('QuestionBlock', () => {
     expect(answerOf(0)?.selected).toEqual(['Only block on ours']);
   });
 
-  // The owner's 2026-10-14 report: ticking one box of a pick-any question
-  // hid "Accept recommended", so the rest of the recommendation took a click
-  // per box. It stays while the picks differ from the recommendation.
   for (const [where, footer] of [
     ['its own footer', undefined],
     ['a host footer', () => <span>host action</span>],
@@ -253,21 +228,17 @@ describe('QuestionBlock', () => {
       await type(card().querySelector<HTMLTextAreaElement>(NOTE)!, 'banner can wait');
       await type(card().querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!, 'A sound');
 
-      // Accept sets exactly the recommendation: extra ticks and Other go, the note stays.
       await click(button(card(), 'Accept recommended')!);
       expect(answerOf(1)).toMatchObject({ selected: ['Dot', 'Banner'], note: 'banner can wait' });
       expect(answerOf(1)?.other).toBeUndefined();
       expect(button(card(), 'Accept recommended')).toBeUndefined();
 
-      // Unticking one brings it back.
       await click(rowText(card(), 'Banner'));
       expect(button(card(), 'Accept recommended')).toBeDefined();
     });
   }
 
   test.skipIf(!hasDom)('multi recommending only a suggestion: a tick hides Accept recommended, as before', async () => {
-    // Accept would clear the ticks for the recommended answer, which is a
-    // row of its own the reviewer can tick beside them.
     const el = await mount(<Harness markdown={`:::question-multi\nWhich indicators ship?\n\n- [ ] Dot\n- [ ] Banner\n\nRecommended: a sound, nothing visual\n:::\n`} />);
     const card = () => cards(el)[0];
     expect(button(card(), 'Accept recommended')).toBeDefined();
@@ -283,7 +254,6 @@ describe('QuestionBlock', () => {
     await click(accept);
     const first = cards(el)[1].querySelector<HTMLInputElement>('input:checked')!;
     expect(first.closest('label')!.textContent).toContain('Dot');
-    // Compared as a boolean: printing a DOM node on failure crashes bun.
     expect(document.activeElement === first).toBe(true);
     await act(async () => root!.unmount());
     host!.remove();
@@ -292,7 +262,6 @@ describe('QuestionBlock', () => {
     const use = button(cards(suggested)[0], 'Accept recommended')!;
     use.focus();
     await click(use);
-    // The agent's own answer is a row of the list: its control takes focus.
     const row = cards(suggested)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!;
     expect(document.activeElement === row).toBe(true);
     expect(row.checked).toBe(true);
@@ -377,7 +346,6 @@ describe('QuestionBlock', () => {
     expect(latest).toEqual([]);
     expect(cards(el)[0].querySelectorAll('input:checked')).toHaveLength(0);
 
-    // A still click with nothing selected is a pick.
     window.getSelection()!.removeAllRanges();
     await act(async () => {
       text.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, pointerType: 'mouse' }));
@@ -386,9 +354,8 @@ describe('QuestionBlock', () => {
     expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
   });
 
-  // A phone counts a tap near the last one as its second click (detail 2), wherever it lands: tapping one
-  // card's answer and then, quickly, the next card's answer must pick both. Only a second click on the same row is a
-  // double-click.
+  // A phone counts a tap near the last one as its second click (detail 2), wherever it lands:
+  // tapping one card's answer and then, quickly, the next card's answer must pick both.
   test.skipIf(!hasDom)("a quick tap on another card's answer picks, even when the browser counts it as a second click", async () => {
     const el = await mount(<Harness markdown={DOC} />);
     const tap = async (text: HTMLElement, detail: number) => {
@@ -402,7 +369,6 @@ describe('QuestionBlock', () => {
     expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
     expect(answerOf(3)?.selected).toEqual(['WebSocket']);
 
-    // The same row twice is still a double-click: the second click picks nothing more and takes its pick back.
     await tap(rowText(cards(el)[0], 'Nowhere'), 1);
     await tap(rowText(cards(el)[0], 'Nowhere'), 2);
     expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
@@ -426,7 +392,6 @@ describe('QuestionBlock', () => {
     }, q.question.key);
     const el = await mount(<Harness markdown={DOC} readOnly initial={stored} />);
     const card = cards(el)[0];
-    // Each control is disabled (not the fieldset, so host footer actions stay live).
     const controls = card.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
     expect(controls.length).toBeGreaterThan(0);
     for (const control of controls) expect(control.disabled).toBe(true);
@@ -435,9 +400,6 @@ describe('QuestionBlock', () => {
     expect(card.querySelector('textarea')!.value).toBe('keep it simple');
   });
 
-  // The owner's report: a table in a question's context rendered as one
-  // paragraph of pipes. The context goes through the document's own block
-  // renderers now.
   test.skipIf(!hasDom)('the context renders block markdown with the document renderers', async () => {
     const markdown = [
       ':::question-text',
@@ -469,19 +431,14 @@ describe('QuestionBlock', () => {
     expect(rows).toEqual([['Limit', 'Proposed'], ['Agents at once', '3'], ['Longest run', '60 minutes']]);
     expect(context.textContent).not.toContain('|');
     expect(context.querySelector('strong')?.textContent).toBe('my');
-    // List items as the document draws them, the wrapped line kept in its item.
     const items = Array.from(context.querySelectorAll('[data-question-context-list] > div')).map((d) => d.textContent?.trim());
     expect(items).toEqual(['•first point\nthat wraps', '•second point']);
     expect(context.querySelector('pre code')?.textContent).toBe('echo  "kept  spacing"');
     expect(context.querySelector('blockquote')?.textContent).toBe('quoted');
-    // Nothing inside the card claims a block id of its own.
     expect(context.querySelectorAll('[data-block-id]').length).toBe(0);
     expect(cards(el)[0].getAttribute('aria-describedby')).toBe(context.id);
   });
 
-  // 0.28.2 pre-tag smoke: an answer saved on 0.28.1 quotes the bullet's first
-  // line, which was its label then. It restored as "Answered" with nothing
-  // picked.
   test.skipIf(!hasDom)('an answer saved under a 0.28.1 label restores picked, exports, and re-saves with the current label', async () => {
     const markdown = [
       ':::question',
@@ -508,19 +465,15 @@ describe('QuestionBlock', () => {
     expect(card.getAttribute('data-question-status')).toBe('answered');
     expect(card.querySelector<HTMLInputElement>('input:checked')?.closest('label')?.textContent).toContain('One per session');
 
-    // Untouched, it exports under the current label, as the recommendation.
     expect(exportAnnotations(blocks, latest)).toContain('Answer: One per session (your recommendation)');
-    // The panel row reads the current label too.
     expect(buildQuestionPanelRows(blocks, latest)[0].answerText).toBe('One per session');
 
-    // Changing the answer stores current labels only.
     await click(rowText(card, 'One per person'));
     expect(answerOf(0)?.selected).toEqual(['One per person']);
     await click(rowText(card, 'One per session'));
     expect(answerOf(0)?.selected).toEqual(['One per session']);
   });
 
-  // Rows 37 and 38 of the Inbox stress test (the same cards in plan review and annotate).
   const UNMATCHED = [
     ':::question',
     'Which store backs the cache?',
@@ -532,11 +485,6 @@ describe('QuestionBlock', () => {
     ':::',
   ].join('\n');
 
-  // One concept (the owner, 2026-10-24: "What is the difference between
-  // suggested/recommended?"; and "It should be inline as an answer, not an
-  // isolated thing"): the agent's recommended answer that is none of its
-  // choices is one more answer row, drawn as a choice, with the same
-  // Recommended tag, after the choices and before "Other…".
   test.skipIf(!hasDom)('a recommendation naming none of the choices is one more answer row, tagged Recommended, before Other', async () => {
     const el = await mount(<Harness markdown={UNMATCHED} />);
     const card = cards(el)[0];
@@ -545,20 +493,15 @@ describe('QuestionBlock', () => {
     expect(rows.map((r) => r.textContent)).toEqual(['Redis', 'Memcached', 'SQLite on the box Recommended']);
     const row = rows[2];
     expect(row.hasAttribute('data-question-suggested')).toBe(true);
-    // The same control as the choices: a radio in the same group, named by
-    // its row (text and tag).
     const input = row.querySelector<HTMLInputElement>('input')!;
     const redis = rows[0].querySelector<HTMLInputElement>('input')!;
     expect(input.type).toBe('radio');
     expect(input.name).toBe(redis.name);
     expect(row.contains(input)).toBe(true);
     expect(row.className).toBe(rows[0].className);
-    // Then "Other…", empty.
     const otherField = card.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
     expect(row.compareDocumentPosition(otherField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // Not a describedby line any more.
     expect(card.getAttribute('aria-describedby')).toBeNull();
-    // One button for it: Accept recommended.
     expect(Array.from(card.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Add note', 'Skip', 'Accept recommended']);
   });
 
@@ -570,15 +513,12 @@ describe('QuestionBlock', () => {
     await click(row().querySelector('span')!);
     expect(answerOf(0)).toMatchObject({ selected: [], other: 'SQLite on the box' });
     expect(row().querySelector('input')!.checked).toBe(true);
-    // The text is on the row, not repeated in the Other field.
     expect(otherField().value).toBe('');
     expect(button(card(), 'Accept recommended')).toBeUndefined();
-    // A choice replaces it, and the row is still there to pick again.
     await click(rowText(card(), 'Redis'));
     expect(answerOf(0)).toMatchObject({ selected: ['Redis'] });
     expect(answerOf(0)?.other).toBeUndefined();
     expect(row().querySelector('input')!.checked).toBe(false);
-    // Accept recommended (on a fresh card) gives exactly the row's answer.
     await click(row().querySelector('span')!);
     const viaRow = answerOf(0);
     await act(async () => root!.unmount());
@@ -586,7 +526,6 @@ describe('QuestionBlock', () => {
     const again = await mount(<Harness markdown={UNMATCHED} />);
     await click(button(cards(again)[0], 'Accept recommended')!);
     expect(answerOf(0)).toEqual(viaRow);
-    // Typing in Other replaces the recommended answer.
     await type(cards(again)[0].querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!, 'Postgres');
     expect(answerOf(0)).toMatchObject({ selected: [], other: 'Postgres' });
     expect(cards(again)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!.checked).toBe(false);
@@ -607,8 +546,6 @@ describe('QuestionBlock', () => {
   });
 
   test.skipIf(!hasDom)('typing in Other, one character at a time, never turns into the recommended row', async () => {
-    // The re-review of #2139: with `Recommended: Yes` naming no choice, typing
-    // "Yes, but slower" blanked the field at "Yes" and stored ", but slower".
     const md = [':::question', 'Pick?', '- [ ] Redis', '- [ ] No', 'Recommended: Yes', ':::'].join('\n');
     const el = await mount(<Harness markdown={md} />);
     const otherField = () => cards(el)[0].querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
@@ -620,7 +557,6 @@ describe('QuestionBlock', () => {
     }
     expect(otherField().value).toBe('Yes, but slower');
     expect(answerOf(0)).toMatchObject({ selected: [], other: 'Yes, but slower' });
-    // Typed whole, the agent's own words stay the reviewer's Other answer too.
     for (let i = 0; i < ', but slower'.length; i++) await type(otherField(), otherField().value.slice(0, -1));
     expect(otherField().value).toBe('Yes');
     expect(row().checked).toBe(false);
@@ -682,7 +618,6 @@ describe('QuestionBlock', () => {
     const el = await mount(<Harness markdown={UNMATCHED} readOnly initial={initial} />);
     const card = cards(el)[0];
     expect(card.querySelector<HTMLInputElement>('label[data-question-suggested] input')!.checked).toBe(true);
-    // The Other row is not drawn: the answer is the recommended row.
     expect(card.querySelector('textarea[aria-label^="Other answer"]')).toBeNull();
   });
 
@@ -734,7 +669,6 @@ describe('QuestionBlock', () => {
     await act(async () => root!.unmount());
     host!.remove();
 
-    // An editable card keeps the row to type into.
     el = await mount(<Harness markdown={UNMATCHED} />);
     expect(other(el)).not.toBeNull();
   });
@@ -754,9 +688,6 @@ describe('QuestionBlock', () => {
   });
 });
 
-// The owner: "the add your own answer blocks..., should allow for multiline input". The Other field is a
-// textarea like the note: Enter (or Shift+Enter) makes a new line, and the lines reach the agent quoted the
-// way a multi-line note's do. A one-line answer reads exactly as before.
 describe('QuestionBlock: an Other answer of several lines', () => {
   const OTHER = 'textarea[aria-label^="Other answer"]';
   const THREE = 'Keep the loser locally.\nShow it under History.\nPurge it after a week.';
@@ -770,7 +701,6 @@ describe('QuestionBlock: an Other answer of several lines', () => {
       'Answer: Other:\n> Keep the loser locally.\n> Show it under History.\n> Purge it after a week.\n',
     );
 
-    // The answered card (read-only, as a sent Inbox answer is) shows the lines, not one run-on line.
     const saved = latest;
     await act(async () => root!.unmount());
     host!.remove();
@@ -818,7 +748,6 @@ describe('QuestionBlock: an Other answer of several lines', () => {
     } finally {
       window.removeEventListener('keydown', onWindow);
     }
-    // Each reached the window as before (⌘Enter still goes to the page's own Send key, where a host has one).
     expect(heard).toEqual(['Enter', 'Shift+Enter', 'Enter', 'Meta+Enter']);
     expect(answerOf(0)).toMatchObject({ selected: [], other: 'First line' });
     expect(latest).toHaveLength(1);
@@ -830,10 +759,8 @@ describe('QuestionBlock: an Other answer of several lines', () => {
     field.focus();
     const data = new DataTransfer();
     data.setData('text/plain', 'Pasted one\r\nPasted two');
-    // What the page inserts for a paste here (the browser's own rule: a one-line field turns each break into a space).
     const insertion = plainTextPasteInsertion({ defaultPrevented: false, clipboardData: data, target: field } as unknown as ClipboardEvent);
     expect(insertion?.text).toBe('Pasted one\nPasted two');
-    // Inserted as the browser does (this DOM has no setRangeText), it is the answer.
     await type(field, insertion!.text);
     expect(answerOf(0)?.other).toBe('Pasted one\nPasted two');
   });

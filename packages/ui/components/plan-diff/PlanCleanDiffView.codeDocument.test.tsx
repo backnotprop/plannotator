@@ -1,10 +1,7 @@
 /**
- * The version diff of a config or data file (`codeDocument`): each chunk is
- * the file's own monospace text, so a TOML comment is not a heading and a
- * YAML list item is not a bullet, and a modified block word-diffs the raw
- * text. Without the prop the chunks parse as markdown, as before.
- *
- * DOM-gated (DOM_TESTS=1), listed in tests/dom-test-list.txt.
+ * The version diff of a config or data file (`codeDocument`): each chunk is the file's own
+ * monospace text, so a TOML comment is not a heading and a YAML list item is not a bullet, and a
+ * modified block word-diffs the raw text.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -14,10 +11,6 @@ import { computePlanDiff } from '../../utils/planDiffEngine';
 import type { Annotation } from '../../types';
 import { __setCodeHighlightModuleForTests } from '../../utils/codeHighlight';
 
-/**
- * A stand-in for Shiki (`@pierre/diffs`): digits in green, every other
- * stretch grey, tokens that rebuild each line byte for byte.
- */
 const NUMBER_COLOR = '#00ff00';
 const fakeHighlighter = {
   getSharedHighlighter: () => Promise.resolve(undefined),
@@ -79,7 +72,6 @@ describe.if(hasDom)('PlanCleanDiffView with a code document (DOM)', () => {
     expect(headings(el)).toHaveLength(0);
     expect(el.querySelectorAll('li, [data-list-item]')).toHaveLength(0);
     expect(el.querySelectorAll('pre[data-plan-diff-code]').length).toBeGreaterThan(0);
-    // An inline code chip would be a <code> outside the chunks.
     expect([...el.querySelectorAll('code')].every((c) => c.parentElement?.matches('pre[data-plan-diff-code]'))).toBe(true);
     expect(el.textContent).toContain('# each key named after its variable (`server.port` is `NOTES_SERVER_PORT`).');
     expect(el.textContent).toContain('- not a list item');
@@ -127,13 +119,11 @@ describe.if(hasDom)('PlanCleanDiffView with a code document (DOM)', () => {
     const yaml = computePlanDiff(YAML_OLD, YAML_NEW).blocks;
     const el = await render(<PlanCleanDiffView blocks={yaml} codeDocument={{ language: 'yaml' }} wordLevel={false} />);
     const removed = el.querySelector<HTMLElement>('.plan-diff-removed')!;
-    // The wrapper's strike would run across the indentation.
     expect(removed.className).not.toContain('line-through');
     const struck = [...removed.querySelectorAll('[data-plan-diff-struck]')].map((s) => s.textContent ?? '');
     expect(struck.length).toBeGreaterThan(0);
     expect(struck.every((t) => !/^[ \t]/.test(t))).toBe(true);
     expect(struck.join('')).toContain('image: registry/notes-api:1.4.2');
-    // The indentation is still there, as plain text before the struck part.
     expect(removed.querySelector('pre code')!.textContent).toBe('      image: registry/notes-api:1.4.2\n      value: "50"');
   });
 
@@ -141,7 +131,6 @@ describe.if(hasDom)('PlanCleanDiffView with a code document (DOM)', () => {
     __setCodeHighlightModuleForTests(fakeHighlighter);
     const yaml = computePlanDiff(YAML_OLD, YAML_NEW).blocks;
     const el = await render(<PlanCleanDiffView blocks={yaml} codeDocument={{ language: 'yaml' }} />);
-    // The grammar attaches asynchronously; the chunks re-render once it has.
     for (let i = 0; i < 20 && !el.querySelector('ins span[style]'); i += 1) {
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
     }
@@ -150,7 +139,6 @@ describe.if(hasDom)('PlanCleanDiffView with a code document (DOM)', () => {
       [...modified.querySelectorAll<HTMLElement>(`${selector} span[style]`)].map((s) => [s.textContent, s.getAttribute('style')]);
     expect(coloured('del.plan-diff-word-removed')).toEqual(expect.arrayContaining([['4', 'color:#00ff00'], ['50', 'color:#00ff00']]));
     expect(coloured('ins.plan-diff-word-added')).toEqual(expect.arrayContaining([['5', 'color:#00ff00'], ['40', 'color:#00ff00']]));
-    // The words around the marks are coloured too, not plain.
     expect(modified.querySelector('code > span[style]')).not.toBeNull();
   });
 
@@ -174,7 +162,6 @@ describe.if(hasDom)('PlanCleanDiffView with a code document (DOM)', () => {
       target.click();
     });
     expect(added).toHaveLength(1);
-    // A modified block quotes old and new as `-`/`+` lines, as it does for markdown.
     expect(added[0]!.originalText).toBe('- port = 8080\n+ port = 8000');
     expect(added[0]!.diffContext).toBe('modified');
   });

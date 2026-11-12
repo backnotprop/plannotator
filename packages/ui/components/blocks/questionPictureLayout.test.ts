@@ -1,14 +1,3 @@
-/**
- * The facts a host lays a question's picture choices out from, before any
- * picture loads (approval "picture-choices-layout", Adaptive).
- *
- * What regresses if this fails: an iPhone screenshot is taken for a full-page
- * capture (and cropped to its top) or the other way round, a terminal strip is
- * not a panorama, a set of phone screenshots stops getting narrow columns, a
- * picture of unknown size breaks a set into "mixed", or the words' length is
- * read from the raw markdown (a long hidden link URL, or Japanese counted as
- * half its drawn width), which moves three choices between Rows and columns.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   drawnTextColumns,
@@ -64,7 +53,6 @@ describe('how long the words run', () => {
   test('a long hidden URL does not make short words long; Japanese of the same drawn width is as long as Latin', () => {
     const hidden = `A · Short — [link](https://example.com/${'x'.repeat(400)})`;
     expect(questionChoiceWords([{ label: hidden }])).toBe('short');
-    // 50 CJK characters draw about as wide as 100 Latin ones.
     expect(questionChoiceWords([{ label: 'あ'.repeat(50) }])).toBe('medium');
     expect(questionChoiceWords([{ label: 'a'.repeat(50) }])).toBe('short');
   });

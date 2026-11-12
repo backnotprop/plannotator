@@ -1,9 +1,6 @@
 /**
- * The quote a Shape comment carries is the part's words as the page shows them
- * (DOM-gated: runs under DOM_TESTS=1 from tests/dom-test-list.txt).
- *
- * What regresses: a part holding a reference bubble ("7") quoting the
- * bubble's number glued to its words ("One whistle7").
+ * What regresses: a part holding a reference bubble ("7") quoting the bubble's number glued to
+ * its words ("One whistle7").
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -62,7 +59,6 @@ afterEach(() => {
 
 const wait = () => act(() => new Promise((r) => setTimeout(r, 20)));
 
-/** A part of the drawing (inside the drawing's shadow root). */
 function mark(id: string): HTMLElement | null {
   for (const host of document.querySelectorAll('*')) {
     const found = host.shadowRoot?.querySelector<HTMLElement>(`[data-mark="${id}"]`);
@@ -97,7 +93,6 @@ describe.if(hasDom)('Shape comment popover quote', () => {
     });
     await wait();
     expect(sent.map((n) => [n.part, n.quote])).toEqual([['whistle', 'One whistle']]);
-    // The bubble is still shown afterwards.
     expect(mark('whistle')?.querySelector<HTMLElement>('.shp-rb')?.style.display).toBe('');
   });
 });

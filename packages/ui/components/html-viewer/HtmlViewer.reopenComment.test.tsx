@@ -1,14 +1,3 @@
-/**
- * `ViewerHandle.reopenComment` on HtmlViewer: a host that kept a comment being
- * written when its file closed puts it back. The viewer asks the bridge to pin
- * the element again (`restore-draft`), and the selection the bridge answers
- * with, stamped with the request's id, opens the composer holding the words.
- * Nothing found: the bridge says so and `onMissing` runs. The viewer half is
- * driven with posted messages; the bridge half evaluates the shipped
- * `restoreDraft` out of the bridge's string with small fakes.
- *
- * DOM-gated (the viewer half): run with DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -107,7 +96,6 @@ describe.if(hasDom)('HtmlViewer reopenComment', () => {
     expect(missing).toBe(0);
   });
 
-  // Failure to catch: a text selection's comment (no anchor) not reopening, or opening the toolbar instead.
   test('a text selection comes back by its words, straight to the composer', async () => {
     const { handle, restores, fromBridge } = await mount();
     const selection: Annotation = { ...kept, htmlAnchor: undefined, originalText: 'Pinpoint' };
@@ -119,7 +107,6 @@ describe.if(hasDom)('HtmlViewer reopenComment', () => {
     expect(document.querySelector('.annotation-toolbar')).toBeNull();
   });
 
-  // Failure to catch: an ordinary selection opening with words a host asked to put back elsewhere.
   test('only the answer to the request carries the words: another selection opens as it always has', async () => {
     const { handle, restores, fromBridge } = await mount();
     handle.current!.reopenComment!(kept);
@@ -128,8 +115,6 @@ describe.if(hasDom)('HtmlViewer reopenComment', () => {
     expect(restores()).toHaveLength(1);
   });
 
-  // Failure to catch: a bridge that never answers (an older cached asset ignores restore-draft) keeping the words
-  // from the host for good, or its late answer opening a composer the host no longer expects.
   test('no answer: after a few seconds onMissing runs, and a late answer is let go', async () => {
     const { handle, restores, posted, fromBridge } = await mount();
     let missing = 0;
@@ -144,7 +129,6 @@ describe.if(hasDom)('HtmlViewer reopenComment', () => {
     expect(posted.some((m) => m.type === 'plannotator-bridge-cancel-selection')).toBe(true);
   });
 
-  // Failure to catch: words lost without the host knowing, when the page no longer has the element.
   test('nothing found: onMissing runs once, and nothing opens', async () => {
     const { handle, restores, fromBridge } = await mount();
     let missing = 0;
@@ -156,7 +140,6 @@ describe.if(hasDom)('HtmlViewer reopenComment', () => {
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
   });
 
-  // Failure to catch: a request made right after mount being dropped before the bridge can hear it.
   test('asked before the bridge is ready, it is posted once it is', async () => {
     const { handle, restores, ready } = await mount({ ready: false });
     expect(handle.current!.reopenComment!(kept)).toBe(true);
@@ -165,7 +148,6 @@ describe.if(hasDom)('HtmlViewer reopenComment', () => {
     expect(restores()).toHaveLength(1);
   });
 
-  // Failure to catch: a read-only page (comments off) or a global comment pinning something.
   test('read-only, or a comment with nothing to pin, opens nothing', async () => {
     const readOnly = await mount({ readOnly: true });
     expect(readOnly.handle.current!.reopenComment!(kept)).toBe(false);
@@ -176,7 +158,6 @@ describe.if(hasDom)('HtmlViewer reopenComment', () => {
     expect(viewer.restores()).toHaveLength(0);
   });
 
-  // Failure to catch: a host that composes (a phone) getting a "selection" draft it would not open.
   test('a host that composes is handed the draft to compose', async () => {
     const drafts: Array<{ intent: string; annotation: Annotation }> = [];
     const { handle, restores, fromBridge } = await mount({ onHostDraft: (draft) => draft && drafts.push(draft as never) });
@@ -201,7 +182,6 @@ function extractFunction(name: string): string {
   throw new Error(`unbalanced braces around ${name}`);
 }
 
-/** The shipped restoreDraft with fakes for what it calls. */
 function bridgeRestore(world: { element: unknown; range: unknown; annotate: boolean; select: boolean }) {
   const calls: Array<{ fn: string; args: unknown[]; restoreId: unknown }> = [];
   const posted: Array<Record<string, unknown>> = [];
@@ -237,7 +217,6 @@ describe('the bridge answering restore-draft', () => {
     expect(posted).toEqual([]);
   });
 
-  // Failure to catch: an element replaced on the page losing a comment its words could still find.
   test('an anchor that no longer resolves falls back to selecting the words', () => {
     const range = { fake: true };
     const { api, calls, posted } = bridgeRestore({ element: null, range, annotate: false, select: true });
@@ -247,7 +226,6 @@ describe('the bridge answering restore-draft', () => {
     expect(posted).toEqual([]);
   });
 
-  // Failure to catch: the host waiting forever when nothing is there.
   test('nothing found says so', () => {
     const { api, posted } = bridgeRestore({ element: null, range: null, annotate: false, select: false });
     api.restoreDraft({ id: 'r3', anchor, text: 'Gone' });

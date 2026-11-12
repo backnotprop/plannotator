@@ -1,19 +1,3 @@
-/**
- * Frame auto-height measurement in the bridge (`measureContentHeight`).
- *
- * Regression: the bridge reported `document.body.scrollHeight`, which omits a
- * child's top margin that collapses through a margin-less body (and the same
- * at the bottom), so a page like `body{margin:0}` + `.card{margin-top:40px}`
- * was cut short by its margins. The fix must also not read anything sized by
- * the frame itself (documentElement.scrollHeight never drops below the frame's
- * viewport, and an html{height:100%} root IS the frame's height), or the frame
- * could grow but never shrink.
- *
- * happy-dom has no layout, so this evaluates the SHIPPED function against a
- * small hand-built box model. The real-layout check (Chromium, collapsed
- * margins, html{height:100%} growing and shrinking) was done by hand when the
- * fix landed; these cases pin the arithmetic and the chain-walk rules.
- */
 import { describe, expect, test } from 'bun:test';
 import { BRIDGE_SCRIPT } from './bridge-script';
 
@@ -77,8 +61,10 @@ function build(box: FakeBox): FakeEl {
   return el;
 }
 
-/** Run the shipped measure against a fake body (and a root that, like an
- *  html{height:100%} root, is as tall as the frame: the measure must not care). */
+/**
+ * Run the shipped measure against a fake body (and a root that, like an html{height:100%} root,
+ * is as tall as the frame: the measure must not care).
+ */
 function measure(bodyBox: FakeBox, opts: { scrollY?: number; frameHeight?: number } = {}): number {
   const body = build(bodyBox);
   const frameHeight = opts.frameHeight ?? 600;
@@ -108,8 +94,6 @@ function measure(bodyBox: FakeBox, opts: { scrollY?: number; frameHeight?: numbe
 
 describe('measureContentHeight (bridge frame auto-height)', () => {
   test('a top margin collapsed through a margin-less body is counted', () => {
-    // body{margin:0} > .card{margin-top:40px;height:560px}: body's box starts
-    // at 40 and is 560 tall, so body.scrollHeight alone said 560.
     const card = { top: 40, bottom: 600 };
     expect(measure({ top: 40, bottom: 600, children: [card] })).toBe(600);
   });
@@ -125,8 +109,6 @@ describe('measureContentHeight (bridge frame auto-height)', () => {
 
   test('the frame height does not feed back into the measure (html{height:100%})', () => {
     const body = { top: 30, bottom: 230, children: [{ top: 30, bottom: 230 }] };
-    // Same content, frame grown far past it, or shrunk below it: same answer,
-    // so the frame can shrink back after content collapses.
     expect(measure(body, { frameHeight: 600 })).toBe(230);
     expect(measure(body, { frameHeight: 5000 })).toBe(230);
     expect(measure(body, { frameHeight: 100 })).toBe(230);
@@ -144,17 +126,14 @@ describe('measureContentHeight (bridge frame auto-height)', () => {
   });
 
   test('overflow past body and page scroll are measured in document coordinates', () => {
-    // body is 100 tall but its content scrolls to 900; the frame is scrolled 50.
     expect(measure({ top: -50, bottom: 50, scrollHeight: 900 }, { scrollY: 50 })).toBe(900);
   });
 });
 
 /**
- * Feedback guard (`nextResizeHeight`). Regression: content sized by the frame
- * (html,body{height:100%}, min-height:100vh, a 100vh child) plus a collapsed
- * or body margin always measures taller than the frame, and the frame grew
- * forever (measured in Chromium: 600 -> 2600+ in under a second). The page is
- * simulated as `measure = viewport + excess` for frame-coupled content.
+ * Regression: content sized by the frame (html,body{height:100%}, min-height:100vh, a 100vh
+ * child) plus a collapsed or body margin always measures taller than the frame, and the frame
+ * grew forever (measured in Chromium: 600 -> 2600+ in under a second).
  */
 describe('nextResizeHeight (feedback guard)', () => {
   const next = new Function(
@@ -179,7 +158,6 @@ describe('nextResizeHeight (feedback guard)', () => {
   test('frame-coupled content stops growing after one grow', () => {
     const { posted } = settle((viewport) => viewport + 16);
     expect(posted).toEqual([616]);
-    // Even content that grows faster than the frame (two 100vh sections).
     expect(settle((viewport) => viewport * 2).posted).toEqual([1200]);
   });
 
@@ -188,7 +166,6 @@ describe('nextResizeHeight (feedback guard)', () => {
     expect(settle(() => 110).posted).toEqual([110]);
 
     const coupled = settle((viewport) => viewport + 16);
-    // Later content change on the held page still posts (and re-checks).
     const h = next(coupled.state, 2000, coupled.viewport);
     expect(h).toBe(2000);
   });

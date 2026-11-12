@@ -1,8 +1,7 @@
 /**
- * Composer-yield hysteresis contract: the composer fades as the pointer
- * approaches (~near), goes click-through when over, and does NOT fully
- * restore until the pointer has moved well away (48px past the rect) or the
- * state machine is reset — preventing flicker at the borders.
+ * Composer-yield hysteresis contract: the composer fades as the pointer approaches (~near), goes
+ * click-through when over, and does NOT fully restore until the pointer has moved well away
+ * (48px past the rect) or the state machine is reset — preventing flicker at the borders.
  */
 import { describe, expect, test } from "bun:test";
 import {

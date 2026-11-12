@@ -1,20 +1,3 @@
-/**
- * A drawn board's words, zone colours and logos read in every shipped palette.
- *
- * Guards against:
- * - a palette (or a change to `SHAPE_FRAME_CSS`'s colours) where the board's zone
- *   colours, `--mark`, `--alert`, `--grey` or `--ink2` read under 4.5:1 on the
- *   grounds they are drawn on, or the ink under 4.5:1 on a zone's `-soft` fill
- *   (under what it reaches on the palette's card, when that is less), after
- *   `shapeContrastFixes`;
- * - a dark logo (SQLite, PayPal, Prisma) staying under 3:1 on a dark board;
- * - a palette that already holds being changed at all (the boards look right as
- *   drawn), or a light board's logos being recoloured.
- *
- * The colours come from each theme file's tokens run through the frame's own
- * `.board` declarations, the way the browser resolves them; nothing here copies
- * the fix's arithmetic.
- */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -38,7 +21,6 @@ function block(css: string, selector: string): Record<string, string> | undefine
   return undefined;
 }
 
-/** The variables a light or dark board sees: the theme's tokens, the board's paper (shape.css) and the frame's `.board`. */
 function boardVars(themeCss: string, id: string, mode: 'light' | 'dark'): Record<string, string> {
   const base = block(themeCss, `.theme-${id}`) ?? {};
   const tokens = mode === 'light' ? { ...base, ...block(themeCss, `.theme-${id}.light`) } : base;
@@ -46,7 +28,6 @@ function boardVars(themeCss: string, id: string, mode: 'light' | 'dark'): Record
   return { ...tokens, ...block(shapeCss, '.shp-root'), ...block(SHAPE_FRAME_CSS, '.board') };
 }
 
-/** A colour value as the browser resolves it: `var()` with fallbacks, `color-mix(in oklab, A p%, B)`, plain colours. */
 function resolve(value: string, vars: Record<string, string>, depth = 0): RgbColor {
   if (depth > 12) throw new Error(`var() loop at ${value}`);
   const v = value.trim();
@@ -87,10 +68,8 @@ function boardColors(vars: Record<string, string>): ShapeColors {
 
 const ratio = (c: RgbColor, ground: RgbColor) => contrastRatio(quantize(compositeOver(c, ground)), ground);
 
-/** Every pair the rule names, below its bar, after the fixes are applied as the board applies them. */
 function shortfalls(c: ShapeColors, fixes: Record<string, string>): string[] {
   const col = (name: (typeof SHAPE_COLOR_NAMES)[number]) => parseCssColor(fixes[`--${name}`]) ?? c[name];
-  // As the page paints them: 8-bit.
   const paper = quantize(compositeOver(c.paper, compositeOver(c.background, WHITE)));
   const surface = quantize(compositeOver(c.surface, paper));
   const ink = quantize(compositeOver(c.ink, paper));

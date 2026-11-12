@@ -1,10 +1,7 @@
 /**
- * The Shape board's "Change it" / "Ask" composers keep the words typed
- * (DOM-gated: runs under DOM_TESTS=1 from tests/dom-test-list.txt).
- *
- * What regresses: Escape on the composer throwing the words away, so choosing
- * the same part (or the whole board) again shows an empty box; one part's
- * words showing up on another part; "Change it" leaving the words behind.
+ * What regresses: Escape on the composer throwing the words away, so choosing the same part (or
+ * the whole board) again shows an empty box; one part's words showing up on another part;
+ * "Change it" leaving the words behind.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -89,7 +86,6 @@ async function mount(host: ShapeHost): Promise<HTMLElement> {
   return el;
 }
 
-/** A part of the drawing (inside the drawing's shadow root). */
 function mark(id: string): HTMLElement | null {
   for (const host of document.querySelectorAll('*')) {
     const found = host.shadowRoot?.querySelector<HTMLElement>(`[data-mark="${id}"]`);
@@ -141,12 +137,10 @@ describe.if(hasDom)('Shape board composer drafts', () => {
     await press(textarea()!, 'Escape');
     expect(textarea()).toBeNull();
 
-    // Another part starts empty.
     const other = await pick('lid');
     expect(other.value).toBe('');
     await press(other, 'Escape');
 
-    // The same part again: the words come back.
     const back = await pick('whistle');
     expect(back.value).toBe('two whistles, not one');
 

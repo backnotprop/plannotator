@@ -1,14 +1,3 @@
-/**
- * File tree names show the whole name on hover (DOM_TESTS=1).
- *
- * Guards #2195: a name cut by the sidebar's narrow column had no way to read
- * the rest. Both tree names are wrapped in HostTitle with `cut`, so plan
- * review and annotate keep a native title, and a host drawing component
- * tooltips opens one only while the name is cut.
- *
- * happy-dom has no layout, so the tooltip test gives the name spans the
- * widths a cut (or fitting) name would have.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -74,7 +63,6 @@ function mount(): HTMLElement {
   return host;
 }
 
-/** The truncated name span inside the row whose text contains `text`. */
 function nameSpan(el: HTMLElement, text: string): HTMLElement {
   for (const row of el.querySelectorAll<HTMLElement>(".file-tree-item, .file-tree-folder")) {
     if (!row.textContent?.includes(text)) continue;
@@ -84,13 +72,11 @@ function nameSpan(el: HTMLElement, text: string): HTMLElement {
   throw new Error(`no tree row named ${text}`);
 }
 
-/** happy-dom has no layout: give an element the sizes a cut (or fitting) name would have. */
 function sized(node: Element, scroll: number, client: number): void {
   Object.defineProperty(node, "scrollWidth", { configurable: true, get: () => scroll });
   Object.defineProperty(node, "clientWidth", { configurable: true, get: () => client });
 }
 
-/** The pointer comes to rest on `target`, the way a mouse does. */
 function hover(target: Element): void {
   act(() => {
     for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter", "pointermove", "mousemove"]) {

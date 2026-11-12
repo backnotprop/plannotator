@@ -1,13 +1,3 @@
-/**
- * Ctrl+C / Cmd+C in the plan diff (version diff, "Classic") once a drag has
- * opened a block's composer (DOM-gated, DOM_TESTS=1).
- *
- * A drag over a changed block ends in a click, which opens that block's
- * composer; its textarea takes the focus and with it the person's selection.
- * Failures to catch: the copy then carries nothing; it carries the whole
- * block instead of the dragged words; a bare click (nothing dragged) copies
- * something; or text the person selected in the textarea is overwritten.
- */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -51,7 +41,6 @@ function addedBlock(el: HTMLElement) {
   return block;
 }
 
-/** Select `phrase` inside `block`, then click it, as the end of a drag does. */
 async function dragThenClick(block: HTMLElement, phrase?: string) {
   if (phrase) {
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
@@ -66,7 +55,6 @@ async function dragThenClick(block: HTMLElement, phrase?: string) {
   }
   await act(async () => block.click());
   await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
-  // The composer's textarea takes the focus, and the page selection goes.
   const area = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea');
   if (!area) throw new Error('no composer');
   window.getSelection()!.removeAllRanges();

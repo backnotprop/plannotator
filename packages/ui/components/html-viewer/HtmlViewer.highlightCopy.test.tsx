@@ -1,13 +1,3 @@
-/**
- * Ctrl+C / Cmd+C on an HTML document once a selection's composer is open
- * (DOM-gated, DOM_TESTS=1). The selection lives in the page's frame; the
- * composer's textarea in the parent then has the focus, so the browser's copy
- * has nothing to copy.
- *
- * Failures to catch: the copy carries nothing with the composer open (focus
- * in its empty textarea, or outside it), it fires before any composer is
- * open, or text the person selected in the textarea is overwritten.
- */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
