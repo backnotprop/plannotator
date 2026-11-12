@@ -162,9 +162,9 @@ function lineOf(page: Page) {
     const lineHeight = parseFloat(getComputedStyle(text).lineHeight) || parseFloat(getComputedStyle(text).fontSize) * 1.5;
     return {
       height: box.height,
-      oneLine: text.getBoundingClientRect().height <= lineHeight * 1.2 && project.getClientRects().length <= 1,
+      oneLine: text.getBoundingClientRect().height <= lineHeight * 1.2 && project.getClientRects().length === 1,
       showInside: show.width > 20 && show.left >= box.left && show.right <= box.right + 0.5,
-      cut: project.getClientRects().length === 0 || project.scrollWidth > project.clientWidth + 0.5,
+      cut: project.scrollWidth > project.clientWidth + 0.5,
       projectText: project.textContent,
     };
   });

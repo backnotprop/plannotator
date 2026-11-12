@@ -51,71 +51,60 @@ async function agentWrites(): Promise<void> {
   await world.agent.send({ project_path: world.project, subject: `Fresh update ${sent}`, body: 'Finished. Nothing to answer.', agent_session: `ses_fresh_${sent}` } as Send);
 }
 
-async function restOnThirdRow(page: Page): Promise<{ x: number; y: number; id: string }> {
-  const row = page.locator('.ib-listcol .ib-lbody [data-thread-id]').nth(2);
-  await expect(row).toBeVisible();
-  const box = (await row.boundingBox())!;
-  const x = box.x + box.width * 0.5;
-  const y = box.y + box.height * 0.25;
-  await page.mouse.move(x, y);
-  return { x, y, id: (await row.getAttribute('data-thread-id'))! };
+function watchArrival(page: Page) {
+  return page.evaluate(() => {
+    const w = window as unknown as { __arrival: { slid: number; down: boolean; line: string } | null };
+    w.__arrival = null;
+    const watch = new MutationObserver(() => {
+      const line = document.querySelector('[data-inbox-notice]');
+      if (!line) return;
+      watch.disconnect();
+      const slides = document.getAnimations().filter((animation) => animation.id === 'ib-settle');
+      const down = slides.some((animation) => {
+        const first = (animation.effect as KeyframeEffect).getKeyframes()[0]?.transform;
+        return typeof first === 'string' && /translate\([^,]+, -\d/.test(first);
+      });
+      w.__arrival = { slid: slides.length, down, line: getComputedStyle(line).animationName };
+    });
+    watch.observe(document.body, { childList: true, subtree: true });
+  });
 }
 
-function watchUnderPointer(page: Page, at: { x: number; y: number }) {
-  return page.evaluate(
-    ({ x, y }) =>
-      new Promise<(string | null)[]>((done) => {
-        const under = () => document.elementFromPoint(x, y)?.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? null;
-        const seen: (string | null)[] = [];
-        const watch = new MutationObserver(() => {
-          if (!document.querySelector('[data-inbox-notice]')) return;
-          watch.disconnect();
-          const sample = () => {
-            seen.push(under());
-            if (seen.length < 12) requestAnimationFrame(sample);
-            else setTimeout(() => done([...seen, under()]), 300);
-          };
-          sample();
-        });
-        watch.observe(document.body, { childList: true, subtree: true });
-      }),
-    at,
-  );
-}
+const arrival = (page: Page) => page.evaluate(() => (window as unknown as { __arrival: { slid: number; down: boolean; line: string } | null }).__arrival);
 
 for (const shape of [
   { name: '1280 px', options: { viewport: { width: 1280, height: 800 } } },
   { name: '390 px phone', options: { ...devices['iPhone 15'], viewport: { width: 390, height: 844 } } },
 ]) {
-  test(`the "N new" line arrives over the list: the row under the pointer stays the same thread (${shape.name})`, async ({ browser }: { browser: Browser }) => {
-    const context = await browser.newContext({ ...shape.options, colorScheme: 'light' });
+  test(`the "N new" line arrives: the rows slide down from where they were and the line fades in (${shape.name})`, async ({ browser }: { browser: Browser }) => {
+    const context = await browser.newContext({ ...shape.options, colorScheme: 'light', reducedMotion: 'no-preference' });
     await context.grantPermissions(['notifications'], { origin: new URL(world.url).origin });
     try {
       const page = await context.newPage();
       await page.goto(world.url);
-      const pointer = await restOnThirdRow(page);
-      const seen = watchUnderPointer(page, pointer);
+      await expect(page.locator('.ib-listcol .ib-lbody [data-thread-id]').first()).toBeVisible();
+      await watchArrival(page);
       await agentWrites();
       await expect(page.locator('[data-inbox-notice]')).toBeVisible();
-      const got = await seen;
-      expect(got).toEqual(new Array(13).fill(pointer.id));
-      await page.mouse.click(pointer.x, pointer.y);
-      await expect(page).toHaveURL(new RegExp(pointer.id));
+      const got = await arrival(page);
+      expect(got?.slid).toBeGreaterThan(0);
+      expect(got?.down).toBe(true);
+      expect(got?.line).toBe('ib-notice-in');
     } finally {
       await context.close();
     }
   });
 }
 
-test('Settings → Motion → Reduced: the line fades in place and no row slides, in the slide variant too', async ({ browser }: { browser: Browser }) => {
+test('Settings → Motion → Reduced: the line fades in place and no row slides', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: 'light', reducedMotion: 'no-preference' });
   await context.grantPermissions(['notifications'], { origin: new URL(world.url).origin });
   try {
     const page = await context.newPage();
-    await page.goto(`${world.url}/?newline=slide#settings`);
+    await page.goto(`${world.url}/#settings`);
     await page.locator('[data-settings-motion]').getByText('Reduced', { exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
-    await page.goto(`${world.url}/?newline=slide`);
+    await page.goto(world.url);
     await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
     await expect(page.locator('.ib-listcol .ib-lbody [data-thread-id]').first()).toBeVisible();
     await page.evaluate(() => {
