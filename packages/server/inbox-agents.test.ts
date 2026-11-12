@@ -456,6 +456,28 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     expect(loadConfig().inboxTool).toBeUndefined();
   });
 
+  test("OpenClaw with Plannotator's plugin from npm: inboxTool on for it, and openclaw is never run", async () => {
+    fake.install("openclaw");
+    const pkg = join(fake.home, ".openclaw", "npm", "projects", "plannotator-openclaw-3f2a", "node_modules", "@plannotator", "openclaw");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/openclaw", version: "0.28.61" }));
+    const report = await connect();
+    expect(report.added).toEqual(["openclaw"]);
+    expect(report.manual).toEqual([]);
+    expect(loadConfig().inboxTool).toEqual({ openclaw: true });
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("OpenClaw without the plugin is left to the person; a ClawHub install under OPENCLAW_STATE_DIR is found", async () => {
+    const state = join(fake.root, "claw-state");
+    mkdirSync(join(state, "extensions", "plannotator"), { recursive: true });
+    expect((await connect({ OPENCLAW_STATE_DIR: state })).manual).toEqual(["openclaw"]);
+    expect(loadConfig().inboxTool).toBeUndefined();
+    writeFileSync(join(state, "extensions", "plannotator", "package.json"), JSON.stringify({ name: "@plannotator/openclaw", version: "0.28.61" }));
+    expect((await connect({ OPENCLAW_STATE_DIR: state })).added).toEqual(["openclaw"]);
+    expect(fake.calls()).toEqual([]);
+  });
+
   test("Claude Code: nothing written; said to be on already", async () => {
     mkdirSync(join(fake.home, ".claude"), { recursive: true });
     writeFileSync(join(fake.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));

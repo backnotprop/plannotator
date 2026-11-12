@@ -296,7 +296,7 @@ test("a switch written as a string (\"true\", \"1\") stays on when another switc
   // One string for every host: each host this version knows keeps it.
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: "1" }));
   expect((await post(s, "/api/inbox/settings", { inbox_tool: { dsh: false } })).status).toBe(200);
-  expect(loadConfig().inboxTool).toEqual({ "claude-code": true, pi: true, opencode: true, dsh: false, cline: true });
+  expect(loadConfig().inboxTool).toEqual({ "claude-code": true, pi: true, opencode: true, dsh: false, cline: true, openclaw: true });
 });
 
 test("PLANNOTATOR_INBOX_TOOL locks the tool and reminder switches", async () => {

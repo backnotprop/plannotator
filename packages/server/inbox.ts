@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_PROMPT_HOSTS, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -154,7 +154,10 @@ import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/sh
 import { perfPhase, retainPerfPhases, syncSection, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
+import { inboxRulesFitError } from "./inbox-rules";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { INBOX_UPGRADING_LINE, storeMoveNote } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
+import { inboxImportDelayFromEnv, openInboxStore, resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
@@ -173,6 +176,7 @@ import {
   INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   inboxStopNoticeId,
+  inboxReminderRulesText,
   type InboxReplyCommand,
 } from "@plannotator/shared/inbox/connection";
 import {
@@ -211,7 +215,7 @@ import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher 
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
-import { inboxAgentsGroup, inboxAgentsWithoutLabels, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
+import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
@@ -233,6 +237,7 @@ import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
+import { inboxNamesShown, inboxSessionsShown } from "./inbox-session-names";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
@@ -486,6 +491,8 @@ export interface InboxServerOptions {
   feedbackUrl?: string;
   /** Tests: the debug log on or off. Default: `PLANNOTATOR_INBOX_DEBUG=1` or the config's `inboxDebug`. */
   debug?: boolean;
+  /** Tests: the SQLite switch. Default: `PLANNOTATOR_INBOX_SQLITE` or the config's `inboxSqlite` (off). */
+  sqlite?: boolean;
   /** Tests: how long a window's record outlives its last event stream (default `WINDOW_GRACE_MS`). */
   windowGraceMs?: number;
   /** Tests: the clock (epoch ms) send_message's "not read since" line reads (packages/server/inbox-session-reads.ts). Default: the wall clock. */
@@ -1063,6 +1070,9 @@ function switchesHeld(): boolean {
   return process.env.PLANNOTATOR_INBOX_PREVIEW !== "1";
 }
 
+/** `POST /api/inbox/settings/storage/backups/<name>/remove`: Settings → Storage's Remove (`store-log/sqlite/backups.ts` checks the name). */
+const INBOX_BACKUP_REMOVE_ROUTE = /^\/api\/inbox\/settings\/storage\/backups\/(backup-[0-9a-z-]+)\/remove$/;
+
 /** Start the Inbox server and write the registry. */
 export async function startInboxServer(options: InboxServerOptions = {}): Promise<InboxServer> {
   assertTestHome();
@@ -1075,7 +1085,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  const store = InboxStore.open(dataDir, options.storeNow ? { now: options.storeNow } : {});
+  // The SQLite switch (off for everyone): with it off and no inbox.db, this is today's InboxStore.open, nothing more.
+  const opened = await openInboxStore(dataDir, {
+    sqlite: options.sqlite ?? resolveInboxSqlite(loadConfig(), process.env),
+    now: options.storeNow,
+    onSlow: () => process.stderr.write(`${INBOX_UPGRADING_LINE}\n`),
+    importStep: inboxImportDelayFromEnv(process.env),
+    // A move checks its files' side in a second run of this program, beside the write.
+    checkFilesCommand: options.selfCommand?.length ? options.selfCommand : undefined,
+  });
+  const store = opened.store;
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
   const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
@@ -1467,6 +1486,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           (await qwenWake.wakes(host, session, meta)) ||
           (await t3Wake.wakes(host, session)),
         bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
+        sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
         // Thread steps: the steps tool and field are listed and served only while the person has them on.
@@ -2072,7 +2092,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (problem) problems.push(problem);
     }
     if (typeof body.tool === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness and Cline have one.", { field: "tool" });
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness, Cline and OpenClaw have one.", { field: "tool" });
       const problem = setInboxTool(agent as InboxToolHost, body.tool, agentEnvironment);
       if (problem) problems.push(problem);
     }
@@ -2976,6 +2996,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
   /** Bro mode's offer, while config.json `inboxBro` is unset (the person never decided). */
   const broUndecided = () => loadConfig().inboxBro === undefined;
+  const agentRulesUnset = () => {
+    const config = loadConfig();
+    return INBOX_PROMPT_HOSTS.every((host) => inboxReminderRulesText(config, host) === null);
+  };
   /**
    * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
    * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
@@ -3003,6 +3027,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     code_review: codeReviewUndecided,
     board: boardUndecided,
     steps: stepsUndecided,
+    agent_rules: agentRulesUnset,
     // Bro mode (approval "bro-mode"): offered while config.json `inboxBro` is unset; its need (heavy use) is the queue's.
     bro: broUndecided,
     // The grill-me tip (shared/inbox/grill-me-tip.ts): nothing to decide, so open until shown; its need (the gap) is
@@ -3334,10 +3359,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const on = Object.fromEntries(
       INBOX_TOOL_HOSTS.map((host) => [host, !(host === "claude-code" && modOff) && resolveInboxReminder(config, env, host)]),
     ) as Record<InboxToolHost, boolean>;
-    // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line.
-    const wakes = { "claude-code": true, pi: true, opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1" };
-    return inboxPromptsModel(config, on, editable, wakes);
+    return inboxPromptsModel(config, on, editable, promptWakes());
   };
+  // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line.
+  const promptWakes = () => ({ "claude-code": true, pi: true, opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1" });
 
   /**
    * The person at this computer, or the login that owns it over the tailnet: what the rules about this
@@ -3451,7 +3476,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const changes: Partial<Record<InboxToolHost, boolean>> = {};
     for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
-        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline).`, { field: `inbox_tool.${host}` });
+        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline, openclaw).`, { field: `inbox_tool.${host}` });
       }
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
@@ -3630,13 +3655,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows, and a linked machine that asks
         // (`deliveries=1`), whose copy of this machine's rows would otherwise keep a "Session ended" that is over.
-        // `labels` (additive): a session's label changed; only the owner's windows hear it (they alone read labels).
-        // A change of labels alone says nothing to a guest's window, so it gets no frame at all.
-        const labelsHere = ownerOrLocal(req, via);
-        // `agents` (additive): the sidebar's Agents moved (inbox-agents-list.ts); every reader hears it (a guest's carry no labels).
-        const sendDeliveries = (labels: boolean, moved: boolean, sessions: boolean, agents: boolean) => {
-          if (!moved && !agents && !labelsHere) return;
-          send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels && labelsHere ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}) })}\n\n`);
+        const sendDeliveries = (labels: boolean, _moved: boolean, sessions: boolean, agents: boolean) => {
+          send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}) })}\n\n`);
         };
         if (windowId || url.searchParams.get("deliveries") === "1") deliveryListeners.add(sendDeliveries);
         // Linked machines (`machines=1`, the window only; the door refuses it to a machine): their records, states and
@@ -4745,6 +4765,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }, LAZY_ASSET_WARM_DELAY_MS);
   lazyAssetWarm.unref?.();
 
+  /**
+   * The window's read of one thread (`GET /api/inbox/threads/<id>`), or null when there is none: each message's seq
+   * (what is new since the last look) and a reply's sent annotations. A Send asks for it with its reply
+   * (`with_thread`), so the window draws the sent reply from that answer instead of reading the thread again.
+   */
+  const windowThreadRead = async (threadId: string, req: Request, via: RequestVia) => {
+    // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
+    if (store.thread(threadId)) imageCapture.schedule(threadId);
+    const thread = perfPhase("thread", () => store.windowThread(threadId));
+    if (!thread) return null;
+    // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
+    // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
+    const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
+    const withRepo = {
+      ...thread,
+      project: { ...thread.project, repo: repos.get(thread.project.root) },
+      ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
+      ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
+      ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
+    };
+    // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
+    // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
+    const run = await launch.runOf(thread.thread_id, isOwner(req, via));
+    const row = store.listRow(thread.thread_id);
+    // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
+    return { serverSession, cursor: store.cursor(), thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
+  };
+
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
     // and the owner's Tailscale login before handing the request here.
@@ -4937,10 +4985,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const merged = url.searchParams.get("machines") === "1";
         const snoozedMode = snoozedModeOf(url);
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
-        // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
-        // author. Display only, never stored; this computer's owner only, so a tailnet guest reads the list as before.
-        // `agents`' labels too (inbox-agents-list.ts): the owner's alone.
-        const model = ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : { ...rows, agents: inboxAgentsWithoutLabels(rows.agents) };
+        // A guest gets only the names of sessions its own answer shows.
+        const labels = merged ? { ...machines.sessionNames().labels, ...live.labels() } : live.labels();
+        const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
+        const shown = ownerOrLocal(req, via) ? null : inboxSessionsShown(rows);
+        const model = { ...rows, session_labels: shown ? inboxNamesShown(labels, shown) : labels, session_titles: shown ? inboxNamesShown(titles, shown) : titles };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -5601,6 +5650,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
       }
+      // Remove on a dated backup a move into SQLite left (behind its switch, off for everyone): the answer's sizes, as a Delete's.
+      const backup = INBOX_BACKUP_REMOVE_ROUTE.exec(path);
+      if (backup) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (!store.removeBackup(backup[1]!)) return json({ error: "No such backup.", code: "backup_not_found" }, 404);
+        return json({ ok: true, store: store.diskUsage() });
+      }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
           const guest = !ownerOrLocal(req, via);
@@ -5668,6 +5726,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The address this computer's browser opens: the owner's to change.
         if (body.cookie_host !== undefined && !owner) return localOnly();
         const promptsChange = body.prompts === undefined ? undefined : parseInboxPromptsChange(body.prompts);
+        const rulesMisfit = promptsChange ? inboxRulesFitError(promptsChange, loadConfig(), promptWakes()) : null;
+        if (rulesMisfit) throw new InboxError("validation_error", rulesMisfit.message, { field: rulesMisfit.field });
         let tailscaleChange: { on: boolean; replaceExposed: boolean } | undefined;
         if (body.tailscale !== undefined) {
           const value = body.tailscale as { on?: unknown; replace_exposed?: unknown } | null;
@@ -6164,27 +6224,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
       if (threadMatch && req.method === "GET") {
-        // The window's thread: each message's seq (what is new since the last look) and a reply's sent annotations.
-        // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
-        if (store.thread(threadMatch[1]!)) imageCapture.schedule(threadMatch[1]!);
-        const thread = perfPhase("thread", () => store.windowThread(threadMatch[1]!));
-        if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
-        // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
-        // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
-        const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
-        const withRepo = {
-          ...thread,
-          project: { ...thread.project, repo: repos.get(thread.project.root) },
-          ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
-          ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
-          ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
-        };
-        // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
-        // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
-        const run = await launch.runOf(thread.thread_id, isOwner(req, via));
-        const row = store.listRow(thread.thread_id);
-        // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) });
+        const read = await windowThreadRead(threadMatch[1]!, req, via);
+        if (!read) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
+        return json(read);
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
@@ -6573,6 +6615,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 // `skip_unanswered` flag is ignored (approval "inbox-explicit-skip", 2026-10-21).
                 skip: body.skip,
                 actions: body.actions,
+                // The message the reply quotes (approval "inbox-reply-quote"); absent from an older window.
+                ...(body.quote !== undefined ? { quote: body.quote } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);
@@ -6603,11 +6647,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               removeInboxUploads(store.dir, sentIds);
               for (const threadId of store.dropSentUploadsFromReplyDrafts(sentIds)) for (const listener of draftListeners) listener(threadId);
             }
+            // `with_thread` (the window's Send, its last reply): the thread as a read of it would answer now, so the
+            // sent reply is drawn from this answer, with no read of the thread after it.
+            const threadRead = body.with_thread === true ? await windowThreadRead(store.message(messageId)?.thread_id ?? "", req, via) : null;
             return json({
               message_id: messageId,
               questions: store.questionsOf(messageId),
               reply: result.reply,
               replayed: result.replayed,
+              ...(threadRead ? { thread_read: threadRead } : {}),
             });
           }
           case "reask": {
@@ -6673,10 +6721,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // Step 8: the live sessions of a thread's project, and New message.
       // Session labels (issue #2450) ride these two for this computer's owner only: a tailnet guest reads them as before.
-      const newMessage = await live.route(req, path, ownerOrLocal(req, via), isGuest(req, via));
+      const newMessage = await live.route(req, path, isGuest(req, via));
       if (newMessage) return newMessage;
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
-      const taggable = tagsRoute.route(req, path, ownerOrLocal(req, via));
+      const taggable = tagsRoute.route(req, path);
       if (taggable) return taggable;
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);
@@ -6749,7 +6797,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           let messages = 0;
           const threadIds = store.threadIds();
           for (const id of threadIds) messages += store.threadMessageIds(id).length;
-          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages });
+          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages, log: opened.log });
+          if (opened.moved) debugLog.note("store_move", storeMoveNote(opened.moved));
         }
         return handleMarkingSnoozes(req, via);
       }, isOwner)
