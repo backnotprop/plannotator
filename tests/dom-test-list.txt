@@ -147,6 +147,7 @@ packages/inbox/endedSession.test.tsx
 packages/inbox/listRowEnded.test.tsx
 packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
+packages/inbox/replyQuote.test.tsx
 packages/inbox/phoneComposer.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/decisionAsk.test.tsx

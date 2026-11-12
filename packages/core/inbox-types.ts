@@ -669,6 +669,13 @@ export interface InboxMessage {
    */
   review_comments_of?: string[];
   /**
+   * On a person's reply that quotes a message of the thread (approval "inbox-reply-quote"): the message, and the
+   * words selected in it (absent: the whole message). The store wrote the lead the agent reads at the start of the
+   * person's words (`inboxReplyQuoteLead`); the window draws this as one quiet line over the reply instead. Absent
+   * on every other message and on older records.
+   */
+  quote?: InboxReplyQuote;
+  /**
    * On a person's New message (plan step 8): the live agent session it is
    * addressed to. Such a message answers nothing (`reply_to` null) and is
    * delivered to that session as a turn, like a reply. Also on a person's
@@ -3134,6 +3141,16 @@ export interface InboxReplyDraft {
    * sent as tags. Absent: not chosen (the thread's last writer), and on a draft an older Inbox wrote.
    */
   recipients?: string[];
+  /** The message the reply quotes (approval "inbox-reply-quote"), kept with the words. Absent: none. */
+  quote?: InboxReplyQuote;
+}
+
+/** The quote a person's reply carries (approval "inbox-reply-quote"): a message of the thread and, when the person selected some, its words. */
+export interface InboxReplyQuote {
+  /** The quoted message's id. */
+  of: string;
+  /** The words selected in it, as shown on screen. Absent: the message as a whole. */
+  words?: string;
 }
 
 /** How many sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes (any number). */

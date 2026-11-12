@@ -111,6 +111,8 @@ import { inboxProjectLabels } from "./project-name";
 import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
 import { inboxWakeQuote } from "./wake-quote";
+import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
+import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
@@ -122,6 +124,7 @@ import {
   INBOX_LIVE_QUOTE_MAX,
   INBOX_LIVE_URL_MAX,
   INBOX_MESSAGE_COMMENT_QUOTE_MAX,
+  isInboxId,
   INBOX_MESSAGE_COMMENT_TEXT_MAX,
   isInboxAnnotationId,
   isInboxAnnotationVersion,
@@ -386,6 +389,14 @@ export interface InboxReplyInput {
    * Held for the Undo window (`settleHandoffs`, `undoHandoff`).
    */
   handoff?: { to: InboxAddressee; label?: string | null; from: { host: string | null; session: string; wakes: boolean; label?: string | null } | null };
+  /**
+   * The message this reply quotes (approval "inbox-reply-quote"): `{ of, words?, time? }`, `of` a message of the
+   * same thread, `words` the words the person selected in it (absent: the whole message), `time` the quoted
+   * message's time as the person's window shows it ("10:04 AM"; absent or not a time: this Inbox's own). The lead
+   * the agent reads goes in front of the person's words. Only with words: a reply without any carries no quote.
+   * Absent (an older window, or no quote): nothing changes.
+   */
+  quote?: unknown;
   /**
    * The person's verdict on the review this reply answers (code review in the
    * Inbox: Approve or Send feedback in the review's header). Only on a reply
@@ -1901,7 +1912,9 @@ export class InboxStore {
       const target = id ? this.messages.get(id) : undefined;
       return target && latest && target.id !== latest.id && target.author.kind === "agent" && target.author.session === session ? target : null;
     };
-    const target = (message.reask?.length ?? 0) > 0 ? null : (own(message.reply_to) ?? (answered.size === 1 ? own([...answered][0]) : null));
+    const found = (message.reask?.length ?? 0) > 0 ? null : (own(message.reply_to) ?? (answered.size === 1 ? own([...answered][0]) : null));
+    // A reply that quotes this very message says so in its own words (approval "inbox-reply-quote"): not twice.
+    const target = found && message.quote?.of === found.id ? null : found;
     const stillOpen = this.stillOpenWritten.get(message.id);
     return {
       messages,
@@ -4894,8 +4907,11 @@ export class InboxStore {
           )
           .flatMap((m) => this.questionRecords(m.id))
       : this.questionRecords(message.id);
+    // A quote goes in front of the person's words (approval "inbox-reply-quote"), so the agent reads what they answer.
+    const quoted = this.planQuote(message, input, words);
+    const quotedWords = quoted ? `${quoted.lead}\n\n${words.trim()}` : words;
     // The picks first, then the annotations as Plannotator's feedback text.
-    const replyParts = { questions: [], sent: [], earlier: [], messages: groups, replyTo: message.id, words, stillOpen };
+    const replyParts = { questions: [], sent: [], earlier: [], messages: groups, replyTo: message.id, words: quotedWords, stillOpen };
     const replyBody = composeInboxReplyBody(replyParts);
     const actionsSection = this.stagedActionsSection(message, actionsSent, stillOpen);
     const body = [withInboxActionsSection(replyBody, actionsSection), feedback]
@@ -4955,6 +4971,7 @@ export class InboxStore {
       ...(verdict ? { review_verdict: verdict } : {}),
       ...(viewing ? { viewing } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
+      ...(quoted ? { quote: quoted.quote } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer
@@ -4975,6 +4992,49 @@ export class InboxStore {
     // The person's words as typed: never the picks, the action items or the feedback the Send adds.
     this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
+  }
+
+  /**
+   * A reply's quote (`InboxReplyInput.quote`, approval "inbox-reply-quote"), checked before anything is written: the
+   * quote to keep on the reply and the lead its words open with. Null without one, or when the reply carries no words
+   * of the person's (a quote rides their words only). Whose message it is, as the agent reading it is told: "your"
+   * when the session the reply goes to wrote it, "my" for the person's own, else the other agent named by its host.
+   */
+  private planQuote(message: InboxMessage, input: InboxReplyInput, words: string): { quote: { of: string; words?: string }; lead: string } | null {
+    const raw = input.quote;
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw !== "object" || Array.isArray(raw)) throw new InboxError("validation_error", "quote: { of, words? }.", { field: "quote" });
+    const { of, words: selected, time } = raw as Record<string, unknown>;
+    if (typeof of !== "string" || !isInboxId("msg", of)) throw new InboxError("validation_error", "quote.of: a message id.", { field: "quote.of" });
+    const target = this.messages.get(of);
+    if (!target || target.thread_id !== message.thread_id || isAckNote(target)) {
+      throw new InboxError("validation_error", "quote.of: a message of this thread.", { field: "quote.of" });
+    }
+    if (selected !== undefined && (typeof selected !== "string" || selected.trim() === "" || selected.length > INBOX_MESSAGE_COMMENT_QUOTE_MAX)) {
+      throw new InboxError("validation_error", `quote.words: the words selected, at most ${INBOX_MESSAGE_COMMENT_QUOTE_MAX} characters.`, { field: "quote.words" });
+    }
+    if (words.trim() === "") return null;
+    const to = input.handoff ? input.handoff.to : (input.to ?? (message.author.kind === "person" && message.to ? message.to : undefined));
+    const session = to?.session ?? (message.author.kind === "agent" ? (message.author.session ?? null) : null);
+    const whose: InboxReplyQuoteWhose =
+      target.author.kind === "person"
+        ? { kind: "mine" }
+        : session !== null && target.author.session === session
+          ? { kind: "yours" }
+          : { kind: "theirs", name: target.author.host && Object.hasOwn(INBOX_HOST_NAMES, target.author.host) ? INBOX_HOST_NAMES[target.author.host]! : "another agent" };
+    // A message that is only questions: its first question's own words.
+    const excerpt =
+      typeof selected === "string"
+        ? selected
+        : inboxReplyQuoteExcerpt(target) || (this.questionRecords(target.id).sort((a, b) => a.position - b.position)[0]?.prompt ?? "");
+    const lead = inboxReplyQuoteLead({
+      whose,
+      id: target.id,
+      time: inboxReplyQuoteTime(time) || whenTime(target.created_at),
+      text: excerpt,
+      selected: typeof selected === "string",
+    });
+    return { quote: { of: target.id, ...(typeof selected === "string" ? { words: selected } : {}) }, lead };
   }
 
   /**
@@ -5918,7 +5978,7 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     if (ops) {
       // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
@@ -5942,7 +6002,7 @@ export class InboxStore {
         this.deleteReplyDraft(threadId);
         return null;
       }
-      return this.writeReplyDraft(threadId, existing, body, after, given);
+      return this.writeReplyDraft(threadId, existing, body, after, given, quote);
     }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
@@ -5974,14 +6034,22 @@ export class InboxStore {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files, given);
+    return this.writeReplyDraft(threadId, existing, body, files, given, quote);
   }
 
   /**
    * Write a thread's draft whole, its `updated_at` strictly later than the last one's. `recipients`: who the reply
-   * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own.
+   * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own. `quote`: the
+   * message the reply quotes; null takes it away, undefined keeps the draft's own.
    */
-  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[], recipients: readonly string[] | null = null): InboxReplyDraft {
+  private writeReplyDraft(
+    threadId: string,
+    existing: InboxReplyDraft | null,
+    body: string,
+    files: readonly InboxDraftFile[],
+    recipients: readonly string[] | null = null,
+    quote: InboxReplyQuote | null | undefined = undefined,
+  ): InboxReplyDraft {
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
     const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
@@ -5995,6 +6063,9 @@ export class InboxStore {
     };
     const aimed = recipients ?? existing?.recipients ?? [];
     if (aimed.length > 0) draft.recipients = [...aimed];
+    // The quote (approval "inbox-reply-quote"): a save that names one sets it, `null` takes it away, absent keeps it.
+    const quoted = quote === undefined ? (existing?.quote ?? null) : quote;
+    if (quoted) draft.quote = { ...quoted };
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.changes += 1;
