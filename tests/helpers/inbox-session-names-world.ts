@@ -1,8 +1,7 @@
 /**
- * A scratch Inbox world for a thread's sessions by name (issue #3108, approval "inbox-thread-session-names"): one
- * thread three Claude Code sessions wrote in, each with its own title (the poll's `label`, as the Claude Code mod
- * sends it), one thread six sessions of five agents wrote in (one long title, one session that ended), and a thread
- * one session wrote in alone. Live sessions poll the bridge as the mod, Pi and OpenCode do. Used by the e2e spec
+ * A scratch Inbox world for a thread's sessions by name (issue #3108): one thread three Claude Code sessions wrote
+ * in, each with its own title (the poll's `label`, as the Claude Code mod sends it), one thread six sessions of five
+ * agents wrote in (one long title, one session that ended), and a thread one session wrote in alone. Live sessions poll the bridge as the mod, Pi and OpenCode do. Used by the e2e spec
  * (inbox-thread-sessions.spec.ts) and by hand against a scratch build; never the person's Inbox: every caller passes
  * the scratch Inbox it started.
  */

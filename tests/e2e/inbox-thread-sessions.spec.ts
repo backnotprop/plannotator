@@ -1,7 +1,7 @@
 /**
- * Who is in a thread with two or more sessions (issue #3108, approval "inbox-thread-session-names", "Unfold"), in a
- * real browser against the compiled binary: the header's line shows the sessions' marks and "N sessions", and a mouse
- * resting on it, a tap or keyboard focus opens it in place into each session's name (the sidebar's) and state.
+ * Who is in a thread with two or more sessions (issue #3108), in a real browser against the compiled binary: the
+ * header's line shows the sessions' marks and "N sessions", and a mouse resting on it, a tap or keyboard focus opens
+ * it in place into each session's name and state.
  *
  * Nothing is mocked: the binary runs `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR and HOME; the
  * threads are written through the Inbox's own /mcp and the live sessions poll its bridge with their titles, as the
@@ -55,7 +55,7 @@ async function open(page: Page, thread: string): Promise<void> {
   await expect(page.locator('section.ib-pane h2.ib-subject')).toBeVisible({ timeout: 30_000 });
 }
 
-test('three Claude Code sessions: one mark and "3 sessions"; resting the mouse on it names each one as the sidebar does, with its state', async ({ page }) => {
+test('three Claude Code sessions: one mark and "3 sessions"; resting the mouse on it names each one, with its state', async ({ page }) => {
   await open(page, world!.three);
   await expect(line(page)).toHaveAttribute('data-thread-sessions', '3');
   await expect(line(page).locator('.ib-ss-tog')).toHaveText('3 sessions');
@@ -98,7 +98,7 @@ test('six sessions of five agents: four marks at most, an ended session says so,
   await expect(names(page)).toHaveCount(0);
 });
 
-test('one session: no line of sessions, the header as before', async ({ page }) => {
+test('one session: no line of sessions in the header', async ({ page }) => {
   await open(page, world!.one);
   await expect(page.locator('section.ib-pane [data-thread-meta]')).toBeVisible();
   await expect(line(page)).toHaveCount(0);

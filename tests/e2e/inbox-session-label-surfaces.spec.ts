@@ -410,8 +410,8 @@ test("a thread: each author is its session's name (several sessions) or keeps it
     await expect(pane.locator('h2.ib-subject')).toBeVisible();
     await expect(pane.locator('[data-session-name]').first()).toBeVisible();
     const list = await authors(page);
-    // Three sessions wrote here (issue #3108, approval "inbox-thread-session-names"): folded and open heads alike,
-    // every agent message leads with its session's name, its agent the mark beside it.
+    // Three sessions wrote here: folded and open heads alike, every agent message leads with its session's name, its
+    // agent the mark beside it.
     expect(list.some((a) => a.folded)).toBe(true);
     expect(list.some((a) => !a.folded)).toBe(true);
     const agents = list.filter((a) => a.text !== 'You');
@@ -437,7 +437,7 @@ test("a thread: each author is its session's name (several sessions) or keeps it
     await openName.click();
     await expect(pane.locator(`[data-message-article="${openId}"]`)).toHaveAttribute('data-folded', '');
 
-    // A named Pi session alone in its thread: "Pi · <its name>", as before, on a one-message thread's open head (no fold button: the head says it).
+    // A named Pi session alone in its thread: "Pi · <its name>" on a one-message thread's open head (no fold button).
     await page.goto(`${world.url}#thread=${world.ids.t4}`);
     await expect(pane.locator('h2.ib-subject')).toHaveText('CSV export columns');
     await expect(pane.locator('[data-session-label]').first()).toBeVisible();

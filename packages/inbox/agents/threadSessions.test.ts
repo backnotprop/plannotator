@@ -1,10 +1,9 @@
 /**
- * A thread's sessions as its header names them (issue #3108, `threadSessions` in agents/model.ts): the sidebar's
- * names for listed agents, the session's label or its agent's name otherwise, one entry per agent.
+ * A thread's sessions as its header names them (`threadSessions` in agents/model.ts): the session's own title, else
+ * its label, else its agent's name, one entry per agent.
  *
  * What this catches: a session named by a thread's subject or a project inside a thread (the sidebar's fallbacks,
- * which there read as the thread's own title), a title or label it was given left out,
- * a conversation that went on under a new session id counted twice, a session that ended read as running (or as
+ * which there read as the thread's own title), a title or label it was given left out, a conversation that went on under a new session id counted twice, a session that ended read as running (or as
  * "ended" on a machine whose agents the Inbox does not list), and another machine's agent with the same session id
  * taken for this one's.
  */
@@ -35,7 +34,7 @@ const group = (agents: InboxAgent[], machine?: string): InboxAgentsGroup => ({ .
 const who = (session: string, host = 'claude-code', name?: string): InboxParticipant => ({ host, session, ...(name ? { name } : {}) });
 const NONE: InboxListRow[] = [];
 
-test('three Claude Code sessions: each by its sidebar name (its label), in the order they joined, with its state', () => {
+test('three Claude Code sessions: each by its title, in the order they joined, with its state', () => {
   const groups = [
     group([
       agent('ses_b', { label: 'Retry worker', state: 'working' }),
@@ -95,7 +94,7 @@ test("an unnamed session is its agent inside a thread, never the sidebar's threa
   const a = agent('ses_a');
   const b = agent('ses_b', { project: { id: 'prj_bill', name: 'billing-svc' } });
   const pi = agent('ses_pi', { host: 'pi', label: 'Queue timeouts' });
-  // The sidebar names them by their thread and their project (unchanged).
+  // The sidebar names them by their thread and their project.
   expect(agentRowName(a, agentThread(a, null, null, rows))).toBe('Invoice retries');
   expect(agentRowName(b, agentThread(b, null, null, rows))).toBe('billing-svc');
   const sessions = threadSessions([who('ses_a'), who('ses_b'), who('ses_pi', 'pi')], [group([a, b, pi])], machinesModel(null), rows, null);

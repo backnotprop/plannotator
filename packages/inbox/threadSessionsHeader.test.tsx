@@ -1,9 +1,8 @@
 /**
- * Who is in a thread with two or more sessions (issue #3108, approval "inbox-thread-session-names", "Unfold"): the
- * header's line shows the sessions' marks and "N sessions", and opens in place into each session's name and state.
+ * Who is in a thread with two or more sessions (issue #3108): the header's line shows the sessions' marks and
+ * "N sessions", and opens in place into each session's name and state.
  *
- * What this catches: the header naming sessions differently from the sidebar (by agent kind again, "Claude Code,
- * Claude Code and Claude Code"), a one-session thread drawn differently, three identical marks for three sessions
+ * What this catches: sessions named only by their agent ("Claude Code, Claude Code and Claude Code"), a one-session thread drawn differently, three identical marks for three sessions
  * that look the same, a line a keyboard or a touch screen cannot open (a tap that only "hovers"), an Escape that
  * closes the thread instead of the line, and an ended session read as running.
  *
@@ -128,7 +127,7 @@ const pointer = (target: Element, type: string, pointerType: string) => {
   target.dispatchEvent(e);
 };
 
-test.skipIf(!hasDom)('three Claude Code sessions: one mark and "3 sessions", opened by keyboard focus into each sidebar name and state', async () => {
+test.skipIf(!hasDom)('three Claude Code sessions: one mark and "3 sessions", opened by keyboard focus into each title and state', async () => {
   const el = await render(threadOf(author('ses_a'), author('ses_b'), author('ses_a'), author('ses_c')));
   expect(line(el)?.getAttribute('data-thread-sessions')).toBe('3');
   // Three sessions that look the same are one mark, never three identical ones.
@@ -190,7 +189,7 @@ test.skipIf(!hasDom)('a mouse: resting on it opens it, leaving closes it; a clic
   expect(opened(el)).toHaveLength(3);
 });
 
-test.skipIf(!hasDom)('a session the list no longer names reads "ended", by its label; a Pi session is named by its sidebar name', async () => {
+test.skipIf(!hasDom)('a session the list no longer names reads "ended", by its agent; a Pi session is named by its label', async () => {
   const agents = [agent('ses_a', { label: 'Billing refactor' }), agent('ses_pi', { host: 'pi', label: 'Docs pass', state: 'working' })];
   const el = await render(threadOf(author('ses_a'), author('ses_gone'), author('ses_pi', 'pi')), agents);
   act(() => toggle(el).focus());
@@ -207,7 +206,7 @@ test.skipIf(!hasDom)("a session's state moves on a list read, and only the line 
   expect(opened(el)?.[1]).toBe('Retry worker · idle');
 });
 
-test.skipIf(!hasDom)('one session: no line of sessions, the header as before', async () => {
+test.skipIf(!hasDom)('one session: no line of sessions in the header', async () => {
   const el = await render(threadOf(author('ses_a'), author('ses_a')));
   expect(line(el)).toBeNull();
   expect(el.querySelector('[data-thread-meta]')?.hasAttribute('data-sessions')).toBe(false);
@@ -257,7 +256,7 @@ test.skipIf(!hasDom)("several sessions: each message leads with its session's na
   expect(el.querySelector('[data-session-label]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('one session: its messages read as before, the agent and the label', async () => {
+test.skipIf(!hasDom)('one session: its messages read its agent and its label', async () => {
   const el = await render(threadOf(author('ses_a'), author('ses_a')));
   expect(el.querySelector('[data-session-name]')).toBeNull();
   expect(authors(el).every((a) => a?.startsWith('Claude Code'))).toBe(true);

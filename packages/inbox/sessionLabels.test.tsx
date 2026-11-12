@@ -217,8 +217,8 @@ async function draw(node: ReactNode) {
 
 describe('drawn', () => {
   test.skipIf(!hasDom)("several sessions: a named session's message leads with its name, its agent heard after it; the unnamed one is untouched; a cleared name goes", async () => {
-    // A thread of several sessions names each by its session (issue #3108, approval "inbox-thread-session-names");
-    // a thread of one keeps "Claude Code · <label>" (the next tests).
+    // A thread of several sessions names each by its session; a thread of one keeps "Claude Code · <label>" (the
+    // next tests).
     const { ThreadPane } = await import('./components/Thread');
     const long = 'Fix the login redirect loop for SSO users on the admin console';
     setSessionLabels({ 'ses-login': 'Fix login redirect', 'ses-docs': long, 'ses-other': 'Not in this thread' });

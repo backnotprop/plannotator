@@ -7,19 +7,17 @@ import { agentName } from '../tags';
 import { Tip } from './Tip';
 
 /**
- * Who is in a thread with two or more sessions (issue #3108, approval "inbox-thread-session-names", "Unfold"): the
- * header's line shows a small pile of the sessions' marks and "N sessions"; a hover (a mouse), a tap or keyboard focus
- * opens it in place into each session's name and what it is doing. One session: not drawn (the header as before).
+ * Who is in a thread with two or more sessions (issue #3108): the header's line shows a small pile of the sessions'
+ * marks and "N sessions"; a mouse resting on it, a tap or keyboard focus opens it in place into each session's name and
+ * what it is doing. Not drawn for one session.
  *
- * The marks are the faces the sessions already have (agents/agentFaces.ts): a face picked in the sidebar, else the
- * agent's own mark. Sessions that look the same share one mark: three Claude Code sessions with no face of their own
- * are one Claude mark and "3 sessions", never three identical marks; opened, a mark starts each run of sessions that
- * look alike. Nothing here picks or saves a face.
+ * The marks are the faces the sessions have (agents/agentFaces.ts); sessions that look the same share one mark, so
+ * three Claude Code sessions with no face are one mark and "3 sessions". Opened, a mark starts each run of sessions
+ * that look alike. Nothing here picks or saves a face.
  *
- * The names come from `threadSessions` (agents/model.ts), the sidebar's names; a click on a listed session's name
- * filters the list to that agent, as a click on the agent in the sidebar does. The states come from the list's agents,
- * read here so only this line draws again when one changes (reading them is what keeps the list's agents fresh, as
- * the sidebar's Agents section does).
+ * The names come from `threadSessions` (agents/model.ts). A click on a listed session's name filters the list to that
+ * agent, as the sidebar's agent does. The states are read from the list's agents here, so only this line draws again
+ * when one changes; reading them also keeps the list's agents fresh.
  */
 
 /** What each session is doing, in the opened line. */

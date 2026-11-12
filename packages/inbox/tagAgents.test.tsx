@@ -319,7 +319,7 @@ test.skipIf(!hasDom)('an MCP agent gets the other heads-up; Send carries the tag
 test.skipIf(!hasDom)('the thread head shows the agents in the thread overlapping, the row beside its project; the Sent row counts deliveries', async () => {
   const el = await renderApp(`#thread=${tags.ids.t3}`);
   await until(() => el.querySelector('[data-thread-participants]') !== null, 'the thread head');
-  // Two sessions (issue #3108): their marks and "2 sessions", a Claude Code mark and a Pi mark.
+  // Two sessions: their marks and "2 sessions", a Claude Code mark and a Pi mark.
   expect(el.querySelector('[data-thread-participants]')!.textContent).toBe('2 sessions');
   expect(el.querySelector('[data-thread-participants]')!.getAttribute('data-thread-sessions')).toBe('2');
   expect(el.querySelector('[data-thread-participants] [data-pile]')!.getAttribute('data-pile')).toBe('2');

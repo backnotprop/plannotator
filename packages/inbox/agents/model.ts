@@ -192,11 +192,9 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
 }
 
 /**
- * One session of a thread as its header and its message lines name it (issue #3108, approval
- * "inbox-thread-session-names"). Found through the sidebar's groups (so a conversation drawn as one row there is one
- * session here), and named by its own title, else its label, else its agent's name: never by a thread or a project,
- * the sidebar's fallbacks, which inside a thread read as the thread's own title. Two unnamed sessions of one agent
- * both read as the agent ("Claude Code"); the header's "2 sessions" says there are two.
+ * One session of a thread as its header and its message lines name it (issue #3108). Found through the sidebar's
+ * groups, so a conversation drawn as one row there is one session here. Two unnamed sessions of one agent both read
+ * as the agent ("Claude Code"); the header's "2 sessions" says there are two.
  */
 export interface ThreadSession {
   /** Its first session id in the thread: the id its face is found by. */
@@ -242,9 +240,8 @@ export function threadSessions(
     } else {
       agent = group?.agents.find((a) => a.session === p.session || (a.continues ?? []).includes(p.session)) ?? null;
     }
-    // Inside a thread a session is named only by a name it has itself: its title (the sidebar's name when that is its
-    // title), else the label the window has for it, else its agent ("Pi", "Claude Code"). Never a thread's subject or
-    // a project, the sidebar's fallbacks: inside a thread those read as this thread's own title.
+    // Only a name the session has itself: its title, else its label, else its agent. Never the sidebar's fallbacks
+    // (a thread's subject, a project), which inside a thread read as the thread's own title.
     const own = Object.hasOwn(labels, p.session) ? labels[p.session]?.trim() : '';
     const name = agent?.label?.trim() || own || p.name || agentHostName(p.host);
     const same = agent ? out.find((s) => s.agentId === agent!.id) : undefined;

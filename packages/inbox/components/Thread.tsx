@@ -1301,8 +1301,8 @@ export interface ThreadPaneProps {
   /** When this thread came back from its snooze, while the person stays in it (snoozeBack.ts); else null. */
   snoozeBack?: string | null;
   /**
-   * The window's rows and machines (issue #3108): a thread with two or more sessions names each one as the sidebar's
-   * Agents section does (agents/model.ts `threadSessions`). Absent: a session is named by its label, else its agent.
+   * The window's rows and machines, which `threadSessions` (agents/model.ts) finds a thread's agents in. Absent: a
+   * session is named by its label, else its agent.
    */
   agentContext?: { rows: readonly InboxListRow[]; machines: MachinesModel } | null;
   /** The list's agent filter now (`#agent=<id>`), and what a click on a session's name in the header does with it. */
@@ -2606,7 +2606,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
-  // Two or more sessions (issue #3108): each one named as the sidebar names it, for the header's line.
+  // Two or more sessions (issue #3108): the header's line and the message lines name each one.
   const severalSessions = participants.length > 1;
   const agentsWho = useInboxAgentsWho(severalSessions);
   const sessions = useMemo(
@@ -5217,7 +5217,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const added = messageTags(m).filter((t) => t.joined && !joined.has(t.session));
       for (const t of added) joined.add(t.session);
       if (added.length > 0 && !threadMoves.has(m.id)) {
-        // Named as the header names them (issue #3108): the session's own name, else its tag's label, else its agent.
+        // The header's name, else the tag's label, else the agent.
         threadMoves.set(m.id, { kind: 'added', names: namesList(added.map((t) => sessionNames.get(t.session) ?? (t.label || agentName({ kind: 'agent', host: t.host, name: t.name ?? null })))), host: added[0]!.host });
       }
     }
@@ -6531,7 +6531,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             chip would (the owner, 2026-11-02: never the same words twice). */}
         {!one && !reviewView && (
           <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 ? '' : undefined}>
-            {/* Two or more sessions (approval "inbox-thread-session-names"): who, at the start; the count and time at the end. */}
+            {/* Two or more sessions: who at the start, the count and time at the end. */}
             {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />}
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 <span>{plural(thread.messages.length, 'message')}</span>
@@ -6578,8 +6578,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             const quietAdd = move.kind === 'added' && sessions.length > 1;
             before.push(
               <div className="ib-tmove" key={`move-${message.id}`} data-thread-move={move.kind} data-held={held ? '' : undefined} data-quiet={quietAdd ? '' : undefined}>
-                {/* Sessions added to a thread of several (approval "inbox-thread-session-names"): one quiet line,
-                    "You added Retry worker · 4:20 PM", the names the header's; no icon, no mark. */}
+                {/* Added to a thread of several: "You added Retry worker · 4:20 PM", the header's names, no icon or mark. */}
                 {!quietAdd && <Icon name={move.kind === 'handoff' ? 'forward' : 'plus'} size={14} />}
                 <span className="ib-tmove-t">
                   {move.kind === 'handoff' ? 'You handed this thread to ' : 'You added '}
@@ -6618,9 +6617,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // screen reader. The session's poll names it; an unnamed one reads as it always did. Display only: no
           // tool takes a label, but Claude Code's comes from the transcript, which the session's own model can
           // append to, so it never proves who wrote (the agent's name and mark stay, and the server refuses "You").
-          // In a thread with two or more sessions (issue #3108, approval "inbox-thread-session-names") the session's
-          // own name leads instead, the header's (the sidebar's), and its agent is the mark beside it, its tooltip and
-          // what a screen reader hears after it: "Billing refactor", heard "Billing refactor, Claude Code".
+          // In a thread with two or more sessions the header's name for the session leads, its agent in the mark,
+          // the tooltip and after it for a screen reader: "Billing refactor", heard "Billing refactor, Claude Code".
           const kind = message.author.kind === 'agent' ? agentName(message.author) : null;
           const sessionName = message.author.kind === 'agent' ? (sessionNames.get(message.author.session ?? '') ?? null) : null;
           const named = sessionName && sessionName !== kind ? sessionName : null;

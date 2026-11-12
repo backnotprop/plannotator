@@ -5071,7 +5071,7 @@ function Inbox() {
   const filterMachine = route.page === 'inbox' && route.machine ? (machines.all.find((m) => m.id === route.machine) ?? null) : null;
   /** Every row the window has (every section, the snoozed too): where an agent's threads are found. */
   const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
-  // A thread with several sessions names them as the sidebar's Agents section does (issue #3108).
+  // Where a thread with several sessions finds their agents (agents/model.ts `threadSessions`).
   const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);

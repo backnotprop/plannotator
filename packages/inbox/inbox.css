@@ -5754,7 +5754,7 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-tg-stack .ib-mk + .ib-mk { margin-left: -5px; }
 .ib-tg-plus { display: inline-flex; align-items: center; height: 16px; margin-left: 3px; padding: 0 5px; border-radius: 999px; font-size: var(--ib-fs-10-5, 10.5px); font-weight: 600; color: var(--muted-foreground); background: var(--muted); }
 
-/* Who is in a thread with two or more sessions (ThreadSessions.tsx, issue #3108): the sessions' marks and "N sessions"
+/* Who is in a thread with two or more sessions (ThreadSessions.tsx): the sessions' marks and "N sessions"
    on the header's line, the count and time at its right. Opened, each session's name and state on a band laid over the
    line from its left (nothing under it moves; it wraps down over the first message when the names need more room). */
 .ib-tmeta[data-sessions] { position: relative; margin-top: 2px; gap: 6px 12px; }

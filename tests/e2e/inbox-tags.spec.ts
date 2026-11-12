@@ -350,7 +350,7 @@ test('the thread head shows the agents in the thread overlapping, the row beside
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.tags.ids.t3}`);
   const head = page.locator('[data-thread-participants]');
-  // Two sessions (issue #3108): a Claude Code mark, a Pi mark and "2 sessions" (inbox-thread-sessions.spec.ts opens it).
+  // Two sessions: a Claude Code mark, a Pi mark and "2 sessions" (inbox-thread-sessions.spec.ts opens it).
   await expect(head).toHaveText('2 sessions');
   await expect(head).toHaveAttribute('data-thread-sessions', '2');
   await expect(head.locator('[data-pile]')).toHaveAttribute('data-pile', '2');
