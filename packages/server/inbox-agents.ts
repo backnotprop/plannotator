@@ -47,10 +47,10 @@ import {
   type InboxConnectReport,
   INBOX_MUSE_BIN,
   INBOX_MUSE_CONFIG_FOLDER,
-  INBOX_MUSE_MCP_KEY,
   INBOX_MUSE_SETTINGS_FILE,
   INBOX_MUSE_SETTINGS_SEED,
   museMcpEntry,
+  museMcpKey,
 } from "@plannotator/core/inbox-types";
 import {
   configuredInboxTool,
@@ -394,6 +394,18 @@ export function xdgConfigHome(e: AgentEnvironment): string {
 }
 export function museDir(e: AgentEnvironment): string {
   return join(xdgConfigHome(e), INBOX_MUSE_CONFIG_FOLDER);
+}
+function museSettings(e: AgentEnvironment): string {
+  return join(museDir(e), INBOX_MUSE_SETTINGS_FILE);
+}
+function museKeys(path: string | null): string[] {
+  const read = path ? readAgentFile(path) : null;
+  if (read?.kind !== "file") return [museMcpKey(null)];
+  try {
+    return [museMcpKey(JSON.parse(read.text))];
+  } catch {
+    return [museMcpKey(null)];
+  }
 }
 export function openCodeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "OPENCODE_CONFIG_DIR") ?? join(xdgConfigHome(e), "opencode");
@@ -1216,9 +1228,9 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   {
     id: "muse",
     detect: (e) => !!e.which(INBOX_MUSE_BIN) || isDir(museDir(e)),
-    way: async () => ({ kind: "json", keys: [INBOX_MUSE_MCP_KEY], json: MUSE_SETTINGS_RULES, entry: museMcpEntry }),
-    file: (e) => join(museDir(e), INBOX_MUSE_SETTINGS_FILE),
-    raw: (e, read) => rawJsonEntry(join(museDir(e), INBOX_MUSE_SETTINGS_FILE), [INBOX_MUSE_MCP_KEY], false, read),
+    way: async (e) => ({ kind: "json", keys: museKeys(museSettings(e)), json: MUSE_SETTINGS_RULES, entry: museMcpEntry }),
+    file: (e) => museSettings(e),
+    raw: (e, read) => rawJsonEntry(museSettings(e), museKeys(museSettings(e)), false, read),
   },
   {
     id: "claude-app",
@@ -1812,7 +1824,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
       // Checked as the agent's own entry is: one gone is nothing to do, one the person replaced is theirs (named
       // once, then no longer recorded); one that can't be read is tried, so the reason is said.
       const strayOurs = stray.command ? [stray.command] : record?.command ? [record.command] : [];
-      const strayRead = classify(rawJsonEntry(stray.path, strayJson!.keys, strayJson!.rules.comments === true), strayOurs, false);
+      const strayFile = jsonFileFor(spec.id, stray.path)!;
+      const strayRead = classify(rawJsonEntry(stray.path, strayFile.keys, strayFile.rules.comments === true), strayOurs, false);
       if (strayRead.kind === "absent") continue;
       if (strayRead.kind === "other") {
         skipped.push(`${label}'s "${NAME}" in ${displayPath(stray.path, e)} now runs something else (changed by hand), so it is yours`);
@@ -1823,8 +1836,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
         stray: stray.path,
         describe: `MCP server ${NAME} from ${label} (${displayPath(stray.path, e)}, that entry only)`,
         apply: async () => {
-          const result = writeJsonEntry(stray.path, strayJson!.keys, undefined, strayOurs, stray.undo, strayJson!.rules);
-          if (result.ok && stray.created) deleteIfOnlyOurs(stray.path, strayJson!.keys, strayJson!.rules.seed);
+          const result = writeJsonEntry(stray.path, strayFile.keys, undefined, strayOurs, stray.undo, strayFile.rules);
+          if (result.ok && stray.created) deleteIfOnlyOurs(stray.path, strayFile.keys, strayFile.rules.seed);
           return result.ok ? null : result.reason;
         },
       });
@@ -1852,7 +1865,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
     if (read && read.kind !== "ours") continue;
     const path = recordedFile(spec, e, record) ?? record.path ?? null;
     const shown = displayPath(path, e);
-    const json = jsonFileFor(spec.id);
+    const json = jsonFileFor(spec.id, path);
     if (json && path) {
       items.push({
         agent: spec.id,
@@ -1888,9 +1901,9 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
 }
 
 /** The agents whose JSON file Plannotator edits itself: where their entry is and how the file is edited. */
-function jsonFileFor(id: InboxAgentId): { keys: readonly string[]; rules: JsonFileRules } | null {
+function jsonFileFor(id: InboxAgentId, path: string | null = null): { keys: readonly string[]; rules: JsonFileRules } | null {
   if (id === "qwen") return { keys: ["mcpServers"], rules: QWEN_SETTINGS_RULES };
-  if (id === "muse") return { keys: [INBOX_MUSE_MCP_KEY], rules: MUSE_SETTINGS_RULES };
+  if (id === "muse") return { keys: museKeys(path), rules: MUSE_SETTINGS_RULES };
   return id === "cursor" || id === "kiro" || id === "claude-app" ? { keys: ["mcpServers"], rules: {} } : null;
 }
 
@@ -1908,7 +1921,7 @@ function recordedFile(spec: AgentSpec, e: AgentEnvironment, record: InboxAgentRe
 /** The recorded entry's raw value (`recordedFile`), read only. */
 function recordedRaw(spec: AgentSpec, e: AgentEnvironment, record: InboxAgentRecord | undefined): RawEntry | null {
   const path = recordedFile(spec, e, record);
-  const json = jsonFileFor(spec.id);
+  const json = jsonFileFor(spec.id, path);
   if (!json || !path || path === spec.file(e)) return spec.raw(e);
   return rawJsonEntry(path, json.keys, json.rules.comments === true);
 }
@@ -2132,8 +2145,8 @@ export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options:
       const moved = await moveRecordedEntry(spec, options, previous!);
       if (moved) {
         // The old one cannot go: the new one is taken back out, so only the recorded entry is ever left.
-        const json = jsonFileFor(id);
         const added = outcome.kind === "added" ? outcome.record : null;
+        const json = jsonFileFor(id, added?.path ?? null);
         if (json && added?.path) {
           beforeMoveRollback?.();
           const undone = writeJsonEntry(added.path, json.keys, undefined, added.command ? [added.command] : [], added.undo, json.rules);

@@ -32,14 +32,14 @@ async function uninstall(): Promise<void> {
 }
 
 describe("Muse Code", () => {
-  test("found on PATH: a new settings.json gets the schema version and an optional stdio entry, muse is never run, and uninstall deletes the file", async () => {
+  test("found on PATH: a new settings.json gets the schema version and an optional stdio entry under mcpServers, muse is never run, and uninstall deletes the file", async () => {
     fake.install("muse");
     const report = await connect();
     expect(report.added).toEqual(["muse"]);
     expect(fake.calls()).toEqual([]);
     expect(JSON.parse(readFileSync(settingsPath(), "utf8"))).toEqual({
       schema_version: 1,
-      mcp_servers: { "plannotator-inbox": { transport: "stdio", command: SELF[0], args: ["inbox", "mcp"], mode: "optional" } },
+      mcpServers: { "plannotator-inbox": { type: "stdio", command: SELF[0], args: ["inbox", "mcp"], mode: "optional" } },
     });
     expect((await connect()).added).toEqual([]);
     await uninstall();
@@ -48,12 +48,23 @@ describe("Muse Code", () => {
 
   test("found by its folder: the person's settings are kept byte for byte through add and removal", async () => {
     mkdirSync(join(fake.home, ".config", "muse"), { recursive: true });
-    const before = '{\n    "schema_version": 1,\n    "mcp_servers": {\n        "docs": { "transport": "streamable_http", "url": "https://example.test/mcp" }\n    },\n    "session_retention_days": 30\n}\n';
+    const before = '{\n  "mcpServers": {\n    "docs": {\n      "type": "http",\n      "url": "https://example.test/mcp"\n    }\n  },\n  "schema_version": 1\n}';
     writeFileSync(settingsPath(), before);
     expect((await connect()).added).toEqual(["muse"]);
     const added = JSON.parse(readFileSync(settingsPath(), "utf8"));
+    expect(Object.keys(added.mcpServers)).toEqual(["docs", "plannotator-inbox"]);
+    await uninstall();
+    expect(readFileSync(settingsPath(), "utf8")).toBe(before);
+  });
+
+  test("a file on the older mcp_servers key gets the entry there, since Muse refuses a file with both keys", async () => {
+    mkdirSync(join(fake.home, ".config", "muse"), { recursive: true });
+    const before = '{\n    "schema_version": 1,\n    "mcp_servers": {\n        "docs": { "transport": "streamable_http", "url": "https://example.test/mcp" }\n    }\n}\n';
+    writeFileSync(settingsPath(), before);
+    expect((await connect()).added).toEqual(["muse"]);
+    const added = JSON.parse(readFileSync(settingsPath(), "utf8"));
+    expect(Object.keys(added)).toEqual(["schema_version", "mcp_servers"]);
     expect(Object.keys(added.mcp_servers)).toEqual(["docs", "plannotator-inbox"]);
-    expect(added.session_retention_days).toBe(30);
     await uninstall();
     expect(readFileSync(settingsPath(), "utf8")).toBe(before);
   });

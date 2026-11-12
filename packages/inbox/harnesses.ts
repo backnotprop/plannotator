@@ -7,8 +7,6 @@
  * see the shell PATH still find it. Pure.
  */
 
-import { INBOX_MUSE_MCP_KEY, INBOX_MUSE_SETTINGS_LABEL, INBOX_MUSE_SETTINGS_SEED, museMcpEntry } from '@plannotator/core/inbox-types';
-
 export type HarnessId =
   | 'claude-code'
   | 'claude-app'
@@ -285,14 +283,8 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       };
     case 'muse':
       return {
-        artefacts: [
-          {
-            kind: 'code',
-            label: INBOX_MUSE_SETTINGS_LABEL,
-            text: json({ ...INBOX_MUSE_SETTINGS_SEED, [INBOX_MUSE_MCP_KEY]: { [SERVER]: museMcpEntry(ctx.command) } }),
-          },
-        ],
-        note: `Merge it into ${INBOX_MUSE_MCP_KEY} in Muse Code's settings.json, then start a new session. Replies don't wake Muse Code: it reads them when it next checks the Inbox.`,
+        artefacts: [{ kind: 'code', text: `muse mcp add ${SERVER} -- ${cmd}` }],
+        note: "Run it in a terminal, then start a new Muse Code session in a folder Muse trusts: it starts MCP servers only there. Replies don't wake Muse Code: it reads them when it next checks the Inbox.",
       };
     case 'jetbrains':
       return {

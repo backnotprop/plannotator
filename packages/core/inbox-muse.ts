@@ -10,13 +10,18 @@ export const INBOX_MUSE_CONFIG_FOLDER = "muse";
 
 export const INBOX_MUSE_SETTINGS_FILE = "settings.json";
 
-export const INBOX_MUSE_SETTINGS_LABEL = "~/.config/muse/settings.json";
+export const INBOX_MUSE_MCP_KEY = "mcpServers";
 
-export const INBOX_MUSE_MCP_KEY = "mcp_servers";
+export const INBOX_MUSE_OLD_MCP_KEY = "mcp_servers";
 
 export const INBOX_MUSE_SETTINGS_SEED: Readonly<Record<string, unknown>> = { schema_version: 1 };
 
-export function museMcpEntry(command: readonly string[]): { transport: "stdio"; command: string; args: string[]; mode: "optional" } {
+export function museMcpEntry(command: readonly string[]): { type: "stdio"; command: string; args: string[]; mode: "optional" } {
   const [program = "plannotator", ...args] = command;
-  return { transport: "stdio", command: program, args, mode: "optional" };
+  return { type: "stdio", command: program, args, mode: "optional" };
+}
+
+export function museMcpKey(settings: unknown): string {
+  const top = settings && typeof settings === "object" && !Array.isArray(settings) ? (settings as Record<string, unknown>) : {};
+  return INBOX_MUSE_OLD_MCP_KEY in top && !(INBOX_MUSE_MCP_KEY in top) ? INBOX_MUSE_OLD_MCP_KEY : INBOX_MUSE_MCP_KEY;
 }
