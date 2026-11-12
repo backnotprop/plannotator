@@ -175,7 +175,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     if (!Array.isArray(value)) throw new DoorRefusal("validation_error", "attachments: a list of { name, data } (data: the file's bytes as base64).");
     const files = value.map((item, i) => {
       if (typeof item === "string") {
-        throw new DoorRefusal("attachment_path_refused", `attachments[${i}]: ${JSON.stringify(item)} is a path on the person's computer. Send the file's bytes instead: { "name": "shot.png", "data": "<base64>" }.`);
+        throw new DoorRefusal("attachment_path_refused", `attachments[${i}]: ${JSON.stringify(item)} is a path, and the Inbox opens no path for a cloud agent. Send the file's bytes: { "name": "shot.png", "data": "<base64>" } (plannotator inbox call does this for a path on your own disk).`);
       }
       const file = item as { name?: unknown; data?: unknown } | null;
       if (!file || typeof file !== "object" || typeof file.name !== "string" || typeof file.data !== "string" || !/^[A-Za-z0-9+/_-]*={0,2}$/.test(file.data)) {
@@ -240,7 +240,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
 
     const body = typeof args.body === "string" ? args.body : "";
     if (bodyShowsLocalImages(body)) {
-      throw new DoorRefusal("image_path_refused", "body: a picture's path names a file on the person's computer. Send the picture's bytes in attachments; it shows below the message.");
+      throw new DoorRefusal("image_path_refused", "body: a picture shown by path (![alt](path)) is not taken from a cloud agent: the Inbox opens no path for it. Put the picture in attachments instead (plannotator inbox call reads a path there from your own disk and sends its bytes); it shows below the message.");
     }
     if (typeof args.reply_to === "string") ownedMessage(args.reply_to, session, "reply_to");
     else if (typeof args.thread === "string") {
