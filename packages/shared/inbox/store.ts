@@ -73,6 +73,7 @@ import {
   type InboxQuestionRecord,
   type InboxReplyDraft,
   type InboxPin,
+  type InboxPriorityBefore,
   type InboxSupersededBy,
   type InboxListRow,
   type InboxListSection,
@@ -153,6 +154,7 @@ import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins
 import { isInboxArtifactKey, readInboxArtifactPins, writeInboxArtifactPins } from "./artifact-pins";
 import { inboxThreadArtifactRefs, type InboxArtifactPin, type InboxArtifactRef } from "@plannotator/core/inbox-artifact-pins";
 import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
+import { checkInboxPriorityRestore, readInboxPriority, writeInboxPriority, type InboxPriorityState } from "./priority";
 import { inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
@@ -855,6 +857,14 @@ export class InboxStore {
   private snoozeList: InboxSnooze[] = [];
   /** Told when the snoozes change (no store line is written for them). */
   private readonly snoozeListeners = new Set<() => void>();
+  /**
+   * The person's Priority (priority.ts): a file outside the event log, read at
+   * load. Read by nothing that routes, lists or answers an agent; `listRow`
+   * never carries it (the server's list model does).
+   */
+  private priorityState: InboxPriorityState = { threads: [], off: [] };
+  /** Told when the person's Priority changes (no store line is written for it). */
+  private readonly priorityListeners = new Set<() => void>();
   private readonly deletionListeners = new Set<() => void>();
   /** The Board's cards, by id (approval "inbox-board"). Read by nothing that routes or lists threads. */
   private readonly cards = new Map<string, InboxCard>();
@@ -961,6 +971,7 @@ export class InboxStore {
     this.loadPins();
     this.loadArtifactPins();
     this.loadSnoozes();
+    this.loadPriority();
   }
 
   /**
@@ -1542,6 +1553,106 @@ export class InboxStore {
   private endLapsedSnooze(threadId: string): void {
     const snooze = this.snoozeList.find((entry) => entry.thread_id === threadId);
     if (snooze && !inboxSnoozeRunning(snooze.until, this.now())) this.endSnooze(threadId);
+  }
+
+  // ─────────────────────────── priority ───────────────────────────
+
+  /** The person's Priority changed (an add, a remove, an Undo, an archive, or a deleted thread left it): no store line is written. */
+  onPriorityChange(listener: () => void): () => void {
+    this.priorityListeners.add(listener);
+    return () => this.priorityListeners.delete(listener);
+  }
+
+  private priorityChanged(): void {
+    for (const listener of this.priorityListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the write.
+      }
+    }
+  }
+
+  /** Read priority.json and keep the entries of threads that exist (the same load-time pruning as `loadPins`). */
+  private loadPriority(): void {
+    const before = this.priorityState;
+    const read = readInboxPriority(this.dir);
+    const kept: InboxPriorityState = { threads: read.threads.filter((e) => this.isThreadRoot(e.thread_id)), off: read.off.filter((e) => this.isThreadRoot(e.thread_id)) };
+    this.priorityState = kept;
+    if (kept.threads.length !== read.threads.length || kept.off.length !== read.off.length) {
+      try {
+        writeInboxPriority(this.dir, kept);
+      } catch {
+        // Best effort: the next load prunes it again.
+      }
+    }
+    const gone = (list: readonly { thread_id: string }[], now: readonly { thread_id: string }[]) => list.some((e) => !now.some((k) => k.thread_id === e.thread_id));
+    if (gone(before.threads, kept.threads) || gone(before.off, kept.off)) this.priorityChanged();
+  }
+
+  /** The person's adds (`threads`) and the asks they took out (`off`). */
+  priorities(): Readonly<InboxPriorityState> {
+    return this.priorityState;
+  }
+
+  private priorityBefore(threadId: string): InboxPriorityBefore {
+    return {
+      at: this.priorityState.threads.find((e) => e.thread_id === threadId)?.at ?? null,
+      off_at: this.priorityState.off.find((e) => e.thread_id === threadId)?.at ?? null,
+    };
+  }
+
+  /** Write one thread's entries as `next` says (null: none); nothing when they are already so. */
+  private commitPriority(threadId: string, next: InboxPriorityBefore): void {
+    const was = this.priorityBefore(threadId);
+    if (was.at === next.at && was.off_at === next.off_at) return;
+    const put = (list: InboxPriorityState["threads"], at: string | null) => [...list.filter((e) => e.thread_id !== threadId), ...(at === null ? [] : [{ thread_id: threadId, at }])];
+    const state: InboxPriorityState = { threads: put(this.priorityState.threads, next.at), off: put(this.priorityState.off, next.off_at) };
+    writeInboxPriority(this.dir, state);
+    this.priorityState = state;
+    this.priorityChanged();
+  }
+
+  /**
+   * The person's Add to Priority (`on`) or Remove from Priority. Add writes
+   * their entry (adding an added thread keeps its first time) and drops any
+   * `off`; an archived thread refuses, since the list does not draw it. Remove
+   * drops the entry. Answers the state before, for the Undo. Writes no store line.
+   */
+  setPriority(threadId: string, on: boolean): InboxPriorityBefore {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const before = this.priorityBefore(threadId);
+    if (on) {
+      if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+      this.commitPriority(threadId, { at: before.at ?? this.now().toISOString(), off_at: null });
+    } else {
+      this.commitPriority(threadId, { at: null, off_at: before.off_at });
+    }
+    return before;
+  }
+
+  /** Undo: one thread's entries exactly as `value` (a `before`) says. Answers the state it replaced. */
+  restorePriority(threadId: string, value: unknown): InboxPriorityBefore {
+    const restore = checkInboxPriorityRestore(value);
+    if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const before = this.priorityBefore(threadId);
+    this.commitPriority(threadId, { at: restore.at === null ? null : new Date(restore.at).toISOString(), off_at: restore.off_at === null ? null : new Date(restore.off_at).toISOString() });
+    return before;
+  }
+
+  /**
+   * An archive ends the person's add (Archive's Undo in the window writes it
+   * back with its first time). The archive already stands, so a file that
+   * cannot be written never fails it.
+   */
+  private endPriority(threadId: string): void {
+    if (!this.priorityState.threads.some((e) => e.thread_id === threadId)) return;
+    try {
+      this.commitPriority(threadId, { at: null, off_at: this.priorityBefore(threadId).off_at });
+    } catch {
+      // See above.
+    }
   }
 
   /** A thread's reply draft was saved or deleted: its row's `unsent` (and section) changed with no store line. */
@@ -5394,6 +5505,7 @@ export class InboxStore {
       );
     }
     if (resolved && by === "person") this.endSnooze(root.id);
+    if (resolved && !isResolved) this.endPriority(root.id);
     if (!resolved && isResolved) this.endLapsedSnooze(root.id);
     return this.threadSummary(root.id)!;
   }

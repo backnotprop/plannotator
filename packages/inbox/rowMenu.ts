@@ -6,8 +6,9 @@
 
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
 import { canMarkUnread, canToggleRead, offersRowMarkRead } from './markRead';
+import { priorityAction } from './priority';
 
-export type RowMenuAction = 'pin' | 'unpin' | 'copy-thread' | 'copy-link' | 'copy-id' | 'snooze' | 'unsnooze' | 'read' | 'mark-unread' | 'unread' | 'archive';
+export type RowMenuAction = 'pin' | 'unpin' | 'priority-add' | 'priority-remove' | 'copy-thread' | 'copy-link' | 'copy-id' | 'snooze' | 'unsnooze' | 'read' | 'mark-unread' | 'unread' | 'archive';
 
 /**
  * The thread's address: the Inbox's one address on this computer
@@ -38,10 +39,15 @@ export function threadLink(threadId: string, base: { url?: string | null; via?: 
  * screen (a seen update the list still holds in New keeps Mark read).
  * `canSnooze` (an Inbox that keeps snoozes, approval "inbox-snooze"): Snooze
  * leads the writes on a thread not archived, with Unsnooze on a snoozed one.
+ * Add to Priority (Remove from Priority on a row in it) follows the star, in
+ * its group, on a row whose Inbox keeps priority (`priority` absent: none);
+ * an archived row offers only Remove.
  */
 export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: boolean | null = null, drawn: InboxListGroupId | null = null, canSnooze = false): RowMenuAction[] {
   const actions: RowMenuAction[] = [];
   if (pinned !== null) actions.push(pinned ? 'unpin' : 'pin');
+  const priority = priorityAction(row);
+  if (priority) actions.push(priority);
   actions.push('copy-thread', 'copy-link', 'copy-id');
   if (canSnooze && !inboxRowArchived(row)) actions.push(...(row.snoozed ? (['snooze', 'unsnooze'] as const) : (['snooze'] as const)));
   if (canMarkRead) {

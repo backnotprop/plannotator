@@ -330,11 +330,11 @@ test.skipIf(!hasDom)("the header ⋯ menu's Star thread pins and Unstar thread u
   await renderApp(`#thread=${ids.waiting}`);
   await until(() => !!document.querySelector('[data-thread-more]'), 'the header ⋯');
   expect(document.querySelector('[data-pin-toggle]')).toBeNull();
-  // In its own group, after the read action and Snooze (which lead the menu), with a separator on each side.
+  // In its own group with Add to Priority, after the read action and Snooze (which lead the menu), with a separator on each side.
   const first = await openThreadMenu();
-  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 4).map((el) => el.textContent?.trim())).toEqual(['Mark read', 'Snooze', 'Star thread', 'Copy thread']);
+  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 4).map((el) => el.textContent?.trim())).toEqual(['Mark read', 'Snooze', 'Star thread', 'Add to Priority']);
   expect(first.previousElementSibling?.getAttribute('role')).toBe('separator');
-  expect(first.nextElementSibling?.getAttribute('role')).toBe('separator');
+  expect(first.nextElementSibling?.nextElementSibling?.getAttribute('role')).toBe('separator');
   await act(async () => first.click());
   await until(() => !threadMenu(), 'the menu to close');
   await until(() => pinnedOrder().includes(ids.waiting), 'the pinned row');

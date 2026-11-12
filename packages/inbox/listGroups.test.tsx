@@ -84,7 +84,7 @@ function row(id: string, section: InboxSectionId, extra: Partial<InboxListRow> =
   } as InboxListRow;
 }
 
-const LABELS: Record<InboxListGroupId, string> = {
+const LABELS: Record<Exclude<InboxListGroupId, 'priority'>, string> = {
   stopped: 'Stopped on you',
   holding: 'Holding up work',
   waiting: 'Waiting on you',
@@ -93,8 +93,8 @@ const LABELS: Record<InboxListGroupId, string> = {
   quiet: 'Quiet',
   snoozed: 'Snoozed',
 };
-const GROUPS = Object.keys(LABELS) as InboxListGroupId[];
-const section = (id: InboxListGroupId, threads: InboxListRow[]): InboxListSection => ({ id, label: LABELS[id], threads });
+const GROUPS = Object.keys(LABELS) as (keyof typeof LABELS)[];
+const section = (id: keyof typeof LABELS, threads: InboxListRow[]): InboxListSection => ({ id, label: LABELS[id], threads });
 /** One row in every group (the Snoozed band's a snoozed Stopped row), plus `more` rows by group. */
 function sections(more: Partial<Record<InboxListGroupId, InboxListRow[]>> = {}): InboxListSection[] {
   return GROUPS.map((id) => section(id, [row(`t_${id}`, id === 'snoozed' ? 'stopped' : id), ...(more[id] ?? [])]));

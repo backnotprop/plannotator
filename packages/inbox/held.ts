@@ -6,23 +6,31 @@
  * closes (`settleOwn`; when that happens and how it moves: settle.ts). Pure.
  */
 
-import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { INBOX_PRIORITY_GROUP, inboxRowInPriority, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 
 /**
- * What the list draws from a read: the sections, then the Snoozed band under
- * Quiet. Only the list goes through here: the band is in no section, so what
- * counts sections (the sidebar, the tab, notifications) never counts it. The
- * held rules below treat it as one more group, so a snoozed row settles,
+ * What the list draws from a read: the Priority group, the sections without
+ * the rows Priority took, then the Snoozed band under Quiet. Only the list
+ * goes through here: neither group is a section, so what counts sections (the
+ * sidebar, the tab, notifications) counts a row wherever it is drawn. The
+ * held rules below treat both as more groups, so a row in either settles,
  * holds and comes back as any other row does.
  */
 export function listGroups(model: { sections: readonly InboxListSection[]; snoozed?: readonly InboxListRow[] }): InboxListSection[] {
-  return [...model.sections, { ...INBOX_SNOOZED_BAND, threads: [...(model.snoozed ?? [])] }];
+  const first: InboxListRow[] = [];
+  const sections = model.sections.map((section) => {
+    if (!section.threads.some(inboxRowInPriority)) return section;
+    first.push(...section.threads.filter(inboxRowInPriority));
+    return { ...section, threads: section.threads.filter((row) => !inboxRowInPriority(row)) };
+  });
+  return [{ ...INBOX_PRIORITY_GROUP, threads: first.sort(newestFirst) }, ...sections, { ...INBOX_SNOOZED_BAND, threads: [...(model.snoozed ?? [])] }];
 }
 
 /** The group a row's state puts it in. */
 function groupOf(row: InboxListRow): InboxListGroupId {
-  return row.snoozed ? INBOX_SNOOZED_BAND.id : row.section;
+  if (row.snoozed) return INBOX_SNOOZED_BAND.id;
+  return inboxRowInPriority(row) ? INBOX_PRIORITY_GROUP.id : row.section;
 }
 
 export interface HeldNotice {
@@ -236,8 +244,9 @@ export function settleOwn(
 ): InboxListSection[] {
   const before = rowsById(shown);
   const known = new Set<string>(latest.map((section) => section.id));
-  // A row held in the band stays there: its own `section` says where it was, not where it is drawn.
+  // A row held in the band or in Priority stays there: its own `section` says where it was, not where it is drawn.
   const inBand = new Set(shown.find((section) => section.id === INBOX_SNOOZED_BAND.id)?.threads.map((row) => row.thread_id));
+  const inPriority = new Set(shown.find((section) => section.id === INBOX_PRIORITY_GROUP.id)?.threads.map((row) => row.thread_id));
   const buckets = new Map<string, InboxListRow[]>();
   const put = (sectionId: string, row: InboxListRow) => {
     const bucket = buckets.get(sectionId);
@@ -257,7 +266,17 @@ export function settleOwn(
       // "N new", like any agent activity.
       else if (old && (old.resolved_at ?? null) !== null && old.back_from_archive !== true) continue;
       // Held: the state on screen, in the section that state sits in.
-      else if (old) put(inBand.has(old.thread_id) && known.has(INBOX_SNOOZED_BAND.id) ? INBOX_SNOOZED_BAND.id : known.has(old.section) ? old.section : section.id, old);
+      else if (old)
+        put(
+          inBand.has(old.thread_id) && known.has(INBOX_SNOOZED_BAND.id)
+            ? INBOX_SNOOZED_BAND.id
+            : inPriority.has(old.thread_id) && known.has(INBOX_PRIORITY_GROUP.id)
+              ? INBOX_PRIORITY_GROUP.id
+              : known.has(old.section)
+                ? old.section
+                : section.id,
+          old,
+        );
     }
   }
   return latest.map((section) => ({ ...section, threads: (buckets.get(section.id) ?? []).sort(section.id === INBOX_SNOOZED_BAND.id ? soonestBack : newestFirst) }));
@@ -312,20 +331,42 @@ export function snoozeChangedRows(shown: readonly InboxListSection[], latest: re
 }
 
 /**
+ * The rows on screen a Priority change moves by itself (`event: priority` with no thread open, as
+ * `snoozeChangedRows` for a snooze): each row drawn in Priority that the read no longer puts there, or drawn
+ * elsewhere and now in it (another tab or a phone added or removed it). Rows with agent activity wait behind "N new".
+ * The person's own add and remove in this window have moved their row already, so it is not here.
+ */
+export function priorityChangedRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): string[] {
+  const fresh = rowsById(latest);
+  const out: string[] = [];
+  for (const section of shown) {
+    if (section.id === INBOX_SNOOZED_BAND.id) continue;
+    for (const row of section.threads) {
+      const next = fresh.get(row.thread_id);
+      if (!next || next.snoozed || (section.id === INBOX_PRIORITY_GROUP.id) === inboxRowInPriority(next)) continue;
+      if (!hasNewAgentActivity(row, next)) out.push(row.thread_id);
+    }
+  }
+  return out;
+}
+
+/**
  * Where the thread covers the list, does Back move the thread just closed
  * (`settleThread`) instead of showing it as left? Yes when an agent message
  * there is still unseen (it comes back unread), and when the thread now waits
  * on the person (Stopped, Holding, Waiting: an agent asked while it was open,
  * seen or not) and is drawn in another group, so it is never left folded in
  * Quiet with questions open. A thread only read stays where it was left. A
- * thread snoozed or unsnoozed while it was open goes to its place: that is what
- * the person just asked for.
+ * thread snoozed or unsnoozed, or added to or removed from Priority, while it
+ * was open goes to its place: that is what the person just asked for.
  */
 export function settlesOnBack(shown: readonly InboxListSection[], row: InboxListRow): boolean {
   const drawn = shown.find((section) => section.threads.some((other) => other.thread_id === row.thread_id));
   if (drawn && (drawn.id === INBOX_SNOOZED_BAND.id) !== !!row.snoozed) return true;
   if (row.snoozed) return false;
+  if (drawn && (drawn.id === INBOX_PRIORITY_GROUP.id) !== inboxRowInPriority(row)) return true;
   if (row.unseen > 0) return true;
+  if (drawn?.id === INBOX_PRIORITY_GROUP.id) return false;
   if (row.section !== 'stopped' && row.section !== 'holding' && row.section !== 'waiting') return false;
   return drawn?.id !== row.section;
 }

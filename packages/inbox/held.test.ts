@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNews, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, snoozeChangedRows } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNews, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, priorityChangedRows, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, snoozeChangedRows } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -581,7 +581,7 @@ describe('the Snoozed band', () => {
   test("an agent's message in a snoozed thread is never news; its return is, and waits behind \"N new\" in the band", () => {
     const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
     const shown = model([], [asleep(a)]);
-    expect(shown.map((s) => s.id)).toEqual(['waiting', 'snoozed']);
+    expect(shown.map((s) => s.id)).toEqual(['priority', 'waiting', 'snoozed']);
     // The agent asks again while it sleeps: nothing to show.
     const asked = model([], [asleep({ ...a, last_at: '2026-10-07T11:00:00Z', last_agent_at: '2026-10-07T11:00:00Z' } as InboxListRow)]);
     expect(heldNotice(shown, asked).count).toBe(0);
@@ -642,6 +642,66 @@ describe('the Snoozed band', () => {
     const next = addOwnThreads(shown, model([], [sooner, asleep(b)]), ['a']);
     expect(next.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['a', 'b']);
     expect(next.find((s) => s.id === 'waiting')!.threads).toEqual([]);
+  });
+});
+
+// The person's Priority: a group drawn first, taking its rows out of their sections. The failures this guards: a row
+// drawn twice or in its section, a held row leaving Priority at a settle, another tab's add not moving the row, and
+// agent news in a Priority thread moving it before Show.
+describe('the Priority group', () => {
+  const at = (minute: number) => `2026-10-07T10:${String(minute).padStart(2, '0')}:00Z`;
+  const r = (id: string, section: InboxListRow['section'], minute: number, extra: Partial<InboxListRow> = {}) =>
+    ({ ...row(id, 'docs-site', at(minute), 'agent'), section, unseen: 0, resolved_at: null, ...extra }) as InboxListRow;
+  const on = (minute: number) => ({ person: true, at: at(minute), ask: null }) as const;
+  const six = (...rows: InboxListRow[]): InboxListSection[] =>
+    (['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'] as const).map((id) => ({ id, label: id, threads: rows.filter((row) => row.section === id) }));
+  const ids = (list: InboxListSection[]) => list.filter((s) => s.threads.length).map((s) => `${s.id}:${s.threads.map((t) => t.thread_id).join(',')}`);
+  const asleep = (x: InboxListRow) => ({ ...x, snoozed: { until: '2026-10-08T12:00:00Z', at: at(0) } }) as InboxListRow;
+
+  test('Priority comes first, newest first, and its rows leave their sections; a snoozed or archived row is not in it', () => {
+    const list = listGroups({
+      sections: six(r('stop', 'stopped', 1, { priority: on(2) }), r('q', 'quiet', 9, { priority: on(1) }), r('w', 'waiting', 5), r('gone', 'quiet', 8, { priority: on(3), resolved_at: at(8) })),
+      snoozed: [asleep(r('nap', 'waiting', 7, { priority: on(4) }))],
+    });
+    expect(list[0]!.id).toBe('priority');
+    expect(list[0]!.label).toBe('Priority');
+    expect(ids(list)).toEqual(['priority:q,stop', 'waiting:w', 'quiet:gone', 'snoozed:nap']);
+    // None added: the group is empty, so it is not drawn.
+    expect(listGroups({ sections: six(r('w', 'waiting', 5)) })[0]!.threads).toEqual([]);
+  });
+
+  test('a held row drawn in Priority stays there at a settle; agent news in it waits for Show', () => {
+    const shown = listGroups({ sections: six(r('a', 'waiting', 1, { priority: on(1) }), r('b', 'new', 2)) });
+    // An agent wrote in `a`: the latest read has it in Stopped and unseen. It is held in Priority, counted as news.
+    const latest = listGroups({ sections: six(r('a', 'stopped', 6, { priority: on(1), unseen: 1 }), r('b', 'new', 2)) });
+    const settled = settleOwn(shown, latest);
+    expect(ids(settled)).toEqual(['priority:a', 'new:b']);
+    expect(heldNotice(settled, latest).count).toBe(1);
+    expect(priorityChangedRows(shown, latest)).toEqual([]);
+  });
+
+  test("priorityChangedRows: another tab's add and remove move their rows; nothing else does", () => {
+    const a = r('a', 'waiting', 5);
+    const b = r('b', 'quiet', 4, { priority: on(1) });
+    const c = r('c', 'new', 3);
+    const shown = listGroups({ sections: six(a, b, c) });
+    const latest = listGroups({ sections: six({ ...a, priority: on(9) }, { ...b, priority: null }, c) });
+    const moving = priorityChangedRows(shown, latest);
+    expect(moving.sort()).toEqual(['a', 'b']);
+    const next = moving.reduce((list, id) => settleThread(list, latest, id), shown);
+    expect(ids(next)).toEqual(['priority:a', 'new:c', 'quiet:b']);
+    expect(priorityChangedRows(next, latest)).toEqual([]);
+  });
+
+  test('settlesOnBack: a thread added or removed while open moves on Back; one only read in Priority stays', () => {
+    const a = r('a', 'waiting', 5);
+    const inWaiting = listGroups({ sections: six(a) });
+    expect(settlesOnBack(inWaiting, { ...a, priority: on(6) })).toBe(true);
+    const inPriority = listGroups({ sections: six({ ...a, priority: on(6) }) });
+    expect(settlesOnBack(inPriority, { ...a, priority: null })).toBe(true);
+    expect(settlesOnBack(inPriority, { ...a, priority: on(6) })).toBe(false);
+    // Waiting on the person, drawn in Priority: that is its place, not another group.
+    expect(settlesOnBack(inPriority, { ...a, section: 'stopped', priority: on(6) })).toBe(false);
   });
 });
 

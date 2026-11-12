@@ -256,12 +256,18 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
   expect(rowMenuActions({ ...read, read_at: '2026-10-20T00:00:00Z', sent: { at: '2026-10-20T00:00:00Z' } } as typeof base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'unread', 'archive']);
   expect(rowMenuActions({ ...read, resolved_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-thread', 'copy-link', 'copy-id']);
   expect(rowMenuActions(read, false)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
+  // An Inbox that keeps Priority (a `priority` key on rows): Add or Remove right after Star; none on an archived row
+  // not in it, none from an older Inbox (no key).
+  const out = { ...base, priority: null } as typeof base;
+  expect(rowMenuActions(out, true, false)).toEqual(['pin', 'priority-add', 'copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
+  expect(rowMenuActions({ ...out, priority: { person: true, at: '2026-10-20T00:00:00Z', ask: null } }, true, true)).toEqual(['unpin', 'priority-remove', 'copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
+  expect(rowMenuActions({ ...out, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true, false)).toEqual(['pin', 'copy-thread', 'copy-link', 'copy-id']);
 });
 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Add to Priority', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   expect(menu()!.querySelector('[role="separator"]')).not.toBeNull();
   // The row keeps a muted background while its menu is open; nothing opened, nothing selected.
   expect(rowWrap(ids.waiting)!.hasAttribute('data-menu')).toBe(true);
@@ -328,7 +334,7 @@ test.skipIf(!hasDom)('Mark read leaves the row in place, read, with its toast; i
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Add to Priority', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
   const before = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
   await choose('mark-unread');
   expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/mark-unread`)).toBe(true);
@@ -365,7 +371,7 @@ test.skipIf(!hasDom)('a row Mark unread brought back keeps Move back in its menu
   await loopback(`/api/inbox/threads/${ids.waiting}/mark-unread`, 'POST', '{}');
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Add to Priority', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
   await choose('unread');
   await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the question reopened');
   const thread = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };

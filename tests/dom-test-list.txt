@@ -217,6 +217,7 @@ packages/inbox/copyMessage.test.tsx
 packages/inbox/decisionExportMenu.test.tsx
 packages/inbox/guideRequest.test.tsx
 packages/inbox/pinnedThreads.test.tsx
+packages/inbox/priority.test.tsx
 packages/inbox/rowStar.test.tsx
 packages/inbox/artifactPins.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx

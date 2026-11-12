@@ -245,6 +245,24 @@ describe("snooze", () => {
     expect(server.store.snoozes()).toEqual([]);
   });
 
+  test("a thread in the person's Priority keeps it while snoozed and when it comes back", async () => {
+    const { server, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    expect((await post(server, `/api/inbox/threads/${a.thread_id}/priority`, { priority: true })).status).toBe(200);
+    const first = server.store.priorities().threads[0]!.at;
+    await snooze(server, a.thread_id, later(800));
+    // Snoozed: in the band (the window draws it there, not in Priority), its priority kept.
+    const snoozed = (await list(server)).snoozed!.find((r) => r.thread_id === a.thread_id)!;
+    expect(snoozed.priority).toEqual({ person: true, at: first, ask: null });
+    let back = await list(server);
+    for (let i = 0; i < 40 && back.snoozed!.length > 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      back = await list(server);
+    }
+    expect(back.snoozed).toEqual([]);
+    expect(back.sections.flatMap((s) => s.threads).find((r) => r.thread_id === a.thread_id)!.priority).toEqual({ person: true, at: first, ask: null });
+  });
+
   test("a time gone by is refused; Unsnooze ends it", async () => {
     const { server, send } = await setup();
     const a = await send("News", "ses_a");

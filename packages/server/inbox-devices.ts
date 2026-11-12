@@ -180,6 +180,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // "inbox-starred-pills". A star stays on the computer the phone reaches (DOOR_WRITES `local`): never forwarded.
   { method: "POST", route: /^threads\/([^/]+)\/pin$/, window: (m) => `/api/inbox/threads/${m[1]}/pin` },
   { method: "POST", route: /^pins$/, window: () => "/api/inbox/pins" },
+  // Add to Priority, Remove from Priority and their Undo (contract 7.66): local, like a star.
+  { method: "POST", route: /^threads\/([^/]+)\/priority$/, window: (m) => `/api/inbox/threads/${m[1]}/priority` },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
   // `reask`: Re-ask, the agent asks its open questions again in one message (7.61).

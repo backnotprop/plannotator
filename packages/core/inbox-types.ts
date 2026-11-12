@@ -1773,6 +1773,16 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   snoozed?: InboxRowSnooze | null;
   /**
+   * The thread is in the list's Priority group (`inboxRowInPriority`), or null.
+   * `person`: the person added it (`inbox/priority.json`), `at` when; `ask` is
+   * always null: no agent can set one. Like `pinned_at`, only on the list model the window
+   * and the phone read, never on anything an agent reads. Every row from an
+   * Inbox that keeps priority carries the key; absent from an older Inbox (no
+   * menu item, no group) and on a linked machine's row (an add stays on the
+   * computer that made it).
+   */
+  priority?: InboxRowPriority | null;
+  /**
    * The thread came back from a snooze at this time and has not been read
    * since: the row's small clock. Only on the list model, like `snoozed`.
    */
@@ -1932,8 +1942,44 @@ export const INBOX_ROW_WAIT_TEXT_MAX = 200;
 export const INBOX_ROW_WAIT_HOLDS_MAX = 8;
 export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
-/** A group the list draws: a section, or the Snoozed band under Quiet (`INBOX_SNOOZED_BAND`), which no row is placed in. */
-export type InboxListGroupId = InboxSectionId | "snoozed";
+/**
+ * A group the list draws: a section, the Priority group above them all (`INBOX_PRIORITY_GROUP`), or the Snoozed band
+ * under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row.
+ */
+export type InboxListGroupId = InboxSectionId | "snoozed" | "priority";
+
+/** Why a row is in Priority (`InboxListRow.priority`). */
+export interface InboxRowPriority {
+  person: boolean;
+  /** When the person added it. */
+  at: string;
+  ask: null;
+}
+
+/** The person's adds to Priority, one per thread, kept in `inbox/priority.json` outside the event log. */
+export interface InboxPriorityEntry {
+  thread_id: string;
+  at: string;
+}
+
+/**
+ * What the priority route answers, and what its Undo writes back: the person's add (`at`) and the time they took an
+ * agent's ask out (`off_at`) as they were before the write, null meaning none.
+ */
+export interface InboxPriorityBefore {
+  at: string | null;
+  off_at: string | null;
+}
+
+export const INBOX_PRIORITY_GROUP = { id: "priority", label: "Priority" } as const;
+
+/**
+ * The row is drawn in the Priority group: it carries `priority`, and is neither snoozed (the Snoozed band wins) nor
+ * archived. One rule for the window's list and its menus.
+ */
+export function inboxRowInPriority(row: Pick<InboxListRow, "priority" | "snoozed" | "resolved_at" | "back_from_archive">): boolean {
+  return row.priority != null && !row.snoozed && !inboxRowArchived(row);
+}
 
 export interface InboxListSection {
   id: InboxListGroupId;

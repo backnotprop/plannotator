@@ -89,7 +89,7 @@ async function agentSends(body: string, reply_to?: string): Promise<string> {
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-const TESTS = 21;
+const TESTS = 22;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -838,4 +838,29 @@ test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the 
   expect(order(el)).toEqual(held);
   expect(rowOf(el, late)).toBeNull();
   expect(el.querySelector('[data-inbox-notice]')!.textContent).toBe(notice);
+});
+
+// State 22 of the priority spec: a list held still with a thread open. An agent writing in a thread drawn in the
+// person's Priority is news like any other: it waits behind "N new · Show", and the row stays drawn in Priority.
+test.skipIf(!hasDom)("an agent's message in a Priority thread, while the list is held, waits behind Show; the row stays in Priority", async () => {
+  const [first, added] = world.news as [string, string];
+  const { serverSession } = JSON.parse((await loopback('/api/inbox/threads')).text) as { serverSession: string };
+  expect((await loopback(`/api/inbox/threads/${added}/priority`, 'POST', JSON.stringify({ serverSession, priority: true }))).status).toBe(200);
+  const el = await renderApp(`#project=${world.project}`);
+  expect(sectionOfRow(el, added)).toBe('priority');
+  await openRow(el, first);
+  await agentSends('A late note in the Priority thread.', added);
+  act(() => pokeStream!());
+  await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(sectionOfRow(el, added)).toBe('priority');
+
+  closeThread();
+  await wait(SETTLE_BEAT_MS + 60);
+  await until(() => sectionOfRow(el, first) !== 'new', 'the settle');
+  expect(sectionOfRow(el, added)).toBe('priority');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('[data-inbox-notice]') === null, 'Show');
+  expect(sectionOfRow(el, added)).toBe('priority');
 });
