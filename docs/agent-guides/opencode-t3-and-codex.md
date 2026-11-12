@@ -119,6 +119,10 @@ order, `list` named it `2 files: notes.md, mock.html`, its feedback arrived
 headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 `close all` closed a second bundle.
 
+### OpenCode 2: sessions the Inbox starts
+
+In a server the Inbox started (`PLANNOTATOR_INBOX_LAUNCHED=1`), the plugin's wake watches each root session as it is created (`session.created`), not only once it ran, so the Inbox's first message reaches a session that has had no turn; with `PLANNOTATOR_INBOX_LAUNCHED_SESSION` it watches that session from the start (a restart). The rest is "OpenCode" in `inbox-launch.md`. Test: `inbox-v2-wake.test.ts` "OpenCode 2 started by the Inbox".
+
 ### OpenCode 2: the installer updates a running service's plugin
 
 The OpenCode 2 service keeps the plugin it loaded. When it is running with an

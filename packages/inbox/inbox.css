@@ -4753,13 +4753,13 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn:hover, .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn[aria-expanded="true"] { color: var(--foreground); }
 .ib-cp-lchbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-picker.ib-cp-lch { left: auto; right: 14px; width: min(400px, calc(100% - 28px)); }
-.ib-cp-lchcols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.ib-cp-lchcols { display: grid; grid-auto-flow: column; grid-template-columns: minmax(0, 3fr); grid-auto-columns: minmax(0, 2fr); min-height: 0; overflow: hidden; }
 .ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 1px solid var(--ib-line); }
 .ib-cp-list.ib-cp-lchcol { grid-template-columns: minmax(0, 1fr) 16px; }
 .pn-inbox .ib-cp-opt.ib-cp-lchopt { width: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); text-align: left; cursor: pointer; }
 .pn-inbox .ib-cp-opt.ib-cp-lchopt:hover, .pn-inbox .ib-cp-opt.ib-cp-lchopt:focus-visible { background: color-mix(in oklch, var(--muted) 80%, transparent); outline: none; }
 :root.light .pn-inbox .ib-cp-opt.ib-cp-lchopt:is(:hover, :focus-visible) { background: var(--muted); }
-.ib-cp-lchopt .ib-cp-op { display: flex; gap: 0.4em; align-items: baseline; }
+.ib-cp-lchopt .ib-cp-op { display: block; }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
