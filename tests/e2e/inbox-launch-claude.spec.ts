@@ -692,8 +692,15 @@ test('a turn that ends in an API error: one note with Claude Code\'s own words, 
     await openThread(page, threadId);
     const p = pane(page);
     const notes = p.locator('article.ib-message[data-author="agent"]');
-    await expect(notes.filter({ hasText: "Claude Code's turn ended with an error:" })).toHaveCount(1, { timeout: 30_000 });
-    await expect(notes).toContainText(`Claude Code's turn ended with an error: ${error}`);
+    // The window sets a message's apostrophe as ’ (smart punctuation); the stored words keep the plain one.
+    const errorNotes = notes.filter({ hasText: 'Claude Code’s turn ended with an error:' });
+    await expect(errorNotes).toHaveCount(1, { timeout: 30_000 });
+    await expect(errorNotes).toContainText(error);
+    const agentBodies = async () =>
+      ((await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { author: { kind: string }; body: string }[] } }).thread.messages
+        .filter((m) => m.author.kind === 'agent')
+        .map((m) => m.body);
+    expect(await agentBodies()).toEqual([`Claude Code's turn ended with an error: ${error}`]);
     const line = p.locator('[data-run="failed"]');
     await expect(line).toHaveText(/^Claude Code couldn't answer\. Your message is kept\.\s*Try again$/);
     await shot(page, '16-turn-error');
@@ -713,7 +720,8 @@ test('a turn that ends in an API error: one note with Claude Code\'s own words, 
     await expect(notes).toHaveCount(2, { timeout: 30_000 });
     await expect(notes.last()).toContainText(`Done: ${words}`);
     await expect(p.locator('[data-run]')).toHaveCount(0);
-    await expect(notes.filter({ hasText: "Claude Code's turn ended with an error:" })).toHaveCount(1);
+    await expect(errorNotes).toHaveCount(1);
+    expect((await agentBodies()).filter((body) => body.startsWith("Claude Code's turn ended with an error:"))).toHaveLength(1);
   } finally {
     fake.configure({ apiError: null, workMs: 800 });
   }
