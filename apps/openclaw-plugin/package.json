@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/openclaw",
-  "version": "0.28.61",
+  "version": "0.28.62",
   "type": "module",
   "description": "Plannotator plugin for OpenClaw - the Plannotator Inbox in your own OpenClaw chats",
   "author": "backnotprop",
