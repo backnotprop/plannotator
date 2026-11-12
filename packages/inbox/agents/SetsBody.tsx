@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import type { InboxIconSet, InboxIconSetIcon } from '@plannotator/core/inbox-types';
 import { keepAgentFace, type AgentFaceRef } from './agentFaces';
 import type { AgentFace } from './faceChoices';
@@ -49,7 +49,7 @@ const licenceLabel = (spdx: string | undefined) => (spdx ? spdx.replace(/-(\d+\.
  * Its keys are the dialog's own (the arrows move in the grid, Enter in the search picks the first found): it adds no
  * shortcut. Choosing an icon closes the dialog (`onDone`). The one credit a set's licence asks for (game-icons.net's) is a muted line under its grid.
  */
-export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
+export function SetsBody({ agent, face, onDone, pin, onPick }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; pin?: ReactNode; onPick?: (face: AgentFace) => void }) {
   const sets = useIconSets();
   // The pointer of fetchable sets is read only here, when the person opens Sets.
   useEffect(() => {
@@ -100,9 +100,37 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
   }, []);
   useEffect(() => () => watcher.current?.disconnect(), []);
 
+  // Exploration ("beside"): `pin` sits under the agent's icon in the grid, scrolling with it.
+  const pinBox = useRef<HTMLDivElement>(null);
+  const [pinAt, setPinAt] = useState<{ top: number; left: number } | null>(null);
+  const shownOnce = useRef(false);
+  useLayoutEffect(() => {
+    if (!pin) return;
+    const place = () => {
+      const box = scroller.current;
+      const cell = box?.querySelector<HTMLElement>('.am-sets-i[aria-checked="true"]');
+      if (!box || !cell) return setPinAt((was) => (was ? null : was));
+      const b = box.getBoundingClientRect();
+      const c = cell.getBoundingClientRect();
+      const width = pinBox.current?.offsetWidth ?? 96;
+      const left = Math.max(width / 2, Math.min(box.clientWidth - width / 2, c.left - b.left + c.width / 2));
+      const top = c.bottom - b.top + box.scrollTop + 4;
+      setPinAt((was) => (was && Math.abs(was.top - top) < 0.5 && Math.abs(was.left - left) < 0.5 ? was : { top, left }));
+      if (!shownOnce.current) {
+        shownOnce.current = true;
+        cell.scrollIntoView({ block: 'nearest' });
+      }
+    };
+    place();
+    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    if (scroller.current) watch?.observe(scroller.current);
+    return () => watch?.disconnect();
+  });
+
   const choose = (icon: InboxIconSetIcon) => {
     if (!set) return;
     keepLastSet(set.id);
+    if (onPick) return onPick(`set:${set.id}/${icon.id}`);
     keepAgentFace(agent, `set:${set.id}/${icon.id}`);
     onDone();
   };
@@ -215,6 +243,11 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
               );
             })}
         </div>
+        {pin && pinAt && (
+          <div ref={pinBox} className="ib-agi-pin" style={{ top: pinAt.top, left: pinAt.left }}>
+            {pin}
+          </div>
+        )}
       </div>
       {set?.credits && (
         <div className="am-sets-credit">

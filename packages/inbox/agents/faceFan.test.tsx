@@ -1,11 +1,11 @@
 /**
  * The agent marks' face picker (FaceFan.tsx, opened from AgentMark.tsx) and where its choices sit (fanLayout.ts).
  *
- * What this catches: a pointer only passing over a mark opening the picker (or a rest on it not opening it); a choice
- * not kept for its agent or not shown on the mark; the picker staying open after Escape or after the pointer has left
- * the mark and the fan; the keys not opening it or not moving along its arcs; a long press on a touch screen stepping
- * the cycle instead of opening it; reduced motion still moving the choices; a choice placed off the window or two
- * choices closer than a target and its gap.
+ * What this catches: a pointer only passing over a mark opening the picker (or a rest on it not opening it); a click or
+ * a tap not opening it, changing the face, or a second click not closing it; a choice not kept for its agent or not
+ * shown on the mark; the picker staying open after Escape or after the pointer has left the mark and the fan; the keys
+ * not opening it or not moving along its arcs; a long press on a touch screen not opening it; reduced motion still
+ * moving the choices; a choice placed off the window or two choices closer than a target and its gap.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No server, no fetch.
  */
@@ -88,6 +88,8 @@ const leave = (el: Element) => {
   Object.assign(event, { pointerType: 'mouse', relatedTarget: document.body });
   act(() => void el.dispatchEvent(event));
 };
+// A pointer's click (detail 1); element.click() is a key's or a screen reader's (detail 0).
+const press = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
 const key = (el: Element, k: string) => act(() => void el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })));
 
 test.skipIf(!hasDom)('a rest of the pointer on the mark opens the picker; a pointer only passing over opens nothing', async () => {
@@ -218,21 +220,67 @@ test.skipIf(!hasDom)('keyboard: Enter on the mark opens it on the face shown; th
   await until(() => document.activeElement === icon, 'focus back on the mark');
 });
 
-test.skipIf(!hasDom)('a click still steps the cycle and never opens the picker; a long press on a touch screen opens it and its lift steps nothing', async () => {
+// The owner, 2026-11-12: "clicking should just open the sundial too". A click never changes the face.
+test.skipIf(!hasDom)('a click opens the picker and changes no face; a second click on the mark (or on the plate over it) closes it, and it stays closed while the pointer rests there', async () => {
   const icon = mount();
-  act(() => icon.click());
-  expect(faces.agentFaceOf('ses_1')).toBe('glass');
+  act(() => faces.keepAgentFace('ses_1', 'glass-blue'));
+  pointer(icon, 'pointerdown', { x: 29, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a click to open it');
+  expect(icon.getAttribute('aria-expanded')).toBe('true');
+  expect(faces.agentFaceOf('ses_1')).toBe('glass-blue');
+  expect(choice('glass-blue')!.getAttribute('aria-checked')).toBe('true');
+  // A second click on the mark itself: closed, nothing chosen.
+  pointer(icon, 'pointerdown', { x: 29, y: 384 });
+  press(icon);
+  await until(() => icon.getAttribute('aria-expanded') === 'false', 'a second click to close it');
+  expect(faces.agentFaceOf('ses_1')).toBe('glass-blue');
+  // The pointer resting and moving on the mark opens nothing again until it leaves.
+  pointer(icon, 'pointermove', { x: 30, y: 385 });
   await wait(fan.FAN_DWELL_MS + 60);
-  expect(group()).toBeNull();
+  expect(icon.getAttribute('aria-expanded')).toBe('false');
+  // Open again; the plate lies over the mark, so a click there (on no choice) is the mark's own second click.
+  press(icon);
+  await until(() => group() !== null && icon.getAttribute('aria-expanded') === 'true', 'a click to open it again');
+  const plate = document.querySelector('.am-fan')!;
+  act(() => void plate.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 29, clientY: 384 })));
+  await until(() => icon.getAttribute('aria-expanded') === 'false', 'a click on the plate over the mark to close it');
+  expect(faces.agentFaceOf('ses_1')).toBe('glass-blue');
+});
+
+test.skipIf(!hasDom)('a click on a picker the pointer opened by resting keeps it open (the click the rest beat); the next click closes it', async () => {
+  const icon = mount();
+  enter(icon);
+  await until(() => group() !== null, 'the picker');
+  press(icon);
+  await wait(40);
+  expect(icon.getAttribute('aria-expanded')).toBe('true');
+  press(icon);
+  await until(() => icon.getAttribute('aria-expanded') === 'false', 'the next click to close it');
+  expect(faces.agentFaceOf('ses_1')).toBe('agent');
+});
+
+test.skipIf(!hasDom)("a tap opens the finger's picker and changes no face; a long press opens it too and its lift does not close it", async () => {
+  const icon = mount();
   // A touch: no hover opening, ever.
   enter(icon, 'touch');
   await wait(fan.FAN_DWELL_MS + 60);
   expect(group()).toBeNull();
   pointer(icon, 'pointerdown', { kind: 'touch', x: 29, y: 384 });
-  await until(() => group() !== null, 'a long press to open it');
   pointer(icon, 'pointerup', { kind: 'touch', x: 29, y: 384 });
-  act(() => icon.click());
-  expect(faces.agentFaceOf('ses_1')).toBe('glass');
+  press(icon);
+  await until(() => group() !== null, 'a tap to open it');
+  expect(document.querySelector('.am-fan')!.hasAttribute('data-touch')).toBe(true);
+  expect(faces.agentFaceOf('ses_1')).toBe('agent');
+  key(document.body, 'Escape');
+  await until(() => icon.getAttribute('aria-expanded') === 'false', 'Escape to close it');
+  pointer(icon, 'pointerdown', { kind: 'touch', x: 29, y: 384 });
+  await until(() => icon.getAttribute('aria-expanded') === 'true', 'a long press to open it');
+  pointer(icon, 'pointerup', { kind: 'touch', x: 29, y: 384 });
+  press(icon);
+  await wait(40);
+  expect(icon.getAttribute('aria-expanded')).toBe('true');
+  expect(faces.agentFaceOf('ses_1')).toBe('agent');
 });
 
 test.skipIf(!hasDom)('reduced motion: the choices appear in place, with no travel', async () => {

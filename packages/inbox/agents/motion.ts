@@ -42,7 +42,7 @@ import { ownIconSrc } from './ownIcons';
 import { setArtStyle, setFaceDrawing } from './iconSets';
 import { AGENT_RIGS, CLAUDE_RAY_ANGLES, type AgentRigKind } from './rigs';
 
-export { AGENT_FACES, nextAgentFace, type AgentFace } from './faceChoices';
+export { AGENT_FACES, type AgentFace } from './faceChoices';
 
 /** The rig an agent host's mark has; null for a host with none (its plain mark, moved as a whole). */
 export function agentRigOf(host: string | null | undefined): AgentRigKind | null {
@@ -1170,7 +1170,7 @@ export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | n
   return plainOf(icon);
 }
 
-/** Show a face (the click cycle, or the face kept for this agent). `animate`: the swap's little show. */
+/** Show a face (the one kept for this agent). `animate`: the swap's little show. */
 export function showAgentFace(el: HTMLElement, face: AgentFace, withMotion = true): void {
   const icon = icons.get(el);
   if (!icon) return;

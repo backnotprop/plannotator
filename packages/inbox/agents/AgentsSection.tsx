@@ -18,7 +18,7 @@ import { agentFacts, agentHostName, agentsGroups, type AgentEntry } from './mode
  * machine name, not even for the thread or the machine on show (the owner, 2026-11-09: "It's a human-controlled list";
  * unlike Pinned and Projects, which keep where you are). Only a press on its heading opens or closes it.
  * Under it the agents, each a 24 px animated mark (motion.ts) and its name; the mark is a button of its own over the
- * row's (AgentMark.tsx: a click steps its face, a rest of the pointer opens its face picker). A machine that has no agent shows nothing.
+ * row's (AgentMark.tsx: a click or a rest of the pointer opens its face picker). A machine that has no agent shows nothing.
  * While agents show from more than one machine, each machine's name is a small quiet grey caption above its agents
  * (still the machine's filter, as its Machines row was) and the agents sit a small step in; with one machine there is
  * no caption, only the agents. No counts and no state marks; no lines; roomier gaps between machines. A click on an
@@ -124,7 +124,7 @@ const AgentRow = memo(
             onClick={(event) => props.onOpen(entry, event.currentTarget)}
             data-agent-open={props.opens}
           >
-            {/* The mark's place: the mark is its own button over it (AgentMark: its picker and click cycle). */}
+            {/* The mark's place: the mark is its own button over it (AgentMark: its picker). */}
             <span className="am-slot" aria-hidden="true" />
             <span className="ib-name" dir="auto">
               {entry.name}

@@ -66,6 +66,33 @@ export function animateSource(face: AgentFace, ours: FaceSources | null): { icon
   return typeof src === 'string' ? { icon: face, src } : null;
 }
 
+/**
+ * One press of "Animate it": keeps a request with the Inbox and opens New message filled in, the picture attached.
+ * `onOpened` runs just before the composer opens. False when the Inbox or the picture could not be reached.
+ */
+export async function startAnimate(agent: AgentFaceRef, source: { icon: string; src: string }, onOpened: () => void = () => {}): Promise<boolean> {
+  try {
+    const ref = typeof agent === 'string' ? { id: agent, session: agent, continues: [] as string[] } : agent;
+    const sessions = [...new Set([ref.session, ...(ref.continues ?? [])].filter((id): id is string => !!id && id !== ref.id))];
+    const [picture, answer] = await within(
+      Promise.all([
+        fetch(source.src).then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          return r.blob();
+        }),
+        inboxApi.askIconAnimate({ icon: source.icon, agent: ref.id, sessions }),
+      ]),
+    );
+    if (typeof answer.request !== 'string') throw new Error('no request');
+    const file = new File([picture], `agent-icon.${EXT[picture.type] ?? 'png'}`, { type: picture.type });
+    onOpened();
+    openComposer({ subject: ANIMATE_THREAD_NAME, body: animatePrompt(answer.request), files: [file], to: 'pick' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The original's still, for "Use the original" (none for a one-colour set's icon: an image cannot take the text colour). */
 function originalStill(face: AgentFace, ours: FaceSources | null): string | null {
   if (isOwnFace(face)) return ownIconSrc(face, true);
@@ -83,7 +110,7 @@ const isOurs = (face: AgentFace) => !isOwnFace(face) && !isSetFace(face) && face
  * it. The agent's hand-back changes this icon in every window by itself; a picture an agent handed back offers "Use the
  * original" in its place.
  */
-export function AnimateIt({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
+export function AnimateIt({ agent, face, onDone, onBack = onDone, bare = false, beforeStart }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; onBack?: () => void; bare?: boolean; beforeStart?: () => void }) {
   const originals = useAnimatedOriginals();
   const ours = useAgentFaceSources(isOurs(face));
   const [busy, setBusy] = useState(false);
@@ -98,27 +125,27 @@ export function AnimateIt({ agent, face, onDone }: { agent: AgentFaceRef; face: 
     if (busy || !source) return;
     setBusy(true);
     setFailed(false);
-    try {
-      const ref = typeof agent === 'string' ? { id: agent, session: agent, continues: [] as string[] } : agent;
-      const sessions = [...new Set([ref.session, ...(ref.continues ?? [])].filter((id): id is string => !!id && id !== ref.id))];
-      const [picture, answer] = await within(
-        Promise.all([
-          fetch(source.src).then((r) => {
-            if (!r.ok) throw new Error(String(r.status));
-            return r.blob();
-          }),
-          inboxApi.askIconAnimate({ icon: source.icon, agent: ref.id, sessions }),
-        ]),
-      );
-      if (typeof answer.request !== 'string') throw new Error('no request');
-      const file = new File([picture], `agent-icon.${EXT[picture.type] ?? 'png'}`, { type: picture.type });
-      onDone();
-      openComposer({ subject: ANIMATE_THREAD_NAME, body: animatePrompt(answer.request), files: [file], to: 'pick' });
-    } catch {
-      setFailed(true);
-      setBusy(false);
-    }
+    beforeStart?.();
+    if (await startAnimate(agent, source, onDone)) return;
+    setFailed(true);
+    setBusy(false);
   };
+
+  if (bare) {
+    if (!source) return null;
+    return (
+      <span className="ib-agi-pinb" data-animate-it="">
+        <button type="button" className="ib-btn ib-sm ib-agi-anim-b" data-animate-go="" aria-busy={busy || undefined} disabled={busy} onClick={() => void start()}>
+          {ANIMATE_WORDS.button}
+        </button>
+        {failed && (
+          <span className="ib-agi-anim-e" role="status">
+            {ANIMATE_WORDS.failed}
+          </span>
+        )}
+      </span>
+    );
+  }
 
   return (
     <div className="ib-agi-anim" data-animate-it="">
@@ -137,7 +164,7 @@ export function AnimateIt({ agent, face, onDone }: { agent: AgentFaceRef; face: 
           data-animate-undo=""
           onClick={() => {
             keepAgentFace(agent, back);
-            onDone();
+            onBack();
           }}
         >
           {backStill && <img src={backStill} alt="" draggable={false} />}
