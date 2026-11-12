@@ -1,14 +1,3 @@
-/**
- * Pair a cloud agent, end to end (packages/inbox/cloud/, packages/server/inbox-cloud-*.ts): Settings → Devices →
- * Pair a cloud agent with a name only (the relay is a dead loopback port, so Settings says it could not reach it),
- * Add wake address, Send a test (a run started, its link), then New message to the agent and the thread's
- * "Woke Nightly fixer · run started" line.
- *
- * The routine's webhook is a stub server in this spec on loopback; no outside service is called. The Inbox is the
- * compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR (see inbox.spec.ts for the build). CLOUD_WAKE_SHOTS_DIR:
- * where to write PNGs (none when unset).
- */
-
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
