@@ -8,16 +8,7 @@ export interface PRSessionState {
   prStackTree: PRStackTree | null;
   prDiffScope: PRDiffScope;
   prDiffScopeOptions: PRDiffScopeOption[];
-  /**
-   * The platform withheld per-file content for this PR (too large). Always
-   * reported; cleared when a server response stops reporting the flag.
-   */
   prPatchIncomplete: boolean;
-  /**
-   * A local checkout (worktree pool) exists, so the partial-diff notice can
-   * offer the "Load full diff" recompute. Without it the notice is
-   * informational only.
-   */
   prPatchUpgradeAvailable: boolean;
 }
 

@@ -9,7 +9,6 @@ const ARTIFACT_ICON: Record<PRArtifactKind, string> = {
   markdown: new URL('../../assets/pr-artifact-icons/markdown.png', import.meta.url).href,
 };
 
-/** Brand media icon for one PR artifact kind. */
 export function PRArtifactIcon({
   kind,
   className = 'h-7 w-7',

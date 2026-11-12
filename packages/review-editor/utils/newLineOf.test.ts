@@ -6,7 +6,6 @@ const fileOf = (hunks: string[]) =>
   parsePatchFiles(`diff --git a/a.txt b/a.txt\nindex 1111111..2222222 100644\n--- a/a.txt\n+++ b/a.txt\n${hunks.join('\n')}\n`)[0]!.files[0]!;
 
 describe('newLineOf: an old line outside every hunk, on the new side', () => {
-  // `git diff -U0` of 30 lines: two added at the top, three after line 5, 12-14 removed, 21 replaced, 30 removed.
   const zeroContext = fileOf([
     '@@ -0,0 +1,2 @@\n+top-a\n+top-b',
     '@@ -5,0 +8,3 @@ line 5\n+in-a\n+in-b\n+in-c',

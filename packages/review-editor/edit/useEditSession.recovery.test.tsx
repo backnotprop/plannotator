@@ -1,18 +1,3 @@
-/**
- * Dirty-session recovery on file-set change.
- *
- * `fileSetKey` changes on more than diff switches — sort-order and
- * collapse-default flips remount the CodeView too — and Pierre tears the
- * editor down without a completion callback on remount. A dirty session must
- * never be silently discarded there: the controller recovers the last-known
- * document contents and prompts to keep them as suggestions (the same
- * pattern as the dirty file-switch prompt in startEdit).
- *
- * The pure recovery helper is tested without DOM; the full hook flow
- * (startEdit -> change -> fileSetKey change -> prompt -> suggestion sink) is
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -81,8 +66,6 @@ describe.if(hasDom)('useEditSession file-set change with a dirty session (DOM)',
 
   let host: HTMLDivElement | null = null;
   let root: Root | null = null;
-  // The describe body runs (for registration) even when the suite is skipped,
-  // so window may only be touched behind the hasDom guard.
   const realConfirm = hasDom ? window.confirm : undefined;
 
   afterEach(async () => {
@@ -158,7 +141,6 @@ describe.if(hasDom)('useEditSession file-set change with a dirty session (DOM)',
       root!.render(<HookHost />);
     });
 
-    // startEdit loads the (real) editor chunk before flipping edit on.
     await act(async () => {
       api!.startEdit(item.id);
     });
@@ -182,7 +164,7 @@ describe.if(hasDom)('useEditSession file-set change with a dirty session (DOM)',
     await act(async () => {
       api.onItemEditChange(item, { contents: 'line one\nline 2 edited\nline three\n' });
     });
-    fileSetKeyRef.current = 'gen-2'; // sort-order flip, diff switch, etc.
+    fileSetKeyRef.current = 'gen-2';
     await act(async () => {
       api.handleFileSetChange();
     });

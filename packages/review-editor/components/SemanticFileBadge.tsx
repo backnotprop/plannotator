@@ -10,11 +10,6 @@ import { SemanticDiffRows, lineSelectionForChange } from '../dock/panels/semanti
 
 const CLOSE_DELAY_MS = 140;
 
-/**
- * A compact "sem · N" pill shown in a file header. On hover it opens a popover
- * with that file's semantic changes — the same terminal rows as the semantic
- * panel. Renders nothing unless sem is available and the file has named changes.
- */
 export const SemanticFileBadge: React.FC<{ filePath: string }> = ({ filePath }) => {
   const state = useReviewStateOptional();
   const available = state?.semanticDiffAvailable === true;
@@ -40,9 +35,6 @@ export const SemanticFileBadge: React.FC<{ filePath: string }> = ({ filePath }) 
 
   const count = changes.length + binaryChanges.length;
   if (!state || !available) return null;
-  // Sem is available but this file has no named changes (or is still
-  // resolving): show a disabled "sem 0" so every header carries the badge in
-  // the same spot — consistent look, aligned buttons, no popover.
   if (loading || count === 0) {
     return (
       <span

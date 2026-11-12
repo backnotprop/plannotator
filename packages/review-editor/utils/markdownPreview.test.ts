@@ -79,7 +79,6 @@ describe('markdownPreviewDocument', () => {
   test('CRLF files match an LF patch (core.autocrlf, eol=crlf)', () => {
     expect(markdownPreviewDocument(patch, '# Title\r\nold\r\nend\r\n', '# Title\r\nnew\r\nend\r\n', 'modified'))
       .toEqual({ kind: 'ready', content: '# Title\r\nnew\r\nend\r\n' });
-    // A real edit is still caught under CRLF.
     expect(markdownPreviewDocument(patch, '# Title\r\nold\r\nend\r\n', '# Title\r\nnewer\r\nend\r\n', 'modified').kind)
       .toBe('stale');
   });
@@ -114,7 +113,6 @@ describe('markdownPreviewSides', () => {
     expect(markdownPreviewSides(patch, '# Title\nold\nend\n', '# Title\nnew\nend\n', 'modified'))
       .toEqual({ kind: 'ready', old: '# Title\nold\nend\n', new: '# Title\nnew\nend\n' });
     expect(markdownPreviewSides(patch, null, '# Title\nnew\nend\n', 'modified').kind).toBe('missing');
-    // An old side that no longer matches the patch never renders as the base.
     expect(markdownPreviewSides(patch, '# Title\nolder\nend\n', '# Title\nnew\nend\n', 'modified').kind).toBe('stale');
   });
 

@@ -1,13 +1,3 @@
-/**
- * Markdown file views (Source / Changes / Read): every file starts in Source;
- * a view picked on any file becomes the starting view for every file not set
- * by hand, remembered for the next review (cookie only); a file set by hand
- * keeps its view; an old "Preview .md" cookie that was on reads as Changes;
- * `P` steps the current file through its views.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -89,13 +79,11 @@ describe.if(hasDom)('Markdown file views', () => {
     expect([...controller!.previewedPaths]).toEqual([]);
 
     await act(async () => controller!.choose('docs/a.md', 'changes'));
-    // The added file has no Changes view: it follows as Read (still rendered).
     expect(views()).toEqual(['changes', 'changes', 'read']);
     expect(controller!.viewOf('src/c.ts')).toBe('source');
     expect([...controller!.previewedPaths].sort()).toEqual(['docs/a.md', 'docs/b.md', 'docs/new.md']);
     expect(stored.get(MARKDOWN_VIEW_COOKIE)).toBe('changes');
 
-    // The next review starts there.
     await remount();
     expect(views()).toEqual(['changes', 'changes', 'read']);
   });
@@ -106,7 +94,6 @@ describe.if(hasDom)('Markdown file views', () => {
     await act(async () => controller!.choose('docs/a.md', 'source'));
     expect(views()).toEqual(['source', 'read', 'source']);
     await act(async () => controller!.choose('docs/new.md', 'read'));
-    // a and b were set by hand; nothing else is left to follow.
     expect(views()).toEqual(['source', 'read', 'read']);
     expect(stored.get(MARKDOWN_VIEW_COOKIE)).toBe('read');
   });
@@ -139,7 +126,6 @@ describe.if(hasDom)('Markdown file views', () => {
       seen.push(controller!.viewOf('docs/a.md'));
     }
     expect(seen).toEqual(['changes', 'read', 'source']);
-    // Each press is a pick: the last one is remembered.
     expect(stored.get(MARKDOWN_VIEW_COOKIE)).toBe('source');
 
     await remount({ targetPath: 'docs/new.md' });
@@ -173,7 +159,6 @@ describe.if(hasDom)('Markdown file views', () => {
     const editor = document.createElement('div');
     editor.contentEditable = 'true';
     shadow.appendChild(editor);
-    // composed: the event reaches window retargeted to the shadow host.
     await press('p', { composed: true }, editor);
     expect(controller!.viewOf('docs/a.md')).toBe('source');
     shadowHost.remove();
@@ -190,7 +175,6 @@ describe.if(hasDom)('Markdown file views', () => {
     expect(controller!.viewOf('docs/a.md')).toBe('source');
     expect(stored.has(MARKDOWN_VIEW_COOKIE)).toBe(false);
 
-    // P on the locked file says why instead of doing nothing.
     expect(lockedNotes).toEqual(['Finish editing first']);
 
     await act(async () => controller!.setEditingFile(null));
@@ -202,14 +186,12 @@ describe.if(hasDom)('Markdown file views', () => {
     await mount({ targetPath: 'docs/b.md' });
     await act(async () => controller!.setEditingFile('docs/a.md'));
     await act(async () => controller!.choose('docs/new.md', 'read'));
-    // b and new follow the pick; a (being edited, never set by hand) keeps Source.
     expect(views()).toEqual(['source', 'read', 'read']);
-    await press('p'); // b: Read -> Source
-    await press('p'); // b: Source -> Changes
+    await press('p');
+    await press('p');
     expect(views()).toEqual(['source', 'changes', 'read']);
     expect(controller!.previewedPaths.has('docs/a.md')).toBe(false);
 
-    // Once the edit ends the file keeps the view it was edited in, until picked.
     await act(async () => controller!.setEditingFile(null));
     expect(controller!.viewOf('docs/a.md')).toBe('source');
     await act(async () => controller!.choose('docs/a.md', 'read'));

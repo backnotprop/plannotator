@@ -7,11 +7,6 @@ interface ResolveLineSelectionBehaviorOptions {
   readonly compactTouchLayout: boolean;
 }
 
-/**
- * Keep mobile range acquisition separate from writing, matching DiffsHub.
- * Desktop retains its incumbent selection-to-composer flow, while the
- * contextual gutter action always represents an explicit writing intent.
- */
 export function resolveLineSelectionBehavior({
   source,
   compactTouchLayout,

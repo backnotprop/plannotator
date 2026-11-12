@@ -6,14 +6,6 @@ import {
 } from '@plannotator/shared/call-flow-languages';
 import type { CallFlowInstallController } from './useCallFlowInstall';
 
-/**
- * Starts each server-authored managed install target at most once per review
- * session. Targets are recorded before the request starts, so a rejected POST,
- * failed preflight, or failed install cannot create a render-driven retry
- * loop. The ledger is per target: one failed language never suppresses the
- * first attempt for a newly required language. Explicit retries continue to
- * use the controller directly.
- */
 export function useCallFlowAutoInstall(
   enabled: boolean,
   consentAcknowledged: boolean,
@@ -25,12 +17,6 @@ export function useCallFlowAutoInstall(
   useEffect(() => {
     if (!enabled || !consentAcknowledged) return;
 
-    // The server executes a multi-target flight in order. If an optional pack
-    // fails, every target after currentLanguageId was queued but never
-    // attempted; release those trailing ids so each still gets its own single
-    // automatic attempt. Core is different: every pack depends on it, so
-    // releasing trailing ids after a core failure would implicitly retry the
-    // failed core when the server prepends it again.
     if (
       install.status.state === 'error'
       && install.status.currentLanguageId

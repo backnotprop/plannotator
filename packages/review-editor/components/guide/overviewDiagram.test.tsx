@@ -1,13 +1,3 @@
-/**
- * A guide overview's Mermaid diagram in the review app: drawn by the diagram
- * engine the server serves on demand (the same loader as Markdown previews),
- * shown as its source while the engine loads, without an engine advert, and
- * with a note when it fails to load. An HTML picture is left to the guide
- * chain's own note.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -100,7 +90,6 @@ describe.if(hasDom)('the guide overview diagram in code review', () => {
     const box = await mountGuide(FIXTURE_V2_HTML, urls);
     expect(box?.textContent).toContain('does not draw');
     await mountGuide(FIXTURE_V1_LOCAL, urls);
-    // Nothing asked for the engine: a later load is this test's first import.
     await loadDiagramEngine(urls, async () => {
       imports += 1;
       return { apiVersion: 1, DiagramFence: () => null };

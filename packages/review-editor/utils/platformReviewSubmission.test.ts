@@ -120,7 +120,6 @@ describe('platform review retry safety', () => {
     expect(recovery).not.toBeNull();
     saveReviewSubmissionRecovery(storage, baseTarget.prUrl, recovery);
 
-    // Simulate Cancel/Close by discarding the dialog plan, then rebuilding it.
     const freshPlan: ReviewSubmission = {
       targets: [
         { ...baseTarget, status: 'pending' },
@@ -267,8 +266,6 @@ describe('platform review retry safety', () => {
   });
 });
 
-// #1611: a stacked submission posts ONE review event to every target, and a
-// retry (or a reload of the retained progress) keeps posting that event.
 describe('request_changes across a multi-PR submission', () => {
   test('every target and the retry of a failed one carry request_changes', async () => {
     const second: SubmissionTarget = {
@@ -296,10 +293,8 @@ describe('request_changes across a multi-PR submission', () => {
     });
     expect(actions.map(([, action]) => action)).toEqual(['request_changes', 'request_changes']);
     expect(first.targets.map((t) => t.status)).toEqual(['success', 'failed']);
-    // GitHub's own reason reaches the target (#1600 surfacing).
     expect(first.targets[1].error).toContain('Can not request changes on your own pull request');
 
-    // The retained progress remembers the event, so a reload retries with it.
     const storage = new MemoryStorage();
     saveReviewSubmissionRecovery(storage, baseTarget.prUrl, first.recovery);
     const reloaded = loadReviewSubmissionRecovery(storage, baseTarget.prUrl);
@@ -315,13 +310,11 @@ describe('request_changes across a multi-PR submission', () => {
       bodyForTarget: () => 'Please fix',
       fetchReview,
     });
-    // The succeeded target is never re-posted; the failed one retries as request_changes.
     expect(actions).toEqual([[second.prUrl, 'request_changes']]);
     expect(retried.allComplete).toBe(true);
   });
 });
 
-// A GitLab before 18.9 has no request changes: the review stays a comment, and the words follow what went.
 describe('a request for changes that went as a comment', () => {
   const submit = (targets: SubmissionTarget[], responses: object[]) => submitPlatformReviewTargets({
     targets,
@@ -349,9 +342,6 @@ describe('a request for changes that went as a comment', () => {
   });
 });
 
-// The stale-tab guard on /api/pr-action: the tab echoes its nonce, and a
-// server that took over the port refuses it; the tab then shows the reload
-// prompt instead of an ordinary failure, and nothing was posted.
 describe('platform review on a replaced server', () => {
   test('sends the nonce, and a session_mismatch refusal marks the tab replaced', async () => {
     __resetServerSessionForTests();

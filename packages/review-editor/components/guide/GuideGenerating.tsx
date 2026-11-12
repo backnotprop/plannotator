@@ -14,8 +14,6 @@ const STATUS_LABEL: Record<AgentJobInfo['status'], string> = {
   killed: 'Cancelled',
 };
 
-/** Keep only the last ~N lines of a live log tail — the guide's generating
- *  page is a glance, not the full job-detail log view. */
 function tailLines(content: string, maxLines = 200): string {
   const lines = content.split('\n');
   if (lines.length <= maxLines) return content;
@@ -27,13 +25,6 @@ interface GuideGeneratingProps {
   onCancel: () => void;
 }
 
-/**
- * Running/starting state for an in-flight guide job. Occupies the same
- * full-width page as the finished guide: the header zone shows status where
- * the guide title will land, and skeleton section cards fill the width below —
- * they're replaced by the real sections when the job completes. The live log
- * is progressive disclosure ("Show activity"), collapsed by default.
- */
 export const GuideGenerating: React.FC<GuideGeneratingProps> = ({ job, onCancel }) => {
   const { jobLogs } = useJobLogs();
   const [showActivity, setShowActivity] = useState(false);
@@ -44,7 +35,6 @@ export const GuideGenerating: React.FC<GuideGeneratingProps> = ({ job, onCancel 
 
   return (
     <div className="w-full px-10 py-8">
-      {/* Header zone — replaced by the guide title when generation finishes */}
       <div className="flex items-center gap-2.5">
         <span className="relative flex h-2 w-2 flex-shrink-0">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-40" />
@@ -83,9 +73,6 @@ export const GuideGenerating: React.FC<GuideGeneratingProps> = ({ job, onCancel 
       </div>
 
       {showActivity && (
-        // LiveLogViewer fills a BOUNDED parent (`h-full` inside) — an auto-height
-        // wrapper lets it grow with content forever. Fixed height + its own
-        // internal scroll (auto-following the tail unless the user scrolls up).
         <div className="mt-3 h-[300px] max-w-[760px]">
           <LiveLogViewer content={logContent} isLive className="h-full" />
         </div>

@@ -8,8 +8,6 @@ import { REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/AgentsTab';
 
 export const GUIDE_ENGINES = Object.keys(REVIEW_ENGINE_LABEL) as ReviewEngine[];
 
-// Marker-engine fallbacks until the server delivers the live catalogs on the
-// capability entries (mirrors AgentsTab's fallbacks).
 const CURSOR_FALLBACK = [{ value: 'auto', label: 'Auto' }];
 const OPENCODE_FALLBACK = [{ value: '', label: 'Default' }];
 const PI_FALLBACK = [{ value: '', label: 'Default' }];
@@ -18,13 +16,10 @@ const COPILOT_FALLBACK = [{ value: '', label: 'Default' }];
 export type GuideModelOption = { value: string; label: string };
 
 export interface GuideLaunchState {
-  /** The persisted agent settings bundle (pickers read/write through this). */
   settings: ReturnType<typeof useAgentSettings>;
-  /** Claude / Codex model catalogs (discovered from the installed CLIs). */
   catalogs: ModelCatalogs;
   guideAvailable: boolean;
   availableEngines: ReviewEngine[];
-  /** Effective engine: the persisted choice, snapped to an available one. */
   engine: ReviewEngine;
   cursorOptions: GuideModelOption[];
   opencodeOptions: GuideModelOption[];
@@ -34,29 +29,12 @@ export interface GuideLaunchState {
   effectiveOpencodeModel: string;
   effectivePiModel: string;
   effectiveCopilotModel: string;
-  /** Whether a guide launch can be attempted at all on this machine. */
   canLaunch: boolean;
-  /** Build the launch params for the current effective engine + models.
-   *  `instructions` is the caller's LIVE textarea value (GuideEmptyState),
-   *  sent so a just-typed preference can never race the server-side save;
-   *  callers without an editor (GuideView Regenerate) pass nothing and the
-   *  server applies its stored standing instructions. */
   buildParams: (instructions?: string) => AgentLaunchParams;
 }
 
-/**
- * Shared guide-launch defaults: resolves the persisted engine/model settings
- * against the live capability catalogs and builds the exact AgentLaunchParams
- * shape the server expects (one shape per engine, mirroring AgentsTab's
- * buildGuideLaunch). Used by GuideEmptyState's Generate button and by
- * GuideView's "Regenerate" hint on an outdated saved guide, so both launch
- * surfaces stay in lockstep.
- */
 export function useGuideLaunch(
   capabilities: AgentCapabilities | null,
-  /** Fetch the guide engine's model catalog. Off where no launch is offered
-   *  (viewing a guide that is not outdated), so merely reading a saved guide
-   *  never spawns a CLI. */
   { loadModels = true }: { loadModels?: boolean } = {},
 ): GuideLaunchState {
   const catalogs = useModelCatalogs(capabilities);
@@ -78,22 +56,12 @@ export function useGuideLaunch(
     capabilities?.providers.some((p) => p.id === id && p.available) ?? false;
   const guideAvailable = providerAvailable('guide');
   const availableEngines = GUIDE_ENGINES.filter(providerAvailable);
-  // A persisted engine can be unavailable on this machine — fall back to the
-  // first available one rather than a dead selection.
   const engine: ReviewEngine = providerAvailable(guideEngine) ? guideEngine : (availableEngines[0] ?? guideEngine);
   const loadCatalog = catalogs.load;
   useEffect(() => {
     if (loadModels) loadCatalog(engine);
   }, [loadModels, loadCatalog, engine]);
 
-  // Marker model catalogs are discovered server-side and delivered on the
-  // capability entry; fall back to the engine-default option until then.
-  // Mirrors AgentsTab's per-engine catalog semantics exactly: opencode/pi
-  // PREPEND their engine-managed "Default" ('' value) to the discovered list —
-  // the discovered catalogs are real models only, and dropping Default left a
-  // saved-default user with a blank pill and no way back after picking a
-  // concrete model. Cursor REPLACES: its discovered list natively includes
-  // 'auto', so prepending would duplicate it.
   const markerModels = (id: 'cursor' | 'opencode' | 'pi' | 'copilot', fallback: GuideModelOption[]): GuideModelOption[] => {
     const models = capabilities?.providers.find((p) => p.id === id)?.models;
     if (!models || models.length === 0) return fallback;
@@ -106,10 +74,6 @@ export function useGuideLaunch(
   const piOptions = markerModels('pi', PI_FALLBACK);
   const copilotOptions = markerModels('copilot', COPILOT_FALLBACK);
 
-  // A stale saved model id is reconciled at read time: if it's not in the
-  // current catalog, fall back to the catalog's first entry rather than
-  // POSTing a dead model id to the server. ('' / Default is present in the
-  // opencode/pi catalogs after the prepend above, so a saved '' stays valid.)
   const effectiveModel = (saved: string, options: GuideModelOption[]): string =>
     options.some((o) => o.value === saved) ? saved : (options[0]?.value ?? saved);
 
@@ -118,12 +82,6 @@ export function useGuideLaunch(
   const effectivePiModel = effectiveModel(guidePiModel, piOptions);
   const effectiveCopilotModel = effectiveModel(guideCopilotModel, copilotOptions);
 
-  // Config shapes mirror AgentsTab's buildGuideLaunch exactly — one shape
-  // per engine, so the server sees identical launches from every surface.
-  // Extra instructions (#1265) are server-stored; only the launch page's
-  // live editor value rides the body (explicit wins server-side), so a
-  // surface without an editor omits the field and the server applies the
-  // stored standing instructions itself.
   const buildParams = (instructions?: string): AgentLaunchParams => {
     const live = instructions?.trim();
     const params = buildEngineParams();
@@ -170,8 +128,6 @@ export function useGuideLaunch(
                   : { reasoningEffort: guideCodexReasoning }),
               };
 
-  // Claude/Codex launches wait for their catalog to settle so a launch never
-  // uses an unresolved pick (the catalog always settles; fallback on failure).
   const modelsReady = engine === 'claude' || engine === 'codex' ? catalogs[engine].settled : true;
 
   return {

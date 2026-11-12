@@ -1,17 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { isCommitDiffType, resolveCommitExitDiff } from './commitViewRestore';
 
-// isCommitDiffType must agree with App.tsx's worktree parse and the server's
-// parseCommitDiffType about what the commit family IS — a divergence would
-// capture/clear the leave-Commits restore memo on the wrong transitions.
 describe('isCommitDiffType', () => {
   test('matches plain and worktree-composed commit diffs', () => {
     expect(isCommitDiffType('commit:36b855f57eb53531c1baa734586e2fb9981f9881')).toBe(true);
-    expect(isCommitDiffType('commit:abcd')).toBe(true); // 4-char minimum, same as the parse
+    expect(isCommitDiffType('commit:abcd')).toBe(true);
     expect(isCommitDiffType('worktree:/tmp/wt:commit:abcdef12')).toBe(true);
-    // Worktree paths may contain colons; only the anchored tail decides.
     expect(isCommitDiffType('worktree:C:/work/tree:commit:abcdef12')).toBe(true);
-    // A jj session's family (Commits rail in jj).
     expect(isCommitDiffType(`jj-commit:${'a'.repeat(40)}`)).toBe(true);
   });
 
@@ -23,12 +18,12 @@ describe('isCommitDiffType', () => {
       'worktree:/tmp/wt:since-base',
       'worktree:/tmp/wt:uncommitted',
       'gitbutler:workspace',
-      'commit:', // no sha
-      'commit:xyz!', // non-hex
-      'commit:abc', // below the 4-char minimum the parse enforces
-      'my-commit-mode', // contains the word, not the family
+      'commit:',
+      'commit:xyz!',
+      'commit:abc',
+      'my-commit-mode',
       'jj-current',
-      'jj-commit:main', // not an id
+      'jj-commit:main',
     ]) {
       expect(isCommitDiffType(t)).toBe(false);
     }
@@ -49,13 +44,12 @@ describe('resolveCommitExitDiff', () => {
 
   test('no memo: preferred default used only when the session offers it', () => {
     expect(resolveCommitExitDiff(null, fallback)).toEqual({ diffType: 'since-base', base: null });
-    // Offered but not first: must win over diffOptions[0].
     expect(
       resolveCommitExitDiff(null, { ...fallback, preferredDefault: 'uncommitted' }),
     ).toEqual({ diffType: 'uncommitted', base: null });
     expect(
       resolveCommitExitDiff(null, { ...fallback, preferredDefault: 'merge-base' }),
-    ).toEqual({ diffType: 'since-base', base: null }); // first offered option
+    ).toEqual({ diffType: 'since-base', base: null });
   });
 
   test('no memo, no options: uncommitted', () => {

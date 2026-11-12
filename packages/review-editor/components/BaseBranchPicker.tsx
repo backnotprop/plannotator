@@ -9,18 +9,11 @@ interface BaseBranchPickerProps {
   onSelectBase: (branch: string) => void;
   disabled?: boolean;
   copy: CompareTargetPickerCopy;
-  /** HEAD ancestry from GitContext.recentCommits — enables picking a commit as the baseline (#709). */
   recentCommits?: RecentCommit[];
-  /**
-   * Draw the trigger as the caller's own button (the sidebar header's
-   * sentence) instead of the field. The popup and its keyboard are the same.
-   */
   trigger?: PickerTrigger;
-  /** Popup alignment against the trigger. */
   align?: 'start' | 'center' | 'end';
 }
 
-/** A caller-drawn trigger: the button's class, its contents and its accessible name. */
 export interface PickerTrigger {
   className: string;
   content: React.ReactNode;
@@ -29,9 +22,6 @@ export interface PickerTrigger {
 
 type Tab = 'branches' | 'commits';
 
-// SHA or `HEAD~N` / `HEAD^N` patterns — the picker treats any matching query as
-// a usable commit-ish even if it isn't in `recentCommits`. We require ≥ 4 hex
-// chars for SHAs to avoid offering "abc" (which is more likely a branch name).
 const SHA_PATTERN = /^[0-9a-f]{4,40}$/i;
 const HEAD_REL_PATTERN = /^HEAD(?:[~^]\d+)?$/i;
 
@@ -43,7 +33,6 @@ function looksLikeSha(ref: string): boolean {
   return /^[0-9a-f]{7,}$/i.test(ref);
 }
 
-/** Short, human-friendly label for the trigger chip. */
 function chipLabel(base: string): string {
   return looksLikeSha(base) ? base.slice(0, 7) : base;
 }
@@ -83,9 +72,6 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
     };
   }, [local, remote, commits, query]);
 
-  // Smart-search: if the typed query looks like a SHA or HEAD~N and isn't
-  // already an exact match in any group, offer to use it verbatim. Powers the
-  // "manual commit hash entry" leg of #709 without adding a separate input.
   const trimmedQuery = query.trim();
   const showUseAsBase =
     trimmedQuery.length > 0 &&
@@ -94,8 +80,6 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
     !filtered.remote.includes(trimmedQuery) &&
     !filtered.commits.some((c) => c.sha === trimmedQuery || c.shortSha === trimmedQuery);
 
-  // Auto-focus the Commits tab when the user types a SHA-like query — otherwise
-  // they'd land on Branches (empty for hex queries) and miss the commit list.
   useEffect(() => {
     if (hasCommits && trimmedQuery && isCommitishQuery(trimmedQuery)) {
       setTab('commits');
@@ -226,8 +210,6 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
               onChange={(e) => setQuery(e.target.value)}
               placeholder={hasCommits ? `${copy.searchPlaceholder} or SHA / HEAD~N` : copy.searchPlaceholder}
               onKeyDown={(e) => {
-                // Enter on a SHA-like query commits the manual entry —
-                // matches the "Use … as base" affordance below.
                 if (e.key === 'Enter' && showUseAsBase) {
                   e.preventDefault();
                   handleSelect(trimmedQuery);

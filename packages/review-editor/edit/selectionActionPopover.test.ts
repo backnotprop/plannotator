@@ -1,14 +1,3 @@
-/**
- * Selection Action popover DOM builder. Pierre renders this node inside the
- * editor's shadow DOM where the app's stylesheets do not apply, so the
- * contract under test is: inline styles only, colors via inherited theme
- * custom properties, mousedown suppressed (an unprevented mousedown blurs the
- * editor and collapses the selection before the click can read it), and the
- * click reporting the button's own rect for anchoring the app-side entry.
- *
- * DOM-gated (DOM_TESTS=1); registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { describe, expect, test } from 'bun:test';
 import { buildSelectionActionElement } from './selectionActionPopover';
 
@@ -31,7 +20,6 @@ describe.if(hasDom)('buildSelectionActionElement (DOM)', () => {
     const style = button.getAttribute('style') ?? '';
     expect(style).toContain('var(--card)');
     expect(style).toContain('var(--border)');
-    // No class names: Tailwind cannot reach into the editor's shadow root.
     expect(button.className).toBe('');
   });
 

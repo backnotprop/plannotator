@@ -1,14 +1,3 @@
-/**
- * DOM-gated guards for the Call flow tab's loading, error and empty states.
- *
- * Regressions guarded (parity inventory item 15, written before the Call tree
- * view joined this panel):
- *  - an analysis error without a working "Retry analysis" control (the user
- *    would be stuck until a reload);
- *  - a finished analysis with no trees rendering an empty tree view instead of
- *    the structural-match notice;
- *  - the loading state rendering a tree or an error.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

@@ -1,14 +1,3 @@
-/**
- * Go to File (approved design record "review-explorer", step 3).
- *
- * Regressions guarded:
- *  - a listing the browser holds searched on the server (or not at all);
- *  - a lazy listing (too large to send) not searched on the server;
- *  - a changed file not marked, or Enter / Alt+Enter not opening the
- *    highlighted file (preview vs a tab beside);
- *  - nothing typed showing nothing instead of the files opened last;
- *  - a review with no repository to list pretending it searched one.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

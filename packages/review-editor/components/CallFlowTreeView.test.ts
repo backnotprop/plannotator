@@ -26,7 +26,6 @@ function callTree(entry: string, tree: CallFlowNode): CallFlowTree {
   return { entry, raw: entry, rawLineStart: 1, tree };
 }
 
-/** Visible text of server-rendered markup: a label is split into receiver, name and arguments. */
 function textOf(markup: string): string {
   return markup.replace(/<[^>]+>/g, '');
 }

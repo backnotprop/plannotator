@@ -4,19 +4,6 @@ import { Avatar } from './Avatar';
 import { MarkdownBody } from './MarkdownBody';
 import { formatRelativeTime } from '@plannotator/ui/utils/aiChatFormat';
 
-/**
- * The commit description heading the all-files view while a `commit:<sha>`
- * diff is on screen: subject, author (avatar + name), sha, age, and the full
- * message body rendered as markdown — the same renderer the PR viewer uses.
- *
- * Rendered as the all-files surface's leadingContent, so it scrolls away with
- * the diff (not pinned). The body shows in full; only genuinely huge bodies
- * get a CSS clamp with a Show more toggle (clamping via max-height keeps the
- * markdown intact — no mid-block truncation). Key the component by sha so the
- * toggle resets per commit.
- */
-
-/** Bodies past this many rendered lines (rough) get the Show more clamp. */
 const LONG_BODY_LINES = 24;
 const LONG_BODY_CHARS = 1800;
 

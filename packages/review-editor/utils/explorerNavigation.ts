@@ -1,16 +1,6 @@
-/**
- * Back and forward across jumps in code review (approved design record
- * "review-explorer", step 3): a review-local history, never the browser's, so
- * it never leaves the review. Only a jump records an entry: Go to File, Go to
- * Definition, a reference opened from the references panel. Opening a file
- * from the tree is not a jump.
- */
-
-/** Where a jump starts or lands. `path: null` is the All files view. */
 export interface NavLocation {
   path: string | null;
   line?: number;
-  /** Going back here also puts this file back in this view (a jump flipped it to Whole file). */
   restoreView?: { path: string; view: 'changes' | 'whole' };
 }
 
@@ -27,7 +17,6 @@ export function sameNavLocation(a: NavLocation | null | undefined, b: NavLocatio
   return a.path === b.path && (a.line ?? null) === (b.line ?? null) && !b.restoreView;
 }
 
-/** A jump from `from`: it becomes the newest Back entry; Forward is dropped. */
 export function pushNavJump(history: NavHistory, from: NavLocation | null): NavHistory {
   if (!from) return { back: history.back, forward: [] };
   const last = history.back[history.back.length - 1];
@@ -35,7 +24,6 @@ export function pushNavJump(history: NavHistory, from: NavLocation | null): NavH
   return { back, forward: [] };
 }
 
-/** Back from `current`: the place to go and the history after it, or null at the start. */
 export function navigateBack(history: NavHistory, current: NavLocation | null): { target: NavLocation; history: NavHistory } | null {
   const target = history.back[history.back.length - 1];
   if (!target) return null;
@@ -60,7 +48,6 @@ export function navigateForward(history: NavHistory, current: NavLocation | null
   };
 }
 
-/** Recently opened paths, newest first, each once. */
 export function pushRecentPath(recent: readonly string[], path: string, max = 20): string[] {
   return [path, ...recent.filter((entry) => entry !== path)].slice(0, max);
 }
@@ -79,13 +66,6 @@ function lineHasSymbol(text: string, symbol: string): boolean {
   }
 }
 
-/**
- * Code navigation searches the working tree, so its line numbers are the
- * working tree's. A tab that shows another revision (staged, a commit, a
- * branch) looks for the symbol near that line in what it shows: the line
- * itself, else the nearest line within `radius` that has the symbol as a
- * whole word. Not found: null, and the tab opens at the top with a note.
- */
 export function findSymbolLine(content: string, symbol: string | undefined, line: number, radius = 200): number | null {
   const lines = content.split('\n');
   if (!symbol) return line >= 1 && line <= lines.length ? line : null;
@@ -98,26 +78,21 @@ export function findSymbolLine(content: string, symbol: string | undefined, line
   return null;
 }
 
-/** A line to bring into view in a file tab (a jump's landing). */
 export interface RevealTarget {
   path: string;
   line: number;
-  /** The symbol jumped to, looked for near `line` when the tab shows another revision. */
   symbol?: string;
-  /** Changes on every jump, so the same line can be revealed again. */
   token: number;
 }
 
 export type JumpVia = 'definition' | 'references' | 'file';
 
-/** "From buildFileTree.ts:11 · Go to Definition (F12)" over the file a jump opened. */
 export interface JumpCrumb {
   targetPath: string;
   from: NavLocation;
   via: JumpVia;
 }
 
-/** "buildFileTree.ts:11", "All changes". */
 export function navLocationLabel(location: NavLocation): string {
   if (location.path == null) return 'All changes';
   const name = location.path.slice(location.path.lastIndexOf('/') + 1);

@@ -7,13 +7,6 @@ import { wholeFileMarks, wholeFileMarksCss } from '../utils/wholeFileMarks';
 import { FileTextState, RevealMissedNote, useRevealedLine, wholeFileAnnotations, type FileTokenHandlers } from './RepoFileView';
 import type { RevealTarget } from '../utils/explorerNavigation';
 
-/**
- * A changed file's Whole file view: its new side, every line, read from
- * `/api/repo-file` (the same revision the diff's new side reads), with change
- * bars in the gutter from the patch (added, modified, a wedge where lines were
- * removed). Comments work on any line: inside a hunk they are ordinary diff
- * comments, outside one they are comments outside the diff.
- */
 export const WholeFileView: React.FC<{
   filePath: string;
   patch: string;
@@ -30,7 +23,6 @@ export const WholeFileView: React.FC<{
   const text = useRepoFileText(filePath, snapshotId);
   const marks = useMemo(() => wholeFileMarks(patch), [patch]);
   const marksCss = useMemo(() => wholeFileMarksCss(marks), [marks]);
-  // Next / previous change walks these lines (`changeNavigation.ts`).
   const changeLines = useMemo(
     () => [...new Set([...marks.added, ...marks.modified, ...marks.removedBefore])].sort((a, b) => a - b).join(','),
     [marks],

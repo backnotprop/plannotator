@@ -1,11 +1,3 @@
-/**
- * Flush files (the Inbox's PR page): the row after an unread file's last hunk. As in the code review app, nothing is
- * drawn there, whatever the file's length, and nothing is read for it: the row's room is given back, and an arrow above
- * it opens the file's whole text with the host's reader.
- *
- * CodeView is a stand-in that renders the one item through `onPostRender` on a host element of its own, the way
- * Pierre hands AllFilesCodeView its `<diffs-container>`; the item is the real partial diff of the patch.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -14,11 +6,8 @@ import type { DiffFile } from '../types';
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
 
-/** The stand-in's host element for its one item, as Pierre's `<diffs-container>`. */
 let itemHost: HTMLElement | null = null;
-/** The item renders again (a scroll, an update): Pierre calls `onPostRender` once more. */
 let renderAgain: () => void = () => {};
-/** An expand arrow's first click: Pierre calls the loader it was given. */
 let clickArrow: () => Promise<unknown> = async () => undefined;
 
 mock.module('../workerPool', () => ({
@@ -64,8 +53,6 @@ mock.module('@pierre/diffs/react', () => ({
     }));
     useEffect(() => {
       for (const item of itemsRef.current.values()) props.options?.onPostRender?.(element.current, {}, 'mount', { item });
-      // Once, as the item first renders.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     return <div ref={props.containerRef} className={props.className} />;
   }),
@@ -90,7 +77,6 @@ const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-// Line 3 of a file changes; the hunk shows lines 1 to 5. The index line names its blobs, as a forge's patch does.
 const OLD = ['one', 'two', 'three', 'four', 'five'];
 const NEW = ['one', 'two', 'THREE', 'four', 'five'];
 const file: DiffFile = {

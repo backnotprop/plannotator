@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 
-/** Loading state for a remote HTML or Markdown artifact. */
 export type RemoteArtifactDocumentState =
   | { readonly status: 'loading' }
   | { readonly status: 'ready'; readonly content: string }
@@ -67,11 +66,6 @@ function loadRemoteArtifactDocument(url: string): Promise<string> {
   return promise;
 }
 
-/**
- * Fetch a hosted document through the authenticated review server. Requests
- * are shared across gallery and focused views; callers can defer the first
- * request until a preview is near the viewport.
- */
 export function useRemoteArtifactDocument(
   url: string,
   enabled = true,
@@ -110,7 +104,6 @@ export function useRemoteArtifactDocument(
   return state;
 }
 
-/** Resolve a rendered Markdown reference against its remote artifact URL. */
 export function resolveArtifactReferenceUrl(
   rawUrl: string,
   artifactUrl: string,
@@ -135,7 +128,6 @@ export function resolveArtifactReferenceUrl(
   }
 }
 
-/** Turn provider file-viewer URLs into raw-content bases for relative assets. */
 export function artifactContentBaseUrl(
   artifactUrl: string,
   provider: ArtifactProviderLocation,
@@ -163,7 +155,6 @@ export function artifactContentBaseUrl(
   return artifactUrl;
 }
 
-/** Build the same-origin URL used for authenticated provider media/resources. */
 export function artifactContentProxyUrl(url: string, sourceUrl?: string): string {
   const endpoint = `/api/pr-artifact-content?${new URLSearchParams({
     url,
@@ -264,11 +255,6 @@ function rewriteSrcSetValue(
   return candidates.join(', ');
 }
 
-/**
- * Repair relative references after RenderedMarkdown has produced DOM. Its
- * normal image resolver targets local files through /api/image; remote
- * artifact documents instead need their own URL as the base.
- */
 export function rewriteArtifactMarkdownReferences(
   root: HTMLElement,
   artifactUrl: string,
@@ -433,7 +419,6 @@ function rewriteResourceAttributes(
   );
 }
 
-/** Inject a safe base element so relative assets resolve against the artifact URL. */
 export function injectArtifactBaseUrl(
   rawHtml: string,
   artifactUrl: string,

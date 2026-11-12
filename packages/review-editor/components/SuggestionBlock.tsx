@@ -2,7 +2,6 @@ import React from 'react';
 import { HighlightedCode } from './HighlightedCode';
 import { SuggestionDiff } from './SuggestionDiff';
 
-/** Suggestion display with header + diff or highlighted code */
 export const SuggestionBlock: React.FC<{
   code: string;
   originalCode?: string;

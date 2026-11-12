@@ -119,7 +119,6 @@ describe("exportReviewFeedback", () => {
   it("local mode: uses generic header, no PR content", () => {
     const result = exportReviewFeedback([ann()]);
     expect(result).toStartWith("# Code Review Feedback\n\n");
-    // Must not leak any PR-specific content
     expect(result).not.toContain("PR Review");
     expect(result).not.toContain("github.com");
     expect(result).not.toContain("Branch:");
@@ -175,9 +174,7 @@ describe("exportReviewFeedback", () => {
       mode: "branch",
       base: "develop",
     });
-    // The PR-style branches line must appear.
     expect(result).toContain("Branch: `fix/widget` → `main`");
-    // The local-mode Diff line must not.
     expect(result).not.toContain("**Diff:**");
   });
 
@@ -187,7 +184,6 @@ describe("exportReviewFeedback", () => {
     expect(result).toContain("**fix: broken widget**");
     expect(result).toContain("Branch: `fix/widget` → `main`");
     expect(result).toContain("https://github.com/acme/widgets/pull/42");
-    // Must not contain the generic local header
     expect(result).not.toContain("# Code Review Feedback");
   });
 
@@ -204,7 +200,6 @@ describe("exportReviewFeedback", () => {
 
   it("PR mode: annotations still render after PR header", () => {
     const result = exportReviewFeedback([ann({ text: "needs fix" })], prMeta);
-    // PR header comes first, then file/line annotations
     const headerIdx = result.indexOf("PR Review:");
     const annotationIdx = result.indexOf("needs fix");
     expect(headerIdx).toBeLessThan(annotationIdx);
@@ -293,8 +288,6 @@ describe("exportReviewFeedback", () => {
   });
 
   it("emits Replaces without Suggested code for a deletion-only suggestion", () => {
-    // The edit-session derivation for a fully-emptied file produces text +
-    // originalCode with no suggestedCode; the anchor must still export.
     const result = exportReviewFeedback([
       ann({ text: "Suggested change: remove these lines.", originalCode: "one\ntwo" }),
     ]);
@@ -315,7 +308,6 @@ describe("exportReviewFeedback", () => {
     ]);
     expect(result).toContain("Rename this\n");
     expect(result).toContain("**Highlighted text:**\n```\nconst widget = make();\n```");
-    // A plain comment must never masquerade as a replacement.
     expect(result).not.toContain("**Replaces:**");
     expect(result).not.toContain("approximate");
   });
@@ -340,7 +332,6 @@ describe("exportReviewFeedback", () => {
     ]);
     expect(result).toContain("**Highlighted text:**\n````\nExample:\n```\nnpm i\n```\n````\n");
     expect(result).toContain("**Replaces:**\n`````\na ```` b\n`````\n");
-    // Code without a backtick run keeps the three-backtick fence, byte for byte.
     expect(result).toContain("**Suggested code:**\n```\nno ticks\n```\n");
   });
 
@@ -437,12 +428,9 @@ describe("exportReviewFeedback", () => {
       ann({ diffScope: "layer", text: "layer finding" }),
       ann({ filePath: "src/other.ts", diffScope: "full-stack", text: "full-stack finding" }),
     ], prMeta);
-    // Should have separate scope sections, not comma-joined
     expect(result).not.toContain("layer, full-stack");
-    // Each scope should be a heading
     expect(result).toContain("## Layer");
     expect(result).toContain("## Full-stack");
-    // Annotations should be under their respective scopes
     const layerIdx = result.indexOf("## Layer");
     const fullStackIdx = result.indexOf("## Full-stack");
     const layerFindingIdx = result.indexOf("layer finding");
@@ -457,17 +445,14 @@ describe("exportReviewFeedback", () => {
       ann({ diffScope: "full-stack", text: "finding" }),
     ], prMeta);
     expect(result).toContain("Review scope: full-stack");
-    // No scope sub-headings when all annotations share the same scope
     expect(result).not.toContain("## Full-stack");
     expect(result).not.toContain("## Layer");
   });
 
   it("prReviewScope param is ignored when annotations carry diffScope", () => {
-    // Simulates Copy All bug: agent ran in layer, user switched to full-stack
     const result = exportReviewFeedback([
       ann({ diffScope: "layer", text: "agent finding" }),
     ], prMeta, undefined, "full-stack");
-    // Should use annotation's diffScope, not the passed-in prReviewScope
     expect(result).toContain("Review scope: layer");
     expect(result).not.toContain("Review scope: full-stack");
   });
@@ -478,7 +463,6 @@ describe("exportReviewFeedback", () => {
     ]);
     expect(result).toContain("## Global comments");
     expect(result).toContain("the overall approach is off");
-    // No bogus line heading for a review-level comment.
     expect(result).not.toContain("Line 0");
   });
 
@@ -490,7 +474,6 @@ describe("exportReviewFeedback", () => {
     expect(result).toContain("line issue");
     expect(result).toContain("## Global comments");
     expect(result).toContain("review-wide note");
-    // Global comments come before the per-file sections.
     expect(result.indexOf("## Global comments")).toBeLessThan(result.indexOf("line issue"));
   });
 
@@ -501,7 +484,6 @@ describe("exportReviewFeedback", () => {
       commitSubject: "fix: broken widget",
     });
     expect(result).toContain("**Diff:** Commit `0123456` — fix: broken widget (diff vs its parent)");
-    // Anchor matches the header — no mismatch note.
     expect(result).not.toContain("anchored");
   });
 
@@ -513,7 +495,6 @@ describe("exportReviewFeedback", () => {
       commitShortId: "kmqzsnwp",
     });
     expect(jj).toContain("**Diff:** Commit `kmqzsnwp` — trim fields");
-    // The same short id on a git commit is ignored: git labels stay unchanged.
     const git = exportReviewFeedback([ann({ commitSha: id })], undefined, {
       mode: `commit:${id}`,
       commitShortId: "kmqzsnwp",
@@ -650,7 +631,6 @@ describe("comments made in a Markdown preview", () => {
     expect(output).toContain("> new installer\n> from the website");
     expect(output).toContain("in removed text");
     expect(output).toContain("Link the installer page.");
-    // Not presented as an ordinary file comment or a line comment.
     expect(output).not.toContain("File Comment");
     expect(output).not.toContain("Line 1");
   });

@@ -9,10 +9,6 @@ import { ReviewSemanticDiffPanel } from './panels/ReviewSemanticDiffPanel';
 import { ReviewCallFlowPanel } from './panels/ReviewCallFlowPanel';
 import { ReviewFilePanel } from './panels/ReviewFilePanel';
 
-/**
- * Component registry for dockview — maps panel type strings to React components.
- * Passed to <DockviewReact components={...} />.
- */
 export const reviewPanelComponents = {
   [REVIEW_PANEL_TYPES.DIFF]: ReviewDiffPanel,
   [REVIEW_PANEL_TYPES.AGENT_JOB_DETAIL]: ReviewAgentJobDetailPanel,

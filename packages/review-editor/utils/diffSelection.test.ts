@@ -96,7 +96,6 @@ describe.skipIf(!hasDom)('diffSelection', () => {
     line6.setAttribute('data-line', '6');
     line6.setAttribute('data-additions', '');
 
-    // Focus on line 2, anchor on line 6 (backward selection drag)
     const selection = {
       isCollapsed: false,
       toString: () => 'lines 2 through 6',

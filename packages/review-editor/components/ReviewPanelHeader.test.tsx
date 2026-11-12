@@ -1,22 +1,3 @@
-/**
- * DOM coverage (DOM_TESTS=1) for the top of the code review sidebar
- * (approved design records "review-sidebar-header", variant "sentence", and
- * "review-sidebar-aligned").
- *
- * Regressions guarded:
- *  - a control of the header (view, diff type, base, Go to File) or of the
- *    scope (Changes | All files) no longer reachable in one click, or its menu
- *    no longer opening;
- *  - the view switch losing its tabs semantics: one Tab stop, Left and Right
- *    moving focus between the tabs (wrapping) without switching the view, the
- *    list below labelled by the chosen tab, focus kept on the chosen tab when
- *    the panel remounts for the new view;
- *  - a long base losing its end (the part that tells stacked branches apart)
- *    or its full name;
- *  - a header control that cannot take keyboard focus;
- *  - Changes | All files losing its counts, its choice, or the live status;
- *  - choosing All files from Git status not landing on the tree.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -85,7 +66,6 @@ afterEach(async () => {
   host?.remove();
   host = null;
   root = null;
-  // Menus and popovers portal into the body.
   if (hasDom) document.body.innerHTML = '';
 });
 
@@ -118,7 +98,6 @@ describe('the sentence words', () => {
     expect(middleTruncateRef(LONG_BASE, 256)).toBe('feature/very-l…ame-for-a-stack');
     expect(middleTruncateRef(LONG_BASE, 160)).toBe('feature…-a-stack');
     expect(middleTruncateRef('main', 160)).toBe('main');
-    // A SHA base is its short form first.
     expect(middleTruncateRef('4f2a9c1d4f2a9c1d4f2a9c1d4f2a9c1d4f2a9c1d', 160)).toBe('4f2a9c1');
   });
 });
@@ -146,18 +125,15 @@ describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
     expect(tabs.map((t) => t.textContent)).toEqual(['Tree', 'Git status', 'Commits']);
     expect(tabs.map((t) => t.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false']);
     for (const tab of tabs) expect(tab.getAttribute('aria-controls')).toBe(REVIEW_PANEL_BODY_ID);
-    // The tab panel names itself by the chosen tab's id.
     expect(tabs[0].id).toBe(reviewPanelBodyProps(model())['aria-labelledby']!);
     expect(sentence(el).textContent).toBe('All changessincemain');
     expect(el.querySelector('[data-go-to-file-button]')).not.toBeNull();
-    // Go to file comes first in reading and Tab order.
     expect(el.querySelector('button')).toBe(el.querySelector('[data-go-to-file-button]'));
   });
 
   test('every control takes keyboard focus; the tabs are one Tab stop', async () => {
     const el = await mount(<ReviewPanelHeader model={model()} width={256} />);
     const buttons = [...el.querySelectorAll<HTMLButtonElement>('button')];
-    // Go to File, Tree, Git status, Commits, diff type, base.
     expect(buttons.length).toBe(6);
     const tabStops = buttons.filter((b) => b.tabIndex === 0);
     expect(tabStops.map((b) => b.getAttribute('data-panel-view') ?? b.getAttribute('aria-label'))).toEqual([
@@ -170,7 +146,6 @@ describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
       expect(button.disabled).toBe(false);
       await act(async () => button.focus());
       expect(document.activeElement).toBe(button);
-      // The visible ring is the shared focus-visible class.
       expect(button.className).toContain('focus-visible:ring-2');
     }
   });
@@ -188,12 +163,10 @@ describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
     expect(document.activeElement).toBe(viewTab(el, 'tree'));
     await press(document.activeElement!, 'ArrowLeft');
     expect(document.activeElement).toBe(viewTab(el, 'commits'));
-    // With a modifier the arrow is not the tabs' key.
     event = await press(document.activeElement!, 'ArrowLeft', { metaKey: true });
     expect(event.defaultPrevented).toBe(false);
     expect(document.activeElement).toBe(viewTab(el, 'commits'));
     expect(onSelectView).not.toHaveBeenCalled();
-    // Up and Down stay with the page (file navigation).
     event = await press(document.activeElement!, 'ArrowDown');
     expect(event.defaultPrevented).toBe(false);
   });
@@ -201,8 +174,6 @@ describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
   test('choosing a tab reaches the app and focus stays on it in the new panel', async () => {
     const onSelectView = mock((_view: string) => {});
     const el = await mount(<ReviewPanelHeader model={model({ onSelectView })} width={256} />);
-    // Each view is its own panel: in the app the click's own update unmounts
-    // this header and mounts the new view's.
     await act(async () => {
       viewTab(el, 'commits').click();
       root?.unmount();
@@ -216,7 +187,6 @@ describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
   });
 
   test('a tab choice the app refused does not pull focus later', async () => {
-    // The app keeps the tree (the switch is refused).
     const el = await mount(<ReviewPanelHeader model={model({ onSelectView: () => {} })} width={256} />);
     await act(async () => viewTab(el, 'commits').click());
     await act(async () => {
@@ -225,7 +195,6 @@ describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
     const outside = document.createElement('button');
     document.body.appendChild(outside);
     outside.focus();
-    // Later the view changes by another route.
     await act(async () => root?.render(<ReviewPanelHeader model={model({ view: 'commits' })} width={256} />));
     expect(document.activeElement).toBe(outside);
   });
@@ -338,7 +307,6 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
     expect(el.querySelector('[data-tree-scope="all"]')?.textContent).toBe('All files8');
     expect(el.querySelector('[data-tree-scope="changes"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(el.querySelector('[data-tree-scope="all"]')?.getAttribute('aria-pressed')).toBe('false');
-    // All files' count is in its name and tooltip, so the row keeps one line.
     expect(el.querySelector('[data-tree-scope="all"]')?.getAttribute('title')).toContain('(8 files)');
   });
 
@@ -360,7 +328,6 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
     const el = await mount(
       <ScopeSwitch model={model({ view: 'sections', diff: undefined, onSelectView, scope: { value: 'all', onSelect: onScope, changed: 4, all: 8 } })} width={256} />,
     );
-    // Git status lists the changes, whatever the tree's scope.
     expect(el.querySelector('[data-tree-scope="changes"]')?.getAttribute('aria-pressed')).toBe('true');
     await act(async () => el.querySelector<HTMLButtonElement>('[data-tree-scope="changes"]')!.click());
     expect(onSelectView).not.toHaveBeenCalled();
@@ -383,13 +350,11 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
       <ScopeSwitch model={model({ scope: { value: 'all', onSelect: () => {}, changed: 4, all: 8 }, repo: readyRepo() })} width={256} />,
     );
     const all = el.querySelector<HTMLButtonElement>('[data-tree-scope="all"]')!;
-    // The button is named by its words and count alone; the dot is decoration.
     expect(all.textContent).toBe('All files8');
     expect(all.querySelector('[data-repo-listing-dot="live"]')?.getAttribute('aria-hidden')).toBe('true');
     const status = el.querySelector('[role="status"][data-repo-listing-status="live"]')!;
     expect(status.getAttribute('aria-live')).toBe('polite');
     expect(status.textContent).toBe('All files is live: 1 added, 1 edited on disk since the diff.');
-    // No age in the announced words: they do not change on the 15 s tick.
     expect(status.textContent).not.toContain('ago');
   });
 

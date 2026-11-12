@@ -1,9 +1,3 @@
-/**
- * The ask-only toolbar (the VS Code Guide tab: selected lines can be asked
- * about, never commented on). It opens on the Ask box with no way to a
- * comment, and closes once the question is sent, since the answer opens
- * somewhere else.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

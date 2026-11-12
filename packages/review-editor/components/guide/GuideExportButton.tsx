@@ -3,7 +3,6 @@ import { Download, Link2 } from 'lucide-react';
 import { GuideShareDialog, formatShareBytes, type GuideShareCreated, type GuideShareExisting } from './GuideShareDialog';
 
 interface GuideExportButtonProps {
-  /** Live guide job id or `saved:{id}`. */
   jobId: string;
 }
 
@@ -12,7 +11,6 @@ interface ExportInfo {
   filename: string;
 }
 
-/** What `/api/guide/:jobId/share-info` reports. */
 interface ShareInfo {
   enabled: boolean;
   serviceUrl: string;
@@ -41,28 +39,6 @@ function parseShareInfo(input: unknown): ShareInfo | null {
 const HEADER_CONTROL_CLASS =
   'inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-[11.5px] text-muted-foreground transition-colors hover:border-border hover:text-foreground';
 
-/**
- * The guide header's Share menu: "Download portable guide" — one HTML file
- * with this guide and the exact diff it describes; the viewer loads from
- * guides.show (decision record D1, D9) — and "Create share link", which
- * uploads the same guide + diff to the share service through
- * `POST /api/guide/:jobId/share` (contract in
- * `adr/implementation/guide-share-hosting.md` §7), only ever from the
- * dialog's Create click.
- *
- * Renders nothing when the server reports the guide is not exportable (its
- * diff was not retained) or the export preflight fails, so a guide that
- * cannot be exported never shows a dead control; the share control is
- * additionally hidden when `/share-info` says sharing is disabled
- * (`PLANNOTATOR_SHARE=disabled`) or that preflight fails. When the server
- * already remembers a link for this guide the control reads "Share link"
- * and the dialog offers Remove link.
- *
- * The result of a Create is held here for the life of this guide view, so
- * reopening the dialog shows the same link and one-time delete token instead
- * of offering a second upload — an unrecorded link (guide history off) can
- * only ever be removed with that token, so it must never be silently orphaned.
- */
 export const GuideExportButton: React.FC<GuideExportButtonProps> = ({ jobId }) => {
   const [info, setInfo] = useState<ExportInfo | null>(null);
   const [share, setShare] = useState<ShareInfo | null>(null);
@@ -144,8 +120,6 @@ export const GuideExportButton: React.FC<GuideExportButtonProps> = ({ jobId }) =
           created={created}
           onCreated={(next) => {
             setCreated(next);
-            // Only a link the server recorded can be removed from here; an
-            // `existing` entry otherwise would offer a Remove that 404s.
             if (!next.recorded) return;
             setShare((prev) =>
               prev ? { ...prev, existing: { url: next.url, createdAt: new Date().toISOString() } } : prev,

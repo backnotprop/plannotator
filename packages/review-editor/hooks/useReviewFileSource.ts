@@ -2,13 +2,11 @@ import { useMemo } from 'react';
 import type { DiffFile } from '../types';
 import type { ReviewState } from '../dock/ReviewStateContext';
 
-/** The text of one side of a reviewed file, for a hover source preview. */
 export interface ReviewFileSource {
   contents: string;
   filepath: string;
 }
 
-/** Which side of the diff: `old` for something the change removed, `new` otherwise. */
 export type ReviewFileSide = 'old' | 'new';
 
 export type ReviewFileSourceLoader = (filePath: string, side: ReviewFileSide) => Promise<ReviewFileSource | null>;
@@ -20,17 +18,6 @@ export interface ReviewFileSourceOptions {
   readonly fetchImpl?: typeof fetch;
 }
 
-/**
- * Build the loader behind code review's hover source previews (Call Flow
- * locations, Semantic Changes rows). It reads the file the review shows
- * through `/api/file-content` (both sides, bound to the review's base and
- * snapshot, so a PR or since-base review previews the reviewed source, not
- * the working tree). A path is matched against the diff's files by its new
- * or old name, so a renamed file is asked for with its `oldPath`. One request
- * per file, shared by every caller; a failed request (a stale snapshot, a file
- * the server cannot read) resolves null and is forgotten, so a later hover
- * asks again.
- */
 export function createReviewFileSourceLoader({
   files,
   reviewBase,
@@ -61,11 +48,6 @@ export function createReviewFileSourceLoader({
   };
 }
 
-/**
- * The hover source loader for the current review, or undefined when the
- * review has no full file contents (a static patch: `/api/file-content`
- * answers 400) so nothing offers a preview.
- */
 export function useReviewFileSource(state: ReviewState | null): ReviewFileSourceLoader | undefined {
   const files = state?.files;
   const reviewBase = state?.reviewBase;

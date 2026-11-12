@@ -191,7 +191,6 @@ describe.if(hasDom)('durable review progress binding', () => {
     originalFetch = globalThis.fetch;
     const realSetTimeout = globalThis.setTimeout;
     let expireFlush: (() => void) | undefined;
-    // Fire only the flush budget manually; React keeps its normal timers.
     const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, delay?: number, ...args: unknown[]) => {
       if (delay === 5000) {
         expireFlush = callback;
@@ -224,7 +223,6 @@ describe.if(hasDom)('durable review progress binding', () => {
       expireFlush!();
       await flushed;
     });
-    // The review action has been released even though the first POST is pending.
     expect(writes).toEqual([true]);
     stalled = false;
     await act(async () => { abortRequest!(); await api.flush(); });
@@ -244,7 +242,6 @@ describe.if(hasDom)('durable review progress binding', () => {
     }) as typeof fetch;
     await render('one');
     await act(async () => { api.persistViewed(paths, true); await api.flush(); });
-    // The server refuses more than 5000 changes in one POST.
     expect(sizes.every(size => size <= 5000)).toBe(true);
     expect(sizes.reduce((a, b) => a + b, 0)).toBe(6000);
   });

@@ -1,14 +1,6 @@
-/**
- * Change bars for a changed file's Whole file view (approved design record
- * "review-explorer", step 2): which new-side lines the diff adds or modifies,
- * and where it removed lines (a wedge on the line that follows), read from the
- * file's patch. A `+` run that replaces `-` lines in the same hunk reads as
- * modified; a `+` run alone as added.
- */
 export interface WholeFileMarks {
   added: number[];
   modified: number[];
-  /** New-side line numbers that removed lines sat just above. */
   removedBefore: number[];
 }
 
@@ -16,7 +8,6 @@ export function wholeFileMarks(patch: string): WholeFileMarks {
   const marks: WholeFileMarks = { added: [], modified: [], removedBefore: [] };
   let newLine = 0;
   let inHunk = false;
-  // The current run of changed lines: removals seen, additions collected.
   let removed = 0;
   let addedRun: number[] = [];
   const flush = () => {
@@ -41,11 +32,9 @@ export function wholeFileMarks(patch: string): WholeFileMarks {
       addedRun.push(newLine);
       newLine += 1;
     } else if (line.startsWith('-')) {
-      // A removal after additions in the same run starts no new run: the
-      // run is one change (git prints removals first, so this is rare).
       removed += 1;
     } else if (line.startsWith('\\')) {
-      continue; // "\ No newline at end of file"
+      continue;
     } else {
       flush();
       newLine += 1;
@@ -59,7 +48,6 @@ function selectorList(lines: readonly number[]): string {
   return lines.map((line) => `[data-gutter] [data-column-number="${line}"]`).join(',\n');
 }
 
-/** The CSS that draws the marks in the gutter of a Pierre `File`. */
 export function wholeFileMarksCss(marks: WholeFileMarks): string {
   const rules: string[] = [];
   if (marks.added.length > 0) {

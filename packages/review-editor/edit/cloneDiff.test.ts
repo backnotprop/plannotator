@@ -20,18 +20,14 @@ describe('cloneFileDiff', () => {
     const reference = JSON.stringify(original);
     const clone = cloneFileDiff(original);
 
-    // Byte-identical snapshot.
     expect(JSON.stringify(clone)).toBe(reference);
 
-    // Simulate what Pierre's edit session does to the live object: replace
-    // additionLines, clobber hunks, stamp the session flag.
     const live = original as unknown as Record<string, unknown>;
     (live.additionLines as string[]).push('// injected by editor\n');
     live.hunks = [];
     live.editSessionDirty = true;
     live.cacheKey = 'mutated';
 
-    // The pristine clone must be unaffected (the restore invariant).
     expect(JSON.stringify(clone)).toBe(reference);
     expect((clone as unknown as Record<string, unknown>).editSessionDirty).toBeUndefined();
   });

@@ -1,14 +1,3 @@
-/**
- * The "All changes" row's +/- counts must read at 4.5:1 on every surface the
- * row is drawn on (the sidebar, the selected row, the hovered row), in every
- * palette that ships, light and dark. Swept from the CSS itself, so a palette
- * added later is checked too.
- *
- * Failures caught: the counts falling back under 4.5:1 (they were the
- * palette's success/destructive at 60% opacity, under 2:1 in several
- * palettes); a fix that reaches 4.5:1 by greying them (moving toward the
- * foreground turned + and - into the same grey in about 20 palettes).
- */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,10 +9,8 @@ const themeFiles = readdirSync(themesDir).filter((f) => f.endsWith('.css')).sort
 
 const isGreenish = (H: number) => H >= 90 && H <= 200;
 const isReddish = (H: number) => H >= 330 || H <= 70;
-/** OKLCH of a colour token, or of a result hex. */
 const lch = (value: string) => rgbToOklch(parseCssColor(value)!);
 
-/** First rule whose selector list names `selector` (some files write `.theme-x,\n.theme-x.light {`). */
 function tokensFromCss(css: string, selector: string): DiffCountTokens | undefined {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
   for (const rule of stripped.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
@@ -47,7 +34,7 @@ describe('All changes row counts', () => {
     for (const mode of ['dark', 'light'] as const) {
       const selector = mode === 'dark' ? `.theme-${id}` : `.theme-${id}.light`;
       const tokens = tokensFromCss(css, selector);
-      if (!tokens) continue; // a palette with one mode
+      if (!tokens) continue;
       test(`${id} / ${mode}: + and - read at ${DIFF_COUNT_CONTRAST_MIN}:1 on every surface of the row`, () => {
         const colors = diffCountColors(tokens);
         expect(colors).toBeDefined();
@@ -67,9 +54,6 @@ describe('All changes row counts', () => {
         const del = lch(colors.deletions);
         const success = lch(tokens.success!);
         const destructive = lch(tokens.destructive!);
-        // A palette may choose other hues (colorblind: blue and orange); then
-        // the count keeps the palette's own hue. A token with no hue at all
-        // (a palette that draws deletions in its text colour) gets the usual one.
         for (const [label, got, own, wanted] of [
           ['+', add, success, isGreenish],
           ['-', del, destructive, isReddish],
@@ -97,7 +81,6 @@ describe('All changes row counts', () => {
   });
 
   test('a count that does not read keeps its hue and chroma and moves only its lightness', () => {
-    // A pale green and a pale red on white get darker; they do not turn grey.
     const colors = diffCountColors({ background: '#ffffff', foreground: '#111111', success: '#86efac', destructive: '#fca5a5' })!;
     const add = lch(colors.additions);
     const del = lch(colors.deletions);

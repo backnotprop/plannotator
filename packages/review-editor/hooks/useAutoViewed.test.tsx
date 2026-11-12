@@ -1,29 +1,3 @@
-/**
- * DOM-gated tests (DOM_TESTS=1) for the auto-mark-viewed binding. Registered
- * in .github/workflows/test.yml's "Run UI seam-contract + DOM tests" step.
- *
- * The decision core is covered purely in utils/autoViewed.test.ts. What this
- * file guards is the wiring the core cannot see:
- *
- *  - a read-through of a PR firing one /api/pr-viewed request per file
- *    (the endpoint's body already takes an array, and the batcher exists
- *    precisely so a 40-file review is not 40 POSTs);
- *  - the off switch reaching the pipeline at all;
- *  - the un-view suppression set (owned by the App because it rides the
- *    draft) actually reaching the core;
- *  - Rule 2: opening a file in the single-file panel marking it, and moving
- *    on from it NOT marking it;
- *  - Rule 4: a suspended session (guide takeover / commit detour) marking.
- *
- * Dwell and batch windows are compressed through the hook's documented test
- * overrides so this runs in milliseconds.
- *
- * Dwell is measured on Date.now(), so the clock is frozen for every test and
- * moves only through `pass(ms)`. A verdict like "b.ts was only glanced at"
- * then cannot depend on how fast the runner is: a loaded CI runner once took
- * longer than DWELL_MS between two rerenders, and a file that was never read
- * came back checked off.
- */
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -32,8 +6,6 @@ import { useAutoViewed, type UseAutoViewedOptions, type UseAutoViewedResult } fr
 const hasDom = typeof document !== 'undefined';
 
 const DWELL_MS = 20;
-// Comfortably longer than a full three-file read-through below, so the batch
-// window is what groups the marks rather than the test's own pacing.
 const BATCH_MS = 400;
 
 let root: Root | null = null;
@@ -70,11 +42,6 @@ async function mount(opts: UseAutoViewedOptions): Promise<Session> {
 const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 
 let clock = 0;
-/**
- * Let `ms` of reading time pass: the frozen clock moves by exactly `ms`, and
- * real time passes too so the hook's own timers (the bottom-of-diff retry)
- * get to run.
- */
 async function pass(ms: number) {
   clock += ms;
   setSystemTime(clock);
@@ -127,7 +94,6 @@ describe.if(hasDom)('useAutoViewed', () => {
       });
     }
 
-    // The checkmarks appear immediately — only the remote sync waits.
     expect(marked).toEqual(['a.ts', 'b.ts', 'c.ts']);
     expect(synced).toEqual([]);
     await wait(BATCH_MS + 30);
@@ -172,8 +138,6 @@ describe.if(hasDom)('useAutoViewed', () => {
     });
     expect(marked).toEqual([]);
 
-    // Leaving the detour resumes from NOW, so the time spent in it is not
-    // banked into an instant mark on the next pass.
     await s.rerender(baseOptions({ suspended: false, onMark: (p) => marked.push(...p) }));
     act(() => {
       s.api.current!.handleReadingFileChange('c.ts');
@@ -188,22 +152,17 @@ describe.if(hasDom)('useAutoViewed', () => {
 
     await s.rerender(baseOptions({ singleFileReadingFile: 'a.ts', onMark: (p) => marked.push(...p) }));
     await pass(DWELL_MS + 10);
-    // Opening it and sitting on it must not check it off — the reviewer has
-    // not moved on yet.
     expect(marked).toEqual([]);
 
     await s.rerender(baseOptions({ singleFileReadingFile: 'b.ts', onMark: (p) => marked.push(...p) }));
     expect(marked).toEqual(['a.ts']);
 
-    // A 2-second glance at b.ts is not a review of it.
     await pass(DWELL_MS / 2);
     await s.rerender(baseOptions({ singleFileReadingFile: 'c.ts', onMark: (p) => marked.push(...p) }));
     expect(marked).toEqual(['a.ts']);
   });
 
   test('a new diff snapshot clears dwell so nothing marks on first contact', async () => {
-    // Guards dwell leaking across a diff switch, which would check files off
-    // in the new diff the instant they were passed.
     const marked: string[] = [];
     const s = await mount(baseOptions({ onMark: (p) => marked.push(...p) }));
     act(() => s.api.current!.handleReadingFileChange('a.ts'));
@@ -217,12 +176,9 @@ describe.if(hasDom)('useAutoViewed', () => {
   });
 
   test('a file parked at the bottom of the diff matures without further scrolling', async () => {
-    // reportVisibleFile only runs on scroll, so the LAST file — the one that
-    // can never scroll out above — would otherwise never reach its dwell.
     const marked: string[] = [];
     const s = await mount(baseOptions({ onMark: (p) => marked.push(...p) }));
     act(() => s.api.current!.handleReadingFileChange('last.ts'));
-    // The at-bottom emission arrives immediately, well before the floor.
     act(() => s.api.current!.handleFileScrolledPast('last.ts'));
     expect(marked).toEqual([]);
     await pass(DWELL_MS + 60);

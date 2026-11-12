@@ -39,8 +39,6 @@ async function renderMenu(compactTouchLayout: boolean) {
 }
 
 describe('ReviewHeaderMenu Options button', () => {
-  // The owner's header order ends with the ☰ alone: no word, but a name for
-  // screen readers and a tooltip.
   test.skipIf(!hasDom)('desktop: the ☰ alone, named "Options" with no visible word', async () => {
     const trigger = await renderMenu(false);
     expect(trigger).not.toBeNull();

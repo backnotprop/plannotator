@@ -131,8 +131,6 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
               value={commentText}
               onChange={(event) => setCommentText(event.target.value)}
               onKeyDown={(event) => {
-                // Mod+Enter is the shortcut scope's (above). A plain Enter saves
-                // only with "Enter saves a comment" on; Shift+Enter stays a newline.
                 if (event.metaKey || event.ctrlKey) return;
                 if (!isCommentSubmitKey(event, enterSavesComment)) return;
                 event.preventDefault();

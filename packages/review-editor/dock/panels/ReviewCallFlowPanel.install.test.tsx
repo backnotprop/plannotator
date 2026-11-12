@@ -1,9 +1,3 @@
-/**
- * DOM-gated (DOM_TESTS=1) tests for the Call flow Dock's opt-in install
- * funnel. Registered in .github/workflows/test.yml's UI seam-contract +
- * DOM step. The funnel must render ONLY for the runtime-missing flavor of
- * an unavailable advert, never for unsupported views.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -38,8 +32,6 @@ function stateWith(
   installStatus: CallFlowInstallStatus,
   startInstall: (languageIds?: readonly CallFlowLanguageId[]) => void = () => {},
 ): ReviewState {
-  // The panel's pre-analysis branches only touch these fields; the partial
-  // cast keeps the harness honest about what the funnel depends on.
   return {
     callFlowAdvert,
     callFlowAvailable: callFlowAdvert.available,

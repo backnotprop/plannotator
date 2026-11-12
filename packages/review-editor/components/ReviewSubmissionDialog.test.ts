@@ -36,7 +36,6 @@ describe('buildPlatformReviewBody', () => {
     })).toBe('');
   });
 
-  // #1611: GitHub requires a body on REQUEST_CHANGES exactly like COMMENT.
   test('uses the same neutral GitHub body for an inline-only request-changes review', () => {
     expect(buildPlatformReviewBody('request_changes', 'github', '', {
       fileComments: [inlineComment],
@@ -103,9 +102,6 @@ describe('buildPRActionRequest', () => {
     });
   });
 
-  // #1583: Bitbucket posts the general comment after the inline ones, so it
-  // can be the piece that failed. The retry must resend THAT text (from the
-  // server), never the dialog's current textarea.
   test('a retry that carries an unposted general comment resends exactly it', () => {
     const partialTarget: SubmissionTarget = {
       ...target,
@@ -278,7 +274,6 @@ describe('file-scoped comments on GitHub (#1599)', () => {
     ]);
     expect(target.fileScopedBody).not.toContain('Split this file.');
     expect(target.fileScopedBody).not.toContain('Wrong directory.');
-    // General and outdated line comments still ride the body, as before.
     expect(target.fileScopedBody).toContain('Overall fine.');
     expect(target.fileScopedBody).toContain('Stale remark');
     expect(target.fileComments).toHaveLength(0);
@@ -337,8 +332,6 @@ describe('comments made in a Markdown preview', () => {
     markdownPreview: { originalText: 'new installer', view: 'diff', diffContext: 'added' },
   };
 
-  // The quote is rendered text, which maps to no line: never inline, never a
-  // file-level thread, always the review body with the quote.
   for (const platform of ['github', 'gitlab', 'bitbucket'] as const) {
     test(`go into the review body with their quote (${platform})`, () => {
       const submission = buildReviewSubmission(

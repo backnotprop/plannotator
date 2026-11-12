@@ -2,20 +2,10 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { PackageChangeCard, PackageMetadata } from '@plannotator/core/package-changes';
 import { storage } from '@plannotator/ui/utils/storage';
 
-/**
- * The page side of package changes. The server works out the cards (GET
- * /api/package-changes, once per diff snapshot and base, shared by every
- * card on the page) and runs the npm lookup per card (POST
- * /api/package-changes/lookup, only after the reviewer allowed it). Nothing
- * here talks to npm.
- */
-
 export type PackageCard = PackageChangeCard & { lookup: { names: string[]; withheld: string[] } };
 
-/** What the page knows about one path: its card, and how many names one lookup click sends in this review. */
 export interface PackageCardData {
   card: PackageCard;
-  /** Every name any card would send: the consent button's count. */
   sendTotal: number;
 }
 
@@ -49,7 +39,6 @@ function loadCards(scope: Scope): Promise<PackageChangesData | null> {
   return hit;
 }
 
-/** This path's card: undefined while loading, null when it has none. */
 export function usePackageCard(path: string, scope: Scope, enabled: boolean): PackageCardData | null | undefined {
   const key = scopeKey(scope);
   const [result, setResult] = useState<{ key: string; card: PackageCardData | null } | undefined>();
@@ -61,7 +50,6 @@ export function usePackageCard(path: string, scope: Scope, enabled: boolean): Pa
       if (live) setResult({ key: `${key}\u0000${path}`, card: card && data ? { card, sendTotal: data.sendTotal } : null });
     });
     return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, path, enabled]);
   if (!enabled) return null;
   return result?.key === `${key}\u0000${path}` ? result.card : undefined;
@@ -95,14 +83,12 @@ function loadLookup(scope: Scope, path: string): Promise<PackageLookupState> {
         return { state: 'ready', byKey, offline: body.offline === true, ...(body.failure ? { failure: body.failure } : {}) };
       })
       .catch((): PackageLookupState => ({ state: 'ready', byKey: new Map(), failure: 'offline', offline: true }));
-    // A failed lookup is retried on demand, never served from the cache.
     hit.then((r) => { if (r.state !== 'ready' || r.failure) lookupCache.delete(key); });
     lookupCache.set(key, hit);
   }
   return hit;
 }
 
-/** npm details for one card, fetched only while `on` (the reviewer allowed it) and the card has names to send. */
 export function usePackageLookup(path: string, scope: Scope, on: boolean, retry: number): PackageLookupState {
   const key = `${scopeKey(scope)}\u0000${path}\u0000${retry}`;
   const [result, setResult] = useState<{ key: string; value: PackageLookupState } | undefined>();
@@ -111,19 +97,15 @@ export function usePackageLookup(path: string, scope: Scope, on: boolean, retry:
     let live = true;
     void loadLookup(scope, path).then((value) => { if (live) setResult({ key, value }); });
     return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, on]);
   if (!on) return { state: 'idle' };
   return result?.key === key ? result.value : { state: 'loading' };
 }
 
-/** Test hook. */
 export function resetPackageChangesCache(): void {
   cardsCache.clear();
   lookupCache.clear();
 }
-
-// --- fold state: one remembered choice for every card --------------------------
 
 export const PACKAGE_CHANGES_FOLD_COOKIE = 'plannotator-package-changes-folded';
 const foldListeners = new Set<() => void>();

@@ -11,11 +11,9 @@ const SERVER_DEBOUNCE_MS = 80;
 
 export interface GoToFileProps {
   onClose: () => void;
-  /** Open a file. `side`: in a tab of its own beside the current one. */
   onOpen: (path: string, options: { side: boolean }) => void;
   files: readonly DiffFile[];
   repo: RepoFilesState;
-  /** The session lists no repository (a static patch, Perforce): changed files only. */
   repoSupported: boolean;
   recentPaths: readonly string[];
   snapshotId?: string;
@@ -36,7 +34,6 @@ const STATUS_CLASS: Record<DiffFile['status'], string> = {
   modified: 'text-primary',
 };
 
-/** The matched characters of a name, marked. */
 function Marked({ text, offset, positions }: { text: string; offset: number; positions: ReadonlySet<number> }) {
   const parts: React.ReactNode[] = [];
   let run = '';
@@ -58,15 +55,6 @@ function Marked({ text, offset, positions }: { text: string; offset: number; pos
   return <>{parts}</>;
 }
 
-/**
- * Go to File (⌘P / Ctrl+P; approved design record "review-explorer", step 3):
- * a fuzzy search over every file of the repository at the revision the diff
- * reads. The browser searches a listing it holds; a listing too large to send
- * (or not loaded yet) is searched on the server. Changed files carry their
- * badge and win ties; with nothing typed, the files opened last, then the
- * changed files. Enter opens the file in the preview tab; Alt+Enter keeps it
- * in a tab beside the current one.
- */
 export const GoToFile: React.FC<GoToFileProps> = ({
   onClose,
   onOpen,
@@ -88,11 +76,8 @@ export const GoToFile: React.FC<GoToFileProps> = ({
   const changedSet = useMemo(() => new Set(changed.keys()), [changed]);
   const localPaths = repo.status === 'ready' ? repo.paths : null;
   const lowerPaths = useMemo(() => localPaths?.map((path) => path.toLowerCase()), [localPaths]);
-  // Searched on the server: a lazy listing, or one still loading.
   const searchOnServer = repoSupported && !localPaths && repo.status !== 'unavailable' && repo.status !== 'error';
 
-  // Focus goes back where it came from when the palette closes without
-  // opening a file (Escape, a click outside).
   const returnFocusRef = useRef<Element | null>(typeof document === 'undefined' ? null : document.activeElement);
   const close = () => {
     onClose();
@@ -140,7 +125,6 @@ export const GoToFile: React.FC<GoToFileProps> = ({
       return fuzzySearchPaths(localPaths, trimmed, { limit: RESULT_LIMIT, preferred: changedSet, lowerPaths });
     }
     if (searchOnServer) return serverMatches?.query === query ? serverMatches.matches : [];
-    // Nothing listed: the changed files only.
     return fuzzySearchPaths(files.map((file) => file.path), trimmed, { limit: RESULT_LIMIT });
   }, [changedSet, files, localPaths, lowerPaths, query, recentPaths, searchOnServer, serverMatches]);
 

@@ -1,4 +1,3 @@
-/** DOM-gated contract tests for one-shot Call flow background installation. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

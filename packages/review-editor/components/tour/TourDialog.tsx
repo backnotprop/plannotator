@@ -10,12 +10,6 @@ import type { TourKeyTakeaway } from '../../hooks/tour/useTourData';
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-// ---------------------------------------------------------------------------
-// Intro composition cascade — each piece springs into place after the dialog
-// card lands, so the landing page composes itself rather than appearing all
-// at once. Spring physics give natural settle, no cartoony bounce.
-// ---------------------------------------------------------------------------
-
 const introContainerVariants: Variants = {
   hidden: {},
   visible: { transition: { staggerChildren: 0.06, delayChildren: 0.12 } },
@@ -54,7 +48,6 @@ const startButtonVariants: Variants = {
   },
 };
 
-// One-shot "spark of life" — color dot pulses once when its card lands.
 const dotVariants: Variants = {
   hidden: { scale: 1 },
   visible: {
@@ -62,10 +55,6 @@ const dotVariants: Variants = {
     transition: { duration: 0.45, times: [0, 0.5, 1], ease: 'easeOut' },
   },
 };
-
-// ---------------------------------------------------------------------------
-// Key takeaways table
-// ---------------------------------------------------------------------------
 
 const severityLabel: Record<TourKeyTakeaway['severity'], string> = {
   info: 'Info',
@@ -115,10 +104,6 @@ function TakeawaysTable({ takeaways }: { takeaways: TourKeyTakeaway[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Page types + animation helpers
-// ---------------------------------------------------------------------------
-
 type TourPage = 'intro' | 'stops' | 'checklist';
 const PAGE_ORDER: TourPage[] = ['intro', 'stops', 'checklist'];
 const PAGE_LABELS: Record<TourPage, string> = {
@@ -144,17 +129,12 @@ function getPageAnimClass(
   return '';
 }
 
-// ---------------------------------------------------------------------------
-// Dialog wrapper
-// ---------------------------------------------------------------------------
-
 interface TourDialogProps {
   jobId: string | null;
   onClose: () => void;
 }
 
 export const TourDialog: React.FC<TourDialogProps> = ({ jobId, onClose }) => {
-  // Keep the last known jobId mounted while we play the exit animation
   const [renderedJobId, setRenderedJobId] = useState<string | null>(jobId);
   const [closing, setClosing] = useState(false);
 
@@ -163,8 +143,6 @@ export const TourDialog: React.FC<TourDialogProps> = ({ jobId, onClose }) => {
       setRenderedJobId(jobId);
       setClosing(false);
     } else if (renderedJobId) {
-      // If reduced motion is on, the exit animation is suppressed and
-      // onAnimationEnd will never fire — unmount immediately instead.
       if (prefersReducedMotion()) {
         setRenderedJobId(null);
         setClosing(false);
@@ -176,7 +154,6 @@ export const TourDialog: React.FC<TourDialogProps> = ({ jobId, onClose }) => {
 
   const requestClose = useCallback(() => { onClose(); }, [onClose]);
 
-  // Escape to close
   useEffect(() => {
     if (!renderedJobId || closing) return;
     const handler = (e: KeyboardEvent) => {
@@ -197,10 +174,8 @@ export const TourDialog: React.FC<TourDialogProps> = ({ jobId, onClose }) => {
   return (
     <MotionConfig reducedMotion="user">
       <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-2 md:px-8 md:py-4" onClick={requestClose}>
-        {/* Backdrop */}
         <div className={`absolute inset-0 bg-black/50 backdrop-blur-[2px] ${closing ? 'tour-dialog-overlay-closing' : 'tour-dialog-overlay'}`} />
 
-        {/* Dialog card */}
         <div
           className={`relative z-10 w-full max-w-6xl h-full max-h-[96vh] bg-background rounded-2xl shadow-2xl border border-border/15 overflow-hidden flex flex-col ${closing ? 'tour-dialog-content-closing' : 'tour-dialog-content'}`}
           onClick={(e) => e.stopPropagation()}
@@ -213,10 +188,6 @@ export const TourDialog: React.FC<TourDialogProps> = ({ jobId, onClose }) => {
   );
 };
 
-// ---------------------------------------------------------------------------
-// Dialog content — 3 navigable pages
-// ---------------------------------------------------------------------------
-
 function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => void }) {
   const state = useReviewState();
   const { tour, loading, error, checked, toggleChecked, retry } = useTourData(jobId);
@@ -225,8 +196,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
   const walkthroughAutoOpenTriggered = useRef(false);
   const [openStops, setOpenStops] = useState<Set<number>>(() => new Set());
 
-  // Single-open accordion: opening a new stop closes any other that was open.
-  // Clicking the currently-open stop closes it.
   const toggleStop = useCallback((i: number) => {
     setOpenStops((prev) => {
       if (prev.has(i)) return new Set();
@@ -240,8 +209,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
 
   const navigate = useCallback((next: TourPage) => {
     if (exitingPage || next === page) return;
-    // Reduced motion suppresses the page animations, so onAnimationEnd
-    // never fires to clear exitingPage — swap immediately instead.
     if (prefersReducedMotion()) {
       setPage(next);
       return;
@@ -267,26 +234,19 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  // Mark each page as "seen" after first mount. Gated on `tour` so it doesn't
-  // flip the refs during the loading render (which would strip the first-time
-  // animation classes before the page ever rendered).
   useEffect(() => {
     if (!tour) return;
     if (page === 'stops' || exitingPage === 'stops') stopsSeenRef.current = true;
   }, [page, exitingPage, tour]);
 
-  // First-visit auto-open: when the user lands on the walkthrough page for the
-  // first time, wait for the stops cascade to finish + a brief breath, then
-  // pop the first accordion. The card itself plays its motion accordion
-  // animation in response, so this slots into the natural reveal beat.
   useEffect(() => {
     if (!tour) return;
     if (page !== 'stops') return;
     if (walkthroughAutoOpenTriggered.current) return;
     walkthroughAutoOpenTriggered.current = true;
 
-    const stopRevealMs = 280; // .tour-stop-reveal duration
-    const stopStaggerMs = 60; // delay between stops
+    const stopRevealMs = 280;
+    const stopStaggerMs = 60;
     const lastStopFinishesAt = stopRevealMs + (tour.stops.length - 1) * stopStaggerMs;
     const breath = 500;
 
@@ -294,9 +254,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
     return () => clearTimeout(t);
   }, [page, tour]);
 
-  // All hooks must run before the early returns below (rules of hooks).
-  // `tour` may still be null during loading, so access it safely — the
-  // filter strips the empty values out anyway.
   const introCards = useMemo(
     () =>
       [
@@ -307,7 +264,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
     [tour?.intent, tour?.before, tour?.after],
   );
 
-  // Loading
   if (loading) {
     return (
       <>
@@ -329,7 +285,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
     );
   }
 
-  // Error
   if (error || !tour) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -345,13 +300,10 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
   const checklistCount = tour.qa_checklist.length;
   const isActive = (p: TourPage) => page === p && !exitingPage;
 
-  // Mark pages as "seen" the first time we mount them so we don't re-animate
-  // the section heading + staggered cards on every back-and-forth navigation.
   const stopsAlreadySeen = stopsSeenRef.current;
 
   return (
     <>
-      {/* Title bar + close */}
       <div className="flex-shrink-0 flex items-center gap-3 px-5 py-1.5 border-b border-border/20 dark:border-border/40">
         <h2 className="text-sm font-semibold tracking-tight text-foreground truncate flex-1 min-w-0">
           {tour.title}
@@ -366,7 +318,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
         </button>
       </div>
 
-      {/* Page nav tabs */}
       <div className="flex-shrink-0 flex items-center gap-1 px-5 py-1.5 border-b border-border/10 dark:border-border/30">
         {PAGE_ORDER.map((p) => (
           <button
@@ -389,10 +340,8 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
         ))}
       </div>
 
-      {/* Page container */}
       <div className="flex-1 relative overflow-hidden">
 
-        {/* ── OVERVIEW ── */}
         {(page === 'intro' || exitingPage === 'intro') && (
           <div
             className={`absolute inset-0 z-10 ${getPageAnimClass('intro', page, exitingPage, slideDir)}`}
@@ -406,8 +355,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
               animate="visible"
               variants={introContainerVariants}
             >
-              {/* Scrollable content area with a bottom fade so content disappears
-                  cleanly under the pinned Start Tour button. */}
               <div className="relative flex-1 min-h-0">
                 <OverlayScrollArea className="h-full">
                   <div className="px-8 py-6 pb-12 max-w-4xl mx-auto">
@@ -420,8 +367,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
                       </motion.p>
                     )}
 
-                    {/* Intent · Before · After trilogy — each card lands in turn,
-                        its color dot doing a single "spark of life" pulse on land. */}
                     <motion.div
                       variants={introContainerVariants}
                       className="grid grid-cols-3 gap-3 mb-5 text-[13px]"
@@ -450,7 +395,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
                   </div>
                 </OverlayScrollArea>
 
-                {/* Bottom fade — content gracefully disappears under the pinned button */}
                 <div
                   className="pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-background backdrop-blur-xl"
                   style={{
@@ -460,7 +404,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
                 />
               </div>
 
-              {/* Pinned Start Tour button — always visible in the viewport */}
               {page === 'intro' && (
                 <div className="flex-shrink-0 px-8 pb-5 pt-1 max-w-4xl mx-auto w-full">
                   <motion.button
@@ -481,7 +424,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
           </div>
         )}
 
-        {/* ── WALKTHROUGH — deferred until intro exit completes so staggered reveals don't flash behind it ── */}
         {(page === 'stops' || exitingPage === 'stops') && exitingPage !== 'intro' && (
           <div
             className={`absolute inset-0 ${getPageAnimClass('stops', page, exitingPage, slideDir)}`}
@@ -526,7 +468,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
           </div>
         )}
 
-        {/* ── CHECKLIST — also deferred past intro exit ── */}
         {(page === 'checklist' || exitingPage === 'checklist') && exitingPage !== 'intro' && (
           <div
             className={`absolute inset-0 ${getPageAnimClass('checklist', page, exitingPage, slideDir)}`}

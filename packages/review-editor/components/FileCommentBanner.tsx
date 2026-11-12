@@ -10,7 +10,6 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface FileCommentBannerProps {
-  /** File-scoped comments for ONE file (already filtered to scope === 'file'). */
   comments: CodeAnnotation[];
   selectedAnnotationId: string | null;
   onSelect: (id: string | null) => void;
@@ -19,11 +18,9 @@ interface FileCommentBannerProps {
   onExplain?: (id: string) => void;
   agentFindingSources?: ReadonlySet<string>;
   explainDisabled?: boolean;
-  /** Re-measure hook for the virtualized all-files host (see FileCommentCard). */
   onHeightChange?: () => void;
 }
 
-/** First non-empty line of the comment, used as the collapsed one-line preview. */
 function firstLine(text: string): string {
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
@@ -32,12 +29,6 @@ function firstLine(text: string): string {
   return text.trim();
 }
 
-/**
- * A single file-scoped comment card. Exported so the all-files view can render
- * it directly inside Pierre's annotation slot (the header-prefix slot is
- * suppressed whenever a custom header is present), while the single-file viewer
- * renders a stack of them in {@link FileCommentBanner}.
- */
 export const FileCommentCard: React.FC<{
   comment: CodeAnnotation;
   isSelected: boolean;
@@ -47,27 +38,17 @@ export const FileCommentCard: React.FC<{
   onExplain?: (id: string) => void;
   agentFindingSources?: ReadonlySet<string>;
   explainDisabled?: boolean;
-  /** Fired after our rendered height changes (expand/collapse/edit) so the
-   *  virtualized all-files host can re-measure this item. */
   onHeightChange?: () => void;
 }> = ({ comment, isSelected, onSelect, onEdit, onDelete, onExplain, agentFindingSources, explainDisabled = false, onHeightChange }) => {
-  // Default expanded (the comment IS the point of a guided review); the toggle
-  // lets a reviewer collapse a long note back to one line to reach the hunks.
   const [collapsed, setCollapsed] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(comment.text ?? '');
   const enterSavesComment = useConfigValue('enterSavesComment');
 
-  // Tell the owner to re-measure when our height changes — in the all-files view
-  // these cards live in Pierre's custom-header portal, whose height isn't auto-
-  // observed; without this, expanding/editing overlaps the content below.
   const mounted = useRef(false);
-  // Layout effect (before paint) so the re-measure lands without a one-frame
-  // overlap when the card grows/shrinks.
   useLayoutEffect(() => {
     if (mounted.current) onHeightChange?.();
     else mounted.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collapsed, isEditing]);
 
   const html = useMemo(
@@ -90,8 +71,6 @@ export const FileCommentCard: React.FC<{
       <CommentMeta
         leading={
           <>
-            {/* Collapse toggle — always visible (primary affordance for reclaiming
-                space from a long comment), unlike the hover-revealed actions. */}
             <button
               className="flex-none -ml-0.5 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               onClick={(e) => { e.stopPropagation(); setCollapsed((c) => !c); }}
@@ -112,7 +91,6 @@ export const FileCommentCard: React.FC<{
         createdAt={comment.createdAt}
       />
 
-      {/* Made in the rendered Markdown preview: the text it is about. */}
       {comment.markdownPreview && !collapsed && (
         <div
           data-file-comment-markdown-quote=""
@@ -168,12 +146,6 @@ export const FileCommentCard: React.FC<{
   );
 };
 
-/**
- * Renders a file's file-scoped comments directly below the file path, above the
- * diff hunks. Long comments stay fully visible (no truncation) but can be
- * collapsed per-comment. Used in both the single-file viewer (plain React tree)
- * and the all-files view (Pierre's `renderHeaderPrefix` portal slot).
- */
 export const FileCommentBanner: React.FC<FileCommentBannerProps> = ({
   comments,
   selectedAnnotationId,

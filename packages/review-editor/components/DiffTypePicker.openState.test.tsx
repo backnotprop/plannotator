@@ -1,12 +1,3 @@
-/**
- * DOM-gated tests (DOM_TESTS=1) for the since-base dropdown label.
- *
- * getGitContext bakes "All changes since <detected default>" into the option
- * label at session start; the picker must re-render it from the LIVE active
- * base so the dropdown agrees with the adjacent BaseBranchPicker after a base
- * switch or a `--base` launch. Failure caught: the dropdown confidently
- * showing the detected default while the session diffs against another ref.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -38,7 +29,6 @@ afterEach(async () => {
 });
 
 const OPTIONS = [
-  // The baked label getGitContext computed from the detected default.
   { id: 'since-base', label: 'All changes since origin/main' },
   { id: 'uncommitted', label: 'Uncommitted changes' },
 ];
@@ -72,8 +62,6 @@ describe.if(hasDom)('DiffTypePicker since-base label (DOM)', () => {
   });
 
   test('falls back to the baked label without a base picker or live base', async () => {
-    // Without a live base (jj sessions, no picker) the baked label must
-    // survive — an unconditional rewrite would render "since undefined".
     const el = await mount(
       <DiffTypePicker
         options={OPTIONS}

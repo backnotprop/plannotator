@@ -4,7 +4,6 @@ import { isContentConsistentWithPatch } from './patchConsistency';
 const lines = (n: number, prefix = 'line') =>
   Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`).join('\n') + '\n';
 
-// A patch replacing 2 lines with 5 (net +3) somewhere in a 10-line file.
 const NET_PLUS_3_PATCH = [
   'diff --git a/foo.ts b/foo.ts',
   '--- a/foo.ts',
@@ -24,14 +23,11 @@ const NET_PLUS_3_PATCH = [
 
 describe('isContentConsistentWithPatch', () => {
   test('accepts contents whose totals match the patch net', () => {
-    // old: 10 lines, new: 13 lines, patch net: +3
     expect(isContentConsistentWithPatch(NET_PLUS_3_PATCH, lines(10), lines(13))).toBe(true);
   });
 
   test('rejects stale contents (file changed since the diff was captured)', () => {
-    // new side drifted by +3 again (e.g. mid-review edit): 16 ≠ 10 + 3
     expect(isContentConsistentWithPatch(NET_PLUS_3_PATCH, lines(10), lines(16))).toBe(false);
-    // old side drifted
     expect(isContentConsistentWithPatch(NET_PLUS_3_PATCH, lines(8), lines(13))).toBe(false);
   });
 
@@ -45,7 +41,6 @@ describe('isContentConsistentWithPatch', () => {
   });
 
   test('handles omitted hunk counts (single-line hunks)', () => {
-    // @@ -3 +3 @@ → oldCount=1, newCount=1, net 0
     const patch = '--- a/f\n+++ b/f\n@@ -3 +3 @@\n-old\n+new\n';
     expect(isContentConsistentWithPatch(patch, lines(5), lines(5))).toBe(true);
     expect(isContentConsistentWithPatch(patch, lines(5), lines(7))).toBe(false);

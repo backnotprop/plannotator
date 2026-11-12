@@ -1,12 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { RepoFileNoContentReason, RepoFileResponse, RepoRevisionInfo } from '@plannotator/shared/repo-files';
 
-/**
- * One file of the repository at the diff's new side, as text, from
- * `GET /api/repo-file` (approved design record "review-explorer", step 2): a
- * file the review does not change, or the Whole file view of one it does.
- * Read once per path and snapshot; a new snapshot reads again.
- */
 export type RepoFileText =
   | { status: 'loading' }
   | { status: 'ready'; content: string; revision: RepoRevisionInfo }
@@ -69,7 +63,6 @@ export function useRepoFileText(
   return key ? state : { status: 'loading' };
 }
 
-/** What a tab says when a file has no text to show. */
 export function repoFileEmptyMessage(reason: RepoFileNoContentReason, size?: number): string {
   switch (reason) {
     case 'too-large':
@@ -83,7 +76,6 @@ export function repoFileEmptyMessage(reason: RepoFileNoContentReason, size?: num
   }
 }
 
-/** Tests only. */
 export function __clearRepoFileTextCache() {
   cache.clear();
 }

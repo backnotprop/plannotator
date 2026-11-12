@@ -130,7 +130,6 @@ describe('parsePRActionSuccess', () => {
       retry: { action: 'request_changes', fileComments: [] },
     };
     expect(parsePRActionSuccess({ ok: true, submission })).toEqual({ submission });
-    // A failed decision can never be "retried" as a plain comment.
     expect(parsePRActionSuccess({
       ok: true,
       submission: { ...submission, retry: { action: 'comment', fileComments: [] } },

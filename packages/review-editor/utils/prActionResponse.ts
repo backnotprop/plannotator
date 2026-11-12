@@ -6,7 +6,6 @@ import type {
   PRReviewSubmissionResult,
 } from '@plannotator/shared/pr-types';
 
-/** Parsed success payload returned by the review server's platform endpoint. */
 export interface PRActionSuccess {
   prUrl?: string;
   submission: PRReviewSubmissionResult;
@@ -100,7 +99,6 @@ function sameFileComment(
   );
 }
 
-/** Parse one server-issued partial submission and its exact retry contract. */
 export function parsePRReviewSubmissionPartial(
   value: Record<string, unknown>,
 ): PRReviewSubmissionPartial | null {
@@ -134,13 +132,10 @@ export function parsePRReviewSubmissionPartial(
     retry.fileComments.every((comment, index) =>
       sameFileComment(comment, failures[index].comment)
     );
-  // A failed decision retries that decision: GitLab's approve, or Bitbucket's
-  // approve / request-changes. Otherwise only inline comments remain.
   const retryActionMatchesApproval =
     value.approval === 'failed'
       ? retry.action !== 'comment' && approvalError !== undefined
       : retry.action === 'comment' && approvalError === undefined;
-  // A body to retry is only coherent when the platform says it was not posted.
   const retryBodyMatches = retry.body === undefined || value.reviewBodyPosted === false;
   if (
     !retryMatchesFailures ||
@@ -165,11 +160,6 @@ export function parsePRReviewSubmissionPartial(
   };
 }
 
-/**
- * Parse the success response from `/api/pr-action`.
- *
- * Returns `null` when the payload does not satisfy the current API contract.
- */
 export function parsePRActionSuccess(value: unknown): PRActionSuccess | null {
   if (!isRecord(value) || value.ok !== true || !isRecord(value.submission)) {
     return null;
@@ -196,7 +186,6 @@ export function parsePRActionSuccess(value: unknown): PRActionSuccess | null {
   };
 }
 
-/** Read a safe server error message from an unsuccessful platform response. */
 export function readPRActionError(value: unknown): string | undefined {
   return isRecord(value) && typeof value.error === 'string'
     ? value.error

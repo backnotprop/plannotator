@@ -1,16 +1,3 @@
-/**
- * DOM-gated: the Call flow tab shows the Call tree beside the Paths cards.
- *
- * Regressions guarded:
- *  - the tab not opening on the Call tree (owner's decision, 2026-11-10, once
- *    the tree had search), or Paths and Raw not one click away;
- *  - search across the tab's trees: the count, the next match moving the
- *    current row into the tree holding it, Cmd/Ctrl+F reaching the field;
- *  - a hunk's "Call tree" entry not landing on its tree (with the caller
- *    trail), Close not returning to the tab's own trees, or Escape not going
- *    back to the hunk;
- *  - a tree row opening through a different path than the review's open.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -131,7 +118,6 @@ describe('ReviewCallFlowPanel Call tree view', () => {
     expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe('2/2');
     expect(selected().some((text) => text.includes('parley.layout(x)'))).toBe(true);
     expect(current()).not.toBeNull();
-    // Escape clears the search: the trees come back as they were.
     await act(async () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
@@ -166,7 +152,6 @@ describe('ReviewCallFlowPanel Call tree view', () => {
     });
     expect(backs).toBe(1);
 
-    // The hunk's tree has the same search.
     await act(async () => host!.querySelector<HTMLButtonElement>('button[aria-label="Search call paths"]')!.click());
     const input = host!.querySelector<HTMLInputElement>('input[placeholder="Find calls or files"]')!;
     await act(async () => {

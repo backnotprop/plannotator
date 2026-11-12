@@ -11,15 +11,9 @@ import { CallFlowRawView } from './CallFlowRawView';
 import { splitCallFlowFilePath } from '../utils/callFlowPresentation';
 
 const CLOSE_DELAY_MS = 250;
-// Hover intent: scrolling the diff drags file headers under a stationary
-// pointer; without a delay every badge that passes under the cursor pops the
-// Lens open.
 const OPEN_DELAY_MS = 100;
-// After the last scroll event, how long before a pointer that ended up outside
-// the Lens is allowed to close it.
 const SCROLL_SETTLE_MS = 160;
 
-/** Per-file call-flow Lens. The same shared analysis powers this and the Dock. */
 export const CallFlowFileBadge: React.FC<{ filePath: string; oldPath?: string }> = ({ filePath, oldPath }) => {
   const state = useReviewStateOptional();
   const [open, setOpen] = useState(false);
@@ -90,12 +84,6 @@ export const CallFlowFileBadge: React.FC<{ filePath: string; oldPath?: string }>
     cancelScheduledOpen();
     setOpen(false);
   };
-  // Scroll-chaining guard (reported on X for Safari): when the page scrolls —
-  // including momentum chained out of the Lens's own scroll container — the
-  // popup tracks its moving anchor and can slide out from under a stationary
-  // pointer, firing mouseleave and closing the Lens mid-scroll. While a scroll
-  // is in flight, hold any pending close; once it settles, close only if the
-  // pointer really ended up outside.
   useEffect(() => {
     if (!open) return;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;

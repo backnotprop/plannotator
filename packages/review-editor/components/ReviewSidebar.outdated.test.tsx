@@ -1,15 +1,3 @@
-/**
- * Outdated PR comments in the review sidebar (DOM_TESTS=1, #1590).
- *
- * Outdated comments are not drawn on the diff, so the sidebar is their only
- * surface. Regressions guarded:
- *  - the card is still listed and carries the "Outdated" marker (and a
- *    current comment does not);
- *  - it stays editable from the card (the diff's inline editor cannot reach
- *    it) and the edit commits trimmed text once;
- *  - it stays deletable;
- *  - current comments gain no sidebar edit affordance (unchanged UI).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

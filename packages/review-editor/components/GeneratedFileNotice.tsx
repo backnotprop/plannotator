@@ -1,30 +1,13 @@
 import React, { useLayoutEffect } from 'react';
 
-/**
- * What a collapsed generated file's card shows instead of an empty body
- * (#1317). A default-collapsed lockfile would otherwise render as a bare
- * file header, indistinguishable from a failed render — this strip states
- * the fold is intentional, carries the +/- counts, and expands on click
- * through the same collapse-report funnel as the header chevron.
- *
- * Styled like the other below-header notices (OversizedFileNotice,
- * BinaryFileNotice): muted strip, existing tokens only.
- */
 export const GeneratedFileNotice: React.FC<{
   additions: number;
   deletions: number;
-  /** Expand the file — the SAME toggle path the chevron uses, so the
-   *  expansion reports through reportFileCollapsed and survives remounts. */
   onExpand: () => void;
-  /** Re-measure hook for the virtualized all-files host (custom-header portal
-   *  heights are not auto-observed). */
   onHeightChange?: () => void;
 }> = ({ additions, deletions, onExpand, onHeightChange }) => {
-  // Layout effect (before paint) so the host re-measures without a one-frame
-  // overlap with the content below.
   useLayoutEffect(() => {
     onHeightChange?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

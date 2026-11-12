@@ -1,25 +1,3 @@
-/**
- * Compact touch keeps a dragged line range on screen instead of opening the
- * composer, so the range has to survive as a PAINTED selection until the
- * reviewer taps Pierre's gutter comment button.
- *
- * The failures guarded here:
- *   - a drag on compact touch force-opening the composer again (the incumbent
- *     desktop behaviour, which is what made mobile range selection unusable);
- *   - the preserved range never reaching Pierre, so nothing is highlighted;
- *   - a SECOND drag not repainting. A non-null `selectedLines` puts Pierre in
- *     controlled-selection mode, where `InteractionManager.updateSelection`
- *     only records a proposal and leaves painting to the host — so without
- *     `onLineSelectionChange` flowing back into app state the old highlight
- *     stays put and the finger is untracked until release;
- *   - a cleared selection being swallowed by the preserve branch and leaving an
- *     open composer behind;
- *   - any of it leaking onto desktop, which must keep handing every completed
- *     drag straight to the toolbar host.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useImperativeHandle, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -37,10 +15,6 @@ interface CapturedFileDiffProps {
 let lastFileDiffProps: CapturedFileDiffProps | null = null;
 let toolbarSelections: Array<SelectedLineRange | null> = [];
 
-// Spread-captured before the mock replaces the module record — a bare namespace
-// handle would be a live view of the record `mock.module` rewrites, so the
-// afterAll restore would silently re-install this file's stub as itself. Same
-// idiom (and the same reason) as AllFilesCodeView.lifecycle.test.tsx.
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
 
@@ -55,8 +29,6 @@ mock.module('../hooks/usePierreTheme', () => ({
   usePierreTheme: () => ({ type: 'light', css: '' }),
 }));
 
-// Only FileDiff is replaced; everything else the review-editor graph imports
-// from this specifier stays real.
 mock.module('@pierre/diffs/react', () => ({
   ...realPierreDiffsReact,
   FileDiff: function MockFileDiff(props: CapturedFileDiffProps) {
@@ -99,8 +71,6 @@ const PATCH = [
 const FIRST_DRAG: SelectedLineRange = { start: 2, end: 3, side: 'additions' };
 const SECOND_DRAG: SelectedLineRange = { start: 1, end: 3, side: 'additions' };
 
-/** Stands in for App: mirrors published selections back down as
- *  `pendingSelection`, which is the loop the repaint depends on. */
 function Harness({ compactTouchLayout, onSelection }: {
   compactTouchLayout: boolean;
   onSelection: (range: SelectedLineRange | null) => void;
@@ -186,8 +156,6 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
 
     expect(toolbarSelections).toEqual([]);
     expect(selections.at(-1)).toEqual(FIRST_DRAG);
-    // The range has to come back down as a painted selection, not just be
-    // published: this prop is the only thing Pierre highlights from.
     expect(pierre().selectedLines).toEqual(FIRST_DRAG);
   });
 
@@ -199,8 +167,6 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
     });
     expect(pierre().selectedLines).toEqual(FIRST_DRAG);
 
-    // Pierre is controlled now, so in-flight deltas of the next drag arrive on
-    // onLineSelectionChange and repaint nothing on their own.
     const onChange = pierre().options.onLineSelectionChange;
     expect(onChange).toBeDefined();
     await act(async () => {
@@ -232,9 +198,6 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
       pierre().options.onLineSelectionEnd?.(null);
     });
 
-    // The real host clears its toolbar state (and republishes the null
-    // selection) from here; swallowing the null in the preserve branch would
-    // leave the composer open over a range that no longer exists.
     expect(toolbarSelections).toEqual([null]);
   });
 
@@ -246,8 +209,6 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
     });
 
     expect(toolbarSelections).toEqual([FIRST_DRAG]);
-    // Desktop never enters the preserved-range state, so it must not even carry
-    // the controlled-repaint handler.
     expect('onLineSelectionChange' in pierre().options).toBe(false);
   });
 

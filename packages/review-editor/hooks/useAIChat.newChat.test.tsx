@@ -1,12 +1,3 @@
-/**
- * #1981, code review: after "New chat" the next question starts a fresh AI
- * session, so it must carry the full "changes under review" block again. The
- * failure this guards: the wrapper's last-sent memory surviving the new chat,
- * so the fresh session only got "[Still reviewing the same changes …]" and
- * never saw the diff.
- *
- * Requires DOM (DOM_TESTS=1, preloaded via bunfig.toml).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

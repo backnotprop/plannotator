@@ -1,14 +1,9 @@
-/**
- * What regresses: a box that scrolls with the page moving the page when it should not (the reader's place lost), or
- * not telling its CodeView that the page moved (blank rows).
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { scrollWithPage, type PageScroll } from './scrollWithPage';
 
 const hasDom = typeof document !== 'undefined' && !!process.env.DOM_TESTS;
 const rect = (top: number, height: number) => ({ x: 0, y: top, left: 0, right: 800, width: 800, top, bottom: top + height, height, toJSON: () => ({}) }) as DOMRect;
 
-/** A page of 900 px with a root of `height` px whose top sits `boxTop` px down the page. */
 function world(height: number, boxTop: number) {
   const page = document.createElement('div');
   page.style.overflowY = 'auto';
@@ -62,7 +57,6 @@ describe.skipIf(!hasDom)('a CodeView root scrolling with the page', () => {
     const { root, scrollPage, scrolled } = start(100_000, 300);
     expect(root.scrollTop).toBe(0);
     expect(root.getBoundingClientRect().height).toBe(900);
-    // The box still below the viewport's top: nothing moved for it.
     scrollPage(200);
     expect(scrolled).toEqual([]);
     scrollPage(1300);
@@ -82,7 +76,6 @@ describe.skipIf(!hasDom)('a CodeView root scrolling with the page', () => {
   });
 
   test('past the last whole window an anchor fix is a move from there, not a jump back', () => {
-    // Last window starts at 9100 in the file; the reader is at 9500.
     const { root, scrollPage, top } = start(10_000, 0);
     scrollPage(9500);
     root.scrollTo({ top: 9140 });

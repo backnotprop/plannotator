@@ -5,16 +5,6 @@ import { AllFilesCodeView, type AllFilesCodeViewProps } from '../AllFilesCodeVie
 import { storage } from '@plannotator/ui/utils/storage';
 import { chapterDiagramRenderer, overviewDiagramRenderer } from './overviewDiagram';
 
-/**
- * The review app's guide host: adapts ReviewState into the narrow contract the
- * packaged guide chain consumes (`@plannotator/guide-viewer/host`), and names
- * `AllFilesCodeView` as the diff renderer with the full in-app wiring
- * (annotations, staging, viewed, search, AI markers).
- *
- * This is the only place review state reaches the guide chain. The portable
- * viewer provides the same contract with a read-only renderer, so both hosts
- * render byte-identical guides (decision record D2).
- */
 type InAppRendererProps = Omit<
   AllFilesCodeViewProps,
   | 'files'
@@ -31,7 +21,6 @@ type InAppRendererProps = Omit<
 export const ReviewGuideHost: React.FC<{
   children: React.ReactNode;
   globalComments?: GuideGlobalComments;
-  /** The top bar's Collapse all (GuideDiffControls): folds or opens every file card. */
   collapseAll?: GuideHostValue['collapseAll'];
 }> = ({ children, globalComments, collapseAll }) => {
   const state = useReviewState();
@@ -50,8 +39,6 @@ export const ReviewGuideHost: React.FC<{
       annotations: state.allAnnotations,
       selectedAnnotationId: state.selectedAnnotationId,
       scrollTargetAnnotation: state.scrollTargetAnnotation,
-      // Only the focused card is the selection target; a shared pending
-      // selection painted on every mounted card would highlight the wrong file.
       pendingSelection: focused ? state.pendingSelection : null,
       reviewBase: state.reviewBase,
       reviewSnapshotId: state.feedbackDiffContext?.snapshotId,
@@ -103,7 +90,6 @@ export const ReviewGuideHost: React.FC<{
       generatedFiles: state.generatedFiles,
       renderOverviewDiagram,
       renderChapterDiagram,
-      // A chapter diagram's fold outlives the review server's random port (cookies, or a host's own backend).
       diagramFoldStore: storage,
       ...(globalComments ? { globalComments } : {}),
       ...(collapseAll ? { collapseAll } : {}),

@@ -4,22 +4,12 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 
 interface LiveLogViewerProps {
-  /** The full accumulated log text. */
   content: string;
-  /** Whether the source is still producing output. */
   isLive?: boolean;
-  /** Max bytes to render (trim from top). Default 50KB. */
   maxRenderSize?: number;
-  /** Optional className for the outer container. */
   className?: string;
 }
 
-/**
- * Reusable streaming log viewer with auto-scroll, truncation, and copy.
- *
- * Auto-scrolls to bottom as new content arrives — unless the user has
- * scrolled up to read earlier output. Follows the AITab streaming pattern.
- */
 export const LiveLogViewer: React.FC<LiveLogViewerProps> = ({
   content,
   isLive = false,
@@ -30,9 +20,6 @@ export const LiveLogViewer: React.FC<LiveLogViewerProps> = ({
     useOverlayViewport<HTMLDivElement>();
   const isAtBottomRef = useRef(true);
 
-  // Track whether the user is within 40px of the bottom. Attach directly
-  // to the OverlayScrollbars viewport because React's onScroll doesn't
-  // bubble across the library's wrapper layers.
   useEffect(() => {
     if (!viewport) return;
     const handleScroll = () => {
@@ -43,7 +30,6 @@ export const LiveLogViewer: React.FC<LiveLogViewerProps> = ({
     return () => viewport.removeEventListener('scroll', handleScroll);
   }, [viewport]);
 
-  // Auto-scroll on new content if user is at bottom
   useEffect(() => {
     if (isAtBottomRef.current && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;

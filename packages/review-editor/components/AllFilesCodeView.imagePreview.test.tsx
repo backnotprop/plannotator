@@ -1,20 +1,3 @@
-/**
- * DOM-gated tests (DOM_TESTS=1) for image previews in the all-files view
- * (#1598). Registered in .github/workflows/test.yml's "Run UI seam-contract +
- * DOM tests" step.
- *
- * The failure under guard: Pierre's CodeView sizes each item from
- * `itemMetrics` and never measures the custom header slot, and the Before/After
- * image preview renders inside that slot. Without telling Pierre the slot's
- * real height, an image card is modeled as a bare 33px header, so it leaves the
- * virtual window after ~33px of scroll and the code files below jump into its
- * place. The fix hands the measured header height to that item's own
- * VirtualizedFileDiff (`setMetrics`) and re-lays it out (`updateItem`).
- *
- * The real virtualizer cannot run under happy-dom (no layout), so these tests
- * drive the seam: the header slot's measured height must reach the item's
- * instance, only for image-preview items, and follow the card when it shrinks.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useImperativeHandle, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -108,11 +91,8 @@ const { AllFilesCodeView } = await import('./AllFilesCodeView');
 
 const hasDom = typeof document !== 'undefined';
 
-// --- Layout stand-ins (happy-dom has no layout) ------------------------------
-
-/** Height the "browser" reports for a header slot that holds a preview. */
 let previewHeaderHeight = 0;
-const HEADER_HEIGHT = 33; // PANEL_HEADER_HEIGHT
+const HEADER_HEIGHT = 33;
 
 const observers = new Set<FakeResizeObserver>();
 class FakeResizeObserver {
@@ -150,8 +130,6 @@ function installLayout() {
     return { x: 0, y: 0, top: 0, left: 0, right: 800, bottom: height, width: 800, height, toJSON() {} } as DOMRect;
   };
 }
-
-// --- Fixtures ------------------------------------------------------------------
 
 const imageFile: DiffFile = {
   path: 'public/icon.png',
@@ -205,7 +183,6 @@ type SeededItem = { id: string; collapsed?: boolean };
 const seededItem = (id: string) =>
   ((lastCodeViewProps?.initialItems ?? []) as SeededItem[]).find((item) => item.id === id)!;
 
-/** Mount one item's custom header the way CodeView's header slot would. */
 async function mountHeader(id: string, item: SeededItem = seededItem(id)) {
   const renderCustomHeader = lastCodeViewProps?.renderCustomHeader as (item: SeededItem) => React.ReactNode;
   if (!headerHost) {
@@ -218,7 +195,6 @@ async function mountHeader(id: string, item: SeededItem = seededItem(id)) {
   });
 }
 
-/** Fire CodeView's onPostRender for an item with a stand-in instance. */
 function postRender(id: string, instance = { setMetrics: mock((_metrics?: Record<string, unknown>) => {}) }) {
   const options = lastCodeViewProps?.options as {
     onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: { item: SeededItem }) => void;
@@ -261,12 +237,9 @@ describe.if(hasDom)('all-files image previews keep their real height in the virt
 
     expect(setMetrics).toHaveBeenCalledTimes(1);
     expect(setMetrics.mock.calls[0][0]?.diffHeaderHeight).toBe(420);
-    // The rest of the item's metrics stay the shared ones.
     expect(setMetrics.mock.calls[0][0]?.hunkSeparatorHeight).toBe(32);
     expect(updatedItemIds).toContain(imageFile.path);
 
-    // The re-layout renders the item again; with nothing changed that render
-    // must not re-apply, or every render would trigger another one.
     updatedItemIds.length = 0;
     postRender(imageFile.path, instance);
     expect(setMetrics).toHaveBeenCalledTimes(1);
@@ -275,18 +248,16 @@ describe.if(hasDom)('all-files image previews keep their real height in the virt
 
   test('the card growing after its images load, and collapsing to a bare header, both re-size the item', async () => {
     installLayout();
-    previewHeaderHeight = 233; // loading placeholder
+    previewHeaderHeight = 233;
     await render({ renderImagePreview });
     await mountHeader(imageFile.path);
     const { setMetrics } = postRender(imageFile.path);
     expect(setMetrics.mock.calls.at(-1)?.[0]?.diffHeaderHeight).toBe(233);
 
-    previewHeaderHeight = 391; // images decoded
+    previewHeaderHeight = 391;
     act(() => resizeAll());
     expect(setMetrics.mock.calls.at(-1)?.[0]?.diffHeaderHeight).toBe(391);
 
-    // Collapsing removes the preview: the item must go back to the shared
-    // header height rather than keep a 391px hole.
     await mountHeader(imageFile.path, { ...seededItem(imageFile.path), collapsed: true });
     act(() => resizeAll());
     expect(setMetrics.mock.calls.at(-1)?.[0]?.diffHeaderHeight).toBe(HEADER_HEIGHT);
@@ -314,7 +285,7 @@ describe.if(hasDom)('all-files image previews keep their real height in the virt
 
     if (root) await act(async () => root?.unmount());
     host?.remove();
-    await render(); // no renderImagePreview
+    await render();
     await mountHeader(imageFile.path);
     expect(postRender(imageFile.path).setMetrics).not.toHaveBeenCalled();
   });

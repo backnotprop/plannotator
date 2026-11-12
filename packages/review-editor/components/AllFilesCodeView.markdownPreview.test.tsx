@@ -1,24 +1,9 @@
-/**
- * DOM-gated tests (DOM_TESTS=1) for Markdown previews in the all-files view.
- * Registered in .github/workflows/test.yml's "Run UI seam-contract + DOM
- * tests" step (it mocks @pierre/diffs, so it runs with --isolate).
- *
- * The contract under guard: a previewed Markdown file's card replaces its
- * diff rows. Its CodeView item carries a hunkless diff (so Pierre draws
- * nothing under the header slot that holds the preview) and gets the real
- * diff back the moment the file goes back to Source; the header carries the
- * host's view control (the Source / Changes / Read menu) for Markdown files
- * only; a search hit in a previewed file sends it back to Source.
- * A host that passes no `markdownPreview` (the guide chain, guides.show) gets
- * none of it.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useImperativeHandle, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DiffFile } from '../types';
 
 let lastCodeViewProps: Record<string, unknown> | null = null;
-// What the stand-in CodeView reports as on screen, and the edit session's file.
 let renderedItems: Array<{ id: string; element: HTMLElement }> = [];
 let viewport: HTMLElement | undefined;
 let fakeEditingItemId: string | null = null;
@@ -42,7 +27,6 @@ mock.module('../hooks/usePierreTheme', () => ({
 
 mock.module('@pierre/diffs', () => ({
   DEFAULT_CODE_VIEW_FILE_METRICS: realPierreDiffs.DEFAULT_CODE_VIEW_FILE_METRICS,
-  // One stand-in hunk per patch that has one, so "hunkless" is observable.
   getSingularPatch: (patch: string) => ({
     name: /diff --git a\/(\S+)/.exec(patch)?.[1] ?? 'file.ts',
     type: 'change',
@@ -108,7 +92,6 @@ mock.module('./ToolbarHost', () => ({
   }),
 }));
 
-// An edit session stand-in: only which item it holds matters here.
 mock.module('../edit/useEditSession', () => ({
   useEditSession: () => new Proxy({
     editingItemId: fakeEditingItemId,
@@ -186,7 +169,6 @@ async function rerender(overrides: Props) {
 const seededItem = (id: string) =>
   ((lastCodeViewProps?.initialItems ?? []) as SeededItem[]).find((item) => item.id === id)!;
 
-/** Mount one item's custom header the way CodeView's header slot would. */
 async function mountHeader(id: string) {
   const renderCustomHeader = lastCodeViewProps?.renderCustomHeader as (item: SeededItem) => React.ReactNode;
   if (!headerHost) {
@@ -292,24 +274,19 @@ describe.if(hasDom)('Markdown previews in the all-files view', () => {
 
   test('the file in an edit session keeps its diff; the swap held back runs once the edit ends, and search scrolls there', async () => {
     const calls: Array<[string, string]> = [];
-    // Stable files: only the edit session changes between the renders below.
     const editProps = { files: [mdFile, codeFile], enableEditSuggestions: true, onAddSuggestionsForFile: () => {} };
     fakeEditingItemId = mdFile.path;
     await render({ markdownPreview: preview([], calls), ...editProps });
-    // Asked to show it rendered mid-edit: the editor's diff stays. One object
-    // from here on, so only the edit session changes between renders.
     const held = preview([mdFile.path], calls);
     await rerender({ markdownPreview: held, ...editProps });
     expect(updatedItems.some((u) => u.id === mdFile.path)).toBe(false);
 
-    // A search hit in it scrolls to the line instead of asking for Source.
     const match = { id: 'm1', filePath: mdFile.path, side: 'addition', lineNumber: 1, text: '# New', matchStart: 2, matchEnd: 5 };
     await rerender({ markdownPreview: held, ...editProps, activeSearchMatch: match as never, activeSearchMatchId: 'm1' });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
     expect(calls).not.toContainEqual([mdFile.path, 'source']);
     expect(scrolls).toContain(mdFile.path);
 
-    // The edit ends: the held-back swap runs.
     fakeEditingItemId = null;
     await rerender({ markdownPreview: held, ...editProps, activeSearchMatch: match as never, activeSearchMatchId: 'm1' });
     expect(updatedItems.filter((u) => u.id === mdFile.path).at(-1)?.fileDiff.hunks).toEqual([]);
@@ -326,7 +303,7 @@ describe.if(hasDom)('Markdown previews in the all-files view', () => {
       return el;
     };
     viewport = box(0, 600);
-    const offscreen = box(700, 900); // rendered as overscan below the viewport
+    const offscreen = box(700, 900);
     renderedItems = [
       { id: mdFile.path, element: box(0, 400) },
       { id: secondMd.path, element: offscreen },
@@ -350,7 +327,6 @@ describe.if(hasDom)('Markdown previews in the all-files view', () => {
       return el;
     };
     viewport = box(0, 600);
-    // Everything fits: code at the top, two Markdown files below it.
     renderedItems = [
       { id: codeFile.path, element: box(0, 100) },
       { id: mdFile.path, element: box(100, 300) },
@@ -361,22 +337,17 @@ describe.if(hasDom)('Markdown previews in the all-files view', () => {
       markdownPreview: { ...preview([], []), registerViewTarget: (fn: (() => string | null) | null) => { resolve = fn; } },
     });
     expect(resolve).not.toBeNull();
-    // No pointer, no focus: the top-most Markdown file in view.
     expect(resolve!()).toBe(mdFile.path);
 
-    // The pointer over the second Markdown file.
     const surface = host!.firstElementChild as HTMLElement;
     await act(async () => {
       surface.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 50, clientY: 400 }));
     });
     expect(resolve!()).toBe(secondMd.path);
-    // Over the code file: nothing to switch.
     await act(async () => {
       surface.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 50, clientY: 50 }));
     });
     expect(resolve!()).toBeNull();
-    // The pointer leaves (React derives pointerleave from pointerout): back
-    // to the top-most Markdown file in view.
     await act(async () => {
       surface.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: document.body }));
     });

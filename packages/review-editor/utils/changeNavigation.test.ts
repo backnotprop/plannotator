@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { getSingularPatch } from '@pierre/diffs';
 import { changeJumpDirection, listDiffChanges, readingLineFor, resolveChangeJump } from './changeNavigation';
 
-// One hunk holding two runs of changed lines, then a pure deletion.
 const PATCH = [
   'diff --git a/a.ts b/a.ts',
   '--- a/a.ts',
@@ -51,7 +50,6 @@ describe('resolveChangeJump', () => {
   });
 
   test('from the change the last jump landed on, whatever the scroll could do', () => {
-    // The last change of a file cannot always reach the middle of the view.
     expect(resolveChangeJump(['before', 'before', 'after'], 'prev', 2)).toBe(1);
     expect(resolveChangeJump(['before', 'before', 'after'], 'next', 2)).toBeNull();
     expect(resolveChangeJump(['after', 'after'], 'prev', 0)).toBeNull();
@@ -80,7 +78,6 @@ describe('changeJumpDirection', () => {
   test('N is next, Shift+N previous (the bindings in shortcuts.ts)', () => {
     expect(changeJumpDirection(key({ key: 'n' }))).toBe('next');
     expect(changeJumpDirection(key({ key: 'N', shiftKey: true }))).toBe('prev');
-    // Caps Lock on: still the plain key.
     expect(changeJumpDirection(key({ key: 'N' }))).toBe('next');
   });
 
@@ -116,7 +113,6 @@ describe('readingLineFor', () => {
   test('N at the top and Shift+N at the bottom take changes already on screen', () => {
     expect(readingLineFor(view, 'next', { atTop: true, atBottom: false })).toBeLessThan(view.top);
     expect(readingLineFor(view, 'prev', { atTop: false, atBottom: true })).toBeGreaterThan(view.bottom);
-    // The other direction keeps the middle.
     expect(readingLineFor(view, 'prev', { atTop: true, atBottom: false })).toBe(400);
     expect(readingLineFor(view, 'next', { atTop: false, atBottom: true })).toBe(400);
   });

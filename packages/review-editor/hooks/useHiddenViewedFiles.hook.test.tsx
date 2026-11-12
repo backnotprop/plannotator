@@ -1,9 +1,3 @@
-/**
- * DOM-gated tests (DOM_TESTS=1, listed in tests/dom-test-list.txt) for the
- * hold that keeps a just-viewed row in place under the pointer (#2713). The
- * pure rule is in useHiddenViewedFiles.test.ts; this guards the hook's state:
- * the pointer entering and leaving the panel, and a key press releasing it.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -50,7 +44,6 @@ describe('useHiddenViewedFiles', () => {
     const s = await mount(new Set(['a.ts']), true);
     expect(s.hidden()).toEqual(['a.ts']);
     await s.pointer('onPointerEnter');
-    // Clicking b.ts auto-marks the file you left (c.ts) as viewed.
     await s.rerender(new Set(['a.ts', 'c.ts']));
     expect(s.hidden()).toEqual(['a.ts']);
     await s.pointer('onPointerLeave');
@@ -62,12 +55,10 @@ describe('useHiddenViewedFiles', () => {
     await s.pointer('onPointerEnter');
     await s.rerender(new Set(['a.ts']));
     expect(s.hidden()).toEqual([]);
-    // j/k with the mouse resting over the panel: viewed files go at once.
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j' })));
     expect(s.hidden()).toEqual(['a.ts']);
     await s.rerender(new Set(['a.ts', 'b.ts']));
     expect(s.hidden()).toEqual(['a.ts', 'b.ts']);
-    // The mouse aims again: what becomes viewed now keeps its row.
     await s.pointer('onPointerMove');
     await s.rerender(new Set(['a.ts', 'b.ts', 'c.ts']));
     expect(s.hidden()).toEqual(['a.ts', 'b.ts']);

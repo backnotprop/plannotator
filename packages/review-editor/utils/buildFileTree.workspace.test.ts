@@ -19,11 +19,7 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     ];
     const tree = buildFileTree(files);
 
-    // With flat fallback: single root folder with only file children gets unwrapped
-    // But here we have two repos at root level, so they stay as folders
     expect(tree.length).toBeGreaterThanOrEqual(2);
-    // After collapseSingleChild, paths like repo-a/src/index.ts become:
-    // folder: "repo-a/src" with file child "index.ts"
     const names = tree.map(n => n.name);
     expect(names).toContain("repo-a/src");
     expect(names).toContain("repo-b/src");
@@ -36,14 +32,12 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     ];
     const tree = buildFileTree(files);
 
-    // After collapseSingleChild: repo-a/src/utils becomes a single folder node
     const repoA = tree.find(n => n.name === "repo-a/src/utils");
     const repoB = tree.find(n => n.name === "repo-b/src/utils");
 
     expect(repoA).toBeDefined();
     expect(repoB).toBeDefined();
 
-    // Each should have the helper.ts file as a child
     const repoAFile = repoA?.children?.find(n => n.name === "helper.ts");
     const repoBFile = repoB?.children?.find(n => n.name === "helper.ts");
 
@@ -56,7 +50,6 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
   });
 
   it("handles nested repo labels (longest prefix)", () => {
-    // Simulates repos like "apps", "apps/api", "apps/web"
     const files = [
       diffFile("apps/src/main.ts"),
       diffFile("apps/api/src/server.ts"),
@@ -64,13 +57,10 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     ];
     const tree = buildFileTree(files);
 
-    // All under single "apps" root, with children for each sub-repo
-    // After collapseSingleChild: api/src and web/src collapse
     expect(tree).toHaveLength(1);
     expect(tree[0].name).toBe("apps");
     expect(tree[0].type).toBe("folder");
 
-    // Children: "api/src" (collapsed), "src" (from apps/src), "web/src" (collapsed)
     const childNames = tree[0].children?.map(n => n.name).sort();
     expect(childNames).toEqual(["api/src", "src", "web/src"]);
   });
@@ -86,8 +76,6 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     expect(tree[0].name).toBe("packages");
     expect(tree[0].type).toBe("folder");
 
-    // After collapseSingleChild, packages/core/src collapses to "core/src"
-    // and packages/shared/utils/helpers collapses to "shared/utils/helpers"
     const children = tree[0].children?.map(n => n.name).sort();
     expect(children).toEqual(["core/src", "shared/utils/helpers"]);
   });
@@ -98,9 +86,6 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     ];
     const tree = buildFileTree(files);
 
-    // After collapseSingleChild: repo-a/src/components collapses to single path
-    // Then flat fallback kicks in: single folder with only file children gets unwrapped
-    // Result: just the file at root level
     expect(tree).toHaveLength(1);
     expect(tree[0].name).toBe("Button.tsx");
     expect(tree[0].type).toBe("file");
@@ -115,12 +100,11 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     ];
     const tree = buildFileTree(files);
 
-    // After collapseSingleChild: repo-a/src contains both files
     const repoA = tree.find(n => n.name === "repo-a/src");
     const repoB = tree.find(n => n.name === "repo-b/src");
 
-    expect(repoA?.additions).toBe(15); // 10 + 5
-    expect(repoA?.deletions).toBe(7);  // 5 + 2
+    expect(repoA?.additions).toBe(15);
+    expect(repoA?.deletions).toBe(7);
     expect(repoB?.additions).toBe(8);
     expect(repoB?.deletions).toBe(3);
   });
@@ -132,7 +116,6 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     ];
     const tree = buildFileTree(files);
 
-    // Two separate root-level folders after collapse
     expect(tree.length).toBeGreaterThanOrEqual(2);
     const names = tree.map(n => n.name);
     expect(names).toContain("my-repo_2.0/src");
@@ -145,8 +128,6 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     ];
     const tree = buildFileTree(files);
 
-    // Collapses to "owner/repo/src" folder, then flat fallback unwraps
-    // Result: just the file with full path preserved
     expect(tree[0].name).toBe("index.ts");
     expect(tree[0].path).toBe("owner/repo/src/index.ts");
   });
@@ -160,9 +141,6 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     const files = [diffFile("repo-a/README.md")];
     const tree = buildFileTree(files);
 
-    // Flat fallback: single root folder with only file children gets unwrapped
-    // But first collapseSingleChild collapses repo-a to contain README.md
-    // Then flat fallback sees single folder "repo-a" with file child, unwraps it
     expect(tree).toHaveLength(1);
     expect(tree[0].name).toBe("README.md");
     expect(tree[0].type).toBe("file");
@@ -177,8 +155,6 @@ describe("buildFileTree - workspace mode with repo-prefixed paths", () => {
     ];
     const tree = buildFileTree(files);
 
-    // repo-a has two children: src (with 2 files) and lib (with 1 file)
-    // So it doesn't get unwrapped by flat fallback
     expect(tree).toHaveLength(1);
     expect(tree[0].name).toBe("repo-a");
     expect(tree[0].type).toBe("folder");
@@ -223,7 +199,6 @@ describe("getAllFolderPaths - workspace mode", () => {
     const tree = buildFileTree(files);
     const folders = getAllFolderPaths(tree);
 
-    // After collapseSingleChild, we get "repo-a/src" and "repo-b/src"
     expect(folders).toContain("repo-a/src");
     expect(folders).toContain("repo-b/src");
   });
@@ -236,7 +211,6 @@ describe("getAllFolderPaths - workspace mode", () => {
     const tree = buildFileTree(files);
     const folders = getAllFolderPaths(tree);
 
-    // After collapseSingleChild: apps stays, apps/api/src and apps/web/src
     expect(folders).toContain("apps");
     expect(folders).toContain("apps/api/src");
     expect(folders).toContain("apps/web/src");

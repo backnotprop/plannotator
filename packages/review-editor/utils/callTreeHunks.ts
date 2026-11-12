@@ -8,18 +8,13 @@ import {
 } from '@plannotator/shared/call-tree';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
 
-/** One hunk of a file's patch, with the line its "Call tree" entry is drawn under. */
 export interface PatchHunk extends CallTreeHunk {
   index: number;
-  /** The first changed line (old side for a deletion). */
   firstChange: { side: 'new' | 'old'; line: number };
-  /** Drawn under this line: the last context line before the first change, else the first change itself. */
   anchor: { side: 'new' | 'old'; line: number };
-  /** The changed lines only, per side (start > end: no change on that side). */
   changed: { newStart: number; newEnd: number; oldStart: number; oldEnd: number };
 }
 
-/** The hunks of one file's unified patch. */
 export function listPatchHunks(file: { path: string; oldPath?: string; patch: string }): PatchHunk[] {
   const hunks: PatchHunk[] = [];
   let current: PatchHunk | null = null;
@@ -80,10 +75,6 @@ export function listPatchHunks(file: { path: string; oldPath?: string; patch: st
   return hunks;
 }
 
-/**
- * The innermost changed entity from `sem` around a hunk's first change, as a
- * line range on both sides. Undefined without sem data or when none covers it.
- */
 export function functionAroundHunk(
   changes: readonly SemanticDiffChange[],
   hunk: PatchHunk,
@@ -115,7 +106,6 @@ export interface CallTreeHunkTarget {
   readonly doc: CallTreeDoc;
 }
 
-/** Every hunk the analysis can draw a Call tree for, with that tree. Hunks it cannot are left out. */
 export function callTreeHunkTargets(
   files: ReadonlyArray<{ path: string; oldPath?: string; patch: string }>,
   trees: readonly CallTreeSourceTree[],
@@ -127,8 +117,6 @@ export function callTreeHunkTargets(
   for (const file of files) {
     for (const hunk of listPatchHunks(file)) {
       const fn = functionAroundHunk(semChanges, hunk);
-      // Without sem, only the changed lines decide: a context line is often
-      // another function (an entry defined just above the change).
       const location = findCallTreeRoot(trees, { ...hunk, ...hunk.changed }, fn);
       if (!location) continue;
       targets.push({ filePath: file.path, hunk, doc: callTreeAt(trees, location, { ...range, ...(fn ? { title: fn.name } : {}) }) });

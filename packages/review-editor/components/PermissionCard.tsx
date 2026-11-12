@@ -1,11 +1,3 @@
-/**
- * Inline approve/deny card for AI tool permission requests.
- *
- * When the Claude provider's session wants to use a tool (e.g. Read a file),
- * it emits a permission_request event. The AI sidebar renders one of these
- * cards for each pending request. The user's decision is sent back via
- * respondToPermission → /api/ai/permission → session.respondToPermission.
- */
 import React, { useState } from 'react';
 
 interface PermissionCardProps {

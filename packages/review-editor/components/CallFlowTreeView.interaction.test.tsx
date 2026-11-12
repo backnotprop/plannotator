@@ -1,4 +1,3 @@
-/** DOM-gated behavior tests for Call Flow pinpoint-style annotation. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -346,12 +345,9 @@ describe('CallFlowTreeView cards', () => {
     const chip = (location: string) => container.querySelector<HTMLButtonElement>(`[aria-label="Open ${location}"]`);
     const crossFile = (location: string) => chip(location)?.classList.contains('call-flow-node-location-cross-file');
 
-    // Into another file: strong.
     expect(crossFile('src/auth.ts:21')).toBe(true);
-    // Same file as the caller: faint, also through a step with no file of its own.
     expect(crossFile('src/checkout.ts:12')).toBe(false);
     expect(crossFile('src/checkout.ts:20')).toBe(false);
-    // An entry's first step names the file the path starts in.
     expect(crossFile('src/checkout.ts:10')).toBe(true);
     expect(chip('src/auth.ts:21')?.textContent).toBe('auth.ts:21');
   });
@@ -367,7 +363,6 @@ describe('CallFlowTreeView cards', () => {
     const added = rowFor(container, 'Auth.authorize(session, order)');
     expect(added.querySelector('.call-flow-marker-added')).not.toBeNull();
     expect(added.querySelector('.call-flow-node-target')?.textContent).toBe('New: Auth.authorize(session, order)');
-    // The called name is its own element, so it can lead the row.
     expect(added.querySelector('.call-flow-signature-name')?.textContent).toBe('authorize');
 
     const context = rowFor(container, 'Cart.checkout(order)');
@@ -403,7 +398,6 @@ describe('CallFlowTreeView cards', () => {
     const outside = container.querySelector<HTMLButtonElement>('[aria-label="Source src/auth.ts:21 is outside the reviewed patch"]');
     expect(outside?.disabled).toBe(true);
 
-    // Without a comment handler, the row itself jumps to the source.
     await act(async () => rowFor(container, 'save(order)').querySelector<HTMLButtonElement>('.call-flow-node-target')?.click());
     expect(opened).toEqual(['src/checkout.ts:12', 'src/checkout.ts:20']);
   });
