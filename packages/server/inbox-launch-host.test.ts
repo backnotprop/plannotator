@@ -41,7 +41,7 @@ function setEnv(name: string, value: string) {
 }
 
 /** `homeDir`: the home folder the engine is given, spelled from the real one (a link to it, a trailing slash). */
-function setup(options: { homeDir?: (home: string, root: string) => string; adapt?: (host: LaunchHost) => void } = {}) {
+function setup(options: { homeDir?: (home: string, root: string) => string; adapt?: (host: LaunchHost) => void; platform?: NodeJS.Platform; ownEnv?: Record<string, string> } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-host-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -67,9 +67,9 @@ function setup(options: { homeDir?: (home: string, root: string) => string; adap
     dataDir,
     serverSession: "srv",
     homeDir: options.homeDir ? options.homeDir(home, root) : home,
-    platform: "darwin",
+    platform: options.platform ?? "darwin",
     loginEnv: async () => (logins.count++, { HOME: home, PATH: "", FAKE_LOGIN: "yes" }),
-    ownEnv: () => ({ HOME: home, PATH: "" }),
+    ownEnv: () => options.ownEnv ?? { HOME: home, PATH: "" },
     installDirs: [],
     displayFolder: (path) => path,
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
@@ -290,6 +290,37 @@ describe("a second agent behind LaunchHost", () => {
     // Never held: the next ask reads it again.
     await context().loginEnv();
     expect(logins.count).toBe(2);
+  });
+
+  test("Windows: a start gets the Inbox's own env (its sign-in, PATH and profile names), without the names a launch never passes", async () => {
+    const logins: Record<string, string>[] = [];
+    const ownEnv = {
+      Path: "C:\\Windows\\System32;C:\\Users\\me\\.local\\bin",
+      USERPROFILE: "C:\\Users\\me",
+      ANTHROPIC_API_KEY: "not-a-key",
+      PLANNOTATOR_PORT: "59812",
+      PLANNOTATOR_SESSION_ID: "outer",
+      CLAUDECODE: "1",
+    };
+    const { store, project, launch, logins: reads, context } = setup({
+      platform: "win32",
+      ownEnv,
+      adapt: (host) => {
+        const start = host.start.bind(host);
+        host.start = (record, input) => (logins.push({ ...input.login }), start(record, input));
+      },
+    });
+    // No login shell runs on Windows: the Inbox's own env through the launch filter stands in.
+    const read = await context().loginEnv();
+    expect(reads.count).toBe(0);
+    expect(read).toEqual({ PATH: "C:\\Windows\\System32;C:\\Users\\me\\.local\\bin", USERPROFILE: "C:\\Users\\me", ANTHROPIC_API_KEY: "not-a-key" });
+
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-win", thread_name: "Tidy", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => logins.length === 1);
+    expect(logins[0]).toEqual(read);
   });
 
   test("the Inbox stops: each host's close lets go of what it holds", () => {

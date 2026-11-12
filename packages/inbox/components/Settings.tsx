@@ -430,7 +430,7 @@ function GeneralSection({
                 <span className="ib-l" id="ib-favicon-label">
                   Favicon
                 </span>
-                <span className="ib-desc">The icon on this tab. Also plan review, code review and annotate.</span>
+                <span className="ib-desc">The icon on this tab and on the installed app. Also plan review, code review and annotate.</span>
               </span>
               <span className="ib-ctl">
                 <span className="ib-seg" role="radiogroup" aria-labelledby="ib-favicon-label">
