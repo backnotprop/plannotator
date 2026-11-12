@@ -7,8 +7,8 @@
  * started by the person; a project's page that still applies the Project picks; Smart groups reordered or renamed by
  * the filter; a menu count that applies its own group; a cookie that keeps junk or breaks the list; a Pull request
  * pick that reads the wrong state, treats a removed PR as one, or puts a PR not read yet under a state (or under No PR);
- * a Read pick that reads anything but the row's bold (`unread`), a row the person opened that an Unread list drops, or
- * a cookie from before the Read group that no longer loads.
+ * a Not seen that reads anything but the row's bold (`unread`), a row the person opened that a Not seen list drops, or
+ * a cookie from before Not seen that no longer loads.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxThreadPullsSummary, type InboxListRow, type InboxListSection, type InboxThreadPull, type InboxThreadPullState } from '@plannotator/core/inbox-types';
@@ -24,7 +24,7 @@ import {
   rowMatches,
   rowPullMatches,
   rowPullStates,
-  rowReadMatches,
+  rowNotSeen,
   settledHeldRead,
   writeListFilter,
   type ListFilter,
@@ -109,35 +109,30 @@ describe('the Pull request group', () => {
   });
 });
 
-describe('the Read group', () => {
-  const cases: Array<[string, Partial<ListFilter>, string[]]> = [
-    ['Unread: the rows drawn bold', { read: ['unread'] }, ['billingToday', 'webLateYesterday', 'mixed']],
-    ['Read: the rows not drawn bold', { read: ['read'] }, ['webSixDaysBack', 'docsSevenDaysBack', 'docs29Back', 'opsOld', 'startedByPerson']],
-    ['both widen to every row', { read: ['unread', 'read'] }, ALL.map((r) => r.thread_id)],
-    ['narrows with the other groups', { read: ['unread'], agents: ['Codex'], updated: '7d' }, ['webLateYesterday', 'mixed']],
-    ['Read with a project', { read: ['read'], projects: ['prj_web'] }, ['webSixDaysBack', 'startedByPerson']],
-  ];
-  for (const [name, filter, ids] of cases) test(name, () => expect(kept(filter)).toEqual(ids));
-
-  test('a row is in exactly one of the two, by its bold alone (a read row still waiting on the person is Read)', () => {
-    const waitingRead = { ...row('waitingRead'), section: 'waiting', unread: false } as InboxListRow;
-    const newUnread = { ...row('newUnread'), section: 'new', unread: true } as InboxListRow;
-    expect([rowReadMatches(waitingRead, 'unread'), rowReadMatches(waitingRead, 'read')]).toEqual([false, true]);
-    expect([rowReadMatches(newUnread, 'unread'), rowReadMatches(newUnread, 'read')]).toEqual([true, false]);
+describe('Not seen', () => {
+  test('keeps the rows drawn bold, and narrows with the other groups', () => {
+    expect(kept({ notSeen: true })).toEqual(['billingToday', 'webLateYesterday', 'mixed']);
+    expect(kept({ notSeen: true, agents: ['Codex'], updated: '7d' })).toEqual(['webLateYesterday', 'mixed']);
+    expect(kept({ notSeen: true, projects: ['prj_docs'] })).toEqual([]);
   });
 
-  test('the badge counts its picks and a menu row counts without its own group', () => {
-    const filter: ListFilter = { ...NO_LIST_FILTER, read: ['unread', 'read'], projects: ['prj_web'] };
-    expect(pickCount(filter)).toBe(3);
-    expect(countWhere(ALL, { ...filter, read: ['read'] }, NOW, 'read', (r) => rowReadMatches(r, 'unread'))).toBe(1);
+  test('reads the bold alone: a row still waiting on the person is seen once its news is', () => {
+    expect(rowNotSeen({ ...row('waitingSeen'), section: 'waiting', unread: false } as InboxListRow)).toBe(false);
+    expect(rowNotSeen({ ...row('newUnseen'), section: 'new', unread: true } as InboxListRow)).toBe(true);
   });
 
-  test('a row held for the Read group (opened while bold) stays when it stops matching; the other groups still apply', () => {
+  test('the badge counts it once, and its menu row counts without itself', () => {
+    const filter: ListFilter = { ...NO_LIST_FILTER, notSeen: true, projects: ['prj_web'] };
+    expect(pickCount(filter)).toBe(2);
+    expect(countWhere(ALL, filter, NOW, 'notSeen', rowNotSeen)).toBe(1);
+  });
+
+  test('a row held for it (opened while bold) stays when it stops matching; the other groups still apply', () => {
     const sections = [{ id: 'new', label: 'New since you looked', threads: [ROWS.webSixDaysBack, ROWS.docs29Back, ROWS.billingToday] }] as InboxListSection[];
     const ids = (filter: Partial<ListFilter>, held?: ReadonlySet<string>) => filterListSections(sections, { ...NO_LIST_FILTER, ...filter }, NOW, held)[0]!.threads.map((r) => r.thread_id);
-    expect(ids({ read: ['unread'] })).toEqual(['billingToday']);
-    expect(ids({ read: ['unread'] }, new Set(['webSixDaysBack']))).toEqual(['webSixDaysBack', 'billingToday']);
-    expect(ids({ read: ['unread'], projects: ['prj_billing'] }, new Set(['webSixDaysBack']))).toEqual(['billingToday']);
+    expect(ids({ notSeen: true })).toEqual(['billingToday']);
+    expect(ids({ notSeen: true }, new Set(['webSixDaysBack']))).toEqual(['webSixDaysBack', 'billingToday']);
+    expect(ids({ notSeen: true, projects: ['prj_billing'] }, new Set(['webSixDaysBack']))).toEqual(['billingToday']);
   });
 
   test('a settle lets go of every held row but the thread still open', () => {
@@ -183,9 +178,9 @@ test('the row summary the server builds is what the picks read: the PR still in 
 });
 
 test('a project\'s page sets its Project picks aside, and the badge counts what applies', () => {
-  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], read: [] };
+  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false };
   expect(pickCount(filter)).toBe(4);
-  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], read: [] });
+  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false });
   expect(pickCount(appliedFilter(filter, true))).toBe(2);
   expect(appliedFilter(filter, false)).toBe(filter);
 });
@@ -206,7 +201,7 @@ test('Smart groups keep their order and names and count only the matches; nothin
 });
 
 test('a menu row counts with the other groups\' picks, not its own group\'s', () => {
-  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], read: [] };
+  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], notSeen: false };
   // docs is not picked, but its row says what ticking it would add: docs rows in the last 7 days.
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_docs')).toBe(0);
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_billing')).toBe(1);
@@ -227,7 +222,7 @@ describe('remembered per browser', () => {
   });
 
   test('picks are written, read back, and removed when cleared', () => {
-    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], read: ['unread'] };
+    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], notSeen: true };
     writeListFilter(filter);
     expect(parseListFilter(getItem(LIST_FILTER_COOKIE))).toEqual(filter);
     writeListFilter(NO_LIST_FILTER);
@@ -237,10 +232,10 @@ describe('remembered per browser', () => {
   const junk: Array<[string, string | null, ListFilter]> = [
     ['no cookie', null, NO_LIST_FILTER],
     ['not JSON', '{oops', NO_LIST_FILTER],
-    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], read: [] }],
+    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], notSeen: false }],
     ['unknown Pull request picks are dropped', JSON.stringify({ pulls: ['open', 'stale', 3] }), { ...NO_LIST_FILTER, pulls: ['open'] }],
-    ['unknown Read picks are dropped', JSON.stringify({ read: ['unread', 'seen', 1] }), { ...NO_LIST_FILTER, read: ['unread'] }],
-    ['a cookie from before the Read group loads with no Read picks', JSON.stringify({ projects: ['prj_web'], updated: '7d', agents: [], pulls: ['open'] }), { ...NO_LIST_FILTER, projects: ['prj_web'], updated: '7d', pulls: ['open'] }],
+    ['Not seen is on only for true', JSON.stringify({ notSeen: 'yes' }), NO_LIST_FILTER],
+    ['a cookie from before Not seen loads with it off', JSON.stringify({ projects: ['prj_web'], updated: '7d', agents: [], pulls: ['open'] }), { ...NO_LIST_FILTER, projects: ['prj_web'], updated: '7d', pulls: ['open'] }],
     ['a range with a bad day is dropped', JSON.stringify({ updated: { from: '2026-13', to: '2026-11-01' } }), NO_LIST_FILTER],
   ];
   for (const [name, raw, want] of junk) test(name, () => expect(parseListFilter(raw)).toEqual(want));

@@ -1264,9 +1264,9 @@ function Inbox() {
   const routeRef = useRef(route);
   routeRef.current = route;
   /**
-   * Threads opened while their row was bold, since the list last settled: the list's Read filter leaves their rows
+   * Threads opened while their row was bold, since the list last settled: the list filter's Not seen leaves their rows
    * where they are (listFilter.ts `filterListSections`), as the list holds still while a thread is open (settle.ts),
-   * so the look that unbolds a row never takes it out of an Unread list. A settle keeps only the thread open then.
+   * so the look that unbolds a row never takes it out of a Not seen list. A settle keeps only the thread open then.
    */
   const [heldRead, setHeldRead] = useState<ReadonlySet<string>>(() => new Set());
   const settleHeldRead = useCallback(() => setHeldRead((current) => settledHeldRead(current, routeRef.current.thread)), []);

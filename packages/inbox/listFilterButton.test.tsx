@@ -7,8 +7,8 @@
  * rows, or a group whose band stays drawn with no rows left; Clear filters (the menu's or the empty state's) that
  * leaves a pick, the cookie, or focus nowhere; the empty words drawn in the header; a project's page that offers the
  * Project group or counts its picks; a reload that forgets the picks; a menu that puts Project anywhere but last (the
- * sidebar already narrows by project), or a Pull request group that does not narrow by the row's PR; a Read group that
- * is not first or does not narrow by the row's bold.
+ * sidebar already narrows by project), or a Pull request group that does not narrow by the row's PR; a Not seen row
+ * that is not first or does not narrow by the row's bold.
  *
  * The harness wires the list as App.tsx does (filter the sections, hand the list the rows before the filter).
  *
@@ -272,16 +272,16 @@ describe.skipIf(!hasDom)('the funnel', () => {
     await press(funnel());
     expect($('[data-list-filter-project]')).toBeNull();
     await click($('[data-list-filter-clear]')!);
-    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!)).toEqual({ projects: ['prj_billing'], updated: null, agents: [], pulls: [], read: [] });
+    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!)).toEqual({ projects: ['prj_billing'], updated: null, agents: [], pulls: [], notSeen: false });
   });
 
-  test('the menu: Read, Updated, Agent, Pull request, then Project last; a Pull request pick narrows by the row\'s PR', async () => {
+  test('the menu: Not seen, Updated, Agent, Pull request, then Project last; a Pull request pick narrows by the row\'s PR', async () => {
     const el = render();
     await press(funnel());
-    const groups = [...document.querySelectorAll('[data-list-filter-menu] [data-list-filter-group], [data-list-filter-menu] [data-list-filter-project]')].map(
-      (n) => n.getAttribute('data-list-filter-group') ?? 'projects',
+    const groups = [...document.querySelectorAll('[data-list-filter-menu] [data-list-filter-not-seen], [data-list-filter-menu] [data-list-filter-group], [data-list-filter-menu] [data-list-filter-project]')].map(
+      (n) => (n.hasAttribute('data-list-filter-not-seen') ? 'notSeen' : (n.getAttribute('data-list-filter-group') ?? 'projects')),
     );
-    expect([...new Set(groups)]).toEqual(['read', 'updated', 'agents', 'pulls', 'projects']);
+    expect([...new Set(groups)]).toEqual(['notSeen', 'updated', 'agents', 'pulls', 'projects']);
     expect([...document.querySelectorAll('[data-list-filter-pull]')].map((n) => n.textContent?.replace(/\d+$/, ''))).toEqual(['Open', 'Draft', 'Merged', 'Closed', 'Has a PR', 'No PR']);
     expect($('[data-list-filter-pull="open"] .ib-pmi-n')?.textContent).toBe('2');
     await click($('[data-list-filter-pull="open"]')!);
@@ -291,7 +291,7 @@ describe.skipIf(!hasDom)('the funnel', () => {
     expect(badge()).toBe('2');
   });
 
-  test('Read: Unread keeps the bold rows, Read the others, both every row; each counts in the badge', async () => {
+  test('Not seen: one row with its count; on, only the bold rows and one in the badge; off, every row again', async () => {
     list = sections({
       waiting: [row('w-billing', 'billing', 1, 'claude-code', 'waiting'), { ...row('w-web', 'web', 2, 'codex', 'waiting'), unread: false }],
       new: [row('n-web', 'web', 3, 'codex', 'new')],
@@ -299,16 +299,14 @@ describe.skipIf(!hasDom)('the funnel', () => {
     });
     const el = render();
     await press(funnel());
-    expect([...document.querySelectorAll('[data-list-filter-read]')].map((n) => n.textContent)).toEqual(['Unread2', 'Read2']);
-    await click($('[data-list-filter-read="unread"]')!);
+    expect([...document.querySelectorAll('[data-list-filter-not-seen]')].map((n) => n.textContent)).toEqual(['Not seen2']);
+    await click($('[data-list-filter-not-seen]')!);
     expect(rowIds(el)).toEqual(['w-billing', 'n-web']);
     expect(badge()).toBe('1');
-    await click($('[data-list-filter-read="unread"]')!);
-    await click($('[data-list-filter-read="read"]')!);
-    expect(rowIds(el)).toEqual(['w-web', 's-docs']);
-    await click($('[data-list-filter-read="unread"]')!);
+    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!).notSeen).toBe(true);
+    await click($('[data-list-filter-not-seen]')!);
     expect(rowIds(el)).toEqual(['w-billing', 'w-web', 'n-web', 's-docs']);
-    expect(badge()).toBe('2');
+    expect(badge()).toBeNull();
   });
 
   test('no thread in the list has a PR: no Pull request group, until a remembered pick of it needs unticking', async () => {

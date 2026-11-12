@@ -5,10 +5,9 @@
  *
  * - The header holds the filter icon (three lines narrowing) alone, at every width. With picks it takes the accent
  *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
- * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Read (Unread,
- *   Read; the row's bold), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only with two
- *   agents or more), Pull request (Open,
- *   Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), then Project last, since the
+ * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Not seen (one
+ *   row: only the rows drawn bold), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
+ *   with two agents or more), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), then Project last, since the
  *   sidebar already narrows by project (each project, several; only on the Inbox page and with two projects or
  *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
  *   sheet titled "Filter".
@@ -29,10 +28,8 @@ import { CountBadge } from './CountBadge';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
-  READ_OPTIONS,
   UPDATED_OPTIONS,
-  rowReadMatches,
-  type ReadPick,
+  rowNotSeen,
   rowPullMatches,
   rowPullStates,
   type PullPick,
@@ -73,9 +70,6 @@ function usePortal(anchor: RefObject<HTMLElement | null>) {
   useEffect(() => setPortal(anchor.current?.closest<HTMLElement>('.pn-inbox') ?? null), [anchor]);
   return portal;
 }
-
-/** The Read group's heading. "Status" is the other word offered; Search's "Any status" means the Smart groups. */
-const READ_GROUP_LABEL: 'Read' | 'Status' = 'Read';
 
 const tick = (on: boolean) => <span className="ib-pc-tick">{on && <Icon name="check" />}</span>;
 
@@ -166,25 +160,19 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
         <Menu.Portal container={portal ?? undefined}>
           {phone && <Menu.Backdrop className="ib-pm-scrim" />}
           <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined}>
-            {/* The order (the owner, 2026-11-08): what the sidebar cannot do first, Project last (the sidebar has its own). Read first: what every row shows, bold or not. */}
+            {/* The order (the owner, 2026-11-08): what the sidebar cannot do first, Project last (the sidebar has its own). Not seen first: what every row shows, bold or not. */}
             <Menu.Popup className="ib-pm ib-pc-menu ib-lflt-menu" aria-label="Filter" data-list-filter-menu="">
               <div className="ib-pm-title" aria-hidden="true">
                 Filter
               </div>
-              <Menu.Group data-list-filter-group="read">
-                <Menu.GroupLabel className="ib-pm-glabel">{READ_GROUP_LABEL}</Menu.GroupLabel>
-                {READ_OPTIONS.map((o) => (
-                  <CheckRow
-                    key={o.value}
-                    label={o.label}
-                    on={filter.read.includes(o.value)}
-                    count={countWhere(rows, filter, now, 'read', (row) => rowReadMatches(row, o.value))}
-                    onToggle={() => set({ read: toggled(source.filter.read, o.value) as ReadPick[] })}
-                    mark={<Icon name={o.value === 'unread' ? 'envelope' : 'checkCircle'} />}
-                    data={{ 'data-list-filter-read': o.value }}
-                  />
-                ))}
-              </Menu.Group>
+              <CheckRow
+                label="Not seen"
+                on={filter.notSeen}
+                count={countWhere(rows, filter, now, 'notSeen', rowNotSeen)}
+                onToggle={() => set({ notSeen: !source.filter.notSeen })}
+                mark={<Icon name="envelope" />}
+                data={{ 'data-list-filter-not-seen': '' }}
+              />
               <Menu.Separator className="ib-pm-sep" />
               <Menu.Group data-list-filter-group="updated">
                 <Menu.GroupLabel className="ib-pm-glabel">Updated</Menu.GroupLabel>
