@@ -212,6 +212,7 @@ import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
+import { sheetLayoutHash, sheetLayoutOf, type SheetLayout } from './prs/tableModel';
 import { sheetModel } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
 import { useSheetPulls } from './prs/useSheetPulls';
@@ -416,6 +417,8 @@ interface Route {
    * the Sheet goes to Reviews there; `#prs` itself is a phone's way in (Reviews' "Pull requests" row).
    */
   prsView?: SheetView;
+  /** Grid or Table (`&layout=table`). */
+  prsLayout?: SheetLayout;
   prsFrom?: 'sheet' | 'stack' | 'reviews';
   /** The Artifacts wall on Pinned (`#artifacts=pinned`; approval "inbox-artifact-stars"); All is `#artifacts`. */
   pinned?: boolean;
@@ -540,6 +543,7 @@ function routeOf(fullHash: string): Route {
       project: null,
       thread: null,
       prsView: params.get('state') === 'merged' ? 'merged' : 'open',
+      prsLayout: sheetLayoutOf(params.get('layout')),
       stack,
       layer,
       scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
@@ -623,6 +627,7 @@ function hashOf(route: Route): string {
     hash =
       'prs' +
       (route.prsView === 'merged' ? '&state=merged' : '') +
+      sheetLayoutHash(route.prsLayout) +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}${route.prsFrom === 'sheet' ? '&from=sheet' : route.prsFrom === 'reviews' ? '&from=reviews' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
@@ -5793,8 +5798,9 @@ function Inbox() {
   // The Pull requests board's own list (everywhere, mine): read only while Reviews (its right pane, a phone's row), the
   // board's page, a stack's page or a PR opened from it shows.
   const sheetPulls = useSheetPulls((route.page === 'prs' || route.page === 'reviews') && pullsShown);
-  // The board in Reviews' pane: Open or Merged, kept while the Inbox is open (Reviews' address has no room for it).
+  // The board in Reviews' pane: Open or Merged, Grid or Table, kept while the Inbox is open (Reviews' address has no room for them).
   const [paneView, setPaneView] = useState<SheetView>('open');
+  const [paneLayout, setPaneLayout] = useState<SheetLayout>('grid');
   const sheetHead = useMemo(() => (sheetPulls.model ? sheetModel(sheetPulls.model, Date.now(), {}).head : null), [sheetPulls.model]);
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
@@ -6844,6 +6850,8 @@ function Inbox() {
           phone={phone}
           view={paneView}
           onView={setPaneView}
+          layout={paneLayout}
+          onLayout={setPaneLayout}
           onOpenPull={(pull, stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' })}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
@@ -7130,6 +7138,8 @@ function Inbox() {
         phone={phone}
         view={route.prsView ?? 'open'}
         onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
+        layout={route.prsLayout}
+        onLayout={(prsLayout) => writeRoute({ ...route, prsLayout }, { replace: true })}
         onBack={() => close({ page: 'reviews', project: null, thread: null })}
         onOpenPull={(pull, stack) => go({ ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' })}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
