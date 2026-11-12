@@ -166,7 +166,6 @@ import {
   inboxCardColumnIndex,
   inboxCardColumnOf,
   readInboxCard,
-  isInboxCardSeenOnlyChange,
   isInboxCardSentWaiting,
   normalizeInboxCardNotes,
   inboxCardHistory,
@@ -196,7 +195,6 @@ import {
 } from "@plannotator/core/inbox-types";
 import type { InboxActivityModel } from "@plannotator/core/inbox-types";
 import {
-  inboxHashtags,
   inboxInitiativeBareName,
   inboxInitiativeJoinKey,
   inboxInitiativeNameKey,
@@ -211,7 +209,8 @@ import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import { InboxError, inboxDir } from "./schema";
-import type { InboxLog, InboxLogFactory } from "./store-log/log";
+import type { InboxLog, InboxLogFactory, InboxLogState } from "./store-log/log";
+import { agentNamesHere, archiveSeqAfter, cardAfter, firstLineName, firstLineTagKeys, movesAddress, pullEventOf, threadNameIndexKey } from "./store-log/history";
 import { jsonlInboxLog } from "./store-log/jsonl-log";
 
 /** The local person, the only picker on a local Inbox. */
@@ -933,13 +932,17 @@ export class InboxStore {
     } catch {
       // Best effort (Windows, a filesystem without modes).
     }
-    const { lines, seqFloor } = this.log.read();
-    this.seq = Math.max(this.seq, seqFloor);
+    const contents = this.log.read();
+    this.seq = Math.max(this.seq, contents.seqFloor);
     this.replyDrafts.clear();
     this.replyDraftRemovals.clear();
     for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
-    lines.sort((a, b) => a.seq - b.seq);
-    for (const line of lines) this.apply(line);
+    if (contents.state) this.restore(contents.state);
+    else {
+      const lines = contents.lines;
+      lines.sort((a, b) => a.seq - b.seq);
+      for (const line of lines) this.apply(line);
+    }
     this.repairUnsentAnswers();
     this.loadPins();
     this.loadArtifactPins();
@@ -974,6 +977,11 @@ export class InboxStore {
     if (line && line.kind === "question") this.latest.set(key, { ...line, record });
   }
 
+  /**
+   * One line, replayed in seq order (at start from today's JSONL, and as each write lands). What depends on the
+   * order of lines (an archive line, a moved address, a name, a card's last real change, a PR event, a first
+   * line's tags) is worked out by `store-log/history.ts`, the same rules the SQLite log keeps in its tables.
+   */
   private apply(line: InboxLine): void {
     this.changes += 1;
     if (line.seq > this.seq) this.seq = line.seq;
@@ -982,48 +990,108 @@ export class InboxStore {
     if (previous && previous.seq > line.seq) return;
     this.latest.set(id, line);
     switch (line.kind) {
+      case "message": {
+        const record = line.record;
+        const prev = previous?.kind === "message" ? previous.record : undefined;
+        const archive = archiveSeqAfter(prev?.resolved_at, this.resolvedSeq.get(record.id) ?? null, record, line.seq);
+        if (archive === null) this.resolvedSeq.delete(record.id);
+        else this.resolvedSeq.set(record.id, archive);
+        if (movesAddress(prev, record)) this.readdressed.add(record.id);
+        // A thread the person started routes by name only once an AGENT names it (sendMessage):
+        // indexed at that line, in seq order, so later sends with the name join it and a replay
+        // routes the same. A name the person typed, or compose's suggestion, never routes another
+        // session's send into the person's thread (`personNamed`, for de-duplication only).
+        if (agentNamesHere(prev, record)) this.indexName(record.project_id, record.thread_name!, record.id);
+        const first = !this.messageSeq.has(record.id);
+        this.placeMessage(record, line.seq, first);
+        if (first) {
+          const named = firstLineName(record);
+          if (named) this.indexThreadName(record.project_id, named, record.id);
+          for (const key of firstLineTagKeys(record)) this.indexTag(key, record.thread_id, line.seq);
+        }
+        break;
+      }
+      case "card": {
+        // Cards are their own records: nothing here touches routing or the list.
+        const { card, heard } = cardAfter(this.cards.get(line.record.id), line.record);
+        if (heard) this.cardHeardSeq.set(card.id, line.seq);
+        this.cards.set(card.id, card);
+        break;
+      }
+      case "thread_pull":
+        // A thread's PRs (approval "inbox-pr-binding"): nothing here touches routing, the list's sections, unread or notifications.
+        if (isInboxThreadPullRecord(line.record)) {
+          const event = pullEventOf(this.pullsById.get(line.record.id), line.record, line.seq);
+          this.placeThreadPull(line.record);
+          if (event) {
+            const events = this.pullEvents.get(line.record.thread_id);
+            if (events) events.push(event);
+            else this.pullEvents.set(line.record.thread_id, [event]);
+          }
+        }
+        break;
+      default:
+        this.placeRecord(line);
+    }
+  }
+
+  /**
+   * A log's current state taken as it is (the SQLite log reads it from its tables): each record's latest line in
+   * the order the records began, and the order-dependent facts the log kept as they happened. Leaves exactly what
+   * `apply` over every line would (the every-read test holds it to that), without reading any history.
+   */
+  private restore(state: InboxLogState): void {
+    this.changes += 1;
+    for (const { line, firstSeq } of state.records) {
+      if (line.seq > this.seq) this.seq = line.seq;
+      this.latest.set(`${line.kind}:${line.id}`, line);
+      switch (line.kind) {
+        case "message":
+          this.placeMessage(line.record, firstSeq, true);
+          break;
+        case "card": {
+          const kept = state.cards.get(line.record.id) ?? { card: cardAfter(undefined, line.record).card, heardSeq: line.seq };
+          this.cards.set(kept.card.id, kept.card);
+          this.cardHeardSeq.set(kept.card.id, kept.heardSeq);
+          break;
+        }
+        case "thread_pull":
+          if (isInboxThreadPullRecord(line.record)) this.placeThreadPull(line.record);
+          break;
+        default:
+          this.placeRecord(line);
+      }
+    }
+    for (const [rootId, seq] of state.archiveSeq) this.resolvedSeq.set(rootId, seq);
+    for (const rootId of state.readdressed) this.readdressed.add(rootId);
+    for (const { projectId, name, rootId, routes } of state.names) this.indexThreadName(projectId, { name, routes }, rootId);
+    for (const { key, threadId, seq } of state.tags) this.indexTag(key, threadId, seq);
+    for (const [threadId, events] of state.pullEvents) this.pullEvents.set(threadId, [...events]);
+  }
+
+  /** A message's latest record in memory; `first`: its first line, at `firstSeq` (its place in the thread and the log). */
+  private placeMessage(record: InboxMessage, firstSeq: number, first: boolean): void {
+    this.messages.set(record.id, record);
+    this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
+    if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
+    if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
+    if (!first) return;
+    this.messageSeq.set(record.id, firstSeq);
+    this.noteAgentMessage(record, firstSeq);
+    const members = this.threadMembers.get(record.thread_id);
+    if (members) members.push(record.id);
+    else this.threadMembers.set(record.thread_id, [record.id]);
+  }
+
+  /** A record whose latest line is all there is to it: a project, question, annotation, steps or initiative. */
+  private placeRecord(line: InboxLine): void {
+    switch (line.kind) {
       case "project":
         this.projectsById.set(line.record.id, line.record);
         this.projectsByRoot.set(line.record.root, line.record);
         this.projectLabels = null;
         this.projectGroups = null;
         break;
-      case "message": {
-        // The archive line: the root line whose resolved_at differs from the one before it.
-        const before = previous?.kind === "message" ? previous.record.resolved_at : null;
-        if (line.record.resolved_at == null) this.resolvedSeq.delete(line.record.id);
-        else if (before !== line.record.resolved_at || !this.resolvedSeq.has(line.record.id)) this.resolvedSeq.set(line.record.id, line.seq);
-        if (previous?.kind === "message" && line.record.started_by_person && previous.record.to && line.record.to && previous.record.to.session !== line.record.to.session) {
-          this.readdressed.add(line.record.id);
-        }
-        // A thread the person started routes by name only once an AGENT names it (sendMessage):
-        // indexed at that line, in seq order, so later sends with the name join it and a replay
-        // routes the same. A name the person typed, or compose's suggestion, never routes another
-        // session's send into the person's thread (`personNamed`, for de-duplication only).
-        if (
-          previous?.kind === "message" &&
-          line.record.started_by_person &&
-          line.record.thread_name &&
-          line.record.named_by?.kind === "agent" &&
-          previous.record.named_by?.kind !== "agent"
-        ) {
-          this.indexName(line.record.project_id, line.record.thread_name, line.record.id);
-        }
-        this.messages.set(line.record.id, line.record);
-        this.threadLines.set(line.record.thread_id, (this.threadLines.get(line.record.thread_id) ?? 0) + 1);
-        if (line.record.wakes === true && line.record.author.kind === "agent" && line.record.author.session) this.wakingSessions.add(line.record.author.session);
-        if (line.record.launch !== undefined && line.record.thread_id === line.record.id) this.launchedRootIds.add(line.record.id);
-        if (!this.messageSeq.has(line.record.id)) {
-          this.messageSeq.set(line.record.id, line.seq);
-          this.noteAgentMessage(line.record, line.seq);
-          const members = this.threadMembers.get(line.record.thread_id);
-          if (members) members.push(line.record.id);
-          else this.threadMembers.set(line.record.thread_id, [line.record.id]);
-          this.indexRoot(line.record);
-          this.indexTags(line.record, line.seq);
-        }
-        break;
-      }
       case "question": {
         this.questions.set(line.record.id, line.record);
         const ids = this.messageQuestions.get(line.record.message_id);
@@ -1033,24 +1101,6 @@ export class InboxStore {
       }
       case "annotation":
         this.setAnnotation(line.record);
-        break;
-      case "card":
-        // Cards are their own records: nothing here touches routing or the list.
-        // A card stored before columns v2 reads in the v2 columns (readInboxCard: the migration table, never a rewrite).
-        {
-          let card = readInboxCard(line.record);
-          const prev = this.cards.get(card.id);
-          // A card in Done holds every PR it links (marked or not: a released Inbox wrote no `via`), with any
-          // list it had; a later line without the field keeps what the card had. So a card shipped and moved back
-          // before the upgrade, or by an older Inbox that carried a stale list along, is not moved to Done again.
-          if (card.column === "done") card = { ...card, done_prs: inboxCardDonePrs(card, card.done_prs ?? prev?.done_prs) };
-          else if (card.done_prs === undefined && prev?.done_prs) card = { ...card, done_prs: prev.done_prs };
-          // An Inbox from before initiatives writes a card without the field: the card keeps its initiative
-          // (only the person sets one, and that Inbox has no way to).
-          if (line.record.initiative === undefined && prev?.initiative) card = { ...card, initiative: prev.initiative };
-          if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
-          this.cards.set(card.id, card);
-        }
         break;
       case "steps":
         // Steps are their own records: nothing here touches routing, the list, unread or notifications.
@@ -1062,33 +1112,25 @@ export class InboxStore {
           ids.add(line.record.id);
         }
         break;
-      case "thread_pull":
-        // A thread's PRs (approval "inbox-pr-binding"): nothing here touches routing, the list's sections, unread or notifications.
-        if (isInboxThreadPullRecord(line.record)) this.applyThreadPull(line.record, line.seq);
-        break;
       case "initiative":
         // The Board's initiatives (approval "board-initiatives"): read by the Board only.
         if (isInboxInitiativeRecord(line.record)) this.initiativesById.set(line.record.id, line.record);
         break;
+      default:
+        break;
     }
   }
 
-  /** Note a root's routing keys, from its first line only. */
-  private indexRoot(message: InboxMessage): void {
-    if (message.thread_id !== message.id) return;
-    // A thread the person started: its compose name (typed, or the suggestion) routes nothing:
-    // it is noted only so no other thread takes the same name.
-    if (message.author.kind !== "agent") {
-      if (message.started_by_person && message.thread_name) {
-        const key = `${message.project_id}\0${inboxThreadNameKey(message.thread_name)}`;
-        const roots = this.personNamed.get(key);
-        if (roots) roots.push(message.id);
-        else this.personNamed.set(key, [message.id]);
-      }
-      return;
-    }
-    const name = message.thread_name ?? null;
-    if (name !== null) this.indexName(message.project_id, name, message.id);
+  /**
+   * A root's name from its first line (`firstLineName`): an agent's routes; one the person gave (typed, or
+   * compose's suggestion) routes nothing and is noted only so no other thread takes the same name.
+   */
+  private indexThreadName(projectId: string, named: { name: string; routes: boolean }, rootId: string): void {
+    if (named.routes) return this.indexName(projectId, named.name, rootId);
+    const key = threadNameIndexKey(projectId, named.name);
+    const roots = this.personNamed.get(key);
+    if (roots) roots.push(rootId);
+    else this.personNamed.set(key, [rootId]);
   }
 
   /**
@@ -1105,7 +1147,7 @@ export class InboxStore {
 
   /** Add a root under a thread name; the last one added is the newest of that name. */
   private indexName(projectId: string, name: string, rootId: string): void {
-    const key = `${projectId}\0${inboxThreadNameKey(name)}`;
+    const key = threadNameIndexKey(projectId, name);
     const roots = this.namedThreads.get(key);
     if (roots) roots.push(rootId);
     else this.namedThreads.set(key, [rootId]);
@@ -7221,23 +7263,12 @@ export class InboxStore {
   // change. Silent: nothing that routes, lists unread or notifies reads it.
   // Who may change it is the server's to check; the store keeps what it is told.
 
-  private applyThreadPull(record: InboxThreadPull, seq: number): void {
-    const prev = this.pullsById.get(record.id);
+  /** A PR record's latest line in memory (its event, if any, is `apply`'s: `pullEventOf`). */
+  private placeThreadPull(record: InboxThreadPull): void {
     this.pullsById.set(record.id, record);
     let ids = this.pullIdsByThread.get(record.thread_id);
     if (!ids) this.pullIdsByThread.set(record.thread_id, (ids = new Set()));
     ids.add(record.id);
-    const live = record.removed_at === undefined;
-    const wasLive = prev ? prev.removed_at === undefined : false;
-    // A state line changes neither: it is no event.
-    if (prev && live === wasLive && (!live || prev.added_at === record.added_at)) return;
-    let events = this.pullEvents.get(record.thread_id);
-    if (!events) this.pullEvents.set(record.thread_id, (events = []));
-    events.push(
-      live
-        ? { seq, at: record.added_at, op: "add", pull: record.pull, by: record.added_by }
-        : { seq, at: record.removed_at!, op: "remove", pull: record.pull, by: record.removed_by! },
-    );
   }
 
   /** The thread a thread or message id names, or thread_not_found. */
@@ -8021,21 +8052,17 @@ export class InboxStore {
     return next;
   }
 
-  /** Hashtags: the tags in a message's body, indexed to its thread (`tagThreads`). Code holds no tag. */
-  private indexTags(message: InboxMessage, seq: number): void {
-    if (typeof message.body !== "string" || !message.body.includes("#")) return;
-    for (const key of new Set(inboxHashtags(message.body).map((tag) => tag.key))) {
-      if (!key) continue;
-      let entry = this.tagThreads.get(key);
-      if (!entry) this.tagThreads.set(key, (entry = { latest: new Map(), order: [] }));
-      if ((entry.latest.get(message.thread_id) ?? -1) >= seq) continue;
-      entry.latest.set(message.thread_id, seq);
-      entry.order.push(message.thread_id);
-      if (entry.order.length > 2 * entry.latest.size + 16) {
-        // Keep each thread's last entry only, in order.
-        const seen = new Set<string>();
-        entry.order = entry.order.reverse().filter((id) => !seen.has(id) && !!seen.add(id)).reverse();
-      }
+  /** Hashtags: one tag of a message's first line (`firstLineTagKeys`), indexed to its thread at `seq` (`tagThreads`). Code holds no tag. */
+  private indexTag(key: string, threadId: string, seq: number): void {
+    let entry = this.tagThreads.get(key);
+    if (!entry) this.tagThreads.set(key, (entry = { latest: new Map(), order: [] }));
+    if ((entry.latest.get(threadId) ?? -1) >= seq) return;
+    entry.latest.set(threadId, seq);
+    entry.order.push(threadId);
+    if (entry.order.length > 2 * entry.latest.size + 16) {
+      // Keep each thread's last entry only, in order.
+      const seen = new Set<string>();
+      entry.order = entry.order.reverse().filter((id) => !seen.has(id) && !!seen.add(id)).reverse();
     }
   }
 

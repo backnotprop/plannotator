@@ -198,10 +198,13 @@
     "@joplin/turndown-plugin-gfm": "^1.0.68",
     "@plannotator/core": "workspace:*",
     "chokidar": "^5.0.0",
+    "drizzle-orm": "1.0.0-rc.5",
     "parse5": "^7.3.0",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.4",
+    "zod": "4.6.7"
   },
   "devDependencies": {
+    "drizzle-kit": "1.0.0-rc.5",
     "fast-check": "4.10.2"
   }
 }
