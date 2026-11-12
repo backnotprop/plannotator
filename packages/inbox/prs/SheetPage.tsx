@@ -14,6 +14,7 @@
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { inboxPullIsOpen, inboxPullLabel, type InboxPull, type InboxPullStack, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
 import { inboxApi } from '../api';
@@ -22,6 +23,8 @@ import { pullsEmptyWords, pullsNotices } from '../pulls/notices';
 import { usePullRisk } from '../pulls/usePullRisk';
 import { Named, Person } from '../pulls/Face';
 import { facesOnce } from '../pulls/words';
+import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
+import { inboxPrBoardShortcuts } from '../shortcuts/prBoard.shortcuts';
 import { ChecksMark, checksLabel } from './ChecksMark';
 import { BoxMark, boxState, SelectBox } from './SelectBox';
 import { SheetTable, type TableSection } from './SheetTable';
@@ -341,6 +344,26 @@ export function SheetPage(props: SheetPageProps) {
     setPicked(new Set());
     anchor.current = null;
   };
+  // Escape leaves select mode once nothing inside the page took it: a menu, the filter's list, a field, a dialog.
+  useShortcutScope({
+    scope: inboxPrBoardShortcuts,
+    target: 'document',
+    handlers: {
+      leaveSelect: {
+        when: (event) => {
+          if (!selecting || event.defaultPrevented || isComposingKey(event) || modalOpen()) return false;
+          const from = keyTarget(event);
+          return !(from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"], [aria-expanded="true"]')));
+        },
+        handle: () => {
+          // Clear and the boxes go with select mode: focus they held moves to Select.
+          const lost = !!document.activeElement?.closest('[data-pr-actions], .ib-prs-box, [data-pr-box]');
+          leaveSelect();
+          if (lost) setTimeout(() => barRef.current?.querySelector<HTMLElement>('[data-pr-select]')?.focus());
+        },
+      },
+    },
+  });
   const actions = selectOn && chosen.size > 0;
   const table = (sections: TableSection[]) => (
     <SheetTable

@@ -7,7 +7,8 @@
  *  - the bar not taking the filter row's place while something is picked, or Clear / Done leaving boxes behind;
  *  - a shift-click not picking the range from the last pick, in the order on screen (the table's sort included);
  *  - Select all in a repository picking another repository's PRs or a merged one, or not letting them go again;
- *  - a phone without its count at the bottom, or without Done in the filter row.
+ *  - a phone without its count at the bottom, or without Done in the filter row;
+ *  - Escape not leaving select mode, or taking the key from an open menu, a field, a dialog or what used it first.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -249,5 +250,90 @@ test('a phone: the filter row keeps Done, and the count and Clear sit in a sheet
   expect(sheet.querySelector('[data-pr-picked]')!.textContent).toBe('1 selected');
   act(() => (sheet.querySelector('[data-pr-clear]') as HTMLElement).click());
   expect($('.ib-prs-picksheet')).toBeNull();
+  expect(noBoxes()).toBe(true);
+});
+
+/**
+ * An Escape from `from` (the page's body when absent), as a person's key reaches the page, and whether it was used when
+ * it reached a window listener added before the page drew, as App's ladder is.
+ */
+let windowSaw: boolean | null = null;
+const onWindow = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') windowSaw = event.defaultPrevented;
+};
+beforeEach(() => {
+  if (hasDom) window.addEventListener('keydown', onWindow);
+});
+afterEach(() => {
+  if (hasDom) window.removeEventListener('keydown', onWindow);
+});
+function escape(from?: HTMLElement | null) {
+  windowSaw = null;
+  act(() => {
+    (from ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  return { usedBeforeWindow: windowSaw };
+}
+
+test('Escape leaves select mode, its picks and boxes gone, focus from Clear on Select; App\'s ladder on the window stands down', async () => {
+  if (!hasDom) return;
+  const { opened } = draw();
+  // Outside select mode Escape is not the board's: the window's ladder gets it unused.
+  expect(escape().usedBeforeWindow).toBe(false);
+
+  press('[data-pr-select="select"]');
+  mouse(tile(key(7)));
+  $('[data-pr-clear]')!.focus();
+  const sent = escape($('[data-pr-clear]'));
+  expect(sent.usedBeforeWindow).toBe(true);
+  expect(noBoxes()).toBe(true);
+  expect($('[data-pr-select="select"]')).not.toBeNull();
+  expect($('[data-pr-filter]')).not.toBeNull();
+  expect(opened).toEqual([]);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(document.activeElement).toBe($('[data-pr-select="select"]'));
+});
+
+test('Escape closes what is open first: a menu, a field, a dialog or a key already used keep it, and select mode stays', () => {
+  if (!hasDom) return;
+  draw({ layout: 'table' });
+  press('[data-pr-select="select"]');
+  mouse(row(key(7)));
+  const stays = () => expect(pickedRows()).toEqual([key(7)]);
+
+  const menu = document.createElement('div');
+  menu.setAttribute('role', 'menu');
+  const item = document.createElement('button');
+  item.setAttribute('role', 'menuitem');
+  menu.appendChild(item);
+  document.body.appendChild(menu);
+  expect(escape(item).usedBeforeWindow).toBe(false);
+  stays();
+  menu.remove();
+
+  const dialog = document.createElement('dialog');
+  dialog.setAttribute('open', '');
+  document.body.appendChild(dialog);
+  escape();
+  stays();
+  dialog.remove();
+
+  const field = document.createElement('input');
+  document.body.appendChild(field);
+  escape(field);
+  stays();
+  field.remove();
+
+  // Something inside the page used this Escape (a popover, the filter's list): it marks the key, the board leaves it.
+  const used = (event: KeyboardEvent) => event.preventDefault();
+  host!.addEventListener('keydown', used);
+  escape(row(key(8)));
+  host!.removeEventListener('keydown', used);
+  stays();
+
+  escape(row(key(8)));
+  expect(pickedRows()).toEqual([]);
   expect(noBoxes()).toBe(true);
 });
