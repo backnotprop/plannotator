@@ -22,6 +22,10 @@
  *     respawns it once, Starting again (12), delivered once → no line (10);
  *     Delete runs stop and rm, removes launch/<id>/, never purge. The login
  *     shell ran for the composer, the start and the respawn.
+ *  2b. A turn that ends in an API error (16, after 9): one note in Claude
+ *     Code's own words, "couldn't answer" with Try again, which sends the
+ *     message to the session again; its good answer clears the line and the
+ *     note stays.
  *  3. Full permissions (Settings → Agents): bypass mode on argv, Claude's env
  *     switch in the file, "Full permissions" in the header.
  *  4. A replayed Send (same key) starts `--bg` once.
@@ -40,7 +44,7 @@
  *     the permission prompt without Open in Terminal (08), no Delete in ⋯.
  *
  * Pictures: LAUNCH_SHOTS_DIR (default .local/proof/launch-pr1), wide light at
- * 2x, plus 02 and 06 dark, and 01, 02, 06 and 08 on a phone. Build the binary first (see
+ * 2x, plus 02, 06 and 16 dark, and 01, 02, 06 and 08 on a phone. Build the binary first (see
  * inbox.spec.ts), then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-claude.spec.ts`.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -723,6 +727,52 @@ test('Delete while --bg is still running: the session it makes is stopped and re
     expect(root.run ?? null).toBeNull();
   } finally {
     fake.configure({ bgDelayMs: 0 });
+  }
+});
+
+test('a turn that ends in an API error: one note with Claude Code\'s own words, "couldn\'t answer" with Try again, which sends the message again; the next good turn clears the line', async () => {
+  const { page, fake } = world;
+  const error = 'Credit balance too low · Add funds: https://platform.claude.com/settings/billing';
+  fake.configure({ startDelayMs: 0, hold: false, workMs: 300, apiError: { error: 'billing_error', text: error } });
+  try {
+    await page.goto(world.url);
+    const words = 'Tighten the retry backoff in the sync worker.';
+    const threadId = await launchFrom(page, words);
+    await openThread(page, threadId);
+    const p = pane(page);
+    const notes = p.locator('article.ib-message[data-author="agent"]');
+    // The window sets a message's apostrophe as ’ (smart punctuation); the stored words keep the plain one.
+    const errorNotes = notes.filter({ hasText: 'Claude Code’s turn ended with an error:' });
+    await expect(errorNotes).toHaveCount(1, { timeout: 30_000 });
+    await expect(errorNotes).toContainText(error);
+    const agentBodies = async () =>
+      ((await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { author: { kind: string }; body: string }[] } }).thread.messages
+        .filter((m) => m.author.kind === 'agent')
+        .map((m) => m.body);
+    expect(await agentBodies()).toEqual([`Claude Code's turn ended with an error: ${error}`]);
+    const line = p.locator('[data-run="failed"]');
+    await expect(line).toHaveText(/^Claude Code couldn't answer\. Your message is kept\.\s*Try again$/);
+    await shot(page, '16-turn-error');
+    await shot(page, '16-turn-error-dark', { scheme: 'dark' });
+    // Read again and again (every sweep, the window's reloads): still one note.
+    await page.reload();
+    await expect(line).toBeVisible();
+    await expect(notes).toHaveCount(1);
+
+    // Try again: the same message goes to the same session once more; it answers, and the line goes. The note stays.
+    fake.configure({ apiError: null });
+    const root = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { id: string }[] } };
+    const rootId = root.thread.messages[0]!.id;
+    expect(fake.delivered().filter((id) => id === rootId)).toHaveLength(1);
+    await line.locator('[data-run-retry]').click();
+    await waitFor('the message taken again', () => fake.delivered().filter((id) => id === rootId).length === 2);
+    await expect(notes).toHaveCount(2, { timeout: 30_000 });
+    await expect(notes.last()).toContainText(`Done: ${words}`);
+    await expect(p.locator('[data-run]')).toHaveCount(0);
+    await expect(errorNotes).toHaveCount(1);
+    expect((await agentBodies()).filter((body) => body.startsWith("Claude Code's turn ended with an error:"))).toHaveLength(1);
+  } finally {
+    fake.configure({ apiError: null, workMs: 800 });
   }
 });
 
