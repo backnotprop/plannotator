@@ -11,11 +11,11 @@ export const USE_THIS_ICON = 'Use this icon';
 export const OPTIONAL = 'Optional';
 
 /**
- * Exploration ("selected", agents/iconFlowDev.ts): the agent icon dialog's page for one icon. `previewing`: just
- * picked in a grid and not kept yet: the agent still shows its old icon everywhere. "Use this icon" keeps it and
+ * The agent icon dialog's page for one icon (AgentIconDialog.tsx), at 128 px and at the sizes the window shows it.
+ * `previewing`: just picked and not kept: the agent still shows its old icon everywhere. "Use this icon" keeps it and
  * closes; "Animate it" keeps it and asks for the animation; the back control (to the grid it came from) and Close
- * leave with nothing changed. Not previewing: the icon the agent shows now, reopened later, with "Animate it" (or
- * "Use the original" for an animated one).
+ * change nothing. Not previewing: the icon the agent shows now, with "Animate it" (or "Use the original" for an
+ * animated one).
  */
 export function SelectedIcon({ agent, host, name, face, previewing, onBack, onDone }: { agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; previewing: boolean; onBack: () => void; onDone: () => void }) {
   const sets = useIconSets();
@@ -75,7 +75,7 @@ export function SelectedIcon({ agent, host, name, face, previewing, onBack, onDo
         )}
         <div className="ib-agi-sel-anim">
           <span className="ib-agi-sel-opt">{OPTIONAL}</span>
-          <AnimateIt agent={agent} face={face} onDone={onDone} onBack={() => {}} beforeStart={previewing ? keep : undefined} />
+          <AnimateIt agent={agent} face={face} onDone={onDone} beforeStart={previewing ? keep : undefined} />
         </div>
       </div>
     </div>

@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import type { InboxIconSet, InboxIconSetIcon } from '@plannotator/core/inbox-types';
-import { keepAgentFace, type AgentFaceRef } from './agentFaces';
 import type { AgentFace } from './faceChoices';
 import { SETS_LABEL } from './FaceFan';
 import { getIconSet, isSetFace, setArtStyle, readIconSets, refreshFetchable, setCreditsHref, setFaceParts, setIconSrc, setLookOf, useIconSets, useSetListing } from './iconSets';
@@ -42,14 +41,14 @@ const licenceLabel = (spdx: string | undefined) => (spdx ? spdx.replace(/-(\d+\.
 
 /**
  * "Sets" in the agent icon dialog (AgentIconDialog.tsx): the icon sets, then a numbered grid of the chosen one with a
- * search by name or number, the Pokédex feel. Choosing an icon shows it on this agent at once, in every window
- * (`set:<set>/<icon>` in the faces). A fetchable set shows "Get" until it is downloaded; its icons then fill in as
+ * search by name or number, the Pokédex feel. Choosing an icon goes to `onPick` as `set:<set>/<icon>` (its page,
+ * AgentIconDialog.tsx). A fetchable set shows "Get" until it is downloaded; its icons then fill in as
  * they arrive. Icons load only as they scroll into view.
  *
  * Its keys are the dialog's own (the arrows move in the grid, Enter in the search picks the first found): it adds no
- * shortcut. Choosing an icon closes the dialog (`onDone`). The one credit a set's licence asks for (game-icons.net's) is a muted line under its grid.
+ * shortcut. The one credit a set's licence asks for (game-icons.net's) is a muted line under its grid.
  */
-export function SetsBody({ agent, face, onDone, pin, onPick }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; pin?: ReactNode; onPick?: (face: AgentFace) => void }) {
+export function SetsBody({ face, onPick }: { face: AgentFace; onPick: (face: AgentFace) => void }) {
   const sets = useIconSets();
   // The pointer of fetchable sets is read only here, when the person opens Sets.
   useEffect(() => {
@@ -100,39 +99,10 @@ export function SetsBody({ agent, face, onDone, pin, onPick }: { agent: AgentFac
   }, []);
   useEffect(() => () => watcher.current?.disconnect(), []);
 
-  // Exploration ("beside"): `pin` sits under the agent's icon in the grid, scrolling with it.
-  const pinBox = useRef<HTMLDivElement>(null);
-  const [pinAt, setPinAt] = useState<{ top: number; left: number } | null>(null);
-  const shownOnce = useRef(false);
-  useLayoutEffect(() => {
-    if (!pin) return;
-    const place = () => {
-      const box = scroller.current;
-      const cell = box?.querySelector<HTMLElement>('.am-sets-i[aria-checked="true"]');
-      if (!box || !cell) return setPinAt((was) => (was ? null : was));
-      const b = box.getBoundingClientRect();
-      const c = cell.getBoundingClientRect();
-      const width = pinBox.current?.offsetWidth ?? 96;
-      const left = Math.max(width / 2, Math.min(box.clientWidth - width / 2, c.left - b.left + c.width / 2));
-      const top = c.bottom - b.top + box.scrollTop + 4;
-      setPinAt((was) => (was && Math.abs(was.top - top) < 0.5 && Math.abs(was.left - left) < 0.5 ? was : { top, left }));
-      if (!shownOnce.current) {
-        shownOnce.current = true;
-        cell.scrollIntoView({ block: 'nearest' });
-      }
-    };
-    place();
-    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
-    if (scroller.current) watch?.observe(scroller.current);
-    return () => watch?.disconnect();
-  });
-
   const choose = (icon: InboxIconSetIcon) => {
     if (!set) return;
     keepLastSet(set.id);
-    if (onPick) return onPick(`set:${set.id}/${icon.id}`);
-    keepAgentFace(agent, `set:${set.id}/${icon.id}`);
-    onDone();
+    onPick(`set:${set.id}/${icon.id}`);
   };
   const onGridKey = (event: KeyboardEvent) => {
     // The grid's own column count (it fills the dialog's width).
@@ -243,11 +213,6 @@ export function SetsBody({ agent, face, onDone, pin, onPick }: { agent: AgentFac
               );
             })}
         </div>
-        {pin && pinAt && (
-          <div ref={pinBox} className="ib-agi-pin" style={{ top: pinAt.top, left: pinAt.left }}>
-            {pin}
-          </div>
-        )}
       </div>
       {set?.credits && (
         <div className="am-sets-credit">

@@ -106,13 +106,7 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
   :root[data-ib-keyboard] .ib-agi .am-sets-tabs::-webkit-scrollbar { display: none; }
 }
 
-/* Exploration ("beside", agents/iconFlowDev.ts): "Animate it" under the agent's icon in the grid, scrolling with it. */
-.ib-agi .am-sets-scroll { position: relative; }
-.ib-agi-pin { position: absolute; z-index: 2; transform: translateX(-50%); }
-.ib-agi-pinb { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.ib-agi-pinb .ib-agi-anim-b { background: var(--card); box-shadow: var(--ib-pill-shadow-hover); white-space: nowrap; }
-
-/* Exploration ("selected", SelectedIcon.tsx): the picked icon's page, in the dialog's body (same size, no edge moves). */
+/* An icon's page (SelectedIcon.tsx), in the dialog's body (same size, so no edge moves). */
 .ib-agi-sel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 16px; }
 .ib-agi-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; padding-left: 6px; }
 .ib-agi-sel-mid { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 0; }

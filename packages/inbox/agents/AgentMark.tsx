@@ -7,7 +7,6 @@ import { agentFaceSources, loadAgentFaceArt } from './faceArtLoad';
 import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
 import { AgentIconDialog, type AgentIconPlace } from './AgentIconDialog';
-import { iconFlow } from './iconFlowDev';
 import { agentFaceArtReady, agentRigOf, mountAgentMark, showAgentFace, unmountAgentMark } from './motion';
 
 export { loadAgentFaceArt } from './faceArtLoad';
@@ -101,11 +100,9 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
   // "Your own…" and "Sets": the fan's last two inner places open the agent icon dialog in the middle of the window
   // (AgentIconDialog.tsx). The face takes focus first, so the dialog gives it back when it closes.
   const [dialog, setDialog] = useState<AgentIconPlace | null>(null);
-  const [fromMark, setFromMark] = useState(false);
-  const openDialog = (place: AgentIconPlace, mark = false) => {
+  const openDialog = (place: AgentIconPlace) => {
     closeFan();
     button.current?.focus({ preventScroll: true });
-    setFromMark(mark);
     setDialog(place);
   };
   const choose = (next: AgentFace) => {
@@ -209,7 +206,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
         <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} />
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
-      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={() => openDialog('own', iconFlow() === 'selected' && face.startsWith('own:'))} onSets={() => openDialog('sets', iconFlow() === 'selected' && face.startsWith('set:'))} onMark={() => toggle(pointer.current === 'touch' ? 'touch' : 'hover')} onClose={() => closeFan()} />}
+      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={() => openDialog('own')} onSets={() => openDialog('sets')} onMark={() => toggle(pointer.current === 'touch' ? 'touch' : 'hover')} onClose={() => closeFan()} />}
       {dialog && (
         <AgentIconDialog
           place={dialog}
@@ -217,7 +214,6 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
           host={host}
           name={name}
           face={face}
-          showPicked={fromMark}
           onClose={() => {
             clicked.current = true;
             quiet.current = true;

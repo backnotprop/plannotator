@@ -1,11 +1,11 @@
 /**
- * "Animate it" for whatever icon an agent shows (AnimateIt.tsx under the agent icon dialog's head), through the Inbox's
- * real routes (packages/server/inbox-icon-animate.ts, inbox-agent-faces.ts, inbox-agent-icons.ts, inbox-icon-sets.ts)
+ * "Animate it" on an icon's page in the agent icon dialog (SelectedIcon.tsx, AnimateIt.tsx), through the Inbox's real
+ * routes (packages/server/inbox-icon-animate.ts, inbox-agent-faces.ts, inbox-agent-icons.ts, inbox-icon-sets.ts)
  * on a temp folder, called through a fetch stand-in: no Inbox is started.
  *
- * What this catches: "Animate it" shown in only one of the dialog's places, or missing for a set's icon or one of our
- * faces; offered for the agent's own mark or Transparent, which have no one picture to hand over; a press that asks
- * about another icon than the one shown, or attaches another picture; "Use the original" not putting a set's icon back.
+ * What this catches: "Animate it" missing from the page of an uploaded picture or a set's icon, or shown in a grid; a
+ * press on a previewed icon that asks before keeping it, or keeps another; a press that asks about another icon than
+ * the one shown, or attaches another picture; "Use the original" not putting a set's icon back.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -137,31 +137,25 @@ async function openDialog(host: Element, place: 'own' | 'sets') {
   return document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
 }
 
-/** "Animate it" as each place shows it: its button's words, or nothing. */
+/** "Animate it" as each place opens from the fan: its button's words, or nothing. */
 async function stripInBothPlaces(host: Element) {
   const out: Record<string, string | null> = {};
-  const dialog = await openDialog(host, 'sets');
   for (const place of ['sets', 'own'] as const) {
-    act(() => dialog.querySelector<HTMLButtonElement>(`[data-agi-place="${place}"]`)!.click());
+    const dialog = await openDialog(host, place);
+    out[place] = dialog.querySelector('[data-animate-it] button')?.textContent ?? null;
+    act(() => dialog.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click());
     await settle();
-    const strip = dialog.querySelector('[data-animate-it]');
-    // Under the head, outside the place's own body, so a switch keeps it where it is.
-    if (strip) expect(strip.closest('.ib-agi-body')).toBeNull();
-    out[place] = strip?.querySelector('button')?.textContent ?? null;
   }
-  act(() => dialog.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click());
-  await settle();
   return out;
 }
 
-test.if(hasDom)('a set icon: "Animate it" shows in both places; a press asks about that icon and attaches its picture', async () => {
+test.if(hasDom)('a set icon in use: Sets opens on its page with "Animate it"; a press asks about that icon and attaches its picture', async () => {
   inbox();
   const host = mount();
   act(() => faces.keepAgentFace('ses_a', 'set:dcss/orc'));
   await settle();
-  expect(await stripInBothPlaces(host)).toEqual({ sets: 'Animate it', own: 'Animate it' });
-
   const dialog = await openDialog(host, 'sets');
+  expect(dialog.querySelector('[data-selected-icon] [data-animate-it]')).not.toBeNull();
   act(() => dialog.querySelector<HTMLButtonElement>('[data-animate-go]')!.click());
   await settle();
   expect(document.querySelector('dialog[data-dialog="agent-icon"]')).toBeNull();
@@ -171,36 +165,45 @@ test.if(hasDom)('a set icon: "Animate it" shows in both places; a press asks abo
   expect(opened[0]!.subject).toBe('Animate an agent icon');
   expect(opened[0]!.body).toMatch(/--request ia_[0-9a-f]{24}/);
   expect(opened[0]!.files!.map((f) => [f.name, f.type])).toEqual([['agent-icon.png', 'image/png']]);
+  expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
 });
 
-test.if(hasDom)('an uploaded picture shows "Animate it" in Sets too; our faces show it; the agent’s own mark and Transparent do not', async () => {
+test.if(hasDom)('"Animate it" is on the page of the uploaded picture or set icon in use, never in a grid; our faces, the agent’s own mark and Transparent open grids', async () => {
   const { store } = inbox();
   const host = mount();
   const kept = store.add(new TextEncoder().encode(SVG('#f97316')));
   if (!kept.ok) throw new Error('upload refused');
   own.hearOwnIcons(store.list());
-  const cases: [string, string | null][] = [
-    [`own:${kept.icon.id}`, 'Animate it'],
-    ['glass-red', 'Animate it'],
-    ['totman', 'Animate it'],
-    ['agent', null],
-    ['transparent', null],
+  const cases: [string, Record<string, string | null>][] = [
+    [`own:${kept.icon.id}`, { sets: null, own: 'Animate it' }],
+    ['set:dcss/orc', { sets: 'Animate it', own: null }],
+    ['glass-red', { sets: null, own: null }],
+    ['totman', { sets: null, own: null }],
+    ['agent', { sets: null, own: null }],
+    ['transparent', { sets: null, own: null }],
   ];
-  for (const [face, button] of cases) {
+  for (const [face, strip] of cases) {
     act(() => faces.keepAgentFace('ses_a', face as never));
     await settle();
-    expect({ face, strip: await stripInBothPlaces(host) }).toEqual({ face, strip: { sets: button, own: button } });
+    expect({ face, strip: await stripInBothPlaces(host) }).toEqual({ face, strip });
   }
-  // One of our faces hands over its own picture.
-  act(() => faces.keepAgentFace('ses_a', 'glass-red'));
+});
+
+test.if(hasDom)('a previewed icon: "Animate it" keeps it, then asks about it with its picture', async () => {
+  inbox();
+  const host = mount();
+  const dialog = await openDialog(host, 'sets');
+  act(() => dialog.querySelector<HTMLButtonElement>('.am-sets-tab[data-set="dcss"]')!.click());
   await settle();
-  const dialog = await openDialog(host, 'own');
+  act(() => dialog.querySelector<HTMLButtonElement>('.am-sets-i[data-set-icon="orc"]')!.click());
+  await settle();
+  expect(faces.agentFaceOf('ses_a')).toBe('agent');
   act(() => dialog.querySelector<HTMLButtonElement>('[data-animate-go]')!.click());
   await settle();
-  const handed = opened.at(-1)!.files![0]!;
-  expect(handed.type).toBe('image/svg+xml');
-  const glass = art.agentFaceSources()!['glass-red'] as string;
-  expect(await handed.text()).toBe(await (await realFetch(glass)).text());
+  expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
+  expect(asked).toContain('GET /api/inbox/icon-sets/dcss/orc');
+  expect(opened).toHaveLength(1);
+  expect(document.querySelector('dialog[data-dialog="agent-icon"]')).toBeNull();
 });
 
 test.if(hasDom)('after a hand-back for a set icon, "Use the original" puts that set icon back', async () => {
@@ -220,7 +223,8 @@ test.if(hasDom)('after a hand-back for a set icon, "Use the original" puts that 
   act(() => faces.keepAgentFace('ses_a', `own:${answer.icon}`));
   await settle();
 
-  const again = await openDialog(host, 'sets');
+  // The handed-back picture is an uploaded one now: "Your own…" opens on its page.
+  const again = await openDialog(host, 'own');
   await settle();
   const strip = again.querySelector('[data-animate-it]')!;
   expect(strip.textContent).toContain('An agent animated this picture.');

@@ -4,7 +4,8 @@
  * inbox-agent-faces.ts) on a temp folder, called through a fetch stand-in: no Inbox is started.
  *
  * What this catches: the fan without its "Your own…" place, or that place not opening the pictures; a pasted or
- * picked picture not kept, or not shown on the agent at once; a picture not shown on the row, the author, the header
+ * picked picture not kept with the Inbox, shown on the agent before "Use this icon", or not shown at once after it; a
+ * picture not shown on the row, the author, the header
  * or the reply pill; a picture that moves outside the sidebar (anything but its still there), or in the sidebar under
  * reduced motion; a picture drawn as markup (innerHTML) instead of an image's address; a removed picture, one from
  * another machine, or one that fails to load drawn as a broken picture instead of the agent's own mark; a removal
@@ -178,7 +179,7 @@ function paste(file: File) {
   document.dispatchEvent(event);
 }
 
-test.if(hasDom)('a pasted picture is kept and shows on the agent everywhere at once: moving in the sidebar, its still everywhere else', async () => {
+test.if(hasDom)('a pasted picture is kept and previewed; "Use this icon" shows it on the agent everywhere at once: moving in the sidebar, its still everywhere else', async () => {
   inbox();
   setInboxAgents([{ agents: [agent()], total: 1, ended_today: 0 }]);
   const host = mount(<Surfaces />);
@@ -188,6 +189,12 @@ test.if(hasDom)('a pasted picture is kept and shows on the agent everywhere at o
   await settle();
   const id = sha(GIF);
   expect(asked).toContain('POST /api/inbox/agent-icons');
+  // Kept with the Inbox, previewed on its page, and on no agent yet.
+  expect(document.querySelector<HTMLElement>('[data-selected-icon]')!.dataset.selectedIcon).toBe(`own:${id}`);
+  expect(faces.agentFaceOf('ses_a')).toBe('agent');
+  for (const s of OUTSIDE) expect(shown(at(host, s))).toBe('own mark');
+  act(() => document.querySelector<HTMLButtonElement>('[data-use-icon]')!.click());
+  await settle();
   expect(faces.agentFaceOf('ses_a')).toBe(`own:${id}`);
   // The sidebar plays it; every other place asks for the still.
   expect(shown(at(host, 'sidebar'))).toBe(`/api/inbox/agent-icons/${id}`);
@@ -275,12 +282,17 @@ test.if(hasDom)('× takes a picture away with no question: the agents showing it
   await settle();
   act(() => document.querySelector<HTMLButtonElement>(`[data-own-icon="${added.icon.id}"]`)!.click());
   await settle();
+  act(() => document.querySelector<HTMLButtonElement>('[data-use-icon]')!.click());
+  await settle();
   expect(faces.agentFaceOf('ses_b')).toBe(`own:${added.icon.id}`);
   expect(asked.filter((a) => a === 'POST /api/inbox/agent-icons')).toEqual([]);
   act(() => faces.keepAgentFace('ses_a', `own:${added.icon.id}`));
   await settle();
 
+  // ses_a shows it: "Your own…" opens on its page; the back control shows the pictures.
   const panel = await openOwn(host);
+  act(() => panel.querySelector<HTMLButtonElement>('.ib-agi-back')!.click());
+  await settle();
   const confirm = globalThis.confirm;
   let questions = 0;
   globalThis.confirm = () => {

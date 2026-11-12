@@ -4,8 +4,8 @@
  * through a fetch stand-in: no Inbox is started. The fetchable set comes from a local fake server
  * (tests/helpers/fake-icon-set.ts, generated pictures on 127.0.0.1).
  *
- * What this catches: the fan without its "Sets" place, or that place not opening the sets; a chosen icon not kept as
- * `set:<set>/<icon>`, or not shown on the sidebar, the row, the author, the header or the reply pill; a pixel set drawn
+ * What this catches: the fan without its "Sets" place, or that place not opening the sets; a picked icon kept before
+ * "Use this icon", or kept by the back control or Close; a used icon not kept as `set:<set>/<icon>`, or not shown on the sidebar, the row, the author, the header or the reply pill; a pixel set drawn
  * without its native size (so not at whole multiples) or a one-colour set drawn as an `<img>` (which cannot take the
  * text colour) or as inlined markup; an icon that does not load drawn as a broken picture instead of the agent's own
  * mark; a search by name or number that finds the wrong icons; the pointer read before the person opens Sets; "Get"
@@ -164,6 +164,11 @@ async function openSets(host: Element) {
 }
 const tab = (id: string) => document.querySelector<HTMLButtonElement>(`.am-sets-tab[data-set="${id}"]`)!;
 const cells = () => [...document.querySelectorAll<HTMLButtonElement>('.am-sets-i')];
+const page = () => document.querySelector<HTMLElement>('[data-selected-icon]');
+const useIt = async () => {
+  act(() => document.querySelector<HTMLButtonElement>('[data-use-icon]')!.click());
+  await settle();
+};
 const type = async (value: string) => {
   const input = document.querySelector<HTMLInputElement>('.am-sets-q')!;
   await act(async () => {
@@ -174,7 +179,7 @@ const type = async (value: string) => {
   await settle();
 };
 
-test.if(hasDom)('"Sets" opens the sets; an icon chosen there shows on the agent everywhere at once, pixel art at its native size', async () => {
+test.if(hasDom)('"Sets" opens the sets; an icon picked there is previewed, and "Use this icon" shows it on the agent everywhere at once, pixel art at its native size', async () => {
   inbox();
   setInboxAgents([{ agents: [agent()], total: 1, ended_today: 0 }]);
   const host = mount(<Surfaces />);
@@ -191,6 +196,13 @@ test.if(hasDom)('"Sets" opens the sets; an icon chosen there shows on the agent 
   expect(cells()[0]!.getAttribute('aria-label')).toBe('Zombie, #001');
   act(() => cells()[0]!.click());
   await settle();
+  // Its page, previewed: nothing kept, nothing told to other windows, the agent still its own mark everywhere.
+  expect(page()!.dataset.selectedIcon).toBe('set:tiny-creatures/zombie');
+  expect(page()!.hasAttribute('data-previewing')).toBe(true);
+  expect(faces.agentFaceOf('ses_a')).toBe('agent');
+  expect(events).toEqual([]);
+  for (const s of OUTSIDE) expect(drawn(at(host, s))).toBe('own mark');
+  await useIt();
   expect(faces.agentFaceOf('ses_a')).toBe('set:tiny-creatures/zombie');
   expect(document.querySelector('dialog[data-dialog="agent-icon"][open]')).toBeNull();
   // Every window heard it.
@@ -216,9 +228,12 @@ test.if(hasDom)('Sets opens on the set last looked at, kept by the browser acros
   act(() => cells()[0]!.click());
   await settle();
   expect(window.localStorage.getItem(panel.LAST_SET_KEY)).toBe('tiny-creatures');
+  await useIt();
   window.localStorage.setItem(panel.LAST_SET_KEY, 'gone');
   dialog = await openSets(host);
-  // The agent's own set icon still opens its set.
+  // The agent's own set icon still opens its set (its page first, then back to the grid).
+  act(() => dialog.querySelector<HTMLButtonElement>('.ib-agi-back')!.click());
+  await settle();
   expect(tab('tiny-creatures').getAttribute('aria-selected')).toBe('true');
   act(() => dialog.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click());
   await settle();
@@ -281,7 +296,7 @@ test.if(hasDom)('search by name or number, and the keys stay inside the panel', 
   const input = document.querySelector<HTMLInputElement>('.am-sets-q')!;
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   await settle();
-  expect(faces.agentFaceOf('ses_a')).toMatch(/^set:dcss\/.*orc/);
+  expect(page()!.dataset.selectedIcon).toMatch(/^set:dcss\/.*orc/);
   // The search's own function: a number is that icon only; words match names and search words.
   const list = [
     { id: 'a', n: 1, name: 'Mossy' },
@@ -336,12 +351,13 @@ test.if(hasDom)('a fetchable set: "Get" downloads it in one click and its grid f
   expect(cells()[1]!.getAttribute('aria-label')).toBe('Mote, #002');
   act(() => cells()[1]!.click());
   await settle();
+  await useIt();
   expect(faces.agentFaceOf('ses_a')).toBe('set:blobs/2');
   for (const s of OUTSIDE) expect(drawn(at(host, s))).toBe('/api/inbox/icon-sets/blobs/2 px 16px');
 });
 
 // The owner, 2026-11-12: a click opens the picker; it no longer drops a set icon for Transparent.
-test.if(hasDom)('a click on a mark showing a set icon opens the picker and keeps the set icon; the picker\'s Sets shows it and opens the dialog with it marked', async () => {
+test.if(hasDom)('a click on a mark showing a set icon opens the picker and keeps the set icon; the picker\'s Sets shows it and opens on its page, the grid behind it with it marked', async () => {
   inbox();
   const host = mount(<Surfaces />);
   act(() => faces.keepAgentFace('ses_a', 'set:dcss/orc'));
@@ -357,8 +373,61 @@ test.if(hasDom)('a click on a mark showing a set icon opens the picker and keeps
   act(() => place.click());
   await settle();
   const dialog = document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
+  // The page of the icon in use: nothing to use, "Animate it" under "Optional".
+  expect(page()!.dataset.selectedIcon).toBe('set:dcss/orc');
+  expect(page()!.hasAttribute('data-previewing')).toBe(false);
+  expect(dialog.querySelector('[data-use-icon]')).toBeNull();
+  expect(dialog.querySelector('.ib-agi-sel-opt')!.textContent).toBe('Optional');
+  act(() => dialog.querySelector<HTMLButtonElement>('.ib-agi-back')!.click());
+  await settle();
   expect([...dialog.querySelectorAll('.am-sets-i[aria-checked="true"]')].map((cell) => cell.getAttribute('data-set-icon'))).toEqual(['orc']);
   expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
+});
+
+test.if(hasDom)('a previewed icon: the back control and Close keep the icon the agent had; "Use this icon" keeps the pick', async () => {
+  inbox();
+  const host = mount(<Surfaces />);
+  act(() => faces.keepAgentFace('ses_a', 'set:dcss/orc'));
+  await settle();
+  const sent = events.length;
+  let dialog = await openSets(host);
+  act(() => dialog.querySelector<HTMLButtonElement>('.ib-agi-back')!.click());
+  await settle();
+  act(() => tab('noto-3d').click());
+  await settle();
+  act(() => cells()[0]!.click());
+  await settle();
+  const picked = page()!.dataset.selectedIcon!;
+  expect(picked).toMatch(/^set:noto-3d\//);
+  // Its page shows the pick large and at the window's sizes; the head still shows the icon in use.
+  expect(page()!.querySelector('.ib-agi-sel-big .ib-set img')!.getAttribute('src')).toBe(`/api/inbox/icon-sets/${picked.slice(4)}`);
+  expect(dialog.querySelector('.ib-agi-mark .ib-set img')!.getAttribute('src')).toBe('/api/inbox/icon-sets/dcss/orc');
+  expect(dialog.querySelector('[data-use-icon]')!.textContent).toBe('Use this icon');
+  expect(dialog.querySelector('.ib-agi-sel-opt')!.textContent).toBe('Optional');
+  // Back: the grid again, nothing kept.
+  act(() => dialog.querySelector<HTMLButtonElement>('.ib-agi-back')!.click());
+  await settle();
+  expect(page()).toBeNull();
+  expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
+  // Close from a preview: nothing kept.
+  act(() => cells()[0]!.click());
+  await settle();
+  act(() => dialog.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click());
+  await settle();
+  expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
+  expect(events.length).toBe(sent);
+  // "Use this icon": kept, closed.
+  dialog = await openSets(host);
+  act(() => dialog.querySelector<HTMLButtonElement>('.ib-agi-back')!.click());
+  await settle();
+  act(() => tab('noto-3d').click());
+  await settle();
+  act(() => cells()[0]!.click());
+  await settle();
+  await useIt();
+  expect(faces.agentFaceOf('ses_a')).toBe(picked);
+  expect(document.querySelector('dialog[data-dialog="agent-icon"][open]')).toBeNull();
+  for (const s of OUTSIDE) expect(drawn(at(host, s))).toContain(picked.slice(4));
 });
 
 test.if(hasDom)('the dialog: a modal naming the agent with its icon now; Escape and a click outside close it; focus goes back to the face', async () => {
