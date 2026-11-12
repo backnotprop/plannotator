@@ -213,11 +213,13 @@ function Switch({ on, labelledBy, disabled, onClick, label }: { on: boolean; lab
 function OverYourTailnet({
   state,
   via,
+  guest,
   busy,
   onToggle,
 }: {
   state: TailscaleSettings;
   via: 'local' | 'tailnet';
+  guest: boolean;
   busy: boolean;
   onToggle: (next: boolean, replaceExposed?: boolean) => void;
 }) {
@@ -267,7 +269,7 @@ function OverYourTailnet({
             </span>
           </span>
           <span className="ib-ctl">
-            <Switch on={state.on} labelledBy="ib-ts-label" disabled={busy || locked || (remote && !state.on)} onClick={() => onToggle(!state.on)} />
+            <Switch on={state.on} labelledBy="ib-ts-label" disabled={busy || locked || (guest && !state.on)} onClick={() => onToggle(!state.on)} />
           </span>
         </div>
         {exposed && (
@@ -276,7 +278,7 @@ function OverYourTailnet({
             <span>
               A tailscale serve mapping{exposedPorts.length ? ` on port ${exposedPorts.join(', ')}` : ''} points at the Inbox&apos;s own port. It exposes the whole
               Inbox, agent tools included, to everyone on your tailnet, so the Inbox refuses every request that comes through it.{' '}
-              {!remote && !locked && (
+              {!guest && !locked && (
                 <button type="button" className="ib-lnk" data-tailscale-replace="" disabled={busy} onClick={() => onToggle(true, true)}>
                   Replace it with the owner-only address
                 </button>
@@ -295,7 +297,7 @@ function OverYourTailnet({
         <Icon name="info" />
         {locked ? (
           `PLANNOTATOR_INBOX_TAILSCALE is set in this Inbox's environment, so it stays ${state.env ? 'on' : 'off'}.`
-        ) : remote ? (
+        ) : remote && (guest || state.source !== 'flag') ? (
           'You opened this page over your tailnet. Turning this off ends that connection; turn it on again from this computer.'
         ) : state.source === 'flag' ? (
           <span>
@@ -373,6 +375,8 @@ export interface DevicesSectionProps {
   phones: PhonesState | null;
   tailscale: TailscaleSettings | undefined;
   via: 'local' | 'tailnet';
+  /** A tailnet login other than the owner's (`tailnetGuest`): it pairs nothing and turns no way on. */
+  guest: boolean;
   tailscaleBusy: boolean;
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   /** `#settings/devices/pair`: Pair a phone is open. */
@@ -386,8 +390,9 @@ export interface DevicesSectionProps {
  * Over your tailnet for browsers on other devices, the difference written
  * out (owner, decision 2).
  */
-export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggleTailscale, pairing, onPairing }: DevicesSectionProps) {
-  const remote = via === 'tailnet';
+export function DevicesSection({ phones, tailscale, via, guest, tailscaleBusy, onToggleTailscale, pairing, onPairing }: DevicesSectionProps) {
+  // The owner pairs and switches from this computer or any of their own devices over the tailnet (owner ruling 2026-11-11).
+  const remote = guest;
   const pairButton = useRef<HTMLButtonElement>(null);
   const [justPaired, setJustPaired] = useState(false);
   const wasPairing = useRef(pairing);
@@ -407,10 +412,7 @@ export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggle
             {remote && (
               <div className="ib-callout" data-pair-remote="">
                 <Icon name="lock" />
-                <span>
-                  You opened this page over your tailnet. Pair a phone and its switches work only from this computer&apos;s own screen, so a code is never shown to
-                  another device.
-                </span>
+                <span>Pair a phone and its switches are for this computer&apos;s owner.</span>
               </div>
             )}
             {pairing && !remote ? (
@@ -495,7 +497,7 @@ export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggle
           )}
         </>
       )}
-      {tailscale && <OverYourTailnet state={tailscale} via={via} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
+      {tailscale && <OverYourTailnet state={tailscale} via={via} guest={guest} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
     </>
   );
 }

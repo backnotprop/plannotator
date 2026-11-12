@@ -508,6 +508,7 @@ async function runPlannotator(
       stdin: options.stdin ? "pipe" : "ignore",
       stdout: "pipe",
       stderr: "pipe",
+      windowsHide: true,
     });
   } catch (error) {
     return {
@@ -952,6 +953,7 @@ function detectPlannotatorVersion(command: string[]): string | null {
   try {
     const result = Bun.spawnSync([...command, "--version"], {
       env: { ...process.env },
+      windowsHide: true,
       stdout: "pipe",
       stderr: "pipe",
     });
