@@ -846,8 +846,8 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness, Cline, OpenClaw and Hermes Agent send every tool&apos;s definition with each request, so they start
-          off.
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness and Cline send every tool&apos;s definition with each request, so they start off. OpenClaw and
+          Hermes Agent start off too, until you turn them on here or <code>plannotator inbox</code> does.
         </p>
         {env !== null && (
           <div className="ib-callout" data-tool-locked="">
