@@ -1,10 +1,3 @@
-/**
- * "Over your tailnet" publishes again by itself once Tailscale is back
- * (`INBOX_TAILSCALE_REPUBLISH`, packages/server/inbox-tailscale.ts): the
- * module alone, with a scripted `tailscale` and a hand-driven clock. No Inbox
- * server starts; the only listener is the module's own tailnet-only one on
- * loopback. Temp PLANNOTATOR_DATA_DIR only; the real `tailscale` never runs.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +30,6 @@ function setEnv(name: string, value: string | undefined): void {
   });
 }
 
-/** A temp data dir that loadConfig() reads, with the switch on. */
 function world(config: Record<string, unknown> = { inboxTailscale: true }): string {
   const dataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-ts-republish-")));
   roots.push(dataDir);
@@ -47,7 +39,6 @@ function world(config: Record<string, unknown> = { inboxTailscale: true }): stri
   return dataDir;
 }
 
-/** A clock the test drives: what is waiting, for how long, and firing it. */
 function fakeClock() {
   const pending = new Map<number, { fn: () => void; ms: number }>();
   let next = 1;
@@ -62,7 +53,6 @@ function fakeClock() {
   return {
     timers,
     waits: () => [...pending.values()].map((t) => t.ms),
-    /** Fire every waiting timer, then let the retry's promise chain settle. */
     fire: async () => {
       const due = [...pending.entries()];
       for (const [id] of due) pending.delete(id);
@@ -74,7 +64,6 @@ function fakeClock() {
 
 type Backend = "Running" | "Stopped" | "NeedsLogin" | "Starting";
 
-/** Tailscale as a scripted CLI: its backend state, its serve config, and every call made. */
 function fakeTailscale() {
   const serve = new Map<number, string>();
   const tailscale = { backend: "Stopped" as Backend, missing: false, daemonDown: false };
@@ -95,7 +84,6 @@ function fakeTailscale() {
       );
     }
     if (args[1] === "status") {
-      // Not running: serve has nothing to say.
       if (!running || serve.size === 0) return ok("{}");
       const TCP = Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }]));
       const Web = Object.fromEntries([...serve].map(([p, proxy]) => [`${MAGIC}:${p}`, { Handlers: { "/": { Proxy: proxy } } }]));
@@ -154,14 +142,12 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
     expect(failed.error).not.toBeNull();
     expect(clock.waits()).toEqual([WAIT[0]!]);
 
-    // Still stopped: each look reads `status --json` and nothing else, and waits longer, up to the last wait.
     const before = ts.calls.length;
     for (let i = 1; i < WAIT.length + 2; i++) {
       await clock.fire();
       expect(clock.waits()).toEqual([WAIT[Math.min(i, WAIT.length - 1)]!]);
     }
     expect(ts.calls.slice(before).every((args) => args.join(" ") === "status --json")).toBe(true);
-    // Quiet: the reason the window shows is the start's, word for word.
     expect(module.state().error).toBe(failed.error);
     expect(republished).toHaveLength(0);
 
@@ -228,7 +214,6 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
     const dataDir = world();
     const ts = fakeTailscale();
     ts.tailscale.backend = "Running";
-    // Someone else's mapping (or one an earlier run left and forgot) on the Inbox's port.
     ts.serve.set(PORT, "http://127.0.0.1:40001");
     const clock = fakeClock();
     const { module, republished } = create(dataDir, ts.run, clock);
@@ -239,14 +224,12 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
 
     await clock.fire();
     await clock.fire();
-    // Two more tries, half an hour apart: reads only, the mapping never touched, the same words.
     expect(ts.serveCalls()).toEqual([]);
     expect(ts.serve.get(PORT)).toBe("http://127.0.0.1:40001");
     expect(module.state().error).toBe(words);
     expect(clock.waits()).toEqual([INBOX_TAILSCALE_REPUBLISH.stuckMs]);
     expect(republished).toHaveLength(0);
 
-    // The person removes it: the next try publishes.
     ts.serve.delete(PORT);
     await clock.fire();
     expect(module.state().url).toBe(`https://${MAGIC}:${PORT}/`);
@@ -257,7 +240,6 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
   test("restarted while Tailscale's daemon was down: the last run's mapping is taken down once it is back, then published", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
-    // The last run's clean stop could not reach Tailscale: its record and its mapping are both still there.
     ts.serve.set(PORT, "http://127.0.0.1:40001");
     ts.tailscale.daemonDown = true;
     const clock = fakeClock();
@@ -276,7 +258,6 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
   test("restarted while Tailscale was stopped (daemon up): serve said nothing, the record went, so the mapping it left blocks the publish; the slow retry waits for the person", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
-    // Stopped: `serve status` answers empty, so the take-down finds nothing and forgets the record.
     ts.serve.set(PORT, "http://127.0.0.1:40001");
     const clock = fakeClock();
     const { module, republished } = create(dataDir, ts.run, clock, { url: null, error: null, https_port: PORT, proxy_port: 40001 });

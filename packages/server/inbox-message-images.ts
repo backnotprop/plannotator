@@ -1,24 +1,3 @@
-/**
- * Plannotator Inbox: `GET /api/inbox/messages/<id>/image?path=<src>`, the
- * images a message shows (#1813). Mounted in the Inbox server's
- * route table (packages/server/inbox.ts), behind its Host allowlist; it sets
- * no CORS headers.
- *
- * Every decision is in packages/shared/inbox/message-images.ts: the path
- * must be an image the message's own body references; for an agent's message
- * anywhere the person's user can read, for a person's own message inside its
- * project or the folder it was sent from; never, outside those, a hidden
- * folder of the home folder or of `/` (`~/.ssh`), nor a dotenv file anywhere
- * (judged as named and by realpath); an image by extension and by its magic bytes, at
- * most 10 MB and 50 megapixels. This file adds the
- * transport: a cross-site request is refused before anything is read, and
- * every answer carries nosniff, a sandbox CSP and a same-origin CORP, so
- * another site can neither embed nor read an image, and an SVG opened
- * directly never runs. A 200 carries an ETag (the SHA-256 of the bytes
- * served) and `Cache-Control: private, no-cache`; If-None-Match with that tag
- * answers 304 with the same headers. The phone door forwards here as is.
- */
-
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
@@ -43,13 +22,10 @@ function refuse(status: number, code: string, error: string): Response {
   });
 }
 
-/** Answers the image route, or null when the path is not it. */
 export async function inboxMessageImageRoute(req: Request, url: URL, store: InboxStore): Promise<Response | null> {
   const match = INBOX_MESSAGE_IMAGE_ROUTE.exec(url.pathname);
   if (!match) return null;
   if (req.method !== "GET" && req.method !== "HEAD") return refuse(405, "method_not_allowed", "Use GET.");
-  // The window's own <img> is same-origin; a typed URL is "none". A page on
-  // another site (or another localhost port) never gets an answer.
   const site = req.headers.get("sec-fetch-site");
   if (site === "cross-site" || site === "same-site") return refuse(403, "cross_origin", "Cross-origin requests are not accepted.");
   const id = match[1]!;
@@ -63,38 +39,26 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
     root: project.root,
     base: message.base_path ?? null,
     path: url.searchParams.get("path"),
-    // An agent's images come from anywhere; a person's own message (a phone, the relay, a tailnet login) from its project.
     anywhere: message.author.kind === "agent",
   });
   return inboxImageResponse(req, result, inboxImageWidth(url));
 }
 
-/** `filename` (an ASCII fallback) and `filename*` (the real name, percent-encoded) for Content-Disposition. */
 export function contentDisposition(type: "inline" | "attachment", name: string): string {
   const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
   const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
-/**
- * Safe image bytes and cache validators shared by message bodies and Markdown attachments. `to`: the width the
- * window draws it at (`?w=`), served as a smaller copy when the picture is wider (inbox-image-scale.ts).
- */
 export async function inboxImageResponse(req: Request, result: InboxMessageImageResult, to: number | null = null): Promise<Response> {
   if (!result.ok) return refuse(result.status, result.code, result.error);
-  // The validator is the SHA-256 of the bytes served (read once, at most the
-  // cap), so it changes whenever the file does. `no-cache`: the file lives on
-  // disk and can change, so a client (the window, a phone caching by message
-  // id + path) revalidates with If-None-Match and gets a 304 when unchanged.
   const etag = `"${createHash("sha256").update(result.bytes).digest("hex")}"`;
   const headers: Record<string, string> = {
     ...GUARD_HEADERS,
     "Content-Type": result.contentType,
     "Cache-Control": "private, no-cache",
-    // Shown in place, under the name the body gave it: a browser's Save Image As saves "empty-cart.png", not "image.png".
     "Content-Disposition": contentDisposition("inline", basename(result.named)),
     ETag: etag,
-    // As code review's image route: the header's size, when it parses.
     ...(result.width !== undefined && result.height !== undefined
       ? { "X-Image-Width": String(result.width), "X-Image-Height": String(result.height) }
       : {}),
@@ -115,54 +79,25 @@ export async function inboxImageResponse(req: Request, result: InboxMessageImage
   });
 }
 
-/** RFC 9110 If-None-Match: `*`, or any listed tag equal to `etag` by weak comparison. */
 function ifNoneMatchHits(header: string | null, etag: string): boolean {
   if (!header) return false;
   const strip = (tag: string) => tag.trim().replace(/^W\//, "");
   return header.split(",").some((tag) => tag.trim() === "*" || strip(tag) === etag);
 }
 
-
-/** How many bytes one background pass reads before it pauses (and lets everything else run). */
 export const INBOX_IMAGE_CAPTURE_PASS_BYTES = 32 * 1024 * 1024;
-/** The pause between passes. */
 export const INBOX_IMAGE_CAPTURE_PAUSE_MS = 25;
-/** A source a read could not capture is tried again after this long (a transient `image_changed`, a file written later). */
 export const INBOX_IMAGE_CAPTURE_RETRY_MS = 60_000;
-/** The most sources one message's background capture takes per pass. */
 const MESSAGE_BATCH = 64;
-/** Messages the retry table remembers (least recently tried dropped first). */
 const ATTEMPTS_MAX_MESSAGES = 10_000;
-/** Refusals that cost a read of the file (or will fail the same way at once): not tried again until the retry window passes. */
 const COSTLY_REFUSALS = new Set(["not_an_image", "image_changed", "image_too_large", "write_failed", "image_unreadable", "image_read_failed"]);
 
 export interface InboxImageCapture {
-  /** Capture the thread's uncaptured images in the background (a read never waits for it). */
   schedule: (threadId: string) => void;
-  /** Resolves once nothing is queued or running (tests). */
   idle: () => Promise<void>;
-  /** The server stopped: nothing more is read or written; a capture in flight discards its copies. */
   stop: () => void;
 }
 
-/**
- * The images a thread's messages show that have no captured record yet
- * (approval "inbox-image-viewer"; `store.imageCaptureGaps`): copied after a
- * read of the thread asked for them, off the request path. The read answers
- * at once; each message's new records arrive as one more line for it (the
- * event stream carries it, and the window reads the thread again). One thread
- * at a time, every read and write asynchronous (inline-images.ts), a yield
- * between images and messages, and a pause after each
- * INBOX_IMAGE_CAPTURE_PASS_BYTES read, so health, streams, the bridge and the
- * MCP keep answering. The copies are staged as temp files and moved into
- * `blobs/` only right after the records that use them are written, so a
- * deletion's blob sweep (which keeps only blobs a record names) can never
- * remove a copy no record names yet. A source refused after a read (not an
- * image, changed while read, too many pixels) is tried again only after
- * INBOX_IMAGE_CAPTURE_RETRY_MS; one refused before any read (not on disk yet)
- * on the next read. Records are marked `captured: "on_open"`. After `stop`,
- * nothing is written.
- */
 export function createInboxImageCapture(
   store: InboxStore,
   options: { passBytes?: number; pauseMs?: number; retryMs?: number } = {},
@@ -171,12 +106,7 @@ export function createInboxImageCapture(
   const pauseMs = options.pauseMs ?? INBOX_IMAGE_CAPTURE_PAUSE_MS;
   const retryMs = options.retryMs ?? INBOX_IMAGE_CAPTURE_RETRY_MS;
   const queue = new Set<string>();
-  /**
-   * Threads whose messages had nothing left to capture, at the thread's version then (`store.threadVersion`): a
-   * read of one that has not changed since starts no pass (its gaps are still none).
-   */
   const settled = new Map<string, string>();
-  /** Per message (least recently tried first), when each costly refusal was last tried. */
   const attempts = new Map<string, Map<string, number>>();
   let running: Promise<void> | null = null;
   let stopped = false;
@@ -221,11 +151,7 @@ export function createInboxImageCapture(
           max: MESSAGE_BATCH,
           stage: true,
         });
-        // A refusal decided before any read (missing, hidden, too large by its size) is tried again on
-        // the next read; one that cost a read (not an image, changed while read) waits INBOX_IMAGE_CAPTURE_RETRY_MS.
         for (const failure of captured.failures) if (COSTLY_REFUSALS.has(failure.code)) tried(message.id, failure.ref);
-        // Still there (a deletion may have run meanwhile) and the server still running: the records go on
-        // it, in text order, and only then do the copies move into blobs/ (no await in between).
         if (stopped || !store.message(message.id)) {
           await captured.discard();
           continue;
@@ -238,7 +164,6 @@ export function createInboxImageCapture(
           await new Promise((resolve) => setTimeout(resolve, pauseMs));
         }
       } catch {
-        // Left for a later read.
       }
     }
   };

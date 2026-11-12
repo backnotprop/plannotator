@@ -1,12 +1,3 @@
-/**
- * Host-only session control on the real Bun servers (`/api/host/status`,
- * `/api/host/close`; packages/shared/host-control.ts).
- *
- * What regresses if this fails: an agent closing a review deletes the
- * reviewer's unsent comments, delivers a decision it should not, reaches a
- * server without its launch token or from a browser page, or closes a plan
- * review; or the tab never learns the review was closed.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,13 +40,11 @@ const saveDraft = (url: string, draft: Record<string, unknown>) =>
   fetch(`${url}/api/draft`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) });
 const loadDraft = (url: string) => fetch(`${url}/api/draft`);
 
-/** Read SSE `data:` events from the external-annotation stream until `want` matches one. */
 async function waitForEvent(url: string, want: (event: Record<string, unknown>) => boolean, act: () => Promise<void>) {
   const response = await fetch(`${url}/api/external-annotations/stream`);
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  // The first event (snapshot) proves the stream is subscribed before we act.
   let acted = false;
   const deadline = Date.now() + 3000;
   try {
@@ -97,7 +86,6 @@ describe("host control: annotate", () => {
     try {
       const answer = await close(off.url);
       expect(answer.status).toBe(404);
-      // Coded, so the mod does not mistake it for an older CLI and TERM it.
       expect((await answer.json()).code).toBe("host_control_disabled");
     } finally {
       off.stop();
@@ -133,11 +121,9 @@ describe("host control: annotate", () => {
 
       const decision = await server.waitForDecision();
       expect(decision).toMatchObject({ exit: true, closedBy: "agent", unsentAnnotations: 2 });
-      // The reviewer's comments survive the close.
       const draft = await (await loadDraft(server.url)).json();
       expect(draft.annotations).toHaveLength(2);
 
-      // A second close (or a late reviewer decision) loses.
       expect((await close(server.url)).status).toBe(409);
       expect((await status(server.url).then((r) => r.json())).decided).toBe(true);
       expect((await fetch(`${server.url}/api/exit`, { method: "POST" })).status).toBe(409);
@@ -158,8 +144,6 @@ describe("host control: annotate", () => {
 });
 
 describe("host control: remote mode", () => {
-  // The failure: a remote session (reachable beyond loopback) answers host
-  // control with the launch token.
   test("remote mode turns the endpoints off even with a token", () => {
     process.env.PLANNOTATOR_REMOTE = "1";
     expect(resolveHostControlToken(TOKEN)).toBeUndefined();
@@ -187,8 +171,6 @@ describe("host control: review", () => {
       expect(draft.codeAnnotations).toHaveLength(1);
       expect((await close(server.url)).status).toBe(409);
 
-      // The tab still open after the close: its late decision is refused
-      // rather than answered ok, and must not delete the kept draft.
       const feedback = await fetch(`${server.url}/api/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

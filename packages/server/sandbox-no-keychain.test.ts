@@ -1,11 +1,3 @@
-/**
- * A sandboxed run (scratch HOME, PLANNOTATOR_TEST_SANDBOX) must never reach the
- * macOS Keychain: with a scratch HOME macOS finds no keychain and shows
- * "Keychain Not Found" on the person's screen for each try. Xcode's system
- * gitconfig sets `credential.helper=osxkeychain`, so a git the Inbox starts must
- * skip it, and the gh runners must carry the same env. Outside the sandbox
- * nothing changes.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +19,6 @@ beforeEach(() => {
   for (const key of Object.keys(SANDBOX_NO_KEYCHAIN_ENV)) delete process.env[key];
   dir = mkdtempSync(join(tmpdir(), "sandbox-no-keychain-"));
   mkdirSync(join(dir, "work"));
-  // A system gitconfig like Xcode's: the helper that reaches the Keychain.
   systemConfig = join(dir, "gitconfig");
   writeFileSync(systemConfig, "[credential]\n\thelper = osxkeychain\n");
   process.env.GIT_CONFIG_SYSTEM = systemConfig;
@@ -62,7 +53,6 @@ describe("git the Inbox starts", () => {
   });
 });
 
-// `env` stands in for gh: it prints the environment the runner gave it.
 describe.skipIf(process.platform === "win32")("the gh runners", () => {
   const ENV = "env" as RefCli;
   const runners = {

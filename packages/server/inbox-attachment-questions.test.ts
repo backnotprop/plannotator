@@ -1,15 +1,3 @@
-/**
- * Questions inside an attached Markdown file (issue #2828), end to end on a
- * running Inbox (loopback, a temp data dir): an agent sends a plan.md with
- * two `:::question` blocks over MCP; the window reads them as questions of
- * the message; the person answers one on the file; the agent reads the reply
- * and can tell which file and which question it answers.
- *
- * What regresses if this fails: the file's questions are not recorded at
- * send (the window cannot answer them, nothing waits on the person), they
- * are read from the file as it is now instead of as sent, or the answer
- * reaches the agent without naming its file.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -89,10 +77,8 @@ test("an attached plan's questions wait on the person, are answered on the file,
     ["Which database should invoices live in?", "plan.md"],
     ["Ship the retry behind a flag?", "plan.md"],
   ]);
-  // Asked as sent: a change to the file after the send asks nothing new.
   writeFileSync(join(project, "plan.md"), PLAN.replace("Ship the retry behind a flag?", "Something else entirely?"));
 
-  // The window's read: two questions of the message, each naming its file.
   const read = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${sent.structured.thread_id}`)).json()) as any;
   const questions = read.thread.messages[0].questions as any[];
   expect(questions.map((q) => [q.prompt, q.attachment?.name, q.state])).toEqual([
@@ -102,12 +88,10 @@ test("an attached plan's questions wait on the person, are answered on the file,
   const attachmentId = read.thread.messages[0].attachments[0].id;
   expect(questions.every((q) => q.attachment.id === attachmentId)).toBe(true);
 
-  // The agent's read before the answer: both wait on the person, numbered in the file.
   const before = await call(client, "read_thread", { thread_id: sent.structured.thread_id, agent_session: "ses_a" });
   expect(before.text).toContain("Waiting on the person (2):");
   expect(before.text).toContain(`- ${messageId}/${questions[0].key} (Q1 in your file plan.md) open: Which database should invoices live in?`);
 
-  // The person picks on the file's first card and sends.
   const db = questions[0];
   server.store.savePicks(messageId, [{ key: db.key, revision: db.revision, answer: { v: 1, key: db.key, kind: db.kind, prompt: db.prompt, selected: ["Postgres"] } }]);
   const replied = await fetch(`http://127.0.0.1:${server.port}/api/inbox/messages/${messageId}/reply`, {
@@ -117,7 +101,6 @@ test("an attached plan's questions wait on the person, are answered on the file,
   });
   expect(replied.status).toBe(200);
 
-  // What the agent reads: the file named, its question numbered as the file's card, at its line in the file.
   const full = await call(client, "read_thread", { thread_id: sent.structured.thread_id, agent_session: "ses_a", format: "full" });
   const reply = (full.structured.thread.messages as any[]).find((m) => m.author.kind === "person");
   expect(reply.body).toStartWith("Answered 1 question.");

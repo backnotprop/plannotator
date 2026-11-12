@@ -1,9 +1,3 @@
-/**
- * Bear Integration Tests
- *
- * Run: bun test packages/server/integrations.test.ts
- */
-
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import {

@@ -214,7 +214,6 @@ function terminateTransports(invocations: SshInvocation[]): void {
     try {
       process.kill(invocation.pid, "SIGKILL");
     } catch {
-      // The fixed path exits before cleanup reaches it.
     }
   }
 }
@@ -299,13 +298,6 @@ describe.skipIf(process.platform === "win32")("background remote discovery", () 
     }, 5_000);
 
     test(`${fixture.name} process exit kills a still-hanging Git transport`, async () => {
-      // Failure caught (#1553): the parent-side timeout timer is the ONLY
-      // thing that ever reaps an isolated transport, and it dies with the
-      // parent. A review server stopped while an ls-remote was still waiting
-      // on authentication therefore orphaned the git/ssh pair — on a
-      // smartcard-backed setup, one that keeps the agent busy long after the
-      // review window is gone. The timeout here is far longer than the child's
-      // lifetime, so only the exit hook can account for the kill.
       const { repo, marker, command } = createSshFixture();
       const runtimeUrl = pathToFileURL(fixture.modulePath).href;
       const source = `
@@ -335,8 +327,6 @@ describe.skipIf(process.platform === "win32")("background remote discovery", () 
         timeout: 10_000,
       });
       const invocations = readInvocations(marker);
-      // The group signal and the child's own teardown race by microseconds;
-      // give the kernel a moment before reading process state.
       await Bun.sleep(100);
 
       try {

@@ -1,21 +1,3 @@
-/**
- * All files (`GET /api/repo-files`, `/api/repo-file`, `/api/repo-files/stream`)
- * against real repositories, on BOTH review servers (Bun and the Pi mirror),
- * so the two cannot drift.
- *
- * Regressions guarded:
- *  - the tree listing files the diff's new side does not read (the working
- *    tree for a committed diff, ignored files, files deleted on disk);
- *  - `/api/repo-file` reading a path outside the listing (an ignored `.env`,
- *    `..`), or the working tree when the diff reads a commit;
- *  - a working-tree read skipping the repo-file guard (repo-file.ts): a FIFO
- *    that would block the server, a file over the 5 MB cap read into memory
- *    (links are followed like VS Code, the owner's ruling on #2261);
- *  - the `repoFilesSupported` advert missing, or present on a static patch;
- *  - big listings sent whole instead of one folder at a time;
- *  - files changed on disk after the diff was taken not reported, and the
- *    live stream not telling the page to list again.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -68,10 +50,6 @@ function write(repo: string, path: string, content: string | Uint8Array) {
   writeFileSync(join(repo, path), content);
 }
 
-/**
- * src/app.ts (changed), src/util.ts and README.md (unchanged), docs/old.md
- * (deleted on disk), notes/new.md (untracked), .env and dist/out.js (ignored).
- */
 function buildRepo(): string {
   const repo = makeTempDir("plannotator-repo-files-");
   git(repo, ["init", "-q"]);
@@ -187,7 +165,6 @@ for (const [runtime, startServer] of [
         const binary = await file("assets/logo.bin");
         expect(binary.body).toMatchObject({ content: null, reason: "binary" });
 
-        // Ignored and absent paths are never read.
         for (const path of [".env", "dist/out.js", "docs/old.md", "nope.ts"]) {
           const refused = await file(path);
           expect(refused.status).toBe(404);
@@ -207,18 +184,15 @@ for (const [runtime, startServer] of [
       writeFileSync(join(outside, "secret.txt"), "outside secret\n");
       const { server, files, file } = await start(repo, "uncommitted");
       try {
-        // Untracked, so listed by `ls-files --others`: one link out, one in.
         symlinkSync(join(outside, "secret.txt"), join(repo, "src/leak.txt"));
         symlinkSync(join(repo, "README.md"), join(repo, "src/readme-link.md"));
         write(repo, "big.txt", "x".repeat(MAX_REPO_FILE_BYTES + 1));
         const listed = await files();
         expect(listed.body.paths).toEqual(expect.arrayContaining(["src/leak.txt", "src/readme-link.md", "big.txt", "src/util.ts"]));
-        // A listed file swapped for a FIFO after the listing: reading it must not hang.
         rmSync(join(repo, "src/util.ts"));
         const fifo = spawnSync("mkfifo", [join(repo, "src/util.ts")]);
         expect(fifo.status).toBe(0);
 
-        // Links are followed wherever they point, like VS Code (#2272).
         const followed = await file("src/leak.txt");
         expect(followed.status).toBe(200);
         expect(followed.body.content).toBe("outside secret\n");
@@ -238,7 +212,6 @@ for (const [runtime, startServer] of [
         expect(body.revision?.kind).toBe("commit");
         expect(body.revision?.label).toBe(git(repo, ["rev-parse", "--short", "HEAD"]).trim());
         expect(body.live).toBe(false);
-        // The commit still holds docs/old.md; it never held notes/new.md.
         expect(body.paths).toEqual([".gitignore", "README.md", "docs/old.md", "src/app.ts", "src/util.ts"]);
         expect((await file("src/util.ts")).body.content).toBe("export const util = 'working tree';\n");
         expect((await file("notes/new.md")).status).toBe(404);
@@ -299,7 +272,6 @@ for (const [runtime, startServer] of [
         expect(util.body.total).toBe(6);
         expect(util.body.matches[0]?.path).toBe("src/util.ts");
         expect(util.body.matches[0]?.positions).toEqual([4, 5, 7]);
-        // Ignored (.env, dist/) and deleted (docs/old.md) files are not in the listing, so never found.
         expect((await search("env")).body.matches).toEqual([]);
         expect((await search("out")).body.matches).toEqual([]);
         expect((await search("md")).body.matches.map((m) => m.path).sort()).toEqual(["README.md", "notes/new.md"]);
@@ -359,7 +331,6 @@ for (const [runtime, startServer] of [
         expect((await files()).body.onDisk).toBeUndefined();
         const live = await openStream(server, payload.snapshotId);
         await live.waitFor('"type":"ready"', 5_000);
-        // Let the deferred watcher start before writing.
         await new Promise((resolve) => setTimeout(resolve, 1_200));
         write(repo, "src/app.ts", "export const app = 3;\n");
         write(repo, "src/fresh.ts", "export const fresh = true;\n");
@@ -374,8 +345,6 @@ for (const [runtime, startServer] of [
       }
     }, 40_000);
 
-    // A page's EventSource.close() closes the connection; destroying a node
-    // request does the same (cancelling a fetch body does not, on either server).
     function openPageStream(server: { url: string }, snapshotId: string) {
       return new Promise<() => void>((resolve, reject) => {
         const req = request(`${server.url}/api/repo-files/stream?snapshot=${encodeURIComponent(snapshotId)}`, (res) => {
@@ -394,13 +363,10 @@ for (const [runtime, startServer] of [
       const { server, files, payload } = await start(repo, "uncommitted");
       try {
         expect((await files()).body.paths).not.toContain("later.md");
-        // The tree is shown (a stream opens), then hidden (it closes).
         const close = await openPageStream(server, payload.snapshotId);
         close();
-        // Let the server see the page go before anything changes.
         await new Promise((resolve) => setTimeout(resolve, 1_000));
         write(repo, "later.md", "# later\n");
-        // Shown again: nothing watched the disk meanwhile, yet the list is current.
         expect((await files()).body.paths).toContain("later.md");
       } finally {
         server.stop();
@@ -409,8 +375,6 @@ for (const [runtime, startServer] of [
 
     test("a build writing gitignored output never tells the page to list again", async () => {
       const repo = buildRepo();
-      // target/ is ignored but does not exist yet when watching begins: the
-      // watcher sees it, the change gate does not count it.
       write(repo, ".git/info/exclude", "target/\n");
       const { server, payload } = await start(repo, "uncommitted");
       try {
@@ -422,7 +386,6 @@ for (const [runtime, startServer] of [
         write(repo, ".env", "SECRET=2\n");
         await new Promise((resolve) => setTimeout(resolve, 2_500));
         expect(live.count('"type":"changed"')).toBe(0);
-        // A real change still arrives.
         write(repo, "src/real.ts", "export const real = 1;\n");
         await live.waitFor('"type":"changed"', 15_000);
         await live.close();
@@ -453,9 +416,6 @@ for (const [runtime, startServer] of [
       const { server, files, payload } = await start(repo, "uncommitted", { repoFilesLazyThreshold: 3 });
       try {
         write(repo, "src/app.ts", "export const app = 9;\n");
-        // The listing (and so the on-disk marks) is per snapshot generation:
-        // force a new one through the stream's change path is not needed here,
-        // the first listing already sees the edit after the snapshot.
         const root = await files();
         expect(root.body.onDisk).toEqual({ "src/app.ts": "M" });
         const folder = await files("&dir=src");
@@ -507,8 +467,6 @@ for (const [runtime, startServer] of [
   });
 }
 
-// jj lists the new side's revision through `jj file list` (the same shared
-// provider code both runtimes vendor), so one runtime is enough here.
 describe("All files in a jj workspace", () => {
   const hasJj = Bun.which("jj") !== null;
   const jjConfig = useScratchJjConfig();

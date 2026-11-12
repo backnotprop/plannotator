@@ -1,20 +1,3 @@
-/**
- * `GET /api/inbox/search` and `POST /api/inbox/search/recent` on a running
- * Inbox (temp data dir, loopback), the agent side over the official MCP
- * client:
- *
- * - the first search builds the index; a build still running answers
- *   `indexing: true` with the thread count and no groups, and every other
- *   route keeps answering meanwhile;
- * - the answer's shape (groups, totals, terms, marks), its validation (bad
- *   status, unknown project, limit out of range) and the empty query's
- *   `recent` and `recent_searches`;
- * - a message an agent sends after the build is found by the next search;
- * - many searches at once agree;
- * - recent searches: written only by the POST, the last 6, newest first,
- *   case-insensitive duplicates once, Clear; the same-origin and
- *   serverSession guards; nothing written by a GET.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +42,6 @@ async function setup(extra: Parameters<typeof startInboxServer>[0] = {}) {
     const response = await fetch(`${base}/api/inbox/search?${query}`);
     return { status: response.status, body: (await response.json()) as Json };
   };
-  /** A search, asked again while the index reports it is still building. */
   const searchSettled = async (query: string) => {
     for (let i = 0; i < 200; i++) {
       const answer = await get(query);
@@ -92,7 +74,6 @@ describe("GET /api/inbox/search", () => {
     expect((await w.get("q=x&project=bogus")).status).toBe(422);
     expect((await w.get("q=x&project=prj_01M4V7JERHR0Y3XQERK1MR604E")).status).toBe(404);
     expect((await fetch(`${w.base}/api/inbox/search`, { method: "POST" })).status).toBe(405);
-    // Filters: the project, and Status.
     const scoped = await w.get(`q=rate&project=${w.project()}&status=new`);
     expect(scoped.body.totals.threads).toBe(1);
   });
@@ -123,21 +104,18 @@ describe("GET /api/inbox/search", () => {
     expect(Object.keys(body.groups).sort()).toEqual(["files", "messages", "projects", "threads"]);
     expect(Object.keys(body.totals).sort()).toEqual(["files", "messages", "projects", "threads"]);
 
-    // The thread deleted: nothing of it is found.
     expect((await windowPost(`/api/inbox/threads/${threadId}/delete`, {})).status).toBe(200);
     const after = await w.searchSettled("q=cdn%20cache%20key");
     expect(after.body.groups.messages).toEqual([]);
   });
 
   test("the first search builds in slices: indexing answers carry the thread count, other routes keep answering, and a later search finds a message sent after the build", async () => {
-    // Slow slices: every thread is a slice and each yield waits 30 ms, so the build of 60 threads outlasts the route's wait.
     let clock = 0;
     const w = await setup({ searchIndex: { sliceMs: 1, now: () => (clock += 1), yieldNow: () => new Promise((r) => setTimeout(r, 30)) } });
     for (let i = 0; i < 60; i++) await w.send(`Thread ${i}`, `Notes number ${i} about the relay.`);
     const first = await w.get("q=relay");
     expect(first.status).toBe(200);
     expect(first.body).toMatchObject({ indexing: true, threads: 60, groups: null, totals: null });
-    // Health, the list and a thread answer while the index builds.
     const started = performance.now();
     expect((await fetch(`${w.base}/api/inbox/health`)).status).toBe(200);
     expect((await fetch(`${w.base}/api/inbox/threads`)).status).toBe(200);
@@ -161,18 +139,14 @@ describe("GET /api/inbox/search", () => {
     for (const headers of [
       { "Sec-Fetch-Site": "cross-site", Origin: "https://evil.example" },
       { "Sec-Fetch-Site": "cross-site" },
-      // Another localhost port is the same site: a page there must not time our searches either.
       { "Sec-Fetch-Site": "same-site", Origin: "http://localhost:5173" },
-      // A browser without Fetch Metadata: the Origin alone decides.
       { Origin: "https://evil.example" },
       { Origin: "null" },
     ] as Record<string, string>[]) {
       const response = await fetch(path, { headers });
       expect([JSON.stringify(headers), response.status, ((await response.json()) as Json).code]).toEqual([JSON.stringify(headers), 403, "cross_origin"]);
     }
-    // Recent searches are refused the same way.
     expect((await fetch(`${w.base}/api/inbox/search/recent`, { method: "POST", headers: { "Sec-Fetch-Site": "same-site", "Content-Type": "application/json" }, body: JSON.stringify({ q: "x" }) })).status).toBe(403);
-    // The window's own page (same origin) and a client without browser headers are answered.
     const own = await fetch(path, { headers: { "Sec-Fetch-Site": "same-origin", Origin: w.base } });
     expect(own.status).toBe(200);
     expect(((await own.json()) as Json).totals.threads).toBe(1);

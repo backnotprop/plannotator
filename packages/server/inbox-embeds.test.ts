@@ -1,16 +1,3 @@
-/**
- * The documents behind live HTML embeds (approval "inbox-inline-html";
- * inbox-embeds.ts) through a running Inbox (temp data dir, loopback). What
- * regresses if these fail:
- * - the page is served without its own sandboxing policy (it would run on
- *   the Inbox's origin when its URL is opened), or as something other than
- *   the built document (no bootstrap: no theme, no height);
- * - another site, or the sandboxed page itself (`Origin: null`), can store a
- *   page on the Inbox;
- * - over the tailnet, a page's own request (cross-site, carrying the owner's
- *   tailnet identity) reaches an embed or any other route;
- * - the store grows without bound.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -130,7 +117,6 @@ describe("the Inbox's embed documents", () => {
     const through = (path: string, init: RequestInit & { headers: Record<string, string> }) =>
       fetch(`http://127.0.0.1:${listener}${path}`, { ...init, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, ...init.headers } });
 
-    // The owner's window stores the page (a same-origin write) and frames it (a same-origin navigation).
     const kept = await through("/api/inbox/embeds", {
       method: "POST",
       headers: { Origin: origin, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json" },
@@ -142,7 +128,6 @@ describe("the Inbox's embed documents", () => {
     expect(framed.status).toBe(200);
     expect(framed.headers.get("content-security-policy")).toBe(EMBED_RESPONSE_CSP);
 
-    // The page's own requests come from an opaque origin: the browser marks them cross-site.
     for (const path of [url, "/api/inbox/threads", "/api/inbox/health"]) {
       const answer = await through(path, { headers: { Origin: "null", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors" } });
       expect(answer.status).toBe(403);
@@ -164,7 +149,6 @@ describe("the embed store", () => {
     await route(store, post("<p>one</p>"));
     expect(store.size()).toBe(1);
     await route(store, post("<p>two</p>"));
-    // Asking for "one" again makes it the newest, so "two" is the oldest when "three" arrives.
     await route(store, post("<p>one</p>"));
     await route(store, post("<p>three</p>"));
     expect(store.size()).toBe(2);

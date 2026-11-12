@@ -1,12 +1,3 @@
-/**
- * "Open Plannotator at plannotator.localhost" (#2184) through the Bun servers:
- * POST /api/config `{ cookieHost }` writes or removes `urlHost:
- * "plannotator.localhost"`, never replaces another `urlHost` (a tailnet name,
- * `auto`, an IP), is locked while PLANNOTATOR_URL_HOST is set, and is refused
- * (and not advertised) in remote mode and `--tailscale` sessions. Also: a live
- * app session stays on localhost, and /api/update's Host check accepts the
- * configured name and no other subdomain.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,7 +34,6 @@ afterEach(() => {
 
 const configFile = () => join(dataDir, "config.json");
 const writeConfig = (value: Record<string, unknown>) => writeFileSync(configFile(), JSON.stringify(value, null, 2) + "\n");
-/** Requests go to 127.0.0.1: a session started after the switch is advertised at plannotator.localhost. */
 const base = (server: { port: number }) => `http://127.0.0.1:${server.port}`;
 const post = (server: { port: number }, body: unknown) =>
   fetch(`${base(server)}/api/config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -83,7 +73,6 @@ describe("cookieHost through POST /api/config", () => {
     test(`never replaces or removes another urlHost (${other}): the switch is locked`, async () => {
       writeConfig({ urlHost: other });
       const before = readFileSync(configFile(), "utf8");
-      // Remote mode would advertise the tailnet name; this session is local, so it still answers on loopback.
       const server = await servers.plan();
       try {
         const config = ((await (await fetch(`${base(server)}/api/plan`)).json()) as { serverConfig: Record<string, unknown> }).serverConfig;

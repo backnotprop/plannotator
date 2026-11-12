@@ -1,10 +1,3 @@
-/**
- * get_guide_brief carries the person's Guided Review standing instructions
- * (`${dataDir}/guide-instructions.md`, the same file the review UI's guide
- * launches apply) so a guide an agent writes for the Inbox follows them too.
- * Without the file the brief's methodology is GUIDE_REVIEW_PROMPT byte for
- * byte. No Inbox is started: the MCP server is built, never served.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

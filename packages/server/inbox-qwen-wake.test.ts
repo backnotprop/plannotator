@@ -1,12 +1,3 @@
-/**
- * The Qwen Code wake (inbox-qwen-wake.ts), through the Inbox's real doors: a
- * Qwen session's send_message over MCP, the person's reply route, and a fake
- * Qwen session made of a socket this test owns and a registry record in a
- * scratch Qwen home, speaking Qwen's cross-session protocol (auth line, user
- * frame, delivery receipts). The trusted-sender token comes from a fake
- * `qwen` (tests/helpers/fake-agents.ts). The real qwen is never run, and the
- * real ~/.qwen never read.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Server } from "node:net";
@@ -37,12 +28,6 @@ afterEach(async () => {
   for (const fake of fakes.splice(0)) fake.remove();
 });
 
-/**
- * Linux's record guards for this process, as Qwen writes them; null elsewhere.
- * The pid namespace is read in another process (`readlink` names it
- * `pid:[<inode>]`, the namespace's own inode, which Qwen records), so a value
- * that differs per process could never match.
- */
 function identity(pid: number): { procStart: string | null; pidNs: number | null } {
   if (process.platform !== "linux") return { procStart: null, pidNs: null };
   const boot = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
@@ -57,15 +42,11 @@ function identity(pid: number): { procStart: string | null; pidNs: number | null
 type Receipt = "delivered" | "held" | "refused" | "denied" | "misaddressed" | "dropped" | "expired" | null;
 
 interface FakeSession {
-  /** What came in on each connection: its lines, parsed. */
   received: { auth: Record<string, unknown>; frame: Record<string, unknown> }[];
-  /** The receipt the next frames get (null: none). */
   answer: Receipt;
   ipcPath: string;
   ipcToken: string;
-  /** Send a receipt for a frame now (as Qwen does when a held message is decided, or expires). */
   receipt(frame: Record<string, unknown>, status: Exclude<Receipt, null>): Promise<void>;
-  /** (Re)write the record: this session, at this pid, of this kind. */
   register(record?: Partial<{ sessionId: string; pid: number; kind: string; ipcPath: string | null; file: string }>): void;
   unregister(): void;
 }
@@ -81,7 +62,6 @@ interface World {
   start: (knobs?: Record<string, unknown>) => Promise<InboxServer>;
 }
 
-/** Send one receipt to the sender's socket, authenticated with the token its frame carried (Qwen's protocol §5). */
 function sendReceipt(frame: Record<string, unknown>, status: string, extra: Record<string, unknown> = {}): Promise<void> {
   return new Promise((done) => {
     const socket = createConnection({ path: frame.from as string });
@@ -141,7 +121,6 @@ async function fakeSession(fake: FakeAgents, qwenHome: string, project: string):
     socket.on("end", () => {
       socket.end();
       const [auth, frame] = text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-      // An unknown token drops the connection without a word, as Qwen's inbox does.
       if (!auth || !frame || auth.type !== "auth" || !grants().includes(auth.token as string)) return;
       session.received.push({ auth, frame });
       if (session.answer) void sendReceipt(frame, session.answer);
@@ -242,19 +221,16 @@ describe("a reply to a running Qwen Code session", () => {
     expect(content.split("\n")[1]).toBe(INBOX_WAKE_INSTRUCTION.split("plannotator_inbox ").join(""));
     expect(content).toContain("Yes, ship it.");
 
-    // Qwen's receipt: queued for its next turn, not yet delivered; the session is live and nothing is uncertain.
     await until(async () => (await asker(w.server, sent.thread_id)).live);
     expect(await asker(w.server, sent.thread_id)).toMatchObject({ live: true });
     expect(w.server.qwenWake.uncertain(SESSION, replyId)).toBe(false);
     expect((await thread(w.server, sent.thread_id)).messages.at(-1)!.delivery ?? null).toBeNull();
 
-    // A restart: the claim is on disk, so it is not sent again.
     w.server.stop();
     const again = await w.start();
     await again.qwenWake.sweep();
     expect(w.session.received).toHaveLength(1);
 
-    // The woken turn answers: that tool call records the delivery.
     const client = await connect(again);
     await client.callTool({ name: "send_message", arguments: { body: "Shipping.", reply_to: sent.message_id, agent_session: SESSION, agent_host: "qwen" } });
     await until(async () => !!(await thread(again, sent.thread_id)).messages.find((m) => m.id === replyId)?.delivery);
@@ -296,11 +272,11 @@ describe("a reply to a running Qwen Code session", () => {
     expect((await qwenSends(w.client, w.project, "A?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     w.session.unregister();
     w.session.register({ kind: "headless" });
-    await w.server.qwenWake.sweep(); // reads the registry and settings again
+    await w.server.qwenWake.sweep();
     expect((await qwenSends(w.client, w.project, "B?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     w.session.unregister();
     w.session.register();
-    await w.server.qwenWake.sweep(); // reads the registry and settings again
+    await w.server.qwenWake.sweep();
     expect((await qwenSends(w.client, w.project, "C?", SESSION, { "qwen-code/invocation": { version: 1, sessionId: SESSION, promptId: "p1" } })).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     expect((await qwenSends(w.client, w.project, "D?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
   });
@@ -309,12 +285,10 @@ describe("a reply to a running Qwen Code session", () => {
     const system = join(realpathSync(mkdtempSync(join(tmpdir(), "plannotator-qwen-system-"))), "settings.json");
     const w = await world({ env: { QWEN_CODE_SYSTEM_SETTINGS_PATH: system } });
     try {
-      // An administrator's system settings hold them: so does every session.
       writeFileSync(system, JSON.stringify({ agents: { crossSessionInbound: "hold" } }));
       expect((await qwenSends(w.client, w.project, "S?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
-      // A value this Qwen does not know is held too (Qwen fails closed).
       writeFileSync(system, JSON.stringify({ agents: { crossSessionInbound: "review-later" } }));
-      await w.server.qwenWake.sweep(); // reads the registry and settings again
+      await w.server.qwenWake.sweep();
       expect((await qwenSends(w.client, w.project, "U?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     } finally {
       rmSync(join(system, ".."), { recursive: true, force: true });
@@ -325,10 +299,10 @@ describe("a reply to a running Qwen Code session", () => {
     writeFileSync(join(w.qwenHome, "settings.json"), "{}");
     mkdirSync(join(w.project, ".qwen"), { recursive: true });
     writeFileSync(join(w.project, ".qwen", "settings.json"), JSON.stringify({ agents: { crossSessionMessaging: false } }));
-    await w.server.qwenWake.sweep(); // reads the registry and settings again
+    await w.server.qwenWake.sweep();
     expect((await qwenSends(w.client, w.project, "B?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     rmSync(join(w.project, ".qwen"), { recursive: true });
-    await w.server.qwenWake.sweep(); // reads the registry and settings again
+    await w.server.qwenWake.sweep();
     expect((await qwenSends(w.client, w.project, "C?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
   });
 
@@ -336,7 +310,6 @@ describe("a reply to a running Qwen Code session", () => {
     const w = await world();
     const sent = await qwenSends(w.client, w.project, "Ship it?");
     const replyId = await reply(w.server, sent.message_id, "Yes.");
-    // The record still names the session, but the process behind the socket moved on (/clear swapped its id).
     w.session.answer = "misaddressed";
     await w.server.qwenWake.sweep();
     await until(() => w.session.received.length > 0);
@@ -351,12 +324,11 @@ describe("a reply to a running Qwen Code session", () => {
   test("a session whose process is gone has ended: nothing is sent; when its record comes back (qwen --resume) the reply goes in", async () => {
     const w = await world({ knobs: { comebackMs: 300 } });
     const sent = await qwenSends(w.client, w.project, "Ship it?");
-    // The session exits: its process is gone and only a stale record is left behind.
     const exited = Bun.spawn(["/bin/sh", "-c", "exit 0"]);
     await exited.exited;
     w.session.unregister();
     w.session.register({ pid: exited.pid });
-    await w.server.qwenWake.sweep(); // reads the registry and settings again
+    await w.server.qwenWake.sweep();
     await reply(w.server, sent.message_id, "Yes.");
     await w.server.qwenWake.sweep();
     await Bun.sleep(150);
@@ -364,7 +336,6 @@ describe("a reply to a running Qwen Code session", () => {
     expect(w.server.qwenWake.status(SESSION)).toBe("dead");
     expect((await asker(w.server, sent.thread_id)).live).toBe(false);
 
-    // Resumed: a live record names the session again, and the slow look finds it.
     w.session.unregister();
     w.session.register();
     await until(() => w.session.received.length > 0, 5_000);
@@ -381,7 +352,6 @@ describe("a reply to a running Qwen Code session", () => {
     await until(() => w.server.qwenWake.uncertain(SESSION, held));
     expect(w.server.qwenWake.uncertain(SESSION, held)).toBe(true);
     expect((await asker(w.server, sent.thread_id)).connection?.uncertain).toEqual([held]);
-    // Released in /peers later: queued after all.
     await w.session.receipt(w.session.received[0]!.frame, "delivered");
     await until(() => !w.server.qwenWake.uncertain(SESSION, held));
     expect(w.server.qwenWake.uncertain(SESSION, held)).toBe(false);
@@ -392,7 +362,6 @@ describe("a reply to a running Qwen Code session", () => {
     await w.server.qwenWake.sweep();
     await until(() => w.server.qwenWake.uncertain(SESSION, silent), 3_000);
     expect(w.server.qwenWake.uncertain(SESSION, silent)).toBe(true);
-    // A restart reads both back; the silent one stays saved, and nothing is sent again.
     w.server.stop();
     const again = await w.start();
     await again.qwenWake.sweep();
@@ -497,7 +466,6 @@ describe("a reply to a running Qwen Code session", () => {
     const w = await world();
     const sent = await qwenSends(w.client, w.project, "Ship it?");
     expect(sent.text).toContain(`${INBOX_REPLY_ARRIVES_TEXT} ${INBOX_REPLY_LOOK_TEXT}`);
-    // The person runs `qwen sessions controllers remove <id>`: Qwen now drops Plannotator's frames without a word.
     writeFileSync(join(w.qwenHome, "peer-controllers.json"), JSON.stringify({ schemaVersion: 1, controllers: [] }));
     const replyId = await reply(w.server, sent.message_id, "Yes.");
     await w.server.qwenWake.sweep();
@@ -524,7 +492,6 @@ describe("a reply to a running Qwen Code session", () => {
       socket.on("close", () => done());
       socket.on("error", () => done());
     });
-    // The Inbox still answers, and still believes the right token.
     expect((await fetch(`${base(w.server)}/api/inbox/threads/${sent.thread_id}`)).status).toBe(200);
     await w.session.receipt(frame, "delivered");
     await until(() => !w.server.qwenWake.uncertain(SESSION, replyId) && (w.server.qwenWake.uncertainItems(SESSION).length === 0));
@@ -532,7 +499,6 @@ describe("a reply to a running Qwen Code session", () => {
   });
 
   test("a receipts folder a crashed Inbox left is cleared; a running one's is kept", async () => {
-    // Short enough for a socket path under it (else the wake uses /tmp, and clears there).
     const parent = realpathSync(mkdtempSync(join("/tmp", "pq-")));
     try {
       const exited = Bun.spawn(["/bin/sh", "-c", "exit 0"]);
@@ -563,18 +529,12 @@ describe("a reply to a running Qwen Code session", () => {
     const frame = w.session.received[0]!.frame;
     await sendReceipt({ ...frame, replyToken: "f".repeat(64) }, "refused");
     await Bun.sleep(150);
-    // The forged refusal changed nothing: the session is still woken.
     expect((await qwenSends(w.client, w.project, "Again?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
     void replyId;
   });
 });
 
 describe("a Tidy through the Qwen wake", () => {
-  /**
-   * A question old enough to Tidy, then the Tidy `tidyAgo` ms ago, with Qwen
-   * answering its frame with `answer` (null: no receipt). No frame is awaited
-   * when the receipts socket cannot be made (`knobs`).
-   */
   async function tidied(answer: string | null, options: { knobs?: Record<string, unknown>; tidyAgo?: number } = {}) {
     const clock = { behind: 3 * 60 * 60_000 };
     const w = await world({ knobs: options.knobs, storeNow: () => new Date(Date.now() - clock.behind) });
@@ -618,7 +578,6 @@ describe("a Tidy through the Qwen wake", () => {
   });
 
   test("a healthy wake with nothing to change: reads alone record the Tidy, and a later Tidy is not held back", async () => {
-    // Past the cool-down, so only a Tidy still not delivered can refuse the next one.
     const t = await tidied("delivered", { tidyAgo: 31 * 60_000 });
     await Bun.sleep(150);
     expect((await t.read()).tidy?.id).toBe(t.note.id);
@@ -660,7 +619,6 @@ describe("a registry record", () => {
     const record = { pid: process.pid, sessionId: SESSION, kind: "tui", ipcPath: "/tmp/x.sock", ipcToken: null, cwd: null, startedAt: 1, shared: false, ...identity(process.pid) };
     expect(qwenRecordLive(record)).toBe(true);
     expect(qwenRecordLive({ ...record, pid: exited.pid })).toBe(false);
-    // Written on another machine sharing this home (a boot id that is not ours).
     expect(qwenRecordLive({ ...record, procStart: "another-boot:123" })).toBe(false);
   });
 });
@@ -695,7 +653,6 @@ test("a reply moved back to the Qwen session told to stop goes in as its own sen
     await w.server.qwenWake.sweep();
     return w.session.received.length > 0;
   });
-  // Its notice goes once, however many sweeps pass.
   await w.server.qwenWake.sweep();
   await w.server.qwenWake.sweep();
   expect(w.session.received).toHaveLength(1);

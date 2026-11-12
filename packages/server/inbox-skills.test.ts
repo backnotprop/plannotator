@@ -1,15 +1,3 @@
-/**
- * `GET /api/inbox/skills` and `GET /api/inbox/skills/content` on a running
- * Inbox (approval "inbox-skill-references"): the composers' skill picker and
- * the SKILL.md a Send pastes in. The failure this catches: the picker listing
- * the wrong folders (a project's, or nothing), a content name read as a path,
- * another site reading which skills this computer has, or a write accepted.
- *
- * Every skill folder is a temp HOME made here; HOME, CLAUDE_CONFIG_DIR,
- * CODEX_HOME and XDG_CONFIG_HOME point into it for each test and are put back
- * after, so the person's real skills are never read. The sandbox test's other
- * home is a folder it made in this checkout.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +44,6 @@ async function setup() {
   skill(claude, "write-better", "description: Improve prose.\n", "# Write better\n\nTighten it.\n");
   skill(claude, "readback", "description: State the request back.\ndisable-model-invocation: true\n", "# Readback\n\nState what I am asking for.\n");
   skill(join(home, ".agents", "skills"), "humanizer", "description: Remove AI tells.\n", "# Humanizer\n");
-  // A project's own skills folder is never listed.
   skill(join(root, "project", ".claude", "skills"), "project-only", "description: Not global.\n", "# Project\n");
   const server = await startInboxServer({ dataDir: join(root, "data"), binaryPath: null, phones: false });
   servers.push(server);
@@ -131,9 +118,8 @@ describe("GET /api/inbox/skills", () => {
     expect((await w.get("/api/inbox/skills/content?name=outside-skill")).status).toBe(200);
   });
 
-  // With both switches off the catalog ignores `discovered` and scans the folders itself, so the empty fake proves that path.
   test.skipIf(checkoutIsScratch)("inboxSkillCatalog, called directly: the sandbox covers every switch, also the path that ignores injected discovery", async () => {
-    await setup(); // For its scratch env, put back after the test.
+    await setup();
     const outside = makeOutsideScratch();
     roots.push(outside);
     skill(join(outside, ".claude", "skills"), "outside-skill", "description: Not a scratch folder.\n", "# Outside\n");

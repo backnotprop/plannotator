@@ -1,19 +1,3 @@
-/**
- * Annotate Server — end-to-end route wiring
- *
- * Boots the real annotate server and exercises /api/save-notes over HTTP. This
- * is the regression guard for the original bug (#844): the route was missing
- * from the annotate server, so POSTs fell through to the SPA HTML catch-all and
- * the "Save to Obsidian" button silently failed. handleSaveNotes is unit-tested
- * in shared-handlers.test.ts; this proves it is actually wired into the server
- * and answers with JSON rather than the HTML page.
- *
- * NOTE: this can only run because apps/opencode-plugin/commands.test.ts injects
- * its annotate-server stub via CommandDeps instead of a global `mock.module`.
- * A module mock there would leak the stub into this file (Bun module mocks are
- * process-global and cannot be unset).
- */
-
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -28,7 +12,6 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 
 describe("annotate server: /api/save-notes wiring", () => {
-  // Bind a random local port regardless of env left behind by sibling suites.
   let savedPort: string | undefined;
   let savedRemote: string | undefined;
 
@@ -54,10 +37,6 @@ describe("annotate server: /api/save-notes wiring", () => {
     });
 
     try {
-      // Empty body keeps this focused on wiring; handler behaviour with real
-      // integrations is unit-tested in shared-handlers.test.ts. If the route
-      // were missing, this POST would fall to the catch-all and return the
-      // 200 text/html SPA page instead of JSON.
       const response = await fetch(`${server.url}/api/save-notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -164,7 +143,6 @@ describe("annotate server: /api/config favicon persistence", () => {
         body: JSON.stringify({ favicon: "unknown" }),
       });
       expect(invalidResponse.status).toBe(200);
-      // "unknown" was not written into config, so "yellow" is retained
       expect(loadConfig().favicon).toBe("yellow");
       expect(getServerConfig(null).favicon).toBe("yellow");
     } finally {
@@ -191,12 +169,6 @@ describe("annotate server: /api/share-html symlink containment", () => {
     else process.env.PLANNOTATOR_REMOTE = savedRemote;
   });
 
-  // Regression: /api/share-html read the requested file through a lexical-only
-  // containment check, so a symlinked *.html inside the doc directory pointing
-  // outside it leaked the target's contents into the share payload. (Completes
-  // the #927 symlink fix, which hardened the asset sinks but missed this one.)
-  // Since #2291 a page on this machine shares an HTML document from anywhere,
-  // as /api/doc serves it; the containment holds for a reader off this machine.
   test("rejects a symlinked .html that escapes the document directory", async () => {
     const docDir = mkdtempSync(join(tmpdir(), "plannotator-sharehtml-"));
     const secretDir = mkdtempSync(join(tmpdir(), "plannotator-secret-"));
@@ -228,11 +200,6 @@ describe("annotate server: /api/share-html symlink containment", () => {
 
 });
 
-// A local rendered-HTML root is served from its current bytes by both
-// /api/plan (tab reload) and /api/share-html (share after Refresh), with the
-// startup snapshot only as the deleted-file fallback. History lives in the
-// real data dir (storage resolves it at import time), so every test uses its
-// own project namespace, removed in afterAll.
 describe("annotate server: local rendered-HTML root freshness", () => {
   let savedPort: string | undefined;
   let savedRemote: string | undefined;
@@ -271,9 +238,6 @@ describe("annotate server: local rendered-HTML root freshness", () => {
   });
 
   const page = (marker: string) => `<html><body>${marker}</body></html>`;
-  // realpath so the deleted-file fallback is reachable: containment realpaths
-  // the root but keeps a missing target's lexical path, which on a symlinked
-  // tmpdir (macOS) would never match.
   const freshDocDir = (label: string) => realpathSync(mkdtempSync(join(tmpdir(), `plannotator-root-html-${label}-`)));
 
   test("/api/share-html shares the root document's current bytes after the file changes on disk", async () => {
@@ -305,12 +269,6 @@ describe("annotate server: local rendered-HTML root freshness", () => {
     }
   });
 
-  // A tab reload after an agent edit must show the edited page (the draft
-  // annotations were placed on it) AND keep the version diff: the saved
-  // baseline is still the previous version, so the diff is recomputed
-  // against the served bytes rather than dropped (a reload used to lose the
-  // "Show changes" toggle for the rest of the session). Reads never write
-  // history.
   test("/api/plan serves the root document's current bytes and recomputes the version diff against them", async () => {
     const pagePath = join(freshDocDir("plan"), "page.html");
     const project = uniqueProject("plan");
@@ -322,7 +280,6 @@ describe("annotate server: local rendered-HTML root freshness", () => {
       diffHtml?: string;
     };
 
-    // Session 1 saves V1 as version 1 so session 2 has a baseline to diff.
     writeFileSync(pagePath, page("V1"), "utf-8");
     const seed = await startAnnotateServer({
       markdown: "",
@@ -356,17 +313,13 @@ describe("annotate server: local rendered-HTML root freshness", () => {
       const reloaded = await plan();
       expect(reloaded.rawHtml).toContain("V3");
       expect(reloaded.rawHtml).not.toContain("V2");
-      // The baseline still names the saved previous version...
       expect(reloaded.previousPlan).toBe(page("V1"));
       expect(reloaded.versionInfo?.version).toBe(2);
-      // ...and the diff describes V1 -> V3, the page actually on screen.
       expect(reloaded.diffCurrent).toBe(page("V3"));
       expect(reloaded.diffHtml).toContain("<ins");
       expect(reloaded.diffHtml).toContain("V3");
       expect(reloaded.diffHtml).not.toContain("V2");
 
-      // The in-app Refresh reads the root through /api/doc: the same
-      // recomputed diff rides along for the ROOT document only.
       const refreshed = (await (await fetch(
         `${server.url}/api/doc?path=${encodeURIComponent(pagePath)}`,
       )).json()) as PlanPayload & { renderAs?: string };
@@ -376,7 +329,6 @@ describe("annotate server: local rendered-HTML root freshness", () => {
       expect(refreshed.versionInfo?.version).toBe(2);
       expect(refreshed.diffHtml).toBe(reloaded.diffHtml);
 
-      // A sibling document served through /api/doc carries no version fields.
       const siblingPath = join(dirname(pagePath), "sibling.html");
       writeFileSync(siblingPath, page("SIBLING"), "utf-8");
       const sibling = (await (await fetch(
@@ -386,7 +338,6 @@ describe("annotate server: local rendered-HTML root freshness", () => {
       expect(sibling.previousPlan).toBeUndefined();
       expect(sibling.diffHtml).toBeUndefined();
 
-      // The saved history is untouched by reads: still exactly the two versions.
       const versions = (await (await fetch(`${server.url}/api/plan/versions`)).json()) as { versions: unknown[] };
       expect(versions.versions).toHaveLength(2);
 
@@ -400,12 +351,6 @@ describe("annotate server: local rendered-HTML root freshness", () => {
     }
   });
 
-  // A root that exists but cannot be read is the missing-file fallback: the
-  // startup snapshot, with its version diff, and the share endpoint agrees.
-  // On Bun, Bun.file(dir).exists() is false, so a path replaced by a
-  // directory already took the missing path (the case guards the Pi mirror,
-  // where existsSync is true and the read throws); the chmod 000 case below
-  // is the one that made the Bun handler throw and answer 500.
   async function seedTwoVersions(label: string): Promise<{ pagePath: string; project: string }> {
     const pagePath = join(freshDocDir(label), "page.html");
     const project = uniqueProject(label);
@@ -454,7 +399,6 @@ describe("annotate server: local rendered-HTML root freshness", () => {
     }
   });
 
-  // chmod 000 is not a restriction for root, so the check is skipped there.
   const canRevokeRead = process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() !== 0;
   test.skipIf(!canRevokeRead)("/api/plan falls back to the startup snapshot when the root file is unreadable", async () => {
     const { pagePath, project } = await seedTwoVersions("perm");
@@ -479,8 +423,6 @@ describe("annotate server: local rendered-HTML root freshness", () => {
       expect(fallback.rawHtml).not.toContain("V3");
       expect(fallback.previousPlan).toBe(page("V1"));
       expect(fallback.diffHtml).toBeDefined();
-      // The fallback is silent to the reviewer, so the reason is logged once
-      // per process (path and error), not once per read.
       await fetch(`${server.url}/api/plan`);
       const rootWarnings = warnings.filter((w) => w.includes("could not read the HTML root"));
       expect(rootWarnings).toHaveLength(1);
@@ -871,9 +813,6 @@ describe("annotate server: folder annotate history", () => {
     savedHistoryFlag = process.env.PLANNOTATOR_ANNOTATE_HISTORY;
     delete process.env.PLANNOTATOR_PORT;
     process.env.PLANNOTATOR_REMOTE = "0";
-    // Force the toggle on for every test but the one that explicitly flips it
-    // off — a real ~/.plannotator/config.json on the machine running these
-    // tests must never change the outcome.
     process.env.PLANNOTATOR_ANNOTATE_HISTORY = "1";
   });
 
@@ -886,13 +825,6 @@ describe("annotate server: folder annotate history", () => {
     else process.env.PLANNOTATOR_ANNOTATE_HISTORY = savedHistoryFlag;
   });
 
-  // Every test uses its own project namespace (history lives in the real
-  // ~/.plannotator data dir, same as storage.test.ts) so runs never collide.
-  // Every minted name is tracked and its history directory removed in
-  // afterAll below — this suite must never leave residue in the real data
-  // dir (including the stray non-directory file the "unwritable data dir"
-  // test deliberately plants inside its own project's history dir; removing
-  // the project dir recursively takes that with it).
   const mintedProjects: string[] = [];
   function uniqueProject(label: string): string {
     const project = `_annotate_history_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -932,13 +864,8 @@ describe("annotate server: folder annotate history", () => {
       expect(firstJson.markdown).toBe("V1\n");
       expect(firstJson.previousPlan).toBeNull();
       expect(firstJson.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
-      // diffCurrent is intentionally not propagated on the folder /api/doc
-      // path — it always equals the doc's own markdown and the client never
-      // reads it (unlike single-file /api/plan, which keeps it for shape parity).
       expect("diffCurrent" in firstJson).toBe(false);
 
-      // Change the file on disk between opens — a re-run of the pipeline
-      // would mint version 2. Memoization must prevent that.
       writeFileSync(docPath, "V2\n", "utf-8");
 
       const second = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
@@ -947,9 +874,7 @@ describe("annotate server: folder annotate history", () => {
         previousPlan?: string | null;
         versionInfo?: { version: number; totalVersions: number; project: string };
       };
-      // The live document content is always read fresh from disk...
       expect(secondJson.markdown).toBe("V2\n");
-      // ...but the history snapshot/diff fields stay exactly what first-open computed.
       expect(secondJson.previousPlan).toBeNull();
       expect(secondJson.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
 
@@ -962,8 +887,6 @@ describe("annotate server: folder annotate history", () => {
   });
 
   test("a config file is served as code and still keeps per-file version history", async () => {
-    // The failure: a new render kind left out of the history gate, so a .toml
-    // in a folder lost its +N/−M badge the day it stopped rendering as markdown.
     const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-code-"));
     const docPath = join(folderPath, "config.toml");
     writeFileSync(docPath, "# Config\n[server]\nport = 8080\n", "utf-8");
@@ -998,8 +921,6 @@ describe("annotate server: folder annotate history", () => {
     const docPath = join(folderPath, "note.md");
     const project = uniqueProject("dedupe");
 
-    // Seed history for this exact path via the single-file flow, then make
-    // the folder file's on-disk content match that stored version exactly.
     const seedServer = await startAnnotateServer({
       markdown: "Same\n",
       filePath: docPath,
@@ -1025,7 +946,6 @@ describe("annotate server: folder annotate history", () => {
         previousPlan?: string | null;
         versionInfo?: { version: number; totalVersions: number; project: string };
       };
-      // Dedup keeps it at version 1 — the folder open did not mint version 2.
       expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
       expect(json.previousPlan).toBeNull();
 
@@ -1042,7 +962,6 @@ describe("annotate server: folder annotate history", () => {
     const docPath = join(folderPath, "note.md");
     const project = uniqueProject("cross-mode");
 
-    // Single-file session saves "V1" as version 1 for this exact resolved path.
     const seedServer = await startAnnotateServer({
       markdown: "V1\n",
       filePath: docPath,
@@ -1052,7 +971,6 @@ describe("annotate server: folder annotate history", () => {
     });
     seedServer.stop();
 
-    // The folder session reads different content off disk, so it mints version 2.
     writeFileSync(docPath, "V2\n", "utf-8");
 
     const server = await startAnnotateServer({
@@ -1104,7 +1022,6 @@ describe("annotate server: folder annotate history", () => {
       };
       expect(json.previousPlan).toBeNull();
       expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
-      // diffCurrent is intentionally not propagated on the folder /api/doc path.
       expect("diffCurrent" in json).toBe(false);
     } finally {
       server.stop();
@@ -1209,7 +1126,6 @@ describe("annotate server: folder annotate history", () => {
     const docPath = join(folderPath, "config.yaml");
     const project = uniqueProject("yaml");
 
-    // Single-file session saves "a: 1" as version 1 for this exact path.
     const seedServer = await startAnnotateServer({
       markdown: "a: 1\n",
       filePath: docPath,
@@ -1219,7 +1135,6 @@ describe("annotate server: folder annotate history", () => {
     });
     seedServer.stop();
 
-    // The folder session reads different content off disk, so it mints version 2.
     writeFileSync(docPath, "a: 2\n", "utf-8");
 
     const server = await startAnnotateServer({
@@ -1232,8 +1147,6 @@ describe("annotate server: folder annotate history", () => {
     });
 
     try {
-      // `doc=1` mirrors the file browser: it forces annotatable plain-text
-      // rendering for extensions that overlap CODE_FILE_REGEX (.yaml, .json…).
       const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
       const json = await response.json() as {
         previousPlan?: string | null;
@@ -1264,9 +1177,6 @@ describe("annotate server: folder annotate history", () => {
     try {
       const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
       const json = await response.json() as Record<string, unknown>;
-      // Whatever shape /api/doc answers with (.env is not annotatable, so it
-      // is never served as a document), no history fields may appear and no
-      // snapshot may be written.
       expect("previousPlan" in json).toBe(false);
       expect("versionInfo" in json).toBe(false);
 
@@ -1284,9 +1194,6 @@ describe("annotate server: folder annotate history", () => {
     writeFileSync(docPath, "Content\n", "utf-8");
     const project = uniqueProject("unwritable");
 
-    // Block the exact history directory the pipeline will try to mkdir by
-    // pre-creating a plain FILE at that path — mkdirSync(recursive) throws
-    // when a target segment exists and is not a directory, on every platform.
     const slug = deriveAnnotateHistorySlug(docPath);
     const historyProjectDir = join(getPlannotatorDataDir(), "history", project);
     mkdirSync(historyProjectDir, { recursive: true });
@@ -1330,14 +1237,12 @@ describe("annotate server: folder annotate history", () => {
     });
 
     try {
-      // No history yet for this path: version endpoints report empty, not an error.
       const versionsBefore = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
       expect(await versionsBefore.json()).toEqual({ project, slug: null, versions: [] });
       const versionBefore = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(docPath)}&v=1`);
       expect(versionBefore.status).toBe(404);
       expect(await versionBefore.json()).toEqual({ error: "No version history" });
 
-      // Open the file so history is initialized this session.
       await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
 
       const versionsAfter = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
@@ -1349,8 +1254,6 @@ describe("annotate server: folder annotate history", () => {
       expect(versionAfter.status).toBe(200);
       expect(await versionAfter.json()).toEqual({ plan: "V1\n", version: 1 });
 
-      // A path outside the folder root resolves the way /api/doc resolves it:
-      // a tab on this machine reaches it (#2291), a forwarded reader does not.
       const outsidePath = join(realpathSync(tmpdir()), "outside.md");
       const outsideVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`);
       expect(outsideVersions.status).toBe(200);
@@ -1361,9 +1264,6 @@ describe("annotate server: folder annotate history", () => {
       const deniedVersion = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(outsidePath)}&v=1`, forwarded);
       expect(deniedVersion.status).toBe(403);
 
-      // Without a path param at all, behavior is exactly today's: this
-      // session has no single-file annotateHistory binding (it's a folder
-      // session), so both endpoints report "no history" as before.
       const noPathVersions = await fetch(`${server.url}/api/plan/versions`);
       expect(await noPathVersions.json()).toEqual({ project, slug: null, versions: [] });
       const noPathVersion = await fetch(`${server.url}/api/plan/version?v=1`);
@@ -1441,9 +1341,6 @@ describe("annotate server: approval notes", () => {
     }
   });
 
-  // Approve-with-notes must anchor exactly where Send Feedback would. Dropping
-  // the message scope made the notes land on the last message rather than the
-  // one the reviewer picked in a multi-message annotate-last session.
   test("forwards the message scope on approval", async () => {
     const server = await startAnnotateServer({
       markdown: "# Test",
@@ -1548,14 +1445,6 @@ describe("annotate server: client lease", () => {
     else process.env.PLANNOTATOR_REMOTE = savedRemote;
   });
 
-  /**
-   * Connect to the client-lease stream and wait for its first byte (the
-   * ready comment). Returns a `disconnect()` that aborts the underlying
-   * fetch — plain `reader.cancel()` only stops local reads and does not
-   * propagate a close to the server's `ReadableStream.cancel()`, whereas
-   * aborting the request closes the connection the way an abandoned browser
-   * tab actually would.
-   */
   async function connectClientLease(url: string): Promise<{ disconnect: () => Promise<void> }> {
     const controller = new AbortController();
     const response = await fetch(`${url}/api/annotate/client-lease`, { signal: controller.signal });
@@ -1576,12 +1465,6 @@ describe("annotate server: client lease", () => {
     };
   }
 
-  /**
-   * Track whether a promise has settled without racing it against a timer —
-   * a `Promise.race` between an already-resolved sentinel and a promise that
-   * may or may not have settled is nondeterministic. Attaching `.then` up
-   * front and reading a flag afterward is reliable regardless of timing.
-   */
   function trackSettled<T>(promise: Promise<T>): () => boolean {
     let settled = false;
     promise.then(() => {
@@ -1616,11 +1499,6 @@ describe("annotate server: client lease", () => {
   });
 
   test("a tailnet-published session neither advertises nor serves the lease even when the CLI predicate allowed it", async () => {
-    // --tailscale forces local mode, so the CLI-side predicate reads the
-    // session as local and passes clientLeaseSupported: true — but clients
-    // reach it through the serve proxy, and a proxy disconnect longer than
-    // the grace would auto-dismiss a live review. The server must force the
-    // capability off, exactly like a remote session.
     const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
     const sandboxDataDir = mkdtempSync(join(tmpdir(), "plannotator-lease-tailnet-"));
     process.env.PLANNOTATOR_DATA_DIR = sandboxDataDir;
@@ -1649,8 +1527,6 @@ describe("annotate server: client lease", () => {
   });
 
   test("a tailnet-published session never offers Save to Notion, even with NOTION_TOKEN", async () => {
-    // --tailscale keeps remote mode off, but the page is reachable from other
-    // devices, and the server would save with its own Notion token.
     const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
     const savedToken = process.env.NOTION_TOKEN;
     const sandboxDataDir = mkdtempSync(join(tmpdir(), "plannotator-notion-tailnet-"));
@@ -1707,7 +1583,6 @@ describe("annotate server: client lease", () => {
       const isSettled = trackSettled(decision);
       const client = await connectClientLease(server.url);
 
-      // Still connected — no expiry.
       await Bun.sleep(20);
       expect(isSettled()).toBe(false);
 
@@ -1737,15 +1612,12 @@ describe("annotate server: client lease", () => {
       const firstClient = await connectClientLease(server.url);
       await firstClient.disconnect();
 
-      // Reconnect well before the 80ms grace deadline.
       await Bun.sleep(20);
       const secondClient = await connectClientLease(server.url);
 
-      // Even past the original deadline, the reconnect cancelled the pending expiry.
       await Bun.sleep(100);
       expect(isSettled()).toBe(false);
 
-      // A fresh disconnect starts its own full grace window.
       await secondClient.disconnect();
       expect(await decision).toEqual({ feedback: "", annotations: [], exit: true });
     } finally {
@@ -1779,8 +1651,6 @@ describe("annotate server: client lease", () => {
         annotations: [],
       });
 
-      // Disconnecting after the explicit decision must not overwrite it once
-      // the grace period elapses — the approval already cancelled tracking.
       await client.disconnect();
       await Bun.sleep(120);
       expect(await server.waitForDecision()).toEqual({
@@ -1813,8 +1683,6 @@ describe("annotate server: client lease", () => {
         exit: true,
       });
 
-      // A tab that never saw the dismissal must not be told its decision was
-      // applied: the caller already received `dismissed`.
       for (const [path, init] of [
         [
           "/api/approve",
@@ -1866,21 +1734,12 @@ describe("annotate server: client lease", () => {
 
     server.stop();
 
-    // The stream must complete rather than stay open on a server that is gone.
     const next = await reader.read();
     expect(next.done).toBe(true);
   });
 });
 
 describe("annotate server: durable submit records (#678)", () => {
-  // The decision promise's consumer (the invoking CLI/agent) can time out
-  // before the reviewer submits; the submit then settled the promise with
-  // nobody listening, deleted the draft, and the feedback existed nowhere.
-  // These tests pin the fix: a durable record is written to
-  // history/{project}/{slug}/submissions/ BEFORE the draft is deleted, the
-  // annotate-history opt-out suppresses the record (stateless sessions keep
-  // legacy behavior), and a failed durable write keeps the draft behind as
-  // the recovery copy.
   let savedPort: string | undefined;
   let savedRemote: string | undefined;
   let savedHistoryFlag: string | undefined;
@@ -1891,8 +1750,6 @@ describe("annotate server: durable submit records (#678)", () => {
     savedHistoryFlag = process.env.PLANNOTATOR_ANNOTATE_HISTORY;
     delete process.env.PLANNOTATOR_PORT;
     process.env.PLANNOTATOR_REMOTE = "0";
-    // Force the toggle on unless a test explicitly flips it off — a real
-    // ~/.plannotator/config.json must never change the outcome.
     process.env.PLANNOTATOR_ANNOTATE_HISTORY = "1";
   });
 
@@ -1905,8 +1762,6 @@ describe("annotate server: durable submit records (#678)", () => {
     else process.env.PLANNOTATOR_ANNOTATE_HISTORY = savedHistoryFlag;
   });
 
-  // History lives in the real data dir (DATA_DIR is cached at module import),
-  // so each test uses a unique project namespace and afterAll removes it.
   const mintedProjects: string[] = [];
   function uniqueProject(label: string): string {
     const project = `_annotate_submission_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1931,9 +1786,6 @@ describe("annotate server: durable submit records (#678)", () => {
     );
   }
 
-  // The project name is baked into the markdown so every test gets a unique
-  // content-hashed draft key — drafts live in the real data dir and identical
-  // markdown across tests would collide on one draft file.
   async function startServer(project: string, docPath: string) {
     const markdown = `# Doc ${project}\n\nBody\n`;
     writeFileSync(docPath, markdown, "utf-8");
@@ -1952,7 +1804,6 @@ describe("annotate server: durable submit records (#678)", () => {
     const server = await startServer(project, docPath);
 
     try {
-      // Auto-saved draft exists before submit (the recovery copy).
       const saved = await fetch(`${server.url}/api/draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1971,7 +1822,6 @@ describe("annotate server: durable submit records (#678)", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ ok: true });
 
-      // Durable record: one markdown file next to the file's version history.
       const recordDir = submissionsDir(project, docPath);
       const records = readdirSync(recordDir).filter((f) => f.endsWith(".md"));
       expect(records.length).toBe(1);
@@ -1980,7 +1830,6 @@ describe("annotate server: durable submit records (#678)", () => {
       expect(content).toContain("- Decision: feedback");
       expect(content).toContain(`- Source: ${resolve(docPath)}`);
 
-      // Draft is gone AFTER the record exists.
       const draft = await fetch(`${server.url}/api/draft`);
       expect(draft.status).toBe(404);
     } finally {
@@ -1992,7 +1841,6 @@ describe("annotate server: durable submit records (#678)", () => {
   test("approve with notes persists a record; a bare approve writes nothing", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-submit-approve-"));
 
-    // Approve-with-notes carries user content -> record.
     const notesDoc = join(dir, "notes.md");
     const notesProject = uniqueProject("approve-notes");
     const notesServer = await startServer(notesProject, notesDoc);
@@ -2013,7 +1861,6 @@ describe("annotate server: durable submit records (#678)", () => {
       notesServer.stop();
     }
 
-    // Bare approve is contentless -> nothing to persist.
     const bareDoc = join(dir, "bare.md");
     const bareProject = uniqueProject("approve-bare");
     const bareServer = await startServer(bareProject, bareDoc);
@@ -2052,10 +1899,7 @@ describe("annotate server: durable submit records (#678)", () => {
       });
       expect(response.status).toBe(200);
 
-      // The opt-out means "no annotate content in the data dir": no version
-      // snapshot AND no submission record — the project dir never appears.
       expect(existsSync(join(getPlannotatorDataDir(), "history", project))).toBe(false);
-      // Legacy behavior preserved: the draft is still deleted on submit.
       const draft = await fetch(`${server.url}/api/draft`);
       expect(draft.status).toBe(404);
     } finally {
@@ -2065,9 +1909,6 @@ describe("annotate server: durable submit records (#678)", () => {
   });
 
   test("previously-stateless modes stay stateless: annotate-last and URL sessions write no record", async () => {
-    // Before #678 these modes never touched the data dir; the durable record
-    // must not widen the documented annotateHistory contract to them — their
-    // submissions quote agent messages or fetched pages.
     const lastProject = uniqueProject("last-message");
     const lastServer = await startAnnotateServer({
       markdown: `# Agent message ${lastProject}\n\nQuoted agent output.\n`,
@@ -2109,9 +1950,6 @@ describe("annotate server: durable submit records (#678)", () => {
   });
 
   test("a malformed feedback body degrades to legacy behavior, never a 500", async () => {
-    // /api/feedback does no body type validation; pre-#678 a non-string
-    // feedback flowed through settle() untouched and returned 200. The
-    // durable-record guard must not turn that into a thrown 500.
     const dir = mkdtempSync(join(tmpdir(), "plannotator-submit-malformed-"));
     const docPath = join(dir, "doc.md");
     const project = uniqueProject("malformed");
@@ -2131,7 +1969,6 @@ describe("annotate server: durable submit records (#678)", () => {
       });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ ok: true });
-      // Legacy behavior: draft deleted, no record (nothing persistable).
       const draft = await fetch(`${server.url}/api/draft`);
       expect(draft.status).toBe(404);
       expect(existsSync(submissionsDir(project, docPath))).toBe(false);
@@ -2145,9 +1982,6 @@ describe("annotate server: durable submit records (#678)", () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-submit-unwritable-"));
     const docPath = join(dir, "doc.md");
     const project = uniqueProject("unwritable");
-    // Plant a FILE where the project's history directory must go: every
-    // mkdir under it fails, so both the startup snapshot and the submission
-    // write degrade. (afterAll's recursive+force rm removes the file too.)
     const historyRoot = join(getPlannotatorDataDir(), "history");
     mkdirSync(historyRoot, { recursive: true });
     writeFileSync(join(historyRoot, project), "not a directory", "utf-8");
@@ -2165,15 +1999,11 @@ describe("annotate server: durable submit records (#678)", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ feedback: "Please fix X", annotations: [{ id: "a1" }] }),
       });
-      // The decision itself still succeeds — persistence is an enhancement.
       expect(response.status).toBe(200);
 
-      // But the draft survives: with no durable record written, it is the
-      // only remaining copy of the reviewer's work.
       const draft = await fetch(`${server.url}/api/draft`);
       expect(draft.status).toBe(200);
 
-      // Cleanup: don't leave this test's draft behind in the real data dir.
       await fetch(`${server.url}/api/draft`, { method: "DELETE" });
     } finally {
       server.stop();
@@ -2241,22 +2071,14 @@ describe("annotate server: live app mode (annotate-app)", () => {
       expect(plan.liveToken).toMatch(/^[0-9a-f]{32}$/);
       expect(plan.sharingEnabled).toBe(false);
       expect(plan.convertHtml).toBe(false);
-      // appUrl is the live loopback proxy under its LOCALHOST spelling (so
-      // the framed app is same-site with the editor and shares the dev
-      // app's host-only localhost cookies), never an advertised-host URL.
       expect(plan.appUrl).toMatch(/^http:\/\/localhost:\d+\/$/);
-      // No srcdoc payloads, no version fields.
       expect(plan.rawHtml).toBeUndefined();
       expect(plan.renderAs).toBeUndefined();
       expect(plan.previousPlan).toBeUndefined();
       expect(plan.versionInfo).toBeUndefined();
       expect(plan.diffCurrent).toBeUndefined();
-      // Agent terminal stays unavailable for live sessions.
       expect((plan.agentTerminal as { enabled: boolean }).enabled).toBe(false);
 
-      // The proxy serves the composed bridge body: config prelude with the
-      // session token and both editor origin forms (localhost first), then
-      // bootstrap, then bridge.
       const appUrl = plan.appUrl as string;
       const bridge = await (await fetch(`${appUrl}__plannotator__/bridge.js`)).text();
       expect(bridge).toContain(String(plan.liveToken));
@@ -2267,7 +2089,6 @@ describe("annotate server: live app mode (annotate-app)", () => {
       expect(bridge).toContain(".pn-live {}");
       expect(bridge.indexOf("/* bootstrap body */")).toBeLessThan(bridge.indexOf("/* bridge body */"));
 
-      // The proxied page carries the injected bridge script tag.
       const page = await (await fetch(appUrl)).text();
       expect(page).toContain('<script src="/__plannotator__/bridge.js"></script>');
     } finally {
@@ -2277,16 +2098,12 @@ describe("annotate server: live app mode (annotate-app)", () => {
   });
 
   test("a pathful target URL keeps its path and query in appUrl", async () => {
-    // Annotating http://localhost:5173/admin/settings must open that page,
-    // not the app root.
     const app = startFakeApp();
     const targetUrl = `http://127.0.0.1:${app.port}/admin/settings?tab=2`;
     const server = await startLiveServer(targetUrl);
     try {
       const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { appUrl: string };
       expect(plan.appUrl).toMatch(/^http:\/\/localhost:\d+\/admin\/settings\?tab=2$/);
-      // The advertised page is reachable through the proxy under the
-      // localhost Host spelling.
       const res = await fetch(plan.appUrl);
       expect(res.status).toBe(200);
     } finally {
@@ -2317,7 +2134,6 @@ describe("annotate server: live app mode (annotate-app)", () => {
     const app = startFakeApp();
     const server = await startLiveServer(`http://127.0.0.1:${app.port}`);
     const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { appUrl: string };
-    // Reachable while running.
     expect((await fetch(plan.appUrl)).status).toBe(200);
     server.stop();
     await Bun.sleep(50);
@@ -2332,10 +2148,6 @@ describe("annotate server: live app mode (annotate-app)", () => {
   });
 
   describe("draft isolation between live sessions", () => {
-    // A live session holds no document text (markdown is "" by construction),
-    // so keying its draft by content gave every live session on the machine
-    // the one hash of the empty string: two sessions against different dev
-    // servers shared a single draft slot and overwrote each other.
     const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
     let draftDataDir: string;
 
@@ -2375,7 +2187,6 @@ describe("annotate server: live app mode (annotate-app)", () => {
         await saveDraft(serverX, "notes for X");
         await saveDraft(serverY, "notes for Y");
 
-        // Neither session sees the other's text, in either direction.
         expect((await loadDraft(serverX))?.feedback).toBe("notes for X");
         expect((await loadDraft(serverY))?.feedback).toBe("notes for Y");
         expect(readdirSync(join(draftDataDir, "drafts")).length).toBe(2);
@@ -2396,8 +2207,6 @@ describe("annotate server: live app mode (annotate-app)", () => {
       } finally {
         first.stop();
       }
-      // Same target, spelled with a trailing slash the way a browser would
-      // hand it back: the draft is the point of the key, so it must survive.
       const second = await startLiveServer(`${targetUrl}/`);
       try {
         expect((await loadDraft(second))?.feedback).toBe("survives the crash");
@@ -2411,20 +2220,15 @@ describe("annotate server: live app mode (annotate-app)", () => {
       const a = liveAppDraftIdentity("http://127.0.0.1:5173");
       expect(liveAppDraftIdentity("http://127.0.0.1:5173/")).toBe(a);
       expect(liveAppDraftIdentity("http://127.0.0.1:5174")).not.toBe(a);
-      // Different pages of one app are different targets, and stay so.
       expect(liveAppDraftIdentity("http://127.0.0.1:5173/admin")).not.toBe(a);
       expect(liveAppDraftIdentity("http://127.0.0.1:5173/admin/")).toBe(
         liveAppDraftIdentity("http://127.0.0.1:5173/admin"),
       );
-      // Unparseable input still yields a per-target value rather than throwing.
       expect(liveAppDraftIdentity("not a url")).toBe("not a url");
     });
   });
 
   test("classic file annotate still keys its draft by content", async () => {
-    // The live fix must not move any existing draft: a file session's key is
-    // the hash of its markdown, exactly as before, so drafts written by an
-    // earlier release are still found.
     const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
     const dataDir = mkdtempSync(join(tmpdir(), "plannotator-file-draft-"));
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
@@ -2460,10 +2264,6 @@ describe("annotate server: live app mode (annotate-app)", () => {
   });
 
   test("tailnet-published sessions reject live app sessions outright", async () => {
-    // --tailscale keeps the annotate server loopback-bound but publishes it
-    // across the tailnet through the serve proxy; a live proxy would relay
-    // the user's authenticated dev app to every tailnet peer, so it is the
-    // same hard-off as remote mode, keyed on tailnetPublished.
     await expect(
       startLiveServer("http://127.0.0.1:65500", { tailnetPublished: true }),
     ).rejects.toThrow("Live app annotation is unavailable in tailnet-published sessions");
@@ -2471,11 +2271,6 @@ describe("annotate server: live app mode (annotate-app)", () => {
 });
 
 describe("annotate server: guarded shutdown (runGuardedShutdown)", () => {
-  // The live-proxy leak this guards: stop() disposes the agent terminal
-  // BEFORE the live proxy, and agent-terminal teardown is historically
-  // fragile (#1314). In a flat sequence a throw there orphaned the proxy's
-  // listener and upstream WebSockets. Each step must run even when an
-  // earlier one throws, and the listener close must run regardless.
   test("a throwing disposer does not skip later steps or the listener close", () => {
     const ran: string[] = [];
     const logged: string[] = [];
@@ -2491,7 +2286,6 @@ describe("annotate server: guarded shutdown (runGuardedShutdown)", () => {
       (message) => logged.push(message),
     );
     expect(ran).toEqual(["agent terminal", "live proxy", "listener"]);
-    // The failure is reported, named after the step that threw.
     expect(logged.some((line) => line.includes("agent terminal"))).toBe(true);
   });
 

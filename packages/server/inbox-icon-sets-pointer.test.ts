@@ -1,11 +1,3 @@
-/**
- * The pointer file plannotator.ai serves for the Inbox's fetchable icon sets
- * (apps/marketing/public/assets/icon-sets/v1/, the default PLANNOTATOR_ICON_SETS_URL) read the way the Inbox reads it,
- * with no network: a stand-in answers the site's two files from the repo, and every other address with generated
- * stand-ins (no picture or name from anywhere is used). What this catches: a pointer or manifest the Inbox would
- * not accept (a typo, a wrong count, an address pattern without its number), names in a shape it cannot read, or a
- * mirror that is never tried.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +21,6 @@ test("the site's pointer offers one set the Inbox can get in one click, its mirr
     if (url.href === INBOX_ICON_SETS_POINTER_DEFAULT) return Response.json(pointer);
     if (url.host === "plannotator.ai" && url.pathname.startsWith("/assets/")) return new Response(readFileSync(join(SITE, url.pathname)));
     const at = /\/(\d+)\.png$/.exec(url.pathname);
-    // The first address fails for every third icon: the mirror answers.
     if (at && Number(at[1]) % 3 === 0 && !url.host.includes("jsdelivr")) return new Response("busy", { status: 503 });
     if (at) return new Response(creature(Number(at[1])));
     if (url.search.includes("limit=")) return Response.json({ results: Array.from({ length: manifest.count }, (_, i) => ({ name: `name-${i + 1}` })) });
@@ -46,7 +37,6 @@ test("the site's pointer offers one set the Inbox can get in one click, its mirr
   const listing = fetcher.listing("pokemon")!;
   expect(listing).toMatchObject({ count: 1025, get: { state: "done", have: 1025 } });
   expect(listing.icons[24]).toEqual({ id: "25", n: 25, name: "Name 25" });
-  // Every address the manifest names, and nothing else: the site, the names, the pictures (and the mirror for a third).
   expect(new Set(asked.map((a) => a.split("/")[0]))).toEqual(new Set(["plannotator.ai", "pokeapi.co", "raw.githubusercontent.com", "cdn.jsdelivr.net"]));
   expect(asked.filter((a) => a.startsWith("cdn.jsdelivr.net"))).toHaveLength(341);
 });

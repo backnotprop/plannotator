@@ -1,11 +1,3 @@
-/**
- * Goal Setup Server
- *
- * Serves the Plannotator shell in a goal-setup mode for the setup-goal skill.
- * The interview and facts phases use the same endpoint surface so agents can
- * launch a browser session, wait, and receive a structured JSON result.
- */
-
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { openPackedApp, packedAppResponse } from "@plannotator/shared/packed-app";
 import type { Origin } from "@plannotator/shared/agents";
@@ -112,14 +104,11 @@ export async function startGoalSetupServer(
     Bun.serve(withPlannotatorServerHeader({
         hostname: getServerHostname(),
         port,
-        // Bun's default 10s idleTimeout kills long-running requests.
         idleTimeout: 0,
 
         async fetch(req) {
-          // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
-          // Then no write from another site, before any route (request-origin-guard.ts).
           const originRefusal = refuseCrossOriginWrite(req);
           if (originRefusal) return originRefusal;
 
@@ -227,8 +216,6 @@ export async function startGoalSetupServer(
 
   const port = server.port!;
   const serverUrl = buildAdvertisedUrl(port);
-  // Remote sessions serve the app page compressed (#1617); start the likely
-  // encoding (gzip over plain http) now so the first load does not wait.
   if (isRemote) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
   onReady?.(serverUrl, isRemote, port);
 

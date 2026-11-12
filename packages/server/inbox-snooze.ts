@@ -1,29 +1,8 @@
-/**
- * Plannotator Inbox: snoozing a thread (approval "inbox-snooze",
- * .product/approved/inbox-snooze/). The window's route, same origin for every
- * POST and with the page's `serverSession`, like every window write:
- *
- *   POST /api/inbox/threads/:id/snooze   `{ until: iso, at? }`: snooze it, or move its snooze; `{ until: null }`: Unsnooze. `{ snoozed }`
- *
- * `at` keeps an earlier snooze's own time (Undo). The door allows the route
- * and `DOOR_WRITES` classes it as a set, so a snooze lives on the thread's home
- * machine and reaches it through the forward and the outbox.
- *
- * Snoozes live in `inbox/snoozes.json`, outside the event log
- * (shared/inbox/snoozes.ts): an agent sees nothing. A change tells every
- * window (`event: snoozes`, as `event: pins` does) and every linked machine
- * that asked (`snoozes=1` on the stream), whose list of this machine's rows
- * otherwise moves only on a record. Whether a thread is snoozed is `until`
- * against the clock when a list is read, never this timer: it only tells the
- * open windows to read the list again at the nearest `until`.
- */
-
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { inboxSnoozeDelay, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
-/** On the window route: the write came through a linked machine's door, so it may have waited (`InboxStore.setHeldSnooze`). */
 export const INBOX_SNOOZE_HELD = "held";
 export const INBOX_SNOOZE_PATH = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/snooze$/;
 
@@ -32,7 +11,6 @@ export function createInboxSnoozes(options: {
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
-  /** Every window and linked machine listening: read the list again. */
   tell: () => void;
 }) {
   const { store, serverSession, json, tell } = options;
@@ -45,7 +23,6 @@ export function createInboxSnoozes(options: {
     const body = await options.readBody(req);
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (body.until === null) {
-      // Unsnooze names a thread like a snooze does: no such thread is a 404, never a quiet 200.
       const root = store.message(match[1]!);
       if (!root || root.thread_id !== match[1]) throw new InboxError("thread_not_found", `No thread ${match[1]}.`);
       store.clearSnooze(match[1]!);

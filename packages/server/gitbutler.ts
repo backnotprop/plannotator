@@ -1,9 +1,3 @@
-/**
- * Bun command adapter for the shared GitButler review provider.
- *
- * GitButler support was originally proposed by Dan Susman in PR #566.
- */
-
 import { childEnv } from "@plannotator/shared/child-env";
 import type {
   GitCommandOptions,
@@ -36,7 +30,6 @@ async function runBut(
             process.kill(-proc.pid, "SIGKILL");
             return;
           } catch {
-            // Fall through when the process exited between the timer and signal.
           }
         } else {
           const killed = Bun.spawnSync(
@@ -61,7 +54,6 @@ async function runBut(
   }
 }
 
-/** Bun Git + GitButler runtime used by the review server. */
 export const runtime: ReviewGitButlerRuntime = {
   ...gitRuntime,
   runBut,

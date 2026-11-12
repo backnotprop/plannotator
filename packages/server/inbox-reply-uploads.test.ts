@@ -1,13 +1,3 @@
-/**
- * Files pasted into the reply box, through the server's real doors: the
- * reply route takes `uploads` as compose's thread does. The uploads become
- * ordinary attachments on the person's reply; the agent reads them as
- * `Attached:` lines on its wake, and as attachment records in `read_thread`; a reply of files alone is a reply (words-only:
- * nothing answered, the still-open line); a replay copies nothing; an id
- * that is gone, a bad list and an archived thread are refused with nothing
- * written and nothing left behind. Every test uses its own temp data dir; the
- * connection is plain HTTP with the registry's token, never a real agent.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,7 +34,6 @@ async function setup() {
   const base = `http://127.0.0.1:${server.port}`;
   const inboxDir = join(dataDir, "inbox");
 
-  /** The agent asks through the MCP, as the session `ses-pi` whose connection wakes it. */
   const ask = async (body: string, session = "ses-pi") => {
     const result = (await client.callTool({ name: "send_message", arguments: { body, project_path: ledger, agent_session: session, agent_host: "pi" } })) as {
       structuredContent: { message_id: string; thread_id: string };
@@ -100,19 +89,16 @@ describe("a reply carrying pasted files", () => {
       ["notes.md", "markdown"],
     ]);
     for (const attachment of attachments) {
-      // A real, read-only file under uploads/, with its own name.
       expect(attachment.path.startsWith(realpathSync(join(inboxDir, "uploads")))).toBe(true);
       expect(statSync(attachment.path).mode & 0o222).toBe(0);
     }
     expect(readFileSync(attachments[1]!.path, "utf8")).toBe("# Notes\n");
-    // Sent: the pending records are gone.
     expect(pending(shot.upload_id)).toBe(false);
     expect(pending(notes.upload_id)).toBe(false);
 
     const attached = attachments.map((a) => `Attached: ${a.name} (${a.path})`).join("\n");
     const [command] = await poll();
     expect(command).toMatchObject({ type: "reply", id: sent.reply.id });
-    // The reply as the store wrote it (the words, then the still-open line), then one line per file.
     expect(sent.reply.body.startsWith("The legend overlaps.")).toBe(true);
     expect(command!.body).toBe(`${sent.reply.body}\n\n${attached}`);
 
@@ -122,7 +108,6 @@ describe("a reply carrying pasted files", () => {
     const inThread = read.structuredContent.thread.messages.find((m) => m.id === sent.reply.id)!;
     expect(inThread.attachments!.map((a) => a.path)).toEqual(attachments.map((a) => a.path));
 
-    // The window's thread lists them under the reply, like compose's files.
     const opened = await thread(asked.thread_id);
     expect(opened.messages.at(-1)!.attachments!.map((a) => a.name)).toEqual(["pasted-image-2026-10-16-0912.png", "notes.md"]);
   });
@@ -135,13 +120,11 @@ describe("a reply carrying pasted files", () => {
     expect(response.status).toBe(200);
     const sent = (await response.json()) as { reply: InboxMessage; questions: { state: string }[] };
     expect(sent.questions.map((q) => q.state)).toEqual(["open"]);
-    // The still-open line, as a words-only reply carries it; then the file.
     expect(sent.reply.body).toMatch(/^No question answered yet; it is still open\./);
     const [command] = await poll();
     expect(command!.body).toBe(`${sent.reply.body}\n\nAttached: ${shot.name} (${sent.reply.attachments![0]!.path})`);
     expect((await thread(asked.thread_id)).messages.at(-1)!.attachments).toHaveLength(1);
 
-    // With no question to keep open, the body is empty and the agent reads the file line alone.
     const news = await ask("The chart is rendered; nothing to decide.", "ses-b");
     const second = await upload("pasted-image-2026-10-16-0914.png", PNG);
     const plain = (await (await reply(news.message_id, { idempotency_key: "r2", words: "", uploads: [second.upload_id] })).json()) as { reply: InboxMessage };
@@ -178,7 +161,6 @@ describe("a reply carrying pasted files", () => {
     expect(server.store.cursor()).toBe(cursor);
     expect(sentFiles()).toHaveLength(1);
 
-    // An archived thread: refused after the copy was made, and the copy is removed; the upload stays for another Send.
     const other = await ask("Another run finished.");
     const kept = await upload("pasted-image-2026-10-16-0916.png", PNG);
     const archived = await fetch(`${base}/api/inbox/messages/${other.message_id}/resolve`, {

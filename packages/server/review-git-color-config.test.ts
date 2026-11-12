@@ -1,17 +1,3 @@
-/**
- * Code review under a user git config that forces color into pipes (#1661),
- * end to end through both review servers (Bun + Pi).
- *
- * Failure caught: with `color.diff = always` every patch line came back wrapped
- * in ANSI escapes, the parser found 0 files, and viewed-file identity capture
- * found 0 identities. `color.ui = never` alone does not fix it (the specific
- * `color.diff` key wins), so this config sets both kinds of key, plus the other
- * settings a dotfiles repo commonly carries (`diff.noprefix`, pagers).
- *
- * Every git and jj call here reads a sandboxed GIT_CONFIG_GLOBAL / JJ_CONFIG,
- * and jj records its repos in a scratch config folder (useScratchJjConfig);
- * the real user config is never read or written.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -30,7 +16,6 @@ import {
 } from "../../apps/pi-extension/server/vcs";
 import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
 
-// Sets XDG_CONFIG_HOME in process.env, which run() and the child below pass on.
 useScratchJjConfig();
 
 const HOSTILE_GIT_CONFIG = `[user]
@@ -83,7 +68,6 @@ function makeTempDir(prefix: string): string {
   return dir;
 }
 
-/** Point every git/jj call at the hostile sandboxed config; restored in afterEach. */
 function sandboxConfig(): void {
   for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
   const configDir = makeTempDir("plannotator-color-config-");
@@ -112,10 +96,6 @@ function run(cmd: string, cwd: string, args: string[]): string {
   return result.stdout;
 }
 
-/**
- * main: base.txt + a.txt. feature: two commits on top, then one uncommitted
- * edit and one untracked file, so since-base spans all three sections.
- */
 function initGitRepo(): string {
   const repo = makeTempDir("plannotator-color-repo-");
   run("git", repo, ["init", "--quiet"]);
@@ -160,16 +140,12 @@ function hasJj(): boolean {
 
 describe("code review with color forced on in the user's git config (#1661)", () => {
   test("the sandboxed config really does color a piped git diff", () => {
-    // Guards the test itself: without this, a config typo would let every
-    // assertion below pass against plain output.
     sandboxConfig();
     const repo = initGitRepo();
     expect(run("git", repo, ["diff"])).toContain("\x1b[");
   });
 
   test("agent jobs' environment keeps the git they run themselves color-free", () => {
-    // Review, tour and guide jobs spawn an agent that runs `git diff` through
-    // its own pipe; the job environment carries the color-off settings.
     sandboxConfig();
     const repo = initGitRepo();
     const env = { ...process.env, ...gitColorFreeEnvironment(process.env) };
@@ -202,8 +178,6 @@ describe("code review with color forced on in the user's git config (#1661)", ()
         htmlContent: "<!doctype html><html><body>review</body></html>",
       });
       try {
-        // A switch recomputes the patch, the sections and the identities
-        // server-side, through the same runtime the session uses.
         const switched = await fetch(`${server.url}/api/diff/switch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -253,7 +227,6 @@ describe("code review with color forced on in the user's git config (#1661)", ()
     ["Pi", resolve(import.meta.dir, "../../apps/pi-extension/server/vcs.ts")],
   ] as const;
   for (const [name, modulePath] of JJ_MODULES) {
-    // Skipped when jj is not installed (CI runners do not ship it).
     testIfJj(`${name}: a jj diff stays parseable with ui.color = "always"`, () => {
       sandboxConfig();
       const repo = makeTempDir("plannotator-color-jj-");
@@ -263,9 +236,6 @@ describe("code review with color forced on in the user's git config (#1661)", ()
       writeFileSync(join(repo, "base.txt"), "base\nchanged\n");
       expect(run("jj", repo, ["diff", "--git"])).toContain("\x1b[");
 
-      // A child process, so the runtime's own jj spawns start from the
-      // sandboxed environment (Bun.spawn without `env` does not see variables
-      // this process set after it started).
       const script = `const m = await import(${JSON.stringify(pathToFileURL(modulePath).href)});
 await m.getVcsContext(${JSON.stringify(repo)}, "jj");
 const d = await m.runVcsDiff("jj-current", "main", ${JSON.stringify(repo)});

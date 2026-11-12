@@ -1,8 +1,3 @@
-/**
- * Which projects Tidy calls one. What can regress: a guess getting through (a
- * shared name, a folder that only looks like a checkout), the wrong project
- * being kept, or a pair the person pulled apart coming back.
- */
 import { describe, expect, test } from "bun:test";
 import type { InboxProject, InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { COMBINE_WHY_STARTED_ABOVE, combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
@@ -85,11 +80,9 @@ describe("combineSuggestions", () => {
   });
 
   test("through a chain: a project is not offered back into the group it left, whichever project now heads it", () => {
-    // fix-y left notes, and notes has since gone into web: web is the group fix-y said no to.
     const projects = [project("prj_web", "/web"), project("prj_fix", "/fix", { separated_from: "prj_notes" })];
     const sameProject = (a: string, b: string) => (a === "prj_notes" ? "prj_web" : a) === (b === "prj_notes" ? "prj_web" : b);
     expect(pairs({ projects, repoOf: () => repo("acme/app"), threads: noThreads, sameProject })).toEqual([]);
-    // Another head is another project: the no was not about it.
     expect(pairs({ projects, repoOf: () => repo("acme/app"), threads: noThreads, sameProject: (a, b) => a === b })).toEqual([["prj_fix", "prj_web"]]);
   });
 
@@ -104,8 +97,6 @@ describe("combineSuggestions", () => {
   });
 });
 
-// Audit D2: a session started in a plain folder above a repository files under the folder; the repository's own
-// sessions file under the repository. Offered only when every agent message of the folder is the repository's work.
 describe("combineSuggestions: work split by start folder", () => {
   const PLAIN = new Set(["/code", "/code/notes", "/home/me"]);
   const split = (work: Record<string, InboxAgentWork[]>, projects = [project("prj_code", "/code"), project("prj_a", "/code/a")], extra: Partial<Parameters<typeof combineSuggestions>[0]> = {}) =>
@@ -115,34 +106,24 @@ describe("combineSuggestions: work split by start folder", () => {
   test("offered into the repository when the folder's messages were sent from inside it, or by sessions that also wrote there", () => {
     const fromInside = split({ prj_code: [at("claude-1", "/code/a"), at("claude-1", "/code/a/src")], prj_a: [at("codex-1")] });
     expect(fromInside.map((row) => [row.from.id, row.into.id, row.why])).toEqual([["prj_code", "prj_a", COMBINE_WHY_STARTED_ABOVE]]);
-    // The same session wrote in both (its shell's calls before one session was one project, or a /cd).
     const sameSession = split({ prj_code: [at("claude-1"), at("claude-1")], prj_a: [at("claude-1", null)] });
     expect(sameSession.map((row) => [row.from.id, row.into.id])).toEqual([["prj_code", "prj_a"]]);
   });
 
   test("never for unrelated folders: other work in the folder, several projects inside it, or no messages", () => {
-    // One message from the folder itself by a session that never wrote in the repository: other work.
     expect(split({ prj_code: [at("claude-1", "/code/a"), at("claude-2")], prj_a: [at("claude-1")] })).toEqual([]);
-    // A message from a sibling whose name starts the same is not inside it.
     expect(split({ prj_code: [at("claude-1", "/code/ab")], prj_a: [at("codex-1")] })).toEqual([]);
-    // A folder that holds several projects is a folder of projects, even when all its work so far was one's.
     const two = [project("prj_code", "/code"), project("prj_a", "/code/a"), project("prj_b", "/code/b")];
     expect(split({ prj_code: [at("claude-1", "/code/a")], prj_a: [at("claude-1")] }, two)).toEqual([]);
-    // Nothing to judge by.
     expect(split({ prj_a: [at("codex-1")] })).toEqual([]);
-    // An agent with no session that sent from the folder itself.
     expect(split({ prj_code: [at(null)], prj_a: [at(null)] })).toEqual([]);
   });
 
   test("never out of a repository, the home folder or `/`, never into a plain folder, and not again once undone", () => {
     const work = { prj_code: [at("claude-1", "/code/a")], prj_a: [at("claude-1")], prj_home: [at("claude-1", "/home/me/a")] };
-    // A repository with a nested one: separate by design (a submodule is its own project).
     expect(split(work, undefined, { plainFolder: () => false })).toEqual([]);
-    // The home folder (plainFolder says no) holding one project.
     expect(split(work, [project("prj_home", "/home/me"), project("prj_a", "/home/me/a")], { plainFolder: (root) => root !== "/home/me" && PLAIN.has(root) })).toEqual([]);
-    // Into a plain folder: two places, whatever their agents did.
     expect(split({ prj_code: [at("claude-1", "/code/notes")], prj_notes: [at("claude-1")] }, [project("prj_code", "/code"), project("prj_notes", "/code/notes")])).toEqual([]);
-    // The person undid it.
     expect(split(work, [project("prj_code", "/code", { separated_from: "prj_a" }), project("prj_a", "/code/a")])).toEqual([]);
   });
 
@@ -153,29 +134,22 @@ describe("combineSuggestions: work split by start folder", () => {
     expect(asked).toEqual([]);
   });
 
-  // Review of #2528, F1: the Inbox knows only the repositories that had traffic; the disk says what else the folder holds.
   test("never when the folder holds other work on disk, a combined member inside it, or a name the person gave it", () => {
     const work = { prj_code: [at("claude-1", "/code/a")], prj_a: [at("claude-1")] };
     const asked: [string, string][] = [];
     expect(split(work, undefined, { holdsOtherWork: (folder, inner) => (asked.push([folder, inner]), true) })).toEqual([]);
     expect(asked).toEqual([["/code", "/code/a"]]);
-    // Without the disk read, the signal is off.
     expect(split(work, undefined, { holdsOtherWork: undefined })).toEqual([]);
-    // A project combined into another place still lives in the folder: two projects inside it.
     const listed = [project("prj_code", "/code"), project("prj_a", "/code/a")];
     expect(split(work, listed, { everyProject: [...listed, project("prj_b", "/code/b", { merged_into: "prj_x" })] })).toEqual([]);
-    // The one project inside is a member of a group headed elsewhere: not one the person sees, so not a target.
     expect(split(work, [project("prj_code", "/code")], { everyProject: [project("prj_code", "/code"), project("prj_a", "/code/a", { merged_into: "prj_x" })] })).toEqual([]);
-    // Renamed: the person sees the folder as its own place.
     expect(split(work, [project("prj_code", "/code", { display_name: "Code" }), project("prj_a", "/code/a")])).toEqual([]);
-    // The disk is asked only for a pair that otherwise qualifies.
     asked.length = 0;
     split({ prj_code: [at("claude-2")], prj_a: [at("claude-1")] }, undefined, { holdsOtherWork: (folder, inner) => (asked.push([folder, inner]), false) });
     expect(asked).toEqual([]);
   });
 
   test("a deep tree of projects reads the same as pair by pair, and stays fast", () => {
-    // A folder of 2000 repositories, each with a leftover checkout, and folders above single repositories.
     const projects: InboxProject[] = [];
     const work: Record<string, InboxAgentWork[]> = {};
     for (let index = 0; index < 1000; index++) {
@@ -195,7 +169,6 @@ describe("combineSuggestions: work split by start folder", () => {
     expect(leftovers.length).toBe(1000);
     expect(leftovers.every((row) => row.from.root.startsWith(`${row.into.root}/.claude/worktrees/`))).toBe(true);
     expect(above.map((row) => [row.from.id, row.into.id])).toEqual(Array.from({ length: 50 }, (_, index) => [`prj_solo${index}`, `prj_solo${index}_repo`]));
-    // The pair-by-pair version took about 0.9 s for 2100 projects; this one takes about 3 ms. A generous bound for a slow machine.
     expect(took).toBeLessThan(500);
   });
 });

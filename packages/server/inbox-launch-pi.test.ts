@@ -1,10 +1,3 @@
-/**
- * Pi's launch host (inbox-launch-pi.ts) against the fake `pi` (tests/helpers/fake-pi/), never the real one: the
- * process it owns per session, Stop and resume on the same session file, the extension dialog it answers Cancel
- * and says so in the thread, Open in Terminal handing the session over without a second writer, restarts that a
- * Stop, Delete or Open in Terminal cancels, the Inbox's stop ending every process, a start that fails, when the
- * row is offered, and the scratch purge. A small bridge in the test's own data dir stands in for the Inbox's.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -21,7 +14,6 @@ import { piSessionClaimFileOf, readPiSessionClaims, releasePiSessionClaim, write
 import { createPiLaunchHost, piDialogNote, piDialogTitle, piExtensionListed, piHandoffCommand, piSessionProcesses, piSpawnEnv, PI_HANDED_BACK_NOTE, PI_HANDOFF_NOTE, PI_STOPPED_NOTE } from "./inbox-launch-pi";
 
 const cleanup: (() => void | Promise<void>)[] = [];
-/** Node on PATH: the fake pi runs on it and titles itself `pi`, as Pi does (tests/helpers/fake-pi). */
 const NODE = Bun.which("node") !== null;
 if (!NODE) console.warn("inbox-launch-pi.test.ts: no node on PATH, so the fake pi runs on Bun, which ignores process.title; the Copy attach test that needs ps to list it as `pi` is skipped");
 afterEach(async () => {
@@ -38,7 +30,6 @@ async function until<T>(what: string, check: () => T | null | undefined | false,
   }
 }
 
-/** The bridge polls of the test's data dir (the fake's extension finds it through inbox.json): live while it polls. */
 function testBridge(dataDir: string) {
   const seen = new Map<string, { polls: number; last: number; holding: number }>();
   const server = Bun.serve({
@@ -82,7 +73,6 @@ function setup(
   const env = { HOME: home, PATH: `${bin}:/usr/bin:/bin` };
   const bridge = testBridge(dataDir);
   const logs: string[] = [];
-  /** A login-shell read the test holds open (`holdLogin`), as a slow one would be. */
   let held: Promise<void> | null = null;
   const holdLogin = () => {
     let release!: () => void;
@@ -115,7 +105,6 @@ function setup(
   const project = store.ensureProject({ name: "project", root: folder });
   const roots = new Map<string, InboxMessage>();
   const hosts: ReturnType<typeof createPiLaunchHost>[] = [];
-  /** A host on this context: another one is the Inbox started again. */
   const makeHost = () => {
     const made = createPiLaunchHost(ctx, options);
     const permissions = made.permissions({
@@ -132,7 +121,6 @@ function setup(
   };
   const { host, sweep } = makeHost();
   const terminals: ReturnType<typeof Bun.spawn>[] = [];
-  /** What Open in Terminal would run, run here as the person's shell runs a typed line (with the fake on PATH). */
   const runTerminal = (command: string, personShell = "/bin/sh") => {
     const shell = Bun.spawn([personShell, "-c", command], { env, stdout: "ignore", stderr: "ignore" });
     terminals.push(shell);
@@ -147,7 +135,6 @@ function setup(
     rmSync(root, { recursive: true, force: true });
   });
   let n = 0;
-  /** A started launch: its record, now with the session. */
   const started = async (login: Record<string, string> = env) => {
     n += 1;
     const launch: InboxLaunchRecord = { id: `lch_01J0000000000000000000000${n}`, agent: "pi", session_ref: null, folder, scratch: false, started_at: new Date().toISOString() };
@@ -176,10 +163,8 @@ describe("Pi's launch host, against the fake pi", () => {
     const [call] = fake.starts();
     expect(call!.argv).toEqual(["--mode", "rpc", "--session-id", session, "--name", "Tidy the readme"]);
     expect(call!.cwd).toBe(folder);
-    // The launched session reaches this Inbox (not the person's default one), with the Inbox tool on for it alone.
     expect(call!.dataDir).toBe(dataDir);
     expect(call!.inboxTool).toBe("1");
-    // The login env's own values go through; the Inbox's PLANNOTATOR_* names and a Pi session's markers never do.
     expect(call!.env).toContain("ANTHROPIC_API_KEY");
     expect(call!.env).not.toContain("PLANNOTATOR_SESSION_TAG");
     expect(call!.env).not.toContain("PI_SESSION_ID");
@@ -198,7 +183,6 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(resumed.failure).toBeNull();
     expect(fake.starts()).toHaveLength(2);
     expect(fake.starts()[1]!.argv.slice(0, 4)).toEqual(["--mode", "rpc", "--session-id", session]);
-    // One session file: the resume continued it, it did not make another.
     expect(fake.sessionFiles()).toHaveLength(1);
     expect((await host.sessions())(session)).toMatchObject({ state: "running" });
   });
@@ -213,13 +197,11 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Pi" });
     expect(note.body).toStartWith("Pi asked something the Inbox can't show yet (“⚠️ Dangerous command: :::question - \\[ \\] Yes \\`rm -rf \\~\\` Allow? xxx");
     expect(note.body).toEndWith("…”); answered Cancel.");
-    // One line, no control or invisible character, no block of its own: it can never become a question.
     expect(note.body).not.toContain("\n");
     expect(note.body).not.toContain("‮");
     expect(store.questionsOf(note.id)).toHaveLength(0);
   });
 
-  // Live check: a provider error (the model refused for a ChatGPT login) ended the turn, and the thread said only "Delivered".
   test("a turn that ends in a provider error: one note from Pi with Pi's own words, once its retries are over", async () => {
     const error = "Codex error: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.";
     const { started, agentNotes, logs } = setup({ noConnect: true, turnOnStart: true, turnError: error, retries: 2 });
@@ -227,7 +209,6 @@ describe("Pi's launch host, against the fake pi", () => {
     const note = await until("the error note in the thread", () => agentNotes(root)[0]);
     expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Pi" });
     expect(note.body).toBe(`Pi's turn ended with an error: ${error}`);
-    // The runs Pi retried say nothing of their own.
     await Bun.sleep(2_000);
     expect(agentNotes(root)).toHaveLength(1);
     expect(logs.some((line) => line.includes(`the turn ended with an error: ${error}`))).toBe(true);
@@ -241,14 +222,11 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(store.questionsOf(note.id)).toHaveLength(0);
   });
 
-  // Round 2, Should 4: the Inbox's Pi was ended before Terminal opened.
   test("Open in Terminal while the Inbox's process runs: it ends only once the terminal shows (its turn aborted), and the terminal's Pi waits for it", async () => {
     const { fake, host, runTerminal, started } = setup();
     const { launch, session, pid } = await started();
-    // Copy attach command is not offered while the Inbox's process runs the session.
     expect(host.attach(launch)).toBeNull();
     const command = host.terminal(launch, false);
-    // No terminal yet (osascript has not run, or failed): the Inbox's Pi keeps running.
     await Bun.sleep(700);
     expect(fake.alive(pid)).toBe(true);
     runTerminal(command);
@@ -257,7 +235,6 @@ describe("Pi's launch host, against the fake pi", () => {
     const terminal = await until("the terminal's Pi", () => fake.terminals()[0]);
     expect(terminal.at).toBeGreaterThanOrEqual(exit.at);
     expect(terminal.argv).toEqual(["--session-id", session]);
-    // A reply starts no second process here.
     expect((await host.resume(launch)).failure).toBeNull();
     expect(fake.starts()).toHaveLength(1);
   });
@@ -277,19 +254,16 @@ describe("Pi's launch host, against the fake pi", () => {
     const { launch, pid } = await started();
     const command = host.terminal(launch, false);
     expect(host.stoppedNote(launch)).toBe(PI_HANDOFF_NOTE);
-    // Another Open's words (a second press while it opens) never withdraw the first one's hand-off.
     host.terminalFailed(launch, host.terminal(launch, false));
     expect(host.stoppedNote(launch)).toBe(PI_HANDOFF_NOTE);
     host.terminalFailed(launch, command);
     expect(host.stoppedNote(launch)).not.toBe(PI_HANDOFF_NOTE);
-    // Not ended once ps would show a terminal: nothing waits for one any more.
     await Bun.sleep(700);
     expect(fake.alive(pid)).toBe(true);
     expect(fake.exits()).toHaveLength(0);
     expect(host.terminal(launch, false)).toContain("kill -0"); // inbox-guard: own child (text of the Terminal command, no signal)
   });
 
-  // Round 3, Should 1: a `pi` wrapper that does not exec read as "another process", so Open in Terminal always refused.
   test("with a pi wrapper that does not exec, Open in Terminal still hands the session over", async () => {
     const { fake, host, runTerminal, started } = setup();
     fake.setExec(false);
@@ -301,7 +275,6 @@ describe("Pi's launch host, against the fake pi", () => {
     await until("the terminal's Pi", () => fake.terminals()[0]);
   });
 
-  // Round 3, Should 2: with its folder gone, the hand-off command ran Pi at once, in the shell's own folder.
   test("the hand-off command with its folder gone runs no Pi", async () => {
     const { fake, root, runTerminal } = setup();
     const shell = runTerminal(piHandoffCommand(join(root, "gone"), randomUUID(), process.pid));
@@ -310,13 +283,11 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.terminals()).toHaveLength(0);
   });
 
-  // Round 3, Must: Copy attach was offered again while the Pi the person started from it ran the session.
   test("Copy attach is not offered while the Pi started from it runs the session", async () => {
     const { fake, host, bridge, runTerminal, started } = setup({});
     const { launch, session } = await started();
     await until("the Inbox's Pi on the bridge", () => bridge.runStateOf(session));
     await host.stop(session);
-    // Its own last polls still read live for a while: offered at once.
     const atStop = bridge.runStateOf(session);
     expect(atStop).not.toBeNull();
     const command = host.attach(launch);
@@ -326,7 +297,6 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(host.attach(launch)).toBeNull();
   });
 
-  // Round 3, Should 4: with no ps, "" read as "no process", and a restart started a second writer.
   test("when ps does not run, a reply's restart starts nothing and says why", async () => {
     const { fake, host, logs, started } = setup({ noConnect: true }, { ps: "/nonexistent/plannotator-test/ps" });
     const { launch, session } = await started();
@@ -337,7 +307,6 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.starts()).toHaveLength(1);
   });
 
-  // Round 2, Must 1: a second Open in Terminal (or Copy attach) before the bridge saw the first terminal's Pi.
   test("a second Open in Terminal, or Copy attach, during a hand-off gives no second Pi on the session", async () => {
     const { fake, host, runTerminal, started } = setup();
     const running = await started();
@@ -351,7 +320,6 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.terminals().filter((call) => fake.alive(call.pid))).toHaveLength(1);
     expect(second).toStartWith("echo ");
 
-    // The same on a stopped session.
     const stopped = await started();
     await host.stop(stopped.session);
     const one = host.terminal(stopped.launch, false);
@@ -363,17 +331,14 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.terminals().filter((call) => call.argv[1] === stopped.session && fake.alive(call.pid))).toHaveLength(1);
   });
 
-  // Round 2, Must 2: an Inbox started again forgot the hand-off, and a reply started an RPC Pi beside the terminal's.
   test("after an Inbox restart, a Pi open in a terminal on the session keeps every restart off, until it quit", async () => {
     const { fake, host, makeHost, dataDir, runTerminal, started } = setup();
     const { launch, session } = await started();
     await host.stop(session);
-    // The terminal's Pi cannot reach the new Inbox yet (it retries on its own backoff).
     rmSync(join(dataDir, "inbox", "inbox.json"));
     runTerminal(host.terminal(launch, false));
     const terminal = await until("the terminal's Pi", () => fake.terminals()[0]);
     const restarted = makeHost().host;
-    // The reply waits for that Pi: held, not restarted; no attach command, no second terminal.
     expect(restarted.live(session)).toMatchObject({ busy: null });
     expect((await restarted.resume(launch)).failure).toBeNull();
     expect(fake.starts()).toHaveLength(1);
@@ -387,7 +352,6 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.starts()).toHaveLength(2);
   });
 
-  // Round 2, Should 3: a reply during a hand-off read as a restart ("Starting Pi again…", then "did not connect").
   test("during a hand-off the session reads as held, so a reply waits for the terminal's Pi; once it is over, it reads as stopped", async () => {
     const { host, started } = setup({ noConnect: true }, { handoffMs: 300 });
     const { launch, session } = await started();
@@ -399,7 +363,6 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(host.live(session)).toBeNull();
   });
 
-  // Round 2, Should 1 and 5: the Terminal command in another shell's syntax, an odd data dir and folder.
   test("the Terminal command runs the same from sh and from csh, with spaces, quotes and shell marks in the data dir and the folder", async () => {
     const odd = { dataDirName: `data dir 'q' "dq" $HOME \`x\` ; &`, folderName: `pro'ject $(x) "y"` };
     const { fake, host, dataDir, folder, runTerminal, started } = setup({ noConnect: true }, odd);
@@ -412,33 +375,25 @@ describe("Pi's launch host, against the fake pi", () => {
     }
   });
 
-  // Must 1: the Terminal's Pi polled nothing (no Inbox tool), and a timer alone ended the hand-off.
   test("the Terminal's Pi takes the session through this Inbox's bridge; nothing starts here until it quit, however long it runs", async () => {
     const { fake, host, dataDir, bridge, runTerminal, started } = setup({ noConnect: true }, { handoffMs: 300 });
     const { launch, session, pid } = await started();
     const shell = runTerminal(host.terminal(launch, false));
-    // It runs only once the Inbox's process is gone, and it polls this Inbox: the Inbox tool on, this data dir.
     await until("the Terminal's Pi on the bridge", () => bridge.runStateOf(session));
     const [terminal] = fake.terminals();
     expect(terminal).toMatchObject({ inboxTool: "1", dataDir, argv: ["--session-id", session] });
     expect(fake.exits().find((e) => e.pid === pid)!.at).toBeLessThanOrEqual(terminal!.at);
-    // Long past the hand-off's minute (here 300 ms): while the Terminal's Pi runs, a reply starts nothing here,
-    // and nothing offers a second Pi on the session.
     await Bun.sleep(700);
     expect((await host.resume(launch)).failure).toBeNull();
     expect(fake.starts()).toHaveLength(1);
     expect(host.attach(launch)).toBeNull();
-    // It quit there: the next reply continues the session here.
     process.kill(terminal!.pid, "SIGTERM"); // inbox-guard: own child (the fake pi this test's Terminal command ran)
     await until("the bridge to lose it", () => !bridge.runStateOf(session));
-    // Quit means gone: the bridge can lose the Pi a moment before its process and the Terminal's shell (whose
-    // command line names the session too) have ended, and a reply in that moment rightly waits (CI, Linux).
     await until("the Terminal's Pi and its shell to end", () => !fake.alive(terminal!.pid) && shell.exitCode !== null);
     expect((await host.resume(launch)).failure).toBeNull();
     expect(fake.starts()).toHaveLength(2);
   });
 
-  // Must 2: Open in Terminal on a session that is not running opened no hand-off, and a restart reading the login shell went on.
   test("Open in Terminal on a stopped session, or during a reply's restart, hands it over: nothing starts here", async () => {
     const { fake, host, holdLogin, started, dataDir, folder } = setup();
     const a = await started();
@@ -451,7 +406,6 @@ describe("Pi's launch host, against the fake pi", () => {
     await host.stop(b.session);
     const release = holdLogin();
     const restart = host.resume(b.launch);
-    // A restart under way: no Copy attach; Open in Terminal gives the Terminal the session, and the restart stops.
     expect(host.attach(b.launch)).toBeNull();
     const command = host.terminal(b.launch, false);
     expect(command).toContain(b.session);
@@ -462,7 +416,6 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.starts()).toHaveLength(2);
   });
 
-  // Must 3: a Stop or Delete (Delete stops first) during a reply's restart still started Pi.
   test("Stop or Delete during a reply's restart: before its spawn nothing starts; as it comes up it ends", async () => {
     const { fake, host, holdLogin, started } = setup({ noConnect: true });
     const a = await started();
@@ -506,7 +459,6 @@ describe("Pi's launch host, against the fake pi", () => {
     sweep();
     expect(host.stoppedNote(handed.launch)).toBe(PI_HANDED_BACK_NOTE);
 
-    // The Inbox started again: it never ran these sessions.
     expect(makeHost().host.stoppedNote(crashed.launch)).toBe(PI_STOPPED_NOTE);
   });
 
@@ -531,16 +483,11 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.starts()).toHaveLength(2);
   });
 
-  // A real Pi 1.5.0 run: Pi sets process.title = "pi", so ps lists a terminal's Pi as `pi` alone, with no
-  // --session-id, and an Inbox started again started a second writer beside the one from Copy attach command.
-  // The fake hides its argv only on Node (Bun ignores process.title): without Node this proves nothing.
   test.skipIf(!NODE)("after an Inbox restart, a Pi from Copy attach command that ps lists as `pi` alone keeps every restart off, until it quit", async () => {
     const { fake, host, makeHost, bin, dataDir, folder, env, started } = setup();
     const { launch, session } = await started();
     await host.stop(session);
     expect(host.attach(launch)).not.toBeNull();
-    // The attach command's Pi once its shell exec'd it: nothing in the process list names the session. Its
-    // Inbox tool off keeps it off the bridge, as one still reconnecting to the new Inbox; it claims the session all the same.
     const attached = Bun.spawn([join(bin, "pi"), "--session-id", session], { cwd: folder, env: { ...env, PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_DATA_DIR: dataDir }, stdout: "ignore", stderr: "ignore" });
     cleanup.push(() => void attached.kill("SIGTERM"));
     const terminal = await until("the attach command's Pi", () => fake.terminals()[0]);
@@ -568,7 +515,6 @@ describe("Pi's launch host, against the fake pi", () => {
     const note = await until("the note", () => agentNotes(root).find((m) => m.body.startsWith("Pi's session file for this thread is gone")));
     expect(note.body).toContain(file!);
     expect(note.author).toMatchObject({ host: "pi", session });
-    // A file that is there: no note.
     await host.stop(session);
     await host.resume(launch);
     expect(agentNotes(root)).toHaveLength(1);
@@ -588,7 +534,6 @@ describe("Pi's launch host, against the fake pi", () => {
     const { fake, host, folder } = setup({ readyDelayMs: 5_000 }, { readyMs: 1_000 });
     const launch: InboxLaunchRecord = { id: "lch_01J0000000000000000000000A", agent: "pi", session_ref: null, folder, scratch: false, started_at: new Date().toISOString() };
     const result = await host.start(launch, { name: "Hi", login: { HOME: "", PATH: fake.shell.replace(/\/login-shell$/, "") + ":/usr/bin:/bin" } });
-    // The fake, as Pi, says "No project session found…" on stderr for a new session id.
     expect(result).toMatchObject({ ok: false, code: "failed", text: "It did not answer within 1 s." });
     expect(fake.starts().every((call) => !fake.alive(call.pid))).toBe(true);
   });
@@ -604,7 +549,6 @@ describe("Pi's launch host, against the fake pi", () => {
     fake.setInstalled(false);
     expect(await host.available()).toMatchObject({ ok: false, missing: true });
 
-    // The settings are read first: with the extension missing, no Pi runs at all, not even `--version`.
     const bare = setup();
     bare.fake.setExtension(false);
     expect(await bare.host.available()).toMatchObject({ ok: false, missing: false });
@@ -616,7 +560,6 @@ describe("Pi's launch host, against the fake pi", () => {
     const { session } = await started();
     await host.stop(session);
     const dir = join(home, ".pi", "agent", "sessions", `--${folder.slice(1).replace(/\//g, "-")}--`);
-    // Another folder whose name encodes the same way (Pi maps "/" and "-" alike): never removed.
     writeFileSync(join(dir, "other.jsonl"), `${JSON.stringify({ type: "session", id: "x", cwd: `${folder}-elsewhere` })}\n`);
     expect((await host.purge(folder)).skipped).toBeUndefined();
     expect(fake.sessionFiles()).toEqual([join(dir, "other.jsonl")]);
@@ -659,10 +602,8 @@ describe("Pi's pure pieces", () => {
     const listing = ["  10     1 /sbin/launchd", " 200    10 pi  ", " 300    10 node /srv/app.js", " 400   250 pi", " 250    10 /Applications/Plannotator"].join("\n");
     const claim = (pid: number, rpc = false) => ({ session, pid, rpc, title: "pi" });
     expect(piSessionProcesses(listing, session, [], [claim(200, true)])).toEqual([{ pid: 200, rpc: true }]);
-    // The pid is another program now, or gone; or the claim is another session's.
     expect(piSessionProcesses(listing, session, [], [claim(300), claim(999)])).toEqual([]);
     expect(piSessionProcesses(listing, randomUUID(), [], [claim(200)])).toEqual([]);
-    // The Inbox's own Pi, or one under it (a wrapper that does not exec), is left out.
     expect(piSessionProcesses(listing, session, [250], [claim(400)])).toEqual([]);
   });
 
@@ -679,7 +620,6 @@ describe("Pi's pure pieces", () => {
     expect(readPiSessionClaims(dataDir)).toHaveLength(1);
     releasePiSessionClaim(dataDir, session, process.pid, "new");
     expect(readPiSessionClaims(dataDir)).toHaveLength(0);
-    // A killed Pi's claim, its pid reused by a Pi on another session: that Pi's claim replaces it.
     writePiSessionClaim(dataDir, { session, pid: process.pid, rpc: true, title: "pi", owner: "killed" });
     const other = randomUUID();
     writePiSessionClaim(dataDir, { session: other, pid: process.pid, rpc: false, title: "pi", owner: "reuser" });

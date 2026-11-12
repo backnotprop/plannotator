@@ -1,12 +1,3 @@
-/**
- * "Open in" for Inbox attachments (packages/server/inbox-open-in.ts, the
- * page route in inbox-attachments.ts), proved against a real Inbox on
- * loopback with real `fetch`. No real app ever starts: the launch tests pass
- * a recording launcher (`openInLauncher`), and the one test of the real
- * launcher puts ONLY a scratch folder of stubs (`open`, `xdg-open`) on PATH
- * while it runs, so a launcher that is not a stub cannot be found. Every test
- * has its own temp data dir; Tailscale is a scripted runner, never the CLI.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -45,7 +36,6 @@ function setEnv(name: string, value: string | undefined): void {
 const PNG = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
 const PDF = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n");
 
-/** A project folder with one file of every kind the policy distinguishes. */
 function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-openin-")));
   roots.push(root);
@@ -72,7 +62,6 @@ function world() {
 
 type Launch = { how: "reveal" | "app" | "default"; path: string; app?: string; line?: number };
 
-/** A launcher that records instead of starting anything. */
 function recordingLauncher(platform: OpenInPlatform, apps: string[] = ["reveal", "vscode", "cursor", "terminal"], answer: { ok: true } | { ok: false; error: string } = { ok: true }) {
   const launches: Launch[] = [];
   const catalog: Record<string, AvailableOpenInApp> = {
@@ -97,12 +86,10 @@ async function start(dataDir: string, extra: Parameters<typeof startInboxServer>
   return server;
 }
 
-/** One message carrying every file of the project; their ids by name. */
 async function attach(server: InboxServer, project: string, names: string[]): Promise<Record<string, string>> {
   const prj = server.store.ensureProject({ name: "billing", root: project });
   const attachments = await recordInboxAttachments(server.store.dir, names, { base: project, at: new Date().toISOString() });
   server.store.sendMessage({ project_id: prj.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" }, body: "Files.", attachments });
-  // Keyed by the name the agent gave (a symlink's own name), as `names` lists them.
   return Object.fromEntries(attachments.map((a, i) => [names[i]!, a.id]));
 }
 
@@ -139,7 +126,6 @@ describe("Inbox Open in: the launch route", () => {
     const ids = await attach(server, project, ALL);
     const allowed = async (name: string, app: string) => (await openIn(server, { attachment_id: ids[name], app_id: app })).status;
     const table: [string, string, number][] = [
-      // Markdown, text and code: editors; the default app only for md/txt/json/yaml/toml/log (macOS, Windows).
       ["plan.md", "vscode", 200],
       ["plan.md", "default", 200],
       ["notes.txt", "default", 200],
@@ -147,29 +133,23 @@ describe("Inbox Open in: the launch route", () => {
       ["rows.csv", "default", 422],
       ["deploy.sh", "cursor", 200],
       ["deploy.sh", "default", 422],
-      // HTML: editors and the file manager; never the OS default (Browser is the window's link).
       ["page.html", "vscode", 200],
       ["page.html", "default", 422],
       ["page.html", "browser", 422],
-      // Images and PDFs: their viewer when the bytes and the extension agree; no editor.
       ["shot.png", "default", 200],
       ["shot.png", "vscode", 422],
       ["run.command", "default", 422],
       ["spec.pdf", "default", 200],
-      // Anything else: the file manager only.
       ["build.zip", "reveal", 200],
       ["build.zip", "default", 422],
       ["build.zip", "vscode", 422],
-      // Never a terminal, whatever the kind.
       ["plan.md", "terminal", 422],
       ["plan.md", "reveal", 200],
     ];
     const answered: [string, string, number][] = [];
     for (const [name, app] of table) answered.push([name, app, await allowed(name, app)]);
     expect(answered).toEqual(table);
-    // run.command is a PNG by its bytes, so the Inbox calls it an image; its name would still run it.
     expect(server.store.attachment(ids["run.command"]!)!.attachment.kind).toBe("image");
-    // Every launch went to the realpath the record holds.
     expect(launches.every((launch) => launch.path === realpathSync(join(project, launch.path.split("/").pop()!)))).toBe(true);
     expect(launches.filter((l) => l.how === "default").map((l) => l.path.split("/").pop())).toEqual(["plan.md", "notes.txt", "shot.png", "spec.pdf"]);
     expect(launches.filter((l) => l.how === "app").map((l) => `${l.app}:${l.path.split("/").pop()}`)).toEqual(["vscode:plan.md", "vscode:rows.csv", "cursor:deploy.sh", "vscode:page.html"]);
@@ -192,9 +172,7 @@ describe("Inbox Open in: the launch route", () => {
     const ids = await attach(server, project, ["plan.md"]);
     const id = ids["plan.md"]!;
     expect(await answerOf(await openIn(server, { attachment_id: id, app_id: "vscode" }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" }))).toEqual([403, "cross_origin"]);
-    // An attached page runs at an opaque origin: Origin null is another site.
     expect(await answerOf(await openIn(server, { attachment_id: id, app_id: "vscode" }, { Origin: "null" }))).toEqual([403, "cross_origin"]);
-    // A preflight-free text/plain POST from another localhost port is refused too.
     expect(await answerOf(await openIn(server, JSON.stringify({ attachment_id: id, app_id: "vscode" }), { "Content-Type": "text/plain", "Sec-Fetch-Site": "same-site", Origin: "http://localhost:1" }))).toEqual([403, "cross_origin"]);
     expect(await answerOf(await openIn(server, { attachment_id: id, app_id: "vscode", serverSession: "an-older-inbox" }))).toEqual([409, "session_mismatch"]);
     expect(await answerOf(await openIn(server, { app_id: "vscode" }))).toEqual([422, "validation_error"]);
@@ -206,7 +184,6 @@ describe("Inbox Open in: the launch route", () => {
     expect(await answerOf(await openIn(server, { attachment_id: id, app_id: "cursor" }))).toEqual([422, "app_not_available"]);
     expect((await fetch(`http://127.0.0.1:${server.port}/api/inbox/open-in`)).status).toBe(405);
     expect(launches).toEqual([]);
-    // A path in the body is never read: the record's realpath is what launches.
     const ok = await openIn(server, { attachment_id: id, app_id: "vscode", path: "/etc/passwd", filePath: "/etc/passwd" });
     expect(await ok.json()).toEqual({ ok: true });
     expect(launches).toEqual([{ how: "app", app: "vscode", path: join(project, "plan.md") }]);
@@ -245,7 +222,6 @@ describe("Inbox Open in: a file a reference names", () => {
   const FILE = "/api/inbox/open-in/file";
   const REPO = "github.com/acme/billing";
 
-  /** An Inbox with Code review and Shape on, a thread in the project, a shape on it, and the project on a repository. */
   async function referenced(extra: Parameters<typeof startInboxServer>[0] = {}) {
     const w = world();
     const made = createShapeStore({ dataDir: w.dataDir }).update({
@@ -285,7 +261,6 @@ describe("Inbox Open in: a file a reference names", () => {
       { how: "app", path, app: "vscode", line: 12 },
     ]);
     r.launches.length = 0;
-    // A project's origin is read behind the first ask for it (the PR page's list has asked by then).
     await r.check({ repo: REPO, path: "src/app.ts" });
     await Bun.sleep(30);
     expect(await r.check({ repo: REPO, path: "src/app.ts" })).toEqual({ found: true, path, kind: "code" });
@@ -297,7 +272,6 @@ describe("Inbox Open in: a file a reference names", () => {
     const r = await referenced();
     expect(await r.check({ thread: r.thread, path: "src/gone.ts" })).toEqual({ found: false });
     expect(await answerOf(await r.open({ thread: r.thread, path: "src/gone.ts", app_id: "vscode" }))).toEqual([404, "attachment_missing"]);
-    // A repository no project here is on, and a thread or shape that does not exist: nothing to find it in.
     expect(await r.check({ repo: "github.com/acme/elsewhere", path: "plan.md" })).toEqual({ found: false });
     expect(await r.check({ thread: "msg_nope", path: "plan.md" })).toEqual({ found: false });
     expect(await r.check({ shape: "shp_nope", path: "plan.md" })).toEqual({ found: false });
@@ -317,7 +291,6 @@ describe("Inbox Open in: a file a reference names", () => {
       expect([path, ...(await answerOf(await r.open({ thread: r.thread, path, app_id: "vscode" })))]).toEqual([path, 422, "open_not_allowed"]);
     }
     expect(r.launches).toEqual([]);
-    // A root in the request means nothing.
     expect(await r.check({ thread: r.thread, root: r.root, path: "secret.txt" })).toEqual({ found: false });
   });
 
@@ -333,7 +306,6 @@ describe("Inbox Open in: a file a reference names", () => {
     expect(r.launches.map((l) => l.how)).toEqual(["app", "default"]);
   });
 
-  /** A linked worktree of the project, as git leaves it: a folder whose `.git` is a file. */
   function worktree(r: { root: string }, name: string, files: Record<string, string>) {
     const dir = realpathSync(mkdtempSync(join(r.root, `${name}-`)));
     const gitdir = join(dir, "..", `${name}-gitdir-${dir.slice(-6)}`);
@@ -361,9 +333,7 @@ describe("Inbox Open in: a file a reference names", () => {
     expect((await r.check({ ...scope, path: "src/app.ts" })).path).toBe(join(wt, "src/app.ts"));
     expect((await r.check({ ...scope, path: "src/only-here.ts" })).path).toBe(join(wt, "src/only-here.ts"));
     expect((await r.check({ ...scope, path: join(wt, "src/app.ts") })).path).toBe(join(wt, "src/app.ts"));
-    // A file the worktree does not have: the main checkout's copy is not the agent's file.
     expect(await r.check({ ...scope, path: "src/only-main.ts" })).toEqual({ found: false });
-    // Named absolutely, it means that file.
     expect((await r.check({ ...scope, path: join(r.project, "src/only-main.ts") })).path).toBe(join(r.project, "src/only-main.ts"));
 
     await r.open({ ...scope, path: "src/app.ts", app_id: "reveal" });
@@ -390,7 +360,6 @@ describe("Inbox Open in: a file a reference names", () => {
     if (!made.ok) throw new Error(JSON.stringify(made));
     expect((await r.check({ shape: made.id, path: "app.ts" })).path).toBe(join(wt, "app.ts"));
     expect((await r.check({ shape: made.id, path: "new.ts" })).path).toBe(join(wt, "new.ts"));
-    // Its file viewer reads the same checkout.
     const read = (await (await fetch(`${r.base}/api/shapes/${made.id}/code/file?path=app.ts`)).json()) as Json;
     expect(JSON.stringify(read)).toContain("worktree");
     rmSync(wt, { recursive: true, force: true });
@@ -479,7 +448,6 @@ describe("Inbox Open in: a file a reference names", () => {
     writeFileSync(join(home, ".ssh/id_rsa"), "secret\n");
     const spelled = join(dir, "linkhome");
     symlinkSync(home, spelled);
-    // The home folder named through a link, a base under the real folder; the home folder real, a base through the link.
     for (const [openInHome, base_path] of [[spelled, home], [home, spelled]] as const) {
       const r = await referenced({ openInHome });
       const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
@@ -558,7 +526,6 @@ describe("Inbox Open in: a file a reference names", () => {
     writeFileSync(join(elsewhere, "secret.ts"), "there\n");
     const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
     const stray = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "There.", base_path: elsewhere });
-    // Without the thread rule, this message's folder would answer.
     expect((await r.check({ thread: stray.message.thread_id, message: stray.message.id, path: "secret.ts" })).found).toBe(true);
     expect(await r.check({ thread: r.thread, message: stray.message.id, path: "secret.ts" })).toEqual({ found: false });
     expect(await answerOf(await r.open({ thread: r.thread, message: stray.message.id, path: "secret.ts", app_id: "vscode" }))).toEqual([404, "attachment_missing"]);
@@ -651,7 +618,6 @@ describe("Inbox Open in: the real launcher, with stubs on PATH", () => {
         "open|-a",
         "open|Visual Studio Code",
         "open|vscode://file/work/my%20app/src/a%23b.ts:12",
-        // `open -a` takes no line: this one opens at the top.
         "open|-a",
         "open|Sublime Text",
         `open|${file}`,
@@ -682,14 +648,10 @@ describe("Inbox Open in: the new-tab page", () => {
     expect(await served.text()).toContain("<h1 id=\"top\">Checkout</h1>");
     const image = await fetch(`${base}${location.replace("page.html", "shot.png")}`);
     expect(image.status).toBe(200);
-    // A hidden file next to it is never served from the folder.
     expect((await fetch(`${base}${location.replace("page.html", ".draft.html")}`)).status).toBe(404);
   });
 
   test("the page cannot leave its sandbox by navigating its tab to a sibling SVG or XML: every non-HTML asset is sandboxed too", async () => {
-    // Top-level, the response CSP is the page's only sandbox. A sibling .svg
-    // (or XHTML .xml) opened as a document would otherwise run script on the
-    // Inbox's origin and reach its API; it carries its own sandbox with no script.
     const { dataDir, project } = world();
     writeFileSync(join(project, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>fetch("/api/inbox/threads")</script></svg>');
     writeFileSync(join(project, "data.xml"), '<html xmlns="http://www.w3.org/1999/xhtml"><script>fetch("/api/inbox/threads")</script></html>');
@@ -776,7 +738,6 @@ describe("Inbox Open in: over the tailnet", () => {
       });
     expect(await answerOf(await through("/api/inbox/open-in/apps"))).toEqual([403, "local_only"]);
     expect(await answerOf(await through("/api/inbox/open-in", { method: "POST", body: JSON.stringify({ attachment_id: ids["plan.md"], app_id: "vscode" }) }))).toEqual([403, "local_only"]);
-    // A file a reference names: the same, before anything else about it is read.
     const thread = "msg_any";
     expect(await answerOf(await through(`/api/inbox/open-in/file?thread=${thread}&path=plan.md`))).toEqual([403, "local_only"]);
     expect(await answerOf(await through("/api/inbox/open-in/file", { method: "POST", body: JSON.stringify({ thread, path: "plan.md", app_id: "vscode" }) }))).toEqual([403, "local_only"]);

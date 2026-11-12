@@ -1,32 +1,3 @@
-/**
- * Plannotator Inbox: threads pinned to the window's sidebar (approval
- * "inbox-pinned-threads", .product/approved/inbox-pinned-threads/). The
- * window's routes (same origin for every POST, as every window write; the
- * page's `serverSession`; the owner over the tailnet like every window route):
- *
- *   POST /api/inbox/threads/:id/pin   `{ pinned: boolean }`: pin (at the bottom) or unpin; `{ pins }`
- *   POST /api/inbox/pins              `{ order: [thread ids] }`: Move up and Move down; `{ pins }`
- *   POST /api/inbox/pins              `{ restore: { thread_id, index, pinned_at } }`: Unpin's Undo; `{ pins }`
- *
- * No limit on pins, and an archived thread stays pinned (the owner's
- * decisions). An order only permutes the threads pinned now: the pinned ones
- * it names come first, in that order, every other pin keeps its place after
- * them, and a named thread that is not pinned (another tab unpinned it) is
- * skipped, so a stale window never drops another tab's pin nor brings back
- * one it unpinned. Only a restore pins again: exactly one thread, at its old
- * index (clamped), with its original `pinned_at`. The list model carries `pins` (rows, in pin
- * order, every pinned thread whatever the project filter or `archived`), and
- * a change tells every window (`event: pins` on the window's stream, as
- * `event: drafts` does). Pins live in `inbox/pins.json`, outside the event
- * log (shared/inbox/pins.ts): agents, the MCP, search and the phone's event
- * stream never see them. The phone's door forwards `GET threads`, so a phone
- * reads `pins` with the list, and carries both writes (`POST threads/:id/pin`
- * and `POST pins`, each under an `idempotency_key`: inbox-devices.ts, contract
- * 7.65, approval "inbox-starred-pills"), which tell the windows as a window's
- * own write does. A linked machine's forward never carries them (`local` in
- * inbox-outbox.ts): a star stays on the computer that holds it.
- */
-
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import type { InboxPin } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";

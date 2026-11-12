@@ -1,14 +1,8 @@
-/**
- * A walkthrough (approval item 6, "a review with no diff"): the agent names files and lines, and the Inbox reads them
- * from the project when it is sent. They become a patch of context lines only, stored with the review like any other,
- * so the same viewers draw the code as it was then, with nothing marked as changed.
- */
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type InboxWalkthroughRead = { ok: true; guide: Record<string, unknown>; patch: string } | { ok: false; error: string };
 
-/** "10-40, 80-95", "12", 12, [10, 40], ["10-40", "80-95"] or [[10, 40], [80, 95]]; null when it is none of these. */
 export function walkthroughRangesOf(lines: unknown): [number, number][] | null {
   const whole = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n > 0;
   if (whole(lines)) return [[lines, lines]];
@@ -35,7 +29,6 @@ export function walkthroughRangesOf(lines: unknown): [number, number][] | null {
   return ranges;
 }
 
-/** Sorted, with overlapping and touching ranges made one: a hunk apiece. */
 const merged = (ranges: [number, number][]): [number, number][] => {
   const out: [number, number][] = [];
   for (const [start, end] of [...ranges].sort((a, b) => a[0] - b[0])) {
@@ -46,7 +39,6 @@ const merged = (ranges: [number, number][]): [number, number][] => {
   return out;
 };
 
-/** One file's named lines as a diff of context lines. Ranges past the end stop at the end. */
 export function walkthroughFilePatch(path: string, text: string, ranges: [number, number][] | null): string | { error: string } {
   const lines = text.split("\n");
   const endsInNewline = lines[lines.length - 1] === "";
@@ -66,7 +58,6 @@ export function walkthroughFilePatch(path: string, text: string, ranges: [number
 
 const outside = (path: string) => !path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path);
 
-/** A file named relative to `folder`, once it is certain to be a file inside it (a link out of the folder isn't). */
 function fileInFolder(folder: string, file: string): { full: string; path: string } | null {
   const full = resolve(folder, file);
   const path = relative(folder, full);
@@ -79,12 +70,6 @@ function fileInFolder(folder: string, file: string): { full: string; path: strin
   return { full: join(folder, path), path: path.split(sep).join("/") };
 }
 
-/**
- * The guide and patch to check and store, from a guide whose `diffs` name `file` and maybe `lines`. A `patch` the agent
- * sent as well is never looked at, so its own diff (or an empty one) can't get in the way. The strict checks that
- * follow are the ones every guide gets, so a file placed twice is refused by name there. `folders`: where to look, the
- * agent's own first (it may be a worktree or a subfolder), the project's last.
- */
 export function readInboxWalkthrough(guide: unknown, folders: readonly string[]): InboxWalkthroughRead {
   let raw = guide;
   if (typeof raw === "string") {

@@ -1,17 +1,3 @@
-/**
- * A thread the removed Grok Build runner wrote (0.28.34 to 0.28.36): the
- * person's first message addressed to `{ host: "grok", session: run_… }`,
- * Grok Build's answers authored `grok` / "Grok Build". With the runner gone
- * the thread still reads as an ordinary agent thread, and a reply in it is
- * stored like a reply to any session that is not live: it waits, nothing
- * fails. The runner's `inbox/acp/sessions.json` and config.json's `inboxRun`
- * are left alone and never read: a setting saved now keeps `inboxRun`. A
- * reply written to a live session instead lands there, told it was written
- * to Grok Build; a message no turn took moves there (Send to another
- * session) and lands. The
- * test's own temp data dir is PLANNOTATOR_DATA_DIR while it runs (config.json
- * is read from there), restored after.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,9 +27,7 @@ describe("a thread the removed Grok Build runner wrote", () => {
     const project = join(root, "billing");
     mkdirSync(project, { recursive: true });
     const data = join(root, "data");
-    // config.json is read and saved under PLANNOTATOR_DATA_DIR: this test's folder while it runs.
     process.env.PLANNOTATOR_DATA_DIR = data;
-    // What 0.28.34–0.28.36 left in the data dir: the runner's session table (its shape, `{ v: 1, sessions }`) and the Settings toggle.
     mkdirSync(join(data, "inbox", "acp"), { recursive: true });
     const table = `${JSON.stringify(
       {
@@ -56,13 +40,11 @@ describe("a thread the removed Grok Build runner wrote", () => {
     writeFileSync(join(data, "inbox", "acp", "sessions.json"), table);
     writeFileSync(join(data, "config.json"), JSON.stringify({ inboxRun: { grok: false } }));
 
-    // The sessions' clock starts behind and catches up below: the runner's session has ended by the move.
     let behind = INBOX_ASKER_RESTART_GRACE_MS + 1;
     const server = await startInboxServer({ dataDir: data, sessionsNow: () => Date.now() - behind });
     servers.push(server);
     const base = `http://127.0.0.1:${server.port}`;
 
-    // The thread as the runner wrote it: compose's Send addressed to the run, then Grok Build's answer (posted with wakes, as its turns were).
     const place = server.store.ensureProject({ name: "billing", root: project });
     const started = server.store.startPersonThread({ project_id: place.id, body: "Look at the refund retries.", to: { host: "grok", session: RUN }, idempotency_key: "old-start" });
     const threadId = started.message.thread_id;
@@ -75,7 +57,6 @@ describe("a thread the removed Grok Build runner wrote", () => {
       wakes: true,
     });
 
-    // The list and the thread read without a `run` and without error; the answer is Grok Build's.
     const list = (await (await fetch(`${base}/api/inbox/threads`)).json()) as InboxListModel;
     const row = list.sections.flatMap((section) => section.threads).find((r) => r.thread_id === threadId);
     expect(row).toBeDefined();
@@ -88,7 +69,6 @@ describe("a thread the removed Grok Build runner wrote", () => {
       { kind: "agent", host: "grok", session: RUN, name: "Grok Build" },
     ]);
 
-    // A reply: stored and waiting for that session, as for any session that is not live.
     const replied = await fetch(`${base}/api/inbox/messages/${answer.message.id}/reply`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -99,7 +79,6 @@ describe("a thread the removed Grok Build runner wrote", () => {
     expect(server.store.pendingReplies(RUN, { tags: false }).map((r) => r.id)).toContain(reply.id);
     expect((await fetch(`${base}/api/inbox/threads/${threadId}`)).status).toBe(200);
 
-    // The ways out, to a live session in the project.
     const poll = async () => {
       const response = await fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, {
         method: "POST",
@@ -110,8 +89,6 @@ describe("a thread the removed Grok Build runner wrote", () => {
       return parseInboxBridgeCommands(await response.text());
     };
     expect(await poll()).toEqual([]);
-    // A reply written to another session (the reply route's `to`, as the window sends it when the asker is gone):
-    // the live session gets it, told it was written to Grok Build.
     const redirected = await fetch(`${base}/api/inbox/messages/${answer.message.id}/reply`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -128,8 +105,6 @@ describe("a thread the removed Grok Build runner wrote", () => {
       body: JSON.stringify({ session: "ses-live", host: "claude-code", type: "delivered", id: sentOn.id }),
     });
     expect(taken.status).toBe(200);
-    // Send to another session: a message addressed to the runner's session that no turn took (its first turn never ran)
-    // moves to the live session, and lands there.
     behind = 0;
     await poll();
     const unstarted = server.store.startPersonThread({ project_id: place.id, body: "Rename the refunds queue.", to: { host: "grok", session: RUN }, idempotency_key: "old-start-2" });
@@ -143,7 +118,6 @@ describe("a thread the removed Grok Build runner wrote", () => {
     expect(server.store.pendingReplies(RUN, { tags: false }).map((r) => r.id)).not.toContain(unstarted.message.id);
     expect((await poll()).map((c) => c.id)).toEqual([unstarted.message.id]);
 
-    // The runner's routes are gone; its session table is untouched; a setting saved now keeps `inboxRun`.
     expect((await fetch(`${base}/api/inbox/acp`)).status).toBe(404);
     const saved = await fetch(`${base}/api/inbox/settings`, {
       method: "POST",

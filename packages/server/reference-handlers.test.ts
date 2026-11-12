@@ -290,7 +290,6 @@ describe("annotatable plain-text files (#1029)", () => {
 		expect(res.status).toBe(200);
 		expect(data.codeFile).toBeUndefined();
 		expect(data.markdown).toBe("key: value\n");
-		// Its own text in one code block, never the markdown pipeline (#1099's follow-up).
 		expect(data.renderAs).toBe("code");
 	});
 
@@ -355,8 +354,6 @@ describe("annotatable document size cap", () => {
 	});
 });
 
-// Each branch resolves its own path, so a symlink escaping the root has to be
-// denied on all six. A single-vector test passes against a fix that missed one.
 describe("symlink containment", () => {
 	function makeEscapeFixture(): { root: string; outside: string } {
 		const root = makeTempDir("plannotator-symlink-root-");
@@ -434,8 +431,6 @@ describe("symlink containment", () => {
 	});
 });
 
-// A root addressed through a symlink is searched under both its spellings, so
-// the one file it finds twice must stay one match.
 describe("symlinked root", () => {
 	test("serves a bare filename from a root given as a symlink", async () => {
 		const real = makeTempDir("plannotator-symroot-real-");

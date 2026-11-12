@@ -1,11 +1,3 @@
-/**
- * The title on what reaches an agent (#2464, approval "inbox-reply-title"): a
- * plain reply shows the thread's short name, or `a reply` with none, and
- * everything that is not a plain reply keeps the thread's subject. Proved
- * through the server's real doors: the connections' poll (which Codex and Qwen
- * share through `replyCommand`) and the window's routes. Every test uses its
- * own temp data dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +30,6 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A status that goes stale, the kind of text the issue saw repeated. */
 const SUBJECT = "Service A quota is 93% used; investigate routing";
 const NAME = "Latest triage";
 const OWNER = "ses-owner";
@@ -46,7 +37,6 @@ const OTHER = "ses-other";
 const OTHER_TAG = { host: "claude-code", session: OTHER, label: "Claude Code (other)" };
 const QUESTION = [":::question", "Route through the second region?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
 
-/** `undoMs`: the Undo window (the set-aside delay) of a 👍, a Mark read and a hand-off. */
 async function setup(undoMs = 60_000, sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-reply-title-")));
   roots.push(root);
@@ -133,7 +123,6 @@ describe("a plain reply", () => {
     expect(command).toMatchObject({ type: "reply", id, thread_id: sent.thread_id, reply_to: sent.message_id, subject: NAME });
     const wake = inboxWakeText(command!).split("\n");
     expect(wake[0]).toBe(`Plannotator Inbox: ${NAME} (${id})`);
-    // Body, ids and routing, as the wake carried them with the subject.
     expect(wake.slice(1)).toEqual(inboxWakeText({ ...command!, subject: SUBJECT }).split("\n").slice(1));
     expect(wake.slice(1)).toEqual([INBOX_WAKE_INSTRUCTION, expect.stringContaining(`[Thread ${sent.thread_id}: `), "", command!.body, "", INBOX_WAKE_CLOSING_LINE]);
   });
@@ -147,7 +136,6 @@ describe("a plain reply", () => {
     expect(firstLine(command!)).toBe(`Plannotator Inbox: a reply (${id})`);
     expect(inboxWakeText(command!)).not.toContain(SUBJECT);
     expect(inboxWakeText(command!).endsWith(INBOX_WAKE_CLOSING_LINE)).toBe(true);
-    // The window still shows the thread's subject.
     expect((await thread(server, sent.thread_id)).subject).toBe(SUBJECT);
   });
 
@@ -337,7 +325,6 @@ describe("what is not a plain reply keeps the subject, in a named thread too", (
     const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Add a retry budget.", idempotency_key: key() });
     await delivered(server, OWNER, started.message.id);
     const id = await personReplies(server, started.message.id, "And log each retry.");
-    // A move needs the session it waits on to have ended.
     now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, OTHER, project);
     await post(server, `/api/inbox/messages/${id}/to`, { to: { host: "claude-code", session: OTHER } });

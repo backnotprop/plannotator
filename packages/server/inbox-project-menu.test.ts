@@ -1,13 +1,3 @@
-/**
- * The project menu through the Inbox's real doors (design record
- * "inbox-project-menu", approved 2026-10-14): `POST
- * /api/inbox/projects/:id/read`, `/unread` and `/resolve` on a running Inbox
- * (temp data dir, loopback). Each is a loop over the single actions, so what
- * is proved here is which threads a batch takes, that its Undo touches
- * exactly those, the `batch_id` replay, the guards, the set-aside notes
- * (one per thread, after the Undo window, none when undone inside it), and
- * the folders' additive `listed` / `archived` counts that hide a project.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,12 +19,6 @@ const DELAY = 150;
 const ask = (prompt: string, extra: string[] = []) =>
   [":::question", prompt, "", ...extra, ...(extra.length ? [""] : []), "- [ ] Yes", "- [ ] No", ":::"].join("\n");
 
-/**
- * Two projects. `billing`: a thread an agent is stopped on, one waiting on a
- * question, one with plain news, one the person replied to (Sent), one quiet
- * (looked at), one archived, and one that came back from the archive.
- * `docs`: one thread waiting on a question.
- */
 async function setup() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-project-menu-")));
   roots.push(root);
@@ -86,16 +70,13 @@ describe("the project menu's routes", () => {
     const res = await post(w.server, `/api/inbox/projects/${w.billing}/read`, { serverSession: w.server.serverSession });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { batch: { read: string[] }; threads: InboxListRow[]; project: Folder; replayed: boolean };
-    // Stopped, Waiting, plain news and the came-back thread; not Sent, Quiet, archived, nor the other project.
     expect(new Set(body.batch.read)).toEqual(new Set([w.stopped, w.waiting, w.news, w.cameBack]));
     expect(body.replayed).toBe(false);
     expect(body.threads.every((row) => row.section === "quiet")).toBe(true);
     const after = await sections(w.server);
     for (const id of [w.stopped, w.waiting, w.news]) expect(after.get(id)).toBe("quiet");
-    // The came-back thread went back to the archive (read made after the line).
     expect(w.store.listRow(w.cameBack)!.back_from_archive).toBe(false);
     for (const id of [w.sent, w.quiet, w.archived, w.other]) expect(after.get(id)).toBe(before.get(id));
-    // The questions closed as skips.
     const stoppedQ = w.store.questionsOf(w.stopped)[0]!;
     expect(stoppedQ).toMatchObject({ state: "closed", answer: { skipped: true } });
 
@@ -116,7 +97,6 @@ describe("the project menu's routes", () => {
     const again = (await (await post(w.server, `/api/inbox/projects/${w.billing}/read`, {})).json()) as { batch: { read: string[] } };
     await Bun.sleep(DELAY + 200);
     const notes = (id: string) => w.store.thread(id)!.messages.filter((m) => m.body.startsWith(INBOX_SET_ASIDE_HEADING)).length;
-    // A note per thread that had a question waiting (not per batch); plain news had none to set aside.
     expect(notes(w.stopped)).toBe(1);
     expect(notes(w.waiting)).toBe(1);
     expect(notes(w.cameBack)).toBe(1);
@@ -134,7 +114,6 @@ describe("the project menu's routes", () => {
     expect(new Set(body.batch.resolved)).toEqual(new Set([w.stopped, w.waiting, w.news, w.sent, w.quiet]));
     expect(body.batch.read).toEqual([w.cameBack]);
     expect(body.project).toMatchObject({ listed: 0, archived: 7 });
-    // The list model carries the same fields: the window draws `listed > 0`.
     const list = (await (await fetch(url(w.server, "/api/inbox/threads?archived=exclude"))).json()) as { projects: Folder[]; sections: InboxListSection[] };
     expect(list.projects.find((p) => p.id === w.billing)).toMatchObject({ listed: 0, archived: 7 });
     expect(list.projects.find((p) => p.id === w.docs)).toMatchObject({ listed: 1, archived: 0 });
@@ -150,7 +129,6 @@ describe("the project menu's routes", () => {
     const w = await setup();
     await post(w.server, `/api/inbox/projects/${w.billing}/resolve`, { resolved: true });
     expect((await folders(w.server)).get(w.billing)!.listed).toBe(0);
-    // A reply_to after the archive brings that thread back, and with it the project.
     w.store.sendMessage({ project_id: w.billing, author: { kind: "agent", host: null, session: "ses_2", name: null }, body: "One more thing.", reply_to: w.waiting });
     expect((await folders(w.server)).get(w.billing)!.listed).toBe(1);
   });
@@ -163,7 +141,6 @@ describe("the project menu's routes", () => {
     expect(retry.replayed).toBe(true);
     expect({ ...retry, replayed: false }).toEqual(first);
     expect(w.store.cursor()).toBe(cursor);
-    // Without the id a second call finds nothing waiting and writes nothing.
     const plain = (await (await post(w.server, `/api/inbox/projects/${w.billing}/read`, {})).json()) as { batch: { read: string[] } };
     expect(plain.batch.read).toEqual([]);
     expect(w.store.cursor()).toBe(cursor);
@@ -177,7 +154,6 @@ describe("the project menu's routes", () => {
     const w = await setup();
     const real = w.store.markRead.bind(w.store);
     let calls = 0;
-    // The second Mark read of the loop fails, as a disk error would.
     w.store.markRead = ((threadId: string, read: boolean) => {
       calls += 1;
       if (read && calls === 2) throw new Error("EIO: the disk went away");
@@ -188,21 +164,17 @@ describe("the project menu's routes", () => {
     const body = (await res.json()) as { batch: { read: string[] }; error?: { code: string; message: string } };
     expect(body.batch.read).toHaveLength(1);
     expect(body.error?.code).toBe("batch_incomplete");
-    // The cause stays in the server's log, never the page.
     expect(body.error?.message).not.toContain("EIO");
     const applied = body.batch.read[0]!;
     expect(w.store.listRow(applied)!.read_at).not.toBeNull();
-    // A retry with the same batch_id answers the same partial answer and writes nothing.
     const cursor = w.store.cursor();
     const retry = (await (await post(w.server, `/api/inbox/projects/${w.billing}/read`, { batch_id: "b-partial" })).json()) as typeof body & { replayed: boolean };
     expect(retry.replayed).toBe(true);
     expect(retry.batch.read).toEqual(body.batch.read);
     expect(w.store.cursor()).toBe(cursor);
     w.store.markRead = real;
-    // The thread that applied gets its set-aside note.
     await Bun.sleep(DELAY + 200);
     expect(w.store.thread(applied)!.messages.some((m) => m.body.startsWith(INBOX_SET_ASIDE_HEADING))).toBe(applied !== w.news);
-    // Its Undo covers exactly what applied.
     const undo = (await (await post(w.server, `/api/inbox/projects/${w.billing}/unread`, { threads: body.batch.read })).json()) as { skipped: string[] };
     expect(undo.skipped).toEqual([]);
     expect(w.store.listRow(applied)!.read_at ?? null).toBeNull();
@@ -226,7 +198,6 @@ describe("the project menu's routes", () => {
 
   test("an Undo touches only the threads it names, and only this project's", async () => {
     const w = await setup();
-    // The other project's thread named in billing's Undo: skipped, untouched.
     await post(w.server, `/api/inbox/projects/${w.docs}/read`, {});
     const undo = (await (await post(w.server, `/api/inbox/projects/${w.billing}/unread`, { threads: [w.other] })).json()) as { skipped: string[] };
     expect(undo.skipped).toEqual([w.other]);
@@ -247,7 +218,6 @@ describe("the project menu's routes", () => {
     expect((await fetch(url(w.server, path))).status).toBe(405);
     expect((await post(w.server, "/api/inbox/projects/nope/read", {})).status).toBe(422);
     expect((await post(w.server, "/api/inbox/projects/prj_00000000000000000000000000/read", {})).status).toBe(404);
-    // Nothing above changed anything.
     expect((await folders(w.server)).get(w.billing)!.listed).toBe(6);
   });
 });

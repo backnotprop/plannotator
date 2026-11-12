@@ -1,10 +1,3 @@
-/**
- * The Inbox's agent connections over HTTP: `POST /api/inbox/control/connect`
- * (what `plannotator inbox` sends to an Inbox an agent started) takes the
- * registry's token like every connection route, runs the connect step once at
- * a time, and `GET /api/inbox/agents` reports what it did. Fake agent CLIs and
- * a scratch home (tests/helpers/fake-agents.ts).
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";

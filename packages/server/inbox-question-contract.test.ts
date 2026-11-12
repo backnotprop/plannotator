@@ -1,16 +1,3 @@
-/**
- * The question contract lines and picture choices through a real Inbox
- * (approval "inbox-decision-mode", agent contract lines): send_message keeps
- * them on the record, captures each choice's picture and the `Shows:`
- * picture as files of the thread (served by the message image route), names
- * a choice picture that will not show, and nudges, never refuses, when a
- * Stopped or Holds up question has no `Stakes:` line.
- *
- * What regresses if this fails: a picture choice never loads in the window
- * (not captured, or refused by the image route), an agent is not told its
- * picture will not show, or the nudge refuses a send / fires on a question
- * that is neither Stopped nor held up.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -94,7 +81,6 @@ test("choice pictures and the Shows picture are captured as files of the thread 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
   }
-  // The choice picture that will not show is named, like any other image.
   expect(structured.images_not_shown).toEqual([{ ref: "shots/drawer-c-missing.png", reason: expect.any(String), not_yet: true }]);
   expect(text).toContain("shots/drawer-c-missing.png");
 });

@@ -12,11 +12,6 @@ import { isFileBrowserWatchExcludedPath } from "@plannotator/shared/reference-co
 import { resolveUserPath } from "@plannotator/shared/resolve-file";
 import { getGitMetadataWatchPaths } from "@plannotator/shared/workspace-status";
 
-// The watcher engine (deferred warmup, reconnect grace, native recursive
-// backend) lives in @plannotator/shared/file-browser-watch-core (#1313).
-// This module keeps only the Bun transport: request parsing, the SSE
-// ReadableStream, and heartbeats.
-
 const HEARTBEAT_MS = 30_000;
 const encoder = new TextEncoder();
 
@@ -38,12 +33,10 @@ const registry: FileBrowserWatchRegistry<ReadableStreamDefaultController> = crea
 
 export { createExactFileWatchListener };
 
-/** Immediate teardown of every live watcher. Server stop and tests. */
 export function closeAllFileBrowserWatchers(): void {
 	registry.closeAll();
 }
 
-/** Tests only. See FileBrowserWatchRegistry.diagnostics/configureForTests. */
 export const __fileBrowserWatchTestHooks = {
 	diagnostics: () => registry.diagnostics(),
 	configure: (overrides: Parameters<FileBrowserWatchRegistry<ReadableStreamDefaultController>["configureForTests"]>[0]) =>

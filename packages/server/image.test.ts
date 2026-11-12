@@ -1,19 +1,9 @@
-/**
- * Image Validation Tests
- *
- * Run: bun test packages/server/image.test.ts
- */
-
 import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 
 describe("UPLOAD_DIR", () => {
   test("uses os.tmpdir(), not hardcoded /tmp", () => {
-    // On macOS tmpdir() returns something like /var/folders/...
-    // On Linux it returns /tmp
-    // On Windows it returns C:\Users\...\AppData\Local\Temp
-    // The key thing: it should NOT be hardcoded to /tmp/plannotator
     expect(UPLOAD_DIR).toContain("plannotator");
     expect(UPLOAD_DIR.startsWith(tmpdir())).toBe(true);
   });
@@ -39,7 +29,7 @@ describe("validateImagePath", () => {
 
   test("resolves path", () => {
     const result = validateImagePath("relative/image.png");
-    expect(result.resolved).toMatch(/^\//); // absolute on POSIX
+    expect(result.resolved).toMatch(/^\//);
   });
 });
 

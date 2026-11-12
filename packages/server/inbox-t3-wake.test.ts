@@ -1,9 +1,3 @@
-/**
- * The T3 Code wake (inbox-t3-wake.ts), through the Inbox's real doors: a T3
- * thread's send_message over MCP as the shim sends it, the person's reply
- * route, and a scripted T3 MCP endpoint behind a grant saved the way
- * `plannotator t3 login` saves it. No T3 server is run.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +25,6 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A T3 environment that has `threads`; `fail` makes the next sends throw that text. */
 function fakeT3(threads: string[]) {
   const sends: Record<string, unknown>[] = [];
   const attempts: unknown[] = [];
@@ -102,7 +95,6 @@ describe("a reply to a T3 Code thread", () => {
     const message = String(call.message);
     expect(message.split("\n")[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
     expect(message).toContain("Yes, ship it.");
-    // The tools as an MCP client lists them, never the plannotator_inbox tool T3's agent does not have.
     expect(message).not.toContain("plannotator_inbox");
     expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
   });
@@ -116,20 +108,17 @@ describe("a reply to a T3 Code thread", () => {
     expect(w.t3.sends).toHaveLength(0);
     expect(w.server.t3Wake.status(THREAD)).toBe("alive");
 
-    // T3 lost the thread: ended, and nothing more is tried for it.
     w.t3.state.fail = "The thread was not found.";
     const second = await w.send("Second question?");
     await w.reply(second.message_id, "Second answer.", "k2");
     await w.server.t3Wake.sweep();
     expect(w.server.t3Wake.status(THREAD)).toBe("dead");
 
-    // The thread calls the Inbox again: alive, and both replies go in.
     w.t3.state.fail = null;
     await w.client.callTool({ name: "read_thread", arguments: { agent_session: THREAD, agent_host: "t3", project_path: "/" } });
     await w.server.t3Wake.sweep();
     expect(w.server.t3Wake.status(THREAD)).toBe("alive");
     expect(w.t3.sends.map((call) => String(call.message))).toEqual([expect.stringContaining("The edge one."), expect.stringContaining("Second answer.")]);
-    // T3 takes a request id once: the retry of a send that may have landed can never be a second turn.
     expect(w.t3.sends[0]!.clientRequestId).toBe(w.t3.attempts[0]);
   });
 
@@ -144,7 +133,6 @@ describe("a reply to a T3 Code thread", () => {
     w.t3.state.fail = "The thread was not found.";
     await w.server.t3Wake.sweep();
     expect(w.server.t3Wake.status(THREAD)).toBe("dead");
-    // The sweep the store's last line queued runs first: it is work, not a retry.
     await Bun.sleep(0);
     await w.server.t3Wake.sweep();
     let sweeps = 0;
@@ -161,12 +149,10 @@ describe("a reply to a T3 Code thread", () => {
     w.t3.state.fail = "connection reset";
     await w.reply(sent.message_id, "The edge one.");
     await w.server.t3Wake.sweep();
-    // The send failed, and T3 is then down for the lookup too.
     w.t3.state.fail = null;
     w.t3.state.down = true;
     clock += 31_000;
     await w.server.t3Wake.sweep();
-    // Back within a minute: the thread is still found, and the reply goes on its next try.
     w.t3.state.down = false;
     expect(await w.server.t3Wake.wakes("t3", THREAD)).toBe(true);
     clock += 61_000;
@@ -182,7 +168,6 @@ describe("a reply to a T3 Code thread", () => {
     w.t3.state.fail = "connection reset";
     await w.reply(sent.message_id, "The edge one.");
     await w.server.t3Wake.sweep();
-    // The grant's environment no longer has the thread: T3 answers the next lookup with "not found".
     w.t3.threads.length = 0;
     clock += 31_000;
     await w.server.t3Wake.sweep();
@@ -201,21 +186,12 @@ describe("a reply to a T3 Code thread", () => {
   });
 });
 
-/**
- * The same wake over T3's real wire: the T3 client the Inbox ships (T3Client,
- * streamable HTTP, the saved grant's Bearer token) against a scripted T3 on
- * loopback (tests/helpers/fake-t3.ts).
- */
 describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
   const fakes: FakeT3[] = [];
   afterEach(() => {
     for (const fake of fakes.splice(0)) fake.stop();
   });
 
-  /**
-   * `access` is the mode T3 approved the grant with; `scoped` saves the scope T3 granted for it, as
-   * `plannotator t3 login` does (a grant saved without one is a grant whose mode is learned only from a denial).
-   */
   async function loopback(options: { token?: string; now?: () => number; access?: T3Access; scoped?: boolean; modes?: Record<string, T3RuntimeMode>; lookupTimeoutMs?: number } = {}) {
     const t3 = startFakeT3({ threads: [THREAD, OTHER], ...(options.access ? { access: options.access } : {}), ...(options.modes ? { modes: options.modes } : {}) });
     fakes.push(t3);
@@ -272,7 +248,6 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     await w.server.t3Wake.sweep();
     expect(w.t3.sendCalls).toBe(1);
     expect(w.t3.turns).toHaveLength(0);
-    // Saved for the agent's next read, as an uncertain send is: no backoff, no second try.
     expect(w.server.t3Wake.uncertain(THREAD, replyId)).toBe(true);
     const line = w.logs.find((entry) => entry.includes("runtime_mode_escalation_denied"));
     expect(line).toContain(replyId);
@@ -281,8 +256,6 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     clock += 11 * 60_000;
     await w.server.t3Wake.sweep();
     expect(w.t3.sendCalls).toBe(1);
-    // Under this grant the thread is not offered as one the Inbox wakes: its agent is told to read the thread later,
-    // and what it gets next is not sent either.
     expect(await w.server.t3Wake.wakes("t3", THREAD)).toBe(false);
     expect(w.server.t3Wake.status(THREAD)).toBeNull();
     const second = await w.send("And the TTL?");
@@ -290,7 +263,6 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     await w.server.t3Wake.sweep();
     expect(w.t3.sendCalls).toBe(1);
 
-    // A new login with a mode that covers the thread: the next reply goes in.
     w.t3.state.deny = null;
     w.login("e2");
     const third = await w.send("Ready?");
@@ -324,7 +296,6 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     const w = await loopback({ now: () => clock });
     const sent = await w.send("Anyone there?");
     expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
-    // T3 revokes the grant (or its 30 days run out): every request is a 401 from now on.
     w.t3.state.token = "revoked";
     await w.reply(sent.message_id, "Here.", "k1");
     await w.server.t3Wake.sweep();
@@ -366,7 +337,6 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     expect(w.t3.sendCalls).toBe(0);
     expect(w.logs.find((entry) => entry.includes(`cannot send into thread ${THREAD}`))).toContain("grant (below Full access) cannot send into thread");
     expect(w.logs.find((entry) => entry.includes(`cannot send into thread ${THREAD}`))).toContain("(it runs full-access)");
-    // A thread the sign-in covers still wakes.
     const other = await w.send("And the TTL?", OTHER);
     expect(other.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
     await w.reply(other.message_id, "An hour.", "k2");
@@ -377,13 +347,11 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
   test("a sign-in saved without its scope learns its mode from T3's first denial, for every thread under it", async () => {
     for (const [access, modes] of [["read-only", {}], ["auto", { [THREAD]: "full-access", [OTHER]: "full-access" }]] as const) {
       const w = await loopback({ access, modes });
-      // Nothing says the grant's mode yet: the first message is promised, and T3 denies the send.
       const sent = await w.send("Which cache?");
       expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
       await w.reply(sent.message_id, "The edge one.", "k1");
       await w.server.t3Wake.sweep();
       expect(w.t3.sendCalls).toBe(1);
-      // From then on no thread the grant does not cover is promised, the denied one or another.
       expect((await w.send("Second?", OTHER)).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
       expect((await w.send("Third?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
       await w.server.t3Wake.sweep();
@@ -398,7 +366,6 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     w.t3.state.token = "restarting";
     await w.reply(sent.message_id, "The edge one.", "k1");
     await w.server.t3Wake.sweep();
-    // T3 answers again, but its lookup fails for a moment.
     w.t3.state.token = "t3-test-access";
     w.t3.state.readFailure = { code: "orchestration_error", message: "The operation could not be completed." };
     clock += 31_000;
@@ -470,7 +437,6 @@ test("a reply moved back to the T3 thread that took its stop notice goes in as i
   await w.server.t3Wake.sweep();
   await w.server.t3Wake.sweep();
 
-  // T3 took it: that send is what says Delivered, so it is the words.
   expect(w.t3.sends).toHaveLength(2);
   expect(String(w.t3.sends[1]!.message)).toContain(WORDS);
   expect(w.t3.sends[1]!.clientRequestId).not.toBe(w.t3.sends[0]!.clientRequestId);

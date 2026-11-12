@@ -1,19 +1,3 @@
-/**
- * The still of an uploaded agent icon that moves (packages/server/inbox-agent-icons.ts): its first frame, made from
- * the bytes on the server, so every window shows the same still and none has to draw one. A picture that does not
- * move has no still: the window's still address serves the picture itself.
- *
- * - SVG: the same file with every CSS animation and transition turned off and its SMIL elements (`<animate>`,
- *   `<animateTransform>`, `<animateMotion>`, `<animateColor>`, `<set>`) taken out, so it shows its rest pose. Inside an
- *   `<img>` a moving SVG ignores the system's reduced-motion setting, so the window needs this file to stay still.
- * - GIF: the header, the palette and the first image only.
- * - APNG: the PNG without its animation chunks (`acTL`, `fcTL`, `fdAT`): the default image every plain PNG reader shows.
- * - Animated WebP: its first frame as a plain WebP (the frame's own bitstream and alpha, the frame's size).
- *
- * Nothing here decodes pixels: each is a cut of the file's own blocks. A file that does not parse as expected has no
- * still (the window then shows the picture as uploaded).
- */
-
 const ascii = (b: Uint8Array, from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
 const u32be = (b: Uint8Array, o: number) => ((b[o]! << 24) | (b[o + 1]! << 16) | (b[o + 2]! << 8) | b[o + 3]!) >>> 0;
 const u32le = (b: Uint8Array, o: number) => (b[o]! | (b[o + 1]! << 8) | (b[o + 2]! << 16) | (b[o + 3]! << 24)) >>> 0;
@@ -29,8 +13,6 @@ function concat(parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-/* ---------- SVG ---------- */
-
 const SVG_MOTION = /@keyframes|\banimation(?:-name)?\s*:|<(?:animate|animateTransform|animateMotion|animateColor|set)\b/i;
 const SMIL_PAIRED = /<(animate|animateTransform|animateMotion|animateColor|set)\b[^>]*?(?<!\/)>[\s\S]*?<\/\1\s*>/gi;
 const SMIL_EMPTY = /<(?:animate|animateTransform|animateMotion|animateColor|set)\b[^>]*\/>/gi;
@@ -42,14 +24,10 @@ function svgStill(text: string): string | null {
   if (!open) return null;
   const at = open.index + open[0].length;
   const body = text.slice(at).replace(SMIL_PAIRED, "").replace(SMIL_EMPTY, "");
-  // A self-closing root (`<svg … />`) has nothing to animate.
   if (open[0].endsWith("/>")) return null;
   return `${text.slice(0, at)}${STILL_STYLE}${body}`;
 }
 
-/* ---------- GIF ---------- */
-
-/** The bytes after a run of sub-blocks starting at `at` (each a length byte and that many bytes, ending with 0). */
 function skipSubBlocks(b: Uint8Array, at: number): number {
   while (at < b.length) {
     const size = b[at]!;
@@ -74,7 +52,6 @@ function gifStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
       const label = b[at + 1]!;
       const end = skipSubBlocks(b, at + 2);
       if (end < 0) return null;
-      // The frame's own control (its transparency) goes with it; the looping block and comments do not.
       if (!first && label === 0xf9) kept.push(b.subarray(at, end));
       at = end;
       continue;
@@ -97,8 +74,6 @@ function gifStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
   return concat([head, ...kept, first, new Uint8Array([0x3b])]);
 }
 
-/* ---------- PNG / APNG ---------- */
-
 function pngStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
   const parts: Uint8Array[] = [b.subarray(0, 8)];
   let at = 8;
@@ -115,8 +90,6 @@ function pngStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
   }
   return animated ? concat(parts) : null;
 }
-
-/* ---------- WebP ---------- */
 
 function riffChunk(type: string, payload: Uint8Array): Uint8Array {
   const pad = payload.byteLength & 1;
@@ -138,7 +111,6 @@ function webpStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
     if (type === "ANMF" && size >= 16) {
       const width = u24le(b, body + 6) + 1;
       const height = u24le(b, body + 9) + 1;
-      // The frame's own chunks: an optional ALPH, then VP8 or VP8L.
       const frame: Uint8Array[] = [];
       let alpha = false;
       let inner = body + 16;
@@ -157,7 +129,6 @@ function webpStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
       const vp8x = new Uint8Array(10);
       vp8x[0] = alpha ? 0x10 : 0;
       vp8x.set([(width - 1) & 0xff, ((width - 1) >> 8) & 0xff, ((width - 1) >> 16) & 0xff, (height - 1) & 0xff, ((height - 1) >> 8) & 0xff, ((height - 1) >> 16) & 0xff], 4);
-      // Even-length chunks: an odd one was copied with its pad byte above, or gets one here.
       const chunks = [riffChunk("VP8X", vp8x), ...frame.map((chunk) => (chunk.byteLength & 1 ? concat([chunk, new Uint8Array(1)]) : chunk))];
       const payload = concat([new TextEncoder().encode("WEBP"), ...chunks]);
       const header = new Uint8Array(8);
@@ -170,7 +141,6 @@ function webpStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
   return null;
 }
 
-/** The still of a picture that moves (its first frame, as the same type), or null for one that does not. */
 export function agentIconStill(type: string, bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
   try {
     if (type === "image/svg+xml") {
@@ -181,7 +151,6 @@ export function agentIconStill(type: string, bytes: Uint8Array): Uint8Array<Arra
     if (type === "image/png") return pngStill(bytes);
     if (type === "image/webp") return webpStill(bytes);
   } catch {
-    // A file that does not parse: no still, the picture as uploaded.
   }
   return null;
 }

@@ -1,13 +1,3 @@
-/**
- * Working-tree reads behind the code-nav preview and diff expansion, on both
- * servers (Bun + Pi), through packages/shared/repo-file.ts.
- *
- * Like VS Code, links are followed wherever they point (owner's ruling on
- * #2261). What must not regress: a file over the 5 MB cap is refused with
- * its size instead of read whole, and a FIFO is refused instead of hanging
- * the request (on Pi, readFileSync on a FIFO froze the whole process).
- * Each runtime keeps its old text output (Bun strips a BOM, Pi keeps it).
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -51,11 +41,6 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-/**
- * Run `source` in a child Bun and return the JSON it prints last. A read
- * that blocks on a FIFO would freeze this process (Pi's server shares the
- * event loop), so FIFO checks run in a child that is killed on timeout.
- */
 function runInChild(source: string, env: Record<string, string>): unknown {
   const child = spawnSync(process.execPath, ["--eval", source], {
     encoding: "utf-8",
@@ -67,7 +52,6 @@ function runInChild(source: string, env: Record<string, string>): unknown {
   return JSON.parse(child.stdout.trim().split("\n").at(-1) ?? "null");
 }
 
-// Symlinks and FIFOs: POSIX only.
 const describePosix = process.platform === "win32" ? describe.skip : describe;
 
 describePosix("working-tree reads for the code-nav preview and diff expansion", () => {
@@ -185,8 +169,6 @@ describePosix("working-tree reads for the code-nav preview and diff expansion", 
       const swapped = join(repo, `becomes-fifo-${runtime}.txt`);
       writeFileSync(swapped, "regular\n");
       try {
-        // The working-tree side lstats the path, then reads it: swap the file
-        // for a FIFO in between. The read must answer null, not block.
         const result = runInChild(
           `
           const { rmSync } = await import("node:fs");
@@ -210,7 +192,6 @@ describePosix("working-tree reads for the code-nav preview and diff expansion", 
           `,
           { PLANNOTATOR_DATA_DIR: join(base, `data-swap-${runtime}`) },
         );
-        // And the runtime's reader never returns a file over the cap.
         expect(result).toEqual({ text: null, big: null });
       } finally {
         rmSync(swapped, { force: true });

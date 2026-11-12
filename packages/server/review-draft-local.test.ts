@@ -1,5 +1,3 @@
-/** Local drafts must survive edits without leaking across Git review targets.
- * Exercise both HTTP runtimes and the same anchor check the client uses. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -86,8 +84,6 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
     }
 
     test('unrelated edits and commits restore comments; changed or missing code stays as outdated', async () => {
-      // Progress is disabled and there is no file-identities sidecar: draft
-      // identity must not depend on either viewed-progress capability.
       const first = await open();
       expect((await post(first.endpoint, body(first.view))).status).toBe(200);
       writeFileSync(join(cwd, 'b.txt'), 'unrelated edit\n');
@@ -117,7 +113,6 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
         ...body(first.view),
         codeAnnotations: [...body(first.view).codeAnnotations, { ...note, id: 'external', source: 'agent' }],
       });
-      // A changed patch still has one human comment, even before accepting restore.
       writeFileSync(join(cwd, 'b.txt'), 'unrelated edit\n');
       const reopened = await open();
       expect(reopened.server.hostControl.status().unsentAnnotations).toBe(1);
@@ -205,7 +200,6 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
         await post(`${endpoint}&client=page-1`, {
           codeAnnotations: [...body(a.view).codeAnnotations, onB], draftGeneration: 4,
         });
-        // A reload (or a different tab) knows only B. Missing A isn't a deletion.
         const restored = await (await fetch(`${endpoint}&client=page-2`)).json();
         expect(restored.codeAnnotations.map((a: CodeAnnotation) => a.id)).toEqual(['on-b']);
         expect((await post(`${endpoint}&client=page-2`, { ...restored, draftGeneration: 5 })).status).toBe(200);
@@ -221,14 +215,11 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
     }
 
     test('a draft saved before the startup base upgrade survives the upgrade and restart; explicit local bases stay separate', async () => {
-      // Hold the remote probe until AFTER the first view and draft save. Without
-      // the gate a fast local remote would hide the orphaned-draft window.
       const remote = join(root, 'origin.git');
       git('clone', '--bare', cwd, remote);
       git('--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/main');
       git('remote', 'add', 'origin', remote);
       git('fetch', 'origin');
-      // Local main and origin/main deliberately name different comparisons.
       writeFileSync(join(cwd, 'b.txt'), 'committed feature\n');
       git('add', 'b.txt');
       git('commit', '-m', 'feature work');

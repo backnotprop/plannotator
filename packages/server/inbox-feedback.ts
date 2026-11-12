@@ -1,20 +1,3 @@
-/**
- * Plannotator Inbox: the Feedback dialog's send (sidebar → Feedback,
- * packages/inbox/components/FeedbackDialog.tsx).
- *
- *   POST /api/inbox/feedback   `{ message, category?, contact? }` → `{ ok: true }`
- *
- * The window cannot reach the feedback Worker itself (its CSP allows
- * `connect-src 'self'` only), so this server forwards the person's words,
- * adding the Plannotator version, this computer's OS name and the names of
- * the agents that wrote to this Inbox (`inboxFeedbackAgents`: "Claude Code",
- * "Codex"; never a session, a path, a subject or a count) and nothing else,
- * through the one client (`sendProductFeedback`, packages/core/
- * product-feedback.ts) the CLI's `plannotator feedback` also uses. A window
- * write like any other (same origin; the owner's page over the tailnet too).
- * Nothing is stored here and nothing is sent unless the person pressed Send.
- */
-
 import {
   FEEDBACK_UNAVAILABLE,
   feedbackAgentNames,
@@ -32,14 +15,8 @@ import { AGENT_CONFIG } from "@plannotator/core/agents";
 
 export const INBOX_FEEDBACK_PATH = "/api/inbox/feedback";
 
-// `serverSession`: every window POST carries it (packages/inbox/api.ts); it is not forwarded.
 const BODY_KEYS = new Set(["message", "category", "contact", "serverSession"]);
 
-/**
- * The name the feedback carries for an agent host, from Plannotator's own
- * lists only ("claude-code" → "Claude Code"). A host it does not know (an agent
- * can call itself anything) is null and is never sent.
- */
 export function feedbackAgentNameOfHost(host: string | null | undefined): string | null {
   if (!host) return null;
   if (Object.hasOwn(INBOX_HOST_NAMES, host)) return INBOX_HOST_NAMES[host]!;
@@ -48,12 +25,6 @@ export function feedbackAgentNameOfHost(host: string | null | undefined): string
   return null;
 }
 
-/**
- * The agents the person has used, from the messages in this Inbox: each
- * agent message's host, as its name, the most recently used first,
- * deduplicated and capped (`feedbackAgentNames`). Names only: an agent's own
- * display name, its session, the thread and the message are never read into it.
- */
 export function inboxFeedbackAgents(messages: Iterable<{ author: InboxAuthor; created_at?: string | null }>): string[] {
   const lastUsed = new Map<string, string>();
   for (const message of messages) {
@@ -67,14 +38,12 @@ export function inboxFeedbackAgents(messages: Iterable<{ author: InboxAuthor; cr
   return feedbackAgentNames(newestFirst);
 }
 
-/** What the Feedback send reads from the Inbox's store: its threads' messages (InboxStore has all three). */
 export interface InboxFeedbackStore {
   threadIds(): readonly string[];
   threadMessageIds(threadId: string): readonly string[];
   message(id: string): { author: InboxAuthor; created_at?: string | null } | null;
 }
 
-/** The agent names for a Send, from every message in the store (`inboxFeedbackAgents`). */
 export function inboxStoreFeedbackAgents(store: InboxFeedbackStore): string[] {
   function* messages() {
     for (const threadId of store.threadIds()) {
@@ -90,11 +59,9 @@ export function inboxStoreFeedbackAgents(store: InboxFeedbackStore): string[] {
 export function createInboxFeedback(options: {
   version: string;
   json: (body: unknown, status?: number) => Response;
-  /** Tests: where to send (default: `PLANNOTATOR_FEEDBACK_URL`, else the constant), and how. */
   url?: () => string;
   send?: (payload: ProductFeedbackPayload, url: string) => Promise<ProductFeedbackResult>;
   platform?: string;
-  /** The Inbox's store: the agent names are read from it at each Send (`inboxStoreFeedbackAgents`). Required, so the wiring cannot be dropped. */
   store: InboxFeedbackStore;
 }) {
   const { json } = options;
@@ -123,15 +90,12 @@ export function createInboxFeedback(options: {
     const input = { message: fields.message, category: (fields.category ?? null) as FeedbackCategory | null, contact: (fields.contact ?? null) as string | null };
     const invalid = feedbackInputError(input);
     if (invalid) return json({ error: invalid, code: "validation_error" }, 400);
-    // The agent names never stop a Send: a failing read sends the feedback without them.
     let agents: string[] = [];
     try {
       agents = inboxStoreFeedbackAgents(options.store);
     } catch {
       agents = [];
     }
-    // sendProductFeedback answers within FEEDBACK_TIMEOUT_MS (8 s) in all, its resend without names included, and never
-    // throws; the catch keeps a thrown seam plain too.
     const result = await send(productFeedbackPayload(input, { version: options.version, os, surface: "inbox", agents }), url()).catch(
       (): ProductFeedbackResult => ({ ok: false, reason: FEEDBACK_UNAVAILABLE, unavailable: true }),
     );

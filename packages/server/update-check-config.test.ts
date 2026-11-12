@@ -1,10 +1,3 @@
-/**
- * The update-notice knob through the Bun servers: Settings turns it off with
- * POST /api/config `{ updateCheck: false }` (boolean only, same-origin guard
- * as every other config write), and /api/plan's serverConfig always reports
- * the config-file value (default true) plus `updateCheckEnv` when
- * PLANNOTATOR_UPDATE_CHECK overrides it.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,13 +1,3 @@
-/**
- * A plan review that spans midnight keeps its version chain.
- *
- * What regresses if this fails: the reviewer annotates a plan, the agent
- * revises it, and the next day's review opens with no Versions tab and no
- * diff — because `generateSlug` stamps the current date into the slug that
- * keys `history/{project}/{slug}/`, so the revision lands in a second
- * directory numbered from 001 again. `versionInfo.totalVersions` is then 1,
- * `previousPlan` is null, and the UI has nothing to compare against.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,7 +37,6 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** The slug today's review would mint, with its date replaced by an earlier one. */
 function slugDatedDaysAgo(plan: string, days: number): string {
   const today = generateSlug(plan);
   const date = new Date();
@@ -120,7 +109,6 @@ describe("plan review spanning a day boundary", () => {
       const versions = await (await fetch(`${server.url}/api/plan/versions`)).json();
       expect(versions.slug).toBe(chain);
       expect(versions.versions).toHaveLength(3);
-      // Nothing was written under today's dated directory.
       expect(existsSync(join(dataDir, "history", project, generateSlug(v1)))).toBe(false);
     } finally {
       await server.stop();
@@ -145,8 +133,6 @@ describe("plan review spanning a day boundary", () => {
     expect(payload.previousPlan).toBeNull();
   });
 
-  // The other half of the split: plans/ snapshots stay named by the decision
-  // day (listArchivedPlans reads that date back), while history continues.
   for (const decision of ["approve", "deny"] as const) {
     test(`${decision} writes plans/{heading}-{today} while history continues an older chain`, async () => {
       const dataDir = process.env.PLANNOTATOR_DATA_DIR!;

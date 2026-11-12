@@ -1,13 +1,3 @@
-/**
- * What an agent gets from the person's reaction (approval "inbox-reaction-tray",
- * addenda 2026-11-07T11:39Z and T12:20Z: every reaction, 👍 included, is one
- * quick label). The failures this guards: every reaction reaching the agent as
- * "👍 Looks good" (in the wake or in read_thread), 👍 worded apart from the
- * others, an ack without `reaction`, an older Inbox or an older note without a
- * reaction printing something else, and a reaction's text forging more of the
- * prompt.
- * On a real store in a temp dir; no Inbox server.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +15,6 @@ afterEach(() => {
 const WINDOW = 10_000;
 const AGENT: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: "claude-code", session: "ses_a", name: null };
 
-/** A message the person reacted to, its Undo window passed: the note the agent is handed, and the thread as it reads it. */
 function reacted(reaction: InboxReaction | null) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-ack-reaction-"));
   roots.push(dir);
@@ -37,12 +26,10 @@ function reacted(reaction: InboxReaction | null) {
   clock.now += WINDOW;
   store.settleAcks(WINDOW);
   const [note] = store.pendingReplies("ses_a");
-  // The bridge command as the server builds it for a note (`ack_of`, and `ack_reaction` when it has one).
   const wake = inboxWakeText({ type: "reply", id: note!.id, thread_id: sent.id, subject: null, body: note!.body, ack_of: note!.ack_of, ...(note!.ack_reaction ? { ack_reaction: note!.ack_reaction } : {}) });
   const shown = store.agentThread(sent.id)!.messages[0]!;
   const full = agentMessage(shown);
   const read = messageText(full, { previousId: null, previousDate: null, rootId: sent.id });
-  // The one-line form an earlier message takes in a long thread: the emoji alone, last.
   const oneLine = messageLineText(agentMessageLine(shown), { previousId: null, previousDate: null, rootId: sent.id }).split(" · ").at(-1);
   return { id: sent.id, note: note!, wake: wake.split("\n"), readLine: read.split("\n").at(-1), oneLine, reaction: full.ack!.reaction };
 }

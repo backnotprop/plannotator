@@ -1,7 +1,3 @@
-/**
- * Ingestion-phase tests: a provider that exits 0 but returns empty/garbage
- * output fails the job instead of silently showing "done".
- */
 import { describe, expect, test } from "bun:test";
 import { parseClaudeStreamOutput, transformClaudeFindings, CLAUDE_REVIEW_SCHEMA_JSON, type ClaudeFinding } from "./claude-review";
 import { transformReviewFindings, CODEX_REVIEW_SCHEMA, type CodexFinding } from "./codex-review";
@@ -39,8 +35,6 @@ describe("launch-time diff attribution", () => {
 });
 
 describe("completion semantics — empty/unparseable output fails the job", () => {
-  // Guards the fix: a provider that exits 0 with nothing/garbage must fail the
-  // job (REVIEW_OUTPUT_FAILED), not silently leave it "done" with no findings.
   test("parseClaudeStreamOutput returns null for empty/whitespace stdout", () => {
     expect(parseClaudeStreamOutput("")).toBeNull();
     expect(parseClaudeStreamOutput("   \n  ")).toBeNull();
@@ -50,10 +44,6 @@ describe("completion semantics — empty/unparseable output fails the job", () =
     expect(parseClaudeStreamOutput("not json\n{ broken")).toBeNull();
   });
 
-  // Claude Code 2.1.x emits one result event per settled turn when the main
-  // agent launches background subagents (result_index 0..n); the trailing ones
-  // can be empty or errors. Reading only the LAST result failed runs that did
-  // deliver findings ("Review finished but produced no usable findings").
   const findings = { findings: [{ file: "a.ts", line: 1, end_line: 1, severity: "nit", description: "d", reasoning: "r" }] };
   const emptyTrailing = { type: "result", subtype: "success", is_error: false, num_turns: 0, result_index: 2 };
 
@@ -103,7 +93,6 @@ describe("completion semantics — empty/unparseable output fails the job", () =
     markJobReviewFailed(job, REVIEW_OUTPUT_FAILED);
     expect(job.status).toBe("failed");
     expect(job.error).toBe(REVIEW_OUTPUT_FAILED);
-    // No schema/CLI internals leaked in the user-facing reason.
     expect(REVIEW_OUTPUT_FAILED).not.toContain("stdout");
     expect(REVIEW_OUTPUT_FAILED).not.toContain("JSON");
   });
@@ -136,11 +125,6 @@ describe("placement classifier — file + line, file only, or general", () => {
 });
 
 describe("Codex schema is OpenAI strict-mode compliant", () => {
-  // Regression: OpenAI structured output requires every property of an object
-  // with additionalProperties:false to appear in `required`. Optional fields
-  // must be nullable-and-required, not omitted from `required`. Dropping a key
-  // (e.g. line_range) from `required` makes codex exec fail with a 400 before
-  // the review runs.
   function assertStrict(node: any, path: string): void {
     if (!node || typeof node !== "object") return;
     const types = Array.isArray(node.type) ? node.type : node.type ? [node.type] : [];

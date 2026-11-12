@@ -1,13 +1,3 @@
-/**
- * Pi, Oh My Pi and OpenCode 2 after an update (owner approval "reload-hosts"):
- * which command loads the newer Plannotator in each runtime. First the rules
- * alone (packages/server/inbox-restart.ts), then over a real Inbox (temp data
- * dir, scratch HOME and Pi agent dir): a poll's `plugin: { version, on_disk,
- * host }` reaches the sessions route's `asker.connection.outdated`, Settings →
- * Agents' `sessions`, and the list model's `restart_agents`; the shared
- * `InboxWake` sends what its host reports; and the `tag_needs_update`
- * refusal names the host's own command. Nothing reads the real ~/.pi or ~/.plannotator.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,7 +35,6 @@ describe("the judgment table", () => {
     expect(plugin({ version: "0.28.30", on_disk: "0.28.31", host: "oh-my-pi" })).toMatchObject({ version: "0.28.30", onDisk: "0.28.31", host: "oh-my-pi" });
     expect(plugin({ version: "0.28.30", on_disk: null })).toMatchObject({ onDisk: null });
     expect("onDisk" in plugin({ version: "0.28.30" })!).toBe(false);
-    // Anything else counts as not sent: never read as "gone".
     expect("onDisk" in plugin({ version: "0.28.30", on_disk: 7 })!).toBe(false);
     expect("host" in plugin({ version: "0.28.30", host: "codex" })!).toBe(false);
   });
@@ -97,19 +86,15 @@ describe("the judgment table", () => {
       reload_command: OPENCODE2_RELOAD_COMMAND,
       ...base,
     } as InboxSessionOutdated);
-    // Behind, the configured spec known: only Plannotator updates (OpenCode wants the spec exactly as configured).
     const behind = plugin({ version: "0.28.29", on_disk: "0.28.29" });
     const named = openCodeSessionOutdated(behind, "0.28.31", { spec: "@plannotator/opencode@latest" })!;
     expect(named).toMatchObject({ fix: "update_extension", update_command: "opencode2 models && opencode2 plugin update @plannotator/opencode@latest", ...base });
     expect(named.update_scope).toBeUndefined();
-    // The spec unknown: no target, and the window says it updates every outdated plugin.
     expect(openCodeSessionOutdated(behind, "0.28.31")).toMatchObject({ fix: "update_extension", update_command: "opencode2 models && opencode2 plugin update", update_scope: "all" });
-    // Pinned to an exact version: plugin update is a no-op, so the pin changes and the service reloads.
     const pinned = openCodeSessionOutdated(behind, "0.28.31", { spec: "@plannotator/opencode@0.28.29" })!;
     expect(pinned).toMatchObject({ fix: "update_extension", pinned_spec: "@plannotator/opencode@0.28.29", pin_to: "@plannotator/opencode@latest", reload_command: OPENCODE2_RELOAD_COMMAND });
     expect(pinned.update_command).toBeUndefined();
     expect(openCodeSessionOutdated(plugin({ version: "0.28.31", on_disk: "0.28.31" }), "0.28.31")).toBeNull();
-    // An older OpenCode connection sends no plugin: nothing to say.
     expect(openCodeSessionOutdated(null, "0.28.31")).toBeNull();
     expect(openCodeSessionOutdated(plugin({ version: "0.28.29" }), "0.28.31")).toBeNull();
   });
@@ -117,7 +102,6 @@ describe("the judgment table", () => {
   test("OpenCode 2's configured spec, as written; a pin is an exact version", () => {
     expect(openCodePluginSpec(JSON.stringify({ plugins: [{ package: "@plannotator/opencode@latest", options: {} }] }))).toBe("@plannotator/opencode@latest");
     expect(openCodePluginSpec(JSON.stringify({ plugins: ["other-plugin", "@plannotator/opencode"] }))).toBe("@plannotator/opencode");
-    // OpenCode 1's key, which OpenCode 2 also reads and our installer writes: a string, or a [spec, options] pair.
     expect(openCodePluginSpec(JSON.stringify({ plugin: ["@plannotator/opencode@latest"] }))).toBe("@plannotator/opencode@latest");
     expect(openCodePluginSpec(JSON.stringify({ plugin: [["@plannotator/opencode@0.28.20", { workflow: "manual" }]] }))).toBe("@plannotator/opencode@0.28.20");
     expect(openCodePluginSpec(JSON.stringify({ plugin: ["other", ["another", {}]] }))).toBeNull();
@@ -126,11 +110,9 @@ describe("the judgment table", () => {
     expect(openCodeSpecPinned("@plannotator/opencode@0.28.20")).toBe(true);
     expect(openCodeSpecPinned("@plannotator/opencode@latest")).toBe(false);
     expect(openCodeSpecPinned("@plannotator/opencode@^0.28.0")).toBe(false);
-    // Opened first: in a folder the service has not opened, the update alone fails (see OPENCODE2_OPEN_FOLDER_COMMAND).
     expect(opencodePluginUpdateCommand("@plannotator/opencode@latest")).toBe("opencode2 models && opencode2 plugin update @plannotator/opencode@latest");
     expect(opencodePluginUpdateCommand("@plannotator/opencode@next")).toBe("opencode2 models && opencode2 plugin update @plannotator/opencode@next");
     expect(opencodePluginUpdateCommand("@plannotator/opencode")).toBe("opencode2 models && opencode2 plugin update @plannotator/opencode");
-    // Anything a shell would read as more than a word (a redirect, a pipe, a glob, a space) is never pasted unquoted.
     for (const unsafe of [">=0.28.0", "<0.29.0", "^0.28.0", "~0.28.0", "0.28.0 || 0.29.0", "latest; rm -rf ~", "* ", "latest x"]) {
       expect(opencodePluginUpdateCommand(`@plannotator/opencode@${unsafe}`)).toBe("opencode2 models && opencode2 plugin update");
       const outdated = openCodeSessionOutdated(plugin({ version: "0.28.29", on_disk: "0.28.29" }), "0.28.31", { spec: `@plannotator/opencode@${unsafe}` })!;
@@ -147,7 +129,6 @@ describe("the judgment table", () => {
       const reader = createOpenCodeSpecReader(createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: "" } }));
       const spec = reader();
       expect(spec).toBe("@plannotator/opencode@0.28.29");
-      // The pin is detected, so the line says to change it (the original bug: the line never cleared).
       expect(openCodeSessionOutdated(plugin({ version: "0.28.29", on_disk: "0.28.29" }), "0.28.31", { spec })).toMatchObject({ pinned_spec: "@plannotator/opencode@0.28.29" });
       const explicit = join(home, "elsewhere.json");
       writeFileSync(explicit, JSON.stringify({ plugins: ["@plannotator/opencode@latest"] }));
@@ -168,7 +149,6 @@ describe("the judgment table", () => {
   });
 
   test("the tag refusal names the host's own command", () => {
-    // Plain text (the window draws no Markdown), each host's own command.
     const fixes = [
       tagUpdateFix("pi", piSessionOutdated(plugin({ version: "0.28.30", on_disk: "0.28.31", host: "pi" }), "0.28.31")),
       tagUpdateFix("oh-my-pi", null),
@@ -185,7 +165,6 @@ describe("the judgment table", () => {
     expect(fixes[3]).toContain("@plannotator/opencode@0.28.29");
     expect(fixes[3]).toContain("@plannotator/opencode@latest");
     expect(fixes[4]).toContain("/reload-plugins");
-    // Claude Code's update stays short: the long commands live in Settings, Agents.
     expect(fixes[5]).not.toContain("claude plugin");
     expect(fixes[5]).toContain("/reload-plugins");
     expect(tagUpdateFix(null, null)).toBe("Update Plannotator there.");
@@ -198,8 +177,6 @@ describe("the judgment table", () => {
     expect(runtimeOf("codex", null)).toBeNull();
   });
 });
-
-// ── Over a real Inbox ──
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -275,7 +252,6 @@ describe("over a real Inbox", () => {
     expect(pi).toMatchObject({ running: 1, outdated: 1 });
     expect(pi!.sessions[0]).toMatchObject({ plugin: "0.28.30", runtime: "pi", outdated: { fix: "reload" } });
     expect((await list(server)).restart_agents).toEqual({ total: 1, runtimes: { pi: 1 } });
-    // /reload: the same session now loaded what is on disk.
     await poll(server, "pi", "pi-1", { project_path: project, busy: false, plugin: { version: "0.28.31", on_disk: "0.28.31", host: "pi" } });
     expect((await agents(server)).sessions?.pi?.sessions[0]).toMatchObject({ plugin: "0.28.31", outdated: null });
     expect((await list(server)).restart_agents).toEqual({ total: 0, runtimes: {} });
@@ -285,7 +261,6 @@ describe("over a real Inbox", () => {
     const { server, project } = await world({ inboxVersion: "0.28.31", piSettings: { packages: ["npm:@plannotator/pi-extension@0.28.29"] } });
     await poll(server, "pi", "pi-pin", { project_path: project, plugin: { version: "0.28.29", on_disk: "0.28.29", host: "pi" } });
     expect((await agents(server)).sessions?.pi?.sessions[0]?.outdated).toMatchObject({ fix: "update_extension", update_command: "pi install npm:@plannotator/pi-extension" });
-    // An update fix is not counted in the sidebar (as Claude Code's update_plugin).
     expect((await list(server)).restart_agents?.total).toBe(0);
   });
 
@@ -313,7 +288,6 @@ describe("over a real Inbox", () => {
     const deadline = Date.now() + 10_000;
     while (!(await listed()) && Date.now() < deadline) await Bun.sleep(100);
     expect(await listed()).toMatchObject({ plugin: "0.28.30", outdated: null });
-    // The package is updated under it: the next poll says so.
     onDisk = "0.28.31";
     wake.dispose();
     const again = new InboxWake(connection, "pi-wake", {
@@ -333,7 +307,6 @@ describe("over a real Inbox", () => {
   test("tag_needs_update names the host's command", async () => {
     const { server, client, project } = await world({ inboxVersion: "dev" });
     const thread = await asked(client, project, "cc-owner", "claude-code");
-    // A live Pi session whose connection predates tags (no `tags: true`), whose package changed under it.
     await poll(server, "pi", "pi-old", { project_path: project, plugin: { version: "0.28.24", on_disk: "0.28.31", host: "pi" } });
     const response = await fetch(`${base(server)}/api/inbox/messages/${thread.message_id}/reply`, {
       method: "POST",

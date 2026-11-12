@@ -1,9 +1,3 @@
-/**
- * #1617: Bun app-HTML routes serve the page compressed to network-reachable
- * sessions (remote mode, --tailscale) and exactly as before to local ones.
- * Nothing else changes shape: API JSON, the framed-embed 404 (#1561), and the
- * VS Code cookie proxy's identity path.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -33,7 +27,6 @@ async function isolate(remote: boolean): Promise<void> {
   process.env.PLANNOTATOR_BROWSER = "/usr/bin/true";
   process.env.PLANNOTATOR_REMOTE = remote ? "1" : "0";
   if (remote) {
-    // Remote mode would otherwise bind the fixed 19432.
     const { start, servers } = await occupyConsecutivePorts(1);
     await closeServer(servers[0]);
     process.env.PLANNOTATOR_PORT = String(start);
@@ -58,7 +51,6 @@ describe("Bun app HTML: remote sessions negotiate compression", () => {
     try {
       await expectAppHtmlNegotiation(`${server.url}/`, html);
       await expectAppHtmlNegotiation(`${server.url}/some/spa/route`, html);
-      // API JSON stays uncompressed.
       const api = await rawRequest(`${server.url}/api/plan`, { headers: { "accept-encoding": "br, gzip" } });
       expect(api.headers["content-encoding"]).toBeUndefined();
       expect(JSON.parse(api.body.toString("utf8")).plan).toBe("# Plan");
@@ -116,7 +108,6 @@ describe("Bun app HTML: remote sessions negotiate compression", () => {
 });
 
 describe("Bun app HTML: --tailscale sessions compress while staying local", () => {
-  // tailscale serve proxies from 127.0.0.1, so only the session flag can tell.
   test("review server", async () => {
     await isolate(false);
     const html = makeAppHtml("bun-review-tailnet");
@@ -182,19 +173,16 @@ describe("VS Code cookie proxy in front of a compressing server", () => {
   });
 
   test("a webview asking for br still gets plain, injectable HTML", async () => {
-    // Remote (compressing) upstream, the worst case for the proxy.
     await isolate(true);
     const html = makeAppHtml("bun-vscode-proxy");
     const server = await startPlannotatorServer({ plan: "# Plan", origin: "claude-code", htmlContent: html });
     try {
       proxy = await createCookieProxy({ loadCookies: () => "plannotator-identity=tater", onSaveCookies: () => {} });
       const proxiedUrl = proxy.rewriteUrl(`${server.url}/`);
-      // What the Electron webview sends.
       const res = await rawRequest(proxiedUrl, { headers: { "accept-encoding": "gzip, deflate, br, zstd" } });
       expect(res.status).toBe(200);
       expect(res.headers["content-encoding"]).toBeUndefined();
       const text = res.body.toString("utf8");
-      // The proxy's injection landed and the app page follows intact.
       expect(text).toContain("Object.defineProperty(document,\"cookie\"");
       expect(text).toContain(html.slice(html.indexOf("<body>")));
     } finally {

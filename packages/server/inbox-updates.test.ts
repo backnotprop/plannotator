@@ -1,10 +1,3 @@
-/**
- * The Inbox's update control against a real Inbox server: the release check
- * (stubbed fetch, never GitHub), the button's states on health, Update now
- * (a recording launcher, never the install script), Remind me tomorrow, the
- * Settings switches (the dialog's "Install new versions automatically"
- * checkbox writes autoUpdate), What's new, and the pure state rules.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,7 +42,6 @@ beforeEach(() => {
   savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
   savedCheck = process.env.PLANNOTATOR_UPDATE_CHECK;
   savedAuto = process.env.PLANNOTATOR_AUTO_UPDATE;
-  // config.json and the sessions registry are read from the data dir env.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   delete process.env.PLANNOTATOR_UPDATE_CHECK;
   delete process.env.PLANNOTATOR_AUTO_UPDATE;
@@ -73,7 +65,6 @@ const latest = (tag = "v0.28.12"): (() => Promise<FetchReleaseResult>) => async 
   return { ok: true, release: { tag, publishedAt: "2026-10-11T00:00:00Z", body: BODY } };
 };
 
-/** A release by its tag, with notes (the What's new link's fetch). */
 const tagged = (): ((version: string) => Promise<FetchReleaseResult>) => async (version) => ({
   ok: true,
   release: { tag: `v${version}`, body: `## What's New in v${version}\n\nNotes for ${version}.\n\n## Install / Update\n` },
@@ -125,10 +116,8 @@ describe("the sidebar button", () => {
     const server = await start();
     const update = await waitFor(() => health(server), (u) => u !== null);
     expect(update).toMatchObject({ available: true, state: "available", version: "0.28.12", current: "0.28.10", action: "script" });
-    // Many health ticks later, GitHub was asked once.
     await Bun.sleep(200);
     expect(fetches).toBe(1);
-    // The list model carries the same, for the page's first paint.
     const list = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads`)).json();
     expect(list.update).toMatchObject({ state: "available", version: "0.28.12" });
   });
@@ -206,11 +195,9 @@ describe("when the Inbox asks (the release page, minutes after a release)", () =
     await waitFor(async () => fetches, (n) => n === 1);
     expect(await health(server)).toBeNull();
     version = "0.28.12";
-    // Reloads inside the minute: the cache answers.
     for (let i = 0; i < 3; i++) await fetch(`http://127.0.0.1:${server.port}/`);
     await Bun.sleep(150);
     expect(fetches).toBe(1);
-    // A minute later a reload asks, and the button follows.
     clock += 61_000;
     await fetch(`http://127.0.0.1:${server.port}/`);
     expect(await waitFor(() => health(server), (u) => u !== null)).toMatchObject({ state: "available", version: "0.28.12" });
@@ -281,14 +268,12 @@ describe("Update now", () => {
   });
 
   test("the installer gets the login shell's PATH once the Inbox has read it (claude and nvm's node outside its own PATH)", async () => {
-    // A sandboxed Inbox's login shell is PLANNOTATOR_TEST_LAUNCH_PATH (inbox.ts), never the person's.
     const saved = { sandbox: process.env.PLANNOTATOR_TEST_SANDBOX, path: process.env.PLANNOTATOR_TEST_LAUNCH_PATH };
     process.env.PLANNOTATOR_TEST_SANDBOX = "1";
     process.env.PLANNOTATOR_TEST_LAUNCH_PATH = "/opt/login-shell/bin:/usr/bin";
     try {
       const server = await start();
       await waitFor(() => health(server), (u) => u !== null);
-      // New message's sessions read is what reads the login shell.
       await fetch(`http://127.0.0.1:${server.port}/api/inbox/sessions`);
       await Bun.sleep(100);
       expect((await post(server, "/api/inbox/update")).status).toBe(200);
@@ -333,8 +318,6 @@ describe("Update now", () => {
     expect(details.failure).toMatchObject({ exit_code: 1 });
   });
 
-  // The failure dialog's way out depends on why the download failed: the
-  // last run's lines in update.log carry update-prepare's certificate hint.
   test("a download refused at TLS says so in the failure details (75 only, the last run only)", async () => {
     writeUpdateState(
       { latestRelease: { tag: "0.28.12", fetchedAt: NOW }, pending: { version: "0.28.12", fromVersion: "0.28.10", startedAt: NOW, by: "person" } },
@@ -388,7 +371,6 @@ describe("Remind me tomorrow, Settings, What's new", () => {
     expect((await post(server, "/api/inbox/settings", { auto_update: "yes" })).status).toBe(422);
     expect((await post(server, "/api/inbox/settings", { update_check: false })).status).toBe(200);
     expect(loadConfig().updateCheck).toBe(false);
-    // Off stops the automatic checks only: the release already known stays one click away.
     expect((await health(server))?.state).toBe("available");
   });
 
@@ -412,7 +394,6 @@ describe("Remind me tomorrow, Settings, What's new", () => {
   });
 
   test("the releases skipped before an update are still listed after it, across restarts", async () => {
-    // The Inbox ran 0.28.7; this run is 0.28.10. The notes for 0.28.10 list 0.28.8 and 0.28.9.
     writeUpdateState({ inboxVersion: "0.28.7" }, dataDir);
     writeReleaseNotes(
       {
@@ -440,18 +421,15 @@ describe("Remind me tomorrow, Settings, What's new", () => {
     const state = readUpdateState(dataDir);
     expect(state.inboxVersion).toBe("0.28.10");
     expect(state.inboxPreviousVersion).toBe("0.28.7");
-    // A newer release still counts from the version this Inbox runs.
     expect((await whatsNew(first, "0.28.12")).since).toBe("0.28.10");
     first.stop();
 
-    // A restart on the same version keeps it.
     const again = await start();
     const kept = await whatsNew(again, "0.28.10");
     expect(kept.since).toBe("0.28.7");
     expect(kept.skipped.map((h) => h.version)).toEqual(["0.28.9", "0.28.8"]);
     again.stop();
 
-    // A downgrade forgets it: there is no update to count from.
     const older = await start({ version: "0.28.9" });
     expect(readUpdateState(dataDir).inboxPreviousVersion).toBeUndefined();
     expect((await whatsNew(older, "0.28.10")).since).toBe("0.28.9");
@@ -459,8 +437,6 @@ describe("Remind me tomorrow, Settings, What's new", () => {
 });
 
 describe("What's new for a version installed outside the Inbox (no notes saved)", () => {
-  // A fake release API on loopback, reached the way the Inbox reaches GitHub
-  // (PLANNOTATOR_UPDATE_API_URL), so the default tag fetch runs for real.
   let api: ReturnType<typeof Bun.serve>;
   let tagRequests: string[];
   let answer: (version: string) => Response | Promise<Response>;
@@ -483,7 +459,6 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
     });
     savedUrl = process.env.PLANNOTATOR_UPDATE_API_URL;
     process.env.PLANNOTATOR_UPDATE_API_URL = `http://127.0.0.1:${api.port}/releases/latest`;
-    // The Inbox ran 0.28.9 before; this run is 0.28.10, installed by the script run by hand.
     writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
   });
 
@@ -493,7 +468,6 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
     else process.env.PLANNOTATOR_UPDATE_API_URL = savedUrl;
   });
 
-  /** The real tag fetch (no fetchReleaseTag stub). */
   const startReal = (extra: { whatsNewWaitMs?: number } = {}) =>
     start({
       updates: { fetchRelease: latest(), isManaged: () => true, listSessions: () => [], launchInstaller: () => {}, ...extra },
@@ -521,7 +495,7 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
     const res = await whatsNew(server, "0.28.10");
     expect(res.status).toBe(404);
     expect((await res.json()).code).toBe("notes_not_found");
-    await Bun.sleep(150); // a few health ticks
+    await Bun.sleep(150);
     expect(tagRequests).toEqual([]);
   });
 
@@ -539,7 +513,6 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
     const server = await startReal();
     expect(await waitFor(() => listUpdated(server), (v) => v === null)).toBeNull();
     expect((await whatsNew(server, "0.28.10")).status).toBe(404);
-    // One attempt, then the notes' 6 h back-off: the tick and the route ask no more.
     await Bun.sleep(150);
     expect(tagRequests).toEqual(["0.28.10"]);
   });
@@ -573,9 +546,6 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
     expect(tagRequests).toEqual(["0.28.10"]);
   });
 
-  // The 0.28.37 bug: the Inbox started on the new version while the release
-  // still carried GitHub's generated body; the written notes replaced it 39 s
-  // later, and the link stayed hidden for the whole run (a 24 h back-off).
   test("asked before the release notes were written: the link shows once the 15-minute retry saves them, without a restart", async () => {
     let clock = Date.now();
     const publishedAt = new Date(clock - 60_000).toISOString();
@@ -589,14 +559,12 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
     const server = await start({
       updates: { fetchRelease: latest(), now: () => clock, isManaged: () => true, listSessions: () => [], launchInstaller: () => {} },
     });
-    // The generated body saved no notes: the link goes, and the ticks ask no more for now.
     expect(await waitFor(() => listUpdated(server), (v) => v === null)).toBeNull();
-    await Bun.sleep(150); // a few health ticks
+    await Bun.sleep(150);
     expect(tagRequests).toEqual(["0.28.10"]);
 
     written = true;
     clock += RELEASE_NOTES_PENDING_RETRY_MS;
-    // The next health tick asks again, saves the notes, and the list (and the event stream) carry the link.
     expect(await waitFor(() => listUpdated(server), (v) => v === "0.28.10")).toBe("0.28.10");
     expect(tagRequests).toEqual(["0.28.10", "0.28.10"]);
     expect((await (await whatsNew(server, "0.28.10")).json()).notes).toBe("What 0.28.10 brings.");
@@ -612,7 +580,6 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
 
 describe("the question sound (config.json inboxSound)", () => {
   const settingsOf = async (server: InboxServer) => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).sound;
-  // These tests restart servers; never reuse a socket from a stopped instance.
   const postJson = (server: InboxServer, path: string, body: unknown) =>
     fetch(`http://127.0.0.1:${server.port}${path}`, { keepalive: false, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const claim = async (server: InboxServer) => (await (await postJson(server, "/api/inbox/sound/dialog", { serverSession: server.serverSession })).json()).show;
@@ -652,10 +619,8 @@ describe("the question sound (config.json inboxSound)", () => {
     expect(loadConfig().inboxSound).toEqual({ dialogShownFor: "0.28.10" });
     expect((await settingsOf(server)).dialog_due).toBe(false);
     expect(await claim(server)).toBe(false);
-    // The choice the page makes later keeps the mark.
     await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { enabled: false } });
     expect(loadConfig().inboxSound).toEqual({ dialogShownFor: "0.28.10", enabled: false });
-    // A stale tab (another server's session) is refused before anything is claimed.
     expect((await postJson(server, "/api/inbox/sound/dialog", { serverSession: "stale" })).status).toBe(409);
   });
 
@@ -664,7 +629,6 @@ describe("the question sound (config.json inboxSound)", () => {
     const first = await start();
     expect((await settingsOf(first)).dialog_due).toBe(true);
     first.stop();
-    // The same version starts again: no update this run, but the dialog still waits for a page.
     const second = await start();
     expect((await (await fetch(`http://127.0.0.1:${second.port}/api/inbox/threads`)).json()).updated).toBeNull();
     expect((await settingsOf(second)).dialog_due).toBe(true);
@@ -680,7 +644,6 @@ describe("the question sound (config.json inboxSound)", () => {
   });
 
   test("someone who used a 0.28.7–0.28.11 Inbox (no recorded version, but its registry and a project) gets the dialog", async () => {
-    // An Inbox from before versions were recorded: the registry it wrote and a project in its store.
     const old = await start({ version: "dev" });
     old.stop();
     InboxStore.open(dataDir).ensureProject({ name: "billing-svc", root: dataDir });
@@ -728,7 +691,6 @@ describe("inboxUsedBefore", () => {
       leave();
       expect([what, inboxUsedBefore(dataDir)]).toEqual([what, true]);
     }
-    // An empty projects folder (an Inbox that opened its store and never saw an agent) is not evidence on its own.
     rmSync(dataDir, { recursive: true, force: true });
     mkdirSync(join(dataDir, "inbox", "projects"), { recursive: true });
     expect(inboxUsedBefore(dataDir)).toBe(false);

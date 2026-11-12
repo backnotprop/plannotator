@@ -1,16 +1,3 @@
-/**
- * An Inbox whose data folder is gone stops instead of running on headless:
- * its `inbox/` folder removed (a test's temp dir, a hand-deleted
- * ~/.plannotator/inbox) or made again empty, or `inbox.json` naming another
- * Inbox (`probeInboxData`). Only that evidence counts: an unreadable or
- * half-written `inbox.json`, or the same files in another folder (a remount,
- * a moved copy), never stop it. And a running Inbox rewrites `inbox.json` only while it is
- * its own, and never makes a removed folder again (`updateOwnInboxRegistry`):
- * a stopping Inbox used to rewrite whatever entry it read, so it dropped its
- * successor's tailnet record, and a SIGTERM after the folder was removed made
- * the folder again. Real servers on loopback, temp data dirs, a scripted
- * `tailscale`.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,7 +26,6 @@ function setEnv(name: string, value: string | undefined): void {
   });
 }
 
-/** A temp root holding the data dir, which loadConfig() reads too. */
 function world(): { root: string; dataDir: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-data-gone-")));
   roots.push(root);
@@ -50,7 +36,6 @@ function world(): { root: string; dataDir: string } {
   return { root, dataDir };
 }
 
-/** `tailscale` as a script: the owner, serve status, serve on and off. */
 const fakeTailscale: TailscaleRunner = (args) => {
   const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
   if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: "box.tail0000.ts.net.", UserID: 1 }, User: { "1": { LoginName: "owner@example.com" } } }));
@@ -88,7 +73,6 @@ describe("an Inbox whose data folder is gone", () => {
     rmSync(root, { recursive: true, force: true });
     expect(await within(gone, 5000, "the stop")).toContain("is gone");
     expect(await listening(server)).toBe(false);
-    // The clean stop took the tailnet mapping down and wrote nothing: the removed folder stays removed.
     expect(existsSync(root)).toBe(false);
   });
 
@@ -104,7 +88,6 @@ describe("an Inbox whose data folder is gone", () => {
   test("another folder at the same path still holding this Inbox's entry (a remount, a moved copy): it keeps running", async () => {
     const { dataDir } = world();
     const { server, gone } = await start(dataDir);
-    // A new device and inode, the same files.
     renameSync(join(dataDir, "inbox"), join(dataDir, "inbox.moved"));
     cpSync(join(dataDir, "inbox.moved"), join(dataDir, "inbox"), { recursive: true });
     const reported = await Promise.race([gone, Bun.sleep(400).then(() => null)]);
@@ -113,14 +96,13 @@ describe("an Inbox whose data folder is gone", () => {
   });
 
   test("inbox.json unreadable (EACCES) or not parsing for several checks: it cannot tell, so it keeps running", async () => {
-    if (process.getuid?.() === 0) return; // root reads a 000 file
+    if (process.getuid?.() === 0) return;
     const { dataDir } = world();
     const { server, gone } = await start(dataDir);
     const file = join(dataDir, "inbox", "inbox.json");
     const entry = readFileSync(file, "utf8");
     chmodSync(file, 0o000);
     try {
-      // Three checks and more at 50 ms.
       expect(await Promise.race([gone, Bun.sleep(400).then(() => null)])).toBeNull();
       expect(await listening(server)).toBe(true);
     } finally {
@@ -134,7 +116,6 @@ describe("an Inbox whose data folder is gone", () => {
 
   test("a tailnet take-down that fails at the data-gone stop: stderr names the manual command", async () => {
     const { root, dataDir } = world();
-    // The e2e's shape: the fake `tailscale` lived in the removed folder, so every call fails once it is gone.
     const goneWithRoot: TailscaleRunner = (args) => (existsSync(root) ? fakeTailscale(args) : { status: 127, stdout: "", stderr: "tailscale: not found" });
     const { server, gone } = await start(dataDir, { tailscale: goneWithRoot, publishTailnet: true });
     expect(server.tailscale.state().url).toContain("box.tail0000.ts.net");
@@ -174,10 +155,8 @@ describe("an Inbox whose data folder is gone", () => {
 describe("the Inbox writes only its own registry entry", () => {
   test("a stopping Inbox never rewrites the entry another Inbox wrote since (its tailnet record stays)", async () => {
     const { dataDir } = world();
-    // Published, so the stop takes the mapping down and saves inbox.json: the write that clobbered the successor.
     const { server } = await start(dataDir, { tailscale: fakeTailscale, publishTailnet: true, dataCheckMs: 60_000 });
     expect(readInboxRegistry(dataDir)?.tailscale?.https_port).toBe(server.port);
-    // The successor published too (its own mapping record), on a port of its own.
     const successor: InboxRegistryEntry = {
       ...readInboxRegistry(dataDir)!,
       pid: 999_998,
@@ -205,7 +184,6 @@ describe("the Inbox writes only its own registry entry", () => {
     const movePort = (e: InboxRegistryEntry) => {
       e.port = 5678;
     };
-    // No file (and no folder): nothing is written, nothing is made.
     expect(updateOwnInboxRegistry(dataDir, "mine", movePort)).toBe(false);
     expect(existsSync(join(dataDir, "inbox"))).toBe(false);
     writeInboxRegistry(dataDir, { ...entry, serverSession: "theirs" });

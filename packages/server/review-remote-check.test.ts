@@ -1,30 +1,3 @@
-/**
- * Which review interactions are allowed to contact the git remote (#1553) —
- * dual-runtime (Bun + Pi) server flow.
- *
- * The reported failure: an OPEN BUT IDLE review page kept the server running
- * `git ls-remote --symref origin HEAD` about once a minute for as long as the
- * tab stayed open, because the 60s remote probe hung off `/api/diff/fresh`,
- * which the client polls every 5s. On a smartcard-backed SSH setup that is one
- * physical touch prompt per minute with nothing on screen to explain it.
- *
- * Guards:
- *  1. An idle session issues NO remote invocation after the startup probes, no
- *     matter how long the freshness poll runs.
- *  2. `baseBehindRemote` still rides EVERY freshness response from the cached
- *     value — dropping the refresh must not make the banner flicker.
- *  3. `/api/diff/switch` (the diff/base pickers and the "Diff out of date ·
- *     Refresh" button) does probe once the interval has elapsed, so the
- *     staleness answer is still refreshed on the interactions that can change
- *     it.
- *  4. With the remote check off, the session issues ZERO ls-remote — startup
- *     probes included — the base stays what local discovery resolved, the
- *     banner never shows, and an explicit Fetch is still reachable.
- *
- * Counting is done with a `git` shim first on PATH that records every
- * `ls-remote` argv and then execs the real git, so a real remote (a local bare
- * repo) can answer while every network probe is still counted exactly.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -63,12 +36,6 @@ function git(cwd: string, args: string[]): string {
   return result.stdout.trim();
 }
 
-/**
- * A repo whose `origin` is a real (local bare) remote that is AHEAD of the
- * local tracking ref, so `baseBehindRemote` is genuinely true: ls-remote
- * answers with the bare repo's tip while `refs/remotes/origin/main` still
- * points at the previous commit.
- */
 function initRepoBehindRemote(): string {
   const repoDir = makeTempDir("plannotator-remote-check-repo-");
   const bareDir = makeTempDir("plannotator-remote-check-origin-");
@@ -87,15 +54,12 @@ function initRepoBehindRemote(): string {
   git(repoDir, ["add", "remote-only.txt"]);
   git(repoDir, ["commit", "-q", "-m", "remote work"]);
   git(repoDir, ["push", "-q", "origin", "main"]);
-  // Rewind only the tracking ref: the remote tip is now ahead of the baseline
-  // the review diffs against, exactly like a teammate pushing mid-review.
   git(repoDir, ["update-ref", "refs/remotes/origin/main", behindSha]);
   git(repoDir, ["reset", "-q", "--hard", behindSha]);
   writeFileSync(join(repoDir, "local-work.txt"), "in progress\n");
   return repoDir;
 }
 
-/** Puts a counting `git` shim first on PATH. Returns the invocation log path. */
 function installLsRemoteCounter(): string {
   const binDir = makeTempDir("plannotator-remote-check-bin-");
   const log = join(binDir, "ls-remote.log");
@@ -170,7 +134,6 @@ async function waitFor(
   return false;
 }
 
-/** Let every startup probe land and settle so later counts are attributable. */
 async function settleStartupProbes(url: string, log: string): Promise<number> {
   await fetchDiff(url);
   await waitFor(async () => (await fetchDiff(url)).baseBehindRemote === true, 10_000);
@@ -198,9 +161,6 @@ afterEach(() => {
 describe("review remote-check traffic", () => {
   for (const [runtime, startServer] of RUNTIMES) {
     test(`${runtime}: an idle session issues no remote invocation beyond startup`, async () => {
-      // Failure caught: the reported #1553 loop — the 5s freshness poll
-      // carrying the 60s remote probe, so an untouched page keeps asking the
-      // remote (and a hardware key) forever.
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-remote-check-data-");
       await preparePiPort(runtime);
       const log = installLsRemoteCounter();
@@ -224,15 +184,9 @@ describe("review remote-check traffic", () => {
         expect(afterStartup).toBeGreaterThan(0);
         const snapshotId = (await fetchDiff(server.url)).snapshotId;
 
-        // The clock is pushed WELL past the probe interval before the polls
-        // run, which is what makes this a real reproduction: the old code's
-        // rate limit is the only thing that kept a fast poll quiet, so a test
-        // at real speed would pass against the bug.
         const skew = REMOTE_BASE_CHECK_INTERVAL_MS * 4;
         Date.now = () => realNow() + skew;
 
-        // The client's own cadence, compressed: every one of these is a poll
-        // the old code hung a network probe off.
         const behind: Array<boolean | undefined> = [];
         for (let i = 0; i < 12; i++) {
           const res = (await fetch(
@@ -241,13 +195,10 @@ describe("review remote-check traffic", () => {
           behind.push(res.baseBehindRemote);
           await Bun.sleep(20);
         }
-        // Give a probe the old code would have started time to reach the shim.
         await Bun.sleep(400);
         Date.now = realNow;
 
         expect(lsRemoteCount(log)).toBe(afterStartup);
-        // Guard 2: the banner value rides every single response, so it cannot
-        // blink off between refreshes.
         expect(behind).toEqual(new Array(12).fill(true));
         await finishSession(server);
       } finally {
@@ -257,9 +208,6 @@ describe("review remote-check traffic", () => {
     }, 30_000);
 
     test(`${runtime}: a diff switch probes the remote once the interval has elapsed`, async () => {
-      // Failure caught: moving the probe off the freshness poll without giving
-      // it a home — the staleness answer would then never refresh within a
-      // session, and the "behind GitHub" banner could never appear or clear.
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-remote-check-data-");
       await preparePiPort(runtime);
       const log = installLsRemoteCounter();
@@ -281,8 +229,6 @@ describe("review remote-check traffic", () => {
       try {
         const afterStartup = await settleStartupProbes(server.url, log);
 
-        // A switch INSIDE the interval must not probe: the rate limit is what
-        // keeps a reviewer clicking through diff types off the network.
         await fetch(`${server.url}/api/diff/switch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -291,9 +237,6 @@ describe("review remote-check traffic", () => {
         await Bun.sleep(300);
         expect(lsRemoteCount(log)).toBe(afterStartup);
 
-        // Past the interval, the same interaction refreshes. The clock is
-        // faked rather than waited out: the gate reads Date.now() and the
-        // server runs in this process.
         const skew = REMOTE_BASE_CHECK_INTERVAL_MS + 5_000;
         Date.now = () => realNow() + skew;
         await fetch(`${server.url}/api/diff/switch`, {
@@ -314,9 +257,6 @@ describe("review remote-check traffic", () => {
     }, 30_000);
 
     test(`${runtime}: gitRemoteCheck off makes the whole session network-free`, async () => {
-      // Failure caught: an opt-out that only silences the periodic probe while
-      // the startup ones still fire — the user asked for no remote contact and
-      // would still get authentication prompts when the review opens.
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-remote-check-data-");
       await preparePiPort(runtime);
       const log = installLsRemoteCounter();
@@ -338,8 +278,6 @@ describe("review remote-check traffic", () => {
       const realNow = Date.now;
       try {
         const payload = await fetchDiff(server.url);
-        // The base stays what LOCAL discovery resolved, and the banner value
-        // is absent rather than false-but-unknown.
         expect(payload.base).toBe("origin/main");
         expect(payload.baseBehindRemote).toBeUndefined();
 
@@ -362,8 +300,6 @@ describe("review remote-check traffic", () => {
 
         expect(lsRemoteCount(log)).toBe(0);
 
-        // An explicit Fetch is the user asking for the network, so it stays
-        // reachable — the opt-out governs the automatic probes only.
         const fetchBase = await fetch(`${server.url}/api/fetch-base`, { method: "POST" });
         expect(fetchBase.status).toBe(200);
         await finishSession(server);

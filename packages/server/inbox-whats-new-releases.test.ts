@@ -1,11 +1,3 @@
-/**
- * What's new's releases panel on the server (inbox-whats-new-releases.ts and
- * the What's new route's logic in inbox-updates.ts), against the update
- * control itself (no Inbox server) and a fake release API on loopback
- * (PLANNOTATOR_UPDATE_API_URL), never GitHub: the list asked at most once a
- * day, any listed release opening, saved notes without a TL;DR written again
- * once when the body changed, and no request at all with update checks off.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -99,7 +91,6 @@ test("the list is asked at most once a day; in between the panel reads the cache
   listAnswer = () => ({ ok: false, error: "fetch failed" });
   const offline = await u.whatsNewReleases();
   expect(listCalls).toBe(2);
-  // The panel still works from what was saved, and says the list could not be had.
   expect(offline.offline).toBe(true);
   expect(offline.releases.map((r) => r.version)).toEqual(["0.28.53", "0.28.52", "0.28.45"]);
 
@@ -110,7 +101,6 @@ test("the list is asked at most once a day; in between the panel reads the cache
   listAnswer = () => ({ ok: false, error: "HTTP 403", rateLimited: true, retryAfterMs: 3 * HOUR });
   await u.whatsNewReleases();
   expect(listCalls).toBe(3);
-  // A rate limit waits what GitHub names, not an hour.
   clock += 2 * HOUR;
   await u.whatsNewReleases();
   expect(listCalls).toBe(3);
@@ -124,7 +114,6 @@ test("any release the list names opens, its notes from the list's own answer; on
   expect(tagCalls).toEqual([]);
   expect(listCalls).toBe(1);
 
-  // A listed release whose body was still GitHub's generated one: fetched by its tag (the old gate let only four versions through).
   listAnswer = () => ({ ok: true, releases: [rel("0.28.53"), rel("0.28.44", "## What's Changed\n\n* a PR\n")] });
   clock += RELEASE_LIST_INTERVAL_MS;
   const later = await u.whatsNew("0.28.44");
@@ -137,9 +126,7 @@ test("any release the list names opens, its notes from the list's own answer; on
 });
 
 test("saved notes without a TL;DR are written again once when the list's body differs; notes with one are left as saved", async () => {
-  // Saved by an older Inbox, before the release got its TL;DR (no stamp).
   writeReleaseNotes({ version: "0.28.52", notes: "Old words.", highlights: [] }, dataDir);
-  // Saved with a TL;DR: kept, though the body has changed since.
   writeReleaseNotes({ version: "0.28.45", notes: "Kept words.", highlights: [], tldr: [{ label: "Fixed", text: "Kept" }], stamp: "other" }, dataDir);
   const backfilled = bodyOf("0.28.52", "### TL;DR\n\n- **Changed:** Backfilled\n");
   listAnswer = () => ({ ok: true, releases: [rel("0.28.53"), rel("0.28.52", backfilled), rel("0.28.45")] });
@@ -150,7 +137,6 @@ test("saved notes without a TL;DR are written again once when the list's body di
   expect(now52.stamp).toBe(releaseBodyStamp(backfilled));
   expect(readReleaseNotes("0.28.45", dataDir)!.notes).toBe("Kept words.");
 
-  // A release still without a TL;DR whose body did not change is not written again (no daily rewrite).
   clock += RELEASE_LIST_INTERVAL_MS;
   const again = await refreshReleaseList({ dataDir, now: () => clock, enabled: () => true, fetchList: async () => listAnswer() });
   expect(again).toMatchObject({ outcome: "fetched", written: [] });
@@ -161,7 +147,6 @@ test("update checks off: no list, no notes request, and the page says why", asyn
   writeReleaseNotes({ version: "0.28.50", notes: "Saved before.", highlights: [] }, dataDir);
   const u = updates();
   const panel = await u.whatsNewReleases();
-  // Built from what is saved, plus the running version.
   expect(panel.releases.map((r) => r.version)).toEqual(["0.28.53", "0.28.50"]);
   expect(panel.offline).toBe(false);
   expect(await u.whatsNew("0.28.53")).toEqual({ kind: "missing", reason: "checks_off" });
@@ -193,10 +178,8 @@ test("GitHub out of reach: the notes are 'unreachable', and Try again asks once 
   });
   expect(await u.whatsNew("0.28.53")).toEqual({ kind: "missing", reason: "unreachable" });
   expect([listCalls, tagCalls.length]).toEqual([1, 1]);
-  // Asking again on its own waits out the back-offs: no request.
   expect(await u.whatsNew("0.28.53")).toEqual({ kind: "missing", reason: "unreachable" });
   expect([listCalls, tagCalls.length]).toEqual([1, 1]);
-  // Try again asks now.
   await u.whatsNew("0.28.53", 2_000, { retry: true });
   expect([listCalls, tagCalls.length]).toEqual([2, 2]);
 });

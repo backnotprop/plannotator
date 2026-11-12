@@ -1,13 +1,3 @@
-/**
- * The look capped at what the window showed (design record
- * "inbox-new-in-open-thread", approved 2026-10-12; not in this repo):
- * `POST /api/inbox/threads/:id/seen` takes an optional `through_seq`, the seq
- * of the newest message the window actually showed, and the look stops there.
- * Through the server's real doors: a running Inbox on loopback, the MCP SDK
- * client for the agent, real `fetch` for the window. The window's side is
- * proved in packages/inbox/seenOnSight.test.tsx and
- * tests/e2e/inbox-seen-on-sight.spec.ts.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,7 +26,6 @@ async function world() {
   const client = new Client({ name: "inbox-seen-through-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
-  /** `replyTo`: the message this one answers, so it lands in that thread. */
   const send = async (body: string, replyTo?: string) => {
     const args = { project_path: project, body, agent_session: "ses_A", ...(replyTo ? { reply_to: replyTo } : {}) };
     const result = (await client.callTool({ name: "send_message", arguments: args })) as {
@@ -82,11 +71,9 @@ test("the race: a message that lands after the window read the thread is not mar
   const first = await send("The refund webhook is wired.");
   const read = await windowThread(server, first.thread_id);
   const shown = Math.max(...read.thread.messages.map((m) => m.seq ?? 0));
-  // The agent writes between the window's read and its look.
   await send("One more thing: the 409 path retries.", first.message_id);
   expect((await seen(server, first.thread_id, { through_seq: shown })).status).toBe(200);
   expect(await row(server, first.thread_id)).toMatchObject({ section: "new", unseen: 1 });
-  // Seen on sight: the window shows it and records the look up to it.
   const after = await windowThread(server, first.thread_id);
   const newest = Math.max(...after.thread.messages.map((m) => m.seq ?? 0));
   expect((await seen(server, first.thread_id, { through_seq: newest })).status).toBe(200);
@@ -99,7 +86,6 @@ test("without through_seq (an older window, the phone door): every agent message
   await send("Retries are on.", first.message_id);
   expect((await seen(server, first.thread_id, {})).status).toBe(200);
   expect(await row(server, first.thread_id)).toMatchObject({ section: "quiet", unseen: 0 });
-  // null counts as absent.
   await send("And the dashboard shows them.", first.message_id);
   expect((await seen(server, first.thread_id, { through_seq: null })).status).toBe(200);
   expect(await row(server, first.thread_id)).toMatchObject({ unseen: 0 });
@@ -115,7 +101,6 @@ test("a through_seq behind the recorded look never lowers it and writes nothing"
   const after = await windowThread(server, first.thread_id);
   expect(after.cursor).toBe(before.cursor);
   expect(await row(server, first.thread_id)).toMatchObject({ unseen: 0 });
-  // Zero is a valid seq and covers nothing.
   expect((await seen(server, first.thread_id, { through_seq: 0 })).status).toBe(200);
   expect((await windowThread(server, first.thread_id)).cursor).toBe(before.cursor);
 });

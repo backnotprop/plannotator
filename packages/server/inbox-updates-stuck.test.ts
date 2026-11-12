@@ -1,18 +1,3 @@
-/**
- * The Inbox is where a user gets stuck (QA item 30: it runs for days). A real
- * Inbox server with an injected clock and a fake GitHub on loopback (release
- * page and API), never GitHub, never the install script:
- *
- *   - a long-running Inbox started before the release shows Update within
- *     the bound, without a restart or a reload;
- *   - checking that fails for hours says so (the sidebar's row, About's dot,
- *     General's line), with the install command, including when the state
- *     file cannot be written;
- *   - "Updating…" never spins on a lock whose wrapper is gone, or one stamped
- *     by a clock that moved back; the failure shows instead;
- *   - a snooze written while the clock was ahead hides the update a day at most;
- *   - Update now → ready → restart → the new version's "What's new".
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -132,7 +117,6 @@ async function waitFor<T>(read: () => Promise<T>, ok: (value: T) => boolean, ms 
   return value;
 }
 
-/** Move the injected clock, then wait for the Inbox's health tick to ask again. */
 async function advance(ms: number) {
   const before = pageRequests;
   clock += ms;
@@ -146,14 +130,11 @@ describe("a long-running Inbox learns of a release on its own", () => {
     const server = await start();
     await waitFor(async () => pageRequests, (n) => n >= 1);
     expect(await health(server)).toBeNull();
-    // Days pass (it checks every 10 minutes); then a release is published.
     for (let i = 0; i < 3; i++) await advance(RELEASE_CHECK_INTERVAL_MS);
     page = redirectTo("0.28.31");
-    // Five minutes on: the cached answer is still fresh, no request yet.
     clock += 5 * 60_000;
     await Bun.sleep(150);
     expect(await health(server)).toBeNull();
-    // At ten minutes the health tick asks, and the sidebar's Update shows (the event stream carries it).
     await advance(5 * 60_000);
     const update = await waitFor(() => health(server), (u) => u?.state === "available");
     expect(update).toMatchObject({ state: "available", version: "0.28.31", current: "0.28.30" });
@@ -179,7 +160,6 @@ describe("checking that fails for hours is shown, never silent", () => {
     const about = await details(server);
     expect(about.check.failing?.since).toBe(failing.since);
     expect(about.command).toContain("plannotator.ai/install.");
-    // GitHub answers again: it goes, and the release shows.
     page = redirectTo("0.28.31");
     await advance(RELEASE_CHECK_RETRY_MS);
     const after = await waitFor(() => list(server), (l) => !l.update_check_failing && l.update?.state === "available");
@@ -188,7 +168,6 @@ describe("checking that fails for hours is shown, never silent", () => {
 
   test("a state file that cannot be written: the Inbox still checks (in memory) and shows the release", async () => {
     page = redirectTo("0.28.31");
-    // update-state.json is a folder: every write of it fails.
     mkdirSync(join(dataDir, "update-state.json"));
     const server = await start();
     expect((await waitFor(() => health(server), (u) => u?.state === "available"))?.version).toBe("0.28.31");
@@ -244,7 +223,6 @@ describe("Updating… never spins for good", () => {
     page = redirectTo("0.28.31");
     writeUpdateState({ pending: { version: "0.28.31", fromVersion: "0.28.30", startedAt: T0, by: "person" } }, dataDir);
     const lock = autoUpdatePaths(dataDir).lock;
-    // The line the detached wrapper writes: its process group (gone) and this machine.
     const dead = await deadPid();
     const m = thisLockMachine();
     writeFileSync(lock, `pid=${dead} group=${dead} host=${m.host} boot=${m.boot} pidns=${m.pidns}\n`);
@@ -254,7 +232,6 @@ describe("Updating… never spins for good", () => {
     const update = await waitFor(() => health(server), (u) => u?.state === "failed");
     expect(update).toMatchObject({ state: "failed", version: "0.28.31" });
     expect((await details(server)).failure).toMatchObject({ exit_code: -1 });
-    // Try again takes the lock.
     const retry = await fetch(`http://127.0.0.1:${server.port}/api/inbox/update`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -303,7 +280,6 @@ test("Update now → the new binary on disk → Restart → the new version's In
       probeVersion: async () => onDisk,
       launchInstaller: (launch) => {
         launches.push(launch);
-        // The install script replaces the binary.
         onDisk = "0.28.31";
         writeFileSync(binary, "new binary");
       },
@@ -316,7 +292,6 @@ test("Update now → the new binary on disk → Restart → the new version's In
     body: JSON.stringify({ serverSession: server.serverSession }),
   });
   expect(res.status).toBe(200);
-  // The wrapper finished (it releases the lock); the probe sees the new binary: Ready.
   rmSync(autoUpdatePaths(dataDir).lock, { force: true });
   expect((await waitFor(() => health(server), (u) => u?.state === "ready"))?.version).toBe("0.28.31");
   expect(
@@ -330,7 +305,6 @@ test("Update now → the new binary on disk → Restart → the new version's In
   ).toBe(200);
   await waitFor(async () => handedOver, (v) => v);
   servers.splice(servers.indexOf(server), 1);
-  // The new binary starts on the same data dir.
   const next = await start({}, "0.28.31");
   const model = await waitFor(() => list(next), (l) => l.updated === "0.28.31");
   expect(model.updated).toBe("0.28.31");

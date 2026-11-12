@@ -1,9 +1,3 @@
-/**
- * The Pull requests page's scope (approval "inbox-pr-dashboard", q-aef3fb89, "Everywhere, mine"): the person's own
- * PRs in any repository, plus every open PR of the projects' repositories as the Reviews page reads them. A PR two
- * searches find is one PR; the scoped read (the Reviews page, the sidebar's count) and the everywhere read are kept
- * apart, so neither throws the other's answer away. A scripted gh stands in for GitHub.
- */
 import { describe, expect, test } from "bun:test";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import type { RefRunner } from "@plannotator/shared/ref-cards";
@@ -56,7 +50,6 @@ describe("mergeListedPulls", () => {
   });
 });
 
-/** GitHub's GraphQL node for a PR, as the list's query asks it. */
 const node = (repo: string, number: number, author = "dana") => ({
   number,
   title: `PR ${number}`,
@@ -91,7 +84,6 @@ function fakeGh() {
     if (query.includes("InboxPullsOthers")) return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, others0: { issueCount: 0, nodes: [] } } }), stderr: "", exitCode: 0 };
     if (query.includes("requested: search")) {
       own.push(args.filter((a) => /^(every)?(requested|authored|assigned|merged)=/i.test(a)));
-      // The same PR asked of the person and assigned to them: two searches, one PR.
       const data = {
         viewer: { login: "dana" },
         rateLimit: { cost: 1, remaining: 4000, resetAt: "2026-11-08T11:00:00Z" },
@@ -99,7 +91,6 @@ function fakeGh() {
         assigned: { issueCount: 1, nodes: [node("elsewhere/tool", 7, "kim")] },
         authored: { issueCount: 1, nodes: [node("northwind/ledger", 412)] },
         merged: { nodes: [] },
-        // The everywhere half (`every…`), asked with the scoped searches in the same call.
         everyRequested: { issueCount: 1, nodes: [node("elsewhere/tool", 7, "kim")] },
         everyAssigned: { issueCount: 1, nodes: [node("elsewhere/tool", 7, "kim")] },
         everyAuthored: { issueCount: 1, nodes: [node("northwind/ledger", 412)] },
@@ -131,14 +122,11 @@ describe("list everywhere", () => {
     expect(tool[0]!.assigned).toBe(true);
     expect(wide.pulls.map((p) => p.key).sort()).toEqual(["github.com/elsewhere/tool#7", "github.com/northwind/ledger#412"]);
 
-    // The Reviews page's list: from the same read (no second call), the outside PR not in it.
     const scoped = await pulls.list(projects);
     expect(gh.own).toHaveLength(1);
     expect(scoped.pulls.map((p) => p.key)).toEqual(["github.com/northwind/ledger#412"]);
-    // The page's PR is still one the Inbox knows (its view, its merge).
     expect(pulls.find("github.com/elsewhere/tool#7")?.number).toBe(7);
 
-    // Cached: neither list reads the forge again within the minute.
     await pulls.list(projects, { everywhere: true });
     await pulls.list(projects);
     expect(gh.own).toHaveLength(1);
@@ -171,19 +159,16 @@ describe("merged from this Inbox", () => {
     const reads = gh.own.length;
 
     pulls.markMerged(KEY);
-    // Both cached answers (the page's and Reviews'), with no new read, and the PR the merge and review routes find.
     expect(await stateOf({ everywhere: true })).toBe("merged");
     expect(await stateOf({})).toBe("merged");
     expect(gh.own).toHaveLength(reads);
     expect(pulls.find(KEY)?.state).toBe("merged");
     expect(pulls.find(KEY)?.merged_at).toBe(new Date(clock).toISOString());
 
-    // A refresh reads the forge again, whose search still says open (it lags): still merged here.
     clock += INBOX_PULLS_REFRESH_MS + 1;
     expect(await stateOf({ everywhere: true, refresh: true })).toBe("merged");
     expect(gh.own.length).toBeGreaterThan(reads);
 
-    // Past the hold the forge's word stands again.
     clock += INBOX_PULLS_MERGED_HOLD_MS;
     expect(await stateOf({ everywhere: true, refresh: true })).toBe("open");
   });

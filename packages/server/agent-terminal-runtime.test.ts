@@ -71,10 +71,6 @@ describe("agent terminal runtime", () => {
       allowScripts?: Record<string, unknown>;
     };
 
-    // npm 12 blocks dependency install scripts unless the installing project
-    // names the package (#1409). Name-only is load-bearing: npm matches these
-    // keys as exact strings, so `node-pty@1.1.0` would stop matching as soon
-    // as webtui's `^1.1.0` range resolved to a newer patch.
     expect(manifest.allowScripts?.["node-pty"]).toBe(true);
     expect(Object.keys(manifest.allowScripts ?? {})).toEqual(["node-pty"]);
   });
@@ -99,8 +95,6 @@ describe("agent terminal runtime", () => {
 
     const result = verifyAgentTerminalNativeBinary(tmp);
     expect(result.ok).toBe(false);
-    // The remedy has to be in the message: npm's blocking is silent, so this
-    // is the only place a user learns why an install that exited 0 cannot run.
     const message = result.ok ? "" : result.message;
     expect(message).toContain("install scripts");
     expect(message).toContain("npm rebuild node-pty");

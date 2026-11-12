@@ -1,7 +1,3 @@
-/**
- * Bun annotate server: drafts follow the file (annotate-draft.ts). The
- * scenarios are shared with the Pi mirror, see annotate-draft.scenarios.ts.
- */
 import { defineAnnotateDraftScenarios } from "./annotate-draft.scenarios";
 import { startAnnotateServer } from "./annotate";
 

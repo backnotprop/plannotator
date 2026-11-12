@@ -1,14 +1,3 @@
-/**
- * Rename… in the project menu through the Inbox's real doors:
- * `POST /api/inbox/projects/:id/name` on a running Inbox (temp data dir,
- * loopback), with real git repositories and linked worktrees in temp
- * folders and the official MCP client for the agent. What can regress: a
- * worktree's message reading the folder's name instead of the person's (it
- * files under the main checkout's project id), agents or search not
- * following the rename, Reset not going back, the route skipping a guard the
- * other window writes have (another site, another session's tab, a GET), and
- * an empty name or a missing project being taken.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,7 +43,6 @@ function git(cwd: string, ...args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
 }
 
-/** The person's layout: `acme/main` holds the repository, its worktrees sit beside it; another repo also checked out as `main`. */
 async function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-rename-")));
   scratch.push(root);
@@ -94,7 +82,6 @@ async function rowNames(server: InboxServer): Promise<Map<string, string>> {
 
 type SearchRow = { type: string; name?: string; project?: { name: string } };
 
-/** Every row a search answers, once the index is built. */
 async function searchRows(server: InboxServer, q: string): Promise<SearchRow[]> {
   for (let i = 0; i < 100; i++) {
     const answer = (await (await fetch(url(server, `/api/inbox/search?q=${encodeURIComponent(q)}`))).json()) as { indexing: boolean; groups: Record<string, SearchRow[]> | null };
@@ -111,7 +98,6 @@ describe("POST /api/inbox/projects/:id/name", () => {
     const fromFeat = await send(w.client, { project_path: w.featX, subject: "From feat-x", body: "From a worktree.", agent_session: "ses_feat" });
     await send(w.client, { project_path: w.initech, subject: "Other main", body: "Another repo named main.", agent_session: "ses_ini" });
     expect(fromFeat.project.id).toBe(fromMain.project.id);
-    // Two repositories checked out as `main`: before the rename each names its parent.
     expect(w.server.store.project(fromMain.project.id)?.name).toBe("main · acme");
 
     const renamed = await post(w.server, `/api/inbox/projects/${fromMain.project.id}/name`, { name: "  acme  " });
@@ -119,17 +105,14 @@ describe("POST /api/inbox/projects/:id/name", () => {
     const answer = (await renamed.json()) as { project: { id: string; name: string; display_name: string; key: string; root: string } };
     expect(answer.project).toMatchObject({ id: fromMain.project.id, name: "acme", display_name: "acme", root: w.main });
 
-    // A worktree the project has not heard from yet still files under it, and the agent reads the person's name.
     const fromFix = await send(w.client, { project_path: w.fixY, subject: "From fix-y", body: "From the other worktree.", agent_session: "ses_fix" });
     expect(fromFix.project).toMatchObject({ id: fromMain.project.id, name: "acme" });
     expect(w.server.store.listProjects().map((p) => p.root).sort()).toEqual([w.main, w.initech].sort());
-    // Every row of the project reads it; the other `main` is alone now.
     const rows = await rowNames(w.server);
     expect(rows.get(fromMain.thread_id)).toBe("acme");
     expect(rows.get(fromFeat.thread_id)).toBe("acme");
     expect(rows.get(fromFix.thread_id)).toBe("acme");
     expect([...rows.values()].filter((name) => name === "main")).toHaveLength(1);
-    // Search finds the project by its new name and names its threads with it.
     const found = await searchRows(w.server, "acme");
     expect(found.some((r) => r.type === "project" && r.name === "acme")).toBe(true);
     const named = (await searchRows(w.server, "worktree")).map((r) => r.project?.name);
@@ -164,13 +147,11 @@ describe("POST /api/inbox/projects/:id/name", () => {
     }
     expect((await post(w.server, "/api/inbox/projects/prj_00000000000000000000000000/name", { name: "acme" })).status).toBe(404);
     expect((await post(w.server, "/api/inbox/projects/nope/name", { name: "acme" })).status).toBe(422);
-    // Another site's page, a tab of an older Inbox, a GET.
     const cross = await post(w.server, path, { name: "acme" }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
     expect(cross.status).toBe(403);
     expect(((await cross.json()) as { code: string }).code).toBe("cross_origin");
     expect((await post(w.server, path, { name: "acme", serverSession: "an-older-inbox" })).status).toBe(409);
     expect((await fetch(url(w.server, path))).status).toBe(405);
-    // Nothing above changed anything.
     expect(w.server.store.project(id)?.display_name).toBeUndefined();
     expect(w.server.store.project(id)?.name).toBe("main");
   });

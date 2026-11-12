@@ -1,26 +1,3 @@
-/**
- * Inbox search's routes (the approved "inbox-search" brief, section 11):
- *
- * - `GET /api/inbox/search`: read-only. `q` (trimmed, 200 characters at
- *   most, 8 terms), `project=prj_…`, `status=waiting|new|sent|quiet|archived`,
- *   `from=agent|me`, `group=` with `offset=` for "Show all", `limit` (per
- *   group, at most 50), `current=prj_…` (the project open in the list: a tie
- *   boost, never a filter), `sort=best|newest` (best match, the default;
- *   newest: each group by its latest message first). The index (packages/shared/inbox/search.ts) is
- *   built on the first call, in slices that yield, so every other route keeps
- *   answering; a call that finds it still building waits a moment, then
- *   answers `indexing: true` with no groups, and the window asks again. An
- *   empty `q` with no filters answers `recent` (the threads the person looked
- *   at last) and `recent_searches`.
- * - `POST /api/inbox/search/recent`: the window's recent searches, written
- *   only when the person opens a result (`{ q }`) or clears them
- *   (`{ clear: true }`): the last 6 in `inbox/recent-searches.json`.
- *
- * Both answer the loopback window and the owner over the tailnet listener,
- * like every read route and the window's own writes. The phone's device door
- * carries the search (`GET search`, contract 7.42), not the recent searches.
- */
-
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_SEARCH_QUERY_MAX } from "@plannotator/core/inbox-search";
@@ -45,15 +22,12 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export const INBOX_SEARCH_PATH = "/api/inbox/search";
 export const INBOX_SEARCH_RECENT_PATH = "/api/inbox/search/recent";
-/** Recent searches kept. */
 export const INBOX_RECENT_SEARCHES_MAX = 6;
 export const INBOX_RECENT_SEARCHES_FILE = "recent-searches.json";
-/** How long a search waits for a build in progress before answering `indexing: true`. */
 export const INBOX_SEARCH_BUILD_WAIT_MS = 250;
 
 export interface InboxSearchRoutes {
   index: InboxSearchIndex;
-  /** The route's answer, or null for a path that is not search's. */
   handle(req: Request, url: URL): Promise<Response | null>;
   dispose(): void;
 }
@@ -69,10 +43,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 const CROSS_SITE_BODY = INBOX_CROSS_SITE_BODY;
-/** A request another site, or another localhost port, made (inbox-cross-site.ts). */
 const crossSite = isCrossSiteRequest;
 
-/** The recent searches on disk, newest first; anything unreadable reads as none. */
 export function readRecentSearches(storeDir: string): string[] {
   try {
     const value = JSON.parse(readFileSync(join(storeDir, INBOX_RECENT_SEARCHES_FILE), "utf8")) as { searches?: unknown };
@@ -129,7 +101,6 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
     const sort = oneOf<InboxSearchSort>(url, "sort", INBOX_SEARCH_SORTS);
     const recentSearches = (answer: InboxSearchAnswer) => (answer.recent ? { recent_searches: readRecentSearches(store.dir) } : {});
     if (!index.ready()) {
-      // The build runs in slices; give a short query a chance to land on a finished index.
       const building = index.ensureBuilt();
       await Promise.race([building, new Promise((resolve) => setTimeout(resolve, INBOX_SEARCH_BUILD_WAIT_MS))]);
       if (!index.ready()) {
@@ -167,8 +138,6 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
     dispose: () => index.dispose(),
     async handle(req, url) {
       if (url.pathname !== INBOX_SEARCH_PATH && url.pathname !== INBOX_SEARCH_RECENT_PATH) return null;
-      // Another site (or another localhost port: same-site) never reaches search. It could not read
-      // the answer, but it picks the query, and how long a search takes says whether it found anything.
       if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       if (url.pathname === INBOX_SEARCH_PATH) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);

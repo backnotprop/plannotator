@@ -206,7 +206,6 @@ export function createNodePtyWebSocketServer(options) {
 async function waitForFile(path: string): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < 5_000) {
-    // Created is not written: wait for content, so a read never sees it empty.
     if (existsSync(path) && statSync(path).size > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }

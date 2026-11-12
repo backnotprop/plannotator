@@ -1,18 +1,3 @@
-/**
- * generatedFiles sidecar on /api/diff (#1317) — dual-runtime (Bun + Pi).
- *
- * Guards three behaviors:
- *  1. A plain local git session resolves `linguist-generated` through git's
- *     own attribute machinery, so stacked and negated `.gitattributes` rules
- *     land exactly as git resolves them — refining the built-in name defaults
- *     in both directions.
- *  2. Sessions without local git access (piped patches, and by the same gate
- *     workspace/PR/jj/GitButler/P4) still emit the sidecar from the built-in
- *     name defaults alone (name matching needs no git), and omit it when no
- *     served path matches.
- *  3. The built-in defaults apply in git sessions with no `.gitattributes`
- *     at all — the industry-standard lockfile experience needs zero setup.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -103,8 +88,6 @@ describe('generatedFiles sidecar (#1317)', () => {
         join(repoDir, '.gitattributes'),
         [
           'gen/** linguist-generated',
-          // Negated rule stacked after the glob — must win, exactly as git
-          // resolves it (a naive first-match parser would mark it generated).
           'gen/keep.ts -linguist-generated',
           'docs/api.md linguist-generated=true',
         ].join('\n') + '\n',
@@ -126,8 +109,6 @@ describe('generatedFiles sidecar (#1317)', () => {
           generatedFiles?: string[];
         };
         expect(data.generatedFiles).toEqual(['gen/schema.sql', 'docs/api.md']);
-        // Presentation-layer contract: the diff itself is never filtered —
-        // every generated file's content still ships in full.
         expect(data.rawPatch).toBe(RAW_PATCH);
       } finally {
         server.stop();
@@ -178,8 +159,6 @@ describe('generatedFiles sidecar (#1317)', () => {
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir('plannotator-generated-data-');
       if (runtime === 'Pi') process.env.PLANNOTATOR_PORT = String(await reservePort());
       const repoDir = initRepo();
-      // No .gitattributes: bun.lock collapses from the built-in list alone.
-      // Then the second half: an explicit un-mark beats the built-in list.
       const gitContext = await getVcsContext(repoDir, 'git');
       const patch = [fileChunk('bun.lock'), fileChunk('yarn.lock'), fileChunk('src/app.ts')].join('\n');
 

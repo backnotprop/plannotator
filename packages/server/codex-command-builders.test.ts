@@ -1,25 +1,13 @@
-/**
- * Schema materialization for the Codex output-schema flag, across all three
- * review surfaces.
- *
- * Run: bun test packages/server/codex-command-builders.test.ts
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Imported statically and BEFORE any PLANNOTATOR_DATA_DIR is set: these modules
-// used to capture the data directory at import, so changing the env var later
-// left every derived path (and the materialized schema) in the old location.
 import { buildCodexCommand, CODEX_REVIEW_SCHEMA } from "./codex-review";
 import { buildGuideCodexCommand, GUIDE_SCHEMA_JSON } from "./guide/guide-review";
 import { buildTourCodexCommand, TOUR_SCHEMA_JSON } from "./tour/tour-review";
 
 import { createTestEnvironment } from "../../tests/helpers/environment";
 
-// HOME and CODEX_HOME too: the builders read Codex's config.toml (for the
-// Inbox override), and a test never reads the real ~/.codex.
 const env = createTestEnvironment(["PLANNOTATOR_DATA_DIR", "HOME", "CODEX_HOME"], "plannotator-codex-builders-");
 
 const OPTIONS = {
@@ -38,7 +26,6 @@ beforeEach(() => {
 
 afterEach(() => env.restore());
 
-/** The path passed to `--output-schema`. */
 function schemaPath(command: string[]): string {
   const index = command.indexOf("--output-schema");
   expect(index).toBeGreaterThanOrEqual(0);
@@ -90,9 +77,6 @@ describe("Codex command builders", () => {
   });
 
   test("overwrite a stale schema file left by an older binary", async () => {
-    // A schema written by an older version persists in the data dir forever
-    // (nothing prunes it). An existence check would keep serving those stale
-    // bytes; every process must refresh the file with its own schema once.
     const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
     const stale = '{"stale":"written by an older binary"}';
     const surfaces = [

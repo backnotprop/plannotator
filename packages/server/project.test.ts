@@ -1,9 +1,3 @@
-/**
- * Project Detection Tests
- *
- * Run: bun test apps/hook/server/project.test.ts
- */
-
 import { describe, expect, test } from "bun:test";
 import { sanitizeTag, extractRepoName, extractDirName, detectProjectName } from "./project";
 
@@ -34,7 +28,6 @@ describe("sanitizeTag", () => {
   });
 
   test("a hyphen at the 30-char cut is trimmed, so the result is idempotent", () => {
-    // 29 chars, then "_": the cut lands right after the hyphen (#2306).
     const name = "abcdefghijklmnopqrstuvwxyzabc_def";
     expect(sanitizeTag(name)).toBe("abcdefghijklmnopqrstuvwxyzabc");
     for (const input of [
@@ -125,8 +118,6 @@ describe("detectProjectName", () => {
     }
   });
 
-  // Verify we detect a repo name from the current working directory.
-  // The exact name depends on the checkout path (local vs CI).
   test("detects a valid repo name", async () => {
     const result = await detectProjectName();
     expect(result).not.toBeNull();

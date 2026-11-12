@@ -11,8 +11,6 @@ describe("buildAgentReviewUserMessage", () => {
       ["staged", "git diff --staged"],
       ["unstaged", "unstaged code changes"],
       ["last-commit", "git diff HEAD~1..HEAD"],
-      // First-parent diff, never `git show` — a merge commit's `git show`
-      // combined-diff presentation differs from the on-screen patch.
       ["commit:abc1234def5678", "git diff abc1234def5678^ abc1234def5678"],
       ["branch", "git diff origin/main..HEAD"],
       ["merge-base", "git merge-base origin/main HEAD"],
@@ -32,7 +30,6 @@ describe("buildAgentReviewUserMessage", () => {
       ["jj-last", "jj diff --git -r @-"],
       ["jj-line", "jj diff --git --from 'heads(::@ & ::(trunk()))' --to @"],
       ["jj-all", "jj diff --git --from 'root()' --to @"],
-      // Commits rail: first parent, never `jj diff -r` (all parents on a merge).
       ["jj-commit:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "jj diff --git --from 'first_parent(commit_id(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa))' --to 'commit_id(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)'"],
     ] as const;
 
@@ -73,13 +70,10 @@ describe("buildAgentReviewUserMessage", () => {
   });
 
   test("uses the inline patch as Ask AI context for static patch reviews", () => {
-    // given
     const diffType = "static-patch";
 
-    // when
     const message = buildAgentReviewUserMessage(patch, diffType, undefined, undefined, true);
 
-    // then
     expect(message).toContain(patch);
     expect(message).not.toContain("working tree");
   });
@@ -120,7 +114,6 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain("do not use absolute filesystem paths");
     expect(message).toContain("- api/ [git, changed] -> /tmp/workspace/api");
     expect(message).toContain("- web/ [jj, changed] -> /tmp/workspace/web");
-    // Workspace jobs work from the inlined diff; no job allowlist admits `git -C`.
     expect(message).not.toContain("git -C");
     expect(message).toContain("- app/ [gitbutler, changed] -> /tmp/workspace/app");
     expect(message).toContain(patch);
@@ -199,8 +192,6 @@ describe("buildAgentReviewUserMessage — contextOnly (custom review skill)", ()
     const dflt = buildAgentReviewUserMessage(patch, "branch", opts, prMetadata, false);
     const custom = buildAgentReviewUserMessage(patch, "branch", opts, prMetadata, true);
 
-    // This branch carries no framing prose, only context, so stripping does
-    // nothing — the two must be byte-identical, and the diff instruction stays.
     expect(custom).toBe(dflt);
     expect(custom).toContain("git diff origin/main...HEAD");
     expect(custom).not.toContain("Provide prioritized");
@@ -229,11 +220,6 @@ describe("buildAgentReviewUserMessage — contextOnly (custom review skill)", ()
   });
 });
 
-// Coverage for the scenarios Ask AI relies on (it reuses this exact machine via
-// the review server's buildCurrentAiReviewContext). These fill the gaps the
-// existing suite didn't cover: plain PR, PR full-stack default framing, the PR
-// local-access "don't use stale local main" warning, untracked-file mention,
-// jj-evolog, and the workspace prompt-context lines in isolation.
 describe("buildAgentReviewUserMessage — Ask AI scenario coverage", () => {
   const prMetadata = {
     url: "https://github.com/o/r/pull/3",
@@ -246,7 +232,6 @@ describe("buildAgentReviewUserMessage — Ask AI scenario coverage", () => {
     expect(message).toContain("git diff origin/main...HEAD");
     expect(message.toLowerCase()).toContain("verify the pr files exist");
     expect(message.toLowerCase()).toContain("warming up");
-    // Still no pasted diff — the agent fetches it from the worktree itself.
     expect(message).not.toContain(patch);
     expect(message).not.toContain("```diff");
   });

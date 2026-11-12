@@ -1,18 +1,3 @@
-/**
- * Annotate's live app mode never proxies a Plannotator server (Bun side; the
- * Pi mirror is apps/pi-extension/server/live-proxy-plannotator.test.ts).
- *
- * The live proxy mirrors its upstream's origin and passes the browser's own
- * Sec-Fetch-Site through, so a proxied Plannotator page would get same-origin
- * writes on that server. Pinned here, against real servers on loopback:
- *  - every Bun Plannotator server marks its responses with the Plannotator
- *    server header;
- *  - the probe refuses a target by port (the data dir's registries) before
- *    any request, and by that header; --app says so, and without it the
- *    session falls back to static conversion with a notice;
- *  - the proxy refuses the editor's own port at start, and any marked
- *    upstream response, so a write through it never reaches a scratch Inbox.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
@@ -82,7 +67,6 @@ function proxyTo(targetUrl: string): LiveAppProxy {
   return proxy;
 }
 
-/** A write as the proxied page's browser sends it: same-origin with the proxy. */
 function proxiedPost(proxy: LiveAppProxy, path: string, body: unknown): Promise<Response> {
   const origin = `http://localhost:${proxy.port}`;
   return fetch(`http://127.0.0.1:${proxy.port}${path}`, {
@@ -111,10 +95,8 @@ describe("every Bun Plannotator server sends the Plannotator server header", () 
     for (const url of [plan.url, review.url, annotate.url, `http://127.0.0.1:${inbox.port}`]) {
       const page = await fetch(`${url}/`);
       expect(page.headers.get(PLANNOTATOR_SERVER_HEADER)).not.toBeNull();
-      // Refusals and unknown routes carry it too.
       const missing = await fetch(`${url}/api/no-such-route`);
       expect(missing.headers.get(PLANNOTATOR_SERVER_HEADER)).not.toBeNull();
-      // A request the live proxy forwarded is refused before any route.
       const proxied = await fetch(`${url}/`, { headers: { [PLANNOTATOR_LIVE_PROXY_HEADER]: "1" } });
       expect(proxied.status).toBe(403);
       expect(proxied.headers.get("x-plannotator-error")).toBe(LIVE_PROXIED_REFUSED_CODE);
@@ -240,7 +222,6 @@ describe("the live proxy refuses a Plannotator server", () => {
   });
 });
 
-/** A raw WebSocket handshake to `port`; resolves with the response head. */
 function rawUpgrade(port: number, extra: Record<string, string> = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = connect(port, "127.0.0.1", () => {
@@ -288,7 +269,6 @@ describe("WebSocket upgrades through the live proxy", () => {
       ws.onopen = () => resolve();
       ws.onerror = () => reject(new Error("upgrade failed"));
     });
-    // The proxy connects upstream once the client's socket is open.
     for (let i = 0; i < 100 && tag === undefined; i++) await Bun.sleep(20);
     ws.close();
     expect(tag).toBe("1");
@@ -296,12 +276,10 @@ describe("WebSocket upgrades through the live proxy", () => {
 
   test("an upgrade through the proxy to an Inbox is refused", async () => {
     const inbox = await scratchInbox();
-    // The Inbox refuses a tagged handshake before any route.
     const direct = await rawUpgrade(inbox.port, { [PLANNOTATOR_LIVE_PROXY_HEADER]: "1" });
     expect(direct).toStartWith("HTTP/1.1 403");
     expect(direct.toLowerCase()).toContain(`x-plannotator-error: ${LIVE_PROXIED_REFUSED_CODE}`);
 
-    // Through the proxy, the client's socket is closed and never carries a message.
     const proxy = proxyTo(`http://127.0.0.1:${inbox.port}/`);
     const ws = new WebSocket(`ws://localhost:${proxy.port}/`);
     let messages = 0;

@@ -1,10 +1,3 @@
-/**
- * The Inbox's connection bridge (plan step 6), proved through its real doors:
- * a running server on loopback, the agent writing through the official MCP
- * SDK client, the person's Send through the window's own route, and the
- * connection's long-poll and acknowledgement through real `fetch` / raw TCP.
- * Every test uses its own temp data dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { connect } from "node:net";
@@ -75,7 +68,6 @@ async function thread(server: InboxServer, threadId: string): Promise<InboxThrea
   return ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${threadId}`)).json()) as { thread: InboxThread }).thread;
 }
 
-/** A raw HTTP/1.1 request, so Host and Origin are exactly what the test sends. */
 function raw(port: number, lines: string[], body: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const socket = connect(port, "127.0.0.1");
@@ -105,7 +97,6 @@ describe("Inbox connection bridge", () => {
     expect(commands[0]).toMatchObject({ type: "reply", id: replyId, thread_id: asked.thread_id, reply_to: asked.message_id, subject: null });
     expect(commands[0]!.body).toContain("Yes, ship it.\n\nBut keep the flag off.");
     expect(commands[0]!.url).toBe(`${server.url}#thread=${asked.thread_id}`);
-    // Another session's poll is not woken by it, and waits out its own hold.
     expect(await other).toEqual([]);
   });
 
@@ -127,7 +118,6 @@ describe("Inbox connection bridge", () => {
     const delivered = await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "session-a", host: "claude-code", type: "delivered", id: replyId });
     expect(delivered.status).toBe(200);
     expect(await poll(server, "session-a")).toEqual([]);
-    // Idempotent: a second acknowledgement (a lost answer, another process) changes nothing.
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "session-a", host: "claude-code", type: "delivered", id: replyId })).status).toBe(200);
 
     const after = await thread(server, asked.thread_id);
@@ -135,11 +125,9 @@ describe("Inbox connection bridge", () => {
     expect(reply.delivery).toMatchObject({ state: "delivered", host: "claude-code", session: "session-a" });
     const rows = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads`)).json()) as { sections: { id: string; threads: { thread_id: string; sent: { checked_at: string | null } | null }[] }[] };
     const row = rows.sections.flatMap((s) => s.threads.map((t) => ({ ...t, section: s.id }))).find((t) => t.thread_id === asked.thread_id)!;
-    // "Delivered to Claude Code, <time>": the agent has the reply, so the row leaves Sent.
     expect(row.section).toBe("quiet");
     expect(row.sent?.checked_at).toBe(reply.delivery!.at);
 
-    // "Replied": the asking session's answer lands after the delivered reply.
     await agentSends(client, project, "session-a", "Done: deployed to us-east-1.", replyId);
     const replied = await thread(server, asked.thread_id);
     expect(replied.messages.at(-1)?.author).toMatchObject({ kind: "agent", session: "session-a" });
@@ -189,9 +177,6 @@ describe("Inbox connection bridge", () => {
     servers.push(again);
     expect((await poll(again, "session-a")).map((c) => c.id)).toEqual([replyId]);
   });
-  // Step 8, New message. The failure this guards: the window lists a session
-  // of another project, or hands the person's message to a session they did
-  // not pick.
   test("New message: polls make sessions live per project (a connection without project_path counts where it wrote); the message goes to the picked session only", async () => {
     const { server, client, project } = await setup();
     const elsewhere = join(project, "..", "other");
@@ -203,7 +188,6 @@ describe("Inbox connection bridge", () => {
       }).sessions;
     expect(await live()).toEqual([]);
 
-    // session-a sends no project_path: live here because it wrote here. session-b says where it works; session-c works elsewhere.
     await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "session-a", host: "pi", waitMs: 0 });
     await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "session-b", host: "claude-code", waitMs: 0, project_path: project, busy: false, idle_since: 1_000 });
     await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "session-c", host: "claude-code", waitMs: 0, project_path: elsewhere, busy: false });
@@ -211,7 +195,6 @@ describe("Inbox connection bridge", () => {
       { session: "session-a", busy: null, wrote_thread: true },
       { session: "session-b", busy: false, wrote_thread: false },
     ]);
-    // A turn starts in session-b.
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "session-b", host: "claude-code", type: "state", busy: true })).status).toBe(200);
     expect((await live()).find((s) => s.session === "session-b")?.busy).toBe(true);
 
@@ -237,9 +220,6 @@ describe("Inbox connection bridge", () => {
     });
     expect(await poll(server, "session-b")).toEqual([]);
   });
-  // Review blocker B1 (PR 1764). The failure this guards: another session's
-  // read_thread on the same thread took the person's message to the session
-  // they picked, which then never got it.
   test("New message: another session's read settles nothing; only the addressee gets it, by its wake", async () => {
     const { server, client, project } = await setup();
     const asked = await agentSends(client, project, "session-two", "Run finished.");
@@ -250,11 +230,9 @@ describe("Inbox connection bridge", () => {
       body: JSON.stringify({ serverSession: server.serverSession, session: "session-one", body: "For the first session only.", idempotency_key: "nm-b1" }),
     });
     const message = ((await sent.json()) as { message: { id: string } }).message;
-    // A read of the thread by session-two settles nothing.
     await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "session-two" } });
     expect(await poll(server, "session-two")).toEqual([]);
     expect((await poll(server, "session-one")).map((c) => c.id)).toEqual([message.id]);
-    // The addressee's wake is its delivery: no turn after it.
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "session-one", host: "claude-code", type: "delivered", id: message.id })).status).toBe(200);
     expect(await poll(server, "session-one")).toEqual([]);
     expect((await thread(server, asked.thread_id)).messages.at(-1)?.delivery).toMatchObject({ host: "claude-code", session: "session-one" });

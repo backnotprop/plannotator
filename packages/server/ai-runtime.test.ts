@@ -153,9 +153,6 @@ describe("createAIRuntime Codex discovery", () => {
 });
 
 describe("createAIRuntime Pi discovery", () => {
-  // Pi's model discovery spawns `pi` and waits up to 10s for its answer. It
-  // used to run at startup and hold every plain capabilities answer until it
-  // finished; it now waits for ?activate= (or a session) like Codex.
   test("plain capabilities answers at once without spawning a slow pi; ?activate= spawns it", async () => {
     if (process.platform === "win32") return;
 
@@ -218,9 +215,6 @@ describe("createAIRuntime Pi discovery", () => {
 });
 
 describe("createAIRuntime Qwen Code", () => {
-  // `qwen` on PATH registers the qwen-sdk provider. Its models come from
-  // $QWEN_HOME/settings.json (no qwen runs for that), and a question is
-  // answered by one qwen run (tests/test-fixtures/fake-qwen-cli.ts).
   test("registers qwen-sdk, lists the settings models without running qwen, and answers a question", async () => {
     if (process.platform === "win32") return;
 

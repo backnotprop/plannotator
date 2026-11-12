@@ -1,9 +1,3 @@
-/**
- * Earlier comments on a file, through the real files route: what a Send carried comes back as
- * `earlier_annotations`, and the window's match keeps the same path. What would regress: drafts or
- * another thread's comments shown as "earlier", a newer version of the file losing them, or a comment
- * on a message's text listed against a file.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,18 +39,15 @@ test("the read returns the sent comments of this thread, and the same path keeps
   const [page, other] = first.attachments!;
   store.saveAnnotation({ attachment_id: page!.id, version: "current", annotation: comment("ann-page", "Say why.", "One") });
   store.saveAnnotation({ attachment_id: other!.id, version: "current", annotation: comment("ann-other", "Too long.", "Other") });
-  // A comment on the message's text rides the same Send; it is not on a file.
   store.saveMessageAnnotation(first.id, comment("ann-msg", "On the words.", "First."));
 
   expect((await read(first.thread_id)).earlier_annotations).toEqual([]);
   send(first.id, "reply-1", ["ann-page", "ann-other", "ann-msg"]);
 
-  // The agent sends the file again: a new attachment id, the same realpath.
   write("page.md", "# Two\n");
   const second = store.sendMessage({ project_id: project.id, author: author("a"), reply_to: first.id, body: "Second.", attachments: await files("page.md") }).message;
   const newer = second.attachments![0]!;
   expect(newer.id).not.toBe(page!.id);
-  // Not sent yet: a draft on the newer version.
   store.saveAnnotation({ attachment_id: newer.id, version: "current", annotation: comment("ann-draft", "Better.", "Two") });
 
   const model = await read(first.thread_id);
@@ -85,11 +76,9 @@ test("a sent comment keeps its reply's time, comes back after a restart, and goe
     attachments: await recordInboxAttachments(server.store.dir, ["page.md"], { base: root, at: new Date().toISOString() }),
   }).message;
   const attachment = message.attachments![0]!;
-  // Made on the version the agent sent, not on `current`: still the same file.
   server.store.saveAnnotation({ attachment_id: attachment.id, version: attachment.sent_sha256, annotation: comment("ann-sent-version", "Say why.", "One") });
   const reply = server.store.sendReply(message.id, { idempotency_key: "reply-1", words: "Notes.", feedback: "Notes.", annotation_ids: ["ann-sent-version"] }).reply;
 
-  // The panel's "From your reply · …" reads `updated_at`: it has to be the reply's own time.
   const [sent] = server.store.earlierAnnotations(message.thread_id);
   expect(sent!.updated_at).toBe(reply.created_at);
   expect(sent!.sent_reply_id).toBe(reply.id);
@@ -130,7 +119,6 @@ test("the comments group by the reply that carried them, the newest reply first"
   );
   expect(replies.map((r) => r.replyId)).toEqual(["r2", "r1"]);
   expect(replies[0]!.label.startsWith("From your reply · Today, ")).toBe(true);
-  // The whole image has no spot; a drawing with no words says so; a video says its moment, not its file's name.
   expect(replies[0]!.comments).toEqual([
     { id: "b", words: "New.", spot: null },
     { id: "c", words: "Drawing", spot: null },

@@ -1,20 +1,3 @@
-/**
- * The expand arrows' whole files in the Inbox (a PR page and a thread's guided
- * review): `GET /api/inbox/pulls/file` and `GET /api/inbox/messages/:id/guide/file`,
- * through a running Inbox's real doors with a scripted gh / glab and real git in
- * a temp folder. No real CLI or forge.
- *
- * What regresses:
- *  - anything run (gh, glab, git) while Code review is off, for an unknown PR,
- *    another site or a bad path;
- *  - a file read at the wrong commits (the base branch's tip instead of where
- *    the head left it; another head than the patch on screen), or the forge
- *    asked again for what a clone or the cache already has;
- *  - a binary or too large file, or a missing side, opening the viewer's gaps;
- *  - a passing failure (a rate limit) remembered as "no such file";
- *  - a guide's file read from anything other than the blobs its patch names:
- *    a working tree that moved on, a path the patch does not change.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,14 +22,12 @@ afterEach(async () => {
 });
 
 const blobId = (text: string) => gitBlobId(Buffer.from(text, "utf8")).slice(0, 10);
-/** What a patch's `index` line names for these two texts. */
 const idsOf = (oldText: string, newText: string) => ({ oldId: blobId(oldText), newId: blobId(newText) });
 const IDS = idsOf("old\n", "new\n");
 const KEY = "github.com/northwind/billing-svc#412";
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
 const REPO = { host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" };
-/** The diff's read of the PR as it is now: its head and its description, one JSON line (inbox-pulls.ts `pullNow`). */
 const PULL_NOW_JQ = "{sha: .head.sha, body: .body} | tojson";
 
 const ghPull = (fields: Record<string, unknown> = {}) => ({
@@ -75,19 +56,12 @@ const ghPull = (fields: Record<string, unknown> = {}) => ({
 
 interface Scripted {
   run: RefRunner;
-  /** Every `gh api` / `glab api` endpoint read, in order. */
   reads: string[];
-  /** Whole-file answers, by the endpoint's path and ref. */
   files: Map<string, string>;
-  /** Answer each read with this instead (a rate limit, an outage). */
   failWith: { stderr: string } | null;
-  /** The PR the list answers. */
   pull: Record<string, unknown>;
-  /** The commit a compare says the head left its base at. */
   mergeBase: string;
-  /** The PR's diff, as the forge answers it. */
   patch: string;
-  /** The commit the PR's head is at, as the forge answers it. */
   headNow: string;
 }
 
@@ -139,7 +113,6 @@ describe("a PR's file", () => {
     const pulls = await listed(f);
     expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(f.reads).toEqual([fileAt("src/a.ts", HEAD), `repos/northwind/billing-svc/compare/main...${HEAD}?per_page=1`, fileAt("src/a.ts", BASE)]);
-    // The same file again, and the page reopened: nothing more is asked of the forge.
     const asked = f.reads.length;
     expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(f.reads.length).toBe(asked);
@@ -221,11 +194,9 @@ describe("a PR's file", () => {
     expect(f.reads).toContain(`repos/northwind/billing-svc/compare/release...${HEAD}?per_page=1`);
   });
 
-  // The client stops asking when an answer has no head_sha; this is what a read still on its way gets.
   test("a head that moved during the diff's read is not remembered: files read at the list's head, then at the next head that held", async () => {
     const f = scripted();
     let heads = 0;
-    // Before and after the first read: two different heads. Before and after the next: the same one.
     const sequence = ["c", "e", "d", "d", "f", "g"];
     const run: RefRunner = (cli, args) =>
       args.includes(PULL_NOW_JQ)
@@ -243,7 +214,6 @@ describe("a PR's file", () => {
     f.reads.length = 0;
     await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS);
     expect(f.reads.some((read) => read.endsWith(`ref=${"d".repeat(40)}`))).toBe(true);
-    // A later read that moved keeps that head: posting relies on it too.
     clock += 3_600_000;
     expect((await pulls.diff(KEY, "layer")).head_sha).toBeNull();
     expect(pulls.readHead(KEY)).toBe("d".repeat(40));
@@ -258,7 +228,6 @@ describe("a PR's file", () => {
 
   test("the cache of texts stays within its bound: the oldest is read again", async () => {
     const f = scripted();
-    // Each under the 5 MB a file may be; fourteen of them pass the 64 MB kept.
     const paths = Array.from({ length: 14 }, (_, i) => `f${i}.ts`);
     for (const path of paths) f.files.set(fileAt(path, HEAD), `${path}${"x".repeat(4_900_000)}`);
     const pulls = await listed(f);
@@ -267,7 +236,6 @@ describe("a PR's file", () => {
     expect(asked()).toBe(1);
     await pulls.fileContents(KEY, "layer", "f0.ts", [], IDS);
     expect(asked()).toBe(2);
-    // The newest stayed.
     await pulls.fileContents(KEY, "layer", "f13.ts", [], IDS);
     expect(f.reads.filter((read) => read === fileAt("f13.ts", HEAD)).length).toBe(1);
   });
@@ -278,7 +246,6 @@ describe("a PR's file", () => {
     f.files.set(fileAt("src/a.ts", BASE), "old\n");
     const pulls = await listed(f);
     expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
-    // Text that is not the patch's still opens nothing.
     f.files.set(fileAt("src/b.ts", HEAD), "something else\n");
     f.files.set(fileAt("src/b.ts", BASE), "old\n");
     expect(await pulls.fileContents(KEY, "layer", "src/b.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
@@ -351,7 +318,6 @@ describe("a PR's file", () => {
     test("where the head left its base: a 404", async () => {
       const f = scripted();
       f.files.set(fileAt("src/a.ts", BASE), "old\n");
-      // The clone has the head, so the compare is the first thing the forge is asked.
       const pulls = await listed(f, async (_root, sha) => (sha === HEAD ? "new\n" : null));
       f.failWith = { stderr: "gh: Not Found (HTTP 404)" };
       expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone"], IDS)).toEqual(nothing);
@@ -409,10 +375,8 @@ describe("a PR's file", () => {
     expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(failed);
     const asked = f.reads.length;
     expect(asked).toBeGreaterThan(0);
-    // Held: asks nothing, for any file.
     expect(await pulls.fileContents(KEY, "layer", "src/b.ts", [], IDS)).toEqual(failed);
     expect(f.reads.length).toBe(asked);
-    // Over: the same file reads.
     f.failWith = null;
     clock += 60 * 60_000;
     expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
@@ -449,7 +413,6 @@ describe("a PR's file", () => {
     await pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
     expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(reads.every((r) => r.startsWith("glab "))).toBe(true);
-    // The whole stack has no merge request's refs to read: the project's merge base. (The texts are cached by now.)
     expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "stack", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(reads).toContain(`glab projects/northwind%2Fdata%2Fledger/repository/merge_base?refs%5B%5D=main&refs%5B%5D=${HEAD}`);
   });
@@ -543,7 +506,6 @@ describe("the PR route", () => {
     writeFileSync(join(w.project, "a.ts"), "new\n");
     w.git("commit", "-qam", "two");
     const headSha = w.git("rev-parse", "HEAD").trim();
-    // The Inbox learns of the project from an agent's message, and of the PR from the list.
     await w.sendGuide(w.git("diff", `${baseSha}..${headSha}`), ["a.ts"]);
     w.forge.pull = ghPull({ headRefOid: headSha });
     w.forge.mergeBase = baseSha;
@@ -587,7 +549,6 @@ describe("the PR route", () => {
     w.forge.files.set(fileAt(".env", BASE), "old\n");
     w.forge.files.set(fileAt("a.ts", HEAD), "new\n");
     w.forge.files.set(fileAt("a.ts", BASE), "old\n");
-    // The Inbox learns of the project from an agent's message, and of the PR from the list.
     await w.sendGuide(w.forge.patch, ["a.ts"]);
     expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
     expect(await contentsOf(await ask(w.base, ".env"))).toEqual(NO_CONTENTS);
@@ -616,7 +577,6 @@ describe("a guide's file", () => {
 
   const PR_SOURCE = { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } as const;
   const patchOf = (path: string) => `diff --git a/${path} b/${path}\nindex ${IDS.oldId}..${IDS.newId} 100644\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new\n`;
-  /** A guide of a PR whose blobs this clone does not have. */
   const prGuide = (w: Awaited<ReturnType<typeof world>>, path: string, project?: string, rawPatch = patchOf(path)) =>
     w.sendGuide("", [], {
       ...(project ? { project_path: project } : {}),
@@ -633,7 +593,6 @@ describe("a guide's file", () => {
     const on = await world({ codeReview: true });
     on.forge.files.set(fileAt("a.ts", HEAD), "new\n");
     on.forge.files.set(fileAt("a.ts", BASE), "old\n");
-    // The Inbox learns of the project from the guide, and of the PR from the list.
     const id = await prGuide(on, "a.ts");
     expect((await fetch(`${on.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
     expect(await contentsOf(await on.askGuide(id, "a.ts"))).toEqual({ oldContent: "old\n", newContent: "new\n" });
@@ -690,7 +649,6 @@ describe("a guide's file", () => {
     const w = await world({ codeReview: true, repoOf: (root) => ({ host: "github.com", display: root.endsWith("billing-svc") ? "northwind/billing-svc" : "someone/third" }) });
     w.forge.files.set(fileAt("a.ts", HEAD), "new\n");
     w.forge.files.set(fileAt("a.ts", BASE), "old\n");
-    // The PR's own project is known to the Inbox, from a guide there.
     const own = await prGuide(w, "a.ts");
     const third = join(w.project, "..", "third");
     mkdirSync(third, { recursive: true });
@@ -715,7 +673,6 @@ describe("a guide's file", () => {
     const w = await world({ codeReview: true });
     const id = await w.sendGuide(await changed(w), ["a.ts"]);
     expect(await contentsOf(await w.askGuide(id, "a.ts"))).toEqual({ oldContent: "one\ntwo\nthree\n", newContent: "one\n2\nthree\n" });
-    // The tree moved on since the diff: the guide keeps the diff as sent, with no arrows rather than the wrong lines.
     writeFileSync(join(w.project, "a.ts"), "one\n2\nthree\nand a fourth\n");
     expect(await contentsOf(await w.askGuide(id, "a.ts"))).toEqual(NO_CONTENTS);
   });
@@ -767,7 +724,6 @@ describe("a guide's file", () => {
     const id = await w.sendGuide(await changed(w, `${before.join("\n")}\n`, `${after.join("\n")}\n`), ["a.ts"]);
     const save = (annotation: Record<string, unknown>) =>
       fetch(`${w.base}/api/inbox/messages/${id}/guide/annotations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotation }) });
-    // Line 5 is far above the hunk: only an arrow shows it.
     const opened = { type: "comment", scope: "line", filePath: "a.ts", lineStart: 5, lineEnd: 5, side: "new", text: "Why?" };
     expect((await save({ ...opened, id: "ann-closed" })).status).toBe(422);
     const kept = await save({ ...opened, id: "ann-opened", outsideDiff: true, anchorText: "line 5" });
@@ -782,7 +738,6 @@ describe("a guide's file", () => {
     w.git("add", ".");
     w.git("commit", "-qm", "one");
     writeFileSync(join(w.project, "a.ts"), "text\u0000two\n");
-    // A text-looking patch of a file git treats as binary, as an agent could send with --text.
     const id = await w.sendGuide(w.git("diff", "--text"), ["a.ts"]);
     expect(await contentsOf(await w.askGuide(id, "a.ts"))).toEqual(NO_CONTENTS);
   });

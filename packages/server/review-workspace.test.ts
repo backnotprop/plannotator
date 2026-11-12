@@ -1,10 +1,3 @@
-/**
- * Workspace Review Tests
- *
- * Tests for workspace repo discovery, label building, and path resolution.
- * Run: bun test packages/server/review-workspace.test.ts
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   chmodSync,
@@ -38,12 +31,6 @@ const tempDirs: string[] = [];
 const originalSemPath = process.env.PLANNOTATOR_SEM_PATH;
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 
-/**
- * The discovery tests build their fixtures with real `git` (six spawns per repo in initRepo).
- * On the Windows runner each spawn can take a few hundred ms, so a test with three repos
- * spent over 5 s (bun's default) in setup alone while discovery itself takes milliseconds.
- * The longer budget covers the fixture; every assertion is unchanged.
- */
 const GIT_FIXTURE_TIMEOUT_MS = 30_000;
 
 function makeTempDir(prefix: string): string {
@@ -146,10 +133,6 @@ async function waitForFile(path: string): Promise<void> {
   throw new Error(`Timed out waiting for ${path}`);
 }
 
-// Sandbox every test's data dir so a contributor's ~/.plannotator/config.json
-// (e.g. reviewAnalysis.semanticDiff: false) can never change server behavior.
-// The root bunfig preload does this too, but not when bun runs from this
-// package directory. Tests that need a specific dir still override it.
 beforeEach(() => {
   process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-review-workspace-data-");
 });
@@ -654,15 +637,11 @@ describe("review-workspace", () => {
 
   describe("discoverWorkspaceRepoPaths", () => {
     it("excludes the root itself even if it is a git repo", () => {
-      // The function is designed to discover repos WITHIN a workspace root,
-      // not the root itself. This allows the workspace root to be a git repo
-      // (e.g., a meta-repo) while still discovering nested repos.
       const root = makeTempDir("plannotator-workspace-root-repo-");
       initRepo(root);
 
       const repos = discoverWorkspaceRepoPaths(root);
 
-      // Root itself is excluded even though it's a git repo
       expect(repos).toHaveLength(0);
       expect(repos).not.toContain(root);
     }, GIT_FIXTURE_TIMEOUT_MS);
@@ -670,7 +649,6 @@ describe("review-workspace", () => {
     it("discovers multiple nested VCS repos", () => {
       const root = makeTempDir("plannotator-workspace-multi-");
 
-      // Create nested repos
       const frontend = join(root, "frontend");
       const backend = join(root, "backend");
       const backendApi = join(backend, "api");
@@ -687,7 +665,7 @@ describe("review-workspace", () => {
       expect(repos).toContain(frontend);
       expect(repos).toContain(backendApi);
       expect(repos).not.toContain(root);
-      expect(repos).not.toContain(backend); // backend itself is not a repo
+      expect(repos).not.toContain(backend);
     }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("uses a symlinked Git repo's logical workspace path end to end", async () => {
@@ -763,20 +741,14 @@ describe("review-workspace", () => {
     }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("bounds discovery when a symlink escapes into a huge external tree", () => {
-      // Regression for the #1060 follow-up: a symlink inside the workspace
-      // pointing at a large unrelated tree must not be enumerated unboundedly
-      // before the server starts. The walk shares the file-discovery budget.
       const root = makeTempDir("plannotator-workspace-symlink-budget-");
       const huge = makeTempDir("plannotator-workspace-symlink-budget-target-");
-      // 40 directories, each with 5 subdirectories — 200+ nodes, no repos.
       for (let i = 0; i < 40; i++) {
         for (let j = 0; j < 5; j++) {
           mkdirSync(join(huge, `dir-${String(i).padStart(2, "0")}`, `sub-${j}`), { recursive: true });
         }
       }
       linkDirectory(huge, join(root, "escape"));
-      // A legitimate repo that sorts BEFORE the escape link so it is found
-      // within the budget.
       const repo = join(root, "app");
       mkdirSync(repo, { recursive: true });
       initRepo(repo);
@@ -793,8 +765,6 @@ describe("review-workspace", () => {
     }, GIT_FIXTURE_TIMEOUT_MS);
 
     it("keeps discovering symlinked repos under the default budget", () => {
-      // The budget must not break the feature it bounds: an external
-      // symlinked repo is still found with default limits.
       const root = makeTempDir("plannotator-workspace-symlink-budget-ok-");
       const targetRoot = makeTempDir("plannotator-workspace-symlink-budget-ok-target-");
       const targetRepo = join(targetRoot, "service");
@@ -835,22 +805,18 @@ describe("review-workspace", () => {
     it("stops recursion at git repo boundaries (does not discover nested repos inside other repos)", () => {
       const root = makeTempDir("plannotator-workspace-boundary-");
 
-      // Create a repo with a nested directory that would be a repo
       const parentRepo = join(root, "parent");
       const childDir = join(parentRepo, "child");
 
       mkdirSync(childDir, { recursive: true });
       initRepo(parentRepo);
 
-      // Create a git repo inside the child (should NOT be discovered separately
-      // because parent repo stops recursion - we don't traverse into git repos)
       const grandchildRepo = join(childDir, "grandchild");
       mkdirSync(grandchildRepo, { recursive: true });
       initRepo(grandchildRepo);
 
       const repos = discoverWorkspaceRepoPaths(root);
 
-      // Only the parent should be discovered - grandchild is inside a git repo
       expect(repos).toHaveLength(1);
       expect(repos).toContain(parentRepo);
       expect(repos).not.toContain(grandchildRepo);
@@ -869,12 +835,10 @@ describe("review-workspace", () => {
     it("skips ignored directories", () => {
       const root = makeTempDir("plannotator-workspace-skip-");
 
-      // Create node_modules with a fake .git (should be skipped)
       const nodeModules = join(root, "node_modules", "some-pkg");
       mkdirSync(nodeModules, { recursive: true });
       mkdirSync(join(nodeModules, ".git"), { recursive: true });
 
-      // Create a real repo
       const realRepo = join(root, "src");
       mkdirSync(realRepo, { recursive: true });
       initRepo(realRepo);
@@ -888,7 +852,6 @@ describe("review-workspace", () => {
     it("returns empty array when root has no git repos", () => {
       const root = makeTempDir("plannotator-workspace-empty-");
 
-      // Create some non-git directories
       mkdirSync(join(root, "src"), { recursive: true });
       mkdirSync(join(root, "docs"), { recursive: true });
       writeFileSync(join(root, "README.md"), "# Project\n", "utf-8");
@@ -934,9 +897,6 @@ describe("review-workspace", () => {
 
   describe("buildRepoLabel (via discoverWorkspaceRepoPaths integration)", () => {
     it("uses relative path as label when possible", () => {
-      // This is tested indirectly through the full workspace flow
-      // The label building logic is internal, but we verify it works
-      // through resolveWorkspaceFilePath tests with realistic labels
       const repos = [
         { id: "1", label: "packages/frontend", cwd: "/tmp/packages/frontend", selected: true, rawPatch: "", gitRef: "" },
         { id: "2", label: "packages/backend", cwd: "/tmp/packages/backend", selected: true, rawPatch: "", gitRef: "" },
@@ -950,8 +910,6 @@ describe("review-workspace", () => {
     });
 
     it("handles duplicate basename fallback", () => {
-      // When two repos have the same basename but different paths,
-      // the second should get a numbered suffix
       const repos = [
         { id: "1", label: "api", cwd: "/tmp/apps/api", selected: true, rawPatch: "", gitRef: "" },
         { id: "2", label: "api-2", cwd: "/tmp/services/api", selected: true, rawPatch: "", gitRef: "" },
@@ -1223,8 +1181,6 @@ describe("review-workspace", () => {
       expect(isRepoRelative("nested/deep/file.ts")).toBe(true);
       expect(isRepoRelative("../outside.ts")).toBe(false);
       expect(isRepoRelative("")).toBe(false);
-      // On Windows, path.relative returns the target's absolute path when the
-      // base is on a different drive; after normalization that is "L:/...".
       expect(isRepoRelative("L:/repos/project/src/file.ts")).toBe(false);
     });
 
@@ -1460,7 +1416,6 @@ describe("review-workspace", () => {
           )
         ));
         expect(concurrentExpansions.every((response) => response.status === 200)).toBe(true);
-        // All six expansion requests share one probe after the switch capture.
         expect(fingerprintCalls).toBe(1);
 
         const fileContentResponse = await fetch(

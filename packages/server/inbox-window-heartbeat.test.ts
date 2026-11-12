@@ -1,10 +1,3 @@
-/**
- * A window's event stream beats with a named frame the page can hear
- * (`event: heartbeat`): EventSource never shows a comment line to the page,
- * so with only `: ping` a dead connection looked like a quiet Inbox
- * (packages/inbox/liveStream.ts). Streams without a window (the phone's
- * door, a linked machine, agents) keep the comment line and get no new frame.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +23,6 @@ async function inbox(windowHeartbeatMs: number) {
   return server;
 }
 
-/** Read a stream's text for `ms`. */
 async function readFor(server: InboxServer, query: string, ms: number): Promise<string> {
   const abort = new AbortController();
   aborts.push(abort);
@@ -54,7 +46,6 @@ test("a window's stream hears `event: heartbeat` on its interval; a stream witho
   const beats = windowText.split("event: heartbeat\ndata: {}\n\n").length - 1;
   expect(beats).toBeGreaterThanOrEqual(3);
   expect(beats).toBeLessThanOrEqual(6);
-  // The window's stream carries the named frame instead of the comment line.
   expect(windowText).not.toContain(": ping");
   const doorText = await readFor(server, "", 550);
   expect(doorText).toContain("event: hello");
@@ -62,7 +53,5 @@ test("a window's stream hears `event: heartbeat` on its interval; a stream witho
 });
 
 test("the page's silence window holds at least two and a half heartbeats", () => {
-  // Raising the server's interval (or shortening the page's window) past this would read one late beat as a dead
-  // connection, and every tab would reconnect and read its list again while nothing is wrong.
   expect(STREAM_STALE_MS).toBeGreaterThanOrEqual(INBOX_WINDOW_HEARTBEAT_MS * 2.5);
 });

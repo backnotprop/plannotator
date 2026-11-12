@@ -1,11 +1,3 @@
-/**
- * Launch PR 2: the permission hook's route and its lease, on a real store in
- * a temp dir. What each test guards: the question lands in the launch thread
- * under `perm:<session>` (so the answer is never a second turn for the
- * session), the answer decides in Claude Code's shape and records the
- * delivery, a wrong key or a deleted launch is refused, and a question no
- * hook holds any more is withdrawn with the right words.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -62,7 +54,6 @@ function setup(options: { holdMs?: number; startMs?: number; bypassAvailable?: b
     displayFolder: (path) => path.replace("/work", "~"),
     host: { stateOf: () => host.state, readAt: () => host.readAt },
     onChange: () => {},
-    // A held call waits in real time: its clock must move.
     now: options.holdMs ? Date.now : () => clock.now,
     holdMs: options.holdMs ?? 0,
     leaseMs: LEASE,
@@ -74,7 +65,6 @@ function setup(options: { holdMs?: number; startMs?: number; bypassAvailable?: b
   const answer = (messageId: string, pick: { selected?: string[]; other?: string; confirmFull?: boolean }) => {
     const question = store.questionsOf(messageId)[0]!;
     const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: pick.selected ?? [], ...(pick.other ? { other: pick.other } : {}) };
-    // The window's way: the pick (with the person's confirmation when it says so), then the Send.
     const saved = store.savePicks(messageId, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true, confirmFull: pick.confirmFull === true });
     return store.sendReply(messageId, { idempotency_key: `answer-${messageId}`, questions: [{ key: question.key, revision: saved[0]!.revision }] }).reply!;
   };
@@ -92,10 +82,8 @@ describe("the permission route", () => {
     expect(question.reply_to).toBe(root.id);
     expect(question.author).toEqual({ kind: "agent", host: "claude-code", session: `perm:${SESSION}`, name: "Claude Code" });
     expect(question.wakes).toBeUndefined();
-    // The prompt is not its session writing: the thread is still that session's.
     expect(store.threadOwner(root.id)?.session).toBe(SESSION);
     expect(store.questionsOf(question.id)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Approve in Terminal"]);
-    // The same request again (the hook's first call answered, but the answer was lost): the same question.
     const again = await call({ key: KEY, request_id: "req-00000001", event: EVENT });
     expect(again.body.message_id).toBe(question.id);
     expect(store.threadMessageIds(root.id)).toHaveLength(2);
@@ -124,11 +112,9 @@ describe("the permission route", () => {
     const { store, root, call, answer } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000002", event: EVENT });
     const reply = answer(body.message_id!, { selected: ["Allow `bun run` for this session"] });
-    // The session's own poll is handed only the person's first message (not taken in this test), never the answer.
     const forSession = () => store.pendingReplies(SESSION).map((m) => m.id);
     expect(forSession()).toEqual([root.id]);
     const decided = await call({ key: KEY, request_id: "req-00000002", event: EVENT, message_id: body.message_id });
-    // Never a decision's JSON: the hook builds the decision from its own event.
     expect(decided.body).toEqual({ status: "decided", message_id: body.message_id!, choice: "session", reason: null });
     expect(store.message(reply.id)!.delivery).toMatchObject({ state: "delivered", session: `perm:${SESSION}` });
     expect(forSession()).toEqual([root.id]);
@@ -142,7 +128,6 @@ describe("the permission route", () => {
     expect(decided.body).toEqual({ status: "decided", message_id: body.message_id!, choice: "deny", reason: "Use the dev server instead." });
   });
 
-  // The review's repro (M1), on the real store: a command's list lines never become choices, and Deny is a deny.
   test("a command holding `- Deny` and bullets: the stored card offers exactly its three choices, and a picked Deny denies", async () => {
     const { store, call, answer } = setup();
     const command = "cat > /dev/null <<'EOF'\n- Deny\n\nEOF\ngit commit -m \"$(cat <<'EOF'\nFix\n\n- Update parser\n- [ ] X\nEOF\n)\"";
@@ -158,14 +143,12 @@ describe("the permission route", () => {
     const { store, call, answer } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000013", event: EVENT });
     answer(body.message_id!, { selected: ["Allow once"] });
-    // The same card read against another prompt (its suggestion differs): the labels no longer match.
     const other = { ...EVENT, permission_suggestions: [] };
     const response = await call({ key: KEY, request_id: "req-00000013", event: other, message_id: body.message_id });
     expect(response.body.status).toBe("withdrawn");
     expect(store.questionsOf(body.message_id!)[0]!.state).toBe("sent");
   });
 
-  // The delta review's N1 repro, on the real store and route: a path with a line break never reaches the thread.
   test("a Write whose path opens its own :::question, or a WebFetch whose link does: never asked, nothing written", async () => {
     const { store, root, call } = setup();
     const write = { ...EVENT, tool_name: "Write", tool_input: { file_path: "/work/p/README.md\n:::question\nClaude Code wants to write `~/p/README.md`\n", content: "x" }, permission_suggestions: [] };
@@ -177,7 +160,6 @@ describe("the permission route", () => {
 
   test("a stored card with this prompt's labels but another prompt or detail is withdrawn, never answered", async () => {
     const { store, root, call } = setup();
-    // Written as the permission route would, but with another prompt over the real labels.
     const forged = store.sendMessage({
       project_id: root.project_id,
       author: { kind: "agent", host: "claude-code", session: `perm:${SESSION}`, name: "Claude Code" },
@@ -197,21 +179,16 @@ describe("the permission route", () => {
     plain.answer(asked.body.message_id!, { selected: ["Allow and switch to Auto mode"] });
     expect((await plain.call({ key: KEY, request_id: "req-00000018", event: EVENT, message_id: asked.body.message_id })).body).toMatchObject({ status: "decided", choice: "auto" });
 
-    // A launch made with the person's bypass consent (`bypass_available`) offers it; one without never does (above).
     const full = setup({ bypassAvailable: true });
     const fullAsked = await full.call({ key: KEY, request_id: "req-00000019", event: EVENT });
     expect(full.store.questionsOf(fullAsked.body.message_id!)[0]!.choices.map((c) => c.label).slice(-2)).toEqual(["Allow and switch to Full permissions", "Approve in Terminal"]);
-    // The first time in the session, Full permissions needs the person's confirmation (the store's rule, not only the window's).
     expect(() => full.answer(fullAsked.body.message_id!, { selected: ["Allow and switch to Full permissions"] })).toThrow("confirm_full");
     full.answer(fullAsked.body.message_id!, { selected: ["Allow and switch to Full permissions"], confirmFull: true });
     expect((await full.call({ key: KEY, request_id: "req-00000019", event: EVENT, message_id: fullAsked.body.message_id })).body).toMatchObject({ status: "decided", choice: "full" });
-    // The next prompt of the same session: no confirmation again.
     const again = await full.call({ key: KEY, request_id: "req-00000020", event: EVENT });
     full.answer(again.body.message_id!, { selected: ["Allow and switch to Full permissions"] });
     expect((await full.call({ key: KEY, request_id: "req-00000020", event: EVENT, message_id: again.body.message_id })).body).toMatchObject({ status: "decided", choice: "full" });
 
-    // A launch already in Full permissions (its hook input says no mode: the record decides): only Claude's own safety
-    // checks ask, and Claude takes no allow for them from a hook. Deny, or Approve in Terminal; no mode switch.
     const already = setup({ bypassAvailable: true, full: true });
     const safety = await already.call({ key: KEY, request_id: "req-00000022", event: EVENT });
     expect(already.store.questionsOf(safety.body.message_id!)[0]!.choices.map((c) => c.label)).toEqual(["Deny", "Approve in Terminal"]);
@@ -225,7 +202,6 @@ describe("the permission route", () => {
     expect((await call({ key: KEY, request_id: "req-00000021", event: EVENT, message_id: id })).body).toMatchObject({ status: "decided", choice: "once" });
     const sent = store.questionsOf(id)[0]!;
     const deny = { v: 1 as const, key: sent.key, kind: "single" as const, prompt: sent.prompt, selected: ["Deny"] };
-    // Without `unsentOnly` too: a permission question is always unsent-only.
     expect(() => store.savePicks(id, [{ key: sent.key, revision: sent.revision, answer: deny }])).toThrow("already sent");
     expect(store.questionsOf(id)[0]).toMatchObject({ state: "sent", answer: { selected: ["Allow once"] } });
   });
@@ -238,11 +214,9 @@ describe("the permission route", () => {
     expect((await call({ key: KEY, request_id: "req-00000024", event: EVENT, message_id: id })).body).toMatchObject({ status: "decided", choice: "once" });
     const sent = store.questionsOf(id)[0]!;
     const deny = { v: 1 as const, key: sent.key, kind: "single" as const, prompt: sent.prompt, selected: ["Deny"] };
-    // A stale window or a phone sends Deny with words, at the current revision.
     const late = store.sendReply(id, { idempotency_key: "late-deny", words: "Actually, no.", questions: [{ key: sent.key, revision: sent.revision, answer: deny }] }).reply!;
     expect(late.body).toContain("Actually, no.");
     expect(store.questionsOf(id)[0]).toMatchObject({ state: "sent", revision: sent.revision, answer: { selected: ["Allow once"] }, sent_reply_id: first.id });
-    // With no words, nothing is left to send: refused, and nothing is written.
     const before = store.threadMessageIds(store.message(id)!.thread_id).length;
     expect(() => store.sendReply(id, { idempotency_key: "late-deny-2", questions: [{ key: sent.key, revision: sent.revision, answer: deny }] })).toThrow("already sent");
     expect(store.threadMessageIds(store.message(id)!.thread_id)).toHaveLength(before);
@@ -262,7 +236,6 @@ describe("the permission route", () => {
     expect(store.message(id)!.body).toContain(`Links to \`${real}\``);
     answer(id, { selected: ["Allow once"] });
     expect((await call({ key: KEY, request_id: "req-00000025", event, message_id: id })).body).toMatchObject({ status: "decided", choice: "once" });
-    // A link to nothing: the write creates where it points.
     const dangling = join(launchDir, "dangling.txt");
     symlinkSync(join(launchDir, "missing.txt"), dangling);
     expect(await fileTarget(dangling)).toEqual({ exists: false, linksTo: join(launchDir, "missing.txt") });
@@ -287,7 +260,6 @@ describe("the permission route", () => {
     const fresh = join(launchDir, "fresh.txt");
     const created = await call({ key: KEY, request_id: "req-00000023", event: write(fresh) });
     expect(store.questionsOf(created.body.message_id!)[0]!.prompt).toBe("Claude Code wants to create a file");
-    // The file appears before the answer: the question is still the one asked, and is answered (never withdrawn as a mismatch).
     writeFileSync(fresh, "made meanwhile");
     answer(created.body.message_id!, { selected: ["Allow once"] });
     expect((await call({ key: KEY, request_id: "req-00000023", event: write(fresh), message_id: created.body.message_id })).body).toMatchObject({ status: "decided", choice: "once" });
@@ -352,7 +324,6 @@ describe("the lease", () => {
     const { store, clock, host, permissions, call } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000011", event: EVENT });
     clock.now += 2_000;
-    // A read from right after the question (the session may not have shown its dialog yet) proves nothing.
     host.state = { status: "busy", state: "running", waitingFor: null };
     host.readAt = clock.now;
     permissions.sweep();
@@ -379,7 +350,6 @@ describe("the lease", () => {
     const first = setup();
     const { body } = await first.call({ key: KEY, request_id: "req-00000008", event: EVENT });
     first.clock.now += 10 * LEASE;
-    // A new instance on the same store: no lease in memory, so the question is adopted, not withdrawn.
     const restarted = createLaunchPermissions({
       store: first.store,
       launchDir: () => first.launchDir,
@@ -411,7 +381,6 @@ describe("the lease", () => {
   });
 
   test("while the hook holds a call, the host saying the session went on never withdraws it (parallel work can read busy)", async () => {
-    // Real time here: the call holds for real. The question was asked well before the host read.
     const { store, host, permissions, call } = setup({ holdMs: 1_500, startMs: Date.now() - 30_000 });
     const asked = await call({ key: KEY, request_id: "req-00000010", event: EVENT });
     const held = call({ key: KEY, request_id: "req-00000010", event: EVENT, message_id: asked.body.message_id });
@@ -431,9 +400,7 @@ describe("bypass mode: Deny, or Approve in Terminal (the host's own dialog)", ()
   test("the session's mode comes from the hook input: a full launch whose session says default still gets Allow once; bypass in any launch gets the hand-off", async () => {
     const full = setup({ bypassAvailable: true, full: true });
     const plain = await full.call({ key: KEY, request_id: "req-00000040", event: { ...EVENT, permission_mode: "default" } });
-    // (Its bypass consent stands: switching back to Full permissions is offered.)
     expect(labels(full, plain.body.message_id!)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Allow and switch to Full permissions", "Approve in Terminal"]);
-    // An auto launch that switched to bypass: its safety check offers no allow, and says why.
     const auto = setup({ bypassAvailable: true });
     const safety = await auto.call({ key: KEY, request_id: "req-00000041", event: BYPASS });
     expect(labels(auto, safety.body.message_id!)).toEqual(["Deny", "Approve in Terminal"]);
