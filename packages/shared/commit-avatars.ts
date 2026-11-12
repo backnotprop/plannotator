@@ -40,7 +40,8 @@ export interface CommandRunner {
   runCommand(cmd: string, args: string[]): Promise<CommandResult>;
 }
 
-export type AvatarPlatform = ForgePlatform;
+/** The forges whose CLI answers an avatar lookup: Bitbucket has no CLI. */
+export type AvatarPlatform = Exclude<ForgePlatform, "bitbucket">;
 
 export interface AvatarRemote {
   platform: AvatarPlatform;
@@ -62,7 +63,7 @@ export function classifyAvatarRemote(remoteUrl: string): AvatarRemote | null {
   const path = parseRemoteUrl(remoteUrl);
   if (!host || !path) return null;
   const platform = classifyForgeHost(host);
-  return platform ? { platform, host, path } : null;
+  return platform === "github" || platform === "gitlab" ? { platform, host, path } : null;
 }
 
 /** Mirrors pr-github's hostnameArgs: `--hostname` only off github.com. */

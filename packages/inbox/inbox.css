@@ -4075,6 +4075,8 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
 .ib-gk-eyes, .am-gk-e { fill: #0b0b0c; }
 .light .ib-gk-body, .light .am-gk-b { fill: #0b0b0c; }
 .light .ib-gk-eyes, .light .am-gk-e { fill: #fff; }
+.ib-hermes { --ib-hermes-mask: var(--ib-hermes-dark); }
+.light .ib-hermes { --ib-hermes-mask: var(--ib-hermes-light); }
 /* The sound dialog's shell, wider; the body scrolls and the footer stays (a long list never pushes the buttons away). */
 .pn-inbox dialog.ib-dlg.ib-anote, dialog.ib-dlg.ib-anote { width: min(720px, calc(100vw - 32px)); border-radius: 14px; overflow: hidden; }
 dialog.ib-dlg.ib-anote[open] { display: flex; flex-direction: column; }
@@ -4753,13 +4755,13 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn:hover, .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn[aria-expanded="true"] { color: var(--foreground); }
 .ib-cp-lchbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-picker.ib-cp-lch { left: auto; right: 14px; width: min(400px, calc(100% - 28px)); }
-.ib-cp-lchcols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.ib-cp-lchcols { display: grid; grid-auto-flow: column; grid-template-columns: minmax(0, 3fr); grid-auto-columns: minmax(0, 2fr); min-height: 0; overflow: hidden; }
 .ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 1px solid var(--ib-line); }
 .ib-cp-list.ib-cp-lchcol { grid-template-columns: minmax(0, 1fr) 16px; }
 .pn-inbox .ib-cp-opt.ib-cp-lchopt { width: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); text-align: left; cursor: pointer; }
 .pn-inbox .ib-cp-opt.ib-cp-lchopt:hover, .pn-inbox .ib-cp-opt.ib-cp-lchopt:focus-visible { background: color-mix(in oklch, var(--muted) 80%, transparent); outline: none; }
 :root.light .pn-inbox .ib-cp-opt.ib-cp-lchopt:is(:hover, :focus-visible) { background: var(--muted); }
-.ib-cp-lchopt .ib-cp-op { display: flex; gap: 0.4em; align-items: baseline; }
+.ib-cp-lchopt .ib-cp-op { display: block; }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
@@ -11821,8 +11823,6 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-sbc[data-dragging], .ib-sbc[data-dragging] * { cursor: grabbing; user-select: none; }
 .ib-sbc-lock { width: 34px; flex: none; display: inline-grid; place-items: center; color: color-mix(in oklch, var(--muted-foreground) 75%, transparent); }
 .ib-sbc-lock .ib-ic { width: 13px; height: 13px; }
-.ib-sbc-middle { display: flex; align-items: center; gap: 6px; height: 34px; margin: 8px 0 0; padding: 0 10px; border-radius: var(--ib-rl-sm-s, 7px); background: color-mix(in oklch, var(--muted) 50%, transparent); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-sbc-middle .ib-ic { width: 13px; height: 13px; }
 /* Where a dragged row lands: a gap the size of a row, tinted. */
 .ib-sbc-gap { height: 34px; flex: none; border-radius: var(--ib-rl-sm-s, 7px); background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-sbc-empty { height: 34px; display: flex; align-items: center; padding: 0 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }

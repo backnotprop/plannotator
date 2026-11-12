@@ -126,7 +126,7 @@ export function parseInboxThreadPullRefs(values: unknown, field: string, project
   return { refs };
 }
 
-/** A stored key's parts (`host/owner/repo#n`, GitLab with `:pull`), or null. */
+/** A stored key's parts (`host/owner/repo#n`, GitLab and Bitbucket with `:pull`), or null. */
 export function inboxThreadPullRefOfKey(key: string, url: string): ForgeRef | null {
   const match = /^([a-z0-9.-]+)\/(.+)#(\d+)(:pull)?$/.exec(key);
   if (!match) return null;
@@ -136,7 +136,8 @@ export function inboxThreadPullRefOfKey(key: string, url: string): ForgeRef | nu
   const path = match[2]!;
   const at = path.lastIndexOf("/");
   if (at <= 0) return null;
-  return { platform: match[4] ? "gitlab" : "github", host: match[1]!, owner: path.slice(0, at), repo: path.slice(at + 1), number: Number(match[3]), kind: "pull" };
+  const platform = match[1] === "bitbucket.org" ? "bitbucket" : match[4] ? "gitlab" : "github";
+  return { platform, host: match[1]!, owner: path.slice(0, at), repo: path.slice(at + 1), number: Number(match[3]), kind: "pull" };
 }
 
 /** How an agent writes a stored PR back (`owner/repo#12`, `group/project!12`, or the URL). */
@@ -184,7 +185,9 @@ export function inboxThreadPullGroups(pulls: readonly InboxThreadPull[]): InboxT
     if (!ref || !pull.base || !pull.head || (pull.state !== "open" && pull.state !== "draft" && pull.state !== "merged")) continue;
     shaped.push({
       key: pull.pull,
-      platform: ref.platform,
+      // The PR page's pull type knows GitHub and GitLab only. Grouping reads the key, host, repository, base, head
+      // and state, never the platform, and only the keys come back out.
+      platform: ref.platform === "gitlab" ? "gitlab" : "github",
       host: ref.host,
       repo: `${ref.owner}/${ref.repo}`,
       number: ref.number,

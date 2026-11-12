@@ -254,6 +254,17 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(card.querySelector('[data-pr-row="northwind/billing-svc#430"] .ib-prpop-sub')!.textContent).toContain('Merged');
   });
 
+  test('PRs on several forges name them under the list; a Bitbucket PR reads by its link', async () => {
+    const bb = pull('https://bitbucket.org/acme/billing/pull-requests/7', 'open', 'main', 'retries');
+    answer = answerOf([pull('northwind/web-app#1309', 'open', 'main', 'flag'), pull('acme/platform/api!61', 'open', 'main', 'cache'), bb]);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    const card = popover()!;
+    expect(card.querySelector('.ib-prpop-foot')!.textContent).toBe('GitHub, GitLab, and Bitbucket');
+    expect(card.querySelector('[data-pr-row="https://bitbucket.org/acme/billing/pull-requests/7"]')).not.toBeNull();
+  });
+
   test('a stack alone says "Stack of N" in its head', async () => {
     answer = answerOf([pull('o/r#1', 'merged', 'main', 'a'), pull('o/r#2', 'open', 'a', 'b'), pull('o/r#3', 'draft', 'b', 'c')]);
     render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
@@ -335,6 +346,25 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     await click(host!.querySelector('[data-pr-button]'));
     await click(popover()!.querySelector('[data-pr-edit] [data-pr-post="o/r#1"]'));
     expect(posted).toEqual(['o/r#1']);
+  });
+
+  test('Post decisions is never offered on a Bitbucket PR (the server refuses it): its row has none, the others keep theirs', async () => {
+    const bbUrl = 'https://bitbucket.org/acme/billing/pull-requests/7';
+    answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull(bbUrl, 'open', 'main', 'b')]);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} onPost={() => undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(popover()!.querySelector(`[data-pr-row="${bbUrl}"]`)).not.toBeNull();
+    expect([...popover()!.querySelectorAll('[data-pr-post]')].map((b) => b.getAttribute('data-pr-post'))).toEqual(['o/r#1']);
+  });
+
+  test('one PR, a Bitbucket one: no Post decisions button under its card', async () => {
+    answer = answerOf([pull('https://bitbucket.org/acme/billing/pull-requests/7', 'open', 'main', 'b')]);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} onPost={() => undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(popover()!.querySelector('[data-pr-edit]')).not.toBeNull();
+    expect(popover()!.querySelector('[data-pr-post]')).toBeNull();
   });
 
   test('Post on a pull request with none linked: the card opens on Add, and the PR added gets the post, then the card closes', async () => {

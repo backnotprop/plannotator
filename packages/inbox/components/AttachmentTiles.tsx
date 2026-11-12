@@ -224,6 +224,7 @@ export function AttachmentTiles({
   openIn,
   onOpenAs,
   newestId = null,
+  newestKeycap = true,
 }: {
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
@@ -238,6 +239,8 @@ export function AttachmentTiles({
   onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
   /** The file `O` opens (artifacts.ts `newestViewableFile`): its tile shows the O keycap and names the key. */
   newestId?: string | null;
+  /** Whether that tile draws the O keycap. Off while a file is open: from the file O does nothing, and the tile still names the key. */
+  newestKeycap?: boolean;
 }) {
   const newestKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'openNewest' });
   const source = useInboxFileSource();
@@ -380,7 +383,7 @@ export function AttachmentTiles({
             >
               {icon}
               {text}
-              {attachment.id === newestId && <ShortcutHint scope={inboxThreadShortcuts} action="openNewest" className="ib-kbd ib-att-kbd" />}
+              {attachment.id === newestId && newestKeycap && <ShortcutHint scope={inboxThreadShortcuts} action="openNewest" className="ib-kbd ib-att-kbd" />}
               <span className="ib-open" aria-hidden="true">
                 {isVideo ? 'Play' : 'Open'}
               </span>

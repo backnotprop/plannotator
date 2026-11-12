@@ -193,6 +193,8 @@ import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { inboxTileShortcuts } from '../shortcuts/grid.shortcuts';
+import { gridStep, type GridKey } from '../gridMove';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
@@ -3912,6 +3914,30 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       },
     },
   });
+  // Arrow keys between a message's tiles (shortcuts/grid.shortcuts.ts `inboxTileShortcuts`). Not under a file in full
+  // screen, a guide or Artifacts: a tile behind them can still hold focus, and there ← → step the file.
+  const tileList = (target: Element | null) => (target && sectionRef.current?.contains(target) && target.matches('[data-attachment-id]') ? target.closest('.ib-tiles') : null);
+  useShortcutScope({
+    scope: inboxTileShortcuts,
+    handlers: {
+      move: {
+        when: (event) => {
+          if (event.defaultPrevented || event.isComposing || paneCovered || modalOpen()) return false;
+          const list = tileList(keyTarget(event));
+          return !!list && list.querySelectorAll('[data-attachment-id]').length > 1;
+        },
+        handle: (event) => {
+          const target = keyTarget(event);
+          const tiles = [...(tileList(target)?.querySelectorAll<HTMLElement>('[data-attachment-id]') ?? [])];
+          const from = tiles.indexOf(target as HTMLElement);
+          const to = from < 0 ? null : gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
+          const next = to === null ? null : tiles[to];
+          next?.focus({ preventScroll: true });
+          next?.scrollIntoView?.({ block: 'nearest' });
+        },
+      },
+    },
+  });
 
   // Another window (or a phone's Send) saved, sent or discarded this thread's draft, or this one did:
   // its copy here follows. A box with no edits since its last save or read takes the new words (or
@@ -7239,6 +7265,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
                     openIn={openIn}
                     newestId={newestFileId}
+                    newestKeycap={!file}
                   />
                 )}
                 {message.guide &&
