@@ -27,6 +27,7 @@ plannotator/
 │   │   ├── plannotator.ts        # Native Amp command-palette integration
 │   │   └── README.md             # Install and local development notes
 │   ├── cline-plugin/             # Cline plugin (@plannotator/cline): the Inbox tool and the reply wake (inbox.ts), built to dist/index.js
+│   ├── hermes-plugin/            # Hermes Agent plugin (Python): a shim over `plannotator inbox connection` for the Inbox tool and the reply wake
 │   ├── droid-plugin/             # Droid plugin
 │   │   ├── .factory-plugin/plugin.json
 │   │   ├── commands/             # Slash command entrypoints

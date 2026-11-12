@@ -22,9 +22,10 @@ export const INBOX_CONNECTION_USAGE = [
   "                            says so, and replies wait in the Inbox.",
   "",
   "First line out:",
-  '  {"type":"ready","tool":{"name","description","parameters"}} the tool to register,',
-  '  or {"type":"ready","tool":null,"why":"..."} when the host has no Inbox tool',
-  "  (its switch is off, or the Inbox never ran on this computer).",
+  '  {"type":"ready","tool":{"name","description","parameters"},"on":true|false}',
+  "      the tool to register; on is the host's switch in Settings → Agents: offer the",
+  "      tool to the model only while it is on.",
+  '  {"type":"ready","tool":null,"why":"..."} when the Inbox never ran on this computer.',
   "",
   "Requests (stdin):",
   '  {"type":"call","id":1,"session":"<id>","cwd":"<folder>","input":{...},"wakes":true}',
@@ -41,11 +42,13 @@ export const INBOX_CONNECTION_USAGE = [
   '  {"type":"deliver","session":"<id>","id":"<reply id>","text":"..."}',
   "      put text into that session as the person's next turn once it is idle, then",
   "      answer delivered or failed. Each reply is handed out once.",
+  '  {"type":"switch","on":true|false}   the switch changed',
   '  {"type":"notify","session":"<id>","text":"..."}   a line for the person, not the model',
 ].join("\n");
 
 export const INBOX_CONNECTION_DELIVER_WAIT_MS = 30_000;
 export const INBOX_CONNECTION_DISCOVER_TIMEOUT_MS = 1_500;
+export const INBOX_CONNECTION_SWITCH_EVERY_MS = 5_000;
 
 export interface InboxConnectionDeps {
   dataDir: string;
@@ -55,6 +58,7 @@ export interface InboxConnectionDeps {
   discover?: (dataDir: string) => Promise<InboxToolInfo[] | null>;
   tickMs?: number;
   deliverWaitMs?: number;
+  switchEveryMs?: number;
 }
 
 interface Options {
@@ -93,19 +97,24 @@ export async function runInboxConnectionCommand(argv: readonly string[], deps: I
     return 2;
   }
   const send = (event: Record<string, unknown>) => deps.write(`${JSON.stringify(event)}\n`);
-  const offWhy = !resolveInboxTool(loadConfig(), deps.env, options.host)
-    ? `The Inbox tool is off for ${INBOX_HOST_NAMES[options.host]}: turn it on in the Inbox's Settings → Agents.`
-    : !existsSync(inboxRegistryFileOf(deps.dataDir))
-      ? "The Inbox has never run on this computer: start it once with plannotator inbox."
-      : null;
-  const tools = offWhy ? null : await (deps.discover ?? ((dir) => discoverInboxTools(dir, { timeoutMs: INBOX_CONNECTION_DISCOVER_TIMEOUT_MS })))(deps.dataDir).catch(() => null);
+  const switchOn = () => resolveInboxTool(loadConfig({ quiet: true }), deps.env, options.host);
+  const neverRan = !existsSync(inboxRegistryFileOf(deps.dataDir));
+  const tools = neverRan ? null : await (deps.discover ?? ((dir) => discoverInboxTools(dir, { timeoutMs: INBOX_CONNECTION_DISCOVER_TIMEOUT_MS })))(deps.dataDir).catch(() => null);
   const spec = tools ? inboxAgentTool(tools, { wakes: options.wakes }) : null;
   if (!tools || !spec) {
-    send({ type: "ready", tool: null, why: offWhy ?? "The Inbox's tools are not known yet: start it once with plannotator inbox." });
+    send({ type: "ready", tool: null, on: false, why: neverRan ? "The Inbox has never run on this computer: start it once with plannotator inbox." : "The Inbox's tools are not known yet: start it once with plannotator inbox." });
     for await (const _line of deps.lines) continue;
     return 0;
   }
-  send({ type: "ready", tool: { name: spec.name, description: spec.description, parameters: spec.inputSchema } });
+  let on = switchOn();
+  send({ type: "ready", tool: { name: spec.name, description: spec.description, parameters: spec.inputSchema }, on });
+  const watcher = setInterval(() => {
+    const now = switchOn();
+    if (now === on) return;
+    on = now;
+    send({ type: "switch", on });
+  }, deps.switchEveryMs ?? INBOX_CONNECTION_SWITCH_EVERY_MS);
+  (watcher as { unref?: () => void }).unref?.();
 
   const connection = new InboxAgentConnection({ dataDir: deps.dataDir, host: options.host, agentName: INBOX_HOST_NAMES[options.host]!, tools });
   const sessions = new Map<string, { wake: InboxWake; cwd: string; busy: boolean }>();
@@ -175,7 +184,7 @@ export async function runInboxConnectionCommand(argv: readonly string[], deps: I
       const running = call(request).catch((error) => send({ type: "result", id: request.id ?? null, text: String(error), is_error: true }));
       calls.add(running);
       void running.finally(() => calls.delete(running));
-    } else if (request.type === "open" && session && options.wakes) open(session, text(request.cwd) ?? "");
+    } else if (request.type === "open" && session && options.wakes && on) open(session, text(request.cwd) ?? "");
     else if (request.type === "state" && session) {
       const entry = sessions.get(session);
       if (entry) entry.busy = request.busy === true;
@@ -186,6 +195,7 @@ export async function runInboxConnectionCommand(argv: readonly string[], deps: I
       sessions.delete(session);
     }
   }
+  clearInterval(watcher);
   for (const entry of sessions.values()) entry.wake.dispose();
   for (const key of [...waiting.keys()]) settle(key, "the agent closed the connection");
   await Promise.allSettled([...calls]);

@@ -7,6 +7,8 @@
  * see the shell PATH still find it. Pure.
  */
 
+import { HERMES_APPLIES, HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT_LINE } from '@plannotator/core/inbox-hermes';
+
 export type HarnessId =
   | 'claude-code'
   | 'claude-app'
@@ -22,6 +24,7 @@ export type HarnessId =
   | 'pi'
   | 'opencode'
   | 'dsh'
+  | 'hermes'
   | 'zed'
   | 'kiro'
   | 'jetbrains'
@@ -48,6 +51,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'pi', label: 'Pi' },
   { id: 'opencode', label: 'OpenCode' },
   { id: 'dsh', label: 'DeepSeek Harness' },
+  { id: 'hermes', label: 'Hermes Agent' },
   { id: 'zed', label: 'Zed' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'jetbrains', label: 'JetBrains' },
@@ -267,6 +271,11 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
           summary: 'for DSH Desktop: open and quit it once before you run this',
           body: { kind: 'code', text: `dsh plugin --profile desktop add ${DSH_PLUGIN}` },
         },
+      };
+    case 'hermes':
+      return {
+        artefacts: [{ kind: 'code', text: `${HERMES_PLUGIN_INSTALL}\n${HERMES_WAKE_GRANT_LINE}` }],
+        note: `Plannotator's Hermes Agent plugin, and Hermes's permission for it to start a turn with your reply. Its Inbox tool starts off: turn it on for Hermes Agent in Settings > Agents. ${HERMES_APPLIES} Your replies then come back into the Hermes session that asked: the terminal, the TUI, the Desktop app or your own direct messages.`,
       };
     case 'zed':
       return {

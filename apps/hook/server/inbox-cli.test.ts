@@ -450,7 +450,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
     // Codex, Qwen Code and T3 Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
     // cross-session messaging, T3's MCP API), and the shim sends as their session.
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "cline", "codex", "dsh", "opencode", "pi", "qwen", "t3"]);
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "cline", "codex", "dsh", "hermes", "opencode", "pi", "qwen", "t3"]);
     expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
     expect(INBOX_SESSION_HOST_NAMES.qwen).toBe("Qwen Code");
     // A Qwen session in the tag is a Qwen session id, never anything else.

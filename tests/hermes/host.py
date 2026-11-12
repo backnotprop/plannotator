@@ -54,7 +54,7 @@ class FakeHermes:
         self.injected_event = threading.Event()
 
     def register_tool(self, name, toolset, schema, handler, check_fn=None, requires_env=None, is_async=False, description="", emoji="", override=False):
-        self.tools[name] = {"toolset": toolset, "schema": schema, "handler": handler}
+        self.tools[name] = {"toolset": toolset, "schema": schema, "handler": handler, "check_fn": check_fn}
 
     def register_hook(self, hook_name, callback, *, hold_stream=False):
         self.hooks.setdefault(hook_name, []).append(callback)

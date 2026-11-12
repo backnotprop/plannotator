@@ -72,7 +72,7 @@ class PluginTest(unittest.TestCase):
     def test_only_the_owner_direct_messages_reach_the_inbox(self):
         host.platform("telegram", allow_admin_from=["111"])
         hermes = self.start()
-        self.assertEqual(json.loads(self.call(hermes, "agent:main:telegram:dm:111", "telegram", "dm", "111"))["signed"], "agent:main:telegram:dm:111")
+        self.assertEqual(json.loads(self.call(hermes, "agent:main:telegram:dm:111", "telegram", "dm", "111"))["signed"], "agent.main.telegram.dm.111.9f8e72d7463ec8da")
         for key, chat_type, actor in (
             ("agent:main:telegram:dm:222", "dm", "222"),
             ("agent:main:telegram:group:9", "group", "111"),
@@ -120,6 +120,17 @@ class PluginTest(unittest.TestCase):
         self.assertNotIn("allow_gateway_injection", second)
         self.assertEqual([r for r in requests(self.log) if r.get("type") in ("open", "state")], [])
         self.assertEqual([c["wakes"] for c in self.calls()], [False, False])
+
+    def test_the_switch_hides_the_tool_and_stops_wakes(self):
+        os.environ["FAKE_SWITCH"] = "0"
+        try:
+            hermes = self.start()
+        finally:
+            os.environ.pop("FAKE_SWITCH", None)
+        self.assertFalse(hermes.tools["plannotator_inbox"]["check_fn"]())
+        with hermes.turn("ses_tui", "tui", cwd=str(self.dir)):
+            pass
+        self.assertEqual([r for r in requests(self.log) if r.get("type") in ("open", "state")], [])
 
     def test_no_plannotator_means_no_tool(self):
         os.environ["PLANNOTATOR_BIN"] = str(self.dir / "missing")

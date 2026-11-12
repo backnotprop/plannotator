@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 
 HOST = "hermes"
 GRANT_COMMAND = "hermes config set plugins.entries.plannotator.allow_gateway_injection true"
@@ -16,6 +18,13 @@ def session_value(name: str) -> str:
 
 def session_key() -> str:
     return session_value("HERMES_SESSION_KEY")
+
+
+def inbox_session(key: str) -> str:
+    plain = re.sub(r"[^A-Za-z0-9._-]", ".", key).strip(".-")
+    if plain == key and len(key) <= 128:
+        return key
+    return f"{plain[:100]}.{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}".lstrip(".")
 
 
 def _ids(raw) -> set:

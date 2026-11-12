@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxThread } from "../../../packages/core/inbox-types";
 import { startInboxServer, type InboxServer } from "../../../packages/server/inbox";
+import { saveConfig } from "../../../packages/shared/config";
 import { runInboxConnectionCommand } from "./inbox-connection-command";
 
 const saved = { data: process.env.PLANNOTATOR_DATA_DIR, tool: process.env.PLANNOTATOR_INBOX_TOOL };
@@ -136,13 +137,18 @@ test("a Hermes session's message is signed as that session, and the person's rep
   expect(await done).toBe(0);
 });
 
-test("with the switch off there is no tool, and nothing polls", async () => {
+test("the switch in Settings → Agents reaches a running connection, and while it is off no session is opened", async () => {
   const w = await world();
   const pipe = new Pipe();
-  const done = run(w.dataDir, pipe, ["--host", "hermes"], { PLANNOTATOR_INBOX_TOOL: "0" });
+  const done = runInboxConnectionCommand(["--host", "hermes"], { dataDir: w.dataDir, env: {}, lines: pipe.lines(), write: pipe.write, tickMs: 40, switchEveryMs: 50 });
   const ready = await pipe.next("ready");
-  expect(ready.tool).toBeNull();
-  expect(String(ready.why)).toContain("Settings → Agents");
+  expect((ready.tool as { name: string }).name).toBe("plannotator_inbox");
+  expect(ready.on).toBe(false);
+  pipe.send({ type: "open", session: "ses_off", cwd: w.project });
+  saveConfig({ inboxTool: { hermes: true } });
+  expect(await pipe.next("switch")).toEqual({ type: "switch", on: true });
+  const live = (await (await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/sessions`)).json()) as { projects: { sessions: { session: string }[] }[] };
+  expect(live.projects.flatMap((group) => group.sessions).some((s) => s.session === "ses_off")).toBe(false);
   pipe.close();
   expect(await done).toBe(0);
 });

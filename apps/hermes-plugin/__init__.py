@@ -31,6 +31,7 @@ class InboxPlugin:
         self.link = None
         self.opened: set = set()
         self.keys: dict = {}
+        self.routes: dict = {}
         self.told: set = set()
         self.lock = threading.Lock()
 
@@ -51,16 +52,25 @@ class InboxPlugin:
             toolset="plannotator",
             schema={"name": tool["name"], "description": tool["description"], "parameters": tool["parameters"]},
             handler=self.handle,
+            check_fn=self.switched_on,
             description=tool["description"],
         )
         self.ctx.register_hook("pre_llm_call", self.turn_started)
         self.ctx.register_hook("on_session_end", self.turn_ended)
         self.ctx.register_hook("on_session_finalize", self.session_closed)
 
+    def switched_on(self) -> bool:
+        return self.link.on
+
+    def inbox_session(self, key: str) -> str:
+        session = hermes.inbox_session(key)
+        self.routes[session] = key
+        return session
+
     def watch(self, key: str) -> None:
         with self.lock:
             self.opened.add(key)
-        self.link.send({"type": "open", "session": key, "cwd": self.ctx.session_cwd() or ""})
+        self.link.send({"type": "open", "session": self.inbox_session(key), "cwd": self.ctx.session_cwd() or ""})
 
     def handle(self, args, **kwargs):
         if not hermes.owner_session(self.ctx):
@@ -69,7 +79,7 @@ class InboxPlugin:
         wakes = hermes.injection_granted(self.ctx)
         if wakes:
             self.watch(key)
-        text, is_error = self.link.call(key, self.ctx.session_cwd() or "", args if isinstance(args, dict) else {}, wakes)
+        text, is_error = self.link.call(self.inbox_session(key), self.ctx.session_cwd() or "", args if isinstance(args, dict) else {}, wakes)
         if is_error:
             return json.dumps({"error": text})
         if not wakes and key not in self.told and (args or {}).get("action") == "send_message":
@@ -78,31 +88,31 @@ class InboxPlugin:
         return text
 
     def turn_started(self, session_id=None, **kwargs):
-        if not hermes.owner_session(self.ctx) or not hermes.injection_granted(self.ctx):
+        if not self.link.on or not hermes.owner_session(self.ctx) or not hermes.injection_granted(self.ctx):
             return None
         key = hermes.session_key()
         if session_id:
             self.keys[session_id] = key
         self.watch(key)
-        self.link.send({"type": "state", "session": key, "busy": True})
+        self.link.send({"type": "state", "session": self.inbox_session(key), "busy": True})
         return None
 
     def turn_ended(self, session_id=None, **kwargs):
         key = self.keys.get(session_id) or hermes.session_key()
         if key in self.opened:
-            self.link.send({"type": "state", "session": key, "busy": False})
+            self.link.send({"type": "state", "session": self.inbox_session(key), "busy": False})
 
     def session_closed(self, session_id=None, **kwargs):
         key = self.keys.pop(session_id, None)
         if key and key in self.opened:
             self.opened.discard(key)
-            self.link.send({"type": "close", "session": key})
+            self.link.send({"type": "close", "session": self.inbox_session(key)})
 
     def on_event(self, event: dict) -> None:
         session = event.get("session") or ""
         if event.get("type") == "deliver":
             try:
-                ok = hermes.wake(self.ctx, session, str(event.get("text") or ""))
+                ok = session in self.routes and hermes.wake(self.ctx, self.routes[session], str(event.get("text") or ""))
             except Exception as error:
                 ok = False
                 logger.warning("plannotator: a reply could not go into %s (%s)", session, error)

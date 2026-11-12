@@ -31,6 +31,7 @@ class Link:
         self._process = None
         self.tool = None
         self.why = None
+        self.on = False
 
     def start(self, timeout: float) -> bool:
         if not self._argv:
@@ -89,7 +90,10 @@ class Link:
             if kind == "ready":
                 self.tool = event.get("tool")
                 self.why = event.get("why")
+                self.on = event.get("on") is True
                 self._ready.set()
+            elif kind == "switch":
+                self.on = event.get("on") is True
             elif kind == "result":
                 with self._answered:
                     self._answers[event.get("id")] = event
