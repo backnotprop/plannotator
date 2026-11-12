@@ -69,6 +69,18 @@ async function dragAcross(page: Page, scope: string, phrase: string): Promise<vo
 
 const toolbar = (page: Page) => page.locator('.annotation-toolbar');
 
+/**
+ * Opens a message the thread drew folded (an older one lands as a one-line fold) until its body shows. Only a folded
+ * article's head is pressed: an open message's head folds it again.
+ */
+async function openMessage(page: Page, id: string) {
+  await expect(async () => {
+    const folded = page.locator(`[data-message-article="${id}"][data-folded] [data-fold-head]`);
+    if ((await folded.count()) > 0) await folded.first().click();
+    await expect(page.locator(`[data-message-id="${id}"]`)).toBeVisible({ timeout: 1000 });
+  }).toPass();
+}
+
 async function comment(page: Page, scope: string, phrase: string, words: string) {
   await dragAcross(page, scope, phrase);
   await expect(toolbar(page)).toBeVisible();
@@ -104,8 +116,8 @@ test('comments on my own message and on a question: the toolbar, the list, what 
 
     const page = await context.newPage();
     await page.goto(`${url}/#thread=${first.thread_id}`);
-    const expand = page.getByRole('button', { name: 'Expand all messages' });
-    if (await expand.isVisible()) await expand.click();
+    await openMessage(page, mine.reply.id);
+    await openMessage(page, asked.message_id);
     await expect(page.locator(`[data-message-id="${mine.reply.id}"]`)).toContainText('Keep the old URL');
 
     // My own message: the toolbar (no Delete), the composer, the highlight.
@@ -152,6 +164,7 @@ test('comments on my own message and on a question: the toolbar, the list, what 
     expect(thread.thread.messages.find((m) => m.id === asked.message_id)!.questions!.map((q) => q.state)).toEqual(['open']);
 
     // A plain click on a choice picks it, in one press.
+    await openMessage(page, asked.message_id);
     await page.locator(`${card} [data-question-option]`).filter({ hasText: 'Under Accounts' }).locator('[data-question-part="choice"]').click();
     await expect(radio('Under Accounts')).toBeChecked();
   } finally {
