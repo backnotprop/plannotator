@@ -27,6 +27,7 @@ import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
 import { proveInboxProcess } from "./process-proof";
+import { inboxUpgradeRunning } from "./store-log/sqlite/upgrade-marker";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -324,7 +325,8 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       try {
-        if (Date.now() - statSync(lock).mtimeMs <= INBOX_START_LOCK_STALE_MS) return null;
+        // Never stale while the Inbox it started moves into SQLite: a second Inbox would start beside it.
+        if (Date.now() - statSync(lock).mtimeMs <= INBOX_START_LOCK_STALE_MS || inboxUpgradeRunning(dataDir)) return null;
         rmSync(lock, { recursive: true, force: true });
       } catch {
         // Gone in between: try again.
@@ -335,12 +337,13 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
 }
 
 /** Wait until `check` answers non-null, polling; null on timeout. */
-export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100): Promise<T | null> {
+export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100, keepWaiting?: () => boolean): Promise<T | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value !== null) return value;
-    if (Date.now() >= deadline) return null;
+    // `keepWaiting`: past the deadline, wait on while it says so (an Inbox still moving into SQLite).
+    if (Date.now() >= deadline && !keepWaiting?.()) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }

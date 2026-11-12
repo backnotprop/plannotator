@@ -231,4 +231,35 @@ describe("Settings → Prompts", () => {
     expect(stale.status).toBe(409);
     expect(onDisk()).toEqual({ displayName: "Ann" });
   });
+
+  test("rules save beside the reminder, an agent's own beside its reminder; Back to default deletes only the rules", async () => {
+    const { server, onDisk } = await world({ prompts: { inbox: { reminder: "Shared line.", runtimes: { pi: { reminder: "Pi line." } } } } });
+    const save = async (inbox: unknown) => {
+      const response = await post(server, { serverSession: server.serverSession, prompts: { inbox } });
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { prompts: InboxPromptsSettings }).prompts;
+    };
+    let prompts = await save({ rules: "Only message me when you are blocked or done." });
+    prompts = await save({ runtimes: { pi: { rules: "Keep messages under 10 lines." } } });
+    expect(prompts.rules?.shared).toBe("Only message me when you are blocked or done.");
+    expect(prompts.rules?.runtimes).toEqual({ "claude-code": null, pi: "Keep messages under 10 lines.", opencode: null });
+    expect(onDisk().prompts.inbox).toEqual({
+      reminder: "Shared line.",
+      rules: "Only message me when you are blocked or done.",
+      runtimes: { pi: { reminder: "Pi line.", rules: "Keep messages under 10 lines." } },
+    });
+    await save({ rules: null });
+    await save({ runtimes: { pi: { rules: null } } });
+    expect(onDisk().prompts.inbox).toEqual({ reminder: "Shared line.", runtimes: { pi: { reminder: "Pi line." } } });
+  });
+
+  test("rules that would not fit with the reminder they follow are refused with 422 and nothing is written", async () => {
+    const { server, onDisk } = await world({ displayName: "Ann" });
+    const room = (await read(server)).rules!.room.shared;
+    const over = await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "r".repeat(room + 1) } } });
+    expect(over.status).toBe(422);
+    expect(onDisk()).toEqual({ displayName: "Ann" });
+    const fits = await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "r".repeat(room) } } });
+    expect(fits.status).toBe(200);
+  });
 });

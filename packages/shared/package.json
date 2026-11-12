@@ -156,6 +156,10 @@
     "./inbox/decision-export-md": "./inbox/decision-export-md.ts",
     "./inbox/decision-post": "./inbox/decision-post.ts",
     "./inbox/store": "./inbox/store.ts",
+    "./inbox/store-log/sqlite/open-store": "./inbox/store-log/sqlite/open-store.ts",
+    "./inbox/store-log/sqlite/move-words": "./inbox/store-log/sqlite/move-words.ts",
+    "./inbox/store-log/sqlite/export-inbox": "./inbox/store-log/sqlite/export-inbox.ts",
+    "./inbox/store-log/sqlite/check-child": "./inbox/store-log/sqlite/check-child.ts",
     "./inbox/project-key": "./inbox/project-key.ts",
     "./shape/format": "./shape/format.ts",
     "./shape/store": "./shape/store.ts",
@@ -199,10 +203,13 @@
     "@joplin/turndown-plugin-gfm": "^1.0.68",
     "@plannotator/core": "workspace:*",
     "chokidar": "^5.0.0",
+    "drizzle-orm": "1.0.0-rc.5",
     "parse5": "^7.3.0",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.4",
+    "zod": "4.6.7"
   },
   "devDependencies": {
+    "drizzle-kit": "1.0.0-rc.5",
     "fast-check": "4.10.2"
   }
 }

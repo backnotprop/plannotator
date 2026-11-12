@@ -2921,6 +2921,11 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`AnnotationToolbar` `showDelete?: boolean`**: shows Delete on a `commentOnly` toolbar. Absent: Delete follows `commentOnly` as before.
 - A host that passes neither sees no change.
 
+## Comments on a question card's words: `Viewer` `questionTextComments` (unreleased; additive, opt-in, no core change)
+
+- **`Viewer` `questionTextComments?: boolean`** (default `false`), with `textComments` (and `answerOnly`, not `readOnly`): `QuestionBlock` cards are no longer wrapped `annotation-exclude`, so their prompt, context and each choice's label and description take the comment-only toolbar, its composer and highlights like any other words. The card's chrome (eyebrow, tags, footer, Other, a picture choice's picture) stays excluded inside `QuestionBlock`, and a host's own `renderQuestionCard` card stays wrapped. A plain click or tap on a choice still picks it in one press; `QuestionBlock`'s existing click guard cancels the pick after a drag or while a selection shows. A comment is an ordinary `COMMENT` row from `onAddAnnotation`: it never answers the question.
+- A host that does not pass it sees no change. The Plannotator Inbox passes it (approval `inbox-annotate-own-and-questions`).
+
 ## Shape: dark contrast (unreleased; additive)
 
 Shape boards can now show any picture: a file on this computer or a web picture, which `plannotator shape update` copies into the board's `files/` (#2756). The board itself still names only `files/<name>`. Nothing changes in the allowlist or in how `resolveSrc` / `assetUrl` resolve a picture.
@@ -3092,3 +3097,10 @@ Pinned by `components/Viewer.clickAWord.test.tsx`, `hooks/useClickWord.test.tsx`
 - **The answer's text.** `QuestionAnswer.other` may hold line breaks (it always could from decision mode's textarea). core's `formatQuestionAnswerLines` (and so `formatQuestionAnswersSection` and ui's `exportAnnotations`) now quotes a multi-line Other under `Answer: Other:` as `> line` lines, indented two spaces under its `- Other:` bullet when there are several picks, the way a multi-line note is quoted. A one-line Other prints byte for byte as before. `formatQuestionAnswerText` (`Annotation.text`) and the panel row stay one line.
 
 Pinned by `components/blocks/QuestionBlock.test.tsx` ("an Other answer of several lines") and core's `question-block.test.ts`.
+
+## `InlineImageTagsContext`: an `<img>` tag inside a line renders as a picture (unreleased; additive, opt-in, no core change)
+
+An `<img>` tag inside a table cell or a sentence is not an HTML block, so `InlineMarkdown` printed it as text. GitHub writes every resized screenshot that way, and PR authors put before/after pairs in tables.
+
+- **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
+- **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.

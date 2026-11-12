@@ -9,6 +9,7 @@ import {
 import { inboxApi } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
+import { AgentRulesSection } from './AgentRules';
 import { Tip } from './Tip';
 
 /**
@@ -41,9 +42,14 @@ type Slot = ReminderSlot | 'guide';
 
 /** The phone's list of sections: Default, or Custom once any reminder text or guide instructions are the person's own. */
 export function promptsSummary(prompts: InboxPromptsSettings): string {
+  const rules = prompts.rules;
+  const ruled = rules ? rules.shared !== null || INBOX_PROMPT_HOSTS.some((host) => rules.runtimes[host] !== null) : false;
+  return reminderCustom(prompts) || ruled || Boolean(prompts.guide?.text) ? 'Custom' : 'Default';
+}
+
+function reminderCustom(prompts: InboxPromptsSettings): boolean {
   const { shared, runtimes } = prompts.reminder;
-  const custom = shared !== null || INBOX_PROMPT_HOSTS.some((host) => runtimes[host] !== null) || Boolean(prompts.guide?.text);
-  return custom ? 'Custom' : 'Default';
+  return shared !== null || INBOX_PROMPT_HOSTS.some((host) => runtimes[host] !== null);
 }
 
 function Chip({ custom }: { custom: boolean }) {
@@ -75,6 +81,7 @@ export function PromptsSection({
   const [error, setError] = useState<{ slot: Slot; text: string } | null>(null);
   const [showDefault, setShowDefault] = useState(false);
   const [otherOpen, setOtherOpen] = useState(false);
+  const [reminderOpen, setReminderOpen] = useState(() => prompts.reminder.over?.shared != null || INBOX_PROMPT_HOSTS.some((host) => prompts.reminder.over?.runtimes[host] != null));
   const field = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLDivElement>(null);
   /** After Save, Cancel, Reset or Use shared: the control focus goes back to. */
@@ -336,12 +343,22 @@ export function PromptsSection({
 
   return (
     <div ref={root} data-prompts-page="">
-      <section className="ib-sgroup ib-sgroup-first" aria-labelledby={`${id}-rem`}>
+      {prompts.rules && <AgentRulesSection rules={prompts.rules} editable={reminder.editable} onPrompts={onPrompts} />}
+      <section className={prompts.rules ? 'ib-sgroup' : 'ib-sgroup ib-sgroup-first'} aria-labelledby={`${id}-rem`}>
         <h2 id={`${id}-rem`}>Inbox reminder</h2>
         <p>{reminder.editable ? 'Sent once, when a session starts.' : 'Sent once, when a session starts. Change it on this computer.'}</p>
         <div className="ib-card">
-          {shared}
-          {INBOX_PROMPT_HOSTS.map(agent)}
+          <button type="button" className="pm-fold" aria-expanded={reminderOpen} aria-controls={`${id}-rem-body`} onClick={() => setReminderOpen((open) => !open)} data-prompts-reminder-fold="">
+            <Chevron />
+            Reminder text
+            <span className="ib-mut">· {reminderCustom(prompts) ? 'Custom' : 'Default'}</span>
+          </button>
+          {reminderOpen && (
+            <div id={`${id}-rem-body`} className="pm-rem-body" data-prompts-reminder="">
+              {shared}
+              {INBOX_PROMPT_HOSTS.map(agent)}
+            </div>
+          )}
         </div>
       </section>
       {guide && (
