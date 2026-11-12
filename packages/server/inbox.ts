@@ -156,6 +156,8 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { inboxRulesFitError } from "./inbox-rules";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { INBOX_UPGRADING_LINE, storeMoveNote } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
+import { inboxImportDelayFromEnv, openInboxStore, resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
@@ -218,6 +220,9 @@ import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
+import { CloudAgentError, createInboxCloudAgents } from "./inbox-cloud-agents";
+import { createInboxAgentDoor, INBOX_AGENT_DOOR_PATH } from "./inbox-agent-door";
+import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
 import {
   claudePluginBehindInbox,
   claudeRestartCommand,
@@ -308,7 +313,8 @@ import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
-import { createInboxRelay } from "./inbox-relay";
+import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./inbox-relay";
+import { createInboxCloudGate } from "./inbox-cloud-gate";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
@@ -489,6 +495,8 @@ export interface InboxServerOptions {
   feedbackUrl?: string;
   /** Tests: the debug log on or off. Default: `PLANNOTATOR_INBOX_DEBUG=1` or the config's `inboxDebug`. */
   debug?: boolean;
+  /** Tests: the SQLite switch. Default: `PLANNOTATOR_INBOX_SQLITE` or the config's `inboxSqlite` (off). */
+  sqlite?: boolean;
   /** Tests: how long a window's record outlives its last event stream (default `WINDOW_GRACE_MS`). */
   windowGraceMs?: number;
   /** Tests: the clock (epoch ms) send_message's "not read since" line reads (packages/server/inbox-session-reads.ts). Default: the wall clock. */
@@ -614,6 +622,7 @@ export interface InboxServerOptions {
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
   /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
   t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number };
+  cloudWake?: { now?: () => number; gapMs?: number; timeoutMs?: number; retryMs?: number; log?: (line: string) => void };
 }
 
 /**
@@ -684,6 +693,7 @@ export interface InboxServer {
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
   t3Wake: InboxT3Wake;
+  cloudWake: InboxCloudWaker;
   /** Shape's watch of the boards: tests read how many windows it reads the store for. */
   shapeWatchers: () => number;
   stop: () => void;
@@ -1066,6 +1076,9 @@ function switchesHeld(): boolean {
   return process.env.PLANNOTATOR_INBOX_PREVIEW !== "1";
 }
 
+/** `POST /api/inbox/settings/storage/backups/<name>/remove`: Settings → Storage's Remove (`store-log/sqlite/backups.ts` checks the name). */
+const INBOX_BACKUP_REMOVE_ROUTE = /^\/api\/inbox\/settings\/storage\/backups\/(backup-[0-9a-z-]+)\/remove$/;
+
 /** Start the Inbox server and write the registry. */
 export async function startInboxServer(options: InboxServerOptions = {}): Promise<InboxServer> {
   assertTestHome();
@@ -1078,7 +1091,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  const store = InboxStore.open(dataDir, options.storeNow ? { now: options.storeNow } : {});
+  // The SQLite switch (off for everyone): with it off and no inbox.db, this is today's InboxStore.open, nothing more.
+  const opened = await openInboxStore(dataDir, {
+    sqlite: options.sqlite ?? resolveInboxSqlite(loadConfig(), process.env),
+    now: options.storeNow,
+    onSlow: () => process.stderr.write(`${INBOX_UPGRADING_LINE}\n`),
+    importStep: inboxImportDelayFromEnv(process.env),
+    // A move checks its files' side in a second run of this program, beside the write.
+    checkFilesCommand: options.selfCommand?.length ? options.selfCommand : undefined,
+  });
+  const store = opened.store;
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
   const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
@@ -2076,7 +2098,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (problem) problems.push(problem);
     }
     if (typeof body.tool === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness and Cline have one.", { field: "tool" });
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness, Cline, OpenClaw and Hermes Agent have one.", { field: "tool" });
       const problem = setInboxTool(agent as InboxToolHost, body.tool, agentEnvironment);
       if (problem) problems.push(problem);
     }
@@ -3460,7 +3482,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const changes: Partial<Record<InboxToolHost, boolean>> = {};
     for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
-        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline).`, { field: `inbox_tool.${host}` });
+        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline, openclaw, hermes).`, { field: `inbox_tool.${host}` });
       }
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
@@ -4120,7 +4142,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     autoSendAfterMs: options.autoSendAfterMs ?? INBOX_AUTO_SEND_AFTER_MS,
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
-    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session),
+    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? cloudWake.status(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
     onPoll: (session, continues) =>
@@ -4188,6 +4210,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     ...options.t3Wake,
+  });
+
+  const cloudAgents = createInboxCloudAgents({
+    store,
+    dataDir,
+    onChange: (agents) => cloudWake.agentsChanged(agents),
+    ...(options.cloudWake?.timeoutMs ? { timeoutMs: options.cloudWake.timeoutMs } : {}),
+    devices: () => phones?.agentDevices ?? null,
+    relayUp: () => relay?.reachable() ?? null,
+  });
+  const cloudGate = createInboxCloudGate({ dataDir, relayUrl: () => readRelayFile(dataDir)?.url ?? defaultRelayUrl() });
+  const agentSignalsFor = (line: InboxLine): string[] => {
+    if (line.kind !== "message" || line.record.author.kind !== "person" || line.at !== line.record.created_at) return [];
+    const threadId = line.record.thread_id;
+    return cloudAgents
+      .list()
+      .flatMap((agent) => (agent.device_id && agentDoor.inScopeOf(threadId, agent.device_id) ? [agent.device_id] : []));
+  };
+  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, baseUrl: () => baseUrl, searchIndex: search.index });
+  const cloudWake = createInboxCloudWake({
+    store,
+    agents: cloudAgents,
+    pin: (session, root, name, host) => live.pinCloud(session, root, name, host),
+    threadUrl: (threadId) => threadPageUrl(baseUrl, threadId),
+    ...options.cloudWake,
   });
 
   // A reply that waited 5 minutes on a busy session goes into its running turn by itself, as if the person
@@ -4808,6 +4855,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (via === "tailnet") return localOnly();
       const answer = phones ? await phones.door(req, url) : null;
       if (answer) return answer;
+    }
+
+    // A paired cloud agent's door (inbox-agent-door.ts): this computer only for now, never the tailnet or a browser.
+    if (path === INBOX_AGENT_DOOR_PATH) {
+      if (via === "tailnet") return localOnly();
+      const forwarded = req.headers.get("x-forwarded-for");
+      if (!isLoopbackHostHeader(req.headers.get("host"), port) || (forwarded !== null && !isLoopbackForwardedFor(forwarded)) || req.headers.has("forwarded")) {
+        return json({ error: "The agent door answers only this machine.", code: "forbidden_host" }, 403);
+      }
+      if (origin !== null) return json({ error: "Browser requests are not accepted here.", code: "origin_not_allowed" }, 403);
+      return agentDoor.handle(req);
     }
 
     if (path === "/mcp") {
@@ -5537,6 +5595,35 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         return json({ account: await codexAccount.read() });
       }
+      if (path === "/api/inbox/cloud-agents" || path.startsWith("/api/inbox/cloud-agents/")) {
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+        const cloudView = () => ({ agents: cloudAgents.list().map(cloudAgents.view), projects: cloudAgents.projects() });
+        if (path === "/api/inbox/cloud-agents" && req.method === "GET") return json({ ...cloudView(), available: await cloudGate.available(cloudAgents.list().length) });
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        try {
+          if (path === "/api/inbox/cloud-agents") {
+            const paired = await cloudAgents.pair(body);
+            return json({ agent: cloudAgents.view(paired.agent), pairing: paired.pairing, setup: paired.setup, ...cloudView() });
+          }
+          const match = /^\/api\/inbox\/cloud-agents\/(cloud\.[0-9a-f]{12})\/(test|key|wake|pairing|remove)$/.exec(path);
+          if (!match) return json({ error: "Not found", code: "not_found" }, 404);
+          const [, session, action] = match as unknown as [string, string, "test" | "key" | "wake" | "pairing" | "remove"];
+          if (action === "test") return json({ test: await cloudAgents.test(session), ...cloudView() });
+          if (action === "key") return json({ agent: cloudAgents.view(cloudAgents.rekey(session, body)), ...cloudView() });
+          if (action === "wake") return json({ agent: cloudAgents.view(cloudAgents.setWake(session, body)), ...cloudView() });
+          if (action === "pairing") {
+            const paired = await cloudAgents.repair(session);
+            return json({ agent: cloudAgents.view(paired.agent), pairing: paired.pairing, setup: paired.setup, ...cloudView() });
+          }
+          return json({ removed: cloudAgents.remove(session), ...cloudView() });
+        } catch (error) {
+          if (error instanceof CloudAgentError) return json({ error: error.message, code: error.code, ...(error.field ? { field: error.field } : {}) }, error.code === "cloud_agent_not_found" ? 404 : 422);
+          throw error;
+        }
+      }
       // The agents on this computer: paths in the person's home, and writes to their real agent files.
       if (path === "/api/inbox/agents" || path.startsWith("/api/inbox/agents/")) {
         // The person's own agent files: only theirs, never a tailnet guest's.
@@ -5634,6 +5721,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
+      }
+      // Remove on a dated backup a move into SQLite left (behind its switch, off for everyone): the answer's sizes, as a Delete's.
+      const backup = INBOX_BACKUP_REMOVE_ROUTE.exec(path);
+      if (backup) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (!store.removeBackup(backup[1]!)) return json({ error: "No such backup.", code: "backup_not_found" }, 404);
+        return json({ ok: true, store: store.diskUsage() });
       }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
@@ -6591,6 +6687,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 // `skip_unanswered` flag is ignored (approval "inbox-explicit-skip", 2026-10-21).
                 skip: body.skip,
                 actions: body.actions,
+                // The message the reply quotes (approval "inbox-reply-quote"); absent from an older window.
+                ...(body.quote !== undefined ? { quote: body.quote } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);
@@ -6771,7 +6869,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           let messages = 0;
           const threadIds = store.threadIds();
           for (const id of threadIds) messages += store.threadMessageIds(id).length;
-          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages });
+          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages, log: opened.log });
+          if (opened.moved) debugLog.note("store_move", storeMoveNote(opened.moved));
         }
         return handleMarkingSnoozes(req, via);
       }, isOwner)
@@ -6891,12 +6990,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       timings: options.machineLinkTimings,
     });
-    if (phonesOn) {
-      // The relay (packages/server/inbox-relay.ts): the mailbox socket while a phone is paired, the pushes, and the
-      // carriage: store lines down as the event stream writes them, commands up through the door in-process.
-      relay = createInboxRelay({ dataDir, store, devices: devices.devices, payload: eventPayload, apply: devices.asDevice });
-      relay.start();
-    }
+    relay = createInboxRelay({
+      dataDir,
+      store,
+      devices: devices.devices,
+      payload: eventPayload,
+      apply: devices.asDevice,
+      phones: phonesOn,
+      agents: {
+        apply: (deviceId, request, commandId) => agentDoor.asAgent(deviceId, request, commandId),
+        signalsFor: (line) => agentSignalsFor(line),
+      },
+    });
+    relay.start();
     // With Phones off, only while a machine is linked.
     devices.startTailnet();
     if (phonesOn) devices.startLan();
@@ -6994,6 +7100,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     codexWake.stop();
     qwenWake.stop();
     t3Wake.stop();
+    cloudWake.stop();
     voice.stop();
     codexAccount.stop();
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
@@ -7013,7 +7120,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, cloudWake, shapeWatchers: () => shapes.watch.watching(), stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

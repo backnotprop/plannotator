@@ -68,6 +68,14 @@ describe('connect snippets', () => {
     expect(another).toContain('/opt/plannotator');
   });
 
+  test("the Hermes Agent panel installs Plannotator's plugin and lets it start a turn with the reply, as two commands", () => {
+    expect(HARNESSES.some((h) => h.id === 'hermes' && h.label === 'Hermes Agent')).toBe(true);
+    expect(harnessPanel('hermes', ctx('/opt/plannotator')).artefacts).toEqual([
+      { kind: 'code', text: 'hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable' },
+      { kind: 'code', text: 'hermes config set plugins.entries.plannotator.allow_gateway_injection true' },
+    ]);
+  });
+
   test('every harness has a panel, and every JSON snippet parses', () => {
     for (const harness of HARNESSES) {
       const panel = harnessPanel(harness.id, ctx('/opt/plannotator'));

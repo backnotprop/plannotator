@@ -83,7 +83,7 @@ import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } 
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
-import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
+import { appliedFilter, filterListSections, localDay, pickCount, settledHeldRead, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
@@ -144,7 +144,7 @@ import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemHashOf, systemKept, systemRouteOf } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
-import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
+import type { InboxAgentRow, InboxAgentsModel, InboxTourChange } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -180,6 +180,8 @@ import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { reloadOntoInbox, STALE_HEALTH_MS, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
+import { saveTour as saveTourChange, TOUR_DECIDED_COOKIE } from './tour/saveTour';
+import { focusFirst, landFocusAfterTour } from './focusLanding';
 import { errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
@@ -213,7 +215,7 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
-import { hearAgentFacesEvent, readAgentFaces } from './agents/agentFaces';
+import { hearAgentFacesEvent, keepAgentName, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -252,7 +254,7 @@ import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
@@ -731,12 +733,6 @@ function settleTourEntry(): void {
   if (window.location.hash !== canonical) window.history.replaceState(window.history.state, '', canonical);
 }
 
-/**
- * Set when a tour decision (finished, skipped) could not be saved on the server
- * (config.json unreadable, the server stopped): this browser remembers it, so
- * Two paths does not come back here. A cookie, so a port change keeps it.
- */
-const TOUR_DECIDED_COOKIE = 'plannotator-inbox-tour-decided';
 
 /**
  * `#settings/experimental`, Experimental's own page before it moved into
@@ -828,20 +824,6 @@ function tourPageInFront(): boolean {
   return document.visibilityState === 'visible' && document.hasFocus();
 }
 
-/** Focus the first element on screen that matches one of `selectors`, in order (a list draws some rows twice, one hidden). */
-function focusFirst(selectors: readonly string[]): boolean {
-  for (const selector of selectors) {
-    const el = [...document.querySelectorAll<HTMLElement>(selector)].find((candidate) => candidate.getClientRects().length > 0);
-    if (el) {
-      // Inside a thread's messages (its subject heading): focus never moves the thread's scroll, the place the
-      // person was in (closing a file with `‹ Inbox` put the thread back at its top).
-      el.focus(el.closest('.ib-pbody') ? { preventScroll: true } : undefined);
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
  * A search result or a link just opened a screen: one with nothing to land on (a reply box already open with a
  * draft, no Reply to focus) leaves focus nowhere, so the thread's subject takes it, never the page. Not once the
@@ -854,8 +836,6 @@ function focusAfterOpen(): void {
   }, 400);
 }
 
-/** A tour setting that did not save is tried again after these waits (ms), then said. */
-const TOUR_SAVE_RETRY_MS = [1000, 4000];
 /** How long the first-run screen waits for the settings before it draws without them. */
 const SETTINGS_LATE_MS = 1500;
 
@@ -1273,6 +1253,18 @@ function Inbox() {
   }, [thread]);
   const routeRef = useRef(route);
   routeRef.current = route;
+  /**
+   * Threads opened while their row was bold, since the list last settled: the list filter's Not seen leaves their rows
+   * where they are (listFilter.ts `filterListSections`), as the list holds still while a thread is open (settle.ts),
+   * so the look that unbolds a row never takes it out of a Not seen list. A settle keeps only the thread open then.
+   */
+  const [heldRead, setHeldRead] = useState<ReadonlySet<string>>(() => new Set());
+  const settleHeldRead = useCallback(() => setHeldRead((current) => settledHeldRead(current, routeRef.current.thread)), []);
+  useEffect(() => {
+    const open = route.thread;
+    if (!open || !shownRowOf(shownRef.current, open)?.unread) return;
+    setHeldRead((current) => (current.has(open) ? current : new Set(current).add(open)));
+  }, [route.thread]);
   // The full-window review is open (set where it is worked out, below), for the Escape ladder.
   const reviewPaneOpenRef = useRef(false);
   // The review a link on a Shape board opened (approval "review-show-me", q-db7db55f): with Code review on it shows the
@@ -1588,9 +1580,10 @@ function Inbox() {
       snoozeMoved.current.clear();
       const groups = listGroups(next);
       setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
+      settleHeldRead();
       sortedWhole();
     },
-    [armSlide, cancelSettle, sortedWhole],
+    [armSlide, cancelSettle, sortedWhole, settleHeldRead],
   );
   useEffect(() => cancelSettle, [cancelSettle]);
 
@@ -1692,7 +1685,10 @@ function Inbox() {
       const gone = adopt ? new Set<string>() : goneRows(shownRef.current, groups, routeRef.current.thread);
       if (gone.size > 0) armSlide();
       setShown((current) => shownAfter(current, groups, { adopt, keep, open: heldOpen(), gone }));
-      if (adopt) sortedWhole(keep);
+      if (adopt) {
+        sortedWhole(keep);
+        settleHeldRead();
+      }
       setLoadError(null);
       return next;
     } catch (cause) {
@@ -1700,7 +1696,7 @@ function Inbox() {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, [armSlide, sortedWhole, queryClient]);
+  }, [armSlide, sortedWhole, queryClient, settleHeldRead]);
   /**
    * The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this
    * window's clock). With no thread open only the rows whose snooze changed move (held.ts `snoozeChangedRows`), each
@@ -4365,6 +4361,18 @@ function Inbox() {
     return true;
   };
 
+  /** An agent row's Rename… and Reset name, kept with its face (agents/agentFaces.ts); the live region says it as for a project. */
+  const renameAgent = async (agent: InboxAgent, name: string | null, own: string): Promise<boolean> => {
+    try {
+      await keepAgentName(agent, name);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The name did not change.'));
+      return false;
+    }
+    say(name === null ? `Name reset${own ? ` to ${own}` : ''}.` : `Renamed to ${name}.`);
+    return true;
+  };
+
   /**
    * The project menu's Set picture… (approval "inbox-letter-marks"): the picture kept by the Inbox, then the list read
    * again, so every project mark shows it. A refused picture (not an image, too big) says why in the toast.
@@ -5178,6 +5186,8 @@ function Inbox() {
   const filterMachine = route.page === 'inbox' && route.machine ? (machines.all.find((m) => m.id === route.machine) ?? null) : null;
   /** Every row the window has (every section, the snoozed too): where an agent's threads are found. */
   const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // Where a thread with several sessions finds their agents (agents/model.ts `threadSessions`).
+  const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
   const projectNames = useMemo(
@@ -5199,9 +5209,9 @@ function Inbox() {
   const listFilterApplied = useMemo(() => appliedFilter(listFilterPicks, listFilterScoped), [listFilterPicks, listFilterScoped]);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now()),
+    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay],
+    [filterList, listFilterApplied, listFilterDay, heldRead],
   );
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {
@@ -5859,66 +5869,7 @@ function Inbox() {
     if (options?.focusCoach) setCoachFocus((n) => n + 1);
   }, []);
   useTourReplay(tourState, dispatchTour, reducedMotion, say);
-  const saveTour = (change: Parameters<typeof inboxApi.saveTour>[0]) => {
-    // Kept here at once, so the entry screen leaves without waiting; the server's answer replaces it.
-    const now = new Date().toISOString();
-    setSettings((current) =>
-      current?.tour
-        ? {
-            ...current,
-            tour: {
-              ...current.tour,
-              seen_at: change.seen ? now : current.tour.seen_at,
-              finished_at: change.finished ? now : current.tour.finished_at,
-              skipped_at: change.skipped ? now : current.tour.skipped_at,
-              notify_again: change.notify_again ?? current.tour.notify_again,
-            },
-          }
-        : current,
-    );
-    // The server's answer replaces the local state, a stamp never going back to null: an earlier save's answer
-    // that lands after a later one (seen, then skipped) never brings Two paths back.
-    const adopt = (tour: InboxTourState) =>
-      setSettings((current) => {
-        if (!current) return current;
-        const local = current.tour;
-        return {
-          ...current,
-          tour: local
-            ? { ...tour, seen_at: tour.seen_at ?? local.seen_at, finished_at: tour.finished_at ?? local.finished_at, skipped_at: tour.skipped_at ?? local.skipped_at }
-            : tour,
-        };
-      });
-    const decision = change.finished ? 'finished' : change.skipped ? 'skipped' : null;
-    // A failed save is tried again (the server restarting, a busy moment); one the server refuses for good
-    // (a 4xx) is not. A decision that still did not reach config.json is remembered in this browser and said,
-    // quietly: the tour never pretends it was saved, and Two paths does not come back here.
-    const attempt = (tries: number) => {
-      void inboxApi.saveTour(change).then(
-        ({ tour }) => adopt(tour),
-        (cause: unknown) => {
-          const status = cause instanceof InboxApiError ? cause.status : 0;
-          if (tries < TOUR_SAVE_RETRY_MS.length && !(status >= 400 && status < 500)) {
-            setTimeout(() => attempt(tries + 1), TOUR_SAVE_RETRY_MS[tries]);
-            return;
-          }
-          if (!decision) return;
-          storage.setItem(TOUR_DECIDED_COOKIE, decision);
-          const why = cause instanceof Error ? cause.message : String(cause);
-          showToast(
-            {
-              icon: 'warn',
-              lead: 'Not saved',
-              detail: 'This browser remembers the tour',
-              speech: `The tour could not be saved: ${why} This browser remembers that you ${decision === 'finished' ? 'finished' : 'left'} it, so it will not offer itself again here.`,
-            },
-            6000,
-          );
-        },
-      );
-    };
-    attempt(0);
-  };
+  const saveTour = (change: InboxTourChange) => saveTourChange(change, setSettings, showToast);
   // The step rides the address (`#tour=N`): a reload or a link opens that step with the walk's state up to it,
   // and each step the person reaches replaces the entry, so one Back leaves the tour.
   const tourSynced = useRef<number | null>(null);
@@ -6016,32 +5967,6 @@ function Inbox() {
     );
     landFocusAfterTour();
   };
-  /**
-   * Focus never drops to the page once the Inbox is back. The browser's Back lands, and the screen redraws, some
-   * frames later on a slow machine; until the tour's own screen is gone the control that was pressed still holds
-   * focus and is about to go, so nothing counts as landed before then. Tried for up to 3 s.
-   */
-  function landFocusAfterTour() {
-    const until = performance.now() + 3000;
-    let settled = 0;
-    const land = () => {
-      if (performance.now() > until) return;
-      if (document.querySelector('[data-tour-bar]')) {
-        requestAnimationFrame(land);
-        return;
-      }
-      const active = document.activeElement;
-      if (!active || active === document.body || !active.isConnected) {
-        // Back where it was started: its own Take the tour (Settings, What's new); else the thread, the first-run heading, the list.
-        focusFirst(['[data-settings-take-tour]', '[data-whats-new-tour] button', 'section.ib-pane h2.ib-subject', '.ib-main .ib-empty h2', '.ib-main .ib-lbody [data-thread-id]', '.ib-main h1']);
-      }
-      const now = document.activeElement;
-      // Landed: focus held over a few frames (a screen that is still drawing can take the element away again).
-      settled = now && now !== document.body && now.isConnected ? settled + 1 : 0;
-      if (settled < 5) requestAnimationFrame(land);
-    };
-    requestAnimationFrame(land);
-  }
   // During the tour, focus that a control took with it (a screen redrawn by a step, a hash change, Try again)
   // lands on the tour's own place: the coach card, the loading screen, step 11's heading, else Exit. Only focus
   // that was LOST (the last focused element left the page): a click on empty space is left alone.
@@ -7353,6 +7278,11 @@ function Inbox() {
               return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
             })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
+            agentContext={threadAgentContext}
+            // A session's name in the thread's header filters the list to that agent, as the sidebar's agent does,
+            // and keeps this thread on screen (the person is reading it); a second click shows everything again.
+            agentFilter={route.page === 'inbox' ? (route.agent ?? null) : null}
+            onAgentFilter={(agentId) => leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: route.page === 'inbox' ? route.thread : null })}
             // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
             onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}
@@ -7636,6 +7566,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onAgentRename={guestPage ? undefined : renameAgent}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.

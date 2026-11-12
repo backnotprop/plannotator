@@ -5,7 +5,7 @@
  * writing into a store it did not read.
  */
 
-import { readHello, type RestartHello } from './sessionAdopt';
+import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
@@ -49,6 +49,7 @@ import type {
   InboxDraft,
   InboxDraftPasted,
   InboxReplyDraft,
+  InboxReplyQuote,
   InboxReplyDraftRow,
   InboxDraftStatus,
   InboxUpload,
@@ -68,7 +69,8 @@ import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
-import { parseRestartAgents } from './restartAgents';
+import { dispatchInboxFrame, type InboxEventHandlers } from './eventFrames';
+export { dispatchInboxFrame, type InboxEventHandlers };
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
 import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
@@ -133,7 +135,7 @@ function noteReplySent(words: string): void {
   for (const listener of replyListeners) listener(lastReply);
 }
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline' | 'openclaw' | 'hermes';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
@@ -675,6 +677,10 @@ export interface InboxStorageModel {
     /** The projects combined into this one, by name: deleting it leaves them. */
     combined?: string[];
   }[];
+  /** The Inbox on SQLite (its switch, off for everyone): the database file's bytes, counted in `bytes`. */
+  database?: number;
+  /** The dated backups a move into SQLite left, counted in `bytes`: listed with Remove (StorageBackups.tsx). */
+  backups?: { name: string; kind: 'jsonl' | 'sqlite'; date: string; bytes: number }[];
 }
 
 /** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). Off, only `enabled` and a false `full_permissions`. */
@@ -1094,7 +1100,14 @@ function actionMarkBody(mark: ActionMarkBody | null, staged: boolean): Record<st
 }
 
 /** A reply draft save's JSON body (the page's save as it goes builds the same one by hand). */
-export function replyDraftSaveBody(body: string, base: string | null, baseBody: string | null, files: ReplyDraftFileOps, recipients?: readonly string[]): Record<string, unknown> {
+export function replyDraftSaveBody(
+  body: string,
+  base: string | null,
+  baseBody: string | null,
+  files: ReplyDraftFileOps,
+  recipients?: readonly string[],
+  quote?: InboxReplyQuote | null,
+): Record<string, unknown> {
   // The box's file changes (the Inbox applies them to the draft's files as they are), always sent, even empty:
   // a save without them is an older page's, which names long pastes only. `recipients` (the recipient pill) only
   // once chosen: without it the draft keeps its own.
@@ -1106,6 +1119,8 @@ export function replyDraftSaveBody(body: string, base: string | null, baseBody: 
     files_remove: files.remove,
     files_place: files.place,
     ...(recipients !== undefined ? { recipients } : {}),
+    // The message the reply quotes (approval "inbox-reply-quote"): null takes it away; absent, the draft keeps its own.
+    ...(quote !== undefined ? { quote } : {}),
   };
 }
 
@@ -1313,6 +1328,18 @@ export interface SearchRequest {
 }
 
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
+export interface CloudAgentsModel {
+  agents: InboxCloudAgentView[];
+  projects: { id: string; name: string }[];
+  available?: boolean;
+}
+
+export interface CloudAgentTest {
+  started: boolean;
+  run_url?: string;
+  words: string;
+}
+
 export interface ComposeSessionsModel {
   serverSession: string;
   home: string;
@@ -1742,6 +1769,11 @@ export const inboxApi = {
       clear_draft?: string;
       /** The person's verdict on the review this message carries (Approve / Send feedback in the review's header; Code review on). */
       review_verdict?: 'approved' | 'changes_requested';
+      /**
+       * The message this reply quotes (approval "inbox-reply-quote"), with the words selected in it and its time as this
+       * window shows it: the Inbox writes the lead the agent reads in front of the words.
+       */
+      quote?: { of: string; words?: string; time?: string };
       /** The answer carries the thread as a read of it would (`thread_read`): the Send's last reply asks, and reads nothing after. */
       with_thread?: boolean;
     },
@@ -1958,8 +1990,15 @@ export const inboxApi = {
    * `files_place`); the Inbox applies them to the draft's files as they are and answers the result. Only
    * different words refuse a save (`base_body`: the words this window saved last).
    */
-  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null, files: ReplyDraftFileOps = NO_FILE_OPS, recipients?: readonly string[]) =>
-    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients)),
+  saveReplyDraft: (
+    threadId: string,
+    body: string,
+    base: string | null,
+    baseBody: string | null = null,
+    files: ReplyDraftFileOps = NO_FILE_OPS,
+    recipients?: readonly string[],
+    quote?: InboxReplyQuote | null,
+  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),
@@ -2208,6 +2247,15 @@ export const inboxApi = {
   pairingChecks: (fresh = false) => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>(inboxUrl(`/pairing/checks${fresh ? '?fresh=1' : ''}`)),
   devices: () => get<{ devices: PairedDevice[] }>(inboxUrl('/devices')),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(inboxUrl(`/devices/${encodeURIComponent(id)}/revoke`), {}),
+  cloudAgents: () => get<CloudAgentsModel>(inboxUrl('/cloud-agents')),
+  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; project_id: string | null }) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl('/cloud-agents'), fields),
+  newCloudPairing: (session: string) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/pairing`), {}),
+  setCloudWake: (session: string, url: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/wake`), { url, key }),
+  testCloudAgent: (session: string) => post<CloudAgentsModel & { test: CloudAgentTest }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/test`), {}),
+  rekeyCloudAgent: (session: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/key`), { key }),
+  removeCloudAgent: (session: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/remove`), {}),
   tailnet: () => get<{ tailnet: TailnetState }>(inboxUrl('/tailnet')),
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>(inboxUrl('/tailnet'), { on }),
   lan: () => get<{ lan: LanState }>(inboxUrl('/lan')),
@@ -2237,6 +2285,8 @@ export const inboxApi = {
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
+  /** Settings → Storage's Remove on a dated backup (the Inbox on SQLite only). */
+  removeBackup: (name: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/settings/storage/backups/${encodeURIComponent(name)}/remove`), {}),
 };
 
 /** One question and what came of it (`packages/shared/inbox/ask.ts`). */
@@ -2366,82 +2416,6 @@ interface LinkedPageBase {
 
 export type LinkedPageView = LinkedPageBase & ({ html: string } | { html: null; text: string });
 
-/** What `subscribeInboxEvents` calls (the server's frames, read). */
-export interface InboxEventHandlers {
-  onRecord: (event: InboxEvent | null) => void;
-  /**
-   * `updated` is undefined from an Inbox older than the field (the "What's new in X" link stays as the list said);
-   * `restartClaudeCode` too (the sidebar's "Reload Claude Code N" stays as the list said), and
-   * `restartAgents` (every runtime's count, "Reload agents N").
-   */
-  onStatus: (update: InboxHealth['update'], updated?: string | null, restartClaudeCode?: number, restartAgents?: InboxRestartAgents, checkFailing?: UpdateCheckFailing | null) => void;
-  /** Whether a notification can reach the person now (inbox-windows.ts); never called by an older Inbox. */
-  onReach?: (reach: InboxNotifyReach) => void;
-  /**
-   * A row's delivery may have moved with the live sessions (a turn started or
-   * ended, a session went away): no store line, so the list is read again.
-   * Never called by an older Inbox. `sessions`: a session ended or came back, so a row's "Session ended" may have
-   * moved. `labels`: a session's label changed too (issue #2450), so the rows' agents
-   * and the authors read the list again.
-   */
-  onDeliveries?: (change?: { labels: boolean; sessions: boolean; agents?: boolean }) => void;
-  /**
-   * The stream (re)connected: the server's `hello`. A reconnect carries the
-   * URL it was first opened with, so its `permission=` may be stale (a grant
-   * since, a restarted Inbox that forgot the window): report again here.
-   * With a shared stream (sharedEvents.ts) also called when the tab whose
-   * stream serves this one changes, so the report names it (`served_by`).
-   */
-  onConnect?: (hello?: RestartHello) => void;
-  /**
-   * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
-   * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
-   */
-  onDrafts?: (threadId: string | null) => void;
-  /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window. */
-  onAsk?: (threadId: string) => void;
-  /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
-  onPins?: () => void;
-  /** The pinned artifacts changed (`event: artifact-pins`, approval "inbox-artifact-stars"); never called by an older Inbox. */
-  onArtifactPins?: () => void;
-  /** Show a thread (`event: show`, `plannotator inbox --open <thread>`): only the window named moves; never called by an older Inbox. */
-  onShow?: (threadId: string, windowId: string) => void;
-  /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
-  onSnoozes?: () => void;
-  /** A read of these threads' PRs changed their checks or review (`event: thread-pulls`, no record); never called by an older Inbox. */
-  onThreadPulls?: (threadIds: string[]) => void;
-  /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
-  /** `last`: the look before this save and, for an agent's command, who made it (`prev`, `by`; absent from an older Inbox). */
-  onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
-  /** The sidebar's layout was saved, here or in another window (`event: sidebar`, approval "inbox-sidebar-customize"). */
-  onSidebar?: (sidebar: unknown, rev: unknown) => void;
-  /** An agent icon's face was saved (`{ faces, rev }`, unparsed). */
-  onAgentFaces?: (data: unknown) => void;
-  /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
-  onReactions?: (reactions: unknown, rev: unknown) => void;
-  /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
-  /** "Over your tailnet" published by itself once Tailscale came back (`event: tailscale`): its new state. Never called by an older Inbox. */
-  onTailscale?: (tailscale: TailscaleSettings) => void;
-  /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
-  onShapes?: (ids: string[]) => void;
-  /**
-   * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
-   * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
-   */
-  onMachine?: (frame: MachineRecordFrame) => void;
-  /** Every machine and its state: a snapshot when the stream opens, and on every change (a state, a far list read again). */
-  onMachines?: (machines: MachineView[]) => void;
-  /** A write held for another machine changed state (queued, sending, delivered, refused…). */
-  onOutbox?: (entry: OutboxView) => void;
-  /**
-   * The live stream went silent past its window (liveStream.ts), or the tab came back after it: read the list and
-   * the open thread again, so nothing it missed stays missed. Never called while the stream is heard.
-   */
-  onCatchUp?: () => void;
-  /** The live stream is dead (`false`: a reconnect brought nothing) or heard again (`true`). Called on a change only. */
-  onLive?: (live: boolean) => void;
-}
 
 /** The `machine` frame: one record of another machine's event stream. */
 export interface MachineRecordFrame {
@@ -2494,214 +2468,6 @@ export function openInboxEventFrames(cursor: number, onFrame: (frame: InboxEvent
   return () => source.close();
 }
 
-/** One frame to the handlers: what each named event means. */
-export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventHandlers): void {
-  switch (frame.name) {
-    case 'heartbeat':
-      // Only proof the stream is alive: no read, nothing to show.
-      return;
-    case 'hello':
-      // The run that answers and its cursor: a page that lived through a restart reads them (sessionAdopt.ts).
-      handlers.onConnect?.(readHello(frame.data) ?? undefined);
-      return;
-    case 'reach':
-      try {
-        handlers.onReach?.(JSON.parse(frame.data) as InboxNotifyReach);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'drafts':
-      try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown; compose?: unknown };
-        if (typeof data.thread_id === 'string') handlers.onDrafts?.(data.thread_id);
-        else if (data.compose === true) handlers.onDrafts?.(null);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'ask':
-      try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown };
-        if (typeof data.thread_id === 'string') handlers.onAsk?.(data.thread_id);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'deliveries': {
-      let labels = false;
-      let sessions = false;
-      let agents = false;
-      try {
-        const change = JSON.parse(frame.data) as { labels?: unknown; sessions?: unknown; agents?: unknown } | null;
-        labels = change?.labels === true;
-        sessions = change?.sessions === true;
-        // The sidebar's Agents moved (agentsList.ts).
-        agents = change?.agents === true;
-      } catch {
-        // An empty or malformed frame is a delivery change alone.
-      }
-      handlers.onDeliveries?.({ labels, sessions, agents });
-      return;
-    }
-    case 'pins':
-      handlers.onPins?.();
-      return;
-    case 'artifact-pins':
-      handlers.onArtifactPins?.();
-      return;
-    case 'show':
-      try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown; window?: unknown };
-        if (typeof data.thread_id === 'string' && typeof data.window === 'string') handlers.onShow?.(data.thread_id, data.window);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'snoozes':
-      handlers.onSnoozes?.();
-      return;
-    case 'thread-pulls':
-      try {
-        const data = JSON.parse(frame.data) as { thread_ids?: unknown };
-        const ids = Array.isArray(data.thread_ids) ? data.thread_ids.filter((id): id is string => typeof id === 'string') : [];
-        if (ids.length > 0) handlers.onThreadPulls?.(ids);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'rows':
-      try {
-        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown; prev?: unknown; by?: unknown };
-        handlers.onRows?.(data.rows, data.rev, { prev: data.prev, by: data.by });
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'sidebar':
-      try {
-        const data = JSON.parse(frame.data) as { sidebar?: unknown; rev?: unknown };
-        handlers.onSidebar?.(data.sidebar, data.rev);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'agent-faces':
-      try {
-        handlers.onAgentFaces?.(JSON.parse(frame.data));
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'reactions':
-      try {
-        const data = JSON.parse(frame.data) as { reactions?: unknown; rev?: unknown };
-        handlers.onReactions?.(data.reactions, data.rev);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'capabilities':
-      try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown } };
-        handlers.onCapabilities?.({
-          ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
-          ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
-          ...(typeof data.bro?.on === 'boolean' ? { bro: { on: data.bro.on } } : {}),
-          ...(typeof data.float_drafts?.on === 'boolean' ? { float_drafts: { on: data.float_drafts.on } } : {}),
-          ...(typeof data.mark_read_warning?.on === 'boolean' ? { mark_read_warning: { on: data.mark_read_warning.on } } : {}),
-          ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
-          ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
-          ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
-          ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
-        });
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'tailscale':
-      try {
-        const data = JSON.parse(frame.data) as { tailscale?: unknown };
-        const tailscale = data.tailscale as TailscaleSettings | null | undefined;
-        if (tailscale && typeof tailscale === 'object' && typeof tailscale.on === 'boolean') handlers.onTailscale?.(tailscale);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'shapes':
-      try {
-        const data = JSON.parse(frame.data) as { ids?: unknown };
-        if (Array.isArray(data.ids)) handlers.onShapes?.(data.ids.filter((id): id is string => typeof id === 'string'));
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'machine':
-      try {
-        const data = JSON.parse(frame.data) as Partial<MachineRecordFrame>;
-        if (typeof data.machine === 'string' && typeof data.seq === 'number') {
-          // A linked machine's steps line (approval "inbox-thread-steps"): its threads show no steps here, so it
-          // neither rings nor makes the open thread read again.
-          // A linked machine's thread PRs line (approval "inbox-pr-binding"): the same, its threads show none here.
-          const machineKind = (data.record as { kind?: unknown } | undefined)?.kind;
-          if (machineKind === 'steps' || machineKind === 'thread_pull') return;
-          rememberMachine(idsIn(data.record), data.machine);
-          handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
-        }
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'machines':
-      try {
-        const data = JSON.parse(frame.data) as { machines?: unknown };
-        if (Array.isArray(data.machines)) handlers.onMachines?.(data.machines as MachineView[]);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'outbox':
-      try {
-        const data = JSON.parse(frame.data) as OutboxView;
-        if (typeof data.key === 'string' && typeof data.machine === 'string') handlers.onOutbox?.(data);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'record': {
-      let parsed: InboxEvent | null = null;
-      try {
-        parsed = JSON.parse(frame.data) as InboxEvent;
-      } catch {
-        // A malformed frame still refreshes the list.
-      }
-      // This Inbox's own record: every id in it is local for good (another machine's arrive as `machine` frames).
-      if (parsed) rememberLocal(localIdsIn(parsed));
-      handlers.onRecord(parsed);
-      return;
-    }
-    case 'status':
-      try {
-        const data = JSON.parse(frame.data) as {
-          update: InboxHealth['update'];
-          updated?: string | null;
-          restart_claude_code?: unknown;
-          restart_agents?: unknown;
-          update_check_failing?: UpdateCheckFailing | null;
-        };
-        handlers.onStatus(
-          data.update,
-          'updated' in data ? (data.updated ?? null) : undefined,
-          typeof data.restart_claude_code === 'number' ? data.restart_claude_code : undefined,
-          parseRestartAgents(data.restart_agents) ?? undefined,
-          'update_check_failing' in data ? (data.update_check_failing ?? null) : undefined,
-        );
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-  }
-}
 
 /**
  * The server's event stream: `onRecord` for every store line after the

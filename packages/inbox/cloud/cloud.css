@@ -1,0 +1,48 @@
+.ib-cl-agent { border-bottom: 1px solid var(--ib-hair); }
+.ib-cl-agent:last-child { border-bottom: 0; }
+.ib-cl-agent > .ib-prow { border-bottom: 0; }
+.ib-cl-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 0 16px 12px; }
+.ib-cl-inline { display: flex; gap: 8px; flex: 1 1 260px; min-width: 0; }
+.ib-cl-inline .ib-fbk-contact { flex: 1 1 auto; min-width: 0; width: auto; }
+.ib-cl-warn { display: inline-flex; align-items: center; gap: 6px; width: 100%; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.ib-cl-warn svg { color: var(--ib-warn, #d97706); flex: none; }
+.ib-cl-said { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-cl-said svg { flex: none; }
+.ib-cl-ok svg { color: var(--ib-ok, #16a34a); }
+.ib-cl-bad svg { color: var(--destructive); }
+.ib-cl-said a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
+.ib-cl-head { display: flex; align-items: center; gap: 8px; outline: none; }
+.ib-cl-p { margin: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.45; }
+.ib-cl-block { margin: 0; padding: 10px 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.5; color: var(--foreground); background: var(--muted); border: 1px solid var(--ib-hair); border-radius: var(--ib-r8-s, 6px); }
+.ib-cl-row { display: flex; gap: 8px; }
+.ib-cl-seg { align-self: flex-start; max-width: 100%; overflow-x: auto; }
+.ib-delivered[data-cloud-wake] .ib-dl-text a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.ib-cl-link-line { display: flex; align-items: baseline; gap: 7px; margin-top: 2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-cl-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); transform: translateY(-1px); }
+.ib-cl-connected .ib-cl-dot { background: var(--ib-ok, #16a34a); }
+.ib-cl-connected { color: var(--foreground); }
+.ib-cl-relay_down .ib-cl-dot, .ib-cl-no_relay .ib-cl-dot { background: var(--destructive); }
+.ib-cl-relay_down, .ib-cl-no_relay { color: var(--foreground); }
+.ib-cl-setup { border-top: 1px solid var(--ib-hair); background: color-mix(in oklch, var(--muted) 45%, transparent); outline: none; }
+.ib-cl-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: start; }
+.ib-cl-copy-l { grid-column: 1 / -1; font-size: var(--ib-fs-13, 13px); color: var(--foreground); font-weight: 500; }
+.ib-cl-copy .ib-cl-block { max-height: 160px; background: var(--card); }
+[data-cloud-copy-block="message"] .ib-cl-block { max-height: none; }
+.ib-cl-copy-b { white-space: nowrap; }
+.ib-cl-foot { align-items: center; justify-content: space-between; }
+.ib-cl-wake { border-top: 1px solid var(--ib-hair); }
+.ib-cl-quiet { padding-top: 0; }
+.ib-cl-setup + .ib-cl-sub { padding-top: 12px; }
+.pn-inbox .ib-cl-link { padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; text-align: left; line-height: 1.45; }
+.pn-inbox .ib-cl-link:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 520px) {
+  .ib-cl-copy { grid-template-columns: minmax(0, 1fr); }
+  .ib-cl-copy-b { justify-self: start; }
+}
+@media (pointer: coarse) {
+  .ib-cl-sub .ib-btn, .ib-cl-row .ib-btn, .ib-cl-copy-b, .ib-cl-foot .ib-btn { min-height: 44px; }
+  .pn-inbox .ib-cl-link { min-height: 44px; }
+  .pn-inbox [data-settings-cloud] .ib-btn, .pn-inbox [data-settings-cloud] .ib-seg-o { min-height: 44px; }
+  .pn-inbox [data-settings-cloud] .ib-mfield .ib-fbk-contact, .pn-inbox [data-settings-cloud] .ib-cl-inline .ib-fbk-contact { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox [data-settings-cloud] .ib-del-l { min-height: 44px; padding: 0 4px; }
+}
