@@ -1197,6 +1197,14 @@ export interface InboxLaunchFrom {
 /** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
 export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting_terminal" | "stopped" | "failed" | "missing" | "cloning" | "clone_failed" | "clone_cancelled";
 
+/**
+ * Whether Stop is offered for a launch: it started (the host gave it a session) and it runs, at rest (no line) or
+ * starting, working or at a prompt in Terminal. A prompt in the window has its own Stop on the permission card.
+ */
+export function inboxLaunchStops(started: boolean, run: InboxRunState | null): boolean {
+  return started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
+}
+
 /** What a launched thread's run line shows (the thread route's `run`). */
 export interface InboxRun {
   state: InboxRunState;
@@ -3313,8 +3321,11 @@ export interface InboxAgent {
    * the host gave the conversation a new session id. One of them that still polls is listed as its own agent too.
    */
   continues?: string[];
-  /** Set when the Inbox launched it: the launch's id and its thread. */
-  launch?: { id: string; thread_id: string };
+  /**
+   * Set when the Inbox launched it: the launch's id and its thread; whether the host started it (`started`) and its
+   * run line's state (`run`, null: no line), absent from an older Inbox.
+   */
+  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
   /** Its title as its connection last said it (the To picker's name). Absent when none. */

@@ -4443,6 +4443,26 @@ function Inbox() {
     return true;
   };
 
+  /** The sidebar agent's Delete … session…: its launch's thread opens with the thread's own confirm. */
+  const [deleteAsk, setDeleteAsk] = useState<string | null>(null);
+  const clearDeleteAsk = useCallback(() => setDeleteAsk(null), []);
+  const askAgentDelete = (agent: InboxAgent) => {
+    if (!agent.launch) return;
+    setDeleteAsk(agent.launch.thread_id);
+    go({ page: 'inbox', project: route.project, machine: route.machine, agent: route.agent, thread: agent.launch.thread_id });
+  };
+  /** The sidebar agent's Stop: as the thread's Stop (Thread.tsx `launchAct`), its words on a toast when it fails. */
+  const stopAgent = async (agent: InboxAgent, machine: string | null) => {
+    if (!agent.launch) return;
+    try {
+      await inboxApi.launchStop(agent.launch.id, machine);
+    } catch (cause) {
+      showToast(errorToast(cause, 'That did not work; try again.'));
+      return;
+    }
+    if (thread?.thread_id === agent.launch.thread_id) void refreshThread(agent.launch.thread_id);
+  };
+
   /**
    * The project menu's Set picture… (approval "inbox-letter-marks"): the picture kept by the Inbox, then the list read
    * again, so every project mark shows it. A refused picture (not an image, too big) says why in the toast.
@@ -7416,6 +7436,8 @@ function Inbox() {
             run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
             attachCommand={threadRun?.threadId === thread.thread_id ? threadRun.attach : null}
             onRunChanged={() => void refreshThread(thread.thread_id)}
+            deleteAsk={deleteAsk === thread.thread_id}
+            onDeleteAsked={clearDeleteAsk}
             openedWith={openedWith?.threadId === thread.thread_id ? openedWith.ids : null}
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
@@ -7722,6 +7744,8 @@ function Inbox() {
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
             onAgentRename={guestPage ? undefined : renameAgent}
+            onAgentStop={(agent, machine) => void stopAgent(agent, machine)}
+            onAgentDelete={askAgentDelete}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.

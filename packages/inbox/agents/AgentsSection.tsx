@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
-import type { InboxAgent, InboxListRow } from '@plannotator/core/inbox-types';
+import { inboxLaunchStops, type InboxAgent, type InboxListRow } from '@plannotator/core/inbox-types';
 import { agentAsListed, agentIsNamed, useInboxAgents } from '../agentsList';
 import { ProjectNameField } from '../components/ProjectRow';
 import { Icon } from '../icons';
@@ -70,6 +70,12 @@ export interface AgentsSectionProps {
    * true once the name is kept. Absent: no menu.
    */
   onRename?: (agent: InboxAgent, name: string | null, own: string) => Promise<boolean>;
+  /**
+   * Stop and Delete … session… on an agent the Inbox launched, here or on a linked machine (`machine`: its id, null
+   * for this Inbox's). Absent: not offered.
+   */
+  onStop?: (agent: InboxAgent, machine: string | null) => void;
+  onDelete?: (agent: InboxAgent, machine: string | null) => void;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
 }
@@ -135,6 +141,8 @@ const AgentRow = memo(
     onOpen: (entry: AgentEntry, opener: HTMLElement) => void;
     phone: boolean;
     onRename?: (entry: AgentEntry, name: string | null) => Promise<boolean>;
+    onStop?: (entry: AgentEntry) => void;
+    onDelete?: (entry: AgentEntry) => void;
     announce?: (text: string) => void;
   }) {
     const { entry, machine, on, away } = props;
@@ -154,6 +162,12 @@ const AgentRow = memo(
     }, [renaming]);
     const onRename = props.onRename;
     const named = agentIsNamed(entry.agent);
+    // Stop and Delete as the launch's thread offers them (Thread.tsx `launchMenu`), for an agent the Inbox launched.
+    const launch = entry.agent.launch;
+    const onStop = launch && props.onStop && inboxLaunchStops(launch.started === true, launch.run ?? null) ? props.onStop : undefined;
+    const onDelete = launch ? props.onDelete : undefined;
+    const hasMenu = !!(onRename || onStop || onDelete);
+    const launchName = agentHostName(entry.agent.host);
     const row = (children: ReactNode) => (
       <div
         className="ib-sbagent"
@@ -190,7 +204,7 @@ const AgentRow = memo(
         />,
       );
     }
-    const act = (action: 'rename' | 'reset') => {
+    const act = (action: 'rename' | 'reset' | 'stop' | 'delete') => {
       setMenuOpen(false);
       setContextOpen(false);
       if (action === 'rename') {
@@ -198,6 +212,8 @@ const AgentRow = memo(
         setRenaming(true);
         return;
       }
+      if (action === 'stop') return onStop?.(entry);
+      if (action === 'delete') return onDelete?.(entry);
       void onRename?.(entry, null);
     };
     const items = (
@@ -206,14 +222,29 @@ const AgentRow = memo(
         <div className="ib-pm-title" dir="auto" aria-hidden="true">
           {entry.name}
         </div>
-        <Menu.Item className="ib-pmi" label="Rename…" onClick={() => act('rename')} data-agent-action="rename">
-          <Icon name="pen" size={15} />
-          Rename…
-        </Menu.Item>
-        {named && (
+        {onRename && (
+          <Menu.Item className="ib-pmi" label="Rename…" onClick={() => act('rename')} data-agent-action="rename">
+            <Icon name="pen" size={15} />
+            Rename…
+          </Menu.Item>
+        )}
+        {onRename && named && (
           <Menu.Item className="ib-pmi" label="Reset name" onClick={() => act('reset')} data-agent-action="reset">
             <Icon name="replay" size={15} />
             Reset name
+          </Menu.Item>
+        )}
+        {onRename && (onStop || onDelete) && <Menu.Separator className="ib-pm-sep" />}
+        {onStop && (
+          <Menu.Item className="ib-pmi" label={`Stop ${launchName}`} onClick={() => act('stop')} data-agent-action="stop">
+            <Icon name="xCircle" size={15} />
+            Stop {launchName}
+          </Menu.Item>
+        )}
+        {onDelete && (
+          <Menu.Item className="ib-pmi" label={`Delete ${launchName} session…`} onClick={() => act('delete')} data-agent-action="delete">
+            <Icon name="x" size={15} />
+            Delete {launchName} session…
           </Menu.Item>
         )}
       </>
@@ -239,7 +270,7 @@ const AgentRow = memo(
           </button>
         </Tip>
         <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} />
-        {onRename && (
+        {hasMenu && (
           <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
             <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${entry.name} options`} data-agent-more={entry.agent.id}>
               <Icon name="dots" size={16} />
@@ -256,7 +287,7 @@ const AgentRow = memo(
         )}
       </>
     );
-    if (props.phone || !onRename) return row(content);
+    if (props.phone || !hasMenu) return row(content);
     return (
       <ContextMenu.Root onOpenChange={setContextOpen}>
         <ContextMenu.Trigger render={row(content)} />
@@ -284,6 +315,8 @@ const AgentRow = memo(
     a.onOpen === b.onOpen &&
     a.phone === b.phone &&
     a.onRename === b.onRename &&
+    a.onStop === b.onStop &&
+    a.onDelete === b.onDelete &&
     a.announce === b.announce,
 );
 
@@ -318,6 +351,14 @@ export function AgentsSection(props: AgentsSectionProps) {
     () => (canRename ? (entry: AgentEntry, name: string | null) => renameNow.current?.(entry.agent, name, agentRowName(agentAsListed(entry.agent), entry.thread)) ?? Promise.resolve(false) : undefined),
     [canRename],
   );
+  const stopNow = useRef(props.onStop);
+  stopNow.current = props.onStop;
+  const deleteNow = useRef(props.onDelete);
+  deleteNow.current = props.onDelete;
+  const canStop = props.onStop !== undefined;
+  const canDelete = props.onDelete !== undefined;
+  const onStop = useMemo(() => (canStop ? (entry: AgentEntry) => stopNow.current?.(entry.agent, entry.machine === props.machines.self ? null : entry.machine) : undefined), [canStop, props.machines.self]);
+  const onDelete = useMemo(() => (canDelete ? (entry: AgentEntry) => deleteNow.current?.(entry.agent, entry.machine === props.machines.self ? null : entry.machine) : undefined), [canDelete, props.machines.self]);
   return (
     // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
     // background"). Closed: its heading only. Open: its heading carries Add agent and Add machine.
@@ -383,6 +424,8 @@ export function AgentsSection(props: AgentsSectionProps) {
                   onOpen={onOpen}
                   phone={props.phone === true}
                   onRename={machine && !machine.self ? undefined : onRename}
+                  onStop={onStop}
+                  onDelete={onDelete}
                   announce={props.announce}
                 />
               ))}
