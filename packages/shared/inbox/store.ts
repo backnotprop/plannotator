@@ -130,7 +130,7 @@ import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
 import { inboxWakeQuote } from "./wake-quote";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import type { InboxCloudWake } from "@plannotator/core/inbox-cloud";
+import { INBOX_CLOUD_POLLING_HOSTS, type InboxCloudWake } from "@plannotator/core/inbox-cloud";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -6562,7 +6562,7 @@ export class InboxStore {
       // A plain reply it owns that the read mark could not cover (a reply still owed to another
       // session comes before it): its read settles it, as the mark does, so the wake never repeats it.
       const plain = !tag && !message.to && !hasTags(message);
-      if (wakes && !plain && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "")) continue;
+      if (wakes && !plain && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "") && !INBOX_CLOUD_POLLING_HOSTS.has(host ?? "")) continue;
       this.recordDelivery(message.id, { host: host ?? "agent", session });
     }
   }

@@ -9,7 +9,7 @@
  */
 
 import { createMcpHandler } from "@modelcontextprotocol/server";
-import { inboxCloudHostOf } from "@plannotator/core/inbox-cloud";
+import { inboxCloudHostOf, inboxCloudPresetWakes } from "@plannotator/core/inbox-cloud";
 import { INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
 import { inboxSearchTerms, INBOX_SEARCH_LIMIT_MAX, INBOX_SEARCH_QUERY_MAX, type InboxSearchMessageRow } from "@plannotator/core/inbox-search";
 import type { InboxProject } from "@plannotator/core/inbox-types";
@@ -120,7 +120,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
         if (ids.length !== uploads.length || ids.some((id, i) => id !== uploads[i])) throw new InboxError("attachment_path_refused", "attachments: uploaded bytes only.");
         return inboxUploadAttachments(store.dir, uploads, at);
       },
-      sessionWakes: async (_host, session) => session === agent.session,
+      sessionWakes: async (_host, session) => session === agent.session && inboxCloudPresetWakes(agent.preset),
       stepsOn: () => false,
       boardOn: () => false,
       ...(context.searchIndex ? { searchIndex: context.searchIndex } : {}),

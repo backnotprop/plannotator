@@ -436,6 +436,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   cloud: "Cloud agent",
   "cloud-claude": "Claude Code routine",
   "cloud-grok": "Grok Bot",
+  "cloud-muse": "Muse by Meta",
 };
 
 /**

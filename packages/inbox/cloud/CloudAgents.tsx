@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
   inboxCloudHostOf,
+  INBOX_CLOUD_PRESET_LABELS,
   INBOX_CLOUD_PRESET_NAMES,
   INBOX_CLOUD_PRESETS,
   type InboxCloudAgentView,
@@ -12,7 +13,7 @@ import { inboxApi, InboxApiError, type CloudAgentTest, type CloudAgentsModel } f
 import { HostMark, Icon } from '../icons';
 import { relativeWords, useRelativeClock } from '../relativeTime';
 
-const WAKE_HINTS: Record<InboxCloudPreset, { url: string; key: string; where: string }> = {
+const WAKE_HINTS: Record<Exclude<InboxCloudPreset, 'muse'>, { url: string; key: string; where: string }> = {
   'claude-routine': {
     url: 'https://api.anthropic.com/v1/claude_code/routines/trig_…/fire',
     key: 'sk-ant-oat01-…',
@@ -77,7 +78,7 @@ export function CloudAgentsSection() {
   return (
     <section className="ib-sgroup" data-settings-cloud="" aria-labelledby="ib-g-cloud">
       <h2 id="ib-g-cloud">Cloud agents</h2>
-      <p>A Claude Code routine, Grok Bot or another agent in the cloud that reads and answers its threads here.</p>
+      <p>A Claude Code routine, Grok Bot, Muse or another agent in the cloud that reads and answers its threads here.</p>
       <div className="ib-card" aria-label="Cloud agents">
         {model.agents.map((agent) => (
           <AgentCard
@@ -183,8 +184,16 @@ function AgentCard({
         </span>
       </div>
       {fresh && <SetupPanel agent={agent} setup={fresh.setup} busy={busy === 'pairing'} onRetry={newPairing} onDone={onDone} />}
-      {agent.key_rejected_at && <NewKey agent={agent} onModel={onModel} />}
-      {agent.wake ? <TestLine agent={agent} onModel={onModel} /> : <WakeForm agent={agent} onModel={onModel} />}
+      {agent.key_rejected_at && agent.preset !== 'muse' && <NewKey agent={agent} placeholder={WAKE_HINTS[agent.preset].key} onModel={onModel} />}
+      {agent.preset === 'muse' ? (
+        <div className="ib-cl-sub ib-cl-quiet" data-cloud-checks-itself="">
+          <span className="ib-cl-said">It checks for your messages itself: no wake address needed.</span>
+        </div>
+      ) : agent.wake ? (
+        <TestLine agent={agent} onModel={onModel} />
+      ) : (
+        <WakeForm agent={agent} hint={WAKE_HINTS[agent.preset]} onModel={onModel} />
+      )}
       {!fresh && (
         <div className="ib-cl-sub ib-cl-quiet" data-cloud-pairing-row="">
           <button type="button" className="ib-cl-link" disabled={busy !== null} onClick={newPairing} data-cloud-new-pairing="">
@@ -271,7 +280,7 @@ function SetupPanel({ agent, setup, busy, onRetry, onDone }: { agent: InboxCloud
   );
 }
 
-function WakeForm({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (model: CloudAgentsModel) => void }) {
+function WakeForm({ agent, hint, onModel }: { agent: InboxCloudAgentView; hint: (typeof WAKE_HINTS)['other']; onModel: (model: CloudAgentsModel) => void }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
@@ -281,7 +290,6 @@ function WakeForm({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (mo
   useEffect(() => {
     if (open) first.current?.focus();
   }, [open]);
-  const hint = WAKE_HINTS[agent.preset];
   const ready = !busy && url.trim() !== '' && key.trim() !== '';
   if (!open) {
     return (
@@ -333,7 +341,7 @@ function WakeForm({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (mo
   );
 }
 
-function NewKey({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (model: CloudAgentsModel) => void }) {
+function NewKey({ agent, placeholder, onModel }: { agent: InboxCloudAgentView; placeholder: string; onModel: (model: CloudAgentsModel) => void }) {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -348,7 +356,7 @@ function NewKey({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (mode
           type="password"
           className="ib-fbk-contact ib-mono"
           aria-label={`New key for ${agent.name}`}
-          placeholder={WAKE_HINTS[agent.preset].key}
+          placeholder={placeholder}
           autoComplete="off"
           spellCheck={false}
           value={key}
@@ -451,7 +459,7 @@ function PairForm({
         {INBOX_CLOUD_PRESETS.map((id) => (
           <label key={id} className="ib-seg-o" data-on={preset === id ? '' : undefined}>
             <input type="radio" name="ib-cloud-preset" value={id} checked={preset === id} onChange={() => setPreset(id)} />
-            {INBOX_CLOUD_PRESET_NAMES[id].replace(' routine', '')}
+            {INBOX_CLOUD_PRESET_LABELS[id]}
           </label>
         ))}
       </div>
