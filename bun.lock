@@ -286,7 +286,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.23",
+      "version": "0.25.28",
       "devDependencies": {
         "typescript": "~5.8.2",
       },
@@ -482,7 +482,7 @@
         "@lezer/highlight": "^1.2.5",
         "@pierre/diffs": "1.6.4",
         "@plannotator/atomic-editor": "^0.9.0",
-        "@plannotator/core": "0.25.23",
+        "@plannotator/core": "0.25.28",
         "@plannotator/markdown-editor": "^0.5.0",
         "@plannotator/web-highlighter": "^0.8.2",
         "@tanstack/react-table": "^8.21.3",

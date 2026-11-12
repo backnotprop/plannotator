@@ -38,12 +38,20 @@
  * became a heading and a backticked name a code chip. `.txt` stays markdown:
  * it is prose as often as not.
  *
+ * `.env` files (`.env`, `.env.local`, … — `isSecretEnvPath`) commonly hold
+ * secrets, so they are annotatable only when the person names one: the CLI's
+ * explicit path (an absolute path, or one relative to the project). They are
+ * never found by name search, listed in the folder browser or opened as a
+ * linked document, and an annotate session on one keeps nothing in the data
+ * dir: no version history copy, no submit record, no feedback archive entry
+ * (the servers turn annotate history off for it; `computeAnnotateHistory`
+ * refuses it too). What the person then does with it is theirs: Ask AI, a
+ * share link, the feedback the agent gets. Through 0.28.61 they were refused.
+ * `.env.example` (the secret-free template convention) is an ordinary code
+ * document. `.env` is still denylisted for the user-configurable extra
+ * extensions below, so no config value makes it searchable or listed.
+ *
  * Deliberate exclusions:
- * - `.env` — commonly holds secrets, and annotate's per-file version history
- *   copies file contents into the data dir (`~/.plannotator/history/`).
- *   `.env.example` (the secret-free template convention) is accepted.
- *   `.env` is also denylisted for the user-configurable extra extensions
- *   below, so no config value can register it.
  * - Source-code extensions (.ts, .py, …) — those belong to the code-file
  *   link/popout system (`CODE_FILE_REGEX` in `code-file.ts`) and would also
  *   flood the annotate folder file browser.
@@ -124,6 +132,20 @@ const ASCIIDOC_FILE_RE = /\.(?:adoc|asciidoc)$/i;
 /** Config and data files shown as their own text: one code block, never markdown. */
 const CODE_DOCUMENT_RE = /(?:\.(?:ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)$/i;
 
+/** A `.env` file that may hold secrets: `.env` or `.env.<anything>`, but not the `.env.example` template. */
+const SECRET_ENV_RE = /(?:^|[\\/])\.env(?:\.[^\\/]+)?$/i;
+
+/**
+ * Whether `path` names a `.env` file (`.env`, `.env.local`, `.env.production`;
+ * not `.env.example`). Annotatable only when named explicitly, and never
+ * copied into the data dir (see the module comment).
+ */
+export function isSecretEnvPath(path: string | null | undefined): boolean {
+	if (!path) return false;
+	const trimmed = path.trim();
+	return SECRET_ENV_RE.test(trimmed) && !/\.env\.example$/i.test(trimmed);
+}
+
 /**
  * Shiki grammar per code-document extension. `.cfg` and `.conf` have none:
  * the name says nothing about the syntax inside (an nginx `.conf` is not INI),
@@ -141,6 +163,7 @@ const CODE_DOCUMENT_LANGUAGES: ReadonlyArray<readonly [RegExp, string]> = [
 	[/\.tsv$/i, "tsv"],
 	[/\.log$/i, "log"],
 	[/\.env\.example$/i, "dotenv"],
+	[SECRET_ENV_RE, "dotenv"],
 ];
 
 /**
@@ -164,7 +187,7 @@ export function documentRenderKindForPath(input: string): DocumentRenderKind | n
 	if (diagram !== null) return diagram;
 	const trimmed = input.trim();
 	if (ASCIIDOC_FILE_RE.test(trimmed)) return "asciidoc";
-	return CODE_DOCUMENT_RE.test(trimmed) ? "code" : null;
+	return CODE_DOCUMENT_RE.test(trimmed) || isSecretEnvPath(trimmed) ? "code" : null;
 }
 
 /** True when `value` is a diagram kind, `"asciidoc"` or `"code"`. */
