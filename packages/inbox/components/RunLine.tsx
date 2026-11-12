@@ -21,6 +21,12 @@ const shownCommand = (command: string) => command.replace(/^cd .*? && /, '');
 const STOP_TIP = 'Stops the session. Commands it started in the background keep running.';
 
 /**
+ * A turn that ended in an error (`run.turn_error`; approval "inbox-failed-turn-note"): the agent's own error is the
+ * note above, so the line says only that it couldn't answer (after its name) and that the message is kept.
+ */
+export const TURN_FAILED = "couldn't answer.";
+
+/**
  * A launched thread's run line (UX screens 05, 06, 08, 09, 11, 12, 14, 15): one
  * quiet line under the latest message, in place of the delivery line, saying
  * what the agent the person started is doing. It goes away while the agent
@@ -301,6 +307,18 @@ export function RunLine({
       break;
     case 'failed':
       icon = 'warn';
+      if (run.turn_error) {
+        text = (
+          <>
+            <b>
+              {name} {TURN_FAILED}
+            </b>{' '}
+            {kept}
+          </>
+        );
+        actions = retry('Try again');
+        break;
+      }
       // E10: a cloned repo that brings hooks, MCP servers or settings starts once the person trusts it (decision 4a).
       if (clone?.brings && clone.brings.length > 0 && run.untrusted && run.trust) {
         text = (
