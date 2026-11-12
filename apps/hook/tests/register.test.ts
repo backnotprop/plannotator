@@ -441,6 +441,31 @@ describe('register', () => {
     expect(w.tools).toEqual([])
   })
 
+  // The VS Code extension hosts Claude Code through the Agent SDK (not interactive, no surface at start) and
+  // starts its chat panel's CLI with CLAUDE_CODE_ENTRYPOINT=claude-vscode (#3111): the mod runs there.
+  test("the VS Code extension's chat panel runs the mod: ExitPlanMode is the mod's, and both tools are registered", async ($: any, on: any) => {
+    const w = world(on, { env: { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' } })
+    on('tool.call', () => ({ result: 'the classic flow ran' }))
+    await $.session.start({ ...SESSION, surface: null, isInteractive: false })
+
+    const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
+
+    // The mod opened the review and told Claude to wait for the decision, as in the terminal.
+    expect(answer.deny).toContain('NOT approved')
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
+  })
+
+  test('a claude -p started inside a VS Code panel session (it inherits claude-vscode) keeps the classic flow', async ($: any, on: any) => {
+    const w = world(on, { env: { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode', CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' } })
+    on('tool.call', () => ({ result: 'the classic flow ran' }))
+    await $.session.start({ ...SESSION, surface: null, isInteractive: false })
+
+    const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
+
+    expect(answer.result).toBe('the classic flow ran')
+    expect(w.tools).toEqual([])
+  })
+
   test('Claude running the CLI through Bash gets the tool: answered at once, the command never runs', async ($: any, on: any) => {
     const w = world(on)
     const ran: string[] = []

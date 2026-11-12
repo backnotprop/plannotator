@@ -28,7 +28,7 @@ import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
-import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor } from './inbox/connection';
+import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
@@ -91,7 +91,8 @@ export interface PromptConfig {
    */
   inbox?: {
     reminder?: string;
-    runtimes?: Partial<Record<InboxToolHost, { reminder?: string }>>;
+    rules?: string;
+    runtimes?: Partial<Record<InboxToolHost, { reminder?: string; rules?: string }>>;
   };
 }
 
@@ -380,6 +381,13 @@ export interface PlannotatorConfig {
    */
   inboxDebug?: boolean;
   /**
+   * The Plannotator Inbox keeps its records in SQLite (`inbox/inbox.db`) instead of the JSONL files, as
+   * `PLANNOTATOR_INBOX_SQLITE=1`. Off by default, for everyone. Config-only, read when the Inbox starts: on moves
+   * the files into the database (kept as a dated backup); turned off again, everything goes back into the files
+   * (`packages/shared/inbox/store-log/sqlite/open-store.ts`).
+   */
+  inboxSqlite?: boolean;
+  /**
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
    * localStorage so they survive the Inbox moving to another port (another
@@ -643,11 +651,12 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; list_view?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    agent_rules?: { shownAt?: string; key?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
@@ -1759,7 +1768,7 @@ export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.Process
  * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
  * Cline plugin (`@plannotator/cline`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
@@ -1776,9 +1785,10 @@ export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   opencode: AGENT_TOOL_DEFAULTS.opencode,
   dsh: AGENT_TOOL_DEFAULTS.dsh,
   cline: false,
+  openclaw: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw"];
 
 /**
  * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
@@ -1880,7 +1890,7 @@ export function resolveInboxReminderText(
   host: InboxToolHost,
   options: { wakes?: boolean; toolName?: string } = {},
 ): string {
-  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes });
+  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes, rules: inboxReminderRulesText(config, host) });
 }
 
 /**

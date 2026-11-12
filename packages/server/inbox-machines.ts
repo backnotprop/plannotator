@@ -521,7 +521,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onChange: machinesChanged,
       // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onSnoozes: () => emit({ event: "snoozes", data: {} }),
-      onDeliveries: ({ sessions, agents }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}) } }),
+      onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
     });
     peers.set(link.id, peer);
@@ -1127,6 +1127,16 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
   /** Each linked machine's agents, as its list last said (kept in memory while it is away, like its rows); none from an older Inbox. */
   const agents = (): InboxAgentsGroup[] => [...peers.values()].flatMap((peer) => (peer.list?.agents ? [peer.list.agents] : []));
+  const sessionNames = (): { labels: Record<string, string>; titles: Record<string, string> } => {
+    const labels = Object.create(null) as Record<string, string>;
+    const titles = Object.create(null) as Record<string, string>;
+    for (const peer of peers.values()) {
+      if (!peer.list) continue;
+      Object.assign(labels, peer.list.session_labels);
+      Object.assign(titles, peer.list.session_titles);
+    }
+    return { labels, titles };
+  };
   const projectOwner = (projectId: string): string | null => {
     for (const peer of peers.values()) if (peer.list?.projects.some((p) => p.id === projectId)) return peer.id;
     return null;
@@ -1160,6 +1170,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     rows,
     projects,
     agents,
+    sessionNames,
     projectOwner,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */

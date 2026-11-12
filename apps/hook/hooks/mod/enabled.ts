@@ -1,7 +1,8 @@
 /**
  * Whether the mod is switched on. It is ON BY DEFAULT wherever Claude Code
  * runs hooks modules (register.ts still stands down in `-p` / SDK sessions
- * and where it finds no shell for its scripts). The user turns it off with:
+ * other than the VS Code extension's chat panel, `isVsCodePanelSession`
+ * below, and where it finds no shell for its scripts). The user turns it off with:
  *
  *   PLANNOTATOR_CLAUDE_MOD=0            (env; also false/off/disabled; wins over the config file)
  *   { "claudeCodeMod": false }          (config.json in the data dir)
@@ -14,7 +15,7 @@
  * may import only its own files); `enabled.test.ts` keeps the two in step.
  */
 
-import { inboxReminderCustomText } from './inbox-contract'
+import { inboxReminderCustomText, inboxReminderRulesText } from './inbox-contract'
 
 /** The env override: true/false, or undefined when it does not decide (unset, empty, unrecognized). */
 export function parseClaudeModEnv(value: string | undefined): boolean | undefined {
@@ -201,4 +202,76 @@ export function resolveInboxReminderCustom(configText: string | null | undefined
   } catch {
     return null
   }
+}
+
+export function resolveInboxReminderRules(configText: string | null | undefined): string | null {
+  if (!configText) return null
+  try {
+    return inboxReminderRulesText(JSON.parse(configText), 'claude-code')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The entrypoint Claude Code's VS Code extension gives the sessions its chat
+ * panel starts (`CLAUDE_CODE_ENTRYPOINT`, set in the environment it spawns
+ * the CLI with; read in the 2.1.322 extension). Claude Desktop's is
+ * `claude-desktop`, an Agent SDK app's `sdk-ts` / `sdk-py`, `claude -p`'s
+ * `sdk-cli`, T3 Code's `t3-code`.
+ */
+export const VSCODE_PANEL_ENTRYPOINT = 'claude-vscode'
+
+/** What `isVsCodePanelSession` reads, each variable as `$.env.get` answers it. */
+export type PanelSessionEnv = {
+  /** `CLAUDE_CODE_ENTRYPOINT`. */
+  entrypoint: unknown
+  /** `CLAUDECODE`: set by Claude Code in every process it starts (and by IDE extensions in their terminals). */
+  claudecode: unknown
+  /** `CLAUDE_CODE_CHILD_SESSION`: set by Claude Code only in the processes it starts. */
+  childSession: unknown
+  /** `PLANNOTATOR_SESSION_TAG`: what the mod of the session that started this process set (`claude-code:<id>`). */
+  sessionTag: unknown
+}
+
+const setIn = (value: unknown) => typeof value === 'string' && value !== ''
+
+/**
+ * Whether a session that is not interactive (`session.start`'s
+ * `isInteractive` false) is a chat panel of the VS Code extension, where the
+ * mod runs as in the terminal (#3111). The extension hosts Claude Code
+ * through the Agent SDK, so its sessions are not interactive, but a person
+ * reads the panel and a plugin's turn shows there ("Prompt from the
+ * <plugin> plugin"). Every other non-interactive session stays inert:
+ * `claude -p`, Agent SDK apps, T3 Code, Claude Desktop, an unknown or
+ * missing entrypoint.
+ *
+ * The entrypoint is inherited: a `claude -p` started from inside a panel
+ * session (Claude's Bash, or an agent job of a Plannotator CLI the mod
+ * started) keeps `claude-vscode` (Claude Code changes only `cli`). Such a
+ * process is told apart by what its parent put in its environment, which the
+ * extension removes from the panel's own (it deletes `CLAUDECODE` and
+ * `CLAUDE_CODE_CHILD_SESSION` before it spawns the CLI): either Claude Code
+ * variable, or the mod's session tag naming another session. The tag naming
+ * this session is this process's own (a module reload runs `session.start`
+ * again after the mod set it).
+ */
+export function isVsCodePanelSession(env: PanelSessionEnv, sessionId: string): boolean {
+  if (env.entrypoint !== VSCODE_PANEL_ENTRYPOINT) return false
+  if (setIn(env.claudecode) || setIn(env.childSession)) return false
+  if (setIn(env.sessionTag) && env.sessionTag !== `claude-code:${sessionId}`) return false
+  return true
+}
+
+/**
+ * A prompt's `origin.kind` as the mod reads it. In a VS Code panel session
+ * the person's Enter reaches Claude Code as the SDK host's own turn (`sdk`:
+ * the extension sends what the person typed into the panel), so there it
+ * reads as `composer`, the person's Enter in the terminal: a prompt they type
+ * takes over the turn answering an "Ask this session" question and pulls the
+ * session's leases to this process, as in the terminal. Everywhere else, and
+ * for every other origin, the kind as the engine stamped it.
+ */
+export function promptOriginKind(kind: string, panel: boolean): string {
+  return panel && kind === 'sdk' ? 'composer' : kind
 }
