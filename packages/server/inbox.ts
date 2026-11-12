@@ -2098,7 +2098,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (problem) problems.push(problem);
     }
     if (typeof body.tool === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness, Cline and OpenClaw have one.", { field: "tool" });
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness, Cline, OpenClaw and Hermes Agent have one.", { field: "tool" });
       const problem = setInboxTool(agent as InboxToolHost, body.tool, agentEnvironment);
       if (problem) problems.push(problem);
     }
@@ -3482,7 +3482,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const changes: Partial<Record<InboxToolHost, boolean>> = {};
     for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
-        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline, openclaw).`, { field: `inbox_tool.${host}` });
+        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline, openclaw, hermes).`, { field: `inbox_tool.${host}` });
       }
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });

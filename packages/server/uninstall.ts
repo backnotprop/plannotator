@@ -43,6 +43,8 @@ import { hasTailnetDoorRecord, readTailnetDoorRecord } from "./inbox-tailnet-doo
 import { takeDownInboxTailscale } from "./inbox-tailscale";
 import { agentHomeAllowed, forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
 import { qwenTrustRemoval, type QwenRevokeResult } from "./inbox-qwen-trust";
+import { hermesPluginInstalled } from "./inbox-hermes";
+import { HERMES_PLUGIN_REMOVE } from "@plannotator/core/inbox-hermes";
 import { planInboxNoteRemoval } from "./inbox-agent-notes";
 import { INBOX_AGENT_LABELS, type InboxAgentId } from "@plannotator/core/inbox-types";
 import {
@@ -631,6 +633,9 @@ async function removeInboxAgentConnections(
   // Plannotator's trusted-sender token in Qwen Code (inbox-qwen-trust.ts): revoked in Qwen, whoever added the MCP entry.
   const trust = agentHomeAllowed(agents) ? qwenTrustRemoval(state.dataDir, agents) : null;
   for (const skipped of [...plan.skipped, ...notes.skipped]) state.warnings.push(`Skipped: ${skipped}.`);
+  if (agentHomeAllowed(agents) && hermesPluginInstalled(agents)) {
+    state.warnings.push(`Skipped: Hermes Agent's Plannotator plugin and its permission to start turns, which Hermes keeps; run \`${HERMES_PLUGIN_REMOVE}\` to remove both.`);
+  }
   // Every other entry that still runs Plannotator, whoever added it: named, so the person can remove it.
   const reportOthers = () => {
     const handled = new Set([...plan.items.filter((item) => !item.stray).map((item) => item.agent), ...plan.named]);

@@ -135,7 +135,7 @@ function noteReplySent(words: string): void {
   for (const listener of replyListeners) listener(lastReply);
 }
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline' | 'openclaw';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline' | 'openclaw' | 'hermes';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {

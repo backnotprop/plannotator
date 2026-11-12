@@ -33,11 +33,14 @@ import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxPersonAnsweredSince
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
-import { awayLine, outboxLine } from '../machines';
+import { awayLine, outboxLine, type MachinesModel } from '../machines';
+import { threadSessions, type ThreadSession } from '../agents/model';
+import { useInboxAgentsWho } from '../agentsList';
+import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
-import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
+import { annotationOf, attachmentFeedback, isFileComment, OWN_MESSAGE_COMMENT_ROW } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures, useCommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
@@ -99,6 +102,7 @@ import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered'
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
+import { givenName, useAgentNames } from '../agents/agentNames';
 import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
 import { shareUnchanged } from '../shareUnchanged';
@@ -146,14 +150,13 @@ import { fileGroupName, sentAnswersOf, sentReplyParts, type SentAnswerGroup } fr
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
 import { paintTagReferences, type TagMarkPlace } from '../tagHighlight';
-import { TagModeNote, TagNotes, TagStack, useTagConnections, useTaggable } from './TagPicker';
+import { TagModeNote, TagNotes, useTagConnections, useTaggable } from './TagPicker';
 import {
   activeHandoff,
   effectiveTagMode,
   handoffName,
   messageTags,
   namesList,
-  participantsWords,
   sendTagsByTarget,
   tagDeliveryLine,
   tagName,
@@ -1133,6 +1136,11 @@ export function MessageBody({
     const id = mark?.getAttribute('data-bind-id') ?? mark?.getAttribute('data-highlight-id');
     // A link in the highlight stays a link. A comment not sent yet (its draft mark) is the Viewer's: it opens the box.
     if (!id || target.closest('a, button') || mark?.classList.contains('comment-draft')) return;
+    // A press on a choice's words picks the choice (one click, as without comments); the comment there opens from
+    // the reply box's list. A press the card cancelled (a drag, a double-click) is the selection's, as below; on a card
+    // that takes no answer now, the press opens the comment as anywhere else.
+    const option = target.closest('[data-question-option]');
+    if (option && !event.defaultPrevented && !option.querySelector('input:disabled')) return;
     // A press that ended in a selection (a drag, a double or triple click) is the comment toolbar's.
     commentsRef.current?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
   };
@@ -1158,8 +1166,12 @@ export function MessageBody({
         onSelectAnnotation={comments ? selectBadge : noop}
         selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
-        // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
-        textDeletions={comments !== undefined}
+        // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete"). Not on the
+        // person's own words (approval "inbox-annotate-own-and-questions"): "Remove this" is about the agent's text.
+        textDeletions={comments !== undefined && message.author.kind === 'agent'}
+        // The whole question takes comments, wording, context and choices (approval "inbox-annotate-own-and-questions").
+        // A click on a choice still picks it; a drag or a double-click selects (QuestionBlock's own guard).
+        questionTextComments={comments !== undefined}
         suggestComment={comments?.suggest}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
@@ -1322,6 +1334,14 @@ export interface ThreadPaneProps {
   lookSeq?: number | null;
   /** When this thread came back from its snooze, while the person stays in it (snoozeBack.ts); else null. */
   snoozeBack?: string | null;
+  /**
+   * The window's rows and machines, which `threadSessions` (agents/model.ts) finds a thread's agents in. Absent: a
+   * session is named by its label, else its agent.
+   */
+  agentContext?: { rows: readonly InboxListRow[]; machines: MachinesModel } | null;
+  /** The list's agent filter now (`#agent=<id>`), and what a click on a session's name in the header does with it. */
+  agentFilter?: string | null;
+  onAgentFilter?: (agentId: string | null) => void;
   /**
    * Seen on sight (design record "inbox-new-in-open-thread", approved
    * 2026-10-12): the seq the window's looks this visit covered (the look
@@ -1722,6 +1742,10 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
+const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
+const NO_ROWS: readonly InboxListRow[] = [];
+const NO_SESSIONS: readonly ThreadSession[] = [];
+
 /**
  * A named session's message author (issue #2450): the agent's name as ever, then " · " and the session's label in
  * the secondary colour, a little smaller and never bold, cut in the middle past ROW_LABEL_MAX and with "…" where the
@@ -1745,7 +1769,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -2631,8 +2655,26 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
+  // Two or more sessions (issue #3108): the header's line and the message lines name each one.
+  const severalSessions = participants.length > 1;
+  const agentsWho = useInboxAgentsWho(severalSessions);
+  const sessions = useMemo(
+    () => (severalSessions ? threadSessions(participants, agentsWho, agentContext?.machines ?? NO_MACHINES, agentContext?.rows ?? NO_ROWS, machine?.id ?? null, sessionLabels) : NO_SESSIONS),
+    [severalSessions, participants, agentsWho, agentContext, machine, sessionLabels],
+  );
+  /** Each session id's name, in a thread with two or more sessions (its message lines lead with it). */
+  const sessionNames = useMemo(() => new Map(sessions.length > 1 ? sessions.flatMap((s) => s.sessions.map((id) => [id, s.name] as const)) : []), [sessions]);
   const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
-  const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
+  // A given name (agents/agentNames.ts) leads an `@` row's second line; the row's label is the token the agent reads, so it stays.
+  const agentNames = useAgentNames();
+  const tagOpts: TagOption[] = useMemo(
+    () =>
+      tagOptions(taggable, tagOwner, thread.project.id, whenTime).map((option) => {
+        const given = givenName(agentNames, option.id);
+        return given ? { ...option, detail: option.detail ? `${given} · ${option.detail}` : given } : option;
+      }),
+    [taggable, tagOwner, thread.project.id, agentNames],
+  );
   // Until the list is read (or from an older Inbox) `@` is plain text.
   const composerTags = useMemo(
     () =>
@@ -2931,9 +2973,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       return next.size === current.size ? current : next;
     });
   }, [records]);
-  /** A message comment's row in the reply box's list: "Claude Code's message, 2:58 PM". */
+  /** A message comment's row in the reply box's list: "Claude Code's message, 2:58 PM"; on the person's own, "Your message, 2:58 PM". */
   const messageCommentName = (record: InboxAnnotationRecord) => {
     const message = thread.messages.find((m) => m.id === record.message_id);
+    if (message?.author.kind === 'person') return `${OWN_MESSAGE_COMMENT_ROW} ${whenTime(record.message?.at ?? message.created_at)}`;
     const who = message ? agentName(message.author) : 'Agent';
     return `${who}'s message, ${whenTime(record.message?.at ?? message?.created_at ?? '')}`;
   };
@@ -3209,6 +3252,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     }
     return attachmentFeedback(pending, allFiles, texts, thread.project.root, {
       personMessageIds,
+      // A comment on a question's words names the question and the choice (approval "inbox-annotate-own-and-questions").
+      messageBodies: new Map(thread.messages.map((m) => [m.id, m.body])),
       // A comment that tags agents is marked in the export (approval "inbox-tag-agents").
       tagNames: (ids) => ids.map((id) => tagOpts.find((o) => o.id === id)?.label ?? 'an agent'),
       // A comment on a question's prototype is filed under the option it shows (approval "inbox-question-tradeoffs").
@@ -5411,11 +5456,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const joined = new Set<string>();
     for (const m of thread.messages) {
       if (m.author.kind !== 'person') continue;
-      if (m.handoff && !m.handoff.undone_at && m.to) threadMoves.set(m.id, { kind: 'handoff', names: handoffName(m), host: m.to.host });
+      if (m.handoff && !m.handoff.undone_at && m.to) threadMoves.set(m.id, { kind: 'handoff', names: givenName(agentNames, m.to.session) ?? handoffName(m), host: m.to.host });
       const added = messageTags(m).filter((t) => t.joined && !joined.has(t.session));
       for (const t of added) joined.add(t.session);
       if (added.length > 0 && !threadMoves.has(m.id)) {
-        threadMoves.set(m.id, { kind: 'added', names: namesList(added.map((t) => t.label || agentName({ kind: 'agent', host: t.host, name: t.name ?? null }))), host: added[0]!.host });
+        // The given name, else the header's name, else the tag's label, else the agent.
+        threadMoves.set(m.id, { kind: 'added', names: namesList(added.map((t) => givenName(agentNames, t.session) ?? sessionNames.get(t.session) ?? (t.label || agentName({ kind: 'agent', host: t.host, name: t.name ?? null })))), host: added[0]!.host });
       }
     }
   }
@@ -6743,17 +6789,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
             chip would (the owner, 2026-11-02: never the same words twice). */}
         {!one && !reviewView && (
-          <div className="ib-tmeta" data-thread-meta="">
+          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 ? '' : undefined}>
+            {/* Two or more sessions: who at the start, the count and time at the end. */}
+            {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />}
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
-                {participants.length > 1 && (
-                  <>
-                    <span className="ib-tg-hwho" data-thread-participants="">
-                      <TagStack participants={participants} />
-                      <span>{participantsWords(participants)}</span>
-                    </span>
-                    <span className="ib-tdot" aria-hidden="true" />
-                  </>
-                )}
                 <span>{plural(thread.messages.length, 'message')}</span>
                 <span className="ib-tdot" aria-hidden="true" />
                 <span>{spanWords(root.created_at, thread.messages[thread.messages.length - 1]!.created_at)}</span>
@@ -6795,14 +6834,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           const move = threadMoves.get(message.id);
           if (move) {
             const held = move.kind === 'handoff' && !message.handoff?.settled_at;
+            const quietAdd = move.kind === 'added' && sessions.length > 1;
             before.push(
-              <div className="ib-tmove" key={`move-${message.id}`} data-thread-move={move.kind} data-held={held ? '' : undefined}>
-                <Icon name={move.kind === 'handoff' ? 'forward' : 'plus'} size={14} />
+              <div className="ib-tmove" key={`move-${message.id}`} data-thread-move={move.kind} data-held={held ? '' : undefined} data-quiet={quietAdd ? '' : undefined}>
+                {/* Added to a thread of several: "You added Retry worker · 4:20 PM", the header's names, no icon or mark. */}
+                {!quietAdd && <Icon name={move.kind === 'handoff' ? 'forward' : 'plus'} size={14} />}
                 <span className="ib-tmove-t">
                   {move.kind === 'handoff' ? 'You handed this thread to ' : 'You added '}
-                  <HostMark host={move.host} />
+                  {!quietAdd && <HostMark host={move.host} />}
                   <b>{move.names}</b>
-                  {move.kind === 'added' ? ' to this thread' : ''}
+                  {move.kind === 'added' && !quietAdd ? ' to this thread' : ''}
                   <span className="ib-tmove-tm"> · {whenTime(message.created_at)}</span>
                 </span>
                 {held && (
@@ -6835,11 +6876,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // screen reader. The session's poll names it; an unnamed one reads as it always did. Display only: no
           // tool takes a label, but Claude Code's comes from the transcript, which the session's own model can
           // append to, so it never proves who wrote (the agent's name and mark stay, and the server refuses "You").
-          const authorLabel = message.author.kind === 'agent' ? labelOf(sessionLabels, message.author.session) : null;
-          const name = isAgent ? agentName(message.author) : 'You';
+          // In a thread with two or more sessions the header's name for the session leads, its agent in the mark,
+          // the tooltip and after it for a screen reader: "Billing refactor", heard "Billing refactor, Claude Code".
+          const kind = message.author.kind === 'agent' ? agentName(message.author) : null;
+          const sessionName = message.author.kind === 'agent' ? (sessionNames.get(message.author.session ?? '') ?? null) : null;
+          const named = sessionName && sessionName !== kind ? sessionName : null;
+          const authorLabel = message.author.kind === 'agent' && !named ? labelOf(sessionLabels, message.author.session) : null;
+          const name = named ?? kind ?? 'You';
           const labelled = authorLabel ? authorWithLabel(name, authorLabel) : null;
-          const nameTip = labelled?.shown ?? name;
-          const nameSaid = labelled?.spoken ?? name;
+          const nameTip = named ? `${named} · ${kind}` : (labelled?.shown ?? name);
+          const nameSaid = named ? `${named}, ${kind}` : (labelled?.spoken ?? name);
           // The day too when it is not today, and the whole moment on hover.
           const time = whenTime(message.created_at);
           const fullWhen = fullTime(message.created_at);
@@ -6903,8 +6949,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       <Icon name="reply" />
                     </span>
                   )}
-                  <Tip content={nameTip} cut={!authorLabel}>
-                    {authorLabel ? labelledAuthorName({ agent: name, label: authorLabel, hidden: true }) : <span className="ib-fl-nm">{name}</span>}
+                  <Tip content={nameTip} cut={!authorLabel && !named}>
+                    {authorLabel ? (
+                      labelledAuthorName({ agent: name, label: authorLabel, hidden: true })
+                    ) : (
+                      <span className="ib-fl-nm" data-session-name={named ? '' : undefined}>
+                        {named ? <bdi>{name}</bdi> : name}
+                      </span>
+                    )}
                   </Tip>
                   {/* An answers snippet is shortened (each prompt cut at a word): its whole text always; words only while cut. */}
                   <Tip content={snippetText(snippet)} cut={snippet.kind !== 'answers'}>
@@ -7035,12 +7087,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                         </span>
                       )}
                     </span>
-                    <Tip content={authorLabel ? nameTip : one ? name : null} cut={!authorLabel}>
+                    <Tip content={authorLabel || named ? nameTip : one ? name : null} cut={!authorLabel && !named}>
                       {authorLabel ? (
                         labelledAuthorName({ agent: name, label: authorLabel, open: true, hidden: hide, onFold: one ? undefined : () => toggleMessage(message.id) })
                       ) : (
-                        <span className="ib-fl-nm ib-who" aria-hidden={hide}>
+                        <span className="ib-fl-nm ib-who" aria-hidden={hide} data-session-name={named ? '' : undefined} onClick={named && !one ? () => toggleMessage(message.id) : undefined}>
                           <bdi>{name}</bdi>
+                          {named && !hide && <span className="ib-sr">, {kind}</span>}
                         </span>
                       )}
                     </Tip>
@@ -7153,7 +7206,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       : undefined
                   }
                   comments={
-                    isAgent && liveMessage(message)
+                    // The person's own messages take comments too, never the Inbox's own notes (approval
+                    // "inbox-annotate-own-and-questions"; the store refuses those).
+                    (isAgent || !isInboxNote(message)) && liveMessage(message)
                       ? {
                           annotations: messageComments.get(message.id) ?? NO_ANNOTATIONS,
                           onSave: (annotation) => saveMessageComment(message.id, annotation),
