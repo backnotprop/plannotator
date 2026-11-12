@@ -32,6 +32,19 @@ function isLocalHostName(hostHeader: string | null): boolean {
 	return isLoopbackHostname(name) || isLocalhostSubdomain(name);
 }
 
+/**
+ * Whether a TCP peer address is this machine's loopback (`127.0.0.0/8`, `::1`,
+ * or IPv4 loopback mapped into IPv6). A peer address cannot be claimed by a
+ * header: it is what decides an SSH session's requests (`isSshTunnelRequest`).
+ */
+export function isLoopbackPeerAddress(address: string | null | undefined): boolean {
+	if (!address) return false;
+	const a = address.trim().toLowerCase();
+	if (a === "::1" || a === "0:0:0:0:0:0:0:1") return true;
+	const v4 = a.startsWith("::ffff:") ? a.slice(7) : a;
+	return /^127(?:\.\d{1,3}){3}$/.test(v4);
+}
+
 /** Whether the request is a page on this machine (see the module comment). */
 export function isThisMachineReader(remote: boolean, headers: Headers): boolean {
 	if (remote) return false;

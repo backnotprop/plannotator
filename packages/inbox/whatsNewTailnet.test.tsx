@@ -3,7 +3,8 @@
  * (`via: 'tailnet'`, `guest: false` in the settings read) is offered What's
  * new (the sidebar's quiet link after an update, and Settings → About) and,
  * as on the computer, the update control (approval "inbox-tailnet-owner");
- * another allowed login's page is offered neither.
+ * another allowed login's page is offered What's new too (owner ruling
+ * 2026-11-11: release notes are public) and no update control.
  *
  * The whole window (InboxApp) over a REAL Inbox server in a temp data dir
  * (tests/helpers/inbox-dom-server.ts `whats-new` mode: this Inbox is 0.28.19,
@@ -212,12 +213,12 @@ test.skipIf(!hasDom)("the owner over the tailnet with a release to install: the 
   expect(updateActions()).toEqual([]);
 });
 
-test.skipIf(!hasDom)("another allowed login over the tailnet: no What's new link and no update control, in the sidebar or in Settings → About", async () => {
+test.skipIf(!hasDom)("another allowed login over the tailnet: What's new in the sidebar and Settings → About, and no update control in the sidebar or there", async () => {
   guest = true;
   const el = renderApp();
   await until(() => !!el.querySelector('.ib-listcol, [data-section-id], .pn-inbox'), 'the window');
-  await settle();
-  expect(el.querySelector('[data-whats-new-link]')).toBeNull();
+  // The sidebar's quiet link after an update, as on every page.
+  await until(() => !!el.querySelector('[data-whats-new-link="0.28.19"]'), "the sidebar's What's new link");
   // The fixture really offers an update (a page on this computer would show the Update button), and this page shows none of it.
   expect(JSON.parse((await loopback('/api/inbox/threads')).text).update).toMatchObject({ state: 'available', version: '0.28.25' });
   expect(el.querySelector('.ib-upd')).toBeNull();
@@ -228,9 +229,9 @@ test.skipIf(!hasDom)("another allowed login over the tailnet: no What's new link
   await until(() => !!el.querySelector('[data-settings-about]'), 'Settings → About');
   await settle();
   expect(el.querySelector('[data-settings-about]')?.getAttribute('data-settings-about')).toBe('tailnet');
-  expect(el.querySelector('[data-about-whats-new]')).toBeNull();
+  expect(el.querySelector('[data-about-whats-new]')).not.toBeNull();
   expect(el.querySelector('[data-settings-about] [role="switch"]')).toBeNull();
-  expect(buttonsNamed(el, /Check now|Update|What's new/)).toEqual([]);
+  expect(buttonsNamed(el, /Check now|Update/)).toEqual([]);
   expect(el.querySelector('[data-about-update], [data-general-update], [data-general-check]')).toBeNull();
   expect(updateActions()).toEqual([]);
 });

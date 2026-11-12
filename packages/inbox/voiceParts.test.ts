@@ -138,7 +138,7 @@ describe('the status line', () => {
 });
 
 describe('when the announcement may ask', () => {
-  const load: VoiceIntroLoad = { due: true, local: true, listLoaded: true, firstRun: false, listIntroDue: false, tourThisLoad: false, otherDialogThisLoad: false, othersSettled: true, updating: false };
+  const load: VoiceIntroLoad = { due: true, owner: true, listLoaded: true, firstRun: false, listIntroDue: false, tourThisLoad: false, otherDialogThisLoad: false, othersSettled: true, updating: false };
 
   test('due, on this computer, nothing else on this load, settled', () => {
     expect(voiceIntroMayAsk(load, true)).toBe(true);
@@ -147,7 +147,7 @@ describe('when the announcement may ask', () => {
 
   test.each([
     ['not due', { due: false }],
-    ['over the tailnet', { local: false }],
+    ["a tailnet guest's page", { owner: false }],
     ['before the list', { listLoaded: false }],
     ['first run', { firstRun: true }],
     ['the list options dialog is due', { listIntroDue: true }],

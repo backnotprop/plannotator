@@ -2546,6 +2546,7 @@ async function defaultRunCommand(
       stdout: "pipe",
       stderr: "ignore",
       env: { ...process.env, ...env },
+      windowsHide: true,
     });
   } catch {
     return { exitCode: 1, timedOut: false };
@@ -2587,6 +2588,7 @@ async function defaultScheduleWindowsSelfDelete(
         stdin: "ignore",
         stdout: "ignore",
         stderr: "ignore",
+        windowsHide: true,
         env: {
           ...process.env,
           PLANNOTATOR_UNINSTALL_TARGET: target,

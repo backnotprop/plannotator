@@ -13,7 +13,7 @@ import { LIST_INTRO_MIN_ROWS, ROWS_INTRO_END_MS, listIntroMayAsk, listIntroPageC
 
 const ready: ListIntroLoad = {
   due: true,
-  local: true,
+  owner: true,
   listLoaded: true,
   firstRun: false,
   rows: 5,
@@ -38,8 +38,8 @@ describe('the list options dialog: when a load may ask for it', () => {
     }
   });
 
-  test('not due (a new user, or already shown), through the tailnet, on first run or before the list loads: never', () => {
-    for (const load of [{ ...ready, due: false }, { ...ready, local: false }, { ...ready, firstRun: true }, { ...ready, listLoaded: false }]) {
+  test("not due (a new user, or already shown), on a tailnet guest's page, on first run or before the list loads: never", () => {
+    for (const load of [{ ...ready, due: false }, { ...ready, owner: false }, { ...ready, firstRun: true }, { ...ready, listLoaded: false }]) {
       expect(listIntroWanted(load)).toBe(false);
     }
   });
