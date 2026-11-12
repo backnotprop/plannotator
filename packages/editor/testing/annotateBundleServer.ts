@@ -1,14 +1,3 @@
-/**
- * Test helper process: runs the real Bun annotate server in bundle mode over
- * the files named on the command line and prints its URL as one JSON line.
- * DOM tests start it as a child process because under happy-dom the global
- * `Response` is happy-dom's, which `Bun.serve` refuses.
- *
- *   bun packages/editor/testing/annotateBundleServer.ts <root> <file> <file>...
- *
- * The caller sets PLANNOTATOR_DATA_DIR (a temp directory) in the child's
- * environment and stops it with SIGTERM.
- */
 import { startAnnotateServer } from "../../server/annotate";
 
 const [root, ...files] = process.argv.slice(2);
