@@ -938,7 +938,7 @@ test.skipIf(!hasDom)('a file\'s comment box offers no picture button where nothi
   expect(pictureButton()).toBeNull();
 });
 
-test.skipIf(!hasDom)('a file\'s comment box in a thread offers the picture button, with no typed path or URL', async () => {
+test.skipIf(!hasDom)('a file\'s comment box in a thread offers the attachments button for pictures and files, with no typed path or URL', async () => {
   serve();
   await render(
     <CommentPictures thread="thr_01K7AAAAAAAAAAAAAAAAAAAAAA" records={[]}>
@@ -949,5 +949,5 @@ test.skipIf(!hasDom)('a file\'s comment box in a thread offers the picture butto
   expect(pictureButton()).not.toBeNull();
   await act(async () => (pictureButton() as HTMLButtonElement).click());
   expect(document.querySelector('input[placeholder="Paste path or URL..."]')).toBeNull();
-  expect(document.body.textContent).toContain('Drop image or click to browse');
+  expect(document.body.textContent).toContain('Drop a file or click to browse');
 });
