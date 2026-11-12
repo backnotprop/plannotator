@@ -58,7 +58,7 @@ import { readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/in
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
+import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
 export const PI = "pi" as const;
 export const PI_NAME = "Pi";
@@ -83,8 +83,6 @@ const HANDOFF_MS = 60_000;
 const TERMINAL_OPEN_MS = 30_000;
 /** The longest dialog title the thread note quotes. */
 const NOTE_TITLE_MAX = 80;
-/** The longest error text a turn's error note quotes. */
-const NOTE_ERROR_MAX = 300;
 /**
  * A Pi before 0.80.4 sends no `agent_settled`: how long after a run's last `agent_end` its error is held for
  * one (or for a compaction or retry that may still follow) before the note goes anyway.
@@ -230,10 +228,7 @@ export function piTurnError(messages: unknown): string | undefined {
 }
 
 /** The thread note for a turn that ended in an error: Pi's own words, one line. */
-export function piTurnErrorNote(error: string): string {
-  const shown = launchNoteText(error, NOTE_ERROR_MAX);
-  return shown ? `Pi's turn ended with an error: ${shown}` : "Pi's turn ended with an error.";
-}
+export const piTurnErrorNote = (error: string): string => launchTurnErrorNote("Pi", error);
 
 /** Pi's default sessions folder for `cwd` under `agentDir` (its `getDefaultSessionDirPath`). */
 export function piSessionDirOf(agentDir: string, cwd: string): string {

@@ -6,7 +6,7 @@
  * executable (`process.execPath`) through a `/bin/sh` wrapper on PATH.
  *
  * State lives in the folder the wrapper names (`FAKE_CLAUDE_STATE`):
- *  - config.json  what the test asks for: { version, fault, workMs, hold, waiting, answer, startDelayMs, bgDelayMs, busyDelayMs }
+ *  - config.json  what the test asks for: { version, fault, workMs, hold, waiting, answer, startDelayMs, bgDelayMs, busyDelayMs, apiError }
  *  - delivered.log  one line per command a session took (after `delivered` was posted)
  *  - calls.jsonl  one line per call: argv, cwd, env names, and for --bg the
  *                 settings file (content, mode) and whether the thread existed
@@ -36,6 +36,15 @@
  * `workMs` (and while `hold` or `waiting` is set) it answers through the
  * Inbox's MCP `send_message` with `reply_to`, and goes idle. `waiting` makes
  * the host list it as waiting on a permission prompt meanwhile.
+ *
+ * `apiError` ({ error, text }): the turn ends as Claude Code ends one the API
+ * refused: no answer in the Inbox, and the session's transcript
+ * (<CLAUDE_CONFIG_DIR or HOME/.claude>/projects/<folder>/<sessionId>.jsonl)
+ * gets the prompt and an assistant entry with `isApiErrorMessage: true`, that
+ * `error` and the text, as Claude Code 2.1.322 writes it. A session whose
+ * transcript exists writes its later turns there too (the prompt, then the
+ * answer). As the mod, a command no longer handed out is forgotten, so one
+ * handed out again (Try again) is taken again.
  *
  * Project MCP servers, as Claude Code 2.1.316 sorts them: a name in
  * `disabledMcpjsonServers` (the --settings file, or the folder's
@@ -161,6 +170,9 @@ const trusted = (folder) => {
     if (path.dirname(dir) === dir) return false;
   }
 };
+/** Where Claude Code keeps a session's transcript: every character of the folder but a letter or digit as `-`. */
+const transcriptPath = (folder, sessionId) =>
+  path.join(process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || "", ".claude"), "projects", folder.replace(/[^A-Za-z0-9]/g, "-"), `${sessionId}.jsonl`);
 const untrustedExit = (folder) => {
   process.stdout.write("Starting background service…\n");
   process.stderr.write(`Error: Workspace not trusted. Run \`claude\` in ${folder} once and accept the trust dialog.\n`);
@@ -409,6 +421,8 @@ async function session(sessionId) {
   });
   const post = (p, body) => fetch(base + p, { method: "POST", headers, body: JSON.stringify({ session: sessionId, host: "claude-code", ...body }) });
   const taken = new Set();
+  /** Taken and not yet finished: kept in `taken` whatever the poll hands out meanwhile. */
+  const working = new Set();
   /** The person answered this session's dialog in `claude attach` (`localAnswer` is its session id). */
   const answeredLocally = () => config().localAnswer === sessionId;
 
@@ -509,10 +523,26 @@ async function session(sessionId) {
     }
     const until = Date.now() + (config().workMs ?? 800);
     while (!stopped && (Date.now() < until || config().hold || config().waiting)) await sleep(150);
+    const apiError = config().apiError || null;
+    const transcript = transcriptPath(agent.cwd, sessionId);
+    const entry = (record) => fs.appendFileSync(transcript, `${JSON.stringify({ sessionId, cwd: agent.cwd, timestamp: new Date().toISOString(), uuid: crypto.randomUUID(), ...record })}\n`);
+    if (apiError || fs.existsSync(transcript)) {
+      fs.mkdirSync(path.dirname(transcript), { recursive: true });
+      entry({ type: "user", message: { role: "user", content: command.body } });
+    }
+    if (apiError) {
+      entry({ type: "assistant", isApiErrorMessage: true, error: apiError.error, message: { model: "<synthetic>", role: "assistant", stop_reason: "stop_sequence", content: [{ type: "text", text: apiError.text }] } });
+      busy = false;
+      idleSince = new Date().toISOString();
+      updateAgent(sessionId, { status: "idle" });
+      await post("/api/inbox/bridge/event", { type: "state", busy: false }).catch(() => {});
+      return;
+    }
     const first = command.body.split("\n")[0].slice(0, 60);
     const tools = outcomes.length > 0 ? ` [${outcomes.map((o) => `${o.tool} ${o.outcome}`).join(", ")}]` : "";
     // `body`: the whole answer, in words (a screenshot's realistic reply); otherwise the line tests read.
     const body = config().body || `${config().answer || "Done"}: ${first} (${env.PLANNOTATOR_LAUNCH || "no launch"})${tools}`;
+    if (fs.existsSync(transcript)) entry({ type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: body }] } });
     await fetch(`${base}/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
@@ -544,10 +574,14 @@ async function session(sessionId) {
       const parsed = await response.json();
       commands = Array.isArray(parsed.commands) ? parsed.commands : [];
     } catch {}
+    // As the mod: what is no longer handed out is forgotten (a message sent again is new).
+    const handed = new Set(commands.map((command) => command && command.id));
+    for (const id of taken) if (!handed.has(id) && !working.has(id)) taken.delete(id);
     for (const command of commands) {
       if (!command || typeof command.id !== "string" || taken.has(command.id)) continue;
       taken.add(command.id);
-      queue = queue.then(() => work(command));
+      working.add(command.id);
+      queue = queue.then(() => work(command)).finally(() => working.delete(command.id));
     }
   }
 }

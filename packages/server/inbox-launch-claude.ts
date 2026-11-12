@@ -27,7 +27,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
@@ -37,6 +37,7 @@ import { placeKey, readAgentFile } from "./agent-files";
 import {
   agentVersionRun,
   claudeBypassSetup,
+  claudeConfigDir,
   claudeCodeInboxToolOn,
   claudeCodePluginEnabled,
   CLAUDE_JSON_MAX_BYTES,
@@ -49,7 +50,7 @@ import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./i
 import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading, hasGit } from "./inbox-launch-claude-trust";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
 import { claudeRulePathOf, claudeWindowsTrustKeys, powerShellInFolder, powerShellQuote } from "./inbox-launch-windows";
-import { launchUploadsDir, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchTrustOffer, type LaunchTrustTarget } from "./inbox-launch-host";
+import { launchUploadsDir, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchTrustOffer, type LaunchTrustTarget, type LaunchTurnError } from "./inbox-launch-host";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
 export const CLAUDE_LAUNCH_MIN_VERSION = "2.1.314";
@@ -262,6 +263,93 @@ export function claudeRepositoryAbove(folder: string): string | null {
 /** Claude's transcripts folder name for a project path: every character but a letter or digit as `-`. */
 function claudeProjectDirName(folder: string): string {
   return folder.replace(/[^A-Za-z0-9]/g, "-");
+}
+
+/** The most of a transcript's end the failed-turn check reads: its last turn's entries, never the whole file. */
+export const CLAUDE_TRANSCRIPT_TAIL_BYTES = 64 * 1024;
+
+/**
+ * Where Claude Code writes `session`'s transcript when it runs in `folder`: `<config dir>/projects/<folder's
+ * name>/<session>.jsonl`. Null for an id that is not one, or a folder name past 200 characters (Claude adds a hash there).
+ */
+export function claudeTranscriptPath(configDir: string, folder: string, session: string): string | null {
+  const name = claudeProjectDirName(folder);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(session) || !name || name.length > 200) return null;
+  return join(configDir, "projects", name, `${session}.jsonl`);
+}
+
+/**
+ * How the last turn in a transcript's end ended: the error Claude Code wrote down for it, or null (it ended well,
+ * a new prompt came after, or the end holds no turn). Claude Code (2.1.322) writes a turn the API refused as an
+ * assistant entry with `isApiErrorMessage: true`, its words in the text, and `error` one of authentication_failed,
+ * oauth_org_not_allowed, account_on_hold, verification_required, billing_error, rate_limit, overloaded,
+ * invalid_request, model_not_found, server_error, unknown, max_output_tokens or cloud_credential_error; any of them,
+ * and any kind it adds later, is quoted the same way. A line cut short (the read's first, or one still being
+ * written) is not read.
+ */
+export function claudeTurnErrorOf(tail: string): LaunchTurnError | null {
+  const lines = tail.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!.trim();
+    if (!line.startsWith("{")) continue;
+    let entry: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      entry = parsed as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const message = entry.message && typeof entry.message === "object" ? (entry.message as { content?: unknown }) : null;
+    const content = message?.content;
+    if (entry.type === "user") {
+      // A tool's result goes on with the same turn; a prompt (the Inbox's, the person's) begins a new one.
+      if (entry.isMeta === true || entry.isSidechain === true) continue;
+      if (Array.isArray(content) && content.length > 0 && content.every((part) => (part as { type?: unknown })?.type === "tool_result")) continue;
+      return null;
+    }
+    if (entry.type !== "assistant" || entry.isSidechain === true) continue;
+    if (entry.isApiErrorMessage !== true) return null;
+    const key = typeof entry.uuid === "string" && /^[A-Za-z0-9-]{1,64}$/.test(entry.uuid) ? entry.uuid : null;
+    if (!key) return null;
+    const text = Array.isArray(content)
+      ? content.flatMap((part) => ((part as { type?: unknown })?.type === "text" && typeof (part as { text?: unknown }).text === "string" ? [(part as { text: string }).text] : [])).join(" ")
+      : typeof content === "string"
+        ? content
+        : "";
+    const at = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : Number.NaN;
+    return { key, text, at: Number.isFinite(at) ? at : Date.now() };
+  }
+  return null;
+}
+
+/**
+ * The end of a transcript, CLAUDE_TRANSCRIPT_TAIL_BYTES at most, read only; null when there is no such file or it
+ * can't be read. Kept per path while its size and time stay the same, so an idle session's file is read once.
+ */
+const transcriptTails = new Map<string, { size: number; mtime: number; result: LaunchTurnError | null }>();
+export function claudeTranscriptTurnError(path: string): LaunchTurnError | null {
+  let fd: number | null = null;
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile()) return null;
+    const kept = transcriptTails.get(path);
+    if (kept && kept.size === stat.size && kept.mtime === stat.mtimeMs) return kept.result;
+    const length = Math.min(stat.size, CLAUDE_TRANSCRIPT_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    fd = openSync(path, "r");
+    const read = readSync(fd, buffer, 0, length, stat.size - length);
+    // A read that starts inside a line drops that line (it is not whole); a whole file starts at its first.
+    let text = buffer.subarray(0, read).toString("utf8");
+    if (stat.size > length) text = text.slice(text.indexOf("\n") + 1);
+    const result = claudeTurnErrorOf(text);
+    transcriptTails.set(path, { size: stat.size, mtime: stat.mtimeMs, result });
+    return result;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
 }
 
 /**
@@ -625,6 +713,25 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
 
     /** The mod's bridge poll. */
     live: (session: string) => ctx.bridge.runStateOf(session),
+
+    /**
+     * The error the launched session's last turn ended in, from the end of its own transcript (read only; Claude
+     * tells the Inbox nothing of it). The folder it started in, as given and as its real path (Claude may write either).
+     */
+    turnError(launch: InboxLaunchRecord, session: string): LaunchTurnError | null {
+      const configDir = claudeConfigDir(claudeFiles());
+      let real = launch.folder;
+      try {
+        real = realpathSync(launch.folder);
+      } catch {
+        // Gone: the path as given.
+      }
+      for (const folder of new Set([launch.folder, real])) {
+        const path = claudeTranscriptPath(configDir, folder, session);
+        if (path && existsSync(path)) return claudeTranscriptTurnError(path);
+      }
+      return null;
+    },
 
     /** `claude respawn <short>`: a pending reply is delivered once it connects. Claude checks trust here too. */
     async resume(launch: InboxLaunchRecord) {
