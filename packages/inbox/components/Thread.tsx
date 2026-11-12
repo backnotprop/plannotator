@@ -25,11 +25,11 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { LaunchChoiceMeta } from './LaunchChoiceMeta';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxReplyQuote, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
-import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
+import { inboxAskingMessage, inboxPersonAnsweredSince, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
@@ -98,9 +98,9 @@ import { conflictText, DraftHead, DraftFootNote, DraftStamp, unsentWords } from 
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { debugNote } from '../debugLog';
-import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from '../deliveryLine';
+import { deliveryLine, restartNote, uncertainItem, waitInputs, type DeliveryLine } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
-import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
+import { UndeliveredBand, UndeliveredText } from './Undelivered';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
@@ -180,8 +180,11 @@ import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
 import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
-import { arrowQuotesWhole, flashQuoteWords, quoteToSend, REPLY_QUOTE_WORDS, selectedWordsIn } from '../replyQuote';
-import { ReactionTray, justReacted, reactionSpeech } from './ReactionTray';
+import { arrowQuotesWhole, quoteToSend, selectedWordsIn } from '../replyQuote';
+import { useReplyQuote } from '../useReplyQuote';
+import { AckPill } from '../parts/AckPill';
+export { AckPill };
+import { ReactionTray } from './ReactionTray';
 import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
@@ -1476,9 +1479,6 @@ export const SIDE_COMMAND_DESCRIPTION = 'Start a side conversation with your age
 /** How long "No skills are installed" stays in the reply box's row after a press on Skills with none to pick. */
 const NO_SKILLS_HINT_MS = 2000;
 
-/** Where a 👍 Looks good is on its way to the agent (amended 2026-10-16: it is sent through). */
-export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'delivered' | 'not-sent';
-
 /**
  * What in the reply box keeps its own click: its controls (the chips'
  * buttons, a file tile's ×), the annotations list, the skill picker, and the
@@ -1511,96 +1511,6 @@ function focusReplyFromBox(event: ReactMouseEvent<HTMLElement>, field: HTMLTextA
   field.focus({ preventScroll: true });
   const end = field.value.length;
   field.setSelectionRange(end, end);
-}
-
-/**
- * The line under a 👍: the toast's Undo window still runs (`pending`), the
- * Inbox sent it and a connection wakes the agent with it (`queued`, or
- * `sending` while that session is idle: the same honest words as a reply's
- * line, from the session's connection now, `deliveryLine`), it waits for an
- * agent that only reads the thread (`saved`), or it reached the agent
- * (`delivered`: its turn was delivered, or the agent read it). No Send now: a
- * 👍 asks nothing of the agent, so it never goes into a running turn; it
- * waits for the turn to end. Pure, for the tests.
- */
-export function ackPillLine(
-  ack: NonNullable<InboxMessageWire['ack']>,
-  agent: string,
-  wakes: boolean,
-  time: (iso: string) => string = whenTime,
-  connection?: RecipientConnection | null,
-  now: number = Date.now(),
-): { state: AckPillState; text: string } {
-  if (ack.delivered_at) {
-    // Marked by the Inbox to go in by itself: say how it went in (into the running turn, or when it ended).
-    const marked = ack.deliver_now_by === 'auto' && ack.deliver_now_at && ack.wait_started_at;
-    const auto = !marked
-      ? ''
-      : ack.delivered_into_turn === false
-        ? ` · ${TURN_ENDED_TEXT}`
-        : ` · ${autoAfterText(wholeMinutes(ack.wait_started_at!, ack.deliver_now_at!))}`;
-    return { state: 'delivered', text: `Delivered to ${agent}, ${time(ack.delivered_at)}${auto}` };
-  }
-  // The window ended after the person replied, or the agent wrote again: it was not sent.
-  if (ack.not_sent === 'replied') return { state: 'not-sent', text: 'not sent: you replied' };
-  if (ack.not_sent === 'wrote_again') return { state: 'not-sent', text: `not sent: ${agent} wrote again` };
-  const you = `You, ${time(ack.at)} · `;
-  if (ack.settled_seq == null) return { state: 'pending', text: `${you}goes to ${agent} in a few seconds` };
-  // A 👍 settled before it was sent through (no note) never reaches a wake: it waits for a read.
-  if (wakes && ack.note_id) {
-    const line = deliveryLine({
-      name: agent,
-      deliveredAt: null,
-      time,
-      wakes: true,
-      sendingNow: !!ack.deliver_now_at,
-      connection,
-      // It waits on a busy session: "Undelivered N min"; a 👍 waits for the turn to end (INBOX_AUTO_SEND_ACK_NOTES), no countdown.
-      ...waitInputs(connection, ack.note_id, { wait_started_at: ack.wait_started_at, deliver_now_by: ack.deliver_now_by, deliver_now_at: ack.deliver_now_at }),
-      ...(INBOX_AUTO_SEND_ACK_NOTES ? {} : { autoSendAfterMs: null }),
-      now,
-    });
-    return { state: line.state === 'sending' ? 'sending' : 'queued', text: `${you}${line.text}` };
-  }
-  return { state: 'saved', text: `${you}Saved for ${agent}. It sees it when it next reads this thread.` };
-}
-
-/** Under a message the person marked 👍 Looks good: when, and where it is on its way to the agent. */
-export function AckPill({
-  ack,
-  agent,
-  wakes = false,
-  connection,
-  messageId,
-}: {
-  ack: NonNullable<InboxMessageWire['ack']>;
-  /** The message it marks: where a reaction's emoji lands (ReactionTray.tsx `flyReaction`). */
-  messageId?: string;
-  agent: string;
-  wakes?: boolean;
-  /** How the agent's session is connected now (the sessions route's `asker.connection`); undefined while unknown. */
-  connection?: RecipientConnection | null;
-}) {
-  // The wait on a busy session is written in whole minutes: its own clock, while the 👍 waits.
-  const now = useMinuteClock(!ack.delivered_at && !!ack.note_id);
-  const line = ackPillLine(ack, agent, wakes, whenTime, connection, now);
-  // The emoji picked in the 👍's tray (approval "inbox-reaction-tray"): its name, or the emoji alone.
-  const reaction = ack.reaction ?? null;
-  // Only the line a reaction was just sent to fades in; an old one is simply there when the thread opens.
-  const [fresh] = useState(() => !!messageId && justReacted(messageId));
-  return (
-    <p className="ib-ackpill" data-ack-pill={line.state} data-ack-for={messageId} data-ack-fresh={fresh ? '' : undefined}>
-      <span className="ib-ackchip" data-bare={reaction && !reaction.label ? '' : undefined}>
-        <span className="ib-ackemoji" aria-hidden="true">
-          {reaction?.emoji ?? '👍'}
-        </span>
-        {reaction ? reaction.label ? ` ${reaction.label}` : <span className="ib-sr">{reactionSpeech(reaction)}</span> : ` ${ack.label}`}
-      </span>
-      <Tip content={line.state === 'delivered' && ack.delivered_at ? `You marked it ${fullTime(ack.at)}; delivered ${fullTime(ack.delivered_at)}` : fullTime(ack.at)}>
-        <span className="ib-ackwhen">{line.text}</span>
-      </Tip>
-    </p>
-  );
 }
 
 /**
@@ -2741,73 +2651,22 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const files = replyFiles.draftFiles(text);
     if (boxRef.current.open && (text.trim() !== '' || files.length > 0)) replyDraft.save(text, files);
   };
-  // ── Reply with a quote (approval "inbox-reply-quote"; replyQuote.ts) ──
-  /** The message the box's words answer: set by ↩ on an older message, or on words selected in one; null: none (a plain Reply). */
-  const [quote, setQuoteState] = useState<InboxReplyQuote | null>(null);
-  const quoteRef = useRef(quote);
-  quoteRef.current = quote;
-  /** The person chose the quote in this window (↩ or ×): a draft's answer never takes it back while the box is open. */
-  const quoteChosen = useRef(false);
-  /** The quoted message, when it is in the thread (a quote of anything else is not shown and not sent). */
-  const quotedMessage = quote ? thread.messages.find((m) => m.id === quote.of) : undefined;
-  /** Set (or drop) the quote; the draft's next saves name it, and a draft already kept learns it now. */
-  const setQuote = (next: InboxReplyQuote | null) => {
-    quoteChosen.current = true;
-    setQuoteState(next);
-    replyDraft.quote(next);
-    const text = replyText.get();
-    const files = replyFiles.draftFiles(text);
-    if (boxRef.current.open && (text.trim() !== '' || files.length > 0)) replyDraft.save(text, files);
-  };
-  // The quote a draft was saved with comes back (a reload, another window, back to the thread). While the box is
-  // open the person's own choice stands.
-  const draftQuote = replyDraft.draft?.quote ? JSON.stringify(replyDraft.draft.quote) : '';
-  useEffect(() => {
-    if (!draftQuote) return;
-    if (boxRef.current.open && quoteChosen.current) return;
-    const saved = JSON.parse(draftQuote) as InboxReplyQuote;
-    setQuoteState(saved);
-    replyDraft.quote(saved);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftQuote]);
-  useEffect(() => {
-    setQuoteState(null);
-    quoteChosen.current = false;
-  }, [thread.thread_id]);
-  // A box closed with no draft forgets its quote, as it forgets the pill's choice.
-  useEffect(() => {
-    if (box.open || replyDraft.draft) return;
-    quoteChosen.current = false;
-    if (quoteRef.current) {
-      setQuoteState(null);
-      replyDraft.quote(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [box.open]);
-  /** The quote is gone after a Send that carried the words, or a Discard. */
-  const forgetQuote = () => {
-    quoteChosen.current = false;
-    setQuoteState(null);
-    replyDraft.quote(null);
-  };
-  /** The × on the box's quote line: the reply goes without it; focus stays in the words. */
-  const removeQuote = () => {
-    setQuote(null);
-    announce(REPLY_QUOTE_WORDS.removed);
-    textRef.current?.focus();
-  };
-  /** A sent reply's quote line: to the original, its quoted words tinted for a moment. */
-  const jumpToQuote = (target: InboxReplyQuote) => {
-    jumpTo({ kind: 'message', messageId: target.of });
-    if (target.words === undefined) return;
-    const words = target.words;
-    setTimeout(() => {
-      const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(target.of)}"] .ib-msg`);
-      if (article) flashQuoteWords(article, words);
-    }, 250);
-  };
-  /** The words selected in a message when its ↩ was pressed (read on the press, before a click can move the selection). */
-  const quoteWordsAtPress = useRef<{ id: string; words: string | null } | null>(null);
+  const { quote, quoteRef, quotedMessage, setQuote, forgetQuote, removeQuote, jumpToQuote, quoteWordsAtPress } = useReplyQuote({
+    threadId: thread.thread_id,
+    messages: thread.messages,
+    replyDraft,
+    boxOpen: box.open,
+    boxOpenNow: () => boxRef.current.open,
+    saveDraft: () => {
+      const text = replyText.get();
+      const files = replyFiles.draftFiles(text);
+      if (boxRef.current.open && (text.trim() !== '' || files.length > 0)) replyDraft.save(text, files);
+    },
+    announce,
+    textRef,
+    bodyRef,
+    jumpToMessage: (messageId) => jumpTo({ kind: 'message', messageId }),
+  });
 
   const noteId = `ib-asker-note-${thread.thread_id}`;
   const conflictId = `ib-draft-conflict-${thread.thread_id}`;
