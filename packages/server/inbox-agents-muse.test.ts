@@ -68,4 +68,12 @@ describe("Muse Code", () => {
     await uninstall();
     expect(readFileSync(settingsPath(), "utf8")).toBe(before);
   });
+  test("after Muse rewrites the file it created, uninstall takes out only the entry and keeps Muse's own keys", async () => {
+    fake.install("muse");
+    await connect();
+    const rewritten = { schema_version: 1, tui: { foreign_context_notice_shown: true }, mcpServers: { "plannotator-inbox": { mode: "optional", command: SELF[0], args: ["inbox", "mcp"] } } };
+    writeFileSync(settingsPath(), JSON.stringify(rewritten, null, 2));
+    await uninstall();
+    expect(JSON.parse(readFileSync(settingsPath(), "utf8"))).toEqual({ schema_version: 1, tui: { foreign_context_notice_shown: true }, mcpServers: {} });
+  });
 });
