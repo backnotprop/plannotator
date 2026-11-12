@@ -1439,7 +1439,7 @@ The owner's ask (approval `inbox-audio-attachments`, not in this repo): an agent
 
 ## 13. Cloud agents (2026-11-11)
 
-A cloud agent (a Claude Code routine, a Grok Bot routine, any webhook the person pastes in Settings → Agents → Cloud agents) is a device of platform `agent`. A phone is the person; a cloud agent is not. It acts as an agent: it posts as itself, sees only the threads it was given, and can never answer, approve or act for the person.
+A cloud agent (a Claude Code routine, a Grok Bot routine, any webhook the person pastes in Settings → Cloud agents) is a device of platform `agent`. A phone is the person; a cloud agent is not. It acts as an agent: it posts as itself, sees only the threads it was given, and can never answer, approve or act for the person.
 
 ### Minted, not redeemed
 

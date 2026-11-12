@@ -47,9 +47,7 @@ export function CloudAgentCard({
   return (
     <div className="ib-cl-agent" data-cloud-agent={agent.session} data-cloud-link={agent.link.state}>
       <div className="ib-prow">
-        <span className="ib-tile">
-          <HostMark host={inboxCloudHostOf(agent.preset)} agent={agent.session} />
-        </span>
+        <HostMark host={inboxCloudHostOf(agent.preset)} agent={agent.session} big />
         <span className="ib-txt">
           <span className="ib-l">{agent.name}</span>
           <span className="ib-desc">

@@ -33,7 +33,7 @@ export function CloudWakeLine({ wake, fallbackName, time }: { wake: InboxCloudWa
           {shown.state === 'key_rejected' && (
             <>
               {' '}
-              <a href="#settings/agents" data-cloud-rekey="">
+              <a href="#settings/cloud-agents" data-cloud-rekey="">
                 Paste the new key
               </a>
             </>

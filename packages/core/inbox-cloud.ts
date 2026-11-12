@@ -36,7 +36,7 @@ export const INBOX_CLOUD_PRESET_LABELS: Readonly<Record<InboxCloudPreset, string
   "claude-routine": "Claude Code",
   "grok-bot": "Grok Bot",
   muse: "Muse by Meta",
-  hermes: "Hermes",
+  hermes: "Hermes Agent",
   openclaw: "OpenClaw",
   other: "Other",
 };

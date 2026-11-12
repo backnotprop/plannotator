@@ -45,10 +45,8 @@ export function CloudAgentsSection() {
   const empty = model.agents.length === 0;
 
   return (
-    <section className="ib-sgroup" data-settings-cloud="" aria-labelledby="ib-g-cloud">
-      <h2 id="ib-g-cloud">Cloud agents</h2>
-      <p>An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes or OpenClaw, that reads and answers its threads here.</p>
-      <div className="ib-card" aria-label="Cloud agents">
+    <section className="ib-sgroup ib-sgroup-first" data-settings-cloud="" aria-label="Cloud agents">
+      <div className="ib-agents ib-cl-card">
         {model.agents.map((agent) => (
           <CloudAgentCard
             key={agent.session}
@@ -74,9 +72,7 @@ export function CloudAgentsSection() {
           />
         ) : empty ? (
           <div className="ib-prow">
-            <span className="ib-tile">
-              <HostMark host="cloud" />
-            </span>
+            <HostMark host="cloud" big />
             <span className="ib-txt">
               <span className="ib-l">No cloud agent paired yet</span>
               <span className="ib-desc">Each one posts under its own name and sees only the threads it is given.</span>

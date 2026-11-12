@@ -17,13 +17,14 @@
  * Activity and becomes `#settings/activity` in place.
  */
 
-export const SETTINGS_SECTIONS = ['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'activity', 'archived', 'storage', 'about'] as const;
+export const SETTINGS_SECTIONS = ['general', 'rows', 'agents', 'cloud-agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'activity', 'archived', 'storage', 'about'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export const SETTINGS_SECTION_LABEL: Record<SettingsSection, string> = {
   general: 'General',
   rows: 'Rows',
   agents: 'Agents',
+  'cloud-agents': 'Cloud agents',
   accounts: 'Accounts',
   prompts: 'Prompts',
   devices: 'Devices',

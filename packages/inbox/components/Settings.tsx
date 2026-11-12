@@ -17,6 +17,7 @@ import type { TestResult } from '../notify';
 import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, reachText, testMissHint } from '../notifyStatus';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
 import { CloudAgentsSection } from '../cloud/CloudAgents';
+import { useCloudAgentsGate } from '../cloud/useCloudAgentsGate';
 import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
@@ -50,6 +51,7 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
   rows: 'contents',
   agents: 'chip',
+  'cloud-agents': 'cloud',
   accounts: 'user',
   prompts: 'prompt',
   devices: 'phone',
@@ -839,7 +841,6 @@ function AgentsSection({
         <section className="ib-sgroup" aria-label="Agents">
           <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
         </section>
-        <CloudAgentsSection />
       </>
     );
   }
@@ -886,7 +887,6 @@ function AgentsSection({
         <p>Agents on this computer reach the Inbox at 127.0.0.1, and it keeps its port between runs when it can.</p>
         <div className="ib-card ib-card-pad">{context && <ConnectPicker harnesses={HARNESSES} initial="other" context={context} compact />}</div>
       </section>
-      <CloudAgentsSection />
     </>
   );
 }
@@ -994,6 +994,7 @@ const LEDE: Record<SettingsSection, string> = {
   // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
+  'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and answers its threads here.',
   accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
@@ -1041,7 +1042,9 @@ export function SettingsPage(props: SettingsPageProps) {
     onRetry,
     phone = false,
   } = props;
-  const section: SettingsSection | null = props.section ?? (phone ? null : 'general');
+  const asked: SettingsSection | null = props.section ?? (phone ? null : 'general');
+  const cloud = useCloudAgentsGate(settings !== null, asked);
+  const section: SettingsSection | null = asked === 'cloud-agents' && cloud.shown === false ? 'agents' : asked;
   // Settings → Storage's sizes walk every file on the server, so they are read only here, each time Storage is shown.
   // The calm wait: nothing moves, and words show only when the count takes longer than STORE_SLOW_MS. Numbers that
   // come after a wait fade in; numbers kept from an earlier visit are there at once.
@@ -1130,7 +1133,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1177,6 +1180,8 @@ export function SettingsPage(props: SettingsPageProps) {
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
+      case 'cloud-agents':
+        return cloud.count > 0 ? plural(cloud.count, 'agent') : '';
       case 'rows':
         return rowsSummary(look);
       case 'accounts':
@@ -1231,6 +1236,9 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
+        break;
+      case 'cloud-agents':
+        body = <CloudAgentsSection />;
         break;
       case 'accounts':
         body = <AccountsSection machine={machines.find((machine) => machine.self)?.name} />;
