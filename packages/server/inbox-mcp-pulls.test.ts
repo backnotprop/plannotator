@@ -27,7 +27,7 @@ const STRANGER = { agent_session: "ses_z", agent_host: "pi", agent_name: "Pi" };
 
 type Result = { content: { text: string }[]; isError?: boolean; structuredContent?: Record<string, unknown> };
 
-function world() {
+function world(projectHost?: InboxPullsMcpContext["projectHost"]) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-mcp-pulls-"));
   roots.push(dir);
   let now = Date.parse("2026-11-08T10:00:00.000Z");
@@ -38,6 +38,7 @@ function world() {
   const context: InboxPullsMcpContext = {
     store,
     now: () => now,
+    projectHost,
     pulls: {
       live: (key) => (key.endsWith("#1") ? { checks: "failing", review: null } : undefined),
       refresh: async (pulls) => {
@@ -50,7 +51,7 @@ function world() {
   const fake = { registerTool: (_name: string, _config: unknown, run: typeof handler) => (handler = run) } as unknown as McpServer;
   registerInboxThreadPullsTool(fake, context);
   const call = (input: Record<string, unknown>) => handler!(input);
-  return { store, thread, context, call, refreshed, advance: (ms: number) => (now += ms) };
+  return { store, project, thread, context, call, refreshed, advance: (ms: number) => (now += ms) };
 }
 
 const textOf = (result: Result) => result.content.map((c) => c.text).join("\n");
@@ -74,6 +75,17 @@ describe("thread_pulls", () => {
     expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Added ${url}. Nothing was sent to the person.`);
     expect(w.refreshed).toEqual([["bitbucket.org/acme/api#3:pull"]]);
     expect(threadPullsText(w.context, w.thread, "ses_a")[1]).toStartWith(`- ${url} `);
+  });
+
+  test("a short group/project!n is on the thread's project's own GitLab host, and is shown back as its URL", async () => {
+    const asked: string[] = [];
+    const w = world(async (projectId) => (asked.push(projectId), "gitlab.acme.dev"));
+    const result = await w.call({ thread_id: w.thread, add: ["acme/api!7"], ...FILLED });
+    expect(asked).toEqual([w.project.id]);
+    expect(textOf(result).split("\n")[0]).toBe(`Thread ${w.thread}: Added https://gitlab.acme.dev/acme/api/-/merge_requests/7. Nothing was sent to the person.`);
+    expect(w.store.threadPulls(w.thread).map((p) => p.url)).toEqual(["https://gitlab.acme.dev/acme/api/-/merge_requests/7"]);
+    await w.call({ thread_id: w.thread, remove: ["acme/api!7"], ...FILLED });
+    expect(w.store.threadPulls(w.thread)).toEqual([]);
   });
 
   test("an agent that is not in the thread is refused, and so is a call with no session: nothing is written", async () => {

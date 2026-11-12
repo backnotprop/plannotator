@@ -10,7 +10,7 @@
  * shape before it runs anything.
  */
 
-import { classifyForgeHost, FORGE_SPECS, type ForgePlatform } from "./forge-refs";
+import { classifyForgeHost, FORGE_SPECS, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
 
 export type { ForgePlatform } from "./forge-refs";
 
@@ -206,12 +206,16 @@ const SHORT_GITLAB_PULL = /^([A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.-]{1,100})*)\
 /**
  * A pull or merge request as an agent or the person names one for a thread
  * (the Inbox's PR coupling), or null: `owner/repo#123` (github.com),
- * `group/sub/project!45` (gitlab.com), or the PR's or MR's URL on any GitHub
- * or GitLab host or on bitbucket.org. Bitbucket has no short form of its own
+ * `group/sub/project!45`, or the PR's or MR's URL on any GitHub or GitLab
+ * host or on bitbucket.org. Bitbucket has no short form of its own
  * (`workspace/repo#3` reads as GitHub). An issue link, a bare `#123` and
  * anything else are not one.
+ *
+ * `projectHost` is the host of the thread's project's git remote. A
+ * `group/sub/project!45` is on that host when it is a GitLab (GitLab reads the
+ * short form on its own instance), else on gitlab.com. A URL keeps its own host.
  */
-export function parseForgePullRef(text: string): ForgeRef | null {
+export function parseForgePullRef(text: string, projectHost?: string | null): ForgeRef | null {
   const value = text.trim();
   if (/^https:\/\//i.test(value)) {
     const ref = parseForgeRefUrl(value);
@@ -223,9 +227,14 @@ export function parseForgePullRef(text: string): ForgeRef | null {
   }
   const gitlab = SHORT_GITLAB_PULL.exec(value);
   if (gitlab && ![...gitlab[1]!.split("/"), gitlab[2]!].some((part) => part === "." || part === "..")) {
-    return { platform: "gitlab", host: "gitlab.com", owner: gitlab[1]!, repo: gitlab[2]!, number: Number(gitlab[3]), kind: "pull" };
+    return { platform: "gitlab", host: shortGitlabHost(projectHost), owner: gitlab[1]!, repo: gitlab[2]!, number: Number(gitlab[3]), kind: "pull" };
   }
   return null;
+}
+
+function shortGitlabHost(projectHost: string | null | undefined): string {
+  const host = normalizeForgeHost(projectHost);
+  return host && classifyForgeHost(host) === "gitlab" ? host : "gitlab.com";
 }
 
 /** A pull or merge request's web address. */

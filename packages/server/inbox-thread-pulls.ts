@@ -299,6 +299,26 @@ function settledWithin(work: Promise<unknown>, ms: number): Promise<void> {
   ]).finally(() => clearTimeout(timer));
 }
 
+/** The host of a project's git remote (inbox-repos.ts), or null. */
+export type ProjectHostOf = (projectId: string) => Promise<string | null>;
+
+/**
+ * `parseInboxThreadPullRefs` in a project: a short `group/project!45` is on
+ * the project's own GitLab host (`parseForgePullRef`). The host is looked up
+ * only when a ref landed on gitlab.com, so a list without one never waits on git.
+ */
+export async function parseProjectPullRefs(
+  values: unknown,
+  field: string,
+  projectId: string,
+  hostOf: ProjectHostOf | undefined,
+): Promise<ReturnType<typeof parseInboxThreadPullRefs>> {
+  const parsed = parseInboxThreadPullRefs(values, field);
+  if ("error" in parsed || !hostOf || !parsed.refs.some(({ ref }) => ref.platform === "gitlab" && ref.host === "gitlab.com")) return parsed;
+  const host = await hostOf(projectId).catch(() => null);
+  return host ? parseInboxThreadPullRefs(values, field, host) : parsed;
+}
+
 /** A thread's PRs as the window reads them: the live list with stack groups, and what was removed in the last 7 days. */
 export function threadPullsAnswer(store: InboxStore, states: Pick<ThreadPullStates, "live">, threadId: string, now: number = Date.now()): InboxThreadPullsAnswer {
   const live = store.threadPulls(threadId);
@@ -326,6 +346,8 @@ export function createThreadPullsRoute(options: {
   /** The serverSession check of a write (`mismatch`: a window from before a restart). */
   sessionMismatch: (body: Record<string, unknown>) => Response | null;
   localOnly: () => Response;
+  /** For a short `group/project!45` (`parseProjectPullRefs`). Absent: gitlab.com. */
+  projectHost?: ProjectHostOf;
   now?: () => number;
 }) {
   const { store, states, json } = options;
@@ -344,10 +366,10 @@ export function createThreadPullsRoute(options: {
         const body = await options.readBody(req);
         const mismatch = options.sessionMismatch(body);
         if (mismatch) return mismatch;
-        const add = body.add === undefined ? { refs: [] } : parseInboxThreadPullRefs(body.add, "add");
+        const add = body.add === undefined ? { refs: [] } : await parseProjectPullRefs(body.add, "add", message.project_id, options.projectHost);
         if ("error" in add) throw new InboxError("validation_error", add.error, { field: add.field });
         const all = Array.isArray(body.remove) && body.remove.length === 1 && body.remove[0] === "all";
-        const remove = all || body.remove === undefined ? { refs: [] } : parseInboxThreadPullRefs(body.remove, "remove");
+        const remove = all || body.remove === undefined ? { refs: [] } : await parseProjectPullRefs(body.remove, "remove", message.project_id, options.projectHost);
         if ("error" in remove) throw new InboxError("validation_error", remove.error, { field: remove.field });
         const change = store.changeThreadPulls({ thread_id: threadId, add: add.refs, remove: all ? "all" : remove.refs, by: { kind: "person" } });
         // A PR just added is read at once, so the popover shows its state; a forge slower than

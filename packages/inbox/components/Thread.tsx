@@ -1,4 +1,5 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { useThreadArmed } from '../threadArmed';
 import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
@@ -102,6 +103,7 @@ import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered'
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
+import { givenName, useAgentNames } from '../agents/agentNames';
 import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
 import { shareUnchanged } from '../shareUnchanged';
@@ -617,7 +619,8 @@ export function MessageBody({
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
-  const { initiatives: tagInitiatives } = useInitiativeTags();
+  // With the Board off, a tag's list in the Inbox (`#tag=ini_…`, approval "inbox-thread-tags").
+  const { initiatives: tagInitiatives, href: tagHref } = useInitiativeTags();
   const linkFiles = useCallback(
     (text: string) =>
       linkHashtags(
@@ -625,8 +628,9 @@ export function MessageBody({
           ? linkReplyFeedback(text, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
           : text,
         tagInitiatives,
+        tagHref,
       ),
-    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives],
+    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives, tagHref],
   );
   // The feedback the Send wrote after the person's words ("# Feedback on the attached files"…): a block of
   // its own, its headings at text size (replyFeedback.ts; display only). The person's own message only.
@@ -685,17 +689,17 @@ export function MessageBody({
   // A sent tag's preview: hover or focus, or a first tap on a touch screen (InitiativePeek).
   const tagPeek = useInitiativePeek(bodyRef);
   const { tapOpens } = tagPeek;
-  // A hashtag's link opens the Board in this window (the markdown renderer opens links in a new tab).
+  // A hashtag's link opens the Board (with the Board off, the tag's list) in this window (the markdown renderer opens links in a new tab).
   const openHashtag = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
       const target = event.target as Element | null;
       // The preview is portaled: its own links are plain in-app links.
       if (target?.closest?.('[data-tag-peek]')) return;
-      const link = target?.closest?.('a[href^="#board&initiative="]');
+      const link = target?.closest?.('a[href^="#board&initiative="], a[href^="#tag="]');
       if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      if (tapOpens(link)) return;
+      if (link.getAttribute('href')!.startsWith('#board&') && tapOpens(link)) return;
       window.location.hash = link.getAttribute('href')!;
     },
     [tapOpens],
@@ -1127,8 +1131,9 @@ export function MessageBody({
     />
   );
 
-  // Here and not through the Viewer's onSelectAnnotation: on a touch screen the highlighter does not listen (the
-  // system's selection is the person's, ui's useAnnotationHighlighter), so a tap would reach nothing.
+  // Here and not through the Viewer's onSelectAnnotation, so a tap opens a highlight the same way on every screen. (On a
+  // touch screen the highlighter does listen here: no onHostDraft, so it paints a finger's selection itself once the
+  // selection is finished, and keeps it selected; ui's useAnnotationHighlighter.)
   const openHighlight = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as Element;
     const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
@@ -1799,6 +1804,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const htmlArmed = useThreadArmed(thread.thread_id);
   const launchAct = async <T,>(action: () => Promise<T>, done?: string | ((result: T) => { lead: string; detail?: string })) => {
     setLaunchError(null);
     try {
@@ -2664,7 +2670,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** Each session id's name, in a thread with two or more sessions (its message lines lead with it). */
   const sessionNames = useMemo(() => new Map(sessions.length > 1 ? sessions.flatMap((s) => s.sessions.map((id) => [id, s.name] as const)) : []), [sessions]);
   const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
-  const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
+  // A given name (agents/agentNames.ts) leads an `@` row's second line; the row's label is the token the agent reads, so it stays.
+  const agentNames = useAgentNames();
+  const tagOpts: TagOption[] = useMemo(
+    () =>
+      tagOptions(taggable, tagOwner, thread.project.id, whenTime).map((option) => {
+        const given = givenName(agentNames, option.id);
+        return given ? { ...option, detail: option.detail ? `${given} · ${option.detail}` : given } : option;
+      }),
+    [taggable, tagOwner, thread.project.id, agentNames],
+  );
   // Until the list is read (or from an older Inbox) `@` is plain text.
   const composerTags = useMemo(
     () =>
@@ -5347,10 +5362,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       : lastTo
         ? deliveryLine({
             name: last.delivery ? toName(last, last.delivery) : last.to ? toName(last, last.to) : hostName(lastTo.host),
-            deliveredAt: last.delivery?.at ?? null,
+            deliveredAt: last.delivery?.at ?? (recipientConnection?.polls ? (sent?.checked_at ?? null) : null),
             time: whenTime,
             // A Codex reply whose `codex queue` ran out of time may not have gone: saved, not queued.
-            wakes: !uncertainItem(recipientConnection, last.id),
+            wakes: !recipientConnection?.polls && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
@@ -5372,7 +5387,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
   const heldHandoff = last.author.kind === 'person' && !!last.handoff && !last.handoff.settled_at && !last.handoff.undone_at;
-  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || isInboxCloudHost(lastTo?.host)) ? last : null;
+  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || (isInboxCloudHost(lastTo?.host) && !recipientConnection?.polls && !last.delivery)) ? last : null;
   const delivered: DeliveryLine | null = cloudLast
     ? null
     : heldHandoff && deliveredNow
@@ -5446,12 +5461,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const joined = new Set<string>();
     for (const m of thread.messages) {
       if (m.author.kind !== 'person') continue;
-      if (m.handoff && !m.handoff.undone_at && m.to) threadMoves.set(m.id, { kind: 'handoff', names: handoffName(m), host: m.to.host });
+      if (m.handoff && !m.handoff.undone_at && m.to) threadMoves.set(m.id, { kind: 'handoff', names: givenName(agentNames, m.to.session) ?? handoffName(m), host: m.to.host });
       const added = messageTags(m).filter((t) => t.joined && !joined.has(t.session));
       for (const t of added) joined.add(t.session);
       if (added.length > 0 && !threadMoves.has(m.id)) {
-        // The header's name, else the tag's label, else the agent.
-        threadMoves.set(m.id, { kind: 'added', names: namesList(added.map((t) => sessionNames.get(t.session) ?? (t.label || agentName({ kind: 'agent', host: t.host, name: t.name ?? null })))), host: added[0]!.host });
+        // The given name, else the header's name, else the tag's label, else the agent.
+        threadMoves.set(m.id, { kind: 'added', names: namesList(added.map((t) => givenName(agentNames, t.session) ?? sessionNames.get(t.session) ?? (t.label || agentName({ kind: 'agent', host: t.host, name: t.name ?? null })))), host: added[0]!.host });
       }
     }
   }
@@ -7857,6 +7872,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         // A full screen opened over another file beside the thread goes back to that file: a comment not saved yet waits as the full screen file's draft.
         exitLeavesFor={fullExitFile && fullExitFile !== openAttachment.id ? (allFiles.find((a) => a.id === fullExitFile)?.name ?? 'that file') : null}
         phone={phone}
+        armedStart={htmlArmed.armedStart}
+        onArmed={htmlArmed.onArmed}
         openIn={openIn}
         steps={optionSet ? optionSet.steps : steps}
         allSteps={steps}
