@@ -1,8 +1,3 @@
-/**
- * `plannotator claude-mod-plan`, the CLI half of the Claude Code mod's
- * non-blocking plan review, run as the real process: revisions arrive through
- * the revision file, the decision leaves through the host result file.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,7 +10,6 @@ const roots: string[] = [];
 let stubs: string[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built HTML; API-only tests need just a stub.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -36,8 +30,6 @@ async function waitFor<T>(read: () => T | null | undefined, ms = 20_000): Promis
 function start(plan: string) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-claude-mod-plan-")));
   roots.push(root);
-  // The launch layout the mod uses: result.json must sit under the data dir's
-  // claude-code-mod/ folder or the CLI refuses the path.
   const launch = join(root, "data", "claude-code-mod", "session-1", "launch-1");
   mkdirSync(launch, { recursive: true });
   const files = {
@@ -81,8 +73,6 @@ describe("claude-mod-plan", () => {
     const shown = (await (await fetch(`${base}/api/plan`)).json()) as { plan: string; planRevision?: number; approvalNotesSupported?: boolean };
     expect(shown.plan).toBe("# Plan\n\n1. First.\n2. Second.\n");
     expect(shown.planRevision).toBe(1);
-    // #1057: the mod delivers an approval's notes, so the tab offers
-    // "Approve with notes" here (the classic hook's tab must not).
     expect(shown.approvalNotesSupported).toBe(true);
 
     const approve = await fetch(`${base}/api/approve`, {

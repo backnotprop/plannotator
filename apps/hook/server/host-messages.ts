@@ -1,35 +1,11 @@
-/**
- * Host messages side channel for `annotate-last --stdin`.
- *
- * A host that starts the CLI detached (the Claude Code mod in
- * `apps/hook/hooks/mod/`) has no transcript file for the CLI to read, so it
- * hands the newest assistant text over on stdin. That alone loses the message
- * picker the classic path offers. When the host also sets
- * `PLANNOTATOR_HOST_MESSAGES_FILE` to a `messages.json` it wrote, the CLI
- * reads the recent assistant messages from it instead:
- *
- *   { "v": 1, "messages": [{ "messageId": "…", "text": "…", "timestamp"?: "…" }] }
- *
- * newest first, index 0 opened by default. Why a variable and not a new flag:
- * a CLI that predates this ignores the variable and still reads the newest
- * text from stdin (today's behavior), while an unknown flag would either be
- * ignored silently (a different code path) or read the JSON as the message.
- *
- * The variable is taken once at startup and removed from `process.env`, like
- * the host result file, so nothing the server spawns inherits it.
- */
-
 import { readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, resolve, sep } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 export const HOST_MESSAGES_FILE_ENV = "PLANNOTATOR_HOST_MESSAGES_FILE";
 
-/** The picker's own limit on the classic path (RECENT_MESSAGES_LIMIT). */
 export const MAX_HOST_MESSAGES = 25;
-/** Per message, in UTF-8 bytes. */
 export const MAX_HOST_MESSAGE_BYTES = 2 * 1024 * 1024;
-/** The whole file, in bytes. */
 export const MAX_HOST_MESSAGES_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_ID_LENGTH = 128;
 const MAX_TIMESTAMP_LENGTH = 64;
@@ -43,14 +19,12 @@ export interface HostMessage {
 let takenPath: string | undefined;
 let taken = false;
 
-/** Only a `messages.json` inside the mod's launch area of the data dir is read. */
 export function isAllowedHostMessagesPath(path: string, dataDir: string = getPlannotatorDataDir()): boolean {
   if (!isAbsolute(path) || basename(path) !== "messages.json") return false;
   const root = resolve(dataDir, "claude-code-mod") + sep;
   return resolve(path).startsWith(root);
 }
 
-/** Read the side-channel path once and scrub it from the environment. */
 export function takeHostMessagesPath(env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (!taken) {
     taken = true;
@@ -73,11 +47,6 @@ function fail(error: string): HostMessagesParse {
   return { ok: false, error: `invalid host messages: ${error}` };
 }
 
-/**
- * Validate the payload fail-closed: version 1, 1..25 messages, string fields
- * only, bounded sizes, non-empty text, unique ids. Error text never quotes the
- * payload.
- */
 export function parseHostMessages(text: string): HostMessagesParse {
   let value: unknown;
   try {
@@ -113,7 +82,6 @@ export function parseHostMessages(text: string): HostMessagesParse {
   return { ok: true, messages };
 }
 
-/** Read and validate the file the host wrote. */
 export function readHostMessages(path: string): HostMessagesParse {
   let size: number;
   try {

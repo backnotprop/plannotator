@@ -2,11 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import { PlannotatorMod } from './controller'
 import { fakeHost, type FakeHost, type RunCall } from './testing/fake-host'
 
-// The failure these guard (a real report): an approval for
-// releases-2026-10-04/QUESTIONS.md arrived as "Plannotator: QUESTIONS.md —
-// Approved." with no path, and the agent took the File: line of an earlier
-// decision about a DIFFERENT QUESTIONS.md and acted on the wrong file.
-
 const SESSION = { sessionId: 'session-1', dataDir: '/data', interactive: true }
 const NEW = '/work/releases-2026-10-04/QUESTIONS.md'
 const OLD = '/work/releases-2026-09-20/QUESTIONS.md'
@@ -19,7 +14,6 @@ function dirOf(call: RunCall): string {
   return call.argv[4] as string
 }
 
-/** The CLI comes up for each launch on its own port, naming `targets[i]` (or nothing: an older CLI). */
 function serve(host: FakeHost, targets: (string | string[] | undefined)[], cwd = '/work') {
   let index = 0
   host.onRun = (call) => {
@@ -55,10 +49,8 @@ describe('decision targets (two files named QUESTIONS.md)', () => {
     const first = await mod.runTool({ action: 'annotate', target: 'releases-2026-09-20/QUESTIONS.md', gate: true })
     const second = await mod.runTool({ action: 'annotate', target: 'releases-2026-10-04/QUESTIONS.md', gate: true })
 
-    // The tool's own text names the full path the server opened.
     expect('text' in second && second.text).toContain(`Target: ${NEW}`)
     expect('text' in first && first.text).toContain(`Target: ${OLD}`)
-    // Two open reviews of a QUESTIONS.md: the status line tells them apart.
     expect(host.statuses.at(-1)).toContain('releases-2026-09-20/QUESTIONS.md')
     expect(host.statuses.at(-1)).toContain('releases-2026-10-04/QUESTIONS.md')
 
@@ -70,7 +62,6 @@ describe('decision targets (two files named QUESTIONS.md)', () => {
 
     expect(host.submits).toHaveLength(2)
     expect(host.submits[0]).toContain(`Target: ${OLD}`)
-    // The bare approval: the heading names the right file in full, and never the other one.
     const approval = host.submits[1] as string
     expect(approval.split('\n')[0]).toContain('releases-2026-10-04/QUESTIONS.md')
     expect(approval.split('\n')[0]).toContain('Approved')
@@ -92,8 +83,6 @@ describe('decision targets (two files named QUESTIONS.md)', () => {
     expect(host.logs.join('\n')).not.toContain('as recorded when it opened')
   })
 
-  // The CLI may find a bare or relative name elsewhere in the project, so the
-  // mod must not assert a path it only guessed: no Target line beats a wrong one.
   test('an older CLI with a relative or bare name: no guessed Target line, in the opened text or the decision', async () => {
     for (const word of ['releases-2026-10-04/QUESTIONS.md', 'QUESTIONS.md']) {
       const host = fakeHost()
@@ -192,9 +181,6 @@ describe('decision targets (two files named QUESTIONS.md)', () => {
   })
 })
 
-// `/plannotator-annotate . a.md` opens a.md alone (the CLI's shared selection
-// drops the stray `.`), but the subject used to come from the typed words:
-// "2 files: ., a.md" in the command reply, status line and decision heading.
 describe('subjects come from what the CLI opened', () => {
   test('a stray `.` beside a file: the subject is the file the CLI opened', async () => {
     const host = fakeHost()

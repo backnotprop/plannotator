@@ -1,25 +1,3 @@
-/**
- * `plannotator shape …`: an agent's side of Shape (SPEC.md §4, "CLI").
- * Unreleased (HIDDEN_SUBCOMMANDS). Its help text is built in
- * packages/core/shape-skill.ts.
- *
- *   update   store a version of a board (the first one creates the shape)
- *   read     the latest version, and the notes waiting for the agent
- *   drawing  say "I'm drawing": the board shows it until the next version (10 min at most)
- *   answer   answer the person's Ask (the board shows it under the question)
- *   done     finish a shape
- *   list     the shapes, newest change first
- *
- * It reads and writes the Shape store under the data dir directly; no server
- * is needed (the Shapes server and page are a later step). The session: inside
- * an agent host session the shape is that session's. Its project is the
- * folder the command runs in (or `--project`); the session's own folder
- * (inbox-mcp-shim.ts) only when that folder gives none.
- *
- * stdout: JSON for update and read (and every command with --json), a line
- * of text otherwise. A refusal goes to stderr as `<code>: <message>` and exits
- * 1; bad usage exits 2.
- */
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxProjectRootHome, isHomeOrRootFolder, resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
@@ -33,16 +11,8 @@ import { SHAPE_COMMAND_USAGE } from "./cli";
 
 export { SHAPE_COMMAND_USAGE };
 
-/** What `plannotator shape` (help included; not `on` or `off`) says while Shape is off. */
 export const SHAPE_OFF_TEXT = "shape_off: Shape is off. To turn it on, run `plannotator shape on` (the same switch as the Plannotator Inbox's Settings → Capabilities → Shape).";
 
-/**
- * `plannotator shape on|off`: the person's switch from a terminal, the same
- * config.json `inboxShape` the Inbox's Settings switch writes
- * (@plannotator/shared/shape/switch). The only shape commands that run while
- * Shape is off (index.ts). One plain line out; exit 1 when config.json could
- * not be saved, 2 on extra arguments.
- */
 export function runShapeSwitch(
   argv: readonly string[],
   deps: { stdout?: (text: string) => void; stderr?: (text: string) => void } = {},
@@ -81,7 +51,6 @@ export interface ParsedShapeCommand {
   notes: boolean;
   all: boolean;
   json: boolean;
-  /** answer: the Ask it answers (`shn_…`), and the words. */
   re: string | null;
   text: string | null;
 }
@@ -148,32 +117,21 @@ export function parseShapeCommand(argv: readonly string[]): { ok: true; command:
 
 export interface ShapeCommandDeps {
   dataDir: string;
-  /** The folder the command runs in (`shapeCommandFolder`); null when it is gone and the shell named none. */
   cwd: string | null;
   env: Record<string, string | undefined>;
-  /** Writes one output; a rejected promise means it did not reach the reader (read --notes then marks nothing). */
   stdout?: (text: string) => void | Promise<void>;
   stderr?: (text: string) => void;
-  /** The project a folder belongs to (the Inbox's rule). Tests pass a stand-in. */
   projectRootOf?: (folder: string) => Promise<ShapeProject>;
-  /** This user's home folder (a realpath; null: none), never a project of its own here. Tests pass a stand-in. */
   home?: string | null;
-  /** How `shape update` fetches the board's web pictures. Tests pass a stand-in. */
   fetch?: (input: string | URL, init?: RequestInit) => Promise<Response>;
 }
 
 async function defaultProjectRoot(folder: string) {
   const resolved = await resolveInboxProjectRoot(folder);
-  // A linked worktree folds into its project; the board's code is the worktree's. (A folder of checkouts is not one.)
   const worktree = resolved.worktree && existsSync(join(resolved.worktree, ".git")) ? resolved.worktree : null;
   return { root: resolved.root, name: resolved.name, ...(worktree ? { worktree } : {}) };
 }
 
-/**
- * The folder a shape command runs in: `PLANNOTATOR_CWD`, else the process's own. When that folder was
- * deleted, `process.cwd()` throws; then the shell's `PWD` (the path it had), so the command still runs
- * and falls back to the session's folder. Null with neither.
- */
 export function shapeCommandFolder(env: Record<string, string | undefined>, cwd: () => string = () => process.cwd()): string | null {
   if (env.PLANNOTATOR_CWD) return env.PLANNOTATOR_CWD;
   try {
@@ -183,7 +141,6 @@ export function shapeCommandFolder(env: Record<string, string | undefined>, cwd:
   }
 }
 
-/** A folder by its realpath, or as written when it cannot be read. */
 function realFolder(folder: string): string {
   try {
     return realpathSync(folder);
@@ -192,14 +149,12 @@ function realFolder(folder: string): string {
   }
 }
 
-/** Write to stdout and settle once the text is flushed (or the pipe is closed). */
 function writeStdout(text: string): Promise<void> {
   return new Promise((done, fail) => {
     process.stdout.write(`${text}\n`, (error) => (error ? fail(error) : done()));
   });
 }
 
-/** Run one shape command; the exit code. */
 export async function runShapeCommand(argv: readonly string[], deps: ShapeCommandDeps): Promise<number> {
   const out = deps.stdout ?? writeStdout;
   const err = deps.stderr ?? ((text: string) => process.stderr.write(`${text}\n`));
@@ -213,19 +168,13 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
   const host = inboxHostSessionFromEnv(deps.env);
   const session: ShapeSession | null = host ? { host: host.host, id: host.session } : null;
 
-  // The folder the command runs in is the project, as the help says ("run it from the project's folder"):
-  // a board made from a scratch or PR folder is filed there, so its file links open that folder's files.
-  // The session's own folder is used only when the shell's folder gives no project (gone, unreadable,
-  // the home folder or `/`).
   const cwd = deps.cwd;
-  /** A path as the agent wrote it, from the folder the command runs in; null when that is gone and the path is relative. */
   const fromHere = (path: string) => (isAbsolute(path) ? path : cwd ? resolve(cwd, path) : null);
   const sessionFolder = inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host ? { host: host.host, session: host.session } : null, cwd ?? "");
   const home = deps.home === undefined ? inboxProjectRootHome() : deps.home;
   const folders = (
     c.project ? [fromHere(c.project)] : [...new Set([...(cwd && !isHomeOrRootFolder(realFolder(cwd), home) ? [cwd] : []), sessionFolder, cwd])]
   ).filter((f): f is string => !!f);
-  /** Why the last `projectOf` found no project, as the one line `update` refuses with. */
   let projectProblem = folders.length ? `${folders[0]} is not a folder` : "the folder this command runs in is gone";
   const projectOf = async (): Promise<ShapeProject | null> => {
     const rootOf = deps.projectRootOf ?? defaultProjectRoot;
@@ -235,7 +184,6 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
       try {
         isFolder = statSync(at).isDirectory();
       } catch {
-        // gone
       }
       if (!isFolder) {
         first ??= `${at} is not a folder`;
@@ -244,7 +192,6 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
       try {
         return await rootOf(at);
       } catch (error) {
-        // An unreadable folder (or `/`): a line like every other refusal, not a stack trace.
         const why = (error instanceof Error ? error.message : String(error)).replace(/^project_path:\s*/, "").replace(/\.$/, "");
         first ??= `could not use ${at} as the project: ${why}`;
       }
@@ -253,12 +200,10 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     return null;
   };
 
-  /** Output where a closed pipe changes nothing: the reader is gone either way. */
   const say = async (text: string) => {
     try {
       await out(text);
     } catch {
-      // nobody is reading
     }
   };
 
@@ -268,7 +213,6 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     return 1;
   };
 
-  /** The shape a call that names none means: the session's newest active one, else this project's. */
   const pick = async (): Promise<string | null> => {
     if (c.id) return c.id;
     const project = await projectOf();
@@ -284,17 +228,13 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch (error) {
       return refuse("invalid", `could not read ${path} as JSON: ${(error as Error).message}`);
     }
-    // Icons, logos and drawn things named in the drawing become plain SVG here, so the stored board
-    // holds the drawing and nothing is looked up when it is shown (shared/shape/stamps.ts).
     board = expandBoardStamps(board).board;
-    // Web pictures are fetched once, here, and kept in the board's files like a picture on this computer.
     const web = await fetchShapeWebPictures(board, deps.fetch ? { fetch: deps.fetch } : {});
     if (web.errors.length) return refuse("invalid", `the board has problems:\n${web.errors.map((e) => `  - ${e}`).join("\n")}`);
     let project: ShapeProject | null = null;
     if (c.id) {
       const record = store.get(c.id);
       if (!record) return refuse("not_found", `No shape ${c.id}. List them with \`plannotator shape list\`.`);
-      // Written from this folder now: the store moves the board there if it is the same project.
       project = (await projectOf().catch(() => null)) ?? record.project;
     } else {
       project = await projectOf();
@@ -358,10 +298,8 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
       await say(JSON.stringify({ shape: record, version }, null, 2));
       return 0;
     }
-    // The notes count as received only once the agent has them: written first, marked after.
     const waiting = store.waiting(id);
     try {
-      // A box's picture: its full path, so the agent can open it.
       const notes = waiting.map((n) => (n.picture ? { ...n, picture: store.filePath(id, n.picture) ?? n.picture } : n));
       await out(JSON.stringify({ shape: record, version, notes }, null, 2));
     } catch (error) {
@@ -389,7 +327,6 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     return 0;
   }
 
-  // done
   store.setState(id, "finished");
   if (c.json) await say(JSON.stringify({ id, state: "finished" }));
   else await say(`${id}: finished. It takes no new versions until the person reopens it.`);

@@ -5,10 +5,6 @@ import { shellTakeOver } from './take-over'
 import { isOlderCliTailscaleRefusal, PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT } from './tool'
 import { fakeHost, type FakeHost, type RunCall } from './testing/fake-host'
 
-// #2166: the tool's `tailscale` option opens the review with the CLI's
-// `--tailscale`, and the mod never hands Claude a tailnet review whose CLI
-// could not keep "Ask this session" there (an older CLI): it says so.
-
 const SESSION = { sessionId: 'session-1', dataDir: '/data', interactive: true }
 
 function launchDirOf(call: RunCall): string {
@@ -27,7 +23,6 @@ function stops(host: FakeHost): RunCall[] {
   return host.runs.filter((call) => call.argv[3] === 'plannotator-stop')
 }
 
-/** Every launch comes up with this ready line (`tailnet` as a current CLI writes it under --tailscale). */
 function serveWith(host: FakeHost, ready: Record<string, unknown>) {
   host.onRun = (call) => {
     if (!isLaunch(call)) return
@@ -69,8 +64,6 @@ describe('the plannotator tool: tailscale', () => {
 
   test('an older CLI (no tailnet field in its ready line): the review is stopped and the tool says to update', async () => {
     const host = fakeHost()
-    // A CLI from before #2166 publishes but drops the bridge; one from before
-    // --tailscale opens a plain local session. Neither writes `tailnet`.
     for (const url of [TAILNET_URL, 'http://localhost:6060']) {
       serveWith(host, { url, isRemote: false, port: 6060 })
       const mod = new PlannotatorMod(host, { ...SESSION, sessionId: `session-${url.length}` })
@@ -118,7 +111,6 @@ describe('the plannotator tool: tailscale', () => {
   test('a launch that answered "starting" and came up later without the tailnet field: the session is told', async () => {
     const host = fakeHost()
     const mod = new PlannotatorMod(host, SESSION)
-    // No ready line within the wait: the tool answers "starting".
     const answer = await mod.runTool({ action: 'annotate', target: 'notes.md', tailscale: true })
     expect('text' in answer && answer.text).toContain('Plannotator is starting')
     const dir = launchDirOf(launches(host)[0]!)
@@ -129,7 +121,6 @@ describe('the plannotator tool: tailscale', () => {
 
   test('without tailscale nothing changes: no flag, no ready check, the same result text', async () => {
     const host = fakeHost()
-    // An older CLI's ready line (no `tailnet`): fine when tailscale was not asked for.
     serveWith(host, { url: 'http://localhost:6060', isRemote: false, port: 6060 })
     const mod = new PlannotatorMod(host, SESSION)
     const answer = await mod.runTool({ action: 'annotate', target: 'notes.md', tailscale: false })
@@ -166,7 +157,6 @@ describe('the plannotator tool: tailscale', () => {
       tailscale: true,
     })
     expect(shellTakeOver('plannotator last --tailscale', false)).toEqual({ action: 'last', tailscale: true })
-    // A subagent's command still runs as written.
     expect(shellTakeOver('plannotator review --tailscale', true)).toBeNull()
   })
 

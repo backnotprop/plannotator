@@ -1,11 +1,3 @@
-/**
- * `plannotator inbox projects …` as real processes (approval "project-combine"):
- * after the window's toast this is the only way back from a combine, so what can
- * regress is an undo that loses a thread, a card or a name, one that needs the
- * session or the Inbox process that combined, a refusal that reads as success,
- * and the guide naming a command the parser does not take. Every process gets a
- * temp HOME and data dir; only Inboxes these tests started are stopped.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -27,7 +19,6 @@ let stubs: string[] = [];
 const started: { entry: InboxEntry; root: string }[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built HTML; these tests never read the pages.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -37,7 +28,6 @@ afterEach(async () => {
   await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
 const agents = stubbedAgentClis();
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
@@ -60,7 +50,6 @@ function sandbox() {
     PLANNOTATOR_INBOX_CONNECT: "0",
     ...GIT_ENV,
   };
-  // The Board is something the person turns on: on here, for the cards.
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
   return { root, dataDir, docs, site, elsewhere, browserMarker, env };
 }
@@ -123,7 +112,6 @@ describe("plannotator inbox projects", () => {
     await projects(box, []);
     await say(box, box.docs, { subject: "One", body: "One." });
     await say(box, box.site, { subject: "Two", body: "Two." });
-    // The person asks with the Inbox stopped: the first list, the one that starts it, is the one the agent reads.
     await mustSignalInbox(inboxEntryOf(box.dataDir), box.root, "SIGKILL");
     await waitGone(started.map((s) => s.entry.pid), 5_000);
     const found = (await listing(box)).suggestions;
@@ -149,7 +137,6 @@ describe("plannotator inbox projects", () => {
     expect(combined.stdout).toContain("Combined Marketing site into docs. To undo: ");
     expect(combined.stdout).toContain(` inbox projects undo ${site}`);
 
-    // One project now, with what the folders do while it stands.
     const one = (await listing(box)).projects;
     expect(one.map((project) => project.id)).toEqual([docs]);
     expect(one[0]!.combined?.map((member) => [member.id, member.name])).toEqual([[site, "Marketing site"]]);
@@ -161,7 +148,6 @@ describe("plannotator inbox projects", () => {
     expect(await cards(box, box.docs)).toEqual([cardBefore, sinceCard].sort());
     const before = { docs: await bodies(box, docsThread), site: await bodies(box, siteThread), since: await bodies(box, sinceThread) };
 
-    // Later: another Inbox process, another session, another folder. Nothing is remembered from the combine.
     await mustSignalInbox(inboxEntryOf(box.dataDir), box.root, "SIGKILL");
     await waitGone(started.map((s) => s.entry.pid), 5_000);
     const undone = await projects(box, ["undo", site], { session: "ses-undoer-0002", cwd: box.elsewhere });
@@ -169,22 +155,17 @@ describe("plannotator inbox projects", () => {
     expect(undone.code).toBe(0);
     expect(undone.stdout).toBe("Marketing site is its own project again.\n");
 
-    // Names.
     const apart = (await listing(box)).projects;
     expect(apart.map((project) => [project.id, project.name]).sort()).toEqual([[docs, "docs"], [site, "Marketing site"]].sort());
     expect(apart.every((project) => project.combined === undefined)).toBe(true);
-    // Threads: each with the folder that started it, the one started since too, and every message.
     expect(await listedIn(box, docs)).toEqual([docsThread]);
     expect(await listedIn(box, site)).toEqual([siteThread, sinceThread].sort());
     expect(await bodies(box, docsThread)).toEqual(before.docs);
     expect(await bodies(box, siteThread)).toEqual(before.site);
     expect(await bodies(box, sinceThread)).toEqual(before.since);
-    // What joined the other folder's thread stays in it.
     expect(before.docs).toContain("A kingfisher note from the site.");
-    // Cards: both go back with the site, the one made from the other folder too.
     expect(await cards(box, box.site)).toEqual([cardBefore, sinceCard].sort());
     expect(await cards(box, box.docs)).toEqual([]);
-    // Routing: the same name from the other folder is another thread again.
     expect((await say(box, box.docs, { subject: "Mine", thread: "landing", body: "A thread of its own." })).thread_id).not.toBe(siteThread);
   });
 
@@ -219,7 +200,6 @@ describe("plannotator inbox projects", () => {
     expect(moved.stderr).toBe("already_combined: docs-site is in docs. Undo it first.\n");
     const one = (await listing(box)).projects.find((project) => project.id === docs)!;
     expect(one.combined?.map((member) => member.id)).toEqual([site]);
-    // And the undo is a way back to where it was: its own project.
     expect((await projects(box, ["undo", site])).code).toBe(0);
     expect((await projects(box, ["combine", site, "--into", web])).code).toBe(0);
   });
@@ -238,16 +218,13 @@ describe("plannotator inbox projects", () => {
       expect(missing.code).toBe(1);
       expect(missing.stderr).toStartWith("project_not_found:");
     }
-    // A name for an id, the likely slip, points at the ids.
     const byName = await projects(box, ["combine", "docs-site", "--into", docs]);
     expect(byName.code).toBe(1);
     expect(byName.stderr).toStartWith("validation_error: docs-site is not a project id.");
     expect((await listing(box)).projects.map((project) => project.id).sort()).toEqual([docs, site].sort());
 
-    // Opposite combines cannot make a loop.
     expect((await projects(box, ["combine", site, "--into", docs])).code).toBe(0);
     expect((await projects(box, ["combine", docs, "--into", site])).stderr).toStartWith("validation_error:");
-    // A combine that is already true changes nothing, and says that.
     const again = await projects(box, ["combine", site, "--into", docs, "--json"]);
     expect(again.code).toBe(0);
     expect(JSON.parse(again.stdout)).toMatchObject({ changed: false, project: { id: docs } });
@@ -263,14 +240,12 @@ describe("plannotator inbox projects", () => {
     const help = await projects(box, ["--help"]);
     expect([help.code, help.stderr]).toEqual([0, ""]);
     expect(help.stdout).toContain("plannotator inbox projects undo <project id>");
-    // Its own usage, not the whole guide.
     expect(help.stdout).not.toContain("# Plannotator Inbox");
     expect(inboxEntryOf(box.dataDir)).toBeNull();
   });
 
   test("every projects command the agents' guide names is one the parser takes", () => {
     const guide = formatInboxHelp({ command: ["plannotator"], dataDir: "/data", board: false });
-    // Command lines only: the usage's description column follows two spaces.
     const lines = [...guide.matchAll(/^ *plannotator inbox projects(?: (?! )(.*))?$/gm)].map((match) => (match[1] ?? "").replace("[--json]", "").replaceAll("<project id>", "prj_x").trim());
     const named = new Set(lines.map((line) => parseProjectsCommand(line === "" ? [] : line.split(/\s+/))).map((parsed) => (parsed.ok ? parsed.op : parsed.error)));
     expect([...named].sort()).toEqual(["combine", "list", "undo"]);
@@ -279,7 +254,6 @@ describe("plannotator inbox projects", () => {
   const FROM = "prj_01ARZ3NDEKTSV4RRFFQ69G5FAV";
   const INTO = "prj_01BX5ZZKBKACTAV9WEVGEMMVRZ";
 
-  /** An Inbox answering what `routes` gives and `not_found`, as every Inbox does, for the rest. */
   async function against(routes: Record<string, () => Response | Promise<Response>>, argv: string[], extra: { json?: boolean; tidyWaitMs?: number; timeoutMs?: number } = {}) {
     const inbox = Bun.serve({
       hostname: "127.0.0.1",
@@ -299,7 +273,6 @@ describe("plannotator inbox projects", () => {
   const listOf = () => Response.json({ serverSession: "s", projects: [{ id: FROM, name: "a", root: "/a", threads: 0 }] });
 
   test("an Inbox older than the command says so, for combine and for undo, instead of a bare 404 or a wrong answer", async () => {
-    // An older Inbox shows a combined project as a project of its own, so only the route can tell.
     for (const argv of [["combine", FROM, "--into", INTO], ["undo", FROM]]) {
       const older = await against({ "/api/inbox/projects": listOf }, argv);
       expect(older.code).toBe(1);

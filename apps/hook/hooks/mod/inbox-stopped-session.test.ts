@@ -1,12 +1,3 @@
-/**
- * The owner's report: after Claude Code compacted an idle session, three Inbox replies each said "Delivered to
- * Claude Code" and no turn started; once the person typed, later replies woke it. Claude Code's
- * `$.prompt.submit` does not reject a prompt it refuses: it resolves `{ drop: <reason> }` (after a Stop: "the
- * session was stopped and nobody has sent input since"), and the mod read that as a turn that started. Any
- * reason is a drop. A real Inbox in process, a
- * running `ClaudeSession` whose engine drops plugin prompts once stopped, the person's reply through the
- * window's own route.
- */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -42,7 +33,6 @@ async function until(what: string, check: () => unknown | Promise<unknown>, ms =
   }
 }
 
-/** The session asked in the Inbox; the person can reply to it. */
 async function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-mod-stopped-')))
   roots.push(root)
@@ -78,7 +68,6 @@ async function world() {
     ((await (await fetch(`${base}/api/inbox/threads/${asked.thread_id}`)).json()) as { thread: { messages: { id: string; delivery?: { session: string } | null }[] } }).thread.messages.find(
       (message) => message.id === id,
     )?.delivery ?? null
-  // The list row's delivery for the thread (the window's "Stopped" line, approval "inbox-stopped-reply").
   const rowReason = async () =>
     ((await (await fetch(`${base}/api/inbox/threads?archived=exclude`)).json()) as { sections: { threads: { thread_id: string; delivery?: { reason: string } | null }[] }[] }).sections
       .flatMap((section) => section.threads)
@@ -110,22 +99,17 @@ describe('a session whose plugin prompts Claude Code refuses until the person ty
 
     const first = await reply('k1', FIRST)
     await until('the wake to be tried', () => attempts(session, FIRST).length > 0)
-    // Several ticks: Claude Code dropped it, so nothing says it went in, and nothing tries it again while input is held.
     await Bun.sleep(3_500)
     expect(wakes(session, FIRST)).toEqual([])
     expect(attempts(session, FIRST)).toHaveLength(1)
     expect(await delivery(first)).toBeNull()
     expect(session.host.toasts).toEqual([])
-    // The claim was given back: nothing reported, nothing delivered.
     expect(existsSync(join(claims, first))).toBe(false)
-    // The mod told the Inbox: the person's reply reads "Stopped", not Queued or Sending.
     await until('the row to read stopped', async () => (await rowReason()) === 'stopped')
 
-    // The person types: their turn runs first, and the reply goes in at the idle after it.
     await session.type('Carry on.')
     await Bun.sleep(2_500)
     expect(wakes(session, FIRST)).toEqual([])
-    // Their input lifted the hold: the reply waits on their turn as any reply does, no longer "Stopped".
     expect(await rowReason()).toBe('working')
     session.endTurn()
     await until('the wake', () => wakes(session, FIRST).length > 0)
@@ -138,11 +122,8 @@ describe('a session whose plugin prompts Claude Code refuses until the person ty
     await until('its delivery', async () => (await delivery(second)) !== null)
     expect(wakes(session, FIRST)).toHaveLength(1)
     expect(wakes(session, SECOND)).toHaveLength(1)
-    // Nothing held any more: the next reply ends delivered too (the state event itself: inbox-held-state.test.ts).
     expect(await rowReason()).toBe('delivered')
   }, 40_000)
-  // Review of #2780: the person typed while the dropped reply's claim was being given back. The hold set after that
-  // release overwrote their input, and the reply waited for the NEXT input. Held first, their input clears it.
   test('the person types while the claim is given back: the reply still goes in at the idle after their turn, once', async () => {
     const { session, reply, delivery } = await world()
     await session.startTurn('Refactor the handler.')

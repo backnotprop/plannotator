@@ -180,10 +180,6 @@ describe("completeAnnotateCommand", () => {
       },
     });
 
-    // The reviewer's draft is already deleted by the time publication runs, so
-    // the completed decision must reach stdout before the failure aborts the
-    // run. Exit 2 still means "the result file was not published" — an
-    // environment error, never a reviewer outcome and never approval.
     expect(events).toEqual(["stdout", "result", "exit:2"]);
     expect(stdout).toEqual(['{"decision":"annotated","feedback":"revise"}\n']);
     expect(errors).toEqual(["destination appeared"]);
@@ -217,7 +213,6 @@ describe("completeAnnotateCommand", () => {
       },
     });
 
-    // Only a stdout failure leaves no decision record anywhere.
     expect(events).toEqual(["stdout", "exit:2"]);
     expect(errors).toEqual(["stdout closed"]);
   });
@@ -257,9 +252,6 @@ describe("completeAnnotateCommand", () => {
   });
 
   test("emits stdout and exits 2 when the real publisher cannot write the destination", async () => {
-    // Real publisher, real filesystem: a destination whose parent directory does
-    // not exist is the cheap stand-in for the filesystems where publication
-    // fails outright (no hard links on exFAT/FAT32/SMB, read-only mounts).
     const directory = await mkdtemp(join(tmpdir(), "plannotator-publish-"));
     const stdout: string[] = [];
     const errors: string[] = [];
@@ -290,7 +282,6 @@ describe("completeAnnotateCommand", () => {
         },
       });
 
-      // The decision survives even though nothing was published.
       expect(stdout).toEqual([
         '{"decision":"annotated","feedback":"needs another pass"}\n',
       ]);

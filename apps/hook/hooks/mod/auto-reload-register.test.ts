@@ -3,22 +3,12 @@ import { AUTO_RELOAD_ARGS, AUTO_RELOAD_COMMAND, AUTO_RELOAD_PROMPT_GAP_TICKS } f
 import { inboxRegistryPathOf } from './inbox'
 import { INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_RELOAD_FIELD } from './inbox-contract'
 
-// Auto reload through the real registered hooks (review of #2873): the gates
-// the controller tests drive by method must also be wired from register.ts.
-// The failures this catches: a running subagent (its `turn.start` with an agent
-// id, or an agent the engine lists) holding the run, or counting as the main
-// turn (background agents keep running across `/reload-plugins`, and the owner
-// asked that the reload never stop work); the main turn or text in the prompt
-// box no longer holding it while a subagent runs; and a prompt between Enter
-// and its turn start not holding the run.
-
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
 const ROOT = '/plugins/cache/plannotator/plannotator/0.28.50'
 
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
 
-/** A fresh copy of register.ts (its module state is per process), and its hooks by event. */
 async function freshHooks(name: string) {
   const { register } = (await import(`./register?${name}`)) as typeof import('./register')
   const held = new Map<string, Hook>()
@@ -37,7 +27,6 @@ const realSleep = (ms: number, options?: { signal?: AbortSignal }) =>
     })
   })
 
-/** The `$` the module runs on, in memory, with an Inbox whose poll answers offer `installed`. */
 function engineOver(sessionId: string, installed: string) {
   const files = new Map<string, string>([
     ['/bin/sh', ''],
@@ -127,7 +116,6 @@ describe('auto reload through the registered hooks', () => {
     const hook = await freshHooks('auto-reload-agent-turns')
     const world = engineOver('sess-agents', '0.28.51')
     const { $ } = world
-    // One started before this module loaded (the engine lists it), one this module sees start; neither ends here.
     world.agents = [{ id: 'agent-old', status: 'running' }]
     await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/app' }))
     await hook('turn.start')($, { turnId: 'agent-turn-1', text: 'research', agentId: 'agent-7' }, pass)
@@ -149,7 +137,6 @@ describe('auto reload through the registered hooks', () => {
     await hook('turn.complete')($, { turnId: 'agent-turn-1', agentId: 'agent-7', answer: 'found it' }, pass)
     await world.tick(5)
     expect(world.commands).toEqual([])
-    // A second subagent turn starts; the main turn ends: the reload runs with the subagent still running.
     await hook('turn.start')($, { turnId: 'agent-turn-2', text: 'more', agentId: 'agent-7' }, pass)
     await hook('turn.complete')($, { turnId: 'turn-1', answer: 'done' }, pass)
     await world.tick(3)
@@ -178,10 +165,8 @@ describe('auto reload through the registered hooks', () => {
     const world = engineOver('sess-prompt-gap', '0.28.53')
     const { $ } = world
     await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/app' }))
-    // The hooks beneath are still working on the prompt (prompt.submit has not resolved).
     let enter: (value: unknown) => void = () => undefined
     const submitted = hook('prompt.submit')($, { text: 'go', origin: { kind: 'composer' } }, () => new Promise((resolve) => (enter = resolve)))
-    // Longer than the gap a prompt that entered gets: a prompt still inside prompt.submit has no time limit.
     await world.tick(AUTO_RELOAD_PROMPT_GAP_TICKS + 10)
     expect(world.commands).toEqual([])
     enter({ text: 'go' })

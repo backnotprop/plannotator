@@ -1,11 +1,3 @@
-/**
- * `plannotator inbox steps <thread> --json '<list>'` (approval
- * "inbox-thread-steps") against a real sandbox Inbox in this process.
- *
- * What can regress: the list landing as another session's, a list read from
- * stdin lost, a refusal a script reads as a result, and a write while the
- * person has steps off. No process is spawned and no agent CLI runs.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,9 +1,3 @@
-/**
- * `annotate-last --stdin` with the Claude Code mod's recent-messages file
- * (PLANNOTATOR_HOST_MESSAGES_FILE), run as the real process: the file yields
- * the message picker with the newest message open; a malformed file is a
- * clean startup error; plain `--stdin` is unchanged.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +10,6 @@ import {
   MAX_HOST_MESSAGES_FILE_BYTES,
   parseHostMessages,
 } from "./host-messages";
-// The mod's own writer: this file pins the contract between the two halves.
 import { MAX_PICKER_FILE_BYTES, MAX_PICKER_MESSAGE_BYTES, pickerFile, RECENT_MESSAGES_LIMIT } from "../hooks/mod/launch";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 
@@ -25,7 +18,6 @@ const roots: string[] = [];
 let stubs: string[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built HTML; API-only tests need just a stub.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -43,7 +35,6 @@ async function waitFor<T>(read: () => T | null | undefined, ms = 20_000): Promis
   }
 }
 
-/** Start `annotate-last --stdin` in the mod's launch layout; `messages` is the file's text, if any. */
 function start(stdin: string, messages?: string) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-host-messages-")));
   roots.push(root);
@@ -119,12 +110,9 @@ describe("annotate-last --stdin with the host messages file", () => {
 
 describe("the mod's messages.json against the CLI's limits", () => {
   const sha256 = async (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
-  // Quote, backslash and ESC: 3 raw bytes that serialize to 10 (\" \\ \u001b).
   const escapeHeavy = (tag: number, units: number) => `${tag}:${'"\\\x1b'.repeat(units)}`;
 
   test("escape-heavy messages: the written file stays under the CLI cap and the CLI accepts it", async () => {
-    // ~1 MiB raw each, ~3.3 MiB serialized: a raw-text budget would take
-    // seven of these and write ~23 MiB, which the CLI refuses.
     const texts = Array.from({ length: MAX_HOST_MESSAGES }, (_, index) => escapeHeavy(index, 330_000));
     const file = await pickerFile(texts, sha256);
 
@@ -149,7 +137,6 @@ describe("the mod's messages.json against the CLI's limits", () => {
   });
 
   test("a newest message too large to serialize within the cap means no file (stdin only)", async () => {
-    // 1.5 MiB of ESC is under the per-message raw limit but ~9 MiB as JSON.
     const file = await pickerFile(["\x1b".repeat(1_500_000), "older"], sha256);
     expect(file.messages).toEqual([]);
   });
@@ -159,7 +146,7 @@ describe("parseHostMessages", () => {
   const ok = (messages: unknown) => parseHostMessages(JSON.stringify({ v: 1, messages }));
 
   test("refuses every shape the CLI should not guess at", () => {
-    expect(parseHostMessages("Newest answer.").ok).toBe(false); // plain text, e.g. a mix-up with stdin
+    expect(parseHostMessages("Newest answer.").ok).toBe(false);
     expect(parseHostMessages(JSON.stringify({ v: 2, messages: [{ messageId: "a", text: "x" }] })).ok).toBe(false);
     expect(ok([]).ok).toBe(false);
     expect(ok("x").ok).toBe(false);

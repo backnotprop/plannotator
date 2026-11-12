@@ -1,14 +1,3 @@
-/**
- * Update notices as real processes: a release-numbered CLI (`bun --define
- * __CLI_VERSION__`) runs `plannotator inbox` against a fake GitHub on
- * loopback. The release page (`/releases/latest`, a 302 to the tag) is the
- * source; the API answers 403 (its rate limit), as it can on a busy IP.
- *
- * The state on disk is the one that hid the notice before: an answer cached
- * a quarter of an hour ago naming the version this binary runs, and an API
- * rate-limit lockout hours long. The Update button must still show within seconds of the
- * Inbox starting, without the API being asked.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +12,6 @@ const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
-// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
 const agents = stubbedAgentClis();
 
 function fakeGitHub(latest: string) {
@@ -38,7 +26,6 @@ function fakeGitHub(latest: string) {
       if (path === `/api/releases/tags/v${latest}`) {
         return Response.json({ tag_name: `v${latest}`, body: `## What's New in v${latest}\n\nThe release the page named.\n\n## Install / Update\n` });
       }
-      // The API's own latest: rate limited.
       return new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
         status: 403,
         headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600) },
@@ -65,7 +52,6 @@ test("a new release shows in the Inbox within seconds of a start, through a stal
     join(dataDir, "update-state.json"),
     JSON.stringify({
       latestRelease: { tag: "0.28.10", fetchedAt: now - 15 * 60 * 1000 },
-      // What 0.28.30 wrote after a 403 from the API: no request for hours.
       releaseCheck: { attemptedAt: now - 12 * 60 * 1000, failedAt: now - 12 * 60 * 1000, error: "HTTP 403", retryAt: now + 5 * 60 * 60 * 1000 },
     }),
   );
@@ -77,7 +63,6 @@ test("a new release shows in the Inbox within seconds of a start, through a stal
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
-      // A release version from source: never the live daily ping (packages/shared/daily-ping.ts).
       NO_ANON_PING: "1",
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER,
@@ -115,7 +100,6 @@ test("a new release shows in the Inbox within seconds of a start, through a stal
   }
   expect(update).toMatchObject({ state: "available", version: "0.28.12" });
   expect(Date.now() - started).toBeLessThan(5_000);
-  // The page answered; the rate-limited API's latest was never asked.
   expect(gh.requests).toContain("HEAD /r/p/releases/latest");
   expect(gh.requests).not.toContain("GET /api/releases/latest");
   const state = JSON.parse(readFileSync(join(dataDir, "update-state.json"), "utf-8"));

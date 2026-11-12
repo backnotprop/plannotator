@@ -1,10 +1,3 @@
-/**
- * `plannotator inbox --help` and Code review (approval
- * "inbox-code-review-direction"). What regresses: the guide naming
- * submit_guide's `review` field while the person has Code review off (an
- * agent would send a field the Inbox refuses), or leaving out a field the
- * Inbox serves while it is on.
- */
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,7 +33,6 @@ test("off (unset or false), the guide is byte-equal and names no review field; o
   expect(section(unset, "submit_guide")).not.toContain("`review`");
   const on = formatInboxHelp({ ...base, codeReview: true });
   expect(section(on, "submit_guide")).toContain("`review`");
-  // Only submit_guide's section changes.
   expect(on.replace(section(on, "submit_guide"), "")).toBe(unset.replace(section(unset, "submit_guide"), ""));
 
   const dataDir = join(root, "served");

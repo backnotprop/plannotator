@@ -1,9 +1,3 @@
-/**
- * `plannotator annotate` run as the real process with the Claude Code mod's
- * host result file: what the editor posts for a Done with nothing to send must
- * be a no-op for the host record (no agent turn), while stdout and `--json`
- * stay exactly what every other caller has always read.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,12 +8,9 @@ const entry = resolve(import.meta.dir, "index.ts");
 const roots: string[] = [];
 let stubs: string[] = [];
 
-// The editor's zero-state payload (ANNOTATE_NO_FEEDBACK_SENTENCE); the CLI
-// prints it verbatim, which is the established stdout contract pinned here.
 const NO_FEEDBACK = "User reviewed the document and has no feedback.";
 
 beforeAll(() => {
-  // The CLI imports the built HTML; API-only tests need just a stub.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -84,7 +75,6 @@ async function post(base: string, path: string, body: unknown) {
   expect(res.status).toBe(200);
 }
 
-// What the editor posts for Done with nothing to send.
 const EMPTY_DONE = { feedback: NO_FEEDBACK, annotations: [], codeAnnotations: [], nothingToSend: true };
 
 describe("annotate Done with nothing to send", () => {
@@ -102,9 +92,6 @@ describe("annotate Done with nothing to send", () => {
     await post(await run.base(), "/api/feedback", EMPTY_DONE);
     const { code, stdout, record } = await run.finish();
     expect(code).toBe(0);
-    // Three additive fields: nothingToSend (#1701), annotationCount (the
-    // OpenCode bridge's heading) and target (the file as the CLI resolved it,
-    // which the bridge names instead of the words it passed).
     const printed = JSON.parse(stdout.trim());
     expect(printed).toEqual({ decision: "annotated", feedback: NO_FEEDBACK, nothingToSend: true, annotationCount: 0, target: expect.any(String) });
     expect(printed.target).toMatch(/\/notes\.md$/);
@@ -160,10 +147,6 @@ describe("annotate folder session", () => {
   }, 30_000);
 });
 
-// Two files can share a name (`QUESTIONS.md` in two release folders): the
-// process names the file it resolved, in full, in the ready line, the
-// sessions registry and the decision record, and `plannotator sessions`
-// prints it with the host's pn- id.
 describe("decision target", () => {
   test("ready line, registry, `sessions --json` and the record name the resolved file; the pn- id rides along", async () => {
     const nested = (root: string) => {
@@ -185,7 +168,6 @@ describe("decision target", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]).toMatchObject({ index: 1, reviewId: "pn-abc123", target: file });
     expect(sessions[0]!.url).toContain(new URL(base).port);
-    // The table names the full target too (stderr, as before).
     const table = Bun.spawnSync([process.execPath, "run", entry, "sessions"], {
       cwd: run.root,
       env: { ...process.env, PLANNOTATOR_DATA_DIR: join(run.root, "data") },
@@ -199,11 +181,6 @@ describe("decision target", () => {
   }, 30_000);
 });
 
-// The Claude Code mod (plannotator tool `gate: true`, `/plannotator-annotate
-// x --gate`, a taken-over `plannotator annotate x --gate` run) launches plain
-// `--gate` with the result file, and the classic skill runs plain `--gate`.
-// Failure caught: the header hiding "Approve with a note…" there (the advert
-// used to require --json), or a note approved there being dropped.
 describe("gated approval with a note, plaintext launch", () => {
   const page = (root: string) => writeFileSync(join(root, "page.html"), "<!doctype html><h1>Plan</h1><p>Body.</p>");
   const NOTE = "Approved, but rename the header before shipping.";

@@ -1,20 +1,3 @@
-/**
- * Fail-closed approval-notes handshake for the OpenCode CLI bridge (PR5).
- *
- * The advert lives in this binary's review server while DELIVERY lives in the
- * independently-versioned OpenCode plugin (`buildReviewPromptFromBridgeOutcome`).
- * Without the handshake, a new binary + old plugin advertises "Approve with
- * notes", the reviewer uses it, and the old bridge silently drops the notes —
- * the exact silent-drop class the decision-control stack exists to kill.
- *
- * Pinned end to end through the real entrypoint: `opencode-review` stdin
- * WITHOUT the plugin's `supportsApprovalNotes` declaration must serve
- * `approvalNotesSupported: false` on /api/diff; WITH it, true.
- *
- * Follows the cli.test.ts entrypoint precedent: the entrypoint imports the
- * built app HTML at module load, so missing dist files are stood in with
- * placeholders and removed again afterwards; a real build is left alone.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -51,7 +34,6 @@ function initRepo(): string {
   writeFileSync(join(repoDir, "app.ts"), "export const a = 1;\n");
   git(repoDir, ["add", "app.ts"]);
   git(repoDir, ["commit", "-q", "-m", "initial"]);
-  // An uncommitted change so the default diff is non-empty.
   writeFileSync(join(repoDir, "app.ts"), "export const a = 2;\n");
   return repoDir;
 }
@@ -68,9 +50,6 @@ async function reservePort(): Promise<number> {
   return port;
 }
 
-/** Spawn `plannotator opencode-review` with the given stdin, read the advert
- *  off /api/diff, dismiss the session, and return the served advert plus the
- *  CLI's final decision record. */
 async function runBridgeReview(stdinJson: object): Promise<{
   advert: boolean | undefined;
   decision: string;
@@ -107,7 +86,6 @@ async function runBridgeReview(stdinJson: object): Promise<{
           break;
         }
       } catch {
-        // Server not listening yet.
       }
       await Bun.sleep(100);
     }
@@ -125,9 +103,6 @@ async function runBridgeReview(stdinJson: object): Promise<{
 
 describe("opencode-review approval-notes handshake", () => {
   test("stdin without the plugin declaration serves approvalNotesSupported: false", async () => {
-    // The old-plugin shape: no supportsApprovalNotes field at all. Fail
-    // closed — the client then renders no approve-carrying items, so an old
-    // bridge can never be handed a note it would discard.
     const result = await runBridgeReview({ arguments: "" });
     expect(result.advert).toBe(false);
     expect(result.decision).toBe("dismissed");

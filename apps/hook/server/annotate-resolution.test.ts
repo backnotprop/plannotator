@@ -75,8 +75,6 @@ describe("resolveAnnotateTarget", () => {
     }
   });
 
-  // #1307: an extension listed in config.json's `markdownExtensions` must be
-  // accepted everywhere .md is — single file, folder discovery, and reading.
   test("a configured extra extension opens as a document and its folder is annotatable", async () => {
     const configured = { extraMarkdownExtensions: [".livemd"] };
 

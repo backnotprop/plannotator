@@ -9,7 +9,6 @@ import { fakeHost, type FakeHost, type RunCall } from './testing/fake-host'
 
 const SESSION = { sessionId: 'session-1', dataDir: '/data', interactive: true }
 
-/** The launch directory the detached launcher was handed ($1 after the script). */
 function launchDirOf(call: RunCall): string {
   return call.argv[4] as string
 }
@@ -18,7 +17,6 @@ function isLaunch(call: RunCall): boolean {
   return call.argv[0] === '/bin/sh' && call.argv[3] === 'plannotator-launch'
 }
 
-/** Simulate the CLI coming up on `port` for every detached launch. */
 function serveOnLaunch(host: FakeHost, port = 4321) {
   host.onRun = (call) => {
     if (isLaunch(call)) host.files.set(`${launchDirOf(call)}/ready`, `${JSON.stringify({ url: `http://localhost:${port}`, isRemote: false, port })}\n`)
@@ -35,29 +33,19 @@ function decide(host: FakeHost, call: RunCall, record: Record<string, unknown>) 
 
 const PLAN = '# Ship it\n\n1. Do the thing.\n'
 
-// The owner's report (2026-10-16): replies in the Plannotator Inbox stayed
-// queued because the session always read as busy. Every hook hears a
-// subagent's turn.start (a background one included), while its end is not
-// counted, so counting the start left the session busy after the main turn
-// ended, and the Inbox wake (which waits for idle) never delivered.
 describe('busy counts the main loop only', () => {
   test("a subagent's turn start does not make the session busy, and the main turn's end leaves it idle", async () => {
     const mod = new PlannotatorMod(fakeHost(), SESSION)
     await mod.onTurnStart('main-1', 'Fix the export.')
     expect(mod.turns.busy).toBe(true)
-    // A background subagent starts while the main turn runs, and keeps running after it.
     await mod.onTurnStart('sub-1', 'Explore the repo.', 'agent-1')
     mod.onTurnComplete('main-1', 'Done.', false)
     expect(mod.turns.busy).toBe(false)
-    // Its next turn (a notification woke it) is still not the session's.
     await mod.onTurnStart('sub-2', '', 'agent-1')
     expect(mod.turns.busy).toBe(false)
   })
 })
 
-// The failure this guards: another plugin delivers its own messages as turns;
-// Send now (and the Inbox's auto-send) put our reply into such a turn, and that
-// plugin then read the agent's answer to our reply as the answer to its message.
 describe("Send now leaves another plugin's turn alone", () => {
   function steerable(mod: PlannotatorMod): string | null {
     return (mod.inbox as unknown as { options: { steerableTurn: () => string | null } }).options.steerableTurn()
@@ -77,7 +65,6 @@ describe("Send now leaves another plugin's turn alone", () => {
     mod.onTurnComplete('plugin-turn', 'Reviewed.', false)
     expect(mod.turns.busy).toBe(false)
 
-    // An engine-started turn (a background task's notification) is the session's own: as today.
     mod.onPromptEntered({ text: 'Task done.', fromUs: false, originKind: 'task-notification' })
     await mod.onTurnStart('note', 'Task done.')
     expect(steerable(mod)).toBe('note')
@@ -102,8 +89,6 @@ describe('plan review', () => {
     expect(stdin.plan).toBe(PLAN)
   })
 
-  // #2197: the CLI names the plan's history project from the session root,
-  // not from its cwd, which a shell cd moves between submits.
   test("the session root rides the launch's stdin, read once per session", async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -192,7 +177,6 @@ describe('plan review', () => {
       updatedInput: { plan: PLAN, planFilePath: '/p.md' },
       updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
     })
-    // No second review was started for the approved call.
     expect(launches(host)).toHaveLength(1)
   })
 
@@ -211,10 +195,6 @@ describe('plan review', () => {
     expect(launches(host)).toHaveLength(2)
   })
 
-  // #2007: on Team/Enterprise accounts Claude Code's built-in guard
-  // (cc-plugin-sec-default) sends classic.PermissionRequest past this mod, so
-  // the plugin's own command hook gets the approved call. The mod records the
-  // approval for it while the call is in flight.
   test('approved: the passing call is recorded for the classic hook, and the record goes when the call settles', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -234,7 +214,6 @@ describe('plan review', () => {
     expect(host.files.has(recordPath)).toBe(false)
     expect(await mod.onPlanCall({ tool_use_id: 'toolu_02', plan: PLAN })).toEqual({ pass: true })
 
-    // Its folder is made owner-only before the record is written.
     const mkdir = host.runs.find((call) => call.argv[3] === 'plannotator-mkdir' && call.argv[4] === '/data/claude-code-mod/session-1/plan-approvals')
     expect(mkdir?.argv[2]).toContain('umask 077')
     const record = JSON.parse(host.files.get(recordPath) ?? '{}')
@@ -319,10 +298,6 @@ describe('plan review', () => {
     expect(host.logs.join('\n')).toContain('unknown subcommand')
   })
 
-  // Version skew: the plugin installs from main and the binary updates on its
-  // own, so a mod can meet a CLI with no claude-mod-plan. What those CLIs
-  // print, observed by running them: 0.27.25 (0.27.11+) and 0.27.10 (older
-  // CLIs read an unknown subcommand as the classic hook).
   for (const [cli, stderr] of [
     ['0.27.11 to 0.27.25', "Unknown command: claude-mod-plan\n\nRun 'plannotator --help' for the list of commands.\n"],
     ['before 0.27.11', 'No plan content in hook event\n'],
@@ -340,12 +315,10 @@ describe('plan review', () => {
       expect(await mod.onPlanCall({ tool_use_id: 't1', plan: PLAN })).toEqual({ pass: true })
       expect(await mod.onPlanCall({ tool_use_id: 't2', plan: `${PLAN}2. More.\n` })).toEqual({ pass: true })
 
-      // One probe, then no more launches; one explanation, not an error per plan.
       expect(launches(host)).toHaveLength(1)
       expect(host.logs).toHaveLength(1)
       expect(host.logs[0]).toContain('classic review')
       expect(host.logs[0]).not.toContain('could not open')
-      // The plan copy on stdin is removed; nothing is waiting or watched.
       const dir = launchDirOf(launches(host)[0]!)
       expect(host.runs.some((call) => call.argv[3] === 'plannotator-cleanup' && call.argv[4] === dir)).toBe(true)
       expect(host.store.get(STORE_LAUNCHES)).toEqual([])
@@ -363,7 +336,6 @@ describe('plan review', () => {
       if (!dir || host.files.has(`${dir}/exit`)) return
       host.files.set(`${dir}/stderr`, 'Unknown command: claude-mod-plan\n')
       host.files.set(`${dir}/exit`, '1')
-      // The 1 s timer fires in the same moment the CLI exits.
       void host.tick()
     }
     const mod = new PlannotatorMod(host, SESSION)
@@ -379,7 +351,6 @@ describe('plan review', () => {
     const host = fakeHost()
     const mod = new PlannotatorMod(host, SESSION)
 
-    // Nothing within the hook's 15 s: Claude is told the review is open.
     const answer = await mod.onPlanCall({ tool_use_id: 't1', plan: PLAN })
     expect('deny' in answer && answer.deny).toContain('NOT approved')
 
@@ -391,7 +362,6 @@ describe('plan review', () => {
     expect(host.logs).toEqual([CLASSIC_PLAN_REVIEW_TEXT])
     expect(host.submits).toHaveLength(1)
     expect(host.submits[0]).toContain('Call ExitPlanMode again')
-    // The call it asks for goes to the classic review without another launch.
     expect(await mod.onPlanCall({ tool_use_id: 't2', plan: PLAN })).toEqual({ pass: true })
     expect(launches(host)).toHaveLength(1)
     expect(host.store.get(STORE_LAUNCHES)).toEqual([])
@@ -471,13 +441,10 @@ describe('commands', () => {
     const [launch] = launches(host)
     expect(launch?.argv.slice(5)).toEqual(['plannotator', 'annotate-last', '--stdin'])
     expect(host.files.get(`${launchDirOf(launch!)}/stdin`)).toBe('The answer is 42.')
-    // One message: nothing to pick, so the launch is exactly the old one.
     expect(host.files.has(`${launchDirOf(launch!)}/messages.json`)).toBe(false)
     expect(launch?.env?.PLANNOTATOR_HOST_MESSAGES_FILE).toBeUndefined()
   })
 
-  // The regression: under the mod only the newest text reached the CLI, so
-  // the picker never showed and an earlier message could not be annotated.
   test('last hands the CLI the recent assistant messages, newest first, for the picker', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -485,10 +452,10 @@ describe('commands', () => {
       { role: 'user', text: 'first question' },
       { role: 'assistant', text: 'First answer.' },
       { role: 'user', text: 'second question' },
-      { role: 'assistant', text: '' }, // a tool-use row: no text
-      { role: 'user', text: '' }, // its tool result
+      { role: 'assistant', text: '' },
+      { role: 'user', text: '' },
       { role: 'assistant', text: 'Second answer, part one.' },
-      { role: 'assistant', text: 'Part two.' }, // same response, next block
+      { role: 'assistant', text: 'Part two.' },
       { role: 'user', text: 'third question' },
       { role: 'assistant', text: '' },
     ]
@@ -499,7 +466,6 @@ describe('commands', () => {
     const [launch] = launches(host)
     const dir = launchDirOf(launch!)
     expect(launch?.argv.slice(5)).toEqual(['plannotator', 'annotate-last', '--stdin'])
-    // stdin still carries the newest text: all an older CLI reads.
     expect(host.files.get(`${dir}/stdin`)).toBe('Second answer, part one.\nPart two.')
     expect(launch?.env?.PLANNOTATOR_HOST_MESSAGES_FILE).toBe(`${dir}/messages.json`)
     const payload = JSON.parse(host.files.get(`${dir}/messages.json`) ?? '{}') as { v: number; messages: { messageId: string; text: string }[] }
@@ -508,7 +474,6 @@ describe('commands', () => {
     expect(new Set(payload.messages.map((message) => message.messageId)).size).toBe(2)
     expect(opened).toContain("Claude's recent messages")
 
-    // The decision names what the reviewer could pick from, not "the last message".
     decide(host, launch!, { surface: 'annotate-last', decision: 'annotated', message: '# Message Annotations\n\nfix it', noop: false, annotationCount: 1 })
     await host.tick()
     expect(host.submits[0]).toStartWith("Plannotator: Claude's recent messages (pn-ababab) — Feedback · 1 comment.")
@@ -573,8 +538,6 @@ describe('commands', () => {
 })
 
 describe('the plannotator tool', () => {
-  // The failure: the tool forks the launch (different argv, no result file,
-  // no bridge token) or tells Claude something other than "end your turn".
   test('a call launches exactly what the slash command launches and returns at once', async () => {
     const host = fakeHost()
     serveOnLaunch(host, 6060)
@@ -643,8 +606,6 @@ describe('the plannotator tool', () => {
     expect(host.logs.some((line) => line.includes('notes.md closed with no annotations'))).toBe(true)
   })
 
-  // #1907: an agent that opens a code review and waits for the sign-off gets
-  // the bare Approve; a review it did not gate (and the slash command) only logs.
   test('a gated code review delivers the bare Approve; an ungated one does not', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -654,7 +615,6 @@ describe('the plannotator tool', () => {
     await mod.runTool({ action: 'review', target: '../wt' })
     await mod.runCommand('review', '--gate')
     const [gated, plain, slash] = launches(host)
-    // The gate is the mod's: never passed to the CLI, so an older CLI still opens it.
     expect(gated?.argv.slice(5)).toEqual(['plannotator', 'review'])
     expect(slash?.argv.slice(5)).toEqual(['plannotator', 'review', '--gate'])
 
@@ -721,7 +681,6 @@ describe('a CLI older than the host result file', () => {
     expect(host.logs.some((line) => line.includes('b.md closed with no annotations'))).toBe(true)
   })
 
-  // #1701: what such a CLI prints for an annotate Done with nothing to send.
   test('its printed zero-feedback sentence starts no turn', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -738,9 +697,6 @@ describe('a CLI older than the host result file', () => {
   })
 })
 
-// #1701, end to end over the record the CLI builds: the editor's Done posts the
-// zero-state sentence as feedback, marked nothingToSend; the session must not
-// receive a "please address the annotation feedback" turn.
 describe('annotate Done with nothing to send (CLI record → mod)', () => {
   test('logs, never submits', async () => {
     const { annotateHostResult } = await import('../../server/host-result')
@@ -769,7 +725,6 @@ describe('restore', () => {
     await first.runCommand('annotate', 'notes.md')
     const call = launches(host)[0]!
 
-    // A new process for the same session (restart / --resume): same disk and store, new timers.
     const restarted = fakeHost()
     restarted.files = host.files
     restarted.store = host.store
@@ -795,9 +750,6 @@ describe('restore', () => {
 })
 
 describe('session boundaries and launch hygiene', () => {
-  // The failure: after /clear (session.start does not fire, the process goes
-  // on under another session id) the old instance's timer delivered a review
-  // decision into the new, unrelated session.
   test('a disposed instance delivers nothing; the session reattaches it when resumed', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -840,14 +792,12 @@ describe('session boundaries and launch hygiene', () => {
     const cleanup = host.runs.find((call) => call.argv[3] === 'plannotator-cleanup')
     expect(cleanup?.argv).toContain('stdin')
     expect(cleanup?.argv).toContain('result.json')
-    // Oversized feedback stays for Claude to Read.
     expect(cleanup?.argv).not.toContain('feedback.md')
     expect(order.indexOf('plannotator-cleanup')).toBeGreaterThan(order.indexOf('write feedback.md'))
   })
 })
 
 describe('the plannotator tool: list and close (contract v2)', () => {
-  /** Answers the host-control endpoints of every launched server; records what was asked. */
   function serveHostControl(host: FakeHost, unsent: number) {
     const calls: string[] = []
     host.onFetch = (url) => {
@@ -884,7 +834,6 @@ describe('the plannotator tool: list and close (contract v2)', () => {
     expect(lines.find((line) => line.startsWith(idB))).toContain('b.md')
   })
 
-  // The failure: one conversation closes (or sees) a review another one opened.
   test('another Claude session neither lists nor closes these reviews', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -912,7 +861,6 @@ describe('the plannotator tool: list and close (contract v2)', () => {
     expect(textOf(closed)).toContain('3 unsent comments')
     expect(calls.filter((url) => url.endsWith('/api/host/close'))).toHaveLength(1)
 
-    // The CLI publishes its dismissal and exits.
     decide(host, launch!, { surface: 'annotate', decision: 'dismissed', message: '', noop: true, closedBy: 'agent', unsentAnnotations: 3 })
     host.files.set(`${launchDirOf(launch!)}/exit`, '0')
     await host.tick()
@@ -923,7 +871,6 @@ describe('the plannotator tool: list and close (contract v2)', () => {
   test('an older CLI without the endpoint is stopped with TERM instead', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
-    // 0.24+ answers an unknown /api/* path with a JSON 404.
     host.onFetch = (url) => ({ status: 404, ok: false, text: JSON.stringify({ error: 'Not found', path: new URL(url).pathname }) })
     const mod = new PlannotatorMod(host, SESSION)
     const id = sessionIdIn(await mod.runTool({ action: 'annotate', target: 'a.md' }))
@@ -932,13 +879,11 @@ describe('the plannotator tool: list and close (contract v2)', () => {
 
     expect(textOf(await mod.runTool({ action: 'close', session: id }))).toContain('Closed a.md')
     const stop = host.runs.find((call) => call.argv[3] === 'plannotator-stop')
-    // The pid, then the files whose presence means the reviewer already decided.
     expect(stop?.argv.slice(4)).toEqual(['4242', `${launchDirOf(launch!)}/result.json`, `${launchDirOf(launch!)}/exit`])
 
     host.files.set(`${launchDirOf(launch!)}/exit`, '143')
     await host.tick()
     expect(host.submits).toHaveLength(0)
-    // Not reported as a crash: Claude asked for it.
     expect(host.logs.some((line) => line.includes('without a decision'))).toBe(false)
   })
 
@@ -956,9 +901,6 @@ describe('the plannotator tool: list and close (contract v2)', () => {
     expect(calls.filter((url) => url.endsWith('/api/host/close'))).toHaveLength(1)
   })
 
-  // The failure (#1709 review): a CLI before the /api/* 404 guard serves its
-  // app page with 200 for POST /api/host/close; read as "closed", the
-  // reviewer's later feedback was swallowed as Claude's close.
   test('an app page (200 text/html) is not a close; it is an older CLI, stopped only after the checks', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -967,14 +909,12 @@ describe('the plannotator tool: list and close (contract v2)', () => {
     const id = sessionIdIn(await mod.runTool({ action: 'annotate', target: 'a.md' }))
     const [launch] = launches(host)
     host.files.set(`${launchDirOf(launch!)}/pid`, '4242\n')
-    // The stop script finds the reviewer's decision already on disk (exit 3).
     const onRun = host.onRun
     host.onRun = (call) => (call.argv[3] === 'plannotator-stop' ? { exitCode: 3, stdout: '', stderr: '' } : onRun(call))
 
     const answer = await mod.runTool({ action: 'close', session: id })
     expect(textOf(answer)).toContain('already decided')
 
-    // Not marked closed: the reviewer's decision is delivered.
     decide(host, launch!, { surface: 'annotate', decision: 'annotated', message: 'fix line 3', noop: false, annotationCount: 1 })
     await host.tick()
     expect(host.submits).toHaveLength(1)
@@ -996,8 +936,6 @@ describe('the plannotator tool: list and close (contract v2)', () => {
     expect(host.runs.some((call) => call.argv[3] === 'plannotator-stop')).toBe(false)
   })
 
-  // A current CLI in remote mode turns /api/host/* off: its 404 is not an
-  // older CLI's, and its process must not be signalled.
   test('host control turned off (remote mode): no TERM, the close says to use the tab', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -1027,9 +965,6 @@ describe('the plannotator tool: list and close (contract v2)', () => {
     expect(textOf(await mod.runTool({ action: 'list' }))).toContain(id)
   })
 
-  // The race a TERM can lose: the reviewer decided just before it, and the
-  // older CLI publishes the decision anyway. A record without closedBy is the
-  // reviewer's, not Claude's close.
   test('after a TERM close, a decision record without closedBy is delivered, not swallowed', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -1056,16 +991,11 @@ describe('the plannotator tool: list and close (contract v2)', () => {
     expect('deny' in refused && refused.deny).toContain('Invalid plannotator call')
     expect(launches(host)).toHaveLength(0)
 
-    // A one-file list is the plain call.
     await mod.runTool({ action: 'annotate', target: ['a.md'] })
     expect(launches(host)[0]?.argv.slice(5)).toEqual(['plannotator', 'annotate', 'a.md'])
   })
 })
 
-// Reviews of several files (bundles). The failures: a list launched as
-// something other than the CLI's bundle invocation (re-split, reordered), the
-// decision heading naming one file of several, or an older CLI's "pick one"
-// error shown to Claude as if its call were wrong.
 describe('the plannotator tool: several files', () => {
   test('a list launches one CLI with the files in order, and the result and decision name the bundle', async () => {
     const host = fakeHost()
@@ -1102,7 +1032,6 @@ describe('the plannotator tool: several files', () => {
     const answer = await mod.runTool({ action: 'annotate', target: ['a.md', 'b.md'] })
     expect('deny' in answer && answer.deny).toBe(PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT)
     expect(await mod.runCommand('annotate', 'a.md b.md')).toBe(PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT)
-    // Prose around two paths is the user's own ambiguity, shown as the CLI said it.
     expect(await mod.runCommand('annotate', 'compare a.md and b.md')).toContain('Ambiguous annotate arguments')
   })
 
@@ -1135,22 +1064,17 @@ describe('the plannotator tool: several files', () => {
 describe('Ask this session survives a server that stops answering', () => {
   const POLL = '/api/ai/bridge/poll'
 
-  /** Counts polls; while `silent`, every request fails like `$.http.fetch` timing out; otherwise a poll stays open. */
   function pausableServer(host: FakeHost) {
     const state = { silent: false, polls: 0 }
     host.onFetch = (url) => {
       if (!url.endsWith(POLL)) return { status: 200, ok: true, text: '{}' }
       state.polls += 1
       if (state.silent) throw new Error('The operation timed out.')
-      // A long poll the server holds open: the loop waits here.
       return new Promise<never>(() => undefined)
     }
     return state
   }
 
-  // The failure: the loop gave up after ~3 minutes of a paused server (a
-  // sleeping laptop) and nothing ever started another, so the page said the
-  // session was gone for good while decisions still arrived.
   test('a bridge that gave up is started again after a backoff, which grows while the server stays silent', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -1163,23 +1087,19 @@ describe('Ask this session survives a server that stops answering', () => {
     const firstLoop = server.polls
     expect(firstLoop).toBe(6)
 
-    // Not again at once.
     await host.tick()
     expect(server.polls).toBe(firstLoop)
 
-    // 5 s later a new loop starts; still silent, so it gives up too.
     host.clock += 5_000
     await host.tick()
     expect(server.polls).toBe(firstLoop * 2)
 
-    // The next wait has doubled: nothing at 5 s, a new loop at 10 s.
     host.clock += 5_000
     await host.tick()
     expect(server.polls).toBe(firstLoop * 2)
     host.clock += 5_000
     server.silent = false
     await host.tick()
-    // The server answers again: the new loop's poll is open, and stays the only one.
     expect(server.polls).toBe(firstLoop * 2 + 1)
     host.clock += 120_000
     await host.tick()
@@ -1208,7 +1128,6 @@ describe('Ask this session survives a server that stops answering', () => {
 })
 
 describe('two Claude Code processes on one session (claude --continue while the first runs)', () => {
-  /** A second process: same disk and store, its own timers, clock and instance id; started `later` ms after the first. */
   function secondProcess(host: FakeHost, later = 1_000): FakeHost {
     const other = fakeHost()
     other.files = host.files
@@ -1229,8 +1148,6 @@ describe('two Claude Code processes on one session (claude --continue while the 
 
   const delivered = (hosts: FakeHost[], text: string) => hosts.flatMap((h) => h.submits).filter((submit) => submit.includes(text))
 
-  // The failure: the old process kept the reviews and received the decision
-  // while the person worked in the new one (and plan review broke there).
   test('the process that restored later watches and delivers; the first forgets the review quietly', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -1243,7 +1160,6 @@ describe('two Claude Code processes on one session (claude --continue while the 
     await bothTick(other, host)
 
     decide(host, launches(host)[0]!, feedback('please fix'))
-    // The first process looks first, with its lease answer cached from before: it must not deliver.
     await bothTick(host, other)
     await bothTick(host, other)
 
@@ -1307,13 +1223,9 @@ describe('two Claude Code processes on one session (claude --continue while the 
     expect(delivered([host], PLAN_APPROVAL_NEXT_STEP)).toHaveLength(1)
 
     expect(await second.onPlanCall({ tool_use_id: 't2', plan: PLAN })).toEqual({ pass: true })
-    // Consumed: the first process does not pass the same approval again.
     expect('deny' in (await first.onPlanCall({ tool_use_id: 't3', plan: PLAN }))).toBe(true)
   })
 
-  // The failure (reproduced on the per-file claim): one process claimed the
-  // result record while the other, finding no record, claimed the exit code
-  // and delivered the stdout copy too.
   test('a decision on disk as both a record and an exit code is delivered once when both check at once', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -1351,8 +1263,6 @@ describe('two Claude Code processes on one session (claude --continue while the 
     expect(host.statuses.at(-1)).toBeUndefined()
   })
 
-  // The failure: a claim made by a process call whose answer timed out read as
-  // someone else's next tick, so the decision was never delivered.
   test('a claim whose answer was lost is retried by its claimant and delivered once', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -1374,9 +1284,6 @@ describe('two Claude Code processes on one session (claude --continue while the 
     expect(delivered([host], 'please fix')).toHaveLength(1)
   })
 
-  // The failure: the 1 s timer does not wait for a slow check, so a second
-  // check of the same launch ran beside it; the claim names this instance,
-  // so both checks won it and the decision went to Claude twice.
   test('overlapping ticks check a launch once', async () => {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -1390,7 +1297,6 @@ describe('two Claude Code processes on one session (claude --continue while the 
     })
     let stalls = 1
     host.exists = async (path) => {
-      // The first check stalls on a slow file system call.
       if (path === `${dir}/settled` && stalls-- > 0) await held
       return exists(path)
     }
@@ -1410,13 +1316,11 @@ describe('two Claude Code processes on one session (claude --continue while the 
     serveOnLaunch(host)
     const first = new PlannotatorMod(host, SESSION)
     await first.runCommand('annotate', 'notes.md')
-    // Started at the same moment: a tie, which the first watcher keeps.
     const other = secondProcess(host, 0)
     const second = new PlannotatorMod(other, SESSION)
     await second.restore()
     await bothTick(host, other)
 
-    // The first process is killed: no more ticks, no release. Its lease goes stale.
     other.clock += 25_000
     for (let index = 0; index < 5; index += 1) await other.tick()
     decide(host, launches(host)[0]!, feedback('please fix'))
@@ -1489,7 +1393,6 @@ describe('stored launch records are pruned', () => {
     host.onRun = (call) => {
       if (call.argv[3] !== 'plannotator-prune') return
       probes.push(call.argv.slice(4))
-      // Another process records a launch while the probe runs.
       const stored = host.store.get(STORE_LAUNCHES) as unknown[]
       host.store.set(STORE_LAUNCHES, [...stored, record('meanwhile', 'session-4', host.clock)])
       return {
@@ -1503,7 +1406,6 @@ describe('stored launch records are pruned', () => {
     await mod.restore()
     await mod.pruning
 
-    // This session's records only when cleaned up; others' also when dead; a long-unresumed session's also with a decision.
     expect(probes).toEqual([
       [
         '--cleaned',
@@ -1521,9 +1423,6 @@ describe('stored launch records are pruned', () => {
   })
 })
 
-// $.prompt.submit waits for Claude to be idle, so a claimed decision can wait
-// as long as Claude's current turn runs. A claimant that quits meanwhile must
-// not leave the decision stranded with nobody saying where it is.
 describe('a decision claimed but never delivered', () => {
   const UNDELIVERED = "arrived but wasn't delivered"
 
@@ -1536,7 +1435,6 @@ describe('a decision claimed but never delivered', () => {
     return other
   }
 
-  /** A process whose $.prompt.submit waits (Claude mid-turn) until `finish()`. */
   async function claimantWaitingForIdle() {
     const host = fakeHost()
     serveOnLaunch(host)
@@ -1558,7 +1456,6 @@ describe('a decision claimed but never delivered', () => {
 
   test('a claimant that quit while Claude was busy: the next restore reports where the decision is, once, and delivers nothing', async () => {
     const { host, mod, dir } = await claimantWaitingForIdle()
-    // The record stays while the decision waits.
     expect((host.store.get(STORE_LAUNCHES) as unknown[]).length).toBe(1)
     mod.dispose()
 
@@ -1607,7 +1504,6 @@ describe('a decision claimed but never delivered', () => {
     const other = secondProcess(host)
     const second = new PlannotatorMod(other, SESSION)
     await second.restore()
-    // The person works in the first process again; it claims, and Claude is mid-turn there.
     host.clock = other.clock + 1_000
     host.submit = () => new Promise<void>(() => undefined)
     first.onPromptEntered({ text: 'back here', fromUs: false, originKind: 'composer' })
@@ -1618,7 +1514,6 @@ describe('a decision claimed but never delivered', () => {
     await other.tick()
     expect(other.logs.filter((line) => line.includes(UNDELIVERED))).toEqual([])
 
-    // Killed: no ticks, no release. Its heartbeat stops.
     other.clock = host.clock + 61_000
     for (let index = 0; index < 10; index += 1) await other.tick()
 
@@ -1627,8 +1522,6 @@ describe('a decision claimed but never delivered', () => {
   })
 })
 
-// The owner closed the Inbox tab and had no easy way back: /plannotator-inbox
-// opens it again (starting a stopped one detached) and says where it is.
 describe('/plannotator-inbox', () => {
   test('runs plannotator inbox --open with the data dir and answers with the address', async () => {
     const host = fakeHost()
@@ -1636,15 +1529,12 @@ describe('/plannotator-inbox', () => {
       call.argv[1] === 'inbox' ? { exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: '' } : undefined
     const mod = new PlannotatorMod(host, SESSION)
     const { text, context } = await mod.openInbox('mcp__plannotator__plannotator_inbox')
-    // The model gets the Inbox briefing as the command's hidden context (no
-    // turn), naming the tool as this session registered it.
     expect(context).toEqual([inboxCommandBriefing('mcp__plannotator__plannotator_inbox')])
     expect(context![0]).toContain('`mcp__plannotator__plannotator_inbox` tool')
     const call = host.runs.find((run) => run.argv[1] === 'inbox')
     expect(call?.argv).toEqual(['plannotator', 'inbox', '--open'])
     expect(call?.env?.PLANNOTATOR_DATA_DIR).toBe('/data')
     expect(text).toContain('http://localhost:59812/')
-    // Nothing is launched: no review, no decision to wait for.
     expect(host.runs.filter(isLaunch)).toEqual([])
   })
 
@@ -1659,7 +1549,6 @@ describe('/plannotator-inbox', () => {
   test('an older CLI without --open is told to update; any other failure says why', async () => {
     const host = fakeHost()
     host.onRun = () => ({ exitCode: 1, stdout: '', stderr: "Unknown inbox option: --open\nRun 'plannotator inbox --help' for usage.\n" })
-    // Not opened: the command's answer carries no briefing (register.ts).
     expect(await new PlannotatorMod(host, SESSION).openInbox()).toEqual({ text: expect.stringContaining('plannotator update') })
 
     const failing = fakeHost()
@@ -1668,10 +1557,7 @@ describe('/plannotator-inbox', () => {
   })
 })
 
-// The owner's report, for review decisions: Claude Code drops a plugin prompt after the person stopped the session
-// until someone types (`PromptDropped`). The decision was marked delivered, its files cleaned up, and it never went in.
 describe('a decision Claude Code dropped', () => {
-  /** An engine that drops every plugin prompt while `held.value` (any reason: a Stop, an idle compaction). */
   function stoppedHost(serve = true) {
     const host = fakeHost()
     const held = { value: true }
@@ -1702,7 +1588,6 @@ describe('a decision Claude Code dropped', () => {
     expect(host.files.has(`${dir}/stdin`)).toBe(true)
     expect(host.logs.some((line) => line.startsWith('Could not send'))).toBe(false)
 
-    // The person types: input moves again, and the decision is tried once more.
     held.value = false
     mod.onPromptEntered({ text: 'carry on', fromUs: false, originKind: 'composer' })
     await mod.onTurnStart('turn-1', 'carry on')

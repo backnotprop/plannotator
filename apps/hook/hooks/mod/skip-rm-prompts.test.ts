@@ -1,12 +1,3 @@
-/**
- * CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS beside Plannotator's plan
- * hook (skip-rm-prompts.ts). What can regress: the mod answering a removal
- * prompt the person did not waive (no variable, not bypass, a nested session),
- * overriding the person's own "ask before rm" rule or hook, a plugin's hook
- * that asked, or an enabled plugin's PermissionRequest or PreToolUse hook on
- * Bash that would never run; or leaving the prompt up where the variable promises none (main
- * loop and subagents alike). Driven through the real hooks register.ts adds.
- */
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,7 +6,6 @@ import { isBareRemovalAsk, personGuardsRemovals, REMOVAL_ASK_TTL_MS, removalAskK
 
 type Hook = ($: unknown, e: any, next: (e: unknown) => unknown) => unknown
 
-/** Every hook register() adds, with its matcher, so a call can be dispatched the way the engine selects. */
 async function freshHooks(name: string) {
   const { register } = (await import(`./register?${name}`)) as typeof import('./register')
   const held: { event: string; matcher: Record<string, unknown> | undefined; hook: Hook }[] = []
@@ -39,11 +29,9 @@ const RM_ASK = {
 const COMMAND = 'mkdir -p t/logs/a && rm -rf t/logs/*/*'
 const BENEATH = { decision: { behavior: 'deny', message: 'the dialog, beneath' } }
 
-/** Temp folders for the plugin tests' config folders and plugins; removed after the file. */
 const TEMP = mkdtempSync(join(tmpdir(), 'plannotator-skip-rm-'))
 afterAll(() => rmSync(TEMP, { recursive: true, force: true }))
 
-/** Files under TEMP are real (the plugin tests' registry and hooks); every other path is as before: only /bin/sh exists. */
 const inTemp = (path: string) => path.startsWith(`${TEMP}/`)
 
 function engine(options: { env?: Record<string, string>; settings?: unknown; settingsThrows?: boolean; ran?: string[]; partVerdict?: (command: string) => unknown } = {}) {
@@ -84,7 +72,6 @@ function engine(options: { env?: Record<string, string>; settings?: unknown; set
     http: { fetch: async () => ({ status: 404, ok: false, text: '' }) },
     tool: {
       register: async (spec: { name: string }) => ({ tool: `mcp__plugin_plannotator__${spec.name}` }),
-      // Claude Code's own verdict for one command, as `$.tool.check` gives it; none set: the query fails.
       check: async (query: { tool: string; input: { command: string } }) => {
         if (!options.partVerdict) throw new Error('no tool.check here')
         return options.partVerdict(query.input.command)
@@ -99,11 +86,6 @@ function engine(options: { env?: Record<string, string>; settings?: unknown; set
 
 let fresh = 0
 
-/**
- * One Bash call through the mod as Claude Code raises it: its verdict
- * (`tool.check`, the engine's own beneath), then its permission prompt.
- * Returns what the prompt was answered with: the mod's allow, or what lies beneath.
- */
 async function removalPrompt(options: {
   variable?: string
   mode?: string
@@ -114,7 +96,6 @@ async function removalPrompt(options: {
   env?: Record<string, string>
   skipCheck?: boolean
   ran?: string[]
-  /** What Claude Code answers for one part of a several-parts command, asked by itself. */
   partVerdict?: (command: string) => unknown
 }) {
   const hooks = await freshHooks(`skip-rm-${fresh++}`)
@@ -132,7 +113,6 @@ async function removalPrompt(options: {
     ...(options.agentId ? { agent_id: options.agentId, agent_type: 'general-purpose' } : {}),
   }
   const selected = hooks('classic.PermissionRequest', prompt)
-  // Each hook runs over the ones after it; the last falls through to the dialog.
   const run = (i: number): Promise<unknown> => (i < selected.length ? Promise.resolve(selected[i]!.hook($, prompt, () => run(i + 1))) : Promise.resolve(BENEATH))
   return run(0)
 }
@@ -210,9 +190,6 @@ describe("the person's own rules and hooks win", () => {
     expect(await removalPrompt({ variable: '1', settings, verdict, agentId: 'agent-7' })).toEqual(BENEATH)
   })
 
-  // Claude Code keeps the waiver on beside a PreToolUse hook (it turns it off for a PermissionRequest hook only),
-  // and the hook has run before the prompt whatever the mod answers: stepping aside for it kept every removal
-  // prompt for anyone with a Bash or catch-all PreToolUse hook (a logger, a formatter, a guard that only denies).
   test('a PreToolUse hook that could run for Bash and did not ask leaves the waiver on, as in Claude Code itself', async () => {
     for (const matcher of ['Bash', '*', '', undefined, 'Bash|Monitor', 'Ba.*', '(unclosed']) {
       const settings = { hooks: { PreToolUse: [{ ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: 'command', command: 'log-commands.sh' }] }] } }
@@ -258,14 +235,10 @@ describe('the removal asks it recognizes', () => {
   })
 })
 
-// Claude Code words the ask for a command of several parts by listing them, without the check that asked
-// (real 2.1.321 verdicts). With Plannotator installed every such removal still prompted: `cd /tmp/x && rm -rf
-// logs/*/*`, two removals in one command, a removal outside the working directories beside a mkdir.
 describe('a removal inside a command of several parts', () => {
   const DANGEROUS = (target: string) => ({ decision: 'ask', reason: `Dangerous rm operation detected: '${target}'\n\nThis command's glob pattern traverses directories that cannot be statically enumerated.` })
   const parts = (...list: string[]) => ({ decision: 'ask', reason: `This Bash command contains multiple operations. The following ${list.length === 1 ? 'part requires' : 'parts require'} approval: ${list.join(', ')}` })
   const CD_RM = parts('cd /tmp/scratch', 'rm -rf build/*/*')
-  /** Claude Code's verdict for each part by itself, in bypass mode: the removal check's ask, else allow. */
   const perPart = (command: string) => (/\*\/\*/.test(command) ? DANGEROUS(command) : { decision: 'allow' })
 
   test('is answered with allow when each part, asked by itself, is allowed or a removal-check ask', async () => {
@@ -273,7 +246,6 @@ describe('a removal inside a command of several parts', () => {
       expect(await removalPrompt({ variable: '1', verdict, partVerdict: perPart })).toEqual(ALLOWED)
       expect(await removalPrompt({ variable: '1', verdict, partVerdict: perPart, agentId: 'agent-7' })).toEqual(ALLOWED)
     }
-    // A `cd` before a relative removal: each part is allowed by itself, and only the removal check reads them together.
     expect(await removalPrompt({ variable: '1', verdict: parts('cd /tmp/scratch', 'rm -rf build/*'), partVerdict: () => ({ decision: 'allow' }) })).toEqual(ALLOWED)
   })
 
@@ -291,7 +263,6 @@ describe('a removal inside a command of several parts', () => {
         },
       }),
     ).toEqual(BENEATH)
-    // An engine with no `$.tool.check`.
     expect(await removalPrompt({ variable: '1', verdict: CD_RM })).toEqual(BENEATH)
   })
 
@@ -316,12 +287,10 @@ describe('a removal inside a command of several parts', () => {
     expect(await removalPrompt({ variable: '1', mode: 'default', verdict: CD_RM, partVerdict: counting })).toEqual(BENEATH)
     expect(await removalPrompt({ variable: '1', verdict: CD_RM, partVerdict: counting, settings: { permissions: { ask: ['Bash(rm *)'] } } })).toEqual(BENEATH)
     expect(await removalPrompt({ variable: '1', verdict: CD_RM, partVerdict: counting, settings: { hooks: { PermissionRequest: [{ hooks: [{ type: 'command', command: 'notify' }] }] } } })).toEqual(BENEATH)
-    // Claude Code is not even asked about the parts there.
     expect(asked).toBe(0)
   })
 })
 
-/** Plannotator's own plugin hooks, as shipped: the plan hooks on EnterPlanMode and ExitPlanMode. */
 const PLANNOTATOR_HOOKS = JSON.parse(readFileSync(join(import.meta.dir, '..', 'hooks.json'), 'utf8'))
 
 function writeFile(path: string, content: string | object) {
@@ -331,11 +300,6 @@ function writeFile(path: string, content: string | object) {
 
 let worlds = 0
 
-/**
- * A Claude Code config folder under TEMP: its plugin registry
- * (`plugins/installed_plugins.json`, v2) and each plugin's folder with the
- * files given. `registry: null` writes no registry; a string writes it as is.
- */
 function pluginWorld(plugins: Record<string, { files?: Record<string, string | object>; registered?: boolean }>, options: { registry?: string | null } = {}) {
   const root = join(TEMP, `world-${worlds++}`)
   const configDir = join(root, 'config')
@@ -357,7 +321,6 @@ const command = (name: string) => [{ type: 'command', command: name }]
 describe("another enabled plugin's permission hooks win (the mod answers above them, so they would never run)", () => {
   test('a PermissionRequest hook that could run for Bash, in hooks/hooks.json or plugin.json', async () => {
     const shapes: Record<string, string | object>[] = [
-      // A remote-approval plugin: every permission prompt goes to it.
       { 'hooks/hooks.json': { hooks: { PermissionRequest: [{ hooks: command('notify-phone') }] } } },
       { '.claude-plugin/plugin.json': { name: 'guard', hooks: { PermissionRequest: [{ matcher: '*', hooks: command('approve') }] } } },
       { '.claude-plugin/plugin.json': { name: 'guard', hooks: './more-hooks.json' }, 'more-hooks.json': { hooks: { PermissionRequest: [{ matcher: 'Bash|Write', hooks: command('scan') }] } } },
@@ -415,7 +378,6 @@ describe("another enabled plugin's permission hooks win (the mod answers above t
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files: { '.claude-plugin/plugin.json': { name: 'guard', hooks: './missing.json' } } } }),
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files: { '.claude-plugin/plugin.json': { name: 'guard', hooks: '${OTHER_ROOT}/h.json' } } } }),
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { files: { 'hooks/hooks.json': { hooks: { PermissionRequest: 'not a list' } } } } }),
-      // Enabled, but not in the registry: what Claude Code loaded for it is unknown.
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': { registered: false } }),
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': {} }, { registry: null }),
       pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'guard@tools': {} }, { registry: '{ not json' }),
@@ -476,7 +438,6 @@ describe('the debug log', () => {
     expect(lines(ran)).toHaveLength(2)
   })
 
-  // "left to the dialog" alone could not tell a person which of their rules, hooks or plugins kept the prompt.
   test('a prompt left to the dialog says what kept it', async () => {
     const world = pluginWorld({ 'plannotator@plannotator': PLANNOTATOR, 'notify@tools': { files: { 'hooks/hooks.json': { hooks: { PermissionRequest: [{ hooks: command('notify-phone') }] } } } } })
     const cases: [Parameters<typeof removalPrompt>[0], RegExp][] = [

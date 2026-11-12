@@ -1,15 +1,3 @@
-/**
- * `plannotator inbox call …` (approval "inbox-scripting-command") as real
- * processes against a real sandbox Inbox: the Inbox runs in this test process
- * so its store's clock can be set back (`storeNow`, what Tidy's ages need), and
- * every call is the CLI, finding it through the data dir's `inbox.json`.
- *
- * What can regress: a script writing as another agent, a script's writes not
- * counting for the Tidy that asked for them, a double post on a rerun, a
- * failure a script reads as a result, and a result cut short in a pipe. Every
- * process gets a temp HOME and data dir, and a PATH of agent stubs
- * (tests/helpers/agent-cli-guard.ts): no real agent CLI ever runs.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,7 +33,6 @@ const fakes: FakeAgents[] = [];
 const detached: { entry: InboxEntry; root: string }[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built HTML; these tests never read the pages.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -54,12 +41,10 @@ afterAll(() => {
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close().catch(() => {});
   for (const server of servers.splice(0)) server.stop();
-  // Throws when a fake CLI outlived the test.
   for (const fake of fakes.splice(0)) fake.remove();
   await stopProvenInboxes(detached.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
 const agents = stubbedAgentClis();
 
 function sandbox() {
@@ -69,7 +54,6 @@ function sandbox() {
   const project = join(root, "code", "billing");
   mkdirSync(project, { recursive: true });
   mkdirSync(dataDir, { recursive: true });
-  // The Board and thread steps are things the person turns on: on here, so every action the command takes is served.
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true, inboxSteps: true }));
   const env: Record<string, string> = {
     ...agents.env,
@@ -86,11 +70,9 @@ function sandbox() {
 }
 type Box = ReturnType<typeof sandbox>;
 
-/** A sandbox with an Inbox running; what a test writes while `clock.behind` is set reads as that much older. */
 async function world() {
   const box = sandbox();
   const clock = { behind: 0 };
-  // This Inbox runs in the test's process: named here, so a run the preload missed still has no agents, on PATH or in /Applications.
   const agentsHome = join(box.dataDir, "agents-home");
   const server = await startInboxServer({
     dataDir: box.dataDir,
@@ -135,18 +117,15 @@ const threadOf = async (server: InboxServer, id: string) => ((await (await fetch
 const planOf = async (server: InboxServer, query = "") => (await (await fetch(`${base(server)}/api/inbox/tidy${query}`)).json()) as InboxTidyPlan;
 const runOf = async (server: InboxServer) => (await planOf(server)).run!;
 
-/** A connection's poll for `session`: live for the next 30 s; the commands it hands out. */
 async function poll(server: InboxServer, session: string, project: string, host = "claude-code") {
   const response = await bridge(server, INBOX_BRIDGE_POLL_PATH, { session, host, project_path: project, waitMs: 0, busy: false, idle_since: Date.now() - HOUR });
   return parseInboxBridgeCommands(await response.text());
 }
-/** The session's Tidy wake, handed out and delivered. */
 async function wakeOf(server: InboxServer, session: string, project: string, host = "claude-code") {
   const [command] = await poll(server, session, project, host);
   await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session, host, type: "delivered", id: command!.id });
   return command!;
 }
-/** The exact value the wake gives the session, as an agent reads it. */
 const sessionValueIn = (body: string) => /`--session ([^`]+)`/.exec(body)?.[1];
 
 const block = (prompt: string) => [":::question", prompt, "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
@@ -164,7 +143,6 @@ describe("what a script gets", () => {
     const refused = await cli(box, ["read_thread", '{"thread_id":"msg_nope"}']);
     expect(refused).toMatchObject({ code: 1, stdout: "" });
     expect(refused.stderr).toStartWith("thread_not_found: ");
-    // A field the tool's schema does not take is refused by the MCP layer, in plain words.
     const unknown = await cli(box, ["resolve_message", '{"message_id":"x","nope":1}']);
     expect(unknown).toMatchObject({ code: 1, stdout: "" });
     expect(unknown.stderr).toStartWith("invalid_arguments: ");
@@ -183,8 +161,6 @@ describe("what a script gets", () => {
     expect(box.server.store.snoozes()).toEqual([]);
   });
 
-  // Review of #2567, finding 2: with thread steps off an agent reads no word of them, so the error's list leaves out
-  // `steps` (as the usage does); the action itself still goes through (the Inbox answers steps_off while off).
   test("an unknown action's list never names steps; steps itself is an action", () => {
     const unknown = parseCallCommand(["blorp"]);
     expect(unknown).toMatchObject({ ok: false, code: "unknown_action" });
@@ -208,7 +184,6 @@ describe("what a script gets", () => {
       expect(result).toMatchObject({ code: 2, stdout: "" });
       expect(result.stderr).toStartWith(`${code}: `);
     }
-    // None of these reached for an Inbox, so none started one.
     expect(existsSync(join(box.dataDir, "inbox", "inbox.json"))).toBe(false);
   });
 
@@ -331,11 +306,8 @@ describe("who is calling", () => {
     { name: "Pi", host: "pi", session: "ses-pi", agentName: "Pi", env: { PI_SESSION_ID: "ses-pi" } },
     { name: "Codex", host: "codex", session: CODEX_THREAD, agentName: "Codex", env: { CODEX_THREAD_ID: CODEX_THREAD } },
     { name: "Qwen Code", host: "qwen", session: QWEN_SESSION, agentName: "Qwen Code", env: { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" } },
-    // DeepSeek Harness sets DSH_SESSION_ID (and DSH_SHELL) in every model shell.
     { name: "DeepSeek Harness", host: "dsh", session: "session-0b9c8e4e", agentName: "DeepSeek Harness", env: { DSH_SHELL: "1", DSH_SESSION_ID: "session-0b9c8e4e" } },
-    // T3 Code runs Claude through the Agent SDK (the mod is off there): the thread, beside Claude's own marker.
     { name: "T3 Code", host: "t3", session: T3_THREAD, agentName: "T3 Code", env: { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "sdk-ts" } },
-    // OpenCode names no session in its shell: only the value its Tidy gives it says who it is.
     { name: "OpenCode", host: "opencode", session: "ses_opencode1", agentName: "OpenCode", env: { OPENCODE: "1" }, flag: "opencode:ses_opencode1" },
   ];
 
@@ -347,7 +319,6 @@ describe("who is calling", () => {
       expect(byScript.code).toBe(0);
       const [first, second] = (await threadOf(box.server, byTool.thread_id)).messages;
       expect(second!.author).toEqual(first!.author);
-      // "Your" threads and cards are this session's.
       const listed = await cli(box, [...(flag ? ["--session", flag] : []), "read_thread", "{}"], { env });
       expect(JSON.parse(listed.stdout).threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([byTool.thread_id]);
     });
@@ -383,7 +354,6 @@ describe("who is calling", () => {
     expect(mine.cards.map((c: { title: string }) => c.title)).toEqual(["My lane"]);
   });
 
-  // Twelve CLI starts in a row and no waiting between them: about 4.5 s alone, so the default 5 s fails under load.
   test("an agent started from another agent's shell never writes as that agent", async () => {
     const box = await world();
     const seen = await tool(box.client, "send_message", { body: "Outer.", subject: "Outer", thread: "Outer", project_path: box.project, agent_session: "ses-outer", agent_host: "claude-code" });
@@ -397,7 +367,6 @@ describe("who is calling", () => {
       { CODEX_THREAD_ID: CODEX_THREAD, OMPCODE: "1" },
       { PI_SESSION_ID: "ses-pi", CLAUDECODE: "1" },
       { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", QWEN_CODE: "1" },
-      // Claude Code or Pi started from a DeepSeek Harness shell: DSH_* is inherited.
       { DSH_SHELL: "1", DSH_SESSION_ID: "session-outer", CLAUDECODE: "1" },
       { DSH_SHELL: "1", DSH_SESSION_ID: "session-outer", PI_SESSION_ID: "ses-pi" },
     ]) {
@@ -405,16 +374,13 @@ describe("who is calling", () => {
       expect(refused).toMatchObject({ code: 1, stdout: "" });
       expect(refused.stderr).toStartWith("session_ambiguous: ");
     }
-    // A value this shell contradicts: a wake that went stale, or a script another agent left behind.
     const stale = await cli(box, ["--session", "claude-code:ses-other", "send_message", send], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer" } });
     expect(stale).toMatchObject({ code: 1, stdout: "" });
     expect(stale.stderr).toStartWith("session_mismatch: ");
     expect(await count()).toBe(1);
-    // The agent's own value settles it: Codex inside Claude Code.
     const settled = await cli(box, ["--session", `codex:${CODEX_THREAD}`, "send_message", send], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", CODEX_THREAD_ID: CODEX_THREAD } });
     expect(settled.code).toBe(0);
     expect((await threadOf(box.server, seen.thread_id)).messages.at(-1)!.author).toMatchObject({ host: "codex", session: CODEX_THREAD });
-    // OpenCode inside Claude Code: its shell names only the outer session, and its Tidy says who it is.
     const nested = await cli(box, ["--session", "opencode:ses_nested", "read_thread", "{}"], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", OPENCODE: "1" } });
     expect(nested.code).toBe(0);
   }, 30_000);
@@ -426,36 +392,28 @@ describe("who is calling", () => {
     };
     expect(caller(null, {})).toBeNull();
     expect(caller(null, { OPENCODE: "1", GEMINI_CLI: "1" })).toBeNull();
-    // A host's marker beside its own session is its own shell, not a nested agent.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "claude-code:s", CLAUDECODE: "1" })).toEqual({ host: "claude-code", session: "s", name: "Claude Code" });
     expect(caller(null, { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" })).toEqual({ host: "qwen", session: QWEN_SESSION, name: "Qwen Code" });
     expect(caller(null, { PI_SESSION_ID: "s", OMPCODE: "1" })).toEqual({ host: "pi", session: "s", name: "Pi" });
     expect(caller(null, { CLAUDECODE: "1" })).toBeNull();
-    // DeepSeek Harness: its marker beside its own session is its own shell; DSH_SHELL alone names no session.
     expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s" })).toEqual({ host: "dsh", session: "session-s", name: "DeepSeek Harness" });
     expect(caller(null, { DSH_SHELL: "1" })).toBeNull();
     expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s", GEMINI_CLI: "1" })).toBe("session_ambiguous");
-    // The person's own terminal in DSH Web (DSH_SESSION_ID, no DSH_SHELL): no DSH session, so whoever runs there is themselves.
     expect(caller(null, { DSH_SESSION_ID: "session-s" })).toBeNull();
     expect(caller(null, { DSH_SESSION_ID: "session-s", PI_SESSION_ID: "ses-pi" })).toEqual({ host: "pi", session: "ses-pi", name: "Pi" });
     expect(caller(null, { DSH_SESSION_ID: "session-s", PLANNOTATOR_SESSION_TAG: "claude-code:s", CLAUDECODE: "1" })).toEqual({ host: "claude-code", session: "s", name: "Claude Code" });
     expect(caller(null, { DSH_SESSION_ID: "session-s", CODEX_THREAD_ID: CODEX_THREAD })).toEqual({ host: "codex", session: CODEX_THREAD, name: "Codex" });
-    // A subagent's model shell: the session Plannotator's plugin names (its parent).
     const sub = { DSH_SHELL: "1", DSH_SESSION_ID: "session-child", DSH_PLANNOTATOR_SESSION_ID: "session-parent", DSH_PLANNOTATOR_SESSION_FOR: "session-child" };
     expect(caller(null, sub)).toEqual({ host: "dsh", session: "session-parent", name: "DeepSeek Harness" });
     expect(caller(null, { ...sub, DSH_PLANNOTATOR_SESSION_FOR: "session-other" })).toEqual({ host: "dsh", session: "session-child", name: "DeepSeek Harness" });
-    // A mismatch names the variable the session came from, so unsetting it changes something.
     const mismatch = inboxCallerOf("dsh:session-mine", sub);
     expect(mismatch.ok ? null : mismatch.message).toContain("from DSH_PLANNOTATOR_SESSION_ID");
     expect(mismatch.ok ? null : mismatch.message).not.toContain("from DSH_SESSION_ID");
     const plain = inboxCallerOf("dsh:session-mine", { DSH_SHELL: "1", DSH_SESSION_ID: "session-child" });
     expect(plain.ok ? null : plain.message).toContain("from DSH_SESSION_ID");
-    // T3 Code: its thread beside Claude's own CLAUDECODE is the thread (T3 runs Claude, and the mod is off there).
     const t3 = { host: "t3", session: T3_THREAD, name: "T3 Code" };
     expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1" })).toEqual(t3);
     expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD })).toEqual(t3);
-    // Anything else beside it is ambiguous: a Codex started in a T3 shell is the caller, not the thread; a tag can be
-    // inherited from a Claude Code that started T3; a DSH model shell or another agent is its own.
     for (const other of [
       { CODEX_THREAD_ID: CODEX_THREAD },
       { PLANNOTATOR_SESSION_TAG: "claude-code:s" },
@@ -466,23 +424,17 @@ describe("who is calling", () => {
       expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1", ...other })).toBe("session_ambiguous");
     }
     expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD })).toBe("session_ambiguous");
-    // The wake's own value settles it.
     expect(caller(`t3:${T3_THREAD}`, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD, CLAUDECODE: "1" })).toEqual(t3);
-    // A thread T3 made through MCP, a delegated or a forked one is not a UUID: no T3 session, never a guess.
     for (const id of [`mcp:${T3_THREAD}`, "thread:mcp:abc:1", `${T3_THREAD}:fork`, "not-a-uuid"]) {
       expect(caller(null, { T3CODE_THREAD_ID: id, CLAUDECODE: "1" })).toBeNull();
     }
     expect(caller("t3:not-a-uuid", {})).toBe("invalid_session");
-    // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
-    // One session named twice is one session.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: `codex:${CODEX_THREAD}`, CODEX_THREAD_ID: CODEX_THREAD })).toEqual({ host: "codex", session: CODEX_THREAD, name: "Codex" });
-    // Agrees with the shell.
     expect(caller("claude-code:s", { PLANNOTATOR_SESSION_TAG: "claude-code:s" })).toEqual({ host: "claude-code", session: "s", name: "Claude Code" });
     expect(caller("claude-code:s", { PLANNOTATOR_SESSION_TAG: "opencode:s" })).toBe("session_mismatch");
     expect(caller("cursor:ses_x", {})).toEqual({ host: "cursor", session: "ses_x", name: "Cursor" });
     expect(caller("ses_x", {})).toEqual({ session: "ses_x" });
-    // Not a value a wake could have given.
     for (const bad of ["a b", "claude-code:", ":x", "$(rm -rf /)", "codex:not-a-uuid", "qwen:ses_x"]) expect(caller(bad, {})).toBe("invalid_session");
   });
 
@@ -492,7 +444,6 @@ describe("who is calling", () => {
     expect(parseCallCommand(["--session", "a", "--session", "b", "card"])).toMatchObject({ ok: false, code: "invalid_session" });
     expect(parseCallCommand(["card", "{}", "{}"])).toMatchObject({ ok: false, code: "usage" });
     expect(parseCallCommand(["card", "--json"])).toMatchObject({ ok: false, code: "usage" });
-    // zsh does not split `cmd $S`: the one word says what to do about it.
     expect(parseCallCommand(["--session ses_x", "card"])).toMatchObject({ ok: false, code: "usage", error: expect.stringContaining("separate words") });
   });
 
@@ -509,7 +460,6 @@ describe("who is calling", () => {
     const scripted = await replied("Scripted");
     const raw = await replied("Raw");
     const named = await replied("Named");
-    // A raw MCP client that names no session, sending and reading: the reply to it is its own to settle.
     const own = await replied("Own", null);
     const checked = async (thread: string) => (await threadOf(server, thread)).messages[0]!.agent_checked_seq ?? null;
 
@@ -518,13 +468,10 @@ describe("who is calling", () => {
       expect(read.code).toBe(0);
       expect(read.stdout).toContain("Scripted yes.");
     }
-    // A script's read with no session is a peek, even of a reply to a message sent with none.
     expect((await cli(box, ["read_thread", JSON.stringify({ thread_id: own.thread, format: "full" })])).code).toBe(0);
     expect(await checked(own.thread)).toBeNull();
-    // A raw MCP client's read with no session is not a peek: it settles the reply to its own message...
     await tool(client, "read_thread", { thread_id: own.thread });
     expect(await checked(own.thread)).not.toBeNull();
-    // ...but not one owed to ses-a, whose connection takes it (only a reply's recipient settles it).
     await tool(client, "read_thread", { thread_id: raw.thread });
     expect((await cli(box, ["--session", "claude-code:ses-a", "read_thread", JSON.stringify({ thread_id: named.thread })])).code).toBe(0);
 
@@ -548,7 +495,6 @@ describe("who is calling", () => {
   });
 });
 
-/** The agent's tidy, as one script: the command on PATH, its output read with nothing but grep. */
 const TIDY_SCRIPT = String.raw`#!/bin/bash
 set -euo pipefail
 call() { plannotator inbox call --session "$SESSION" "$@"; }
@@ -561,7 +507,6 @@ call send_message "{\"reply_to\":\"$QUESTION\",\"supersedes\":[\"$QUESTION\"],\"
 call send_message - < "$ANSWER_JSON" | grep -o '"replayed":[a-z]*'
 `;
 
-/** The script's world: a `plannotator` on PATH that is this CLI, and the script. */
 function scriptOf(box: Box) {
   const bin = join(box.root, "bin");
   mkdirSync(bin);
@@ -610,20 +555,17 @@ describe("a Tidy run from one script", () => {
     expect(started.status).toBe(200);
     const wake = await wakeOf(server, "ses-a", project);
     await wakeOf(server, "ses-b", project);
-    // A write counts once it is after the delivery (a later clock tick).
     await Bun.sleep(5);
 
     const lastPerson = (await threadOf(server, words.thread_id)).messages.filter((m) => m.author.kind === "person" && !m.tidy).at(-1)!;
     const answerJson = join(box.root, "answer.json");
     writeFileSync(answerJson, JSON.stringify({ reply_to: lastPerson.id, body: "Screenshots are attached to the card.", idempotency_key: "tidy-answer" }));
     const script = scriptOf(box);
-    // The session comes from the wake alone: this shell names none, as OpenCode's does not.
     const env = { SESSION: sessionValueIn(wake.body)!, ACTION: deploy.message_id, QUESTION: question.message_id, ANSWER_JSON: answerJson };
     expect(env.SESSION).toBe("claude-code:ses-a");
     const first = await script(env);
     expect(first).toMatchObject({ code: 0, stdout: '"replayed":false\n' });
 
-    // The Inbox's state: its cards moved and only its cards, the item done, the question withdrawn, the words answered.
     const cards = JSON.parse((await cli(box, ["card", '{"op":"list","asked_by":"anyone"}'])).stdout).cards as { title: string; column: string; heard_by: { session: string } }[];
     expect(Object.fromEntries(cards.map((c) => [c.title, c.column]))).toEqual({ "Ledger lane": "in_review", "Docs lane": "in_review", "Refunds lane": "in_progress" });
     const deployThread = await threadOf(server, deploy.thread_id);
@@ -634,15 +576,12 @@ describe("a Tidy run from one script", () => {
     const answer = webhooks.messages.filter((m) => !m.tidy).at(-1) as InboxMessage;
     expect(answer.body).toBe("Screenshots are attached to the card.");
     expect(answer.author).toMatchObject({ host: "claude-code", session: "ses-a", name: "Claude Code" });
-    // The wake of a session its connection reaches stays the connection's to deliver: the script read no Tidy text.
     expect(first.stderr).not.toContain(INBOX_TIDY_INSTRUCTION);
 
-    // Tidy's progress: ses-a tidied, in the three threads it was asked about; ses-b, which wrote nothing, not.
     const byScript = Object.fromEntries((await run()).map((a) => [a.session, [a.state, a.updated]]));
     expect(byScript).toEqual({ "ses-a": ["tidied", 3], "ses-b": ["delivered", 0] });
     expect((await threadOf(server, others.thread_id)).messages.every((m) => m.author.session !== "ses-a")).toBe(true);
 
-    // A rerun: nothing posts twice, and the cards stay where they are.
     const counts = async () => Promise.all([question, deploy, words].map(async ({ thread_id }) => (await threadOf(server, thread_id)).messages.length));
     const before = await counts();
     const again = await script(env);
@@ -670,13 +609,11 @@ describe("a Tidy run from one script", () => {
       const refused = await cli(box, ["--session", value, "send_message", send("k1")], { env: stale });
       expect(refused).toMatchObject({ code: 1, stdout: "" });
       expect(refused.stderr).toStartWith("session_mismatch: ");
-      // It names the variable to clear, the way out that writes as the Tidy's session.
       expect(refused.stderr).toContain(Object.keys(stale)[0]!);
       expect(refused.stderr).not.toContain("Leave --session out");
       expect(await authors()).toEqual(before);
       expect((await runOf(server)).agents[0]).toMatchObject({ state: "delivered" });
 
-      // A new shell, or that variable unset: the same call is the session the Tidy asked, and it counts.
       const unset = await cli(box, ["--session", value, "send_message", send("k2")]);
       expect(unset.code).toBe(0);
       expect((await authors()).at(-1)).toBe("ses-a");
@@ -722,7 +659,6 @@ describe("a Tidy run from one script", () => {
     await wakeOf(server, "ses-b", project);
     await Bun.sleep(5);
 
-    // OpenCode's shell marks itself and names no session.
     const env = { OPENCODE: "1" };
     const session = sessionValueIn(wake.body)!;
     expect(session).toBe("opencode:ses_oc1");
@@ -758,14 +694,7 @@ describe("a Tidy run from one script", () => {
 });
 
 describe("a Codex thread's script and the reply wake (#2573)", () => {
-  /**
-   * The Inbox runs with a fake `codex` (tests/helpers/fake-agents.ts) and its
-   * own scratch CODEX_HOME, where the thread's rollout says what started it.
-   * The thread never called the Inbox tool: only `plannotator inbox call` from
-   * its shell (CODEX_THREAD_ID), as an agent that did not find the MCP tools.
-   */
   type Rollout = { source: unknown; originator: string };
-  /** The thread's rollout, in the day folder its UUIDv7 id names (`created`), or a later one (a thread resumed months on). */
   function writeRollout(codexHome: string, rollout: Rollout, where: "created" | "later" = "created") {
     const day = join(codexHome, "sessions", where === "created" ? codexRolloutDayFolders(CODEX_THREAD)[0]! : join("2026", "11", "03"));
     mkdirSync(day, { recursive: true });
@@ -789,7 +718,6 @@ describe("a Codex thread's script and the reply wake (#2573)", () => {
   }
   type CodexWorld = Awaited<ReturnType<typeof codexWorld>>;
   const queues = (fake: FakeAgents) => fake.calls().filter((call) => call.name === "codex" && call.args[0] === "queue");
-  /** A send from the thread's shell, and whether the message it stored wakes. */
   async function scriptSends(w: CodexWorld, body: string) {
     const sent = await cli(w, ["send_message", JSON.stringify({ body })], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
     expect(sent.code).toBe(0);
@@ -860,7 +788,6 @@ describe("a Codex thread's script and the reply wake (#2573)", () => {
     expect(queues(w.fake)).toHaveLength(1);
     expect(w.server.codexWake.status(CODEX_THREAD)).toBe("dead");
 
-    // Its shell's call says it is there (off `dead`), not that Codex knows it again: still no wake.
     const again = await scriptSends(w, "Still there?");
     expect(again.wakes).toBe(false);
     expect((await answer(w, again.message_id, "Yes, still.")).status).toBe(200);

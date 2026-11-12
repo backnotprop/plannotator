@@ -1,14 +1,5 @@
-/**
- * What a CLI session is OF, in full, as this process resolved it: the target
- * a host names in every decision message (`HostResultRecord.target`, the
- * OpenCode bridge's JSON records), in the ready file, and in the `sessions/`
- * registry. Taken from the server's own state, never from the words the agent
- * typed: `QUESTIONS.md` can name two different files.
- */
-
 import path from "path";
 
-/** Review: the PR URL, the patch file (absolute), or the reviewed directory (absolute). Undefined for a patch on stdin. */
 export function reviewDecisionTarget(input: {
   prUrl?: string;
   patchFile?: string;
@@ -22,7 +13,6 @@ export function reviewDecisionTarget(input: {
   return path.resolve(input.cwd);
 }
 
-/** Annotate: the files of a bundle (in review order), else the folder, else the file path or URL. */
 export function annotateDecisionTarget(input: {
   bundlePaths?: readonly string[];
   folderPath?: string;
@@ -32,7 +22,6 @@ export function annotateDecisionTarget(input: {
   return input.folderPath || input.absolutePath || undefined;
 }
 
-/** The registry's one-line form of a target: a bundle's paths joined with ", ". */
 export function targetText(target: string | readonly string[] | undefined): string | undefined {
   if (target === undefined) return undefined;
   if (typeof target === "string") return target || undefined;
@@ -41,13 +30,6 @@ export function targetText(target: string | readonly string[] | undefined): stri
 
 export const HOST_REVIEW_ID_ENV = "PLANNOTATOR_HOST_REVIEW_ID";
 
-/**
- * The `pn-` id a host gave the review it started this process for
- * (`PLANNOTATOR_HOST_REVIEW_ID`, set by the Claude Code mod and the OpenCode
- * plugin), recorded in the `sessions/` registry. Read once and scrubbed from
- * the environment, so nothing this process starts inherits it. Anything that
- * is not `pn-` and six hex digits is ignored.
- */
 export function takeHostReviewId(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const value = env[HOST_REVIEW_ID_ENV];
   delete env[HOST_REVIEW_ID_ENV];

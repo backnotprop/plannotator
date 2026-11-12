@@ -21,8 +21,6 @@ describe("variables the mod sets for its plugin's hooks only", () => {
     expect(env.PATH).toBe("/usr/bin");
   });
 
-  // At startup, before the first spawn: beside the other variables a host hands
-  // the CLI (the bridge token, the result file), ahead of every subcommand.
   test("the CLI scrubs them at startup, before it parses its arguments", () => {
     const source = readFileSync(join(import.meta.dir, "index.ts"), "utf8");
     const scrub = source.indexOf("\nscrubModSessionEnv();");

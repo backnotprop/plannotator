@@ -1,12 +1,3 @@
-/**
- * `plannotator inbox status | stop | restart` as real processes, each in its
- * own scratch HOME and data dir (never the person's Inbox): what status says
- * and exits with, stop asking first and escalating only on a pid proven to be
- * this data dir's Inbox (never another program that has the pid now),
- * restart replacing the Inbox through the detached start, and an agent
- * session's reply wake carrying on across a restart, each reply delivered
- * once.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +18,6 @@ const started: { entry: InboxEntry; root: string }[] = [];
 const children: { kill: (signal?: number | NodeJS.Signals) => void }[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built pages; these tests never read them.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -39,7 +29,6 @@ afterEach(async () => {
   await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
 const agents = stubbedAgentClis();
 
 interface Sandbox {
@@ -71,14 +60,12 @@ function sandbox(): Sandbox {
   };
 }
 
-/** Remember the Inbox the sandbox's record names now, for the teardown (killed only while still provably it). */
 function track(box: Sandbox): void {
   const named = inboxEntryOf(box.dataDir);
   if (named) started.push({ entry: named, root: box.root });
 }
 
 async function cli(box: Sandbox, args: string[], options: { version?: string } = {}): Promise<{ code: number; stdout: string; stderr: string }> {
-  // `version`: run as that release (a source run is "dev"), as the build's define does.
   const define = options.version ? ["--define", `__CLI_VERSION__=${JSON.stringify(options.version)}`] : [];
   const proc = Bun.spawn([process.execPath, "run", ...define, entry, ...args], { cwd: box.root, env: box.env, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -92,7 +79,6 @@ async function background(box: Sandbox) {
   return readInboxRegistry(box.dataDir)!;
 }
 
-/** A port nothing listens on. */
 function deadPort(): number {
   const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
   const port = probe.port as number;
@@ -100,7 +86,6 @@ function deadPort(): number {
   return port;
 }
 
-/** A long-lived child of this test that is not an Inbox; its command line is `argv`. */
 function standIn(argv: string[]): number {
   const proc = Bun.spawn(argv, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
   children.push(proc);
@@ -159,7 +144,6 @@ describe("plannotator inbox status", () => {
       started_at: live.startedAt,
       data_dir: box.dataDir,
     });
-    // Status only reads: the same Inbox still runs, its token unchanged.
     expect(readInboxRegistry(box.dataDir)!.token).toBe(live.token);
   }, 60_000);
 
@@ -180,7 +164,6 @@ describe("plannotator inbox status", () => {
     const box = sandbox();
     const session = "v".repeat(32);
     let inboxVersion = "";
-    // The Inbox's health answer alone (status only reads it): a stand-in that reports `inboxVersion`.
     const stub = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -233,14 +216,12 @@ describe("plannotator inbox stop", () => {
     const stop = await cli(box, ["inbox", "stop"]);
     expect(stop.code).toBe(0);
     expect(stop.stdout).toContain(`pid ${live.pid}`);
-    // The clean stop, not a signal: the Inbox took its own stop route.
     expect(stop.stdout).not.toContain("SIG");
     expect(isPidAlive(live.pid)).toBe(false);
     expect(readInboxRegistry(box.dataDir)).toMatchObject({ pid: live.pid, port: live.port });
     const after = await cli(box, ["inbox", "status", "--json"]);
     expect(after.code).toBe(1);
     expect(JSON.parse(after.stdout)).toMatchObject({ state: "stopped", reason: "dead_pid", pid: live.pid });
-    // Stopping again finds nothing to stop: still exit 0, and nothing is started.
     const again = await cli(box, ["inbox", "stop"]);
     expect(again.code).toBe(0);
     expect(again.stdout).toContain(`pid ${live.pid}`);
@@ -269,7 +250,6 @@ describe("plannotator inbox stop", () => {
 
   test("never signals a reused pid that only looks like an Inbox: it started after the record was written", async () => {
     const box = sandbox();
-    // An Inbox-shaped command line (`… index.ts inbox --no-open`), started after the record's time: not the process that wrote it.
     const fake = join(box.root, "fake", "index.ts");
     mkdirSync(join(box.root, "fake"), { recursive: true });
     writeFileSync(fake, "setInterval(() => {}, 1000);\n");
@@ -304,7 +284,6 @@ describe("plannotator inbox stop", () => {
     expect(isPidAlive(live.pid)).toBe(true);
     expect(await inboxStatus(original.dataDir)).toMatchObject({ state: "running", entry: { pid: live.pid, serverSession: live.serverSession } });
 
-    // Restart stops nothing and says it restarted nothing (a start would only find the original through the copied record).
     const restart = await cli(copy, ["inbox", "restart"]);
     expect(restart.code).toBe(1);
     expect(restart.stdout).toBe("");
@@ -315,7 +294,6 @@ describe("plannotator inbox stop", () => {
   test.skipIf(process.platform === "win32")("a hung Inbox that cannot answer is proven by its process and ended with SIGKILL", async () => {
     const box = sandbox();
     const live = await background(box);
-    // Paused: it takes neither its stop route nor SIGTERM, only SIGKILL.
     await mustSignalInbox(live, box.root, "SIGSTOP");
     const stop = await cli(box, ["inbox", "stop"]);
     expect(stop.code).toBe(0);
@@ -350,7 +328,6 @@ describe("plannotator inbox restart", () => {
     expect(after.port).toBe(before.port);
     expect(isPidAlive(before.pid)).toBe(false);
     expect((await inboxStatus(box.dataDir)).state).toBe("running");
-    // Started detached, like --background: its ready line is in the log, once per start.
     const log = readFileSync(join(box.dataDir, "inbox", "inbox.log"), "utf8");
     expect(log.split("\n").filter((line) => line.startsWith("Plannotator Inbox: "))).toHaveLength(2);
   }, 60_000);
@@ -369,8 +346,6 @@ describe("plannotator inbox restart", () => {
     const box = sandbox();
     const before = await background(box);
     const restarting = cli(box, ["inbox", "restart"]);
-    // The agent's on-demand start (what the shim and the connections run) in the gap: the old Inbox
-    // is gone and the restart still holds the start lock.
     const lock = join(box.dataDir, "inbox", "start.lock");
     for (let i = 0; i < 200 && !(existsSync(lock) && !isPidAlive(before.pid)); i++) await Bun.sleep(25);
     expect(isPidAlive(before.pid)).toBe(false);
@@ -382,7 +357,6 @@ describe("plannotator inbox restart", () => {
     const now = readInboxRegistry(box.dataDir)!;
     expect(agent.stdout.trim()).toBe(now.url);
     expect(restarted.stdout.trim()).toBe(now.url);
-    // One start after the first: never two writers on the store.
     const log = readFileSync(join(box.dataDir, "inbox", "inbox.log"), "utf8");
     expect(log.split("\n").filter((line) => line.startsWith("Plannotator Inbox: "))).toHaveLength(2);
   }, 60_000);
@@ -419,7 +393,6 @@ describe("plannotator inbox restart", () => {
     const wake = new InboxWake(connection, session, { isBusy: () => busy, deliver: async (text) => void delivered.push(text), notify: () => {} }, 50);
     wake.start();
     try {
-      // Held: the session is busy, so this reply waits in the wake when the Inbox restarts.
       await reply("The first title.", "before");
       await Bun.sleep(500);
       const restart = await cli(box, ["inbox", "restart"]);
@@ -431,7 +404,6 @@ describe("plannotator inbox restart", () => {
       expect(delivered).toHaveLength(2);
       expect(delivered[0]).toContain("The first title.");
       expect(delivered[1]).toContain("Actually, the second one.");
-      // The new Inbox recorded both deliveries, and nothing is delivered again.
       const now = readInboxRegistry(box.dataDir)!;
       let messages: InboxMessageWire[] = [];
       for (let i = 0; i < 100; i++) {

@@ -14,7 +14,6 @@ async function shellOn(env: Record<string, string>, files: string[]): Promise<st
 }
 
 describe('which Windows shell the mod picks', () => {
-  // Windows and Git on other drives, so nothing passes by matching C:\.
   const windows = { OS: 'Windows_NT', SYSTEMROOT: 'E:\\Win', PROGRAMFILES: 'D:\\Apps' }
 
   test('Git Bash when it is there, Windows PowerShell when it is not', async () => {
@@ -26,7 +25,6 @@ describe('which Windows shell the mod picks', () => {
     expect(await shellOn({ ...windows, PLANNOTATOR_MOD_SHELL: 'powershell' }, [BASH, POWERSHELL])).toBe(POWERSHELL)
     expect(await shellOn({ ...windows, PLANNOTATOR_MOD_SHELL: 'PowerShell ' }, [BASH, POWERSHELL])).toBe(POWERSHELL)
     expect(await shellOn({ ...windows, PLANNOTATOR_MOD_SHELL: 'sh' }, [BASH, POWERSHELL])).toBe(BASH)
-    // Asked for sh where there is none: inert, never PowerShell in its place.
     expect(await shellOn({ ...windows, PLANNOTATOR_MOD_SHELL: 'sh' }, [POWERSHELL])).toBeNull()
   })
 
@@ -45,7 +43,6 @@ describe('the shell a session keeps (pin) and the probe', () => {
   const windows = { OS: 'Windows_NT', SYSTEMROOT: 'E:\\Win', PROGRAMFILES: 'D:\\Apps' }
   const both = [BASH, POWERSHELL]
 
-  /** A pick against fake shells: `broken` fail the probe; `pin` is the session's pin file. */
   async function pick(env: Record<string, string>, files: string[], options: { pin?: string; broken?: string[] } = {}) {
     const written: string[] = []
     const probed: string[] = []
@@ -65,9 +62,7 @@ describe('the shell a session keeps (pin) and the probe', () => {
     expect(await pick(windows, both)).toEqual({ shell: BASH, written: ['sh'], probed: [BASH] })
     const later = await pick({ ...windows, PLANNOTATOR_MOD_SHELL: 'sh' }, both, { pin: 'powershell\n' })
     expect(later).toEqual({ shell: POWERSHELL, written: [], probed: [POWERSHELL] })
-    // Pinned to Git Bash, which is gone: inert, never PowerShell in its place.
     expect((await pick(windows, [POWERSHELL], { pin: 'sh' })).shell).toBeNull()
-    // A pin file that holds anything else is ignored.
     expect((await pick(windows, both, { pin: 'cmd' })).shell).toBe(BASH)
   })
 
@@ -81,7 +76,6 @@ describe('the shell a session keeps (pin) and the probe', () => {
   })
 })
 
-// Both real Windows shells pass the probe on a machine that allows them.
 const REAL_POWERSHELL = process.platform === 'win32' && process.env.SystemRoot ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` : ''
 describe.skipIf(!REAL_POWERSHELL || !existsSync(REAL_POWERSHELL))('the probe, run for real', () => {
   const run = async (argv: string[]) => {

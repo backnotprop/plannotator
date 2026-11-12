@@ -1,9 +1,3 @@
-/**
- * Claude Code Plan Resolver Tests
- *
- * Run: bun test apps/hook/server/claude-plan.test.ts
- */
-
 import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/shared/annotatable";
@@ -32,8 +26,6 @@ function writePlanFile(content: string, name = "plan.md"): string {
 
 describe("resolveClaudePlan", () => {
   test("prefers the plan file over a stale inline snapshot", () => {
-    // The model edited the plan file in the same message as ExitPlanMode, so
-    // the inline `plan` Claude Code captured predates the edit.
     const planFilePath = writePlanFile("# Plan\n\nRevised after feedback.\n");
 
     expect(resolveClaudePlan({ plan: "# Plan\n\nFirst draft.\n", planFilePath })).toBe(
@@ -63,15 +55,11 @@ describe("resolveClaudePlan", () => {
   });
 
   test("a plan read from the file passes the server's plan-file trust check", () => {
-    // /api/doc serves the plan's linked documents only when readPlanFile sees
-    // the file's contents equal the plan; a file-sourced plan must satisfy it.
     const planFilePath = writePlanFile("# Plan\n\nSee [notes](notes.md).\n");
     const plan = resolveClaudePlan({ plan: "# Plan\n\nstale\n", planFilePath });
     expect(readPlanFile(planFilePath, plan)).not.toBeNull();
   });
 
-  // The hook reads whatever path the payload names, so it is gated like
-  // readPlanFile: anything else falls back to the inline plan.
   test("ignores a plan file path that is not an absolute .md file", () => {
     const notMarkdown = writePlanFile("# From file", "plan.txt");
     expect(resolveClaudePlan({ plan: "# Inline plan", planFilePath: notMarkdown })).toBe("# Inline plan");
@@ -84,7 +72,6 @@ describe("resolveClaudePlan", () => {
   });
 
   test.skipIf(process.platform === "win32")("does not block on a FIFO named like a plan file", () => {
-    // Reading a FIFO with no writer blocks forever; this would hang the hook.
     const fifo = join(tempDir(), "plan.md");
     expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
     expect(resolveClaudePlan({ plan: "# Inline plan", planFilePath: fifo })).toBe("# Inline plan");

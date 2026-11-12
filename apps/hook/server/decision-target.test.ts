@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { annotateDecisionTarget, HOST_REVIEW_ID_ENV, reviewDecisionTarget, takeHostReviewId } from "./decision-target";
 
-// The failure these guard: a decision record or registry row that names a
-// review by something other than what the server actually opened (a relative
-// word, the wrong one of several files), or a host review id that leaks into
-// every process the server spawns.
 describe("decision target", () => {
   test("review: a PR URL wins, then the patch file, then the reviewed directory, all absolute", () => {
     expect(reviewDecisionTarget({ prUrl: "https://github.com/o/r/pull/9", cwd: "/repo", invocationCwd: "/x" })).toBe("https://github.com/o/r/pull/9");

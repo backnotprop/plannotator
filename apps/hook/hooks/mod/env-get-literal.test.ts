@@ -3,9 +3,6 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SKIP_RM_PROMPTS_VARIABLE } from './skip-rm-prompts'
 
-// Claude Code refuses to load a hooks module whose `$.env.get` takes anything
-// but a string literal, and then the whole mod (plan review included) is off.
-// Unit tests never run Claude Code's loader, so this reads the source instead.
 const dir = import.meta.dir
 const sources = readdirSync(dir)
   .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts') && !name.endsWith('.d.ts'))

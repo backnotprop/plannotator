@@ -46,9 +46,6 @@ describe("annotate stdout", () => {
     )).toBe('{"decision":"approved"}');
   });
 
-  // The OpenCode bridge names the count in its decision heading. Failure
-  // caught: the count leaking into plaintext, hook output or the strict record
-  // (which scripts compare byte for byte), or missing from the JSON record.
   test("the JSON record carries annotationCount; plaintext, hook and the strict record do not", () => {
     const sent = { feedback: "Revise this.", annotations: [{}, {}] };
     expect(JSON.parse(formatAnnotateOutcome(sent, { hook: false, json: true }) as string))
@@ -62,8 +59,6 @@ describe("annotate stdout", () => {
     expect(serializeStrictAnnotateResult(sent)).not.toContain("annotationCount");
   });
 
-  // #1701: a bare Done gains ONE additive JSON field; plaintext, hook and the
-  // strict-gate record keep their bytes.
   test("a Done with nothing to send adds nothingToSend to the JSON record only", () => {
     const done = { feedback: "User reviewed the document and has no feedback.", nothingToSend: true };
     expect(formatAnnotateOutcome(done, { hook: false, json: true }))
@@ -78,9 +73,6 @@ describe("annotate stdout", () => {
       .toBe('{"decision":"annotated","feedback":"Revise this."}');
   });
 
-  // Failure caught: "Approve with a note…" hidden in a gated session whose
-  // output delivers the note (plaintext, which the Claude Code mod and the
-  // classic skill launch), or shown where it is dropped (--hook, no gate).
   test("advertises approval notes for every gated output except --hook", () => {
     expect(supportsAnnotateApprovalNotes({ gate: true, hook: false })).toBe(true);
     expect(supportsAnnotateApprovalNotes({ gate: false, hook: false })).toBe(false);
@@ -94,7 +86,6 @@ describe("annotate stdout", () => {
       { hook: false, json: false },
       { runtime: "claude-code", context: "File: /tmp/page.html", config },
     )).toBe("APPROVED File: /tmp/page.html :: Rename the header.");
-    // The default prompt still carries the note and the file it is about.
     const framed = formatAnnotateOutcome(
       { feedback: "Rename the header.", approved: true },
       { hook: false, json: false },
@@ -102,7 +93,6 @@ describe("annotate stdout", () => {
     );
     expect(framed).toContain("Rename the header.");
     expect(framed).toContain("File: /tmp/page.html");
-    // Whitespace is no note: the legacy marker, byte for byte.
     expect(formatAnnotateOutcome(
       { feedback: "  \n", approved: true },
       { hook: false, json: false },
@@ -119,19 +109,7 @@ describe("annotate stdout", () => {
   });
 });
 
-/**
- * index.ts is a top-level CLI dispatcher, not an importable module, so the
- * repo's precedent for pinning a call-site invariant in it is a source scan
- * (see strict-annotate-result.test.ts, "routes every annotate startup failure
- * through the shared helper").
- *
- * The invariant is deliberately "EVERY call site", not "the four that exist
- * today": the OpenCode bridge site shipped without the lease precisely because
- * a per-site check would have missed it, leaving `/plannotator-last --gate`
- * hanging on waitForDecision() forever once its tab was abandoned.
- */
 describe("annotate client-lease call sites", () => {
-  /** Slice out the option object literal of every startAnnotateServer( call. */
   function annotateServerCallSites(source: string): string[] {
     const sites: string[] = [];
     const call = "startAnnotateServer({";
@@ -160,22 +138,13 @@ describe("annotate client-lease call sites", () => {
     const source = readFileSync(join(import.meta.dir, "index.ts"), "utf8");
     const sites = annotateServerCallSites(source);
 
-    // Sanity: the scan found the call sites at all (import-only sites like the
-    // `startAnnotateServer,` import line are not `startAnnotateServer({`).
     expect(sites.length).toBeGreaterThanOrEqual(4);
 
     for (const site of sites) {
-      // Every transport that blocks on waitForDecision() must decide the lease
-      // through supportsAnnotateClientLease rather than hardcoding a boolean —
-      // that is what keeps hook/plaintext/remote transports opted out.
       expect(site).toContain("clientLeaseSupported: supportsAnnotateClientLease({");
       expect(site).toContain("isRemote: isRemoteSession()");
     }
 
-    // Every CLI-flag site decides "Approve with a note…" through the shared
-    // predicate (a hardcoded or missing advert hides it, or offers it where
-    // the note is dropped). The one exception is opencode-annotate-last: its
-    // only output is the structured record, so the advert is the gate itself.
     const bridge = "approvalNotesSupported: input.gate === true,";
     const bridgeSites = sites.filter((site) => site.includes(bridge));
     expect(bridgeSites).toHaveLength(1);
@@ -186,8 +155,6 @@ describe("annotate client-lease call sites", () => {
     const advertUses = source.split("approvalNotesSupported: supportsAnnotateApprovalNotes({").length - 1;
     expect(advertUses).toBe(sites.length - 1);
 
-    // Cross-check the brace scan against a plain occurrence count, so a call
-    // site the scanner failed to slice cannot pass by being invisible.
     const predicateUses = source.split("clientLeaseSupported: supportsAnnotateClientLease({").length - 1;
     expect(predicateUses).toBe(sites.length);
   });

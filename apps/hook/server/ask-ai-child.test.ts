@@ -1,10 +1,3 @@
-/**
- * The plan-review hook (`plannotator` with no arguments) inside an agent that
- * Plannotator's Ask AI started (`PLANNOTATOR_ASK_AI_CHILD=1`, set by
- * `askAiChildEnv`): it exits 0 at once with no answer, so no plan hook opens
- * a review nobody waits for.
- * Every run gets a temp HOME and data dir, no browser and no Inbox connect.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,7 +11,6 @@ const roots: string[] = [];
 let stubs: string[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built HTML; these runs never serve it.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -32,7 +24,6 @@ function scratch(): string {
   return root;
 }
 
-/** Claude Code's PermissionRequest for ExitPlanMode with a plan inline. */
 function claudeExitPlanMode(): Record<string, unknown> {
   return {
     session_id: "0b7c1f7e-1111-4222-8333-444455556666",
@@ -78,8 +69,6 @@ async function runHook(root: string, event: Record<string, unknown>, askAiChild:
 }
 
 describe("the plan-review hook in an agent Ask AI started", () => {
-  // The check comes before the hook reads which agent sent the event, so this
-  // one event stands for every plan hook (Codex Stop, Qwen Code, Gemini, Vibe).
   test("Claude Code's ExitPlanMode exits 0 at once: no answer, no server, no browser", async () => {
     const root = scratch();
     const run = await runHook(root, claudeExitPlanMode(), "1", 20_000);
@@ -93,7 +82,6 @@ describe("the plan-review hook in an agent Ask AI started", () => {
   test("only the exact value 1 counts: without it (or with another value) the review opens as before", async () => {
     for (const value of [undefined, "true"]) {
       const root = scratch();
-      // The server waits for a decision; it is killed once it is up.
       const run = await runHook(root, claudeExitPlanMode(), value, 6_000);
       expect(run.stdout).toBe("");
       expect(run.stderr).toContain("http://");

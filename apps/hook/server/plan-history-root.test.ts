@@ -1,16 +1,3 @@
-/**
- * #2197: a plan's version history is keyed `history/{project}/{slug}`. The
- * Claude Code hosts also hand the CLI the session's root (the mod's
- * `$.session.root()` as `projectRoot` on `claude-mod-plan`'s stdin, the
- * classic hook's CLAUDE_PROJECT_DIR), which a shell cd does not move. A chain
- * the root's project holds is continued when the cwd's project has none, so a
- * resubmit made after the session changed directory into a nested clone still
- * diffs against the earlier version. A new chain still starts under the cwd's
- * project, exactly as before.
- *
- * Runs the real CLI as a process against a scratch data dir and a workspace
- * folder holding a separate git clone.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,7 +33,6 @@ function gitInit(dir: string): void {
   if (init.exitCode !== 0) throw new Error(`git init failed in ${dir}`);
 }
 
-/** A workspace repository holding a separate clone, and a scratch data dir. */
 function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-plan-history-root-")));
   roots.push(root);
@@ -59,7 +45,6 @@ function world() {
   return { root, workspace, serviceA, serviceB, data: join(root, "data") };
 }
 
-/** The test env: no agent markers, no inherited CLAUDE_PROJECT_DIR, never a browser. */
 function baseEnv(data: string, ready: string, extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string | undefined> = { ...process.env };
   for (const key of ["CLAUDE_PROJECT_DIR", "PLANNOTATOR_CWD", "CODEX_THREAD_ID", "COPILOT_CLI", "OPENCODE", "GEMINI_CLI", "OMPCODE", "PLANNOTATOR_HOST_RESULT_FILE"]) {
@@ -88,11 +73,6 @@ interface PlanView {
 
 let launchSeq = 0;
 
-/**
- * One plan submit: start the CLI in `cwd`, read `/api/plan`, deny, wait for exit.
- * `kind` "mod" runs `claude-mod-plan` (the stdin may carry `projectRoot`);
- * "classic" runs the PermissionRequest hook with `env`.
- */
 async function submit(
   w: ReturnType<typeof world>,
   opts: { kind: "mod" | "classic"; cwd: string; plan: string; projectRoot?: string; env?: Record<string, string> },

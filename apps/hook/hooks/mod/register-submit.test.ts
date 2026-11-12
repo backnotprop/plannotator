@@ -1,9 +1,3 @@
-/**
- * register.ts's own `submit` (review of #2780): Claude Code's `$.prompt.submit` RESOLVES `{ drop: <reason> }` for
- * a prompt it refuses, and the one line in `hostOf` that reads it is the fix. Driven through the real registered
- * hooks on a fake `$` (the engine harness in apps/hook/tests needs `claude plugin test`): a review decision whose
- * turn the engine drops is never marked delivered, and goes in once the person's prompt lets input move again.
- */
 import { describe, expect, test } from 'bun:test'
 
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
@@ -21,7 +15,6 @@ async function settle() {
   for (let spin = 0; spin < 50; spin += 1) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-/** The engine beneath the mod: files, a store, timers the test runs, and a `$.prompt.submit` that may drop. */
 function engine() {
   const files = new Map<string, string>([['/bin/sh', '']])
   const env = new Map<string, string>([
@@ -35,7 +28,6 @@ function engine() {
     runs: [] as string[][],
     submits: [] as string[],
     logs: [] as string[],
-    /** What `$.prompt.submit` resolves with; `{ drop }` is a refusal. */
     answer: { drop: 'the session was stopped and nobody has sent input since' } as unknown,
     async tick() {
       for (const fn of [...timers]) fn()
@@ -130,7 +122,6 @@ describe("register.ts's submit reads $.prompt.submit's answer", () => {
     expect(world.files.has(`${dir}/settled/delivered`)).toBe(false)
     expect(world.logs.some((line) => line.startsWith('Could not send'))).toBe(false)
 
-    // The person types: the engine takes plugin prompts again.
     world.answer = undefined
     await hook('prompt.submit')($, { text: 'carry on', origin: { kind: 'composer' } }, async () => ({ text: 'carry on' }))
     await hook('turn.start')($, { turnId: 'turn-1', text: 'carry on' }, pass)

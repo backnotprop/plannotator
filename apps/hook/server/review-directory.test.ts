@@ -1,4 +1,3 @@
-/** A directory must own the whole review, including writes, not just its first diff. */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -11,7 +10,6 @@ const roots: string[] = [];
 let stubs: string[] = [];
 
 beforeAll(() => {
-  // API-only CLI tests need the import-time HTML assets, even without a UI build.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -37,7 +35,6 @@ function initRepo(path: string, label: string) {
 }
 
 function fixture() {
-  // realpath: macOS tmpdir is a symlink, and git reports the resolved toplevel.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-review-directory-")));
   roots.push(root);
   const caller = join(root, "caller");
@@ -77,8 +74,6 @@ async function launch(cwd: string, args: string[], dataDir: string, bridge = fal
   const stdout = new Response(proc.stdout).text();
   const stderr = new Response(proc.stderr).text();
   for (let i = 0; i < 200; i++) {
-    // The CLI appends one JSON line; the file exists before the line is
-    // written, so only a newline-terminated read is the whole record.
     const line = existsSync(ready) ? readFileSync(ready, "utf8") : "";
     if (line.endsWith("\n")) {
       const { url } = JSON.parse(line);
@@ -108,7 +103,6 @@ for (const bridge of [false, true]) {
   test(`${bridge ? "OpenCode bridge" : "CLI"}: selected repo owns reads, staging, refresh, progress, and feedback`, async () => {
     const { caller, target, dataDir } = fixture();
     const hostCwd = process.cwd();
-    // This ref only exists in the target: --base validation must move there too.
     git(target, "branch", "target-base");
     const session = await launch(caller, [relative(caller, target), "--base", "target-base", "--diff-type", "since-base"], dataDir, bridge);
     try {
@@ -121,7 +115,6 @@ for (const bridge of [false, true]) {
       expect(await session.api("/api/file-content?path=app.ts")).toMatchObject({
         oldContent: "export const selected = 1;\n", newContent: "export const selected = 2;\n",
       });
-      // Code navigation uses the same cwd resolver as Ask AI and review jobs.
       expect(await session.api("/api/code-nav/file?path=app.ts")).toMatchObject({ content: "export const selected = 2;\n" });
       await session.api("/api/git-add", { filePath: "app.ts" });
       expect(git(target, "diff", "--cached")).toContain("selected = 2");
@@ -151,7 +144,6 @@ for (const bridge of [false, true]) {
     } finally {
       session.stop();
     }
-    // Opening B from B without a target must restore the very same progress.
     const reopened = await launch(target, ["--base", "target-base", "--diff-type", "since-base"], dataDir, bridge);
     try {
       const diff = await reopened.api("/api/diff");
@@ -201,8 +193,6 @@ test("direct CLI honors PLANNOTATOR_CWD only for an explicit directory", async (
       session.stop();
     }
   }
-  // Two cold CLI boots plus the CLI's fixed 1.5 s exit grace each, like the
-  // other two-session tests here; launch() alone allows each boot ~10 s.
 }, 30_000);
 
 test("a selected linked worktree and a multi-repo parent use existing discovery", async () => {

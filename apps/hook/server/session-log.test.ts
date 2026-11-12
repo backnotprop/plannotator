@@ -1,12 +1,3 @@
-/**
- * Session Log Parser Tests
- *
- * Run: bun test apps/hook/server/session-log.test.ts
- *
- * Uses synthetic JSONL fixtures modeled after real Claude Code session logs.
- * Each test builds a minimal log and verifies the extraction logic.
- */
-
 import { describe, expect, test } from "bun:test";
 import {
   parseSessionLog,
@@ -36,9 +27,6 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, rmSync, utimesSync }
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// --- Fixture Helpers ---
-
-/** Minimal assistant entry with text content */
 function assistantText(
   msgId: string,
   text: string,
@@ -57,7 +45,6 @@ function assistantText(
   });
 }
 
-/** Assistant entry with only a tool_use block (no text) */
 function assistantToolUse(
   msgId: string,
   toolName: string,
@@ -83,7 +70,6 @@ function assistantToolUse(
   });
 }
 
-/** Assistant entry with both text and tool_use */
 function assistantTextAndToolUse(
   msgId: string,
   text: string,
@@ -110,7 +96,6 @@ function assistantTextAndToolUse(
   });
 }
 
-/** Human user prompt (string content) */
 function userPrompt(text: string): string {
   return JSON.stringify({
     type: "user",
@@ -121,7 +106,6 @@ function userPrompt(text: string): string {
   });
 }
 
-/** Tool result (array content — NOT a human prompt) */
 function userToolResult(toolUseId: string, output: string): string {
   return JSON.stringify({
     type: "user",
@@ -136,7 +120,6 @@ function userToolResult(toolUseId: string, output: string): string {
   });
 }
 
-/** Progress entry (sub-agent noise) */
 function progress(subtype: string = "agent_progress"): string {
   return JSON.stringify({
     type: "progress",
@@ -146,7 +129,6 @@ function progress(subtype: string = "agent_progress"): string {
   });
 }
 
-/** System entry (hook summary, etc.) */
 function systemEntry(subtype: string = "stop_hook_summary"): string {
   return JSON.stringify({
     type: "system",
@@ -156,7 +138,6 @@ function systemEntry(subtype: string = "stop_hook_summary"): string {
   });
 }
 
-/** File history snapshot */
 function fileSnapshot(): string {
   return JSON.stringify({
     type: "file-history-snapshot",
@@ -164,7 +145,6 @@ function fileSnapshot(): string {
   });
 }
 
-/** Queue operation (background agent completed) */
 function queueOp(): string {
   return JSON.stringify({
     type: "queue-operation",
@@ -172,17 +152,10 @@ function queueOp(): string {
   });
 }
 
-/** Bookkeeping entry with no id at all — Claude Code often writes these last. */
 function lastPromptEntry(lastPrompt: string, leafUuid: string): string {
   return JSON.stringify({ type: "last-prompt", lastPrompt, leafUuid });
 }
 
-/**
- * Link fixture lines into one parent chain, the way Claude Code records a
- * conversation. The individual helpers assign random `parentUuid`s, which would
- * otherwise leave every entry an orphan and make branch resolution untestable.
- * Entries with no `uuid` (bookkeeping types) are passed through untouched.
- */
 function linkChain(lines: string[], parentUuid: string | null = null): string[] {
   let previous = parentUuid;
   return lines.map((line) => {
@@ -196,7 +169,6 @@ function linkChain(lines: string[], parentUuid: string | null = null): string[] 
   });
 }
 
-/** Last `uuid` in a set of already-linked lines. */
 function tailUuid(lines: string[]): string {
   for (let i = lines.length - 1; i >= 0; i--) {
     const entry = JSON.parse(lines[i]);
@@ -211,12 +183,6 @@ function buildLog(...lines: string[]): string {
   return linkChain(lines).join("\n");
 }
 
-/**
- * A log recording a `/rewind`. `kept` runs to the rewind target, `abandoned` is
- * orphaned by the rewind but stays in the file, and `resumed` re-parents back to
- * the target. File order stays kept → abandoned → resumed, because the
- * transcript is append-only and the rewind itself writes nothing.
- */
 function buildRewoundLog(opts: {
   kept: string[];
   abandoned: string[];
@@ -254,8 +220,6 @@ function droidMessage(
       : {}),
   });
 }
-
-// --- Tests ---
 
 describe("projectSlugFromCwd", () => {
   test("converts Unix absolute path to slug", () => {
@@ -435,7 +399,6 @@ describe("extractLastRenderedMessage", () => {
   });
 
   test("grabs last message.id only, not earlier text in the turn", () => {
-    // Text before tool call, then text after — only the LAST bubble matters
     const log = buildLog(
       userPrompt("first"),
       assistantText("msg_1", "Let me check that."),
@@ -506,7 +469,6 @@ describe("extractLastRenderedMessage", () => {
   });
 
   test("skips back-to-back user messages to find previous turn", () => {
-    // User sent multiple messages without assistant response between them
     const log = buildLog(
       userPrompt("first"),
       assistantText("msg_1", "The actual response"),
@@ -695,7 +657,6 @@ describe("extractLastRenderedMessage", () => {
 
 describe("extractLastRenderedMessage — edge cases", () => {
   test("thinking block does not interfere with text extraction", () => {
-    // Thinking blocks have type:"thinking" — not text, not tool_use
     const thinkingEntry = JSON.stringify({
       type: "assistant",
       message: {
@@ -723,8 +684,6 @@ describe("extractLastRenderedMessage — edge cases", () => {
 
 describe("extractRecentRenderedMessages (picker)", () => {
   test("returns newest-first across turn boundaries", () => {
-    // Multiple turns — picker must surface assistant bubbles from all of them,
-    // not stop at the most recent turn boundary like extractLastRenderedMessage does.
     const log = buildLog(
       userPrompt("first"),
       assistantText("msg_1", "First response"),
@@ -759,8 +718,6 @@ describe("extractRecentRenderedMessages (picker)", () => {
   });
 
   test("first entry matches extractLastRenderedMessage default", () => {
-    // The picker's default selection (index 0) must match today's annotate-last
-    // behavior — otherwise the no-interaction case would silently change.
     const log = buildLog(
       userPrompt("first"),
       assistantText("msg_1", "Old"),
@@ -818,13 +775,10 @@ describe("resolveActiveBranchIndices", () => {
       resumed: [userPrompt("after rewind")],
     });
     const entries = parseSessionLog(log);
-    // Lines 2 and 3 are the abandoned branch; they stay in the file but are
-    // not part of the conversation any more.
     expect(resolveActiveBranchIndices(entries)).toEqual(new Set([0, 1, 4]));
   });
 
   test("walks back from a tail that carries no id", () => {
-    // Claude Code frequently writes a `last-prompt` entry as the final line.
     const linked = linkChain([
       userPrompt("first"),
       assistantText("msg_1", "Response"),
@@ -848,8 +802,6 @@ describe("resolveActiveBranchIndices", () => {
   });
 
   test("null when the chain dead-ends instead of reaching the root", () => {
-    // Unlinked lines: each helper assigns a random parentUuid that matches
-    // nothing in the file. A partial walk must not be mistaken for a branch.
     const log = [userPrompt("first"), assistantText("msg_1", "Response")].join("\n");
     const entries = parseSessionLog(log);
     expect(resolveActiveBranchIndices(entries)).toBeNull();
@@ -898,7 +850,6 @@ describe("extractRecentRenderedMessages — after a rewind", () => {
   });
 
   test("without branchIndices the orphan still wins (unchanged file-order read)", () => {
-    // Documents the behavior the Droid path keeps, and the bug this fixes.
     const entries = parseSessionLog(rewoundLog());
     const result = extractRecentRenderedMessages(entries, entries.length, 25);
     expect(result[0].messageId).toBe("msg_orphan");
@@ -909,13 +860,10 @@ describe("extractRecentRenderedMessages — after a rewind", () => {
     const result = extractRecentRenderedMessages(entries, entries.length, 25, {
       branchIndices: resolveActiveBranchIndices(entries),
     });
-    // msg_target is file line 2 (index 1), even though lines 3-4 were skipped.
     expect(result[0].lineNumbers).toEqual([2]);
   });
 
   test("an untrustworthy chain degrades to the file-order read", () => {
-    // resolveActiveBranchIndices returns null here; passing it through must not
-    // filter everything out.
     const log = [userPrompt("first"), assistantText("msg_1", "Response")].join("\n");
     const entries = parseSessionLog(log);
     const result = extractRecentRenderedMessages(entries, entries.length, 25, {
@@ -926,8 +874,6 @@ describe("extractRecentRenderedMessages — after a rewind", () => {
 });
 
 describe("getRecentRenderedMessages — after a /compact", () => {
-  // A compact boundary is written with `parentUuid: null`, so it is a tree
-  // root: the active branch stops there and pre-compaction entries are cut.
   const compactedLog = () => {
     const preCompact = linkChain([
       userPrompt("early question"),
@@ -954,9 +900,6 @@ describe("getRecentRenderedMessages — after a /compact", () => {
   });
 
   test("an empty active branch falls back to the file-order read", () => {
-    // Right after a compaction the branch holds no assistant messages. An
-    // empty result must not escape: callers treat it as "wrong log file" and
-    // walk off to an older session. Fail open to the file-order read instead.
     const dir = join(tmpdir(), `plannotator-compact-test-${process.pid}`);
     mkdirSync(dir, { recursive: true });
     const logPath = join(dir, "session.jsonl");
@@ -972,8 +915,6 @@ describe("getRecentRenderedMessages — after a /compact", () => {
   });
 
   test("a post-compaction assistant message is preferred once one exists", () => {
-    // Once the compacted conversation has its own assistant message, the
-    // branch read stands on its own and the pre-compaction orphan stays out.
     const log = [
       compactedLog(),
       linkChain([assistantText("msg_post", "Post-compaction answer")], "u-after").join("\n"),
@@ -1125,8 +1066,6 @@ describe("resolveDroidSessionLogForCwd", () => {
   });
 });
 
-// --- Resolver Tests (new) ---
-
 describe("getAncestorPids", () => {
   test("returns empty array for invalid startPid", () => {
     expect(getAncestorPids(0, 5, () => null)).toEqual([]);
@@ -1163,7 +1102,6 @@ describe("getAncestorPids", () => {
   });
 });
 
-/** Build an isolated sessions + projects dir under tmpdir for a test. */
 function makeTempDirs(label: string): {
   sessionsDir: string;
   projectsDir: string;
@@ -1181,7 +1119,6 @@ function makeTempDirs(label: string): {
   };
 }
 
-/** Write a session metadata file for a PID. */
 function writeSessionMeta(
   sessionsDir: string,
   pid: number,
@@ -1198,7 +1135,6 @@ function writeSessionMeta(
   );
 }
 
-/** Create a session jsonl for a given cwd + sessionId. */
 function writeSessionLog(
   projectsDir: string,
   cwd: string,
@@ -1861,7 +1797,6 @@ describe("resolveClaudeSessionLog", () => {
         cwd,
         sessionsDir,
         projectsDir,
-        // The writer finishes while the reader waits to retry.
         beforeMetadataRetry: () => writeSessionMeta(sessionsDir, 600, {
           sessionId: "session-z",
           cwd: "/tmp/elsewhere",
@@ -1963,8 +1898,6 @@ describe("resolveSessionLogByAncestorPids", () => {
   });
 
   test("walks past bash subshell to find Claude Code ancestor", () => {
-    // Simulates: plannotator (ppid=500 = sh) → sh (ppid=400 = claude)
-    // Claude Code's session file is at pid 400, NOT 500.
     const { sessionsDir, projectsDir, cleanup } = makeTempDirs("walks-past");
     try {
       const cwd = "/tmp/fake-project-walk";
@@ -1989,7 +1922,6 @@ describe("resolveSessionLogByAncestorPids", () => {
     const { sessionsDir, projectsDir, cleanup } = makeTempDirs("skip-missing");
     try {
       const cwd = "/tmp/fake-project-skip";
-      // Metadata exists but the log file does not
       writeSessionMeta(sessionsDir, 400, { sessionId: "missing-id", cwd });
 
       const result = resolveSessionLogByAncestorPids({
@@ -2026,10 +1958,8 @@ describe("resolveSessionLogByAncestorPids", () => {
       const oldSessionId = "old-session-before-clear";
       const newSessionId = "new-session-after-clear";
 
-      // Metadata still points to old session (stale after /clear)
       writeSessionMeta(sessionsDir, 400, { sessionId: oldSessionId, cwd });
 
-      // Both logs exist; force mtime ordering via utimes
       const { utimesSync } = require("node:fs");
       const oldLog = writeSessionLog(projectsDir, cwd, oldSessionId, buildLog(
         userPrompt("hello"),
@@ -2050,7 +1980,6 @@ describe("resolveSessionLogByAncestorPids", () => {
         projectsDir,
       });
 
-      // Should prefer the ghost session (newer, unregistered)
       expect(result).toBe(newLog);
     } finally {
       cleanup();
@@ -2064,11 +1993,9 @@ describe("resolveSessionLogByAncestorPids", () => {
       const sessionA = "session-terminal-1";
       const sessionB = "session-terminal-2";
 
-      // Both sessions have their own metadata (different PIDs)
       writeSessionMeta(sessionsDir, 400, { sessionId: sessionA, cwd });
       writeSessionMeta(sessionsDir, 500, { sessionId: sessionB, cwd });
 
-      // Terminal 1's log (older)
       const { utimesSync } = require("node:fs");
       const logA = writeSessionLog(projectsDir, cwd, sessionA, buildLog(
         userPrompt("hello from terminal 1"),
@@ -2077,13 +2004,11 @@ describe("resolveSessionLogByAncestorPids", () => {
       const past = new Date(Date.now() - 5000);
       utimesSync(logA, past, past);
 
-      // Terminal 2's log (more recently modified)
       const logB = writeSessionLog(projectsDir, cwd, sessionB, buildLog(
         userPrompt("hello from terminal 2"),
         assistantText("msg_b", "Response in terminal 2")
       ));
 
-      // From terminal 1's process tree, should get terminal 1's log
       const result = resolveSessionLogByAncestorPids({
         startPid: 400,
         getParentPid: () => null,
@@ -2091,7 +2016,6 @@ describe("resolveSessionLogByAncestorPids", () => {
         projectsDir,
       });
 
-      // Should keep the PID-based result (session B is registered, not a ghost)
       expect(result).toBe(logA);
     } finally {
       cleanup();
@@ -2136,7 +2060,6 @@ describe("resolveSessionLogByCwdScan", () => {
     const { sessionsDir, projectsDir, cleanup } = makeTempDirs("pick-recent");
     try {
       const cwd = "/tmp/multi-project";
-      // Two concurrent sessions with the same cwd
       writeSessionMeta(sessionsDir, 111, {
         sessionId: "old-session",
         cwd,
@@ -2176,7 +2099,6 @@ describe("resolveSessionLogByCwdScan", () => {
         startedAt: 2_000,
       });
       const oldLog = writeSessionLog(projectsDir, cwd, "old-session");
-      // Note: no jsonl for new-session-no-log
 
       const result = resolveSessionLogByCwdScan({
         cwd,
@@ -2208,8 +2130,6 @@ describe("resolveSessionLogByCwdScan", () => {
     }
   });
 });
-
-// --- Process Table Parser Tests ---
 
 describe("parseProcessTablePs", () => {
   test("parses well-formed ps output", () => {
@@ -2288,9 +2208,6 @@ describe("parseProcessTableCsv", () => {
 });
 
 describe("normalizeCwdForCompare", () => {
-  // normalizeCwdForCompare branches on process.platform. Rather than mock the
-  // platform, assert the invariant that identical cwds always normalize equal,
-  // and that on the current platform the function is idempotent.
   test("is idempotent", () => {
     const cwd = process.platform === "win32"
       ? "C:\\Users\\me\\project"
@@ -2318,7 +2235,6 @@ describe("resolveSessionLogByCwdScan (cross-platform cwd matching)", () => {
     if (process.platform !== "win32") return;
     const { sessionsDir, projectsDir, cleanup } = makeTempDirs("win-case");
     try {
-      // Claude writes C:\Users\... but process.cwd() may return c:\users\...
       const storedCwd = "C:\\Users\\Admin\\proj";
       const queryCwd = "c:\\users\\admin\\proj";
       writeSessionMeta(sessionsDir, 111, { sessionId: "s1", cwd: storedCwd });

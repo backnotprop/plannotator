@@ -20,22 +20,6 @@ import { INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_RELOAD_FIELD } from './inbox-contra
 import { register } from './register'
 import { fakeHost, type FakeHost } from './testing/fake-host'
 
-// Plannotator reloads itself after an update (owner approval "cc-auto-reload"
-// and its addendum: one visible echo line is fine; nothing may break, loops and
-// agents keep running). The failures these catch: a reload while a main turn
-// or Plannotator work runs; a running subagent holding the reload (it keeps
-// running across one, and the owner asked that it never stop work), or
-// counting as the main turn; a reload over text the person typed; a
-// second reload for the same version (a reload that loaded nothing new must not
-// loop); a refused run retried without the person's input, or forever; the old
-// module not saying the reload did not take; the new module not checking in;
-// the poll not asking or the Inbox's word not reaching the reload; and the
-// render hook hiding anything but our own run's plain success. And the loops
-// the review of #2873 found: a store that refuses or loses the record, a
-// reload that does not replace the module, an Inbox that alternates versions,
-// a turn that starts while the store is written, a refusal that lands after
-// the new module checked in.
-
 const SESSION = 'sess-1'
 
 function deps(overrides: Partial<AutoReloadDeps> = {}) {
@@ -65,7 +49,6 @@ function deps(overrides: Partial<AutoReloadDeps> = {}) {
     },
     after: (ms, fn) => timers.push({ at: state.clock + ms, fn }),
     debug: () => undefined,
-    // One module's memory per deps(): a test that reloads the module gives the new one a fresh map.
     attempts: new Map(),
     ...overrides,
   }
@@ -142,7 +125,6 @@ describe('when Plannotator reloads itself', () => {
     reload.setOffer({ installed: '0.28.51' })
     await reload.tick()
     expect(record()?.outcome).toBe('pending')
-    // The old module is still here: the reload did not replace it.
     await elapse(AUTO_RELOAD_CHECK_IN_MS)
     expect(record()?.outcome).toBe('did_not_take')
     for (let i = 0; i < 5; i += 1) {
@@ -151,7 +133,6 @@ describe('when Plannotator reloads itself', () => {
       await reload.tick()
     }
     expect(state.runs).toBe(1)
-    // A later release is a new version: one more try.
     reload.setOffer({ installed: '0.28.52' })
     await reload.tick()
     expect(state.runs).toBe(2)
@@ -162,7 +143,6 @@ describe('when Plannotator reloads itself', () => {
     const first = new AutoReload(d)
     first.setOffer({ installed: '0.28.51' })
     await first.tick()
-    // A reloaded module: its memory starts over, the store remembers.
     const second = new AutoReload({ ...d, attempts: new Map() })
     second.setOffer({ installed: '0.28.51' })
     await second.tick()
@@ -240,7 +220,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     expect(unreadable.state.runs).toBe(0)
 
     const forgetful = deps()
-    // set resolves, but nothing is kept.
     const b = new AutoReload({ ...forgetful.d, storeSet: async () => undefined })
     b.setOffer({ installed: '0.28.51' })
     for (let i = 0; i < 5; i += 1) await b.tick()
@@ -253,7 +232,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     reload.setOffer({ installed: '0.28.51' })
     await reload.tick()
     expect(state.runs).toBe(1)
-    // Another session's read-modify-write dropped this record; the did_not_take write may fail too.
     store.delete(STORE_AUTO_RELOAD)
     await elapse(AUTO_RELOAD_CHECK_IN_MS)
     store.delete(STORE_AUTO_RELOAD)
@@ -262,7 +240,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
       await reload.tick()
     }
     expect(state.runs).toBe(1)
-    // A /clear moves the session id in the same module: still no second run for that version.
     const cleared = new AutoReload({ ...d, sessionId: 'sess-after-clear' })
     cleared.setOffer({ installed: '0.28.51' })
     await cleared.tick()
@@ -277,7 +254,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
       await reload.tick()
     }
     expect(state.runs).toBe(2)
-    // A module the reload loaded (fresh memory) reads the tried versions from the store.
     const next = new AutoReload({ ...d, attempts: new Map() })
     for (const version of ['0.28.51', '0.28.52']) {
       next.setOffer({ installed: version })
@@ -293,7 +269,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
       ...d,
       storeSet: async (key, value) => {
         await d.storeSet(key, value)
-        // The person pressed Enter while the first record was written.
         if ((writes += 1) === 1) state.busy = 'a turn runs'
       },
     })
@@ -325,11 +300,9 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     const { d, state } = deps()
     const reload = new AutoReload(d)
     reload.setOffer({ installed: '0.28.51' })
-    // The hooks beneath ours are slow (another plugin, a UserPromptSubmit command): far past the gap.
     reload.notePromptSubmitting()
     for (let i = 0; i < AUTO_RELOAD_PROMPT_GAP_TICKS + 10; i += 1) await reload.tick()
     expect(state.runs).toBe(0)
-    // Dropped: nothing more to wait for.
     reload.notePromptLeft('dropped')
     await reload.tick()
     expect(state.runs).toBe(1)
@@ -339,7 +312,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     a.setOffer({ installed: '0.28.51' })
     a.notePromptSubmitting()
     await a.tick()
-    // Into a turn already running (that turn's own count holds the run).
     a.notePromptLeft('into-turn')
     await a.tick()
     expect(into.state.runs).toBe(1)
@@ -351,7 +323,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     b.notePromptLeft('new-turn')
     await b.tick()
     expect(fresh.state.runs).toBe(0)
-    // Its turn started (and, in the mod, that turn now holds the run).
     b.onInputMoved()
     await b.tick()
     expect(fresh.state.runs).toBe(1)
@@ -363,7 +334,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     c.notePromptLeft('new-turn')
     for (let i = 0; i < AUTO_RELOAD_PROMPT_GAP_TICKS; i += 1) await c.tick()
     expect(late.state.runs).toBe(0)
-    // A prompt that entered and started no turn (a slash command) is let go.
     await c.tick()
     await c.tick()
     expect(late.state.runs).toBe(1)
@@ -379,7 +349,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     expect(state.runs).toBe(0)
     expect(lines.filter((line) => line.includes('a turn runs'))).toHaveLength(1)
 
-    // The gate fails after the record was written, and the put-back write fails too.
     const failing = deps()
     const said: string[] = []
     let writes = 0
@@ -433,7 +402,6 @@ describe('after the reload', () => {
     old.setOffer({ installed: '0.28.51' })
     await old.tick()
     const ranAt = state.clock
-    // The reload replaces the module (its timer goes with it) and the new one loads.
     old.dispose()
     await elapse(500)
     state.loaded = { version: '0.28.51', root: '/plugins/cache/plannotator/0.28.51', loaded_at: state.clock }
@@ -442,10 +410,8 @@ describe('after the reload', () => {
     await fresh.noteTools(true)
     await fresh.notePolled()
     expect(record()).toMatchObject({ outcome: 'checked_in', version: '0.28.51', tools: true, inbox: true, checkedIn: { version: '0.28.51', loadedAt: ranAt + 500 } })
-    // The disposed old module's window passing changes nothing.
     await elapse(AUTO_RELOAD_CHECK_IN_MS)
     expect(record()?.outcome).toBe('checked_in')
-    // The Inbox still saying "outdated" for that version (a judgment the reload cannot change) runs nothing again.
     fresh.setOffer({ installed: '0.28.51' })
     await fresh.tick()
     expect(state.runs).toBe(1)
@@ -486,7 +452,6 @@ describe('after the reload', () => {
     await old.tick()
     old.dispose()
     state.clock += 500
-    // The module ran again, but it is still 0.28.50.
     state.loaded = { ...state.loaded, loaded_at: state.clock }
     const again = new AutoReload({ ...d, attempts: new Map() })
     expect(await again.checkIn()).toMatchObject({ outcome: 'did_not_take', checkedIn: { version: '0.28.50' } })
@@ -541,8 +506,6 @@ describe('what the chat shows of the run', () => {
     expect(hook.run({}, row({ text: 'Reloaded: 1 plugin\n1 error during load.' }), next)).toBe(passed)
   })
 })
-
-// --- Through the mod: the Inbox link's poll and the controller's gates --------------------------------
 
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
@@ -603,7 +566,6 @@ describe('through the mod', () => {
     expect(reloads).toHaveLength(0)
     mod.onTurnComplete('turn-1', 'done', false)
     await ticks(host, 3)
-    // The main loop is idle; the subagent still runs (it never completes here), and /reload-plugins leaves it running.
     expect(reloads).toHaveLength(1)
     mod.dispose()
   })

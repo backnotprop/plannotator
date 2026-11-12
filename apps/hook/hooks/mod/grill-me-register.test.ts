@@ -1,19 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { inboxRegistryPathOf } from './inbox'
 
-// The grill-me note is the Inbox's alone: it rides a grill-me skill the person
-// picks in the Inbox's reply box, New message or a comment (the owner,
-// 2026-11-08: "if it's a skill ran from our UI, that's it";
-// packages/inbox/skills.ts). The failure this catches: the Claude Code mod
-// adding anything of ours to a session's own `/grill-me` or to the Skill tool
-// running one, even where the Inbox has run and its tool is registered.
-
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
 
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
 
-/** A fresh copy of register.ts (its module state is per process), and its first hook for each event. */
 async function freshHooks(name: string) {
   const { register } = (await import(`./register?${name}`)) as typeof import('./register')
   const held = new Map<string, Hook>()
@@ -23,7 +15,6 @@ async function freshHooks(name: string) {
   return (event: string) => held.get(event)!
 }
 
-/** The `$` the module runs on, in memory; `inboxRan`: the Inbox's registry file exists. */
 function engineOver(options: { inboxRan?: boolean; config?: Record<string, unknown> } = {}) {
   const files = new Map<string, string>([['/bin/sh', '']])
   if (options.inboxRan !== false) files.set(inboxRegistryPathOf(DATA), REGISTRY)
@@ -75,16 +66,13 @@ function engineOver(options: { inboxRan?: boolean; config?: Record<string, unkno
 
 const composer = { kind: 'composer' }
 
-/** What the engine beneath hands back for a prompt: it entered, with the context it was given. */
 const entered = (e: any) => ({ text: e.text, context: e.context, origin: e.origin })
-/** What the engine beneath hands back for a Skill call. */
 const skillRan = () => ({ ref: 1, result: { success: true, commandName: 'grill-me' }, text: 'Launching skill' })
 
 async function started(name: string, options?: Parameters<typeof engineOver>[0]) {
   const hook = await freshHooks(name)
   const $ = engineOver(options)
   await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/app' }))
-  /** The context a typed command's prompt entered with. */
   const typed = async (command: string) => {
     let seen: any = null
     await hook('prompt.submit')($, { text: `/${command}`, command: { name: command, args: '' }, origin: composer, wait: false }, (e: any) => {
@@ -93,7 +81,6 @@ async function started(name: string, options?: Parameters<typeof engineOver>[0])
     })
     return (seen?.context ?? []) as string[]
   }
-  /** The context a Skill call's result came back with. */
   const skill = async (skillName: string, extra: Record<string, unknown> = {}) => {
     const result = (await hook('tool.call')($, { tool: 'Skill', skill: skillName, tool_use_id: 'tu', ...extra }, skillRan)) as any
     return (result?.context ?? []) as string[]

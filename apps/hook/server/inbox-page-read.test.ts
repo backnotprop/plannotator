@@ -1,11 +1,3 @@
-/**
- * The built Inbox page is about 22 MB and only serving uses it, while every
- * agent session keeps an `inbox mcp` process running: those must never read
- * it. Real CLI processes from source, each in its own scratch HOME and data
- * dir, with the page's import pointed at a scratch path
- * (tests/helpers/redirect-inbox-page.ts). A read of a path that holds no file
- * ends the process, so a command that gets through never read the page.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +19,6 @@ beforeAll(() => {
 });
 afterAll(() => removeStubbedHtml(stubs));
 afterEach(async () => {
-  // Any Inbox a test's record names, also one a failing test did not expect.
   const started = [...dataDirs].flatMap(([root, dataDir]) => {
     const named = inboxEntryOf(dataDir);
     return named ? [{ entry: named, root }] : [];
@@ -41,7 +32,6 @@ afterEach(async () => {
   }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
 const agents = stubbedAgentClis();
 
 function sandbox() {
@@ -72,7 +62,6 @@ function sandbox() {
   return { root, dataDir, page, spawn };
 }
 
-/** The child's exit and stderr, killing it after `ms` first: its stderr only ends once it has. */
 async function finish(proc: (typeof children)[number], ms = 20_000): Promise<{ exit: number; stderr: string }> {
   const stderr = new Response(proc.stderr).text();
   // inbox-guard: own child
@@ -83,9 +72,7 @@ async function finish(proc: (typeof children)[number], ms = 20_000): Promise<{ e
 }
 
 test.each([
-  // stdin is at its end, so the shim stops at once: no message, so no Inbox is started for it.
   [["inbox", "mcp"], 0],
-  // Exit 1 is status's own "never ran"; the missing page's error below is what would tell a read apart.
   [["inbox", "status"], 1],
 ] as const)("%j runs without the page", async (args, code) => {
   const box = sandbox();

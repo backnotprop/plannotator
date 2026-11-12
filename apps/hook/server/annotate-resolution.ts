@@ -1,20 +1,3 @@
-/**
- * Annotate target resolution for the direct CLI (`plannotator annotate`).
- *
- * Extracted from the annotate branch of index.ts so the resolution pipeline
- * can be re-run once by the tolerant token fallback (#1182) and unit tested.
- * The behavior of a single resolution pass is unchanged: the same branch
- * order (URL, folder, HTML, document), the same messages, and the same
- * progress lines, emitted through `log` at the same points as before.
- *
- * Failures are returned instead of exiting; the caller maps them onto the
- * existing exit behavior. `notFound` is true only for the "the input named
- * nothing" terminal, which is the sole hook point for the token fallback.
- * Every target-specific failure (unsupported type, oversized file, empty
- * folder, unreachable URL, ambiguous name) keeps `notFound` false so it
- * surfaces verbatim.
- */
-
 import { existsSync, statSync } from "fs";
 import path from "path";
 import { resolveAtReference, stripAtPrefix } from "@plannotator/shared/at-reference";
@@ -53,21 +36,16 @@ export interface AnnotateResolutionSuccess {
   rawHtml?: string;
   absolutePath: string;
   folderPath?: string;
-  /** `annotate-bundle` is built by the CLI's bundle rule, never by this pipeline. */
   annotateMode: "annotate" | "annotate-folder" | "annotate-bundle";
-  /** Several files reviewed as one, in review order (annotate-bundle only). */
   bundleFiles?: AnnotateBundleFile[];
   sourceInfo?: string;
   sourceConverted: boolean;
   isUrl: boolean;
-  /** Loopback HTML target resolved as a LIVE app session (server mode
-   *  "annotate-app"): the URL is proxied, not converted. */
   liveApp?: boolean;
 }
 
 export interface AnnotateResolutionFailure {
   ok: false;
-  /** True only when the input resolved to nothing at all. */
   notFound: boolean;
   message: string;
 }
@@ -76,10 +54,6 @@ export type AnnotateResolutionResult =
   | AnnotateResolutionSuccess
   | AnnotateResolutionFailure;
 
-/** The loopback gate for the live-app probe: the proxy-side predicate is the
- * single source of truth (localhost, IPv6 loopback, or a LITERAL IPv4
- * address in 127.0.0.0/8, never a string prefix, which DNS names like
- * 127.0.0.1.evil.example would satisfy). Re-exported for the tests. */
 export { isLoopbackHostname };
 
 export async function resolveAnnotateTarget(options: {
@@ -87,15 +61,8 @@ export async function resolveAnnotateTarget(options: {
   projectRoot: string;
   noJina: boolean;
   renderMarkdown: boolean;
-  /**
-   * Extra extensions the user registered as markdown (#1307). Defaults to the
-   * process-wide set resolved from config.json; passed explicitly by callers
-   * that already hold a resolved list.
-   */
   extraMarkdownExtensions?: readonly string[];
-  /** --app: force live mode; loud startup failure when it cannot apply. */
   forceApp?: boolean;
-  /** --static: force the classic conversion pipeline on loopback URLs. */
   forceStatic?: boolean;
   log?: (line: string) => void;
 }): Promise<AnnotateResolutionResult> {
@@ -104,9 +71,6 @@ export async function resolveAnnotateTarget(options: {
     options.extraMarkdownExtensions ?? getExtraMarkdownExtensions();
   const log = options.log ?? ((line: string) => console.error(line));
 
-  // Primary resolution strips the `@` reference marker; rawFilePath is
-  // preserved so each branch can fall back to the literal form below
-  // (scoped-package-style names).
   const filePath = stripAtPrefix(rawFilePath);
 
   if (process.env.PLANNOTATOR_DEBUG) {
@@ -114,11 +78,8 @@ export async function resolveAnnotateTarget(options: {
     log(`[DEBUG] File path arg: ${filePath}`);
   }
 
-  // --- URL annotation ---
   const isUrl = /^https?:\/\//i.test(filePath);
 
-  // --app is contracted to fail loudly whenever it cannot apply; a file or
-  // folder target silently swallowing it would hide the flag's typo'd use.
   if (!isUrl && forceApp) {
     return {
       ok: false,
@@ -128,13 +89,6 @@ export async function resolveAnnotateTarget(options: {
   }
 
   if (isUrl) {
-    // --- Live app detection (shared with the Pi extension) ---
-    // Loopback http URLs default to LIVE mode when a quick probe returns an
-    // HTML page; --static forces the classic conversion pipeline; --app
-    // forces live mode and fails loudly when it cannot apply. Non-loopback
-    // URLs keep the conversion pipeline untouched. Probe semantics and
-    // messages live in @plannotator/shared/live-probe so every host judges
-    // the same URL identically.
     const { parsed: parsedUrl, loopback } = classifyLiveAppCandidate(filePath);
 
     if (forceApp && !loopback) {
@@ -145,7 +99,6 @@ export async function resolveAnnotateTarget(options: {
       };
     }
     if (forceApp && parsedUrl?.protocol === "https:") {
-      // The live proxy is http-only.
       return {
         ok: false,
         notFound: false,
@@ -154,8 +107,6 @@ export async function resolveAnnotateTarget(options: {
     }
 
     if (loopback && parsedUrl?.protocol === "http:" && !forceStatic) {
-      // Never a Plannotator server: the live proxy would give the proxied
-      // page same-origin writes on it (see live-proxy-core).
       const probe = await probeLiveAppTarget(filePath, parsedUrl, fetch, {
         plannotatorPorts: listPlannotatorServerPorts(),
       });
@@ -178,11 +129,6 @@ export async function resolveAnnotateTarget(options: {
           message: buildForceAppFailureMessage(filePath, probe),
         };
       }
-      // Probe failure or non-HTML without --app: fall through to the static
-      // pipeline, whose own error surfaces verbatim (preserves the legacy
-      // behavior for dead URLs and JSON endpoints). A failed probe says so
-      // first: a dev server still starting up probes as unreachable, and a
-      // silent downgrade to static conversion reads as a broken live session.
       if (probe.plannotator) {
         log(buildLivePlannotatorFallbackNotice(filePath));
       } else if (probe.probeError !== null) {
@@ -211,15 +157,14 @@ export async function resolveAnnotateTarget(options: {
     return {
       ok: true,
       markdown,
-      absolutePath: filePath, // Use URL as the "path" for display
+      absolutePath: filePath,
       annotateMode: "annotate",
-      sourceInfo: filePath, // Full URL for source attribution
+      sourceInfo: filePath,
       sourceConverted,
       isUrl,
     };
   }
 
-  // Folder check with literal-@ fallback for scoped-package-style names.
   const folderCandidate = resolveAtReference(rawFilePath, (c) => {
     try {
       return statSync(resolveUserPath(c, projectRoot)).isDirectory();
@@ -230,7 +175,6 @@ export async function resolveAnnotateTarget(options: {
 
   if (folderCandidate !== null) {
     const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
-    // Folder annotation mode (markdown/plain text/config + HTML files)
     if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, buildAnnotatableDocRegex(extraMarkdownExtensions))) {
       return {
         ok: false,
@@ -250,7 +194,6 @@ export async function resolveAnnotateTarget(options: {
     };
   }
 
-  // HTML check with the same literal-@ fallback semantics.
   const htmlCandidate = resolveAtReference(rawFilePath, (c) => {
     const abs = resolveUserPath(c, projectRoot);
     return /\.html?$/i.test(abs) && existsSync(abs);
@@ -284,8 +227,6 @@ export async function resolveAnnotateTarget(options: {
     };
   }
 
-  // Single markdown/plain-text file annotation mode
-  // Strip-first with literal-@ fallback (scoped-package-style names).
   let resolved = resolveMarkdownFile(filePath, projectRoot, { extraMarkdownExtensions });
   if (resolved.kind === "not_found" && rawFilePath !== filePath) {
     resolved = resolveMarkdownFile(rawFilePath, projectRoot, { extraMarkdownExtensions });
@@ -302,7 +243,6 @@ export async function resolveAnnotateTarget(options: {
     };
   }
   if (resolved.kind !== "found") {
-    // Check if file exists but has unsupported type
     const resolvedPath = resolveUserPath(resolved.input, projectRoot);
     const fileExists = existsSync(resolvedPath);
 

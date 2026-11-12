@@ -1,9 +1,3 @@
-/**
- * `plannotator review <GitHub PR URL>` with two signed-in gh accounts (#2157),
- * a real spawn of the CLI entry against a fake `gh` (tests/helpers/fake-gh.ts)
- * first on PATH, with a scratch HOME, gh config dir and data dir. The real gh,
- * its config and the network are never reached.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,7 +29,6 @@ afterEach(async () => {
   workDir = undefined;
 });
 
-/** A local repository holding refs/pull/7/head, for the fake `gh repo clone`. Real git, no user config. */
 function makeCloneSource(dir: string): string {
   const git = Bun.which("git");
   if (!git) throw new Error("git is needed for the --local test");
@@ -93,7 +86,7 @@ async function waitForReady(readyFile: string, stderr: () => string): Promise<st
     if (existsSync(readyFile)) {
       try {
         return (JSON.parse(readFileSync(readyFile, "utf-8")) as { url: string }).url.replace(/\/$/, "");
-      } catch { /* partially written */ }
+      } catch { }
     }
     if (proc?.exitCode !== null) break;
     await Bun.sleep(100);
@@ -131,7 +124,7 @@ describe("plannotator review <GitHub PR> with two gh accounts", () => {
     expect(prCalls.length).toBeGreaterThan(0);
     expect(prCalls.every((c) => c.as === "tobey-work")).toBe(true);
 
-    try { await fetch(`${base}/api/exit`, { method: "POST" }); } catch { /* already gone */ }
+    try { await fetch(`${base}/api/exit`, { method: "POST" }); } catch { }
     await Promise.race([proc!.exited, Bun.sleep(5_000)]);
   }, 40_000);
 
@@ -149,10 +142,9 @@ describe("plannotator review <GitHub PR> with two gh accounts", () => {
     const fetches = calls.filter((c) => c.git && c.args.includes("fetch"));
     expect(fetches.length).toBeGreaterThan(0);
     expect(fetches.every((c) => c.as === "tobey-work")).toBe(true);
-    // The token is not in the CLI's own environment: its other git calls run without it.
     expect(calls.some((c) => c.git && !c.args.includes("fetch") && c.as === null)).toBe(true);
 
-    try { await fetch(`${base}/api/exit`, { method: "POST" }); } catch { /* already gone */ }
+    try { await fetch(`${base}/api/exit`, { method: "POST" }); } catch { }
     await Promise.race([proc!.exited, Bun.sleep(5_000)]);
   }, 60_000);
 });

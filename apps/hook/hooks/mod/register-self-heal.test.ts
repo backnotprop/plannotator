@@ -1,11 +1,3 @@
-/**
- * register.ts's `session.end` rule and self-heal (self-heal.ts), through the
- * real registered hooks on a fake `$` (the engine harness in apps/hook/tests
- * needs `claude plugin test`). What can regress: another session's end
- * disposing this one, the dispose waiting on a `$` call, the self-heal never
- * armed or never armed again after the engine ended it, and a healed Inbox
- * link taking a lease another live process holds.
- */
 import { describe, expect, test } from 'bun:test'
 import { inboxRegistryPathOf, inboxSessionDirOf, INBOX_TICK_MS } from './inbox'
 import { MOD_HEAL_EVERY_MS } from './self-heal'
@@ -30,7 +22,6 @@ const DATA = '/data'
 const LEASE = `${inboxSessionDirOf(DATA, SESSION)}/watcher.json`
 const REGISTRY = JSON.stringify({ v: 1, pid: 4242, port: 5150, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:5150' })
 
-/** The engine beneath the mod: files, a clock the test moves, and the timers it arms (the test fires them). */
 function engine() {
   const files = new Map<string, string>([
     ['/bin/sh', ''],
@@ -46,7 +37,6 @@ function engine() {
     files,
     timers,
     now: 1_000_000,
-    /** Set: `$.session.id()` never answers. */
     idHangs: false,
     live: (ms: number) => timers.filter((timer) => timer.live && timer.ms === ms),
     async fire(ms: number) {
@@ -145,7 +135,6 @@ describe('the self-heal', () => {
     await settle()
     expect(world.live(INBOX_TICK_MS)).toHaveLength(0)
 
-    // Within the period (/clear may still be moving the id): nothing.
     world.now += MOD_HEAL_EVERY_MS - 1
     await world.fire(MOD_HEAL_EVERY_MS)
     expect(world.live(INBOX_TICK_MS)).toHaveLength(0)
@@ -153,7 +142,6 @@ describe('the self-heal', () => {
     world.now += 1
     await world.fire(MOD_HEAL_EVERY_MS)
     expect(world.live(INBOX_TICK_MS)).toHaveLength(1)
-    // Live again: another look makes nothing new.
     world.now += MOD_HEAL_EVERY_MS
     await world.fire(MOD_HEAL_EVERY_MS)
     expect(world.timers.filter((timer) => timer.ms === INBOX_TICK_MS)).toHaveLength(2)
@@ -167,14 +155,12 @@ describe('the self-heal', () => {
       await settle()
     }
 
-    // Firing: left alone.
     world.now += MOD_HEAL_EVERY_MS
     await world.fire(MOD_HEAL_EVERY_MS)
     world.now += MOD_HEAL_EVERY_MS
     await turnEnd('t1')
     expect(world.timers.filter((timer) => timer.ms === MOD_HEAL_EVERY_MS)).toHaveLength(1)
 
-    // Silent for two periods: one new timer, the old one cancelled.
     world.now += 2 * MOD_HEAL_EVERY_MS
     await turnEnd('t2')
     await turnEnd('t3')
@@ -189,7 +175,6 @@ describe('the self-heal', () => {
     expect(lease(world)?.owner).toBeNull()
 
     world.now += MOD_HEAL_EVERY_MS
-    // Another process on this session, where the person last worked, holds a live lease.
     const other = JSON.stringify({ owner: 'other-process', at: world.now, touchedAt: world.now - 5_000 })
     world.files.set(LEASE, other)
     await world.fire(MOD_HEAL_EVERY_MS)

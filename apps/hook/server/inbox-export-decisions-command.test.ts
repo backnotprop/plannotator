@@ -1,9 +1,3 @@
-/**
- * `plannotator inbox export-decisions` against a real Inbox server in a temp folder (in this process, with the fake
- * PR runtime: no real gh). What regresses: the file not written where --out says, or stdout carrying anything but
- * the file; --pr not posting through the Inbox, or a second run adding a second comment; a refusal exiting 0 or
- * without its code; the usage taking a flag combination it then ignores.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,7 +70,6 @@ test("a file to --out (nothing on stdout), Markdown on stdout, --pr in the descr
   expect(await w.run(["--thread", w.thread, "--pr", "acme/notes#12"])).toBe(0);
   expect(await w.run(["--thread", w.thread, "--pr", "acme/notes#12"])).toBe(0);
   expect(w.description.text).toStartWith("PR body.\n\n<!-- plannotator-decisions:start");
-  // The person can't edit this PR's description: the comment instead, and the line says so.
   w.description.locked = true;
   expect(await w.run(["--thread", w.thread, "--pr", "acme/notes#12"])).toBe(0);
   expect(w.outs.slice(1)).toEqual([

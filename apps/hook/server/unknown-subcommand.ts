@@ -21,7 +21,6 @@ const PUBLISHED_SUBCOMMANDS = [
   ...Object.keys(SUBCOMMAND_HELP_ALIASES),
 ];
 
-// Unreleased subcommands still run, but are never suggested to a user.
 function suggestableSubcommands(hidden: ReadonlySet<string>): string[] {
   return PUBLISHED_SUBCOMMANDS.filter((sub) => !hidden.has(sub));
 }
@@ -50,11 +49,6 @@ function levenshteinDistance(left: string, right: string): number {
   return previous[right.length];
 }
 
-/**
- * The closest published subcommand to a typo, never one in `hidden`
- * (HIDDEN_SUBCOMMANDS by default; tests pass their own set because the real
- * one is empty while nothing is unreleased).
- */
 export function findClosestSubcommand(
   token: string,
   hidden: ReadonlySet<string> = HIDDEN_SUBCOMMANDS,

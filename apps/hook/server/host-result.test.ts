@@ -8,7 +8,6 @@ describe("reviewHostResult", () => {
   test("LGTM and Close never reach the agent; feedback does, as the CLI prints it", () => {
     const lgtm = { approved: true, feedback: "", annotations: [] };
     const lgtmOutput = buildReviewOutput(lgtm, "claude-code");
-    // noop, yet it carries the configured approved prompt, which a gated review delivers (#1907).
     expect(reviewHostResult(lgtm, lgtmOutput)).toMatchObject({ decision: "approved", noop: true, message: lgtmOutput.message });
     expect(lgtmOutput.message).not.toBe("");
 
@@ -34,14 +33,9 @@ describe("reviewHostResult", () => {
     const posted = { approved: false, feedback: status, annotations: [], platform: true };
     const record = reviewHostResult(posted, buildReviewOutput(posted, "claude-code"));
     expect(record).toMatchObject({ decision: "annotated", noop: true, platform: true });
-    // The status line, never the request-changes suffix.
     expect(record.message).toBe(status);
   });
 
-  // The review editor sends only code comments in `annotations`; PR
-  // description comments, PR comment notes and VS Code editor comments ride
-  // only in `feedback`. Zero annotations must therefore never read as the
-  // platform post (that silently dropped these reviews under the mod).
   test.each([
     ["PR description comments", "## PR description\n\n> Adds the parser\n\nExplain why the fallback exists."],
     ["PR comment notes", "## PR comments\n\n> @alice: looks risky\n\nAgree, split this."],
@@ -56,9 +50,6 @@ describe("reviewHostResult", () => {
     expect(record.message).toContain(feedback);
   });
 
-  // End to end on the mod path: the record the CLI writes for such feedback
-  // reaches the mod's delivery decision as a turn, while the marked platform
-  // post still only logs with the follow-up suggestion.
   test("the mod submits zero-annotation feedback and only logs the platform post", () => {
     const context = { subject: "PR #1", overflowPath: "/data/x/feedback.md" };
     const descriptionOnly = { approved: false, feedback: "## PR description\n\nExplain the fallback.", annotations: [] };
@@ -81,8 +72,6 @@ describe("reviewHostResult", () => {
 });
 
 describe("annotateHostResult", () => {
-  // Failure caught: plaintext stdout and the result file naming the target of
-  // an approval with notes differently (they share annotateContextLine).
   test("an approval with notes reads the same on stdout and in the result file", () => {
     const config = { prompts: { annotate: { approvedWithNotes: "{{context}} || {{feedback}}" } } };
     const outcome = { approved: true, feedback: "ship it after the rename", annotations: [] };
@@ -120,8 +109,6 @@ describe("annotateHostResult", () => {
     expect(last.message).not.toContain("{{");
   });
 
-  // #1701: the editor's Done posts the zero-state sentence as feedback and
-  // marks the body; that must not start a turn on either surface.
   test("a Done marked nothingToSend is a no-op even though feedback carries the sentence", () => {
     const sentence = "User reviewed the document and has no feedback.";
     for (const kind of ["file", "folder", "last"] as const) {
@@ -133,17 +120,13 @@ describe("annotateHostResult", () => {
 
 describe("takeHostResultPath", () => {
   test("scrubs the variable so nothing the server spawns inherits it", () => {
-    // Module state is taken once per process; use a private env object.
     const env: NodeJS.ProcessEnv = { [HOST_RESULT_FILE_ENV]: "/tmp/r.json" };
     const before = takeHostResultPath(env);
     expect(env[HOST_RESULT_FILE_ENV]).toBeUndefined();
-    // The first call in this process decides; later calls return the same value.
     expect(takeHostResultPath({})).toBe(before);
   });
 });
 
-// The failure: any process that could set the variable made the CLI create
-// or replace an arbitrary file (rename onto ~/.bashrc, mkdir -p anywhere).
 describe("isAllowedHostResultPath", () => {
   test("only a result.json inside <data dir>/claude-code-mod/", () => {
     const data = "/home/me/.plannotator";
@@ -151,7 +134,6 @@ describe("isAllowedHostResultPath", () => {
     expect(isAllowedHostResultPath(`${data}/t3-code/env/threads/thread/reviews/pn-aabbcc/result.json`, data)).toBe(true);
     expect(isAllowedHostResultPath(`${data}/t3-code/../config.json`, data)).toBe(false);
     expect(isAllowedHostResultPath(`${data}/t3-code-evil/result.json`, data)).toBe(false);
-    // The DeepSeek Harness plugin's launches (apps/dsh-plugin/reviews.ts): if this were refused, no DSH decision would arrive.
     expect(isAllowedHostResultPath(`${data}/dsh/pn-aabbcc/result.json`, data)).toBe(true);
     expect(isAllowedHostResultPath(`${data}/dsh-evil/result.json`, data)).toBe(false);
     expect(isAllowedHostResultPath("/home/me/.bashrc", data)).toBe(false);
@@ -163,8 +145,6 @@ describe("isAllowedHostResultPath", () => {
   });
 });
 
-// The failure: a review the agent closed reads, to the host, like the
-// reviewer's own Close, and the unsent count the agent was told is lost.
 describe("host close", () => {
   test("an agent close is a dismissal marked closedBy, with the unsent count", () => {
     const review = { approved: false, feedback: "", annotations: [], exit: true, closedBy: "agent" as const, unsentAnnotations: 2 };
@@ -174,9 +154,6 @@ describe("host close", () => {
   });
 });
 
-// The failure this guards: a bare approval record carried no path, so the
-// agent named the decision after an earlier one about a different file of the
-// same name. Every record now names the target the SUBMITTING server resolved.
 describe("decision target", () => {
   test("annotate records name the file, folder, URL or bundle in full; annotate-last names none", () => {
     expect(annotateHostResult({ approved: true, feedback: "" }, { kind: "file", target: "/w/releases-2026-10-04/QUESTIONS.md" }))

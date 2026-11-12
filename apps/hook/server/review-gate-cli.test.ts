@@ -1,11 +1,3 @@
-/**
- * `plannotator review --gate` run as the real process (#1907). An agent that
- * opens a code review and waits for the sign-off runs this when it has no
- * `plannotator` tool, so the CLI must accept the flag rather than refuse it as
- * an unknown option. A bare Approve stays a `noop` host record (nothing for an
- * agent that did not gate), but it carries the configured approved prompt,
- * which a gated launch delivers as an "Approved" turn.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +20,6 @@ const PATCH = [
 ].join("\n");
 
 beforeAll(() => {
-  // The CLI imports the built HTML; API-only tests need just a stub.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -108,11 +99,9 @@ describe("review --gate", () => {
     expect(response.status).toBe(200);
     const { code, stdout, record } = await run.finish();
     expect(code).toBe(0);
-    // The CLI prints the approval as it always has.
     expect(stdout.trim()).not.toBe("");
     expect(record).toMatchObject({ v: 1, surface: "review", decision: "approved", noop: true, message: stdout.trim() });
 
-    // The mod only logs it for an ungated launch, and delivers it for a gated one.
     const context = { subject: "change.patch", sessionId: "pn-abc123", overflowPath: "/unused/feedback.md" };
     expect(deliveryFor(record, context).action).toBe("log");
     const gated = deliveryFor(record, { ...context, deliverApproval: true });

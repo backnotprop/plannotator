@@ -1,23 +1,3 @@
-/**
- * Show me (approval "shape-in-code-review") gates every word it adds to an
- * agent on the Code review switch. With Code review off, no Show me word is in
- * what an agent can read: the Inbox's MCP tool list, the guide brief,
- * `plannotator inbox --help`, the top-level help (Board off and on),
- * `plannotator review --help`, and Shape's own text (`shape --help`, `/shape`),
- * which stays byte for byte; `plannotator review draw …` and `review drawings …`
- * are the review parse's (`review <DIRECTORY>`), and a version-3 guide snapshot is refused with the release's
- * own "Unsupported snapshot version" words.
- *
- * What regresses: a Show me word (the chapter diagram's rules, the refusal of `review draw`,
- * the skills' drawing lines) reaching an agent whose person has Code review
- * off, or Code review on and Shape off (approval "code-review-029-shape-off":
- * Show me and the Overview's drawing ride Shape's own switch too). These texts
- * change for everyone on purpose, so the test names the words and not the
- * texts; a control proves each word is real, with Code review and Shape on.
- *
- * Chapter diagrams (Settings → Capabilities, under Code review, config.json `inboxChapterDiagrams`): with Code review
- * on and it off, no chapter diagram word reaches an agent either, Shape off or on.
- */
 import { afterAll, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -39,36 +19,18 @@ const home = join(root, "home");
 mkdirSync(home, { recursive: true });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-/**
- * The words Show me added, by the text that carries them with Code review on, copied from
- * `packages/core/inbox-review.ts`. A word holds no double quote or line break: the MCP texts are JSON, where those are escaped.
- */
 const SHOW_ME_WORDS = {
-  /** inboxReviewChapterDiagramDoc(true): the html kind's words (approval "guide-chapter-diagrams"), Shape on only */
   get_guide_brief: ["plannotator shape --help", "drawing by the rules in"],
-  /** INBOX_REVIEW_DRAW_GONE: what an older `review draw` gets */
   "review draw": ["review_draw_gone", "Show me makes a Shape"],
-  /** INBOX_REVIEW_CURATE_DRAWING_LINE (Shape on; with Shape off the line names Mermaid only) */
   "the review skills": ["Mermaid preferred"],
 };
 
-/**
- * A chapter's Mermaid diagram: Code review's own words (approval "guide-chapter-diagrams"), offered whatever Shape
- * says, so they are absent only with Code review off.
- */
 const CHAPTER_WORDS = {
-  /** inboxReviewChapterDiagramDoc */
   get_guide_brief: ["sections[].diagram", "one diagram at the top of a chapter"],
-  /** INBOX_REVIEW_CURATE_DRAWING_LINE(_NO_SHAPE) and INBOX_REVIEW_RECHECK_DRAWING_LINE */
   "the review skills": ["sections[].diagram", "draw it again in the chapter"],
-  /** INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES: submit_guide's `guide` field */
   "mcp tools/list": ["diagram?"],
 };
 
-/**
- * Each text an agent reads, with Code review on or off (and Shape, off unless named). `diagrams`: Chapter diagrams,
- * written to config.json as the Settings switch writes it (absent: never set, on).
- */
 async function agentTexts(codeReview: boolean, shape = false, diagrams?: boolean): Promise<Record<string, string>> {
   const dataDir = join(root, `data-texts-${codeReview ? "on" : "off"}${shape ? "-shape" : ""}${diagrams === undefined ? "" : diagrams ? "-diagrams" : "-no-diagrams"}`);
   mkdirSync(dataDir, { recursive: true });
@@ -81,7 +43,6 @@ async function agentTexts(codeReview: boolean, shape = false, diagrams?: boolean
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
     const { tools } = await client.listTools();
     const brief = await client.callTool({ name: "get_guide_brief", arguments: {} });
-    // A failed call would hold no word at all: the off test must read the real texts.
     expect(tools.map((tool) => tool.name)).toContain("get_guide_brief");
     expect(brief.isError).toBeFalsy();
     return {
@@ -108,15 +69,6 @@ async function agentTexts(codeReview: boolean, shape = false, diagrams?: boolean
   }
 }
 
-/**
- * Shape's own agent text, as it is on main without Show me, by SHA-256: Show me's agent words go in its request,
- * never here, because someone with Shape on and Code review off reads these. A change to Shape's text on purpose
- * pins the new hash here; one that names the code review belongs in the request. Last pinned for the stack paragraph
- * ("A stack of PRs", approval "stack-show-me" q-c24e5d2c, after its clean-room test), which names no code review,
- * re-pinned on merging main's later Shape text.
- */
-// #2703 (approvals shape-know-removed, shape-whats-changed-removed): Shape stops asking agents for views.know and views.changed.
-// Re-pinned in merge train B for the stack paragraph and #2703's removals together.
 const SHAPE_TEXT_SHA256 = { "shape --help": "ce2ee98da4eebc163bb184abb8dc6c32f43e2d0ea5407a0a2030395faa0df196", "/shape skill": "2d311dca120c01f3e9c6dbe6d360bdde401f3b8c857b6ef3f2455748a72e39f9" };
 
 test("Code review off: Shape's own agent text is byte for byte what it was", () => {
@@ -132,7 +84,6 @@ test("Code review off: no agent text holds a Show me word or a chapter diagram's
 });
 
 test("Code review on and Shape off: no agent text holds a Show me word (no overview.diagram, no Shape drawing rules)", async () => {
-  // `review draw` is the review parse's here (the CLI test below), as with Code review off.
   const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())];
   const texts = {
     ...(await agentTexts(true, false)),
@@ -140,14 +91,12 @@ test("Code review on and Shape off: no agent text holds a Show me word (no overv
   };
   const leaks = Object.entries(texts).flatMap(([name, text]) => words.filter((word) => text.includes(word)).map((word) => `${name}: ${word}`));
   expect(leaks).toEqual([]);
-  // Code review's own words are still there: the notes rule, and a chapter's Mermaid diagram.
   expect(texts.get_guide_brief).toContain("diffs[].notes");
   const missing = Object.entries(CHAPTER_WORDS).flatMap(([name, words]) => words.filter((word) => !texts[name]!.includes(word)).map((word) => `${name}: ${word}`));
   expect(missing).toEqual([]);
 });
 
 test("Code review on and Chapter diagrams off: no agent text holds a chapter diagram's word, Shape off or on", async () => {
-  // Every word of CHAPTER_WORDS, and in the brief and the skills any diagram or Mermaid word at all (the html kind's too).
   const words = [...new Set(Object.values(CHAPTER_WORDS).flat())];
   for (const shape of [false, true]) {
     const texts = {
@@ -159,10 +108,8 @@ test("Code review on and Chapter diagrams off: no agent text holds a chapter dia
       for (const word of ["diagram", "mermaid", "plannotator shape --help"]) if (texts[name]!.toLowerCase().includes(word)) leaks.push(`${shape}: ${name}: ${word}`);
     }
     expect(leaks).toEqual([]);
-    // The rest of Code review's words stay: the notes rule.
     expect(texts.get_guide_brief).toContain("diffs[].notes");
   }
-  // Turned on again (config.json `true`), every chapter word is back.
   const on = await agentTexts(true, false, true);
   const back = { ...on, "the review skills": inboxReviewSkills({ diagrams: true }).map((skill) => skill.body).join("\n") };
   const missing = Object.entries(CHAPTER_WORDS).flatMap(([name, list]) => list.filter((word) => !back[name]!.includes(word)).map((word) => `${name}: ${word}`));
@@ -200,7 +147,6 @@ test("Code review off: `review draw` and `review drawings` are the review parse'
   ]) {
     expect(isReviewDrawCommand(argv, () => false)).toBe(false);
   }
-  // The switch (config.json) is read only for `review draw|drawings`: every other command reads nothing new.
   let reads = 0;
   for (const argv of [["--version"], ["--help"], ["review", "--help"], ["review"], ["annotate", "x.md"], ["sessions"]]) {
     isReviewDrawCommand(argv, () => (reads++, true));
@@ -226,7 +172,6 @@ test("Code review off with a broken config.json: --version, --help, review --hel
     PLANNOTATOR_INBOX_CONNECT: "0",
     PLANNOTATOR_TEST_SANDBOX: "1",
   };
-  // In a folder that is no repository: the review parse answers at once, nothing is reviewed.
   const runWith = async (data: string, argv: string[]) => {
     const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...argv], { cwd: root, env: { ...env, PLANNOTATOR_DATA_DIR: data }, stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -234,8 +179,6 @@ test("Code review off with a broken config.json: --version, --help, review --hel
   };
   const cli = (...argv: string[]) => runWith(dataDir, argv);
   try {
-    // What 0.28.49 printed: --version reads no config; --help reads it once (the Board's help line), and
-    // `review --help` once (its Tailscale default). Show me adds no read, so no second warning.
     const warnings = (stderr: string) => stderr.split("\n").filter((line) => line.includes("failed to read config.json")).length;
     const version = await cli("--version");
     expect([version.code, warnings(version.stderr)]).toEqual([0, 0]);
@@ -244,9 +187,6 @@ test("Code review off with a broken config.json: --version, --help, review --hel
     const reviewHelp = await cli("review", "--help");
     expect([reviewHelp.code, reviewHelp.stdout, warnings(reviewHelp.stderr)]).toEqual([0, `${formatSubcommandHelp("review")}\n`, 1]);
 
-    // Every shaped `review draw|drawings` form: a broken config is Code review off, so each prints what it prints
-    // with Code review off, plus the warnings the review parse always gave (0.28.49's): as many as the same words
-    // with the command's word misspelt (`drawx`), which never reach Show me's code.
     const offDir = join(root, "data-off");
     mkdirSync(offDir, { recursive: true });
     writeFileSync(join(offDir, "config.json"), JSON.stringify({ inboxCodeReview: false }));
@@ -317,14 +257,12 @@ test("Code review on: `shape` answers only with Shape on, and an old `review dra
 }, 120_000);
 
 test("Code review off: a version-3 snapshot is an unsupported version", () => {
-  // 0.28.49's parser knew versions 1 and 2: any other was "Unsupported snapshot version: <n>", at $.version.
   const snapshot = { kind: "plannotator-guided-review", version: 3, exportedAt: "2026-01-01T00:00:00Z", guide: {}, review: {}, source: {} };
   expect(checkInboxGuide({ snapshot }, root, { codeReview: false })).toEqual({ ok: false, error: "Invalid guide snapshot ($.version): Unsupported snapshot version: 3" });
   expect(checkInboxGuide({ snapshot: JSON.stringify(snapshot) }, root, { codeReview: false })).toEqual({ ok: false, error: "Invalid guide snapshot ($.version): Unsupported snapshot version: 3" });
 });
 
 test("a version-2 snapshot taken while Code review is off is taken while on, html overview diagram and all", () => {
-  // The repo's own v2 html fixture (a `code:` link) and a guide-builder picture with <style>: the guide format's, not Shape's.
   const styled = { ...FIXTURE_V2_HTML, guide: { ...FIXTURE_V2_HTML.guide, overview: { text: "x", diagram: { kind: "html" as const, source: '<style>.a{color:red}</style><a class="a" href="chapter:1">One</a>' } } } };
   for (const snapshot of [FIXTURE_V2_HTML, styled]) {
     const off = checkInboxGuide({ snapshot }, root, { codeReview: false });

@@ -1,16 +1,3 @@
-/**
- * `plannotator system …` (step A7) as real processes: the repo's own CLI
- * entry against real git repos made in a temp folder, with a temp HOME and
- * PLANNOTATOR_DATA_DIR, git with no global config, and a PATH of agent stubs
- * (tests/helpers/agent-cli-guard.ts), so no real agent, gh or network runs.
- *
- * What can regress: the JSON and exit code contract a script and launchd
- * read, check naming the field that cites a missing path, the gate's wake on
- * real commits, check, gate and revision reading the drawing folder under
- * the data dir (never a folder in the repo), revision storing only what
- * loads, and schedule touching launchctl. launchctl only ever
- * runs in-process, through a recorder: never for real.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -29,26 +16,18 @@ const entry = resolve(import.meta.dir, "index.ts");
 let stubs: string[] = [];
 const roots: string[] = [];
 beforeAll(() => {
-  // The CLI imports the built HTML; these tests never read the pages.
   stubs = stubHookDistHtml();
 });
 afterAll(() => removeStubbedHtml(stubs));
 afterEach(() => {
   const tripped = roots.filter((root) => existsSync(join(root, LAUNCHCTL_LOG))).map((root) => readFileSync(join(root, LAUNCHCTL_LOG), "utf8"));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  // a child that reached launchctl fails the test that ran it, with what it ran
   if (tripped.length) throw new Error(`a test ran launchctl: ${tripped.join("")}`);
 });
-// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
 const agents = stubbedAgentClis();
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 
-/**
- * Where a sandbox's launchctl tripwire writes. Every child gets a `launchctl`
- * first on PATH that records its arguments here and exits 1, so no test can
- * reach the real one (which would load a job into the developer's session).
- */
 const LAUNCHCTL_LOG = "launchctl-tripwire.log";
 
 function git(root: string, ...args: string[]): string {
@@ -71,7 +50,6 @@ const commit = (root: string, message: string) => {
   return git(root, "rev-parse", "HEAD").trim();
 };
 
-/** A drawing of the small ledger app, drawn at `at`, its store citing `storePath`: the files of its drawing folder. */
 function drawing(at: string, storePath = "src/store/db.ts"): Record<string, string> {
   return {
     "system.yaml": [
@@ -106,11 +84,6 @@ const CODE = {
   "test/routes.test.ts": "// a test\n",
 };
 
-/**
- * A sandbox: a temp HOME and data dir, a git repo with the code committed,
- * and the drawing in the project's drawing folder, `<data dir>/system/<key>/drawing`
- * (nothing of it in the repo).
- */
 async function sandbox(o: { storePath?: string } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-system-cli-")));
   roots.push(root);
@@ -181,7 +154,6 @@ describe("plannotator system check", () => {
     expect(json.code).toBe(1);
     expect(JSON.parse(json.stdout)).toEqual({ ok: false, errors: [], warnings: [], missing: ["src/store/database.ts"], cited_by: { "src/store/database.ts": ["parts.store.code"] } });
 
-    // the drawing folder is read as it is: the edit counts at once
     const yaml = join(box.drawingDir, "system.yaml");
     writeFileSync(yaml, readFileSync(yaml, "utf8").replace("src/store/database.ts", "src/store/db.ts"));
     const fixed = await cli(box, ["check"]);
@@ -190,19 +162,16 @@ describe("plannotator system check", () => {
 
   test("check --dir <drawing> --root <source>, as the recipes run it: a data-dir drawing against Plannotator's clone", async () => {
     const box = await sandbox();
-    // Plannotator's clone of the project, beside the drawing folder; run from a folder outside both
     const source = join(box.dataDir, "system", box.key, "source");
     git(box.root, "clone", "-q", "--no-checkout", box.repo, source);
     const args = ["check", "--dir", box.drawingDir, "--root", source];
     expect(await cli(box, args, { cwd: box.home })).toEqual({ code: 0, stdout: `clean: ${box.drawingDir}\n`, stderr: "" });
     expect(JSON.parse((await cli(box, [...args, "--json"], { cwd: box.home })).stdout)).toEqual({ ok: true, errors: [], warnings: [], missing: [], cited_by: {} });
-    // the paths are looked up in the clone at sources.repos.self.at
     const yaml = join(box.drawingDir, "system.yaml");
     writeFileSync(yaml, readFileSync(yaml, "utf8").replace("src/store/db.ts", "src/store/database.ts"));
     const bad = await cli(box, args, { cwd: box.home });
     expect(bad.code).toBe(1);
     expect(bad.stdout).toBe(`missing: src/store/database.ts (cited by parts.store.code; not in the repo at ${box.drawnAt.slice(0, 12)})\n`);
-    // relative paths are taken from the current folder
     writeFileSync(yaml, readFileSync(yaml, "utf8").replace("src/store/database.ts", "src/store/db.ts"));
     const relative = await cli(box, ["check", "--dir", "drawing", "--root", "source"], { cwd: join(box.dataDir, "system", box.key) });
     expect(relative).toEqual({ code: 0, stdout: `clean: ${box.drawingDir}\n`, stderr: "" });
@@ -273,7 +242,6 @@ describe("plannotator system check", () => {
     expect(none.code).toBe(1);
     expect(none.stdout).toBe("");
     expect(none.stderr).toStartWith("no_drawing: ");
-    // a folder given with no drawing in it is no drawing too, as gate says it, not a finding
     const empty = join(box.root, "empty");
     mkdirSync(empty);
     for (const args of [["check", "--root", empty], ["check", "--root", box.repo, "--dir", empty], ["check", "--root", empty, "--json"], ["gate", "--project", empty, "--from", "main", "--to", "main"]]) {
@@ -317,17 +285,13 @@ describe("plannotator system gate", () => {
     commit(box.repo, "main moves on");
     const base = git(box.repo, "merge-base", "main", "receipts").trim();
 
-    // the project's drawing folder, which has no receipt part
     const onMain = JSON.parse((await cli(box, ["gate", "--from", base, "--to", "receipts"])).stdout);
     expect(onMain.touched.parts).toEqual(["mail"]);
     expect(onMain.why).toEqual([{ path: "src/mail/receipt.ts", reason: "added" }]);
-    // --from main is main's tip, not the merge base: main's new file reads as deleted
     const tip = JSON.parse((await cli(box, ["gate", "--from", "main", "--to", "receipts"])).stdout);
     expect(tip.why).toContainEqual({ path: "src/store/cache.ts", reason: "deleted" });
-    // the branch checked out in the repo changes nothing: the drawing is not in it
     git(box.repo, "checkout", "-q", "receipts");
     expect(JSON.parse((await cli(box, ["gate", "--from", base, "--to", "receipts"])).stdout)).toEqual(onMain);
-    // --dir reads another drawing folder: a copy that has the receipt part
     const copy = join(box.root, "drawing-copy");
     cpSync(box.drawingDir, copy, { recursive: true });
     writeFileSync(join(copy, "system.yaml"), readFileSync(join(copy, "system.yaml"), "utf8").replace("  mail:", "  receipt: { in: server, name: Receipt, code: { src/mail/receipt.ts: the receipt } }\n  mail:"));
@@ -421,7 +385,6 @@ describe("plannotator system revision", () => {
     expect(other.code).toBe(1);
     expect(other.stderr).toBe("revision_refused: revision pr: is 13; --pr says 12\n");
     expect(existsSync(join(box.dataDir, "system", box.key, "reviews"))).toBe(false);
-    // a project with no drawing folder has no drawing to load against
     const elsewhere = join(box.root, "elsewhere");
     mkdirSync(elsewhere);
     git(elsewhere, "init", "-q");
@@ -472,7 +435,6 @@ describe("plannotator system tick", () => {
     const dir = join(box.dataDir, "system", PROJECT);
     cpSync(box.drawingDir, join(dir, "drawing"), { recursive: true });
     writeFileSync(join(dir, "setup.json"), JSON.stringify({ v: 1, repos: [], docs: [], agent: "claude", model: null, thread_message: null }));
-    // a teammate edits a cited file on main: the gate does not wake, so no agent runs
     const team = join(box.root, "team");
     git(box.root, "clone", "-q", origin, team);
     write(team, { "src/server/routes.ts": "export const route = 3;\n" });
@@ -505,9 +467,7 @@ describe("plannotator system schedule", () => {
     const install = await cli(box, ["schedule", "install", "--project", box.repo, "--key", "ledger"]);
     expect(install.code).toBe(1);
     expect(install.stderr).toStartWith("not_installed: ");
-    // the tripwire saw nothing (afterEach fails any test it did see)
     expect(existsSync(join(box.root, LAUNCHCTL_LOG))).toBe(false);
-    // and it is the launchctl every child finds first
     const which = Bun.spawnSync(["/bin/sh", "-c", "command -v launchctl"], { env: box.env, stdout: "pipe" });
     expect(which.stdout.toString().trim()).toBe(join(box.root, "tripwire", "launchctl"));
     expect((await cli(box, ["schedule", "start"])).code).toBe(2);
@@ -548,7 +508,6 @@ describe("plannotator system schedule", () => {
     expect(existsSync(plistPath)).toBe(false);
     expect(calls).toEqual([["launchctl", "bootout", "gui/501/ai.plannotator.system.ledger"]]);
 
-    // a bootstrap launchctl refuses is a failure with its words, never a success
     const errs: string[] = [];
     const refusing = { ...deps, stderr: (t: string) => void errs.push(t), schedule: { agentsDir, uid: 501, run: async (argv: string[]) => (argv[1] === "bootstrap" ? { code: 5, stdout: "", stderr: "Bootstrap failed: 5: Input/output error" } : { code: 0, stdout: "", stderr: "" }) } };
     expect(await runSystemCommand(["schedule", "install", "--project", ".", "--key", "ledger"], refusing)).toBe(1);

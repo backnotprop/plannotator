@@ -1,32 +1,3 @@
-/**
- * `plannotator system …` (System build spec, step A7): a thin file over
- * @plannotator/system, for the agents that draw a project's System drawing and
- * the launchd job that keeps it current. The subcommands and flags are exactly
- * the package's SYSTEM_COMMANDS, which its recipes (recipe/DRAW.md, UPDATE.md,
- * REVIEW.md) name too; the help is SYSTEM_COMMAND_USAGE in cli.ts.
- *
- *  - check: the loader, then every cited path at `sources.repos.<alias>.at`.
- *  - gate: `gateRepo` over the drawing folder.
- *  - tick: one scheduled check (`tick`), what the plist runs.
- *  - revision: store an open pull request's revision, refused unless it loads
- *    against the drawing folder.
- *  - schedule install | remove | list: the launchd job.
- *
- * The drawing lives in Plannotator's folder, `<data dir>/system/<key>/drawing/`
- * (owner ruling 2026-11-06, row 7689): `--dir` names it, and by default it is
- * the drawing folder of the project the repo folder belongs to. Nothing here
- * commits, branches or pushes.
- *
- * The contract is `plannotator inbox call`'s: stdout the result (one JSON
- * value; check prints lines unless --json) and nothing on failure, stderr
- * `<code>: <message>`, exit 0 ok, 1 failed, 2 bad usage. check's findings are
- * its result: printed, with exit 1.
- *
- * Nothing here edits the project's repo. launchctl, the redraw agent, the
- * forge and the clock come in through `deps`, so tests never load a job, run
- * a model or reach GitHub.
- */
-
 import { lstatSync, statSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
@@ -52,18 +23,13 @@ export { SYSTEM_COMMAND_USAGE };
 
 export interface SystemCommandDeps {
   cwd: string;
-  /** The Inbox's data folder (`getPlannotatorDataDir()`): setup.json, state.json and stored reviews live under it. */
   dataDir: string;
   env: Record<string, string | undefined>;
-  /** The command that runs this plannotator: one word for the installed binary, `bun <script>` from a source checkout. */
   self: readonly string[];
-  /** stdin as text, up to `max` bytes; null when there is more. */
   stdin?: (max: number) => Promise<string | null>;
   stdout?: (text: string) => Promise<void>;
   stderr?: (text: string) => void;
-  /** launchctl, the agents folder and the user id: tests pass a recorder and a temp folder. */
   schedule?: { run?: CommandRunner; agentsDir?: string; uid?: number };
-  /** The tick's agent, forge and note. */
   tick?: TickDeps;
   now?: Date;
 }
@@ -72,11 +38,6 @@ class UsageError extends Error {}
 
 type Flags = { values: Map<string, string[]>; words: string[] };
 
-/**
- * Parse `--flag value` and `--flag=value` for the flags a subcommand takes, and
- * `--json` as a switch. A lone `-` is a word (revision's stdin). Anything else
- * is bad usage.
- */
 function parseFlags(argv: readonly string[], valueFlags: readonly string[], switches: readonly string[] = [], repeatable: readonly string[] = []): Flags {
   const values = new Map<string, string[]>();
   const words: string[] = [];
@@ -112,7 +73,6 @@ function noWords(f: Flags, sub: string) {
   if (f.words.length) throw new UsageError(`${sub} takes no argument "${f.words[0]}"`);
 }
 
-/** True when something is at `path`, a symlink included (dangling or not). */
 const lexists = (path: string) => {
   try {
     lstatSync(path);
@@ -130,33 +90,28 @@ const isDir = (path: string) => {
   }
 };
 
-/** A failure: `<code>: <message>` on stderr, nothing on stdout, exit 1. */
 class Refusal extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
   }
 }
 
-/** A folder flag's folder, resolved from here; not_a_folder when nothing is there. */
 function folderFlag(deps: SystemCommandDeps, flag: string, name: string): string {
   const folder = resolve(deps.cwd, flag);
   if (!isDir(folder)) throw new Refusal("not_a_folder", `${name} ${flag}: no such folder`);
   return folder;
 }
 
-/** The repo folder a check or a gate is about: the flag, else the repo (or folder) the current folder is in. */
 async function repoFolder(deps: SystemCommandDeps, flag: string | undefined, name: string): Promise<string> {
   if (flag !== undefined) return folderFlag(deps, flag, name);
   return (await resolveInboxProjectRoot(resolve(deps.cwd))).root;
 }
 
-/** The Inbox's key for the project a folder belongs to, as setup.json, the drawing and the stored reviews are filed. */
 async function projectKey(folder: string): Promise<string> {
   const project = await resolveInboxProjectRoot(folder);
   return inboxProjectKey(project.name, project.root);
 }
 
-/** The drawing folder: --dir, else `<data dir>/system/<key>/drawing` of the repo folder's project. */
 async function drawingFolder(deps: SystemCommandDeps, flag: string | undefined, root: string): Promise<string> {
   if (flag !== undefined) return resolve(deps.cwd, flag);
   return systemPaths(resolve(deps.dataDir), await projectKey(root)).drawing;
@@ -184,11 +139,9 @@ async function runCheck(argv: readonly string[], deps: SystemCommandDeps, out: (
   const at = one(f, "--at");
   if (at !== undefined && (at.startsWith("-") || /\s/.test(at))) throw new UsageError(`--at takes a commit, not "${at}"`);
 
-  // no system.yaml at all is no drawing, as gate says it, not a finding; a symlinked one is the loader's to report
   if (!lexists(join(dir, "system.yaml"))) throw new Refusal("no_drawing", `no drawing in ${dir}`);
 
   const result = await check({ dir, root, roots, ...(at ? { at } : {}) });
-  // which fields cite each missing path, so the fix is one look away
   const model = result.missing.length ? (await load(dir)).model : null;
   const citedBy: Record<string, string[]> = {};
   if (model) {
@@ -198,7 +151,6 @@ async function runCheck(argv: readonly string[], deps: SystemCommandDeps, out: (
       const fields: string[] = [];
       if (c.by.kind === "part") fields.push(`parts.${c.by.id}.code`);
       else if (Object.hasOwn(model.flows, c.by.id)) {
-        // a line cites a file at each end: name the end (or both), so the fix is one look away
         const code = model.flows[c.by.id]!.code;
         for (const end of ["from", "to"] as const) {
           if (code[end]?.repo === c.repo && code[end]?.path === c.path) fields.push(`flows.${c.by.id}.code.${end}`);
@@ -279,7 +231,6 @@ async function runTick(argv: readonly string[], deps: SystemCommandDeps, out: (t
   return 0;
 }
 
-/** `host/owner/repo#n`: each part a plain name, n a pull request number. */
 function parsePr(value: string): { repo: string; segments: [string, string, string]; n: number } {
   const m = /^([^/#\s]+)\/([^/#\s]+)\/([^/#\s]+)#([1-9][0-9]{0,9})$/.exec(value);
   if (!m || [m[1], m[2], m[3]].some((s) => s === "." || s === "..")) throw new UsageError(`--pr takes <host>/<owner>/<repo>#<n>, for example github.com/acme/app#12, not "${value}"`);
@@ -294,7 +245,6 @@ async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out
   const head = required(f, "--head");
   if (!/^[0-9a-f]{7,64}$/i.test(head)) throw new UsageError(`--head takes the pull request's head commit as a sha, not "${head}"`);
 
-  // the Inbox's own key for this folder: the drawing and the stored reviews are filed under it
   const key = await projectKey(root);
   const paths = systemPaths(resolve(deps.dataDir), key);
   const drawing = await load(paths.drawing);
@@ -326,7 +276,6 @@ async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out
   const tmp = `${path}.${process.pid}.tmp`;
   await writeFile(tmp, yaml, { mode: 0o600 });
   await rename(tmp, path);
-  // exactly the fields the approved help lists
   await out(JSON.stringify({ stored: path, revision: revision.id, pr: `${pr.repo}#${pr.n}`, head: head.toLowerCase() }));
   return 0;
 }
@@ -352,13 +301,11 @@ async function runSchedule(argv: readonly string[], deps: SystemCommandDeps, out
     noWords(f, "schedule install");
     const key = keyOf(f);
     const root = projectFolder(deps, f);
-    // the plist runs `<program> system tick`: one binary, never `bun <script>`
     const program = deps.self.length === 1 ? deps.self[0]! : null;
     if (!program || !isAbsolute(program)) {
       throw new Refusal("not_installed", "schedule install writes a launchd job that runs the installed plannotator binary; run it from the installed plannotator, not from a source checkout");
     }
     const dataDir = resolve(deps.dataDir);
-    // launchd starts a job with almost no environment; the tick runs git, gh and the person's agent
     const env: Record<string, string> = deps.env.PATH ? { PATH: deps.env.PATH } : {};
     await launchd(() => schedule.install({ key, root, program, dataDir, interval: SYSTEM_TICK_INTERVAL_SECONDS, env, ...o }));
     await out(JSON.stringify({ installed: key, label: schedule.label(key), plist: join(o.agentsDir ?? launchAgentsDir(), `${schedule.label(key)}.plist`), interval: SYSTEM_TICK_INTERVAL_SECONDS }));
@@ -367,7 +314,6 @@ async function runSchedule(argv: readonly string[], deps: SystemCommandDeps, out
   throw new UsageError(op ? `schedule takes install, remove or list, not "${op}"` : "schedule takes install, remove or list");
 }
 
-/** launchctl's and the platform's refusals, as a failure. */
 async function launchd(step: () => Promise<void>): Promise<void> {
   try {
     await step();
@@ -377,7 +323,6 @@ async function launchd(step: () => Promise<void>): Promise<void> {
   }
 }
 
-/** stdin up to `max` bytes as UTF-8; null when there is more. */
 async function readStdin(max: number): Promise<string | null> {
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -395,10 +340,8 @@ async function readStdin(max: number): Promise<string | null> {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
-/** Write to stdout and settle once the text is flushed (or the reader is gone). */
 const writeStdout = (text: string): Promise<void> => new Promise((done) => void process.stdout.write(`${text}\n`, () => done()));
 
-/** Run one `plannotator system` command; the exit code. */
 export async function runSystemCommand(argv: readonly string[], deps: SystemCommandDeps): Promise<number> {
   const out = deps.stdout ?? writeStdout;
   const err = deps.stderr ?? ((text: string) => void process.stderr.write(`${text}\n`));

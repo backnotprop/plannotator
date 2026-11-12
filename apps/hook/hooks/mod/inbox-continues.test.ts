@@ -1,25 +1,3 @@
-/**
- * A branched conversation tells the Inbox which session it continues
- * (INBOX_CONTINUES_POLL_FIELD), so the person's reply to the old session id
- * reaches it. Claude Code writes `forkedFrom: { sessionId, messageUuid }` on
- * every row it copies into a branch's transcript. The failures these guard:
- * a branch that never names its source (its replies wait on the old id for
- * good); a conversation that is no branch naming one (it would take another
- * session's replies); message text that quotes such a row taken as one; a
- * transcript that is not there yet never looked for again; the transcript
- * read on every poll.
- *
- * A conversation handed over to a new session names nothing in its own
- * transcript: Claude Code ends the OLD transcript with
- * `{"type":"continued-in","sessionId":<old>,"continuedInSessionId":<new>}`.
- * The failures these guard: the new session never finding the one handed over
- * to it (the reported case); a line of hand-overs cut short; records that
- * point at each other looping; a broken or stale record taken for a
- * hand-over; a stranger's hand-over taken; the folder read on every poll.
- *
- * Real files and a real `/bin/sh` in a temp folder, and a memory host for the
- * poll: never the person's own ~/.claude, no Inbox. Every id is made up.
- */
 import { afterAll, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -54,7 +32,6 @@ const plain = (text: string) => line({ type: 'user', sessionId: NEW, message: { 
 let fileCount = 0
 const pathOf = () => join(scratch, `t${(fileCount += 1)}.jsonl`)
 
-/** A host on real files and real processes, counting the shell reads. */
 function realHost() {
   const state = { now: 1_000_000, runs: 0 }
   const host: Pick<Host, 'fileSize' | 'run' | 'now'> = {
@@ -89,7 +66,6 @@ describe("the session a branch's transcript names", () => {
 
   test('a conversation that is no branch names nothing, and is not read again', async () => {
     const path = pathOf()
-    // Its text quotes a branch's row: inside a string the quotes are escaped, so it is not one.
     writeFileSync(path, plain('Hello.') + plain(`look at this row: ${copied('x')}`))
     const { host, state } = realHost()
     const from = new TranscriptForkedFrom(host, NEW, async () => [path])
@@ -105,7 +81,6 @@ describe("the session a branch's transcript names", () => {
     const from = new TranscriptForkedFrom(host, NEW, async () => [path])
     expect(await from.read()).toEqual([])
     writeFileSync(path, copied('Which runner?'))
-    // Within the wait: not looked for.
     expect(await from.read()).toEqual([])
     expect(state.runs).toBe(0)
     state.now += TRANSCRIPT_FORKED_FROM_RETRY_MS
@@ -134,7 +109,6 @@ describe('the sessions whose transcripts say they were continued in this one', (
     line({ type: 'system', subtype: 'compact_boundary', sessionId, compactMetadata: { trigger: 'manual' } }) + turn(sessionId, 'This session continues an earlier conversation.')
 
   let folderCount = 0
-  /** A project folder of transcripts, as Claude Code lays one out: `<session id>.jsonl` each. */
   function project(files: Record<string, string>): string {
     const dir = join(scratch, `project-${(folderCount += 1)}`)
     mkdirSync(dir)
@@ -156,7 +130,6 @@ describe('the sessions whose transcripts say they were continued in this one', (
     expect(await found.read()).toEqual([A])
     expect(await found.read()).toEqual([A])
     expect(state.runs).toBe(1)
-    // The same transcript names no branch source: this case is found only through the old one.
     const { host } = realHost()
     expect(await new TranscriptForkedFrom(host, B, async () => [join(dir, `${B}.jsonl`)]).read()).toEqual([])
   })
@@ -188,7 +161,6 @@ describe('the sessions whose transcripts say they were continued in this one', (
     expect(await finder(dir, A).found.read()).toEqual([B])
     expect(await finder(dir, B).found.read()).toEqual([A])
     expect(transcriptContinuedLineOf([{ from: A, to: B }, { from: B, to: C }, { from: C, to: A }], A)).toEqual([C, B])
-    // A long line stops at the most the poll takes.
     const long = Array.from({ length: 20 }, (_, i) => ({ from: `s${i + 1}`, to: `s${i}` }))
     expect(transcriptContinuedLineOf(long, 's0')).toEqual(Array.from({ length: TRANSCRIPT_CONTINUED_IN_CHAIN_MAX }, (_, i) => `s${i + 1}`))
   })
@@ -196,30 +168,22 @@ describe('the sessions whose transcripts say they were continued in this one', (
   test('a missing, cut or garbled record, and another session\'s, hand nothing over; looked for a few times at once, then now and then', async () => {
     const whole = handover(A, B)
     const dir = project({
-      // No record at all.
       [A]: turn(A, 'One.') + reply(A, 'Two.'),
-      // Cut short (the write did not finish).
       '55555555-eeee-4eee-8eee-eeeeeeeeeeee': turn(A, 'One.') + whole.slice(0, whole.length - 12),
-      // Not JSON.
       '66666666-ffff-4fff-8fff-ffffffffffff': `{"type":"continued-in","sessionId":"${A}","continuedInSessionId":"${B}",,}\n`,
-      // No id, an id that is no id, and its own id.
       '77777777-aaaa-4aaa-8aaa-000000000001': line({ type: 'continued-in', sessionId: A }) ,
       '77777777-aaaa-4aaa-8aaa-000000000002': line({ type: 'continued-in', sessionId: '../../etc', continuedInSessionId: B }),
-      // A message that quotes such a record: inside a string the quotes are escaped.
       '77777777-aaaa-4aaa-8aaa-000000000003': reply(STRANGER, `the row was ${whole}`) ,
-      // Another session's hand-over.
       '77777777-aaaa-4aaa-8aaa-000000000005': handover(STRANGER, C),
       [B]: compacted(B),
     })
     const { found, state } = finder(dir, B)
     expect(await found.read()).toEqual([])
-    // Looked for again a few times (the record is written just after the new session starts)...
     for (let i = 1; i < TRANSCRIPT_CONTINUED_IN_LOOKS_MAX; i += 1) {
       state.now += TRANSCRIPT_CONTINUED_IN_RETRY_MS * 2 ** (i - 1)
       expect(await found.read()).toEqual([])
     }
     expect(state.runs).toBe(TRANSCRIPT_CONTINUED_IN_LOOKS_MAX)
-    // ...then only every TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS, however often the session polls.
     for (let i = 0; i < 50; i += 1) {
       state.now += 1_000
       expect(await found.read()).toEqual([])
@@ -228,14 +192,11 @@ describe('the sessions whose transcripts say they were continued in this one', (
     state.now += TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS
     expect(await found.read()).toEqual([])
     expect(state.runs).toBe(TRANSCRIPT_CONTINUED_IN_LOOKS_MAX + 1)
-    // A record that turns up long after the session started is found at the next of those looks.
     writeFileSync(join(dir, `${A}.jsonl`), turn(A, 'One.') + handover(A, B))
     state.now += TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS
     expect(await found.read()).toEqual([A])
   })
 
-  // An old transcript may go on growing after the hand-over (bookkeeping rows, or the person going back to it):
-  // the record was looked for only in its last 8 KB, and one conversation could then be listed as two agents.
   test('a record deep in a large transcript is found', async () => {
     const later = (line({ type: 'system', subtype: 'informational', sessionId: A, content: 'x'.repeat(4_000) })).repeat(3_000)
     expect(later.length).toBeGreaterThan(12_000_000)

@@ -1,8 +1,3 @@
-/**
- * A reply moved back to the session that was told to stop working on it. That session goes on running, with the notice
- * taken, on its way in, or still waiting, and whatever it keeps for the notice must never stand for the person's words.
- * A real Inbox in process on a clock the test moves, a running `InboxWake`, and a running `ClaudeSession`.
- */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -40,7 +35,6 @@ async function until(what: string, check: () => unknown | Promise<unknown>, ms =
   }
 }
 
-/** The former owner asked, handed its thread to a new owner that then stopped; the person's reply is to move back. */
 async function world(host: string) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-mod-move-back-')))
   roots.push(root)
@@ -77,9 +71,7 @@ async function world(host: string) {
   const message = async (threadId: string, id: string) =>
     ((await (await fetch(`${base}/api/inbox/threads/${threadId}`)).json()) as { thread: { messages: { id: string; delivery?: { session: string }; tags?: { session: string; delivery?: unknown }[] }[] } }).thread.messages.find((m) => m.id === id)!
   const asked = await ask('Which runner?')
-  /** The hand-off settles and the former owner's connection takes its notice (`tookNotice`). */
   const handOff = async (tookNotice: () => boolean) => {
-    // The former owner's connection polls: only then is it told to stop.
     await until('the former owner to poll', async () => ((await (await fetch(`${base}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }).sessions.some((s) => s.session === FORMER))
     await pollNewOwner()
     const id = await reply(asked.message_id, 'k1', WORDS, { tags: [{ host: 'pi', session: NEW_OWNER, mode: 'handoff' }] })
@@ -88,7 +80,6 @@ async function world(host: string) {
     await until('the notice recorded', async () => (await message(asked.thread_id, id)).tags?.[0]?.delivery)
     return id
   }
-  /** The hand-off settles while the former owner's connection may still be busy: it has not taken its notice. */
   const handOffBusy = async () => {
     await until('the former owner to poll', async () => ((await (await fetch(`${base}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }).sessions.some((one) => one.session === FORMER))
     await pollNewOwner()
@@ -96,7 +87,6 @@ async function world(host: string) {
     await until('the hand-off to settle', async () => (await pollNewOwner()).length > 0)
     return id
   }
-  /** A connection of the former owner, by hand: its poll and its report, as any version sends them. */
   const bridge = async (path: string, body: Record<string, unknown>) =>
     fetch(`${base}${path}`, {
       method: 'POST',
@@ -106,13 +96,10 @@ async function world(host: string) {
   const pollFormer = async (waitMs = 0) =>
     ((await (await bridge(INBOX_BRIDGE_POLL_PATH, { waitMs, tags: true })).json()) as { commands: InboxReplyCommand[] }).commands
   const report = (id: string) => bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'delivered', id })
-  /** `polled`: no connection runs here, so the test's own poll says the former owner is there. */
   const age = () => {
     now += INBOX_ASKER_RESTART_GRACE_MS + 1
   }
-  /** A plain reply to the former owner, which has it waiting. */
   const replyToFormer = () => reply(asked.message_id, 'k1', WORDS)
-  /** The former owner fell silent past the grace: the reply moves to a live session. */
   const moveToNewOwner = async (id: string) => {
     age()
     await pollNewOwner()
@@ -167,7 +154,6 @@ describe('moved back to the session that took the stop notice', () => {
     const w = await world('pi')
     const delivered = runningWake(w)
     const id = await w.handOff(() => delivered.some((d) => d.command.handed_away))
-    // Its next poll is held: nothing ends it without the id before the move does.
     await Bun.sleep(150)
     await w.moveBack(id)
     await until('the words', () => delivered.some((d) => d.text.includes(WORDS)))
@@ -175,7 +161,6 @@ describe('moved back to the session that took the stop notice', () => {
     const words = delivered.filter((d) => d.text.includes(WORDS))
     expect(words).toHaveLength(1)
     expect(words[0]!.command.also_tagged).toBeUndefined()
-    // It is this session's own again: nothing says another session had it.
     expect(words[0]!.command.handoff).toBeUndefined()
     expect((await w.message(w.asked.thread_id, id)).delivery).toMatchObject({ session: FORMER })
   }, 40_000)
@@ -184,7 +169,6 @@ describe('moved back to the session that took the stop notice', () => {
     const w = await claudeWorld()
     const session = await w.open()
     const id = await w.handOff(() => took(session, NOTICE))
-    // The tick (1 s) has started the next, held, poll.
     await Bun.sleep(1_500)
     await w.moveBack(id)
     await until('the words', () => took(session, WORDS))
@@ -244,7 +228,6 @@ describe('moved back to the session with the notice not taken yet', () => {
     await session.startTurn('a long tool call')
     await Bun.sleep(1_200)
     const id = await w.handOffBusy()
-    // Its poll has the notice waiting for the turn to end.
     await Bun.sleep(2_500)
     await w.moveBack(id)
     await Bun.sleep(2_500)
@@ -288,7 +271,6 @@ test('the id a stop notice shows reads as its reply wherever an agent can pass i
   const resolved = (await w.client.callTool({ name: 'resolve_message', arguments: { message_id: notice!.id } })) as { isError?: boolean; content: { text: string }[]; structuredContent?: unknown }
   expect(resolved.isError ?? false).toBe(false)
   expect(resolved.content[0]!.text).toContain(w.asked.thread_id)
-  // An id that is no notice's is named as it was written.
   for (const id of ['-stop', 'msg_x-stop']) {
     const bad = await call('read_thread', { message_id: id })
     expect(bad.isError).toBe(true)
@@ -297,7 +279,6 @@ test('the id a stop notice shows reads as its reply wherever an agent can pass i
 }, 40_000)
 
 describe('tagged, not taken, then moved to that session', () => {
-  /** Another session asked and stopped; the person replied and tagged the running session. */
   async function taggedOnAnother(w: Awaited<ReturnType<typeof world>>, beforeReply: () => void = () => {}) {
     const asked = (
       await w.client.callTool({
@@ -348,9 +329,7 @@ describe('tagged, not taken, then moved to that session', () => {
     await until('it to poll', async () => session.host.fetches.some((url: string) => url.includes(INBOX_BRIDGE_POLL_PATH)))
     await session.startTurn('a long tool call')
     await Bun.sleep(1_200)
-    // The asker's silence passes first: a tag waiting that long would go into the running turn by itself.
     const id = await taggedOnAnother(w, w.age)
-    // Its poll has the tag waiting for the turn to end.
     await Bun.sleep(2_500)
     await w.moveBack(id, false, true)
     await Bun.sleep(2_500)
@@ -363,12 +342,10 @@ describe('tagged, not taken, then moved to that session', () => {
 })
 
 describe('moved back to a session that lost it once', () => {
-  /** A wake whose polls the test can stop: `away` all of them, `longAsleep` only the long ones (its check before a delivery goes). */
   function wakeWithPolls(w: Awaited<ReturnType<typeof world>>, deliver: (text: string) => Promise<void>) {
     const state = { away: false, longAsleep: false, busy: true, polled: 0 }
     const connection = new InboxAgentConnection({ dataDir: w.dataDir, host: 'pi', agentName: 'Pi', tools: [] })
     const send = connection.bridge.bind(connection)
-    // Polls held for a moment only, so one ends without the reply soon after it moves.
     connection.bridge = (async (path: string, id: string, body: Record<string, unknown>, signal?: AbortSignal) => {
       const poll = path === INBOX_BRIDGE_POLL_PATH
       if (state.away || (poll && state.longAsleep && (body.waitMs as number) > 0)) return null
@@ -382,7 +359,6 @@ describe('moved back to a session that lost it once', () => {
     return state
   }
 
-  /** The same for a running Claude Code. */
   async function claudeWithPolls(w: Awaited<ReturnType<typeof claudeWorld>>) {
     const session = await w.open()
     await until('it to poll', async () => session.host.fetches.some((url: string) => url.includes(INBOX_BRIDGE_POLL_PATH)))
@@ -403,7 +379,6 @@ describe('moved back to a session that lost it once', () => {
     const delivered: string[] = []
     const state = wakeWithPolls(w, async (text) => void delivered.push(text))
     const id = await w.replyToFormer()
-    // Its poll has the reply, waiting for the turn to end.
     await Bun.sleep(300)
     state.away = true
     await Bun.sleep(150)
@@ -411,7 +386,6 @@ describe('moved back to a session that lost it once', () => {
     state.away = false
     state.longAsleep = true
     state.busy = false
-    // Its check before the delivery finds the reply gone.
     await Bun.sleep(500)
     expect(delivered).toEqual([])
     await w.moveBack(id, true)
@@ -450,7 +424,6 @@ describe('moved back to a session that lost it once', () => {
     })
     state.busy = false
     const id = await w.replyToFormer()
-    // The failed delivery is reported, and the reply stays handed out.
     await Bun.sleep(300)
     fail = false
     expect(delivered).toEqual([])

@@ -1,25 +1,3 @@
-/**
- * Starting the `plannotator` CLI detached, and reading what it leaves behind.
- *
- * `$.process.run` is one shot and ends at ten minutes, so it cannot hold a
- * review open. It runs a tiny shell wrapper instead that starts the CLI in
- * the background with every stream on a file and returns at once. The CLI
- * itself does the rest through files in the launch directory:
- *
- *   stdin        what the CLI reads on stdin (plan JSON, the last message)
- *   ready        PLANNOTATOR_READY_FILE: one JSON line { url, isRemote, port, target? } once listening
- *   result.json  PLANNOTATOR_HOST_RESULT_FILE: the decision record, written atomically
- *   stdout/stderr  the CLI's own output (startup errors land in stderr)
- *   pid          the CLI's pid, for the liveness check
- *   exit         the CLI's exit code, written after it exits
- *   revision.json / revision.json.ack   plan revisions pushed into an open review
- *   messages.json  PLANNOTATOR_HOST_MESSAGES_FILE: `last`'s recent assistant messages, for the picker
- *   watcher.json   which Claude Code process watches this launch (`{ owner, at, touchedAt }`, a heartbeat)
- *   settled/by     the claim: made (mkdir) by the one process that settles the launch, naming it
- *
- * No listener in the mod: it looks at these files on a timer.
- */
-
 import type { SessionKind } from './delivery'
 import { isAbsolutePath, trimTrailingSeparators } from './paths'
 import { onWindows, shellArgv } from './shell'
@@ -27,7 +5,6 @@ import { splitShellWords } from './shell-words'
 import { PLAN_APPROVALS_DIR } from './plan'
 import { looksLikeFilePath, plannotatorBundleSubject, plannotatorTargetSubject, type PlannotatorTarget } from './tool'
 
-/** The wrapper. `$1` is the launch directory; the CLI argv follows. */
 export const LAUNCH_SCRIPT = [
   'dir=$1; shift',
   '(',
@@ -55,7 +32,6 @@ export const LAUNCH_FILES = {
   overflow: 'feedback.md',
 } as const
 
-/** The claim directory `claimArgv` makes, and the file in it naming the claimant. */
 export const SETTLED_DIR = 'settled'
 export const SETTLED_BY = 'settled/by'
 
@@ -63,7 +39,6 @@ export function fileIn(dir: string, name: keyof typeof LAUNCH_FILES): string {
   return `${dir}/${LAUNCH_FILES[name]}`
 }
 
-/** Polls for any of its arguments to exist, 100 ms apart, `$1` times. */
 export const WAIT_SCRIPT = [
   'n=$1; shift',
   'i=0',
@@ -75,33 +50,16 @@ export const WAIT_SCRIPT = [
   'exit 1',
 ].join('\n')
 
-/** `$.process.run` argv that waits for any of `paths` for up to `timeoutMs`. */
 export function waitArgv(paths: readonly string[], timeoutMs: number): string[] {
   return shellArgv('wait', WAIT_SCRIPT, 'plannotator-wait', [String(Math.max(1, Math.ceil(timeoutMs / 100))), ...paths])
 }
 
-/** `$.process.run` argv for a detached launch of `cliArgv` in `dir`. */
 export function launchArgv(dir: string, cliArgv: readonly string[]): string[] {
   return shellArgv('launch', LAUNCH_SCRIPT, 'plannotator-launch', [dir, ...cliArgv])
 }
 
-/**
- * What only Plannotator writes into its data directory (`DATA_DIR_MARKERS`
- * in packages/shared/data-dir.ts; a hooks module imports only its own files,
- * so this is a copy, and tests/data-dir-mirrors.test.ts keeps it equal).
- */
 export const DATA_DIR_MARKERS = ['history', 'sessions', 'drafts', 'inbox', 'claude-code-mod', 'install-flags.json'] as const
 
-/**
- * The data directory, as the CLI resolves it (`getPlannotatorDataDir`):
- * `PLANNOTATOR_DATA_DIR` (with `~` expanded); else `~/.plannotator` when it
- * exists, unless it holds no Plannotator data while the XDG folder does
- * (a stray folder, #2305); else `$XDG_DATA_HOME/plannotator` when that is
- * absolute; else `~/.plannotator`. A relative `PLANNOTATOR_DATA_DIR`
- * (resolved against the CLI's cwd) is refused: the mod could not name the
- * same directory. `legacyHoldsData` / `xdgHoldsData` matter only when the
- * legacy folder exists (see `resolveDataDir`).
- */
 export function dataDirOf(env: {
   home?: string
   dataDir?: string
@@ -126,7 +84,6 @@ export function dataDirOf(env: {
   return xdg ?? legacy
 }
 
-/** `dataDirOf`, with the folder checks it needs made through `exists` (only when the legacy folder exists and XDG is set). */
 export async function resolveDataDir(
   env: { home?: string; dataDir?: string; xdgDataHome?: string },
   exists: (path: string) => Promise<boolean>,
@@ -147,27 +104,14 @@ export async function resolveDataDir(
   return dataDirOf({ ...env, legacyExists, xdgHoldsData, legacyHoldsData })
 }
 
-/**
- * Creates a launch directory owner-only (0700, and any parent it has to
- * create) before anything is written into it: it holds the plan or message on
- * stdin and the reviewer's feedback in stdout and result.json. Prints the
- * working directory the CLI will run in (the session's), which the mod
- * resolves relative targets against.
- */
 export function privateDirArgv(dir: string): string[] {
   return shellArgv('mkdir', 'umask 077 && mkdir -p "$1" && chmod 700 "$1" && pwd', 'plannotator-mkdir', [dir])
 }
 
-/**
- * `/a/b/../c/./d` → `/a/c/d`, `C:\a\..\b` → `C:/b`, `\\srv\share\..\x` →
- * `//srv/share/x`: a drive or a UNC share stays the root (no symlinks resolved:
- * nothing is looked up).
- */
 function normalizeAbsolute(path: string): string {
   const unc = /^\\\\([^\\/]+)[\\/]+([^\\/]+)/.exec(path)
   const root = unc ? `//${unc[1]}/${unc[2]}` : /^[A-Za-z]:/.test(path) ? path.slice(0, 2) : ''
   const out: string[] = []
-  // A POSIX path splits on `/` alone: a backslash is an ordinary character in its names.
   for (const segment of path.slice(unc ? unc[0].length : root.length).split(root ? /[\\/]/ : '/')) {
     if (segment === '' || segment === '.') continue
     if (segment === '..') out.pop()
@@ -177,23 +121,11 @@ function normalizeAbsolute(path: string): string {
   return `${root}/${out.join('/')}`
 }
 
-/** An absolute path word (`/a/b`, `@/a/b`), normalized; anything else (relative, `~`) is undefined. */
 function absoluteWord(word: string): string | undefined {
   const path = word.replace(/^@/, '')
   return isAbsolutePath(path) ? normalizeAbsolute(path) : undefined
 }
 
-/**
- * The mod's own idea of what a launch shows, only for a CLI that predates
- * naming its target in the ready file and result record. It never guesses:
- * the CLI may resolve a bare or relative name somewhere else (it searches the
- * project) and reads prose around a review directory as words to ignore, so a
- * confidently wrong path would be worse than none. Only what the words state
- * exactly counts: a URL or PR URL, an absolute path, and a review with no
- * words at all (the session's directory, which the CLI reviews then). In
- * every other case there is no fallback and the message carries no Target
- * line from the mod.
- */
 export function modTargetFor(
   kind: SessionKind,
   args: string | readonly string[],
@@ -203,7 +135,6 @@ export function modTargetFor(
   const words: string[] = []
   for (let index = 0; index < all.length; index += 1) {
     const word = all[index] as string
-    // `--base <ref>` / `--diff-type <id>` take a value that is not a target.
     if (word === '--base' || word === '--diff-type') {
       index += 1
       continue
@@ -233,14 +164,6 @@ export function modTargetFor(
   }
 }
 
-/**
- * Removes a settled launch's files, keeping `feedback.md` (Claude reads it
- * later) and the directory when that file is there. Only names this module
- * wrote; never a glob. The claim (`settled/`) goes only with the directory:
- * while `feedback.md` keeps the directory, the claim keeps saying the launch
- * was settled. Files go first, `stdin` among them, so a claim made after this
- * started finds `stdin` gone and loses (`CLAIM_SCRIPT`).
- */
 export function cleanupArgv(dir: string): string[] {
   const names = Object.entries(LAUNCH_FILES)
     .filter(([key]) => key !== 'overflow')
@@ -258,20 +181,8 @@ export function cleanupArgv(dir: string): string[] {
   )
 }
 
-/** Exit codes of `CLAIM_SCRIPT`. */
 export const CLAIM_EXIT = { won: 0, lost: 3, failed: 4 } as const
 
-/**
- * Claims one launch's settlement across Claude Code processes: two processes
- * on one session id (`claude --continue` while the first still runs) both
- * watch the launch, and only the one that makes `$1/settled` (mkdir is atomic
- * and fails when it exists: exactly one winner) settles it, whichever file
- * says it is settled (the result record, the exit code, or a dead pid). The
- * winner writes its id (`$2`) to `settled/by`, so the same instance that
- * claimed but lost the answer (a timed-out process call) wins again on retry
- * (exit 0). A claim made once cleanup removed `stdin` is too late (exit 3).
- * Neither made nor found: try again later (exit 4).
- */
 export const CLAIM_SCRIPT = [
   'd=$1; me=$2',
   `if mkdir "$d/${SETTLED_DIR}" 2>/dev/null; then`,
@@ -289,29 +200,13 @@ export function claimArgv(dir: string, claimant: string): string[] {
   return shellArgv('claim', CLAIM_SCRIPT, 'plannotator-claim', [dir, claimant])
 }
 
-/**
- * Prints each launch directory whose stored record can go. Arguments are
- * directories in three groups, each started by a marker:
- * - `--cleaned`: only when settled or cleaned up (no `stdin` — which the mod
- *   writes before launching and only `cleanupArgv` removes — or no directory
- *   at all; or a `settled/` claim marked delivered or reported, or with no
- *   decision on disk). A claimed decision never marked delivered stays, so
- *   its session can report it when resumed (`UNDELIVERED_AFTER_MS`);
- * - `--dead`: also when no decision waits (`result.json`, `exit`) and the
- *   server's pid no longer answers `kill -0` (or there is none);
- * - `--expired`: also with a decision waiting, unless the server still runs
- *   (a session nobody resumed for a long time).
- * A live server always keeps its record.
- */
 export const PRUNE_SCRIPT = [
   'mode=cleaned',
   'for d in "$@"; do',
   '  case "$d" in --cleaned|--dead|--expired) mode=${d#--}; continue ;; esac',
   '  if [ ! -e "$d/stdin" ]; then echo "$d"; continue; fi',
   `  if [ -e "$d/${SETTLED_DIR}" ]; then`,
-  // Delivered, reported, or a claim on a server that stopped without a decision.
   `    if [ -e "$d/${SETTLED_DIR}/delivered" ] || [ -e "$d/${SETTLED_DIR}/reported" ] || { [ ! -e "$d/result.json" ] && [ ! -e "$d/exit" ]; }; then echo "$d"; continue; fi`,
-  // Claimed and maybe never delivered: kept until its session reports it, or it expires.
   '    [ "$mode" = expired ] || continue',
   '  fi',
   '  [ "$mode" = cleaned ] && continue',
@@ -342,15 +237,8 @@ export function pruneArgv(groups: { cleaned: readonly string[]; dead: readonly s
 
 type PruneGroups = { cleaned: readonly string[]; dead: readonly string[]; expired: readonly string[] }
 
-/** Room under Windows' 32,767-character command line for one prune call, the program's path aside. */
 export const PRUNE_ARGV_BUDGET = 28_000
 
-/**
- * The prune calls for `groups`: one when everything fits in `budget`
- * characters of command line, else several, each folder keeping its group.
- * Under PowerShell a folder costs about 800 characters (its base64 sits inside
- * the base64 script), so a few dozen records already fill one call.
- */
 export function pruneArgvs(groups: PruneGroups, budget = PRUNE_ARGV_BUDGET): string[][] {
   const size = (argv: readonly string[]) => argv.reduce((sum, word) => sum + word.length + 1, 0)
   const empty = (): { cleaned: string[]; dead: string[]; expired: string[] } => ({ cleaned: [], dead: [], expired: [] })
@@ -379,19 +267,8 @@ export function pruneArgvs(groups: PruneGroups, budget = PRUNE_ARGV_BUDGET): str
   return batches.map((each) => pruneArgv(each))
 }
 
-/** Above this the debug log is moved to `<file>.1` before the next append. */
 export const DEBUG_LOG_MAX_BYTES = 1_048_576
 
-/**
- * Appends stdin to the debug log, rotating it once it passes
- * `DEBUG_LOG_MAX_BYTES`. Appending (O_APPEND) is what lets several Claude Code
- * processes share one log: rewriting the whole file from each process's own
- * buffer clobbered the other's lines and could leave NUL bytes behind. The
- * rotation runs under a lock (`<file>.rotating`, mkdir; a lock older than a
- * minute is a dead writer's and is removed) and re-checks the size inside it,
- * so two writers past the limit at once rotate once instead of the second
- * moving the fresh log over the first one's `<file>.1`.
- */
 export const DEBUG_APPEND_SCRIPT = [
   'f=$1; lock="$f.rotating"',
   'mkdir -p "$(dirname "$f")" 2>/dev/null',
@@ -410,25 +287,12 @@ export function debugAppendArgv(path: string): string[] {
   return shellArgv('debug-append', DEBUG_APPEND_SCRIPT, 'plannotator-debug', [path])
 }
 
-/** Liveness probe through the shell's own `kill` (no /bin/kill on every system). */
 export function aliveArgv(pid: string): string[] {
   return shellArgv('alive', 'kill -0 "$1" 2>/dev/null', 'plannotator-alive', [pid])
 }
 
-/** Exit codes of `STOP_SCRIPT`. */
 export const STOP_EXIT = { stopped: 0, decided: 3, notPlannotator: 4, failed: 5, cannotVerify: 6 } as const
 
-/**
- * Stops a CLI that has no host close endpoint (an older Plannotator) with
- * TERM, which ends the server without a decision and never deletes its draft.
- * `$1` is the pid, the rest are files whose presence means the reviewer
- * already decided (the result record, the exit code): then nothing is sent
- * (exit 3), so that decision is still delivered. The pid must still name a
- * `plannotator` process (exit 4 otherwise), so a pid reused after the CLI
- * died (a reboot, a crash) is never signalled. Where `ps` cannot say (missing,
- * as on Debian slim without procps, or without `-p`, as BusyBox's) nothing is
- * signalled either (exit 6): the check is made on the script's own pid first.
- */
 export const STOP_SCRIPT = [
   'pid=$1; shift',
   'for f in "$@"; do [ -e "$f" ] && exit 3; done',
@@ -441,14 +305,12 @@ export function stopArgv(pid: string, decidedFiles: readonly string[]): string[]
   return shellArgv('stop', STOP_SCRIPT, 'plannotator-stop', [pid, ...decidedFiles])
 }
 
-/** Where the session's approved ExitPlanMode calls are recorded for the classic hook (plan.ts, #2007). */
 export function planApprovalPathOf(dataDir: string, sessionId: string, toolUseId: string): { dir: string; path: string } {
   const safe = (value: string) => value.replace(/[^A-Za-z0-9._-]/g, '_')
   const dir = `${dataDir}/claude-code-mod/${safe(sessionId)}/${PLAN_APPROVALS_DIR}`
   return { dir, path: `${dir}/${safe(toolUseId)}.json` }
 }
 
-/** Removes one file the mod wrote; nothing else. */
 export function removeFileArgv(path: string): string[] {
   return shellArgv('rm', 'rm -f "$1"', 'plannotator-rm', [path])
 }
@@ -462,13 +324,7 @@ export interface ReadyInfo {
   url: string
   port: number
   isRemote: boolean
-  /** What the server shows, in full, as the CLI resolved it (absent from an older CLI). */
   target?: string | string[]
-  /**
-   * A `--tailscale` session from a CLI that keeps "Ask this session" over the
-   * tailnet (#2166): `ask` true when the machine owner's tab gets it. Absent
-   * from every other session, and from an older CLI.
-   */
   tailnet?: { ask: boolean }
 }
 
@@ -480,7 +336,6 @@ function readyTargetOf(value: unknown): string | string[] | undefined {
   return undefined
 }
 
-/** The first well-formed line of the ready file. */
 export function parseReadyFile(text: string): ReadyInfo | null {
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
@@ -499,15 +354,11 @@ export function parseReadyFile(text: string): ReadyInfo | null {
         }
       }
     } catch {
-      // A partial line: not ready yet.
     }
   }
   return null
 }
 
-// --- Commands ---------------------------------------------------------------
-
-/** The slash commands the mod runs non-blocking, by the name the user types. */
 export const COMMANDS = {
   'plannotator-review': {
     kind: 'review',
@@ -528,36 +379,25 @@ export const COMMANDS = {
 
 export type CommandName = keyof typeof COMMANDS
 
-/**
- * `/plannotator-inbox`: opens the person's Plannotator Inbox and says where it
- * is. Not a review (no launch, no decision): one `plannotator inbox --open`,
- * which starts a stopped Inbox detached and returns at once.
- */
 export const INBOX_COMMAND = {
   name: 'plannotator-inbox',
   description: 'Open your Plannotator Inbox in the browser, show its address, and brief Claude on using it.',
 } as const
 
-/** How long `/plannotator-inbox` waits: the CLI waits up to 20 s for a starting Inbox. */
 export const INBOX_OPEN_TIMEOUT_MS = 30_000
 
-/** The CLI argv `/plannotator-inbox` runs. */
 export function inboxOpenArgv(): string[] {
   return ['plannotator', 'inbox', '--open']
 }
 
-/** Whether `plannotator inbox --open` opened the Inbox (exit 0 with its address). */
 export function inboxOpened(result: { exitCode: number; stdout: string }): boolean {
   return result.exitCode === 0 && /https?:\/\/\S+/.test(result.stdout)
 }
 
-/** What `/plannotator-inbox` shows for the CLI's answer. */
 export function inboxOpenAnswer(result: { exitCode: number; stdout: string; stderr: string }): string {
   const url = /https?:\/\/\S+/.exec(result.stdout)?.[0]
-  // The CLI's stderr says why no browser opened (a remote session, a "none" browser).
   if (result.exitCode === 0 && url) return `Plannotator Inbox: ${url}${result.stderr.trim() ? `\n${result.stderr.trim()}` : ''}`
   const why = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`
-  // A CLI older than --open (or than the Inbox itself).
   if (/unknown inbox option: --open|unknown command/i.test(why)) {
     return 'The plannotator on PATH is older than /plannotator-inbox. Update it with `plannotator update`, or run `plannotator inbox` in a terminal.'
   }
@@ -568,16 +408,10 @@ export function isModCommand(name: string): name is CommandName {
   return Object.prototype.hasOwnProperty.call(COMMANDS, name)
 }
 
-/**
- * A slash command's typed arguments split like its shell line, or words that
- * are already split (a tool call). On Windows a typed backslash stays, since
- * it is a path separator there, not an escape.
- */
 export function wordsOf(args: string | readonly string[]): string[] {
   return typeof args === 'string' ? splitShellWords(args, { windows: onWindows() }) : [...args]
 }
 
-/** The CLI argv for a command, with the user's words passed through unchanged. */
 export function cliArgvFor(kind: Exclude<SessionKind, 'plan'>, args: string | readonly string[]): string[] {
   const words = wordsOf(args)
   switch (kind) {
@@ -586,8 +420,6 @@ export function cliArgvFor(kind: Exclude<SessionKind, 'plan'>, args: string | re
     case 'annotate':
       return ['plannotator', 'annotate', ...words]
     case 'last':
-      // `last` takes no words but `--tailscale` (the tool's `tailscale`, or a
-      // person who typed it after /plannotator-last).
       return ['plannotator', 'annotate-last', '--stdin', ...(words.includes('--tailscale') ? ['--tailscale'] : [])]
   }
 }
@@ -603,33 +435,19 @@ function baseName(path: string): string {
   return trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1) || trimmed
 }
 
-/**
- * Whether annotate's words (flags ignored) are several file paths, i.e. a
- * review of several files (the CLI checks they exist; this only reads their
- * shape, for naming the session and for reading an older CLI's refusal).
- */
 export function isSeveralFilePaths(words: readonly string[]): boolean {
   const targets = [...new Set(words.filter((word) => !word.startsWith('-')))]
   return targets.length > 1 && targets.every(looksLikeFilePath)
 }
 
-/** A review of the session's own working tree, opened with no target words. */
 export const LOCAL_CHANGES_SUBJECT = 'local changes'
 
-/**
- * The subject a launch takes once its CLI reports the target it opened (the
- * ready line), or null to keep `typed` (the subject from the typed words).
- * Annotate and review are named from the target, since the CLI may have
- * dropped words (a stray `.`, prose beside a file); plan and last keep theirs.
- * A review typed with no target stays "local changes".
- */
 export function subjectFromServerTarget(kind: SessionKind, typed: string, target: PlannotatorTarget | undefined): string | null {
   if (kind === 'plan' || kind === 'last') return null
   if (kind === 'review' && typed === LOCAL_CHANGES_SUBJECT) return null
   return plannotatorTargetSubject(kind, target)
 }
 
-/** How the status line, the command output and the plugin turn name a session. */
 export function subjectFor(kind: SessionKind, args: string | readonly string[], version?: number): string {
   const words = wordsOf(args).filter((word) => !word.startsWith('-'))
   switch (kind) {
@@ -646,7 +464,6 @@ export function subjectFor(kind: SessionKind, args: string | readonly string[], 
       return directory ? `changes in ${baseName(directory)}` : LOCAL_CHANGES_SUBJECT
     }
     case 'annotate': {
-      // Several file paths open as one review: name it as a bundle.
       if (isSeveralFilePaths(words)) return plannotatorBundleSubject([...new Set(words)])
       const target = words.find((word) => /^https?:\/\//i.test(word) || /[./]/.test(word)) ?? words[0]
       if (!target) return 'document'
@@ -662,31 +479,13 @@ export function subjectFor(kind: SessionKind, args: string | readonly string[], 
   }
 }
 
-/**
- * `last`'s subject when the reviewer can pick among several messages: the
- * feedback may be about an older one (its excerpt rides in the feedback).
- */
 export const RECENT_MESSAGES_SUBJECT = "Claude's recent messages"
 
-/** The classic `annotate-last` picker's limit (RECENT_MESSAGES_LIMIT in the CLI). */
 export const RECENT_MESSAGES_LIMIT = 25
-/** The CLI's limits on the messages file (`apps/hook/server/host-messages.ts`): raw text per message. */
 export const MAX_PICKER_MESSAGE_BYTES = 2 * 1024 * 1024
-/** The CLI's cap on the whole SERIALIZED file. */
 export const MAX_PICKER_FILE_BYTES = 8 * 1024 * 1024
-/**
- * What the mod lets the serialized file reach: under the CLI's cap with a
- * margin. Measured on the JSON as written, since escaping inflates text
- * (quotes and newlines double, a control character such as ESC becomes
- * `\u001b`, six bytes).
- */
 export const PICKER_FILE_BUDGET_BYTES = MAX_PICKER_FILE_BYTES - 256 * 1024
 
-/**
- * The assistant messages that have text, newest first, at most `limit`.
- * Consecutive assistant rows (no user row between them) are one response, so
- * their texts are joined, as the transcript path groups chunks by message id.
- */
 export function recentAssistantTexts(
   messages: readonly { role: string; text: string }[],
   limit: number = RECENT_MESSAGES_LIMIT,
@@ -718,18 +517,9 @@ export interface PickerMessage {
 
 export interface PickerFile {
   messages: PickerMessage[]
-  /** Exactly what is written to `messages.json`, within PICKER_FILE_BUDGET_BYTES. */
   json: string
 }
 
-/**
- * The picker list the CLI reads from `messages.json`: `texts` newest first,
- * each with an id derived from its content (stable across launches, so a
- * message keeps its id as newer ones arrive), and the file text itself. The
- * budget is the serialized size: older messages that would push the file past
- * it (or are over the CLI's per-message limit) are left out. When the newest
- * alone does not fit, the list is empty and the launch hands over stdin alone.
- */
 export async function pickerFile(
   texts: readonly string[],
   sha256: (text: string) => Promise<string>,
@@ -740,7 +530,6 @@ export async function pickerFile(
   const empty = { messages: [], json: JSON.stringify({ v: 1, messages: [] }) }
   const picked: PickerMessage[] = []
   const used = new Map<string, number>()
-  // `{"v":1,"messages":[]}`, then each entry's JSON plus a comma between entries.
   let total = size(empty.json)
   for (const [index, text] of texts.entries()) {
     const fits = size(text) <= MAX_PICKER_MESSAGE_BYTES
@@ -759,7 +548,6 @@ export async function pickerFile(
   return { messages: picked, json: JSON.stringify({ v: 1, messages: picked }) }
 }
 
-/** The command's own output once the server is up. */
 export function openedText(kind: SessionKind, subject: string, url: string, extra?: string): string {
   const detail = extra ? ` · ${extra}` : ''
   const second = kind === 'review'
@@ -768,7 +556,6 @@ export function openedText(kind: SessionKind, subject: string, url: string, extr
   return `Opened ${subject} in Plannotator${detail} · ${url}\n${second}`
 }
 
-/** Startup failure: what the CLI printed, trimmed for the transcript. */
 export function failedText(subject: string, stderr: string, stdout: string, exitCode: number | null): string {
   const output = (stderr.trim() || stdout.trim()).slice(0, 4000)
   const code = exitCode === null ? '' : ` (exit ${exitCode})`

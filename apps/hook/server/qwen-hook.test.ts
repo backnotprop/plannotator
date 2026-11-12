@@ -1,17 +1,3 @@
-/**
- * Qwen Code end to end: the real CLI as a process, the way Qwen runs it.
- *
- * - Plan review: Qwen's PermissionRequest hook on exit_plan_mode. The CLI
- *   must know Qwen from the payload alone (no PLANNOTATOR_ORIGIN, no Qwen
- *   variables), show the Qwen badge, and answer in Qwen's decision shape: a
- *   deny carries the feedback to the model; an allow carries nothing
- *   Claude-only (Qwen still asks the person in the terminal).
- * - Claude Code's ExitPlanMode payload keeps its own answer.
- * - `plannotator last` from Qwen's shell (QWEN_CODE_SESSION_ID +
- *   QWEN_CODE_PROJECT_DIR) reads that session's log.
- *
- * Scratch data dir and temp Qwen folders; never a browser, never the Inbox.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +14,6 @@ beforeAll(() => {
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
-  // A failed assertion leaves its CLI waiting for a decision: stop it.
   for (const proc of procs) proc.kill();
   removeStubbedHtml(stubs);
   for (const root of roots) rmSync(root, { recursive: true, force: true });
@@ -122,7 +107,6 @@ describe("Qwen Code plan review hook", () => {
     const view = (await (await fetch(`${base}/api/plan`)).json()) as { plan: string; origin: string; approvalNotesSupported?: boolean };
     expect(view.origin).toBe("qwen-code");
     expect(view.plan).toBe(PLAN);
-    // Qwen ignores a hook's allow on exit_plan_mode, so notes could not travel.
     expect(view.approvalNotesSupported ?? false).toBe(false);
 
     await post(base, "/api/deny", { feedback: "Use an LRU, not a map." });
@@ -171,7 +155,6 @@ describe("plannotator last under Qwen Code", () => {
       line({ uuid: "u2", parentUuid: "a1", type: "user", message: { parts: [{ text: "more" }] } }),
       line({ uuid: "a2", parentUuid: "u2", type: "assistant", message: { parts: [{ text: "thinking", thought: true }, { text: "Latest reply." }] } }),
     ].join("\n") + "\n");
-    // Another session of the same project, newer on disk: must not be picked.
     writeFileSync(join(projectDir, "chats", "other.jsonl"), line({ uuid: "x", parentUuid: null, type: "assistant", message: { parts: [{ text: "Other session." }] } }) + "\n");
 
     const proc = Bun.spawn([process.execPath, "run", entry, "last"], {
