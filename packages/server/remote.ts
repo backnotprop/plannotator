@@ -90,6 +90,18 @@ export function isRemoteSession(): boolean {
 }
 
 /**
+ * Remote mode that only SSH turned on (`PLANNOTATOR_REMOTE` unset, `SSH_TTY`
+ * or `SSH_CONNECTION` set). The server binds and advertises exactly as in any
+ * remote mode, but a request that comes over loopback (the person's own SSH
+ * tunnel, or a browser on that machine) is answered as in a local session:
+ * `isSshTunnelRequest` in this-machine.ts. `PLANNOTATOR_REMOTE=1` keeps
+ * remote mode whole (a proxy on this machine also arrives over loopback).
+ */
+export function isSshDetectedRemote(): boolean {
+  return getRemoteOverride() === null && Boolean(process.env.SSH_TTY || process.env.SSH_CONNECTION);
+}
+
+/**
  * Get the server ports to try, in order.
  */
 export function getServerPorts(): number[] {

@@ -18,6 +18,7 @@
 import { join } from "node:path";
 import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import type { InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -207,8 +208,13 @@ export interface LaunchHost {
   readonly shellNames: readonly string[];
   /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
   readonly shellFlags?: readonly string[];
-  /** Whether To may offer it. The engine caches it 30 s. */
-  available(): Promise<LaunchAvailability>;
+  /**
+   * Whether To may offer it. The engine caches it 30 s. `folders`: whether it can start in at least one of these
+   * (already checked) folders, by their own settings where the host reads any (Claude Code's project plugin
+   * scopes); not cached. None: the machine's own setup.
+   */
+  available(folders?: readonly string[]): Promise<LaunchAvailability>;
+  choices?(): Promise<Omit<InboxLaunchChoices, "last"> | null>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */

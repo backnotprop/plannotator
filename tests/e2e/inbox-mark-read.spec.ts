@@ -19,7 +19,8 @@
  *  - Mark read moves a thread to Quiet ("Read"), and an agent's new message
  *    brings it back to the top;
  *  - Mark read on a thread an agent is stopped on warns, and Z undoes it;
- *  - the row's hover action, and its Undo;
+ *  - the row's hover action, and its Undo; on a touch tablet (no hover) no
+ *    action shows and one tap opens the thread;
  *  - the toast's × and a swipe close it early, its Undo with it (Z no longer
  *    undoes), a short drag springs back, and the longest one-line toasts stay
  *    one line with the ×.
@@ -611,4 +612,31 @@ test('the row hover action marks read without opening the thread, in place; its 
   await expect(button).toHaveClass(/\bib-u\b/);
   expect(await sectionOf(page, threads.news)).toBe('new');
   expect(world.errors).toEqual([]);
+});
+
+test('on a touch tablet (820 by 1180, no hover) a row shows no hover action and one tap opens its thread', async ({ browser }: { browser: Browser }) => {
+  // iPadOS Safari takes the first tap on a row as a hover when that hover shows a button, and drops the click, so
+  // "Mark read" showing on the tap meant two taps to open. Chromium never drops the click, so this checks the cause:
+  // a pointer resting on the row (`:hover`) shows no action where the screen cannot hover.
+  const { threads } = world;
+  const context = await browser.newContext({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true, colorScheme: 'light' });
+  try {
+    const page = await context.newPage();
+    await page.goto(world.url);
+    expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
+    const row = page.locator(`.ib-lbody [data-row="${threads.news}"]`);
+    const button = row.locator('[data-thread-id]');
+    await expect(button).toHaveClass(/\bib-u\b/);
+    // The row offers Mark read (the action is drawn), but a hover does not show it.
+    await expect(row.locator('[data-row-mark-read]')).toHaveCount(1);
+    await row.hover();
+    expect(await row.evaluate((el) => el.matches(':hover'))).toBe(true);
+    await expect(row.locator('[data-row-mark-read]')).toBeHidden();
+    await expect(row.locator('.ib-t').first()).toBeVisible();
+    await button.tap();
+    await expect(page.locator('section.ib-pane')).toBeVisible();
+    await expect(row.locator('[data-row-mark-read]')).toBeHidden();
+  } finally {
+    await context.close();
+  }
 });

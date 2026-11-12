@@ -180,7 +180,7 @@ export interface TagModeLine {
 export function tagModeLine(tagged: readonly TagOption[], chosen: TagMode): TagModeLine | null {
   const others = tagged.filter((t) => !t.owner);
   if (others.length === 0) return null;
-  const names = namesList(others.map((t) => t.label));
+  const names = shortNamesList(others.map((t) => t.label));
   const canAdd = others.every((t) => t.wakes && t.taggable);
   const canHandOff = canAdd && others.length === 1;
   const mode = effectiveTagMode(tagged, chosen);
@@ -190,7 +190,7 @@ export function tagModeLine(tagged: readonly TagOption[], chosen: TagMode): TagM
   const after =
     asleep.length === 0
       ? ''
-      : ` · ${namesList(asleep.map((t) => t.label))} ${asleep.length === 1 ? "isn't" : "aren't"} woken: ${asleep.length === 1 ? 'it sees' : 'they see'} your reply the next time ${asleep.length === 1 ? 'it reads' : 'they read'} this thread`;
+      : ` · ${shortNamesList(asleep.map((t) => t.label))} ${asleep.length === 1 ? "isn't" : "aren't"} woken: ${asleep.length === 1 ? 'it sees' : 'they see'} your reply the next time ${asleep.length === 1 ? 'it reads' : 'they read'} this thread`;
   return {
     mode,
     lead: 'Asks',
@@ -261,6 +261,15 @@ export function tagName(tag: Pick<InboxTag, 'host' | 'name' | 'session' | 'label
 }
 
 /** "Pi", "Pi and Codex", "Pi, Codex and OpenCode". */
+/**
+ * The names on the reply box's one line: all of them up to three, else the first two and how many more ("Pi, Codex
+ * and 10 more"). Every tag is a chip in the box itself; the line stays one line on a phone however many are tagged.
+ */
+export function shortNamesList(names: readonly string[]): string {
+  if (names.length <= 3) return namesList(names);
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
+}
+
 export function namesList(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;

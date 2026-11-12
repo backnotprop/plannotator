@@ -39,6 +39,8 @@
   padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground); cursor: pointer;
 }
 .pn-cbox-row { flex: none; display: flex; align-items: center; gap: 2px; min-width: 0; padding: 4px 8px 8px 6px; }
+.pn-cbox-row:has(> .pn-picture-status) { flex-wrap: wrap; }
+.pn-cbox-row > .pn-picture-status { order: -1; flex-basis: 100%; min-height: 28px; padding: 0 2px 2px 6px; }
 .pn-cbox-tool {
   flex: none; height: 30px; min-width: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   padding: 0 6px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground);
@@ -123,4 +125,7 @@ mark.annotation-highlight.comment-draft { background: color-mix(in oklab, var(--
 @media print {
   mark.annotation-highlight.comment-draft { background: none; }
   .pn-cdraft-layer { display: none; }
+}
+@media (pointer: coarse) {
+  .pn-cbox-row > .pn-picture-status button { min-width: 44px; min-height: 44px; }
 }
