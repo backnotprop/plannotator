@@ -102,6 +102,14 @@ Plannotator's own entries import the eager math and identity modules (`math-eage
 
 Wiki links require `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^0.7.0` (see HANDOFF.md § "Wiki-link seams (0.27.0)"); link widgets require `@plannotator/markdown-editor ^0.5.0` and `@plannotator/atomic-editor ^0.9.0`, which is what 0.47.0 declares (see HANDOFF.md § "Host link widgets (0.47.0)").
 
+### Hover-card providers and plain-text linkers (`utils/refCardProviders`; unreleased, core 0.25.29)
+
+Hover cards beyond GitHub and GitLab, added for the Inbox's Linear cards (#3063). Two global registers, outside `configurePlannotatorUI`; both are empty by default, so a host that registers nothing renders and fetches exactly as before.
+
+- **`registerRefCardProvider({ parse, owns, View?, label? })`** returns an unregister function. `refCardTarget(href)` (`utils/refCard.ts`) asks the providers after `parseForgeRefUrl`, so a provider's links get the same controller, delay, pinning, phone sheet and client cache as a forge link, fetched through the host's own `refCardTransport` (no transport, no card, as before). Its refs travel as `ForgeRef` objects whose `platform` names the provider at runtime. `RefCardView` hands a ref the provider `owns` to its `View` (same `RefCardViewProps`); `label` names the card for screen readers ("Linear issue ENG-123"). `components/RefHoverCard` also exports the card's parts for a provider's own card: `RefCardAvatar`, `RefCardMarkdown` (the safe body renderer: no images, links behind Open · Cancel), `RefCardStateIcon`, `refCardTimeAgo`.
+- **`registerPlainTextLinker((text, previousChar) => spans)`** returns an unregister function. `InlineMarkdown` adds the spans beside bare URLs and code paths, never over one, never inside code or a link's label. Text already on screen re-renders when a linker comes or goes (`usePlainTextLinkers`).
+- **`components/LinearRefCardView`** is the Linear card (`@plannotator/core/linear-ref-card` holds the link parser, `findLinearIdentifiers` and the card fields). Its optional `noKeyText` replaces the no-key line ("Add a Linear API key to see details here.") with the host's own words, such as where its key is set. The Inbox registers it in `packages/inbox/linearCards.tsx`; no other Plannotator surface does.
+
 ### Frozen markdown diff (`MarkdownDiff`)
 
 - **`MarkdownDiff` renders two markdown revisions as a frozen, themed comparison** — the newer revision as the real (uncollapsed) document, deletions projected struck-through in place, char/word change emphasis, a change-count toolbar with prev/next, a clickable keyboard-accessible overview rail, and a changed-line gutter. The surface is never editable (edits are rejected at the state and view boundaries; the content DOM is `contenteditable="false"`).

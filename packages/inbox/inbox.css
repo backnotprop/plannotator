@@ -2034,6 +2034,11 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-acct-mh { display: flex; align-items: center; gap: 8px; margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; }
 .ib-acct-mh svg { color: var(--muted-foreground); }
 .ib-acct-tool { padding: 14px 0 12px; border-bottom: 1px solid var(--ib-line); }
+/* Accounts → Linear (LinearKeySettings.tsx): one row on the page, as a machine's tool block, not a card */
+.ib-acct-linear { border-bottom: 1px solid var(--ib-line); }
+.ib-acct-linear > .ib-prow { padding: 14px 0 12px; border-bottom: 0; }
+/* The field and Save shrink to the window when the row wraps on a phone (`.ib-prow .ib-ctl` is `flex: none`). */
+.ib-acct-linear .ib-prow .ib-vkeyctl { flex: 0 1 300px; min-width: 0; max-width: 100%; }
 .ib-acct-th { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; margin-bottom: 4px; }
 .ib-acct-tl { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
 /* A row: circle, name and its notes, usage, and the quiet "Switch" at its right end */

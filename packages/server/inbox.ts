@@ -195,6 +195,8 @@ import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { createRefCards, refCliRunner, type RefRunner } from "./ref-cards";
+import { createLinearCards, linearRefsRoute, withLinearCards } from "./inbox-linear-cards";
+import { createLinearKey } from "./inbox-linear-key";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -1218,7 +1220,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  // Linear issue links answer from Linear (inbox-linear-cards.ts); a test's own runner gets no real Linear.
+  // Its key: pasted in Settings → Accounts (inbox-linear-key.ts), else LINEAR_API_KEY.
+  const linearKey = createLinearKey({ dataDir, serverSession, json, readBody: (req) => readBody(req), changed: () => linearCards?.forget() });
+  const linearCards = options.refRunner ? null : createLinearCards({ apiKey: () => linearKey.apiKey() });
+  const refCards = withLinearCards(createRefCards(options.refRunner ? { run: options.refRunner } : {}), linearCards);
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
   const cardRefResolvers = [forgeCardRefResolver(refCards)];
   const cardFavicons = createCardFavicons(options.cardFavicons ?? {});
@@ -3360,6 +3366,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     reveal: line,
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
+    /** Settings → Accounts → Linear: where the hover cards' Linear key comes from. Never the key; not for a guest. */
+    ...(guest ? {} : { linear_key: linearKey.state() }),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
     /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184); not for a tailnet guest's page. */
@@ -4923,6 +4931,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Tidy: who it would ask (GET) and asking them (POST).
       const tidied = await tidy.route(req, url);
       if (tidied) return tidied;
+      const linearRefs = await linearRefsRoute(req, path, linearCards, serverSession, json);
+      if (linearRefs) return linearRefs;
       // A hover card's data for an issue, PR or MR link (ref-cards.ts). Read only, the window's own
       // read guard; the owner over the tailnet gets it too. Never on the device door (not in its
       // allowlist), so nothing of it reaches a phone or the relay.
@@ -5699,6 +5709,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (!ownerOrLocal(req, via)) throw voiceOwnerOnly();
         const answer = await voice.route(req, url, via);
+        if (answer) return answer;
+      }
+      // Settings → Accounts → Linear: the hover cards' key (inbox-linear-key.ts), the owner only, as voice's key.
+      if (path === "/api/inbox/linear/key") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!ownerOrLocal(req, via)) throw new InboxError("owner_only", "Only this computer's owner can set its Linear key.");
+        const answer = await linearKey.route(req, path, via);
         if (answer) return answer;
       }
       // Settings → Accounts: the owner's logins and usage, and a read that goes to the Keychain and to Anthropic,

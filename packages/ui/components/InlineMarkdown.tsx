@@ -14,6 +14,7 @@ import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
 import { useMathRenderer } from "../hooks/useMathRenderer";
 import { HostTitle } from "./HostTitle";
+import { plainTextLinkSpans, usePlainTextLinkers } from "../utils/refCardProviders";
 
 export interface DocPreviewResult {
   contents?: string;
@@ -312,7 +313,8 @@ function emitPlainTextWithBareUrls(
   if (text.length === 0) return;
 
   type Span = { start: number; end: number; kind: 'url'; value: string }
-    | { start: number; end: number; kind: 'path'; value: string };
+    | { start: number; end: number; kind: 'path'; value: string }
+    | { start: number; end: number; kind: 'node'; value: string; node: (key: number) => React.ReactNode };
   const spans: Span[] = [];
 
   // Collect bare URLs
@@ -342,6 +344,8 @@ function emitPlainTextWithBareUrls(
     }
   }
 
+  // A host's plain-text linkers (utils/refCardProviders.ts), never over a URL or path above.
+  spans.push(...plainTextLinkSpans(text, previousChar, spans));
   if (spans.length === 0) {
     parts.push(transformPlainText(text));
     return;
@@ -354,7 +358,8 @@ function emitPlainTextWithBareUrls(
     if (span.start > last) {
       parts.push(transformPlainText(text.slice(last, span.start)));
     }
-    if (span.kind === 'url') {
+    if (span.kind === 'node') parts.push(span.node(nextKey()));
+    else if (span.kind === 'url') {
       parts.push(
         <a
           key={nextKey()}
@@ -556,6 +561,8 @@ export const InlineMarkdown: React.FC<{
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
+  // Text already on screen links once a host registers a plain-text linker.
+  usePlainTextLinkers();
   // Cross-repo `owner/repo#123` refs: for a caller that names its project's
   // repo (it knows the forge); otherwise they stay plain text, unless the
   // host opted in (`crossRepoRefsWithoutRepo`: the host it names, else
