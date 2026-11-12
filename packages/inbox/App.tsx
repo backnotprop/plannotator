@@ -135,7 +135,7 @@ import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemHashOf, systemKept, systemRouteOf } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
-import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
+import type { InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -189,6 +189,7 @@ import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
 import { installPasteFollowsField } from './pasteTarget';
 import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from './stack';
+import { usePrPaneFocus } from './pulls/prPaneFocus';
 import { threadPanelShows, useThreadPanel } from './threadPanel';
 import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
@@ -212,7 +213,7 @@ import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
-import { sheetModel } from './prs/sheetModel';
+import { sheetModel, tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
 import { useSheetPulls } from './prs/useSheetPulls';
 import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
@@ -794,7 +795,7 @@ function closeTo(route: Route): void {
 
 /**
  * Which panes cover their list now (a window too narrow for both, stack.ts),
- * kept in step by the window. Closing a covering thread back to the list is
+ * kept in step by the window. Closing a covering thread (or PR pane) back to the list is
  * then the browser's Back, as on a phone, so an iPad's swipe back and
  * `‹ Inbox` agree.
  * Every other close, and every close beside the list, stays a new entry, as on
@@ -806,6 +807,10 @@ function leavesCoveringPane(route: Route): boolean {
   const from = readRoute();
   if (covering.thread && route.page === 'inbox' && !route.thread) {
     return from.page === 'inbox' && !!from.thread && !from.file && !from.guide;
+  }
+  // A PR's pane (a stack, or one PR's launchpad) covers the Reviews list the same way.
+  if (covering.thread && route.page === 'reviews' && !route.stack) {
+    return from.page === 'reviews' && !!from.stack && !from.layer;
   }
   return false;
 }
@@ -6729,6 +6734,10 @@ function Inbox() {
       focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(row)}"]`, `.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(before.thread)}"]`]);
     }
   }, [view, route.thread, stack.thread, phone]);
+  // A PR's pane on the Reviews page (its launchpad, or a stack's page) covers the list the same way, and focus follows
+  // it as it follows a thread (pulls/prPaneFocus.ts): opened or shrunk over the list, to its `‹ Reviews`; back, to its row.
+  const prPane = route.page === 'reviews' && !route.layer ? (route.stack ?? null) : null;
+  usePrPaneFocus(prPane, stack.thread, phone, focusFirst);
 
   // The window resized across the stacking width with a thread open. Into it: a list row that
   // had focus is now hidden under the pane (and redrawn), so focus would drop to the page; it goes to the
@@ -6961,6 +6970,8 @@ function Inbox() {
       projects={projects}
       projectNames={projectNames}
       phone={phone}
+      // A window too narrow for the list and the PR's pane: the pane covers the list, as a thread does (stack.ts).
+      stacked={stack.thread}
       onNew={() => openCompose({ review: {} })}
       onOpenStack={(id) => (id ? writeRoute({ page: 'reviews', project, view, thread: null, stack: id, layer: null, ...drawingKept }, { replace: !!route.stack && !phone }) : close({ page: 'reviews', project, view, thread: null, stack: null, layer: null, ...drawingKept }))}
       onScope={({ filter, project: next }) => go(threadId ? { ...route, reviews: { project: next, view: filter } } : { page: 'reviews', project: next, view: filter, thread: null, stack: null, ...drawingKept })}
@@ -6983,6 +6994,9 @@ function Inbox() {
       onOpenThread={(id) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id })}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
       onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)}
+      onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })}
+      shapes={shapeOn ? shapes.byThread : null}
+      onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       prsSummary={sheetHead}
       onPullRequests={() => go({ page: 'prs', project: null, thread: null })}
       prBoard={
@@ -6994,7 +7008,7 @@ function Inbox() {
           phone={phone}
           view={paneView}
           onView={setPaneView}
-          onOpenPull={(pull, stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' })}
+          onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
         />
@@ -7006,6 +7020,11 @@ function Inbox() {
   const refreshBoard = () => {
     void refreshCards();
     void refreshList(false);
+  };
+  /** A board tile's click: a single open PR Reviews lists opens its launchpad; anything else `view`, the PR view. */
+  const boardPull = (pull: InboxPull, stack: InboxPullStack, view: Route): Route => {
+    const opens = tileOpens(pull, stack, pulls.model);
+    return opens === 'pull' ? view : { page: 'reviews', project: null, thread: null, stack: opens.launchpad, layer: null };
   };
   /** Where the board is: its own page on a phone, Reviews' right pane on a desktop. */
   const prsHome = (from: Route): Route => (phone ? { page: 'prs', project: null, thread: null, prsView: from.prsView } : { page: 'reviews', project: null, thread: null });
@@ -7281,7 +7300,7 @@ function Inbox() {
         view={route.prsView ?? 'open'}
         onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
         onBack={() => close({ page: 'reviews', project: null, thread: null })}
-        onOpenPull={(pull, stack) => go({ ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' })}
+        onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
         onMerged={sheetPulls.refresh}
       />
