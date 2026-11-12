@@ -4,15 +4,17 @@ import Nav from '../../../components/Nav.astro';
 import Footer from '../../../components/Footer.astro';
 import InboxShot from '../../../components/inbox/InboxShot.astro';
 import AgentLevel from '../../../components/inbox/AgentLevel.astro';
+import AgentMark from '../../../components/inbox/AgentMark.astro';
 import CommandBox from '../../../components/inbox/CommandBox.astro';
 import AgentsPageScript from '../../../components/inbox/AgentsPageScript.astro';
 import Inline from '../../../components/inbox/Inline.astro';
 import '../../../components/inbox/agents.css';
 import { INBOX_LAUNCHED } from '../../../lib/inbox-launch';
-import { AGENTS, COLUMNS, agentHref, tierOf, type Agent } from '../../../lib/inbox-agents';
+import { AGENTS, COLUMNS, cellOf, tierOf, type Agent } from '../../../lib/inbox-agents';
 
-// /inbox/agents/<slug>/: one page per agent, one template, every word about the
-// agent from src/lib/inbox-agents.ts (the overview's table reads the same).
+// /inbox/agents/<slug>/: one setup page per agent, one template. The best way
+// first, then the other ways, a check, troubleshooting, what works, examples.
+// Every word about the agent comes from src/lib/inbox-agents.ts.
 export function getStaticPaths() {
   if (!INBOX_LAUNCHED) return [];
   return AGENTS.map((agent) => ({ params: { inbox: 'inbox', agent: agent.slug }, props: { agent } }));
@@ -20,103 +22,140 @@ export function getStaticPaths() {
 
 const { agent } = Astro.props as { agent: Agent };
 const tier = tierOf(agent.tier);
-const title = `${agent.name} and the Plannotator Inbox`;
-const groups = [
-  { name: 'With the Inbox', cols: COLUMNS.inbox.map((c) => ({ ...c, cell: agent.inbox[c.key] })) },
-  { name: 'In Plannotator', cols: COLUMNS.plannotator.map((c) => ({ ...c, cell: agent.plannotator[c.key] })) },
+const title = `Set up ${agent.name} with the Plannotator Inbox`;
+const works = [
+  { name: 'Inbox', cols: COLUMNS.inbox },
+  { name: 'Plannotator', cols: COLUMNS.plannotator },
 ];
-// What doesn't work: the capabilities marked no, by name, then the limits.
-const missing = groups.flatMap((g) => g.cols).filter((c) => c.cell.level === 'no').map((c) => c.name);
-const others = AGENTS.filter((a) => a.slug !== agent.slug);
-// Steps that only continue the step before (a second command) join it.
-const steps = agent.install.reduce<{ text: string; boxes: { code: string; file?: string }[] }[]>((out, s) => {
-  if (!s.text && out.length) out[out.length - 1].boxes.push({ code: s.code ?? '', file: s.file });
-  else out.push({ text: s.text, boxes: s.code ? [{ code: s.code, file: s.file }] : [] });
-  return out;
-}, []);
 ---
 
 <Base title={title} description={agent.lede} ogImage="https://plannotator.ai/assets/inbox/inbox-og.jpg">
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
 
-    <main class="ag-main max-w-6xl mx-auto px-6 md:px-8">
-      <header class="ag-hero">
-        <p class="ag-kicker"><a href="/inbox/agents/">Agents</a> · {tier.name}</p>
-        <h1 class="font-display ag-heading">{agent.name}</h1>
+    <main class="ag-main ag-setup max-w-6xl mx-auto px-6 md:px-8">
+      <header class="ag-setup-head">
+        <a class="ag-back" href="/inbox/agents/">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>
+          All agents
+        </a>
+        <div class="ag-title-row">
+          <AgentMark slug={agent.slug} size={44} />
+          <h1 class="font-display ag-display">{agent.name}</h1>
+        </div>
         <p class="ag-lede"><Inline text={agent.lede} /></p>
+        <p class="ag-tier-tag">{tier.name} · {tier.short}</p>
       </header>
 
-      <!-- ── What you get ── -->
-      <section class="ag-arc" aria-labelledby="ag-get">
-        <h2 class="font-display ag-arc-title" id="ag-get">What you get</h2>
-        <p class="ag-body">{tier.get}</p>
-      </section>
-      <div class="ag-groups-grid">
-        {groups.map((g) => (
-          <section class="ag-group" aria-label={g.name}>
-            <h3 class="ag-title">{g.name}</h3>
-            <dl class="ag-dl">
-              {g.cols.map((c) => (
-                <div class="ag-dl-row">
-                  <dt>{c.name}</dt>
-                  <dd>
-                    <AgentLevel level={c.cell.level} label={c.cell.label} />
-                    <p><Inline text={c.cell.detail} /></p>
-                  </dd>
+      <div class="ag-setup-grid">
+      <nav class="ag-toc" aria-label="On this page">
+        <a href="#ag-rec">Set it up</a>
+        {agent.other.length > 0 && <a href="#ag-other">Other ways</a>}
+        <a href="#ag-check">Check it works</a>
+        <a href="#ag-trouble">Troubleshooting</a>
+        <a href="#ag-works">What works</a>
+        {(agent.examples.length > 0 || agent.shot) && <a href="#ag-ex">Examples</a>}
+      </nav>
+      <div class="ag-setup-body">
+        <section aria-labelledby="ag-rec">
+          <h2 class="font-display ag-h2" id="ag-rec">Set it up</h2>
+          <ol class="ag-steps">
+            {agent.setup.map((s, i) => (
+              <li class="ag-step">
+                <span class="ag-step-n" aria-hidden="true">{i + 1}</span>
+                <div class="ag-step-body">
+                  <p><Inline text={s.do} /></p>
+                  {s.code && <CommandBox code={s.code} file={s.file} />}
+                  {s.see && (
+                    <p class="ag-see"><span class="ag-see-label">You should see</span> <Inline text={s.see} /></p>
+                  )}
                 </div>
-              ))}
-            </dl>
-            {g.name === 'With the Inbox' && agent.inbox.tool.level !== 'no' && (
-              <p class="ag-note">Once connected it can send you questions with choices and files to annotate and guided reviews.</p>
-            )}
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        {agent.other.length > 0 && (
+          <section aria-labelledby="ag-other">
+            <h2 class="font-display ag-h2" id="ag-other">Other ways</h2>
+            {agent.other.map((o) => (
+              <div class="ag-other">
+                <h3 class="ag-h3">{o.title}</h3>
+                {o.steps.map((s) => (
+                  <div class="ag-other-step">
+                    <p><Inline text={s.do} /></p>
+                    {s.code && <CommandBox code={s.code} file={s.file} />}
+                  </div>
+                ))}
+              </div>
+            ))}
           </section>
-        ))}
+        )}
+
+        <section aria-labelledby="ag-check">
+          <h2 class="font-display ag-h2" id="ag-check">Check it works</h2>
+          <div class="ag-check">
+            <p><Inline text={agent.check.do} /></p>
+            {agent.check.code && <CommandBox code={agent.check.code} />}
+            <p class="ag-see"><span class="ag-see-label">You should see</span> <Inline text={agent.check.see} /></p>
+          </div>
+        </section>
+
+        <section aria-labelledby="ag-trouble">
+          <h2 class="font-display ag-h2" id="ag-trouble">Troubleshooting</h2>
+          <dl class="ag-trouble">
+            {agent.trouble.map((t) => (
+              <div class="ag-trouble-row">
+                <dt><Inline text={t.symptom} /></dt>
+                <dd>
+                  <p><Inline text={t.fix} /></p>
+                  {t.code && <CommandBox code={t.code} />}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        <section aria-labelledby="ag-works">
+          <h2 class="font-display ag-h2" id="ag-works">What works</h2>
+          <div class="ag-works-grid">
+            {works.map((g) => (
+              <ul class="ag-works-list" aria-label={g.name}>
+                {g.cols.map((c) => {
+                  const cell = cellOf(agent, c.key);
+                  return (
+                    <li>
+                      <span class="ag-works-name">{c.name}</span>
+                      <AgentLevel level={cell.level} label={cell.label} />
+                    </li>
+                  );
+                })}
+              </ul>
+            ))}
+          </div>
+          {agent.limits.length > 0 && (
+            <ul class="ag-list ag-limits">
+              {agent.limits.map((l) => <li><Inline text={l.text} /></li>)}
+            </ul>
+          )}
+        </section>
+
+        {(agent.examples.length > 0 || agent.shot) && (
+          <section aria-labelledby="ag-ex">
+            <h2 class="font-display ag-h2" id="ag-ex">Examples</h2>
+            <ul class="ag-examples">
+              {agent.examples.map((e) => <li><Inline text={e} /></li>)}
+            </ul>
+            {agent.shot && <InboxShot name={agent.shot.name} alt={agent.shot.alt} class="ag-shot" />}
+          </section>
+        )}
+      </div>
       </div>
 
-      {agent.shot && <InboxShot name={agent.shot.name} alt={agent.shot.alt} class="ag-shot" />}
-
-      <!-- ── Install ── -->
-      <section class="ag-arc" aria-labelledby="ag-install">
-        <h2 class="font-display ag-arc-title" id="ag-install">Install</h2>
-      </section>
-      <ol class="ag-steps">
-        {steps.map((s, i) => (
-          <li class="ag-step">
-            <span class="ag-step-n" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
-            <div class="ag-step-body">
-              {s.text && <p><Inline text={s.text} /></p>}
-              {s.boxes.map((b) => <CommandBox code={b.code} file={b.file} />)}
-            </div>
-          </li>
-        ))}
-      </ol>
-      <p class="ag-body ag-windows"><b>Windows.</b> <Inline text={agent.windows.text} /></p>
-
-      <!-- ── Limits ── -->
-      <section class="ag-arc" aria-labelledby="ag-limits">
-        <h2 class="font-display ag-arc-title" id="ag-limits">What doesn't work yet</h2>
-        {missing.length > 0 && (
-          <p class="ag-body">Not with {agent.name} yet: {missing.join(' · ')}.</p>
-        )}
-        {agent.limits.length > 0 && (
-          <ul class="ag-list">
-            {agent.limits.map((l) => <li><Inline text={l.text} /></li>)}
-          </ul>
-        )}
-      </section>
-
-      <section class="ag-end" aria-labelledby="ag-more">
-        <h2 class="font-display ag-title" id="ag-more">More</h2>
-        <p class="ag-others">
-          <a class="ag-link" href="/inbox/agents/">Every agent compared</a>
-          {agent.docs && <a class="ag-link" href={agent.docs}>The full {agent.name} setup guide</a>}
-          <a class="ag-link" href="/inbox/">The Inbox</a>
-        </p>
-        <p class="ag-others ag-others-quiet" aria-label="Other agents">
-          {others.map((a) => <a class="ag-link" href={agentHref(a.slug)}>{a.name}</a>)}
-        </p>
-      </section>
+      <p class="ag-foot">
+        <a class="ag-link" href="/inbox/agents/">Every agent</a>
+        {agent.docs && <a class="ag-link" href={agent.docs}>Full {agent.name} guide</a>}
+      </p>
     </main>
 
     <AgentsPageScript />
@@ -125,111 +164,232 @@ const steps = agent.install.reduce<{ text: string; boxes: { code: string; file?:
 </Base>
 
 <style>
-  .ag-groups-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
-  }
-
-  @media (min-width: 900px) {
-    .ag-groups-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-
-  .ag-group {
+  .ag-setup-head {
+    padding: 5.5rem 0 2.5rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    padding: 1.5rem 1.5rem 1.25rem;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    background: var(--card);
+    gap: 1rem;
+    max-width: 46rem;
   }
 
-  .ag-dl-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
+  .ag-back {
+    display: inline-flex;
+    align-items: center;
     gap: 0.25rem;
-    padding: 0.875rem 0;
+    align-self: flex-start;
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+    transition: color 150ms ease-out;
   }
 
-  .ag-dl-row + .ag-dl-row { border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent); }
+  .ag-back svg { width: 16px; height: 16px; }
+  .ag-back:hover { color: var(--foreground); }
 
-  .ag-dl dt {
-    font-size: 0.8125rem;
+  .ag-title-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .ag-tier-tag {
+    font-size: 0.875rem;
     color: var(--muted-foreground);
   }
 
-  .ag-dl dd {
+  .ag-setup-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 46rem);
+    gap: 4rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .ag-setup-body {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    font-size: 0.9375rem;
-    font-weight: 600;
+    gap: 3.5rem;
+    padding-top: 2.5rem;
   }
 
-  .ag-dl dd p {
-    font-size: 0.875rem;
-    line-height: 1.6;
-    font-weight: 400;
-    color: var(--ag-dim);
+  .ag-setup-body > section { scroll-margin-top: 5rem; }
+
+  .ag-toc { display: none; }
+
+  @media (min-width: 1100px) {
+    .ag-setup-grid { grid-template-columns: minmax(0, 46rem) 12rem; }
+    .ag-toc {
+      grid-column: 2;
+      grid-row: 1;
+      position: sticky;
+      top: 5rem;
+      align-self: start;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      padding-top: 2.75rem;
+      font-size: 0.875rem;
+    }
+    .ag-toc a { color: var(--muted-foreground); transition: color 150ms ease-out; }
+    .ag-toc a:hover { color: var(--foreground); }
   }
 
-  .ag-note {
-    font-size: 0.8125rem;
-    line-height: 1.6;
-    color: var(--ag-subtle);
-    padding-top: 0.25rem;
-  }
+  .ag-setup-body > section > .ag-h2 { margin-bottom: 1.25rem; }
 
-  .ag-main :global(.ag-shot) { margin-top: 1.75rem; }
-
-  /* ── Install (the /inbox/ page's ib-step) ── */
+  /* ── Steps ── */
   .ag-steps {
     display: flex;
     flex-direction: column;
-    max-width: 46rem;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    background: var(--card);
-    padding: 0.25rem 1.5rem;
+    gap: 1.5rem;
   }
 
   .ag-step {
     display: grid;
-    grid-template-columns: 2.25rem minmax(0, 1fr);
-    gap: 0 0.5rem;
-    padding: 1.125rem 0;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0 0.75rem;
   }
-
-  .ag-step + .ag-step { border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
 
   .ag-step-n {
-    font-family: var(--font-mono);
-    font-size: 0.8rem;
-    font-weight: 600;
+    width: 1.75rem;
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--primary) 16%, transparent);
     color: var(--primary);
-    padding-top: 0.2rem;
+    font-size: 0.8125rem;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
   }
 
-  .ag-step-body {
+  .ag-step-body,
+  .ag-other-step,
+  .ag-check {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    min-width: 0;
   }
 
-  .ag-step-body p {
+  .ag-step-body > p:first-child,
+  .ag-other-step > p,
+  .ag-check > p:first-child {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    padding-top: 0.15rem;
+  }
+
+  .ag-see {
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: var(--ag-dim);
+  }
+
+  .ag-see-label {
+    font-weight: 600;
+    color: var(--success);
+  }
+
+  /* ── Other ways ── */
+  .ag-other + .ag-other { margin-top: 1.75rem; }
+
+  .ag-h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.625rem;
+  }
+
+  .ag-other-step + .ag-other-step { margin-top: 0.75rem; }
+
+  /* ── Check ── */
+  .ag-check {
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+  }
+
+  /* ── Troubleshooting ── */
+  .ag-trouble { display: flex; flex-direction: column; }
+
+  .ag-trouble-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.375rem;
+    padding: 1rem 0;
+    border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  }
+
+  .ag-trouble-row:last-child { border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+
+  .ag-trouble dt {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .ag-trouble dd {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
     font-size: 0.9375rem;
     line-height: 1.6;
     color: var(--ag-dim);
   }
 
-  .ag-windows { margin-top: 1rem; }
+  /* ── What works ── */
+  .ag-works-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 2rem;
+  }
 
-  .ag-others-quiet { font-size: 0.875rem; color: var(--ag-dim); }
+  @media (min-width: 640px) {
+    .ag-works-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  .ag-works-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+    font-size: 0.875rem;
+  }
+
+  .ag-works-name { color: var(--ag-dim); }
+
+  .ag-works-list :global(.ag-level) { text-align: right; font-weight: 550; }
+
+  .ag-limits { margin-top: 1.25rem; }
+
+  /* ── Examples ── */
+  .ag-examples {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .ag-examples li {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--ag-dim);
+  }
+
+  .ag-main :global(.ag-shot) { margin-top: 1.5rem; }
+
+  .ag-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    padding: 3.5rem 0 6rem;
+    font-size: 0.9375rem;
+  }
 
   @media (max-width: 639px) {
-    .ag-group { padding: 1.25rem 1rem 1rem; }
-    .ag-steps { padding: 0.25rem 1rem; }
-    .ag-step { grid-template-columns: 1.75rem minmax(0, 1fr); }
+    .ag-setup-head { padding-top: 4rem; }
+    .ag-setup-body { gap: 2.75rem; }
+    .ag-step { grid-template-columns: 1.75rem minmax(0, 1fr); gap: 0 0.625rem; }
   }
 </style>

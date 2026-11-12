@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { AGENTS, COLUMNS } from './src/lib/inbox-agents';
+import { AGENTS, COLUMNS, TIERS, cellOf } from './src/lib/inbox-agents';
 
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const switchFile = join(marketingRoot, 'src/lib/inbox-launch.ts');
@@ -128,23 +128,29 @@ describe('Plannotator Inbox launch switch', () => {
     }
   });
 
-  // The agents overview and every agent's page read src/lib/inbox-agents.ts:
-  // each agent has its page, a row in the overview's table linking to it, its
-  // answers in the row in the columns' order, and a place in the sitemap.
+  // The agents overview and every agent's setup page read
+  // src/lib/inbox-agents.ts: each agent has its page, a row in the overview's
+  // table (in tier order) linking to it, its answers in the row in the
+  // columns' order, a place in the sitemap, and every command its page names
+  // behind a copy button.
   test('on: the agents overview and one page per agent are built from one list', async () => {
     const overview = await read(dist.on, agentsPath);
-    expect(overview).toContain('<title>Agents and the Plannotator Inbox</title>');
+    expect(overview).toContain('<title>Set up your agent with the Plannotator Inbox</title>');
     expect(await read(dist.on, 'inbox/index.html')).toContain('href="/inbox/agents/"');
     const sitemap = await read(dist.on, 'sitemap-0.xml');
     expect(sitemap).toContain('<loc>https://plannotator.ai/inbox/agents/</loc>');
     const rows = overview.match(/<tr[^>]*class="ag-row[^"]*"[^>]*>[\s\S]*?<\/tr>/g) ?? [];
     expect(rows).toHaveLength(AGENTS.length);
     const cols = [...COLUMNS.inbox, ...COLUMNS.plannotator];
-    AGENTS.forEach((agent, i) => {
+    const ordered = TIERS.flatMap((t) => AGENTS.filter((a) => a.tier === t.id));
+    ordered.forEach((agent, i) => {
       const href = `/inbox/agents/${agent.slug}/`;
       expect(rows[i]).toContain(`href="${href}"`);
       const cells = (rows[i].match(/<td\b[\s\S]*?<\/td>/g) ?? []).map(text);
-      const want = cols.map((c) => (c.key in agent.inbox ? (agent.inbox as any)[c.key] : (agent.plannotator as any)[c.key]).label);
+      const want = cols.map((c) => {
+        const cell = cellOf(agent, c.key);
+        return cell.short ?? cell.label;
+      });
       expect(cells).toEqual(want);
       expect(sitemap).toContain(`<loc>https://plannotator.ai${href}</loc>`);
     });
@@ -154,7 +160,10 @@ describe('Plannotator Inbox launch switch', () => {
       const copies = [...html.matchAll(/data-copy="([^"]*)"/g)].map(([, v]) =>
         v.replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'),
       );
-      for (const step of AGENTS[i].install) if (step.code) expect(copies, path).toContain(step.code);
+      const a = AGENTS[i];
+      const codes = [...a.setup, ...a.other.flatMap((o) => o.steps), a.check, ...a.trouble].map((s) => s.code).filter(Boolean);
+      expect(codes.length, path).toBeGreaterThan(0);
+      for (const code of codes) expect(copies, path).toContain(code);
     }
   });
 });

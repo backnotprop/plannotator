@@ -3,24 +3,28 @@ import Base from '../../../layouts/Base.astro';
 import Nav from '../../../components/Nav.astro';
 import Footer from '../../../components/Footer.astro';
 import AgentLevel from '../../../components/inbox/AgentLevel.astro';
-import AgentsPageScript from '../../../components/inbox/AgentsPageScript.astro';
+import AgentMark from '../../../components/inbox/AgentMark.astro';
 import '../../../components/inbox/agents.css';
 import { INBOX_LAUNCHED } from '../../../lib/inbox-launch';
-import { AGENTS, COLUMNS, TIERS, agentHref, agentsOfTier } from '../../../lib/inbox-agents';
+import { COLUMNS, TIERS, agentHref, agentsOfTier, cellOf } from '../../../lib/inbox-agents';
 
-// /inbox/agents/: which agents get the most out of the Inbox, and what works
-// with each one. Generated with /inbox/, behind the same launch switch. Every
-// word about an agent comes from src/lib/inbox-agents.ts.
+// /inbox/agents/: pick your agent, then what works with each one. Generated
+// with /inbox/, behind the same launch switch. Every fact about an agent comes
+// from src/lib/inbox-agents.ts.
 export function getStaticPaths() {
   return INBOX_LAUNCHED ? [{ params: { inbox: 'inbox' } }] : [];
 }
 
-const title = 'Agents and the Plannotator Inbox';
-const description =
-  'What works with each coding agent in the Plannotator Inbox: which ones get your reply on their own and which ones read it when they next check.';
-const inboxCols = COLUMNS.inbox;
-const plannotatorCols = COLUMNS.plannotator;
-const cols = [...inboxCols, ...plannotatorCols];
+const title = 'Set up your agent with the Plannotator Inbox';
+const description = 'Setup and troubleshooting for every agent the Plannotator Inbox works with, and what works with each one.';
+const groups = [
+  { name: 'Inbox', cols: COLUMNS.inbox },
+  { name: 'Plannotator', cols: COLUMNS.plannotator },
+];
+const cols = groups.flatMap((g) => g.cols);
+// One slot that flips through the agents in place (the brand kit's rule:
+// one agent slot, not a wall of logos). Decoration: the tiles below link.
+const slot = ['claude-code', 'codex', 'pi', 'opencode', 'cursor', 'cline', 'amp', 'copilot-cli', 'droid', 'kiro-cli', 'qwen-code', 'deepseek-harness'];
 ---
 
 <Base title={title} description={description} ogImage="https://plannotator.ai/assets/inbox/inbox-og.jpg">
@@ -28,192 +32,263 @@ const cols = [...inboxCols, ...plannotatorCols];
     <Nav />
 
     <main class="ag-main max-w-6xl mx-auto px-6 md:px-8">
-      <header class="ag-hero">
-        <p class="ag-kicker"><a href="/inbox/">Plannotator Inbox</a></p>
-        <h1 class="font-display ag-heading">Your agent and the Inbox <em>what works and what doesn't yet</em></h1>
-        <p class="ag-lede">
-          How an agent connects to Plannotator decides how much of the Inbox it gets. With Plannotator's own plug-in
-          your reply arrives in the session by itself. Through a shim or MCP alone the agent sees your reply when it
-          next checks the Inbox, except on Codex and Qwen Code. Every connected agent can send you questions with
-          choices and files to annotate and guided reviews.
-        </p>
+      <header class="ag-pick-head">
+        <div class="ag-pick-title">
+          <span class="ag-slot" aria-hidden="true" style={`--n:${slot.length}`}>
+            {slot.map((slug, i) => (
+              <span class="ag-slot-item" style={`--i:${i}`}><AgentMark slug={slug} size={36} /></span>
+            ))}
+          </span>
+          <h1 class="font-display ag-display">Pick your agent</h1>
+        </div>
+        <p class="ag-lede">Every agent here writes to your <a class="ag-link" href="/inbox/">Inbox</a>. Pick yours for setup and troubleshooting.</p>
       </header>
 
-      <!-- ── The three tiers ── -->
-      <section class="ag-arc" aria-labelledby="ag-tiers">
-        <h2 class="font-display ag-arc-title" id="ag-tiers">Three ways an agent connects</h2>
-      </section>
-      <div class="ag-tiers">
+      <div class="ag-pick">
         {TIERS.map((tier) => (
-          <section class="ag-tier" aria-labelledby={`ag-tier-${tier.id}`}>
-            <h3 class="ag-title" id={`ag-tier-${tier.id}`}>{tier.name}</h3>
-            <p class="ag-tier-get">{tier.get}</p>
-            <p class="ag-tier-miss">{tier.miss}</p>
-            <ul class="ag-tier-agents" aria-label={`${tier.name} agents`}>
+          <section class="ag-pick-tier" aria-labelledby={`ag-t-${tier.id}`}>
+            <div class="ag-pick-label">
+              <h2 id={`ag-t-${tier.id}`}>{tier.name}</h2>
+              <p>{tier.short}</p>
+            </div>
+            <ul class="ag-tiles">
               {agentsOfTier(tier.id).map((a) => (
-                <li><a href={agentHref(a.slug)}>{a.name}</a></li>
+                <li>
+                  <a class="ag-tile" href={agentHref(a.slug)}>
+                    <AgentMark slug={a.slug} size={28} />
+                    <span>{a.name}</span>
+                  </a>
+                </li>
               ))}
             </ul>
           </section>
         ))}
       </div>
 
-      <!-- ── The table ── -->
-      <section class="ag-arc" aria-labelledby="ag-table-h">
-        <h2 class="font-display ag-arc-title" id="ag-table-h">What works with each agent</h2>
-        <p class="ag-body">
-          The Inbox first, then the rest of Plannotator. Pick an agent for how to install it and what doesn't work yet.
-        </p>
-      </section>
+      <section class="ag-works" aria-labelledby="ag-works-h">
+        <div class="ag-works-head">
+          <h2 class="font-display ag-h2" id="ag-works-h">What works</h2>
+          <p class="ag-legend" aria-hidden="true">
+            <AgentLevel level="yes" label="Yes" />
+            <AgentLevel level="part" label="With a condition" />
+            <AgentLevel level="no" label="No" />
+          </p>
+        </div>
 
-      <div class="ag-table-wrap">
-        <table class="ag-table" role="table" aria-labelledby="ag-table-h">
-          <thead role="rowgroup">
-            <tr role="row" class="ag-groups">
-              <td role="cell"></td>
-              <th role="columnheader" scope="colgroup" colspan={inboxCols.length}>With the Inbox</th>
-              <th role="columnheader" scope="colgroup" colspan={plannotatorCols.length} class="ag-group-start">In Plannotator</th>
-            </tr>
-            <tr role="row">
-              <th role="columnheader" scope="col">Agent</th>
-              {cols.map((c, i) => (
-                <th role="columnheader" scope="col" class:list={[i === inboxCols.length && 'ag-group-start']}>{c.name}</th>
-              ))}
-            </tr>
-          </thead>
-          {TIERS.map((tier) => (
-            <tbody role="rowgroup">
-              <tr role="row" class="ag-tier-row">
-                <th role="rowheader" scope="rowgroup" colspan={cols.length + 1}>{tier.name}</th>
+        <div class="ag-scroll" tabindex="0" role="region" aria-labelledby="ag-works-h">
+          <table class="ag-table">
+            <thead>
+              <tr class="ag-groups">
+                <td></td>
+                {groups.map((g, i) => (
+                  <th scope="colgroup" colspan={g.cols.length} class:list={[i > 0 && 'ag-split']}>{g.name}</th>
+                ))}
               </tr>
-              {agentsOfTier(tier.id).map((a) => (
-                <tr role="row" class="ag-row">
-                  <th role="rowheader" scope="row"><a href={agentHref(a.slug)}>{a.name}</a></th>
-                  {inboxCols.map((c) => (
-                    <td role="cell" data-label={c.name}><AgentLevel {...a.inbox[c.key]} /></td>
-                  ))}
-                  {plannotatorCols.map((c, i) => (
-                    <td role="cell" data-label={c.name} class:list={[i === 0 && 'ag-group-start']}><AgentLevel {...a.plannotator[c.key]} /></td>
-                  ))}
+              <tr>
+                <th scope="col" class="ag-sticky">Agent</th>
+                {cols.map((c, i) => (
+                  <th scope="col" title={c.means} class:list={[i === COLUMNS.inbox.length && 'ag-split']}>{c.name}</th>
+                ))}
+              </tr>
+            </thead>
+            {TIERS.map((tier) => (
+              <tbody>
+                <tr class="ag-tier-row">
+                  <th scope="rowgroup" colspan={cols.length + 1}><span class="ag-sticky-label">{tier.name}</span></th>
                 </tr>
-              ))}
-            </tbody>
-          ))}
-        </table>
-      </div>
-
-      <div class="ag-legend">
-        <p class="ag-legend-marks">
-          <AgentLevel level="yes" label="Works" />
-          <AgentLevel level="part" label="Works with a condition the cell names" />
-          <AgentLevel level="no" label="Not yet" />
-        </p>
-        <dl class="ag-legend-cols">
-          {cols.map((c) => (
-            <div>
-              <dt>{c.name}</dt>
-              <dd>{c.means}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-
-      <section class="ag-end" aria-labelledby="ag-end-h">
-        <h2 class="font-display ag-title" id="ag-end-h">New to the Inbox</h2>
-        <p class="ag-body">
-          Install Plannotator and run <code>plannotator inbox</code>. It connects the agents it finds on this computer.
-          The <a class="ag-link" href="/inbox/#install">Inbox page</a> has the steps.
-        </p>
-        <p class="ag-others" aria-label="Every agent">
-          {AGENTS.map((a) => <a class="ag-link" href={agentHref(a.slug)}>{a.name}</a>)}
-        </p>
+                {agentsOfTier(tier.id).map((a) => (
+                  <tr class="ag-row">
+                    <th scope="row" class="ag-sticky">
+                      <a href={agentHref(a.slug)}>
+                        <AgentMark slug={a.slug} size={18} />
+                        <span>{a.name}</span>
+                      </a>
+                    </th>
+                    {cols.map((c, i) => {
+                      const cell = cellOf(a, c.key);
+                      return (
+                        <td class:list={[i === COLUMNS.inbox.length && 'ag-split']} title={cell.label}>
+                          <AgentLevel level={cell.level} label={cell.short ?? cell.label} compact />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            ))}
+          </table>
+        </div>
       </section>
     </main>
 
-    <AgentsPageScript />
     <Footer />
   </div>
 </Base>
 
 <style>
-  /* ── Tiers (the /inbox/ page's ib-loop-node cards, without the arrows) ── */
-  .ag-tiers {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
-  }
-
-  @media (min-width: 860px) {
-    .ag-tiers { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  }
-
-  .ag-tier {
+  /* ── Pick your agent ── */
+  .ag-pick-head {
+    padding: 6.5rem 0 2.5rem;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    padding: 1.5rem 1.5rem 1.625rem;
+    gap: 1rem;
+  }
+
+  .ag-pick-title {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+
+  /* Each mark holds for one beat and clicks to the next: no fade. */
+  .ag-slot {
+    position: relative;
+    flex: 0 0 auto;
+    width: 4.5rem;
+    height: 4.5rem;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 16px;
     background: var(--card);
   }
 
-  .ag-tier-get {
-    font-size: 0.9375rem;
-    line-height: 1.6;
-    color: color-mix(in oklab, var(--foreground) 80%, transparent);
+  .ag-slot-item {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    visibility: hidden;
+    animation: ag-flip calc(var(--n) * 850ms) steps(1, end) infinite;
+    animation-delay: calc(var(--i) * 850ms - var(--n) * 850ms);
   }
 
-  .ag-tier-miss {
+  .ag-slot-item :global(img) { filter: grayscale(1) contrast(1.15); }
+
+  /* One beat of the cycle: 100% / the 12 marks in `slot`. */
+  @keyframes ag-flip {
+    0% { visibility: visible; }
+    8.333% { visibility: hidden; }
+    100% { visibility: hidden; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ag-slot-item { animation: none; }
+    .ag-slot-item:first-child { visibility: visible; }
+  }
+
+  .ag-pick {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+  }
+
+  .ag-pick-tier {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+    padding: 1.5rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  @media (min-width: 900px) {
+    .ag-pick-tier { grid-template-columns: 15rem minmax(0, 1fr); gap: 2rem; padding: 1.75rem 0; }
+  }
+
+  .ag-pick-label h2 {
+    font-size: 1.125rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  .ag-pick-label p {
+    margin-top: 0.25rem;
     font-size: 0.875rem;
-    line-height: 1.6;
-    color: var(--ag-subtle);
+    line-height: 1.5;
+    color: var(--muted-foreground);
   }
 
-  .ag-tier-agents {
+  .ag-tiles {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.375rem;
-    margin-top: auto;
-    padding-top: 0.5rem;
+    gap: 0.5rem;
   }
 
-  .ag-tier-agents a {
+  .ag-tile {
     display: inline-flex;
-    padding: 0.3rem 0.65rem;
-    border-radius: 999px;
+    align-items: center;
+    gap: 0.625rem;
+    min-height: 3rem;
+    padding: 0.5rem 1rem 0.5rem 0.75rem;
     border: 1px solid var(--border);
-    font-size: 0.8125rem;
+    border-radius: 12px;
+    background: var(--card);
+    font-size: 0.9375rem;
+    font-weight: 550;
     color: var(--foreground);
-    transition: background-color 150ms ease-out;
+    transition: border-color 150ms ease-out, background-color 150ms ease-out, transform 120ms ease-out;
   }
 
-  .ag-tier-agents a:hover { background: color-mix(in oklab, var(--foreground) 6%, transparent); }
+  .ag-tile:hover {
+    border-color: color-mix(in oklab, var(--primary) 55%, var(--border));
+    background: color-mix(in oklab, var(--primary) 6%, var(--card));
+  }
 
-  /* ── The table ── */
-  .ag-table-wrap {
+  .ag-tile:active { transform: scale(0.98); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ag-tile { transition: none; }
+    .ag-tile:active { transform: none; }
+  }
+
+  /* ── What works ── */
+  .ag-works { padding: 4.5rem 0 6rem; }
+
+  .ag-works-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem 2rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .ag-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem 1.25rem;
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
+  }
+
+  .ag-scroll {
+    overflow-x: auto;
     border: 1px solid var(--border);
     border-radius: 14px;
     background: var(--card);
-    overflow: hidden;
+    scrollbar-width: thin;
   }
+
+  .ag-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 
   .ag-table {
     width: 100%;
-    border-collapse: collapse;
+    min-width: 58rem;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 0.8125rem;
   }
 
   .ag-table th,
   .ag-table td {
-    padding: 0.7rem 0.75rem;
+    padding: 0.625rem 0.75rem;
     text-align: left;
-    vertical-align: top;
+    vertical-align: middle;
   }
 
   .ag-table thead th {
     font-weight: 600;
-    color: var(--foreground);
-    line-height: 1.3;
+    line-height: 1.25;
+    vertical-align: bottom;
   }
 
   .ag-groups th {
@@ -223,129 +298,65 @@ const cols = [...inboxCols, ...plannotatorCols];
     color: var(--muted-foreground);
   }
 
-  .ag-table thead tr:last-child th {
-    border-bottom: 1px solid var(--border);
-  }
+  .ag-table thead tr:last-child th { border-bottom: 1px solid var(--border); }
 
-  .ag-table .ag-group-start {
-    border-left: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  .ag-table .ag-split { border-left: 1px solid var(--border); }
+
+  /* The agent column stays put while the answers scroll under it. */
+  .ag-sticky {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--card);
+    box-shadow: 1px 0 0 var(--border);
   }
 
   .ag-tier-row th {
-    padding-top: 1.1rem;
-    padding-bottom: 0.35rem;
+    padding-top: 1rem;
+    padding-bottom: 0.25rem;
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--primary);
   }
 
-  .ag-row th {
-    font-weight: 600;
-    white-space: nowrap;
-  }
+  .ag-sticky-label { position: sticky; left: 0.75rem; }
+
+  .ag-row td :global(.ag-level) { white-space: nowrap; }
 
   .ag-row th a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    white-space: nowrap;
     color: var(--foreground);
+  }
+
+  .ag-row th a span {
     text-decoration: underline;
-    text-decoration-color: color-mix(in oklab, var(--foreground) 25%, transparent);
+    text-decoration-color: color-mix(in oklab, var(--foreground) 22%, transparent);
     text-underline-offset: 3px;
   }
 
-  .ag-row th a:hover { text-decoration-color: var(--primary); }
+  .ag-row th a:hover span { text-decoration-color: var(--primary); }
 
-  .ag-row + .ag-row th,
-  .ag-row + .ag-row td {
-    border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
-  }
+  .ag-row td,
+  .ag-row th { border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent); }
 
-  .ag-row:hover { background: color-mix(in oklab, var(--foreground) 3%, transparent); }
+  .ag-tier-row + .ag-row td,
+  .ag-tier-row + .ag-row th { border-top: 0; }
 
-  /* Phones and narrow windows: one block per agent, each answer under the
-     column's name. The roles above keep it a table for screen readers. */
-  @media (max-width: 899px) {
-    .ag-table-wrap { border: 0; background: none; border-radius: 0; overflow: visible; }
-    .ag-table,
-    .ag-table tbody,
-    .ag-table tr,
-    .ag-table th,
-    .ag-table td { display: block; }
-    .ag-table thead {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip: rect(0 0 0 0);
-      white-space: nowrap;
-    }
-    .ag-table tbody + tbody { margin-top: 1.5rem; }
-    .ag-tier-row th { padding: 0 0 0.5rem; font-size: 0.8125rem; }
-    .ag-row {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--card);
-      padding: 0.25rem 1rem 0.75rem;
-    }
-    .ag-row + .ag-row { margin-top: 0.625rem; }
-    .ag-row:hover { background: var(--card); }
-    .ag-row th { padding: 0.75rem 0 0.5rem; font-size: 0.9375rem; white-space: normal; }
-    .ag-row td {
-      display: grid;
-      grid-template-columns: minmax(7.5rem, 40%) minmax(0, 1fr);
-      gap: 0.75rem;
-      padding: 0.45rem 0;
-    }
-    .ag-row td::before {
-      content: attr(data-label);
-      color: var(--muted-foreground);
-    }
-    .ag-row + .ag-row th,
-    .ag-row + .ag-row td { border-top: 0; }
-    .ag-table .ag-group-start { border-left: 0; }
-    /* The Plannotator group starts after a line. */
-    .ag-row td.ag-group-start {
-      margin-top: 0.4rem;
-      padding-top: 0.85rem;
-      border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
-    }
-  }
+  .ag-row:hover td,
+  .ag-row:hover th { background: color-mix(in oklab, var(--foreground) 3%, var(--card)); }
 
-  /* ── Legend ── */
-  .ag-legend {
-    margin-top: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-  }
-
-  .ag-legend-marks {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 1.5rem;
-    font-size: 0.8125rem;
-  }
-
-  .ag-legend-cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.625rem 2rem;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-  }
-
-  @media (min-width: 720px) {
-    .ag-legend-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-
-  .ag-legend-cols dt {
-    display: inline;
-    font-weight: 600;
-    color: var(--foreground);
-  }
-
-  .ag-legend-cols dt::after { content: ' '; }
-
-  .ag-legend-cols dd {
-    display: inline;
-    color: var(--ag-dim);
+  @media (max-width: 639px) {
+    .ag-pick-head { padding: 4.5rem 0 1.75rem; }
+    .ag-slot { width: 3.5rem; height: 3.5rem; border-radius: 13px; }
+    .ag-pick-title { gap: 0.875rem; }
+    .ag-tile { min-height: 2.75rem; font-size: 0.875rem; padding-right: 0.875rem; }
+    .ag-works { padding-top: 3rem; }
+    .ag-table { min-width: 52rem; }
+    .ag-row th a { font-size: 0.8125rem; }
   }
 </style>
