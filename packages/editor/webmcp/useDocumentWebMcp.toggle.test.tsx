@@ -1,20 +1,3 @@
-/**
- * The App-facing hook through its real wiring shape (DOM-gated):
- *
- *  - the Settings opt-out aborts every registered tool and re-enabling
- *    re-registers them, and the default leaves NO cookie behind (the
- *    zero-footprint rule: nothing is written until the user opts out);
- *  - a successful add_comments stamps browser-agent, records activity (the
- *    indicator's only trigger), and its own response already carries the
- *    new comment's seq and the pending_unsent nudge even though React has
- *    not committed the state yet (optimistic overlay);
- *  - reveal { annotationId, path } waits for the navigated document to
- *    COMMIT before looking the comment up: with an open() that only sets
- *    state, a lookup right after the await would read the stale document
- *    and answer not_found after moving the human's view;
- *  - folder sessions list the file browser's tree and treat its selection as
- *    the open sibling.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -51,7 +34,6 @@ const PLAN = '# Plan\n\nRotate the key.\n';
 const ROOT = '/docs/plan.md';
 const SIBLING = '/docs/rollout.md';
 const SIBLING_TEXT = '# Rollout\n\nShip behind a flag.\n';
-/** In the folder tree, but its load fails (the fetch error path). */
 const BROKEN = '/docs/notes/broken.md';
 const SIBLING_ANN: Annotation = { id: 'sib-1', blockId: 'blk', startOffset: 0, endOffset: 4, type: 'COMMENT' as Annotation['type'], text: 'why?', originalText: 'Ship', createdA: 1, author: 'ramos' };
 
@@ -61,11 +43,6 @@ interface HarnessProps {
   onSelect?: (id: string | null) => void;
 }
 
-/**
- * Mirrors App: the open document and its annotations are React STATE, and
- * linkedDoc.open only schedules a state update, so the hook sees the new
- * document on a later commit, exactly as with useLinkedDoc.
- */
 function Harness({ folder = false, onAdd, onSelect }: HarnessProps) {
   const [openPath, setOpenPath] = React.useState<string | null>(null);
   const [annotations, setAnnotations] = React.useState<Annotation[]>([]);
@@ -85,9 +62,6 @@ function Harness({ folder = false, onAdd, onSelect }: HarnessProps) {
       error: openError,
       getDocAnnotations: () => new Map<string, CachedDocState>([[SIBLING, { annotations: isSibling ? annotations : [SIBLING_ANN], globalAttachments: [], markdown: SIBLING_TEXT }]]),
       open: async (path) => {
-        // Only state updates, applied on a later commit; nothing is visible
-        // to the caller when this promise resolves. A failed load lands in
-        // the error state like useLinkedDoc, it never rejects.
         await Promise.resolve();
         if (path === BROKEN) {
           setOpenError('Failed to load document');
@@ -118,9 +92,9 @@ function Harness({ folder = false, onAdd, onSelect }: HarnessProps) {
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
-// The settings storage seam, observed directly: what the opt-out writes is
-// the footprint under test, so the assertions read the backend the code
-// writes through rather than happy-dom's cookie jar.
+// The settings storage seam, observed directly: what the opt-out writes is the footprint under
+// test, so the assertions read the backend the code writes through rather than happy-dom's cookie
+// jar.
 const stored = new Map<string, string>();
 
 async function mount(props: HarnessProps): Promise<FakeContext> {
@@ -135,10 +109,6 @@ async function mount(props: HarnessProps): Promise<FakeContext> {
   return ctx;
 }
 
-// Deliberately NOT wrapped in act(): a tool call that navigates waits for a
-// React commit, and act() would hold that commit until the callback settled,
-// which is the deadlock a real page never has. React commits on its own
-// scheduler here, as in the browser; the trailing act() drains what is left.
 async function call(ctx: FakeContext, name: string, input: unknown): Promise<any> {
   const response = await ctx.tools.get(`plannotator.${name}`)!.execute(input, { signal: new AbortController().signal });
   await act(async () => {});
@@ -195,7 +165,6 @@ describe.skipIf(!hasDom)('useDocumentWebMcp', () => {
     expect(typeof response.data.results[0].annotation.seq).toBe('number');
     const codes = response.nudges.map((n: { code: string }) => n.code);
     expect(codes).toContain('pending_unsent');
-    // The agent's own write is never "new" to it.
     expect(codes).not.toContain('annotations_new');
   });
 
@@ -209,13 +178,10 @@ describe.skipIf(!hasDom)('useDocumentWebMcp', () => {
 
   test('reveal { path } answers promptly for a path the session cannot open', async () => {
     const ctx = await mount({ folder: true });
-    // Not in the tree or the cache: not_found at once, no commit wait.
     const startUnknown = Date.now();
     const unknown = await call(ctx, 'reveal', { section: 'rollout', path: '/elsewhere/ghost.md' });
     expect(unknown.ok === false && unknown.error.code).toBe('not_found');
     expect(Date.now() - startUnknown).toBeLessThan(1000);
-    // In the tree, but the load fails: the linked-doc error state fails the
-    // waiter instead of letting it run out the 5s timeout.
     const startBroken = Date.now();
     const broken = await call(ctx, 'reveal', { section: 'rollout', path: BROKEN });
     expect(broken.ok === false && broken.error.code).toBe('not_found');
@@ -237,8 +203,6 @@ describe.skipIf(!hasDom)('useDocumentWebMcp', () => {
     const ctx = await mount({ folder: true });
     const listed = await call(ctx, 'list_documents', {});
     expect(listed.data.documents.map((d: { path: string }) => d.path)).toEqual(['/docs/notes/broken.md', '/docs/notes/rollout.md', '/docs/plan.md', '/docs/rollout.md']);
-    // Navigating makes the browser selection the open document; the sibling
-    // it left is no longer "open" and the nudges say the human moved.
     await call(ctx, 'reveal', { section: 'rollout', path: SIBLING });
     const read = await call(ctx, 'read_document', { include: ['outline'] });
     expect(read.data.document.path).toBe(SIBLING);

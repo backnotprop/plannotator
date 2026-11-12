@@ -1,13 +1,3 @@
-/**
- * WebMCP and `:::question` blocks: browser agents can READ the questions and
- * the human's answers through `read_document`, and can never write an answer
- * (owner decision 5).
- *
- * What regresses if this fails: an agent reading the page cannot see what
- * the human answered (or sees an answer attached to the wrong question); a
- * document with no questions starts carrying a `questions` key; or a tool
- * gains a way to create, edit or remove an answer.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation } from '@plannotator/ui/types';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -125,7 +115,6 @@ describe('read_document questions', () => {
     expect(second.answer).toBeUndefined();
     expect(third.answer).toEqual({ annotationId: expect.any(String), selected: [], skipped: true });
 
-    // The answer is also a listed annotation, tied back to its question.
     const listed = data.annotations.find((a: any) => a.id === ann.id);
     expect(listed.answersQuestion).toBe(first.key);
   });
@@ -174,7 +163,6 @@ describe('answers are read-only to agents', () => {
       expect(a.questionAnswer).toBeUndefined();
       expect(a.type).toBe(AnnotationType.COMMENT);
     }
-    // The human's answer is untouched.
     expect(fx.annotations.find((a) => a.id === ann.id)?.questionAnswer?.selected).toEqual(['Server-side per user']);
   });
 
@@ -189,8 +177,6 @@ describe('answers are read-only to agents', () => {
   });
 });
 
-// 0.28.2: an answer saved under a 0.28.1 label (a wrapped plain bullet's
-// first line) reads as the choice it picked, under the current label.
 describe('read_document maps an answer saved under an older label', () => {
   test('selected carries the current label', () => {
     const markdown = ':::question\nHow should it be named?\n\n- **One per session:** each agent shows\n  as its own machine.\n- **One per person:** shared.\n:::\n';

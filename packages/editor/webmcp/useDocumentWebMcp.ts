@@ -1,14 +1,3 @@
-/**
- * App-side wiring: builds the `DocumentToolAdapter` over App state (read
- * through one ref updated every render, the `headerHandlersRef` pattern) and
- * attaches the phase-1 catalog with `useToolset`.
- *
- * Zero footprint without WebMCP: `useToolset` resolves `document.modelContext`
- * once; when it is absent, the catalog is never built, the tracker never
- * observes, and no effect body runs. Nothing here is rendered, and the
- * opt-out preference is read lazily (no settings-registry entry, so no
- * cookie is ever seeded for a user who never opts out).
- */
 import { useEffect, useMemo, useRef } from 'react';
 import type { RefObject } from 'react';
 import { blocksForDocument } from '../feedbackDocuments';
@@ -61,18 +50,13 @@ export interface DocumentWebMcpInputs {
   linkedDoc: {
     isActive: boolean;
     filepath: string | null;
-    /** useLinkedDoc's load error; a failed open lands here rather than rejecting. */
     error: string | null;
     getDocAnnotations: () => Map<string, CachedDocState>;
     open: (path: string) => Promise<void>;
-    /** Stop a Back scroll restore still settling, before a reveal scrolls. */
     cancelScrollRestore?: () => void;
   };
-  /** Folder sessions: the file browser's loaded directories (absolute dir path + relative tree). */
   fileBrowserDirs: DocumentWebMcpFileBrowserDir[];
-  /** Folder sessions: the absolute path the file browser has selected. */
   fileBrowserActiveFile: string | null;
-  /** Folder sessions: App's file-browser selection handler (absolute path + its directory). */
   openFolderFile?: (absolutePath: string, dirPath: string) => Promise<void>;
   viewerRef: RefObject<ViewerHandle | null>;
   scrollViewport: HTMLElement | null;
@@ -84,7 +68,6 @@ export interface DocumentWebMcpInputs {
 }
 
 const PAINT_DELAY_MS = 50;
-/** How long `reveal { path }` waits for the navigated document to commit. */
 const NAVIGATION_COMMIT_TIMEOUT_MS = 5000;
 
 function firstHeading(blocks: readonly Block[]): string | null {
@@ -97,7 +80,6 @@ function isComposerOpen(): boolean {
   return !!document.querySelector('[data-comment-popover="true"]');
 }
 
-/** Every file in a directory tree as an absolute path (the file browser's own `${dir}/${node.path}` rule). */
 export function flattenFileBrowserDirs(dirs: readonly DocumentWebMcpFileBrowserDir[]): Array<{ path: string; title?: string }> {
   const out: Array<{ path: string; title?: string }> = [];
   const walk = (dirPath: string, nodes: readonly VaultNode[]) => {
@@ -113,12 +95,6 @@ export function flattenFileBrowserDirs(dirs: readonly DocumentWebMcpFileBrowserD
   return out;
 }
 
-/**
- * Pending writes the tools made that React has not committed yet. The
- * adapter overlays them on the last committed list so the nudges built
- * right after a mutation (and the tracker seq of the new comment) reflect
- * the mutation; entries drop out as soon as the committed list shows them.
- */
 interface OptimisticOverlay {
   added: Map<string, Annotation>;
   patched: Map<string, Partial<Annotation>>;
@@ -127,7 +103,6 @@ interface OptimisticOverlay {
 
 export function applyOverlay(base: readonly Annotation[], overlay: OptimisticOverlay): Annotation[] {
   const ids = new Set(base.map((a) => a.id));
-  // Reconcile: anything the committed list already reflects is done.
   for (const id of overlay.added.keys()) if (ids.has(id)) overlay.added.delete(id);
   for (const id of overlay.removed) if (!ids.has(id)) overlay.removed.delete(id);
   for (const [id, patch] of overlay.patched) {
@@ -148,10 +123,7 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
   const state = useMemo(() => createDocumentToolState(), []);
   const toolsEnabled = useWebMcpToolsEnabled();
   const overlayRef = useRef<OptimisticOverlay>({ added: new Map(), patched: new Map(), removed: new Set() });
-  // Waiters for `reveal { path }`: resolved by the commit effect below once
-  // the navigated document is the open one.
   const navigationWaitersRef = useRef<Array<{ path: string; resolve: (ok: boolean) => void; timer: ReturnType<typeof setTimeout> }>>([]);
-  /** Resolve every waiter for `path` (or all when null) and clear their timers. */
   const settleWaiter = (path: string | null, ok: boolean) => {
     const remaining: typeof navigationWaitersRef.current = [];
     for (const waiter of navigationWaitersRef.current) {
@@ -195,11 +167,8 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
       }, PAINT_DELAY_MS);
     };
     const isOpen = (path: string | null) => path === null || path === openPath();
-    /** The file browser directory that contains `path` (folder sessions). */
     const dirFor = (path: string): string | null =>
       current().fileBrowserDirs.find((d) => !d.isVault && path.startsWith(`${d.path}/`))?.path ?? null;
-    /** Navigate to a sibling and resolve once React has committed it as the open document. */
-    /** Whether the session knows `path` at all (folder tree or linked-doc cache). */
     const knowsPath = (path: string): boolean => {
       const i = current();
       if (i.linkedDoc.getDocAnnotations().has(path)) return true;
@@ -208,13 +177,7 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
     };
     const navigateTo = (path: string): Promise<boolean> => {
       const i = current();
-      // A path the session cannot know never opens; answer at once instead
-      // of waiting out the commit timeout (linkedDoc.open swallows fetch
-      // failures into its error state).
       if (!knowsPath(path)) return Promise.resolve(false);
-      // Folder sessions open through the file browser's own selection path so
-      // the browser's active file, the doc URL (base + doc=1) and the linked
-      // document stay in step, exactly like a click in the sidebar.
       const dir = i.annotateSource === 'folder' ? dirFor(path) : null;
       const open = dir && i.openFolderFile ? () => i.openFolderFile!(path, dir) : () => i.linkedDoc.open(path);
       const commit = new Promise<boolean>((resolve) => {
@@ -264,8 +227,6 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
         }
         if (i.annotateSource !== 'folder' && !cached) return null;
         try {
-          // /api/doc answers `{ markdown }` for annotatable documents and
-          // `{ contents }` for code files; a folder file is the former.
           const result = (await getDocPreviewFetcher()(path, dirFor(path) ?? undefined)) as { contents?: string; markdown?: string } | null;
           const text = typeof result?.markdown === 'string' ? result.markdown : typeof result?.contents === 'string' ? result.contents : null;
           if (text === null) return null;
@@ -284,8 +245,6 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
           seen.add(path);
           siblings.push({ path, open: i.fileBrowserActiveFile === path, annotations: cached.annotations, composerOpen: false });
         }
-        // Folder sessions: the file browser's selection is "open" even when
-        // the linked-doc cache has not seen the document yet.
         if (i.annotateSource === 'folder' && i.fileBrowserActiveFile && i.fileBrowserActiveFile !== open && !seen.has(i.fileBrowserActiveFile)) {
           siblings.push({ path: i.fileBrowserActiveFile, open: true, annotations: [], composerOpen: false });
         }
@@ -358,17 +317,12 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
     hooks: useMemo(() => buildDocumentHooks(adapter, state, (bare) => `${getWebMcpPolicy().namePrefix}${bare}`), [adapter, state]),
   });
 
-  // Observe annotation changes as they happen so tombstones and activity
-  // times are real-time rather than call-time. Gated on the provider: a
-  // browser without WebMCP never runs the body.
   const annotations = inputs.allAnnotations;
   useEffect(() => {
     if (!result.registered) return;
     syncTrackers(adapter, state);
   }, [adapter, state, annotations, result.registered]);
 
-  // Resolve `reveal { path }` waiters on the commit that makes their
-  // document the open one (the DOM for it is mounted by then).
   const openFilepath = inputs.linkedDoc.filepath;
   useEffect(() => {
     if (openFilepath !== null) settleWaiter(openFilepath, true);
@@ -379,8 +333,6 @@ export function useDocumentWebMcp(inputs: DocumentWebMcpInputs): { available: bo
   useEffect(() => {
     if (openError) settleWaiter(null, false);
   }, [openError]);
-  // Unmount: no commit can ever settle a waiter again, so fail them now and
-  // clear their timers instead of leaving timeouts firing into a dead hook.
   useEffect(() => () => {
     for (const waiter of navigationWaitersRef.current) {
       clearTimeout(waiter.timer);

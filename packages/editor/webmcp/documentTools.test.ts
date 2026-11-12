@@ -1,21 +1,3 @@
-/**
- * Catalog contract with a fake adapter, no DOM. Named for invariants:
- *
- *  - no tool name in any built set is a decision verb (approve / deny /
- *    submit / send / close / stage / viewed); write tools are absent once the
- *    session is read-only or decided; list_documents exists only in folder
- *    sessions; every read tool carries readOnlyHint and read_document carries
- *    untrustedContentHint; names match the spec pattern; descriptions and
- *    parameter descriptions stay within the LLM-reader budgets.
- *  - anchoring cascade: inReplyTo inherits the parent anchor, quote resolves
- *    by text (ambiguous with two matches, disambiguated by section), section
- *    alone anchors on the heading, none is a document-level note.
- *  - ownership: update_comment / remove_comments refuse human-authored ids.
- *  - idempotency: a repeated requestId returns the existing comment.
- *  - windowing: 16k default cut at a block boundary with a continuation
- *    nudge; `since` marks novelty; comment-only surfaces never yield a
- *    DELETION and quote-verify against the page text.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -168,10 +150,8 @@ describe('catalog shape', () => {
     };
     for (const tool of fake({}, PLAN, { folder: true }).tools) {
       expect(tool.description.length).toBeLessThanOrEqual(TOOL_DESCRIPTION_MAX_CHARS);
-      // Deliberate pin: the design requires every description to say when NOT
-      // to use the tool (an LLM-reader rule, not incidental prose). The regex
-      // accepts the phrasings in use; a description that drops the clause
-      // entirely must fail here.
+      // The regex accepts the phrasings in use; a description that drops the clause entirely must
+      // fail here.
       expect(tool.description).toMatch(/Do not use|do not use|It refuses|It cannot|It returns no content/);
       const params: string[] = [];
       walk(tool.inputSchema, params);
@@ -331,9 +311,6 @@ describe('add_comments anchoring cascade', () => {
   });
 
   test('a reply to a diagram comment inherits the diagram anchor', async () => {
-    // What regresses: the reply has no anchor, falls to text search on the
-    // node's label, and the highlighter wraps a <mark> wherever the prose
-    // (or the svg) repeats it.
     const fx = fake();
     const diagramAnchor = { v: 1 as const, family: 'flowchart' as const, kind: 'node' as const, id: 'D', label: 'Approve?', sourceLine: [7, 7] as const };
     const parent = humanComment(fx, 'Ship behind a flag', 'Rename this step', { diagramAnchor });
@@ -440,14 +417,11 @@ describe('ownership', () => {
     const res = await fx.call('read_document');
     const nudge = res.nudges.find((n) => n.code === 'annotations_removed');
     expect(nudge?.ids).toEqual([mine.id]);
-    // Deliberate pin: the "your comments" wording is the resolution signal
-    // (see nudges.test.ts); the catalog must route an agent-owned removal to it.
     expect(nudge?.message).toContain('your comments');
   });
 
   test('ownership is the session claim, not the source stamp: a browser-agent comment the tools did not create is refused', async () => {
     const fx = fake();
-    // Posted through the external-annotations API with a forged source.
     fx.annotations.push({
       id: 'ext-1', blockId: '', startOffset: 0, endOffset: 0, type: AnnotationType.GLOBAL_COMMENT,
       text: 'eslint finding wearing the agent stamp', originalText: '', createdA: 1, source: BROWSER_AGENT_SOURCE, author: BROWSER_AGENT_SOURCE,
@@ -461,8 +435,6 @@ describe('ownership', () => {
 });
 
 describe('requestId memory is bounded', () => {
-  // The idempotency map only ever grew: every add_comments call with a
-  // requestId added an entry for the life of the tab.
   test('past MAX_REMEMBERED_REQUESTS the oldest requestId is forgotten and a replay of it creates anew', async () => {
     const fx = fake();
     const first = dataOf(await fx.call('add_comments', { comments: [{ text: 'first', requestId: 'r-0' }] }));
@@ -470,10 +442,8 @@ describe('requestId memory is bounded', () => {
     for (let i = 1; i <= MAX_REMEMBERED_REQUESTS; i++) {
       await fx.call('add_comments', { comments: [{ text: `note ${i}`, requestId: `r-${i}` }] });
     }
-    // The newest replay is still deduplicated...
     const recent = dataOf(await fx.call('add_comments', { comments: [{ text: 'again', requestId: `r-${MAX_REMEMBERED_REQUESTS}` }] }));
     expect(recent.created).toBe(0);
-    // ...while the evicted first one is treated as a new request.
     const replay = dataOf(await fx.call('add_comments', { comments: [{ text: 'first again', requestId: 'r-0' }] }));
     expect(replay.created).toBe(1);
     expect(replay.results[0].annotation.id).not.toBe(firstId);
