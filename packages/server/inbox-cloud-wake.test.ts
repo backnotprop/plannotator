@@ -1,8 +1,3 @@
-/**
- * The cloud wake (inbox-cloud-wake.ts, inbox-cloud-agents.ts) through the Inbox's real doors: Settings' routes pair
- * an agent, New message and the reply route write to it, and a local stub server stands in for the routine's webhook.
- * No outside service is ever called; every test has its own temp data dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +23,6 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-/** The routine's webhook on loopback: it records each POST and answers from `replies`, then 200 with a run link. */
 function stubRoutine() {
   const seen: Seen[] = [];
   const replies: Reply[] = [];
@@ -59,12 +53,10 @@ async function world(options: { gapMs?: number; timeoutMs?: number; retryMs?: nu
     cloudWake: { gapMs: options.gapMs ?? 60_000, timeoutMs: options.timeoutMs ?? 2_000, ...(options.retryMs ? { retryMs: options.retryMs } : {}), log: (line) => logs.push(line) },
   });
   cleanups.push(() => server.stop());
-  // A project, as an agent's first message makes one.
   const client = new Client({ name: "cloud-wake-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   cleanups.push(() => client.close());
   await client.callTool({ name: "send_message", arguments: { body: "Hello.", project_path: project, agent_session: "ses-pi", agent_host: "pi" } });
-  /** Every answer the window got, for the leak check. */
   const answers: string[] = [];
   const call = async (path: string, body?: Record<string, unknown>) => {
     const response = await fetch(`http://127.0.0.1:${server.port}${path}`, {
@@ -104,7 +96,6 @@ const until = async (check: () => boolean | Promise<boolean>, ms = 5_000) => {
   }
 };
 
-/** Every file under a folder, as text. */
 function filesUnder(dir: string): { path: string; text: string }[] {
   return readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
@@ -117,7 +108,6 @@ describe("the cloud wake", () => {
     const hook = stubRoutine();
     const w = await world({ gapMs: 50 });
     const agent = await w.pair(hook.url);
-    // Listed in New message's To, under its name, in its project.
     const to = (await w.call("/api/inbox/sessions")).json.projects as { sessions: { session: string; host: string; label?: string }[] }[];
     expect(to.flatMap((group) => group.sessions)).toContainEqual(expect.objectContaining({ session: agent.session, host: "cloud-claude", label: "Nightly fixer" }));
 
@@ -202,14 +192,12 @@ describe("the cloud wake", () => {
     await until(async () => (await w.wakeOf(sent.thread_id, sent.message.id))?.state === "key_rejected");
     const listed = (await w.call("/api/inbox/cloud-agents")).json.agents as InboxCloudAgentView[];
     expect(listed[0]).toMatchObject({ wake: true, key_rejected_at: expect.any(String) });
-    // A new key: the held item goes.
     await w.call(`/api/inbox/cloud-agents/${agent.session}/key`, { key: NEW_KEY });
     await until(() => hook.seen.length === 2);
     expect(hook.seen[1]!.headers.authorization).toBe(`Bearer ${NEW_KEY}`);
     await w.call(`/api/inbox/cloud-agents/${agent.session}/test`, {});
     await until(async () => (await w.wakeOf(sent.thread_id, sent.message.id))?.state === "started");
 
-    // Remove: the file holds neither, the agent is no longer offered, and a reply wakes nothing.
     await w.call(`/api/inbox/cloud-agents/${agent.session}/remove`, {});
     const after = readFileSync(cloudAgentsPath(w.dataDir), "utf8");
     expect(after).not.toContain(NEW_KEY);
@@ -232,7 +220,6 @@ describe("the cloud wake", () => {
     await Bun.sleep(150);
     await reader.cancel();
     await read.catch(() => {});
-    // The debug log is written about every 250 ms.
     await Bun.sleep(400);
     const haystacks = [...w.answers, ...frames, ...w.logs, ...filesUnder(w.dataDir).map((file) => file.text)];
     for (const secret of [KEY, NEW_KEY, "trig_SECRETPATH42"]) {
