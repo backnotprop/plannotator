@@ -330,9 +330,10 @@ export interface ListModel {
   list_version?: string;
   /**
    * Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. Absent from
-   * an older Inbox and for a tailnet guest, which then read every session as before.
+   * an older Inbox, which then reads every session as before.
    */
   session_labels?: Record<string, string>;
+  session_titles?: Record<string, string>;
   /**
    * Each machine's agents (the Agents section; agentsList.ts holds them): this Inbox's group, then each linked
    * machine's on the merged view. Absent from an older Inbox.

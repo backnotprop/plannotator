@@ -256,6 +256,7 @@ import { SideButtonContext } from './ask/sideButton';
 import { useReplyFloaters } from './floaters/useReplyFloaters';
 import { emitFloaterEvent } from './floaters/model';
 import { setSessionLabels } from './sessionLabels';
+import { setSessionTitles } from './sessionTitles';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
@@ -1610,6 +1611,7 @@ function Inbox() {
       setLatest(next);
       // The sessions' labels (issue #2450): every row's agents and the open thread's authors read them.
       setSessionLabels(next.session_labels);
+      setSessionTitles(next.session_titles);
       if (!firstList.current!.done) {
         firstList.current!.done = true;
         firstList.current!.resolve();
@@ -2177,11 +2179,12 @@ function Inbox() {
      * many came (#2593). A record's read, which starts after them, covers it: it is dropped then.
      */
     let eventListTimer: ReturnType<typeof setTimeout> | null = null;
-    const listAfterEvents = (delay: number) => {
+    const listAfterEvents = (delay: number, failed = 0) => {
       if (eventListTimer) clearTimeout(eventListTimer);
       eventListTimer = setTimeout(() => {
         eventListTimer = null;
-        void refreshList(false);
+        // The stream stayed up, so nothing else would read again.
+        void refreshList(false).then((next) => next === null && !eventListTimer && listAfterEvents(Math.min(30_000, 2_000 * 2 ** failed), failed + 1));
       }, delay);
     };
     let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2488,6 +2491,8 @@ function Inbox() {
         onConnect: (hello) => {
           // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
           if (hello) void adoptAfterRestart(hello);
+          // `event: deliveries` carries no record, so the cursor never replays one sent before this connect.
+          listAfterEvents(80);
           // A reconnect may have missed `event: shapes`: the boards are read again.
           for (const listener of shapeFrameListeners) listener([]);
           reportWindow();
