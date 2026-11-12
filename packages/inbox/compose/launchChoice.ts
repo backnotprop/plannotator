@@ -1,10 +1,17 @@
-import { launchChoiceLine, type InboxLaunchChoice, type InboxLaunchChoices } from '@plannotator/core/inbox-launch-choice';
+import { launchChoiceLine, launchEffortsFor, type InboxLaunchChoice, type InboxLaunchChoices } from '@plannotator/core/inbox-launch-choice';
 
 /** An effort the CLI no longer lists is dropped. */
 export function initialLaunchChoice(choices: InboxLaunchChoices | null | undefined): InboxLaunchChoice {
   const last = choices?.last;
   if (!choices || !last) return {};
-  return { ...(last.model ? { model: last.model } : {}), ...(last.effort && choices.efforts.includes(last.effort) ? { effort: last.effort } : {}) };
+  return { ...(last.model ? { model: last.model } : {}), ...(last.effort && launchEffortsFor(choices, last.model).includes(last.effort) ? { effort: last.effort } : {}) };
+}
+
+/** A model that doesn't take the current effort drops it back to Default. */
+export function pickLaunchModel(choice: InboxLaunchChoice, choices: InboxLaunchChoices, model: string | null): InboxLaunchChoice {
+  const next: InboxLaunchChoice = model ? { model } : {};
+  if (choice.effort && launchEffortsFor(choices, next.model).includes(choice.effort)) next.effort = choice.effort;
+  return next;
 }
 
 export const shortLaunchModel = (model: string) => model.slice(model.lastIndexOf('/') + 1);
