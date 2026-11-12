@@ -425,7 +425,7 @@ export interface PRPlatformCapabilities {
    * `POST /request-changes`.
    */
   requestChanges: boolean;
-  /** The platform refuses approve from the PR author. */
+  /** The platform always refuses approve from the PR author (GitHub only). */
   selfReviewBlocked: boolean;
   /** The platform refuses request-changes from the PR author (GitHub only). */
   selfRequestChangesBlocked: boolean;
@@ -470,7 +470,9 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     changeLabel: "MR",
     numberPrefix: "!",
     requestChanges: true,
-    selfReviewBlocked: true,
+    // GitLab lets an author approve their own MR unless the project forbids
+    // it; then GitLab refuses and the review shows its answer. Nothing mutes.
+    selfReviewBlocked: false,
     // An MR author may mark their own MR as needing changes.
     selfRequestChangesBlocked: false,
     fileLevelComments: false,

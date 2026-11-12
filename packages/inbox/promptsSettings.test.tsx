@@ -4,7 +4,7 @@
  * shown in full and marked Default, Edit and Save writing
  * `prompts.inbox.reminder`, Reset to default and Use shared deleting their
  * key (null), an agent's own text, the "Reminder off in Agents" note, the
- * cap (the count from 3,700, Save refused past 4,128), and the twelve
+ * cap (the count from 8,000, Save refused past 9,000), and the twelve
  * read-only prompts folded into one row. Requests go to a recording fetch
  * that answers like the server.
  *
@@ -39,7 +39,7 @@ function model(over: Partial<InboxPromptsSettings['reminder']> = {}): InboxPromp
       shared: null,
       runtimes: { 'claude-code': null, pi: null, opencode: null },
       defaults: { wake: WAKE, no_wake: 'no wake' },
-      max: 4128,
+      max: 9000,
       on: { 'claude-code': true, pi: true, opencode: false },
       editable: true,
       ...over,
@@ -58,8 +58,9 @@ function server(start: InboxPromptsSettings) {
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
     sent.push(body.prompts);
-    const inbox = body.prompts.inbox;
+    const inbox = body.prompts.inbox ?? {};
     const clean = (value: string | null) => (value === null || value.trim() === '' ? null : value);
+    if ('guide' in body.prompts) state.guide = { text: clean(body.prompts.guide), max: 12000 };
     if ('reminder' in inbox) state.reminder.shared = clean(inbox.reminder);
     for (const [agent, entry] of Object.entries(inbox.runtimes ?? {})) state.reminder.runtimes[agent as InboxPromptHost] = clean((entry as { reminder: string | null }).reminder);
     return new Response(JSON.stringify({ prompts: structuredClone(state) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -188,19 +189,19 @@ test.skipIf(!hasDom)("an agent's own text: Edit starts from the shared text, Sav
   expect(q(pi, '[data-prompt-text="pi"]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('the cap: no count under 3,700; the count from there; past 4,128 Save is refused and the count says so', async () => {
+test.skipIf(!hasDom)('the cap: no count under 8,000; the count from there; past 9,000 Save is refused and the count says so', async () => {
   server(model());
   const el = mount(model());
   await click(q(el, '[data-prompt-edit="shared"]'));
   const box = q<HTMLTextAreaElement>(el, '[data-prompt-field="shared"]')!;
-  type(box, 'a'.repeat(3699));
+  type(box, 'a'.repeat(7999));
   expect(q(el, '[data-prompt-count]')).toBeNull();
-  type(box, 'a'.repeat(3700));
-  expect(q(el, '[data-prompt-count]')?.textContent).toBe('3,700 / 4,128');
+  type(box, 'a'.repeat(8000));
+  expect(q(el, '[data-prompt-count]')?.textContent).toBe('8,000 / 9,000');
   expect(box.getAttribute('aria-describedby')).toBe(q(el, '[data-prompt-count]')!.id);
-  type(box, 'a'.repeat(4128));
+  type(box, 'a'.repeat(9000));
   expect(q<HTMLButtonElement>(el, '[data-prompt-save="shared"]')!.disabled).toBe(false);
-  type(box, 'a'.repeat(4129));
+  type(box, 'a'.repeat(9001));
   expect(q(el, '[data-prompt-count]')?.hasAttribute('data-over')).toBe(true);
   expect(q<HTMLButtonElement>(el, '[data-prompt-save="shared"]')!.disabled).toBe(true);
   expect(box.getAttribute('aria-invalid')).toBe('true');
@@ -211,7 +212,7 @@ test.skipIf(!hasDom)('the cap: no count under 3,700; the count from there; past 
 
 test.skipIf(!hasDom)('a refused save keeps the field and says why', async () => {
   globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ error: 'prompts.inbox.reminder: at most 4,128 characters.', code: 'validation_error' }), {
+    new Response(JSON.stringify({ error: 'prompts.inbox.reminder: at most 9,000 characters.', code: 'validation_error' }), {
       status: 422,
       headers: { 'Content-Type': 'application/json' },
     })) as unknown as typeof fetch;
@@ -220,7 +221,7 @@ test.skipIf(!hasDom)('a refused save keeps the field and says why', async () => 
   type(q<HTMLTextAreaElement>(el, '[data-prompt-field="shared"]')!, 'Mine.');
   await click(q(el, '[data-prompt-save="shared"]'));
   expect(q(el, '[data-prompt-field="shared"]')).not.toBeNull();
-  expect(q(el, '[data-prompt-error="shared"]')?.textContent).toContain('at most 4,128 characters');
+  expect(q(el, '[data-prompt-error="shared"]')?.textContent).toContain('at most 9,000 characters');
 });
 
 test.skipIf(!hasDom)('the plan, review and annotate prompts: one folded row, opened read-only with key, mark and note', async () => {
@@ -240,14 +241,14 @@ test.skipIf(!hasDom)('the plan, review and annotate prompts: one folded row, ope
 
 test.skipIf(!hasDom)('text over the limit in config.json: the default stays marked, a calm line says it is ignored, and Reset to default / Use shared delete it', async () => {
   const start = model({
-    over: { shared: 4200, runtimes: { 'claude-code': null, pi: 5000, opencode: null } },
+    over: { shared: 9200, runtimes: { 'claude-code': null, pi: 10000, opencode: null } },
   });
   const sent = server(start);
   const el = mount(start);
   expect(q(el, '[data-prompt-slot="shared"] .ib-chip')?.textContent).toBe('Default');
   expect(q(el, '[data-prompt-text="shared"]')?.textContent).toBe(WAKE);
-  expect(q(el, '[data-prompt-over="shared"]')?.textContent).toBe('The text in config.json is 4,200 characters, over the 4,128 limit, so it is ignored.');
-  expect(q(el, '[data-prompt-over="pi"]')?.textContent).toBe('The text in config.json is 5,000 characters, over the 4,128 limit, so it is ignored.');
+  expect(q(el, '[data-prompt-over="shared"]')?.textContent).toBe('The text in config.json is 9,200 characters, over the 9,000 limit, so it is ignored.');
+  expect(q(el, '[data-prompt-over="pi"]')?.textContent).toBe('The text in config.json is 10,000 characters, over the 9,000 limit, so it is ignored.');
   expect(q(el, '[data-prompt-status="pi"]')?.textContent).toBe('Uses the shared text');
   // Calm: not an alert, not the error line.
   expect(el.querySelectorAll('[role="alert"]')).toHaveLength(0);
@@ -298,9 +299,43 @@ test.skipIf(!hasDom)('config.json is named with the home folder as ~, the full p
   expect(await tooltipOf(outside)).toBeNull();
 });
 
+test.skipIf(!hasDom)('Guided reviews: Default with only Edit; Save writes `guide` and shows it as Custom; Reset to default deletes it', async () => {
+  const start: InboxPromptsSettings = { ...model(), guide: { text: null, max: 12000 } };
+  const sent = server(start);
+  const el = mount(start);
+  const row = q(el, '[data-prompt-slot="guide"]')!;
+  expect(q(row, '.ib-chip')?.textContent).toBe('Default');
+  expect(q(row, '[data-prompt-text="guide"], [data-prompt-reset]')).toBeNull();
+  await click(q(row, '[data-prompt-edit="guide"]'));
+  const box = q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!;
+  expect(box.value).toBe('');
+  expect(document.activeElement).toBe(box);
+  type(box, 'Start with the riskiest change.');
+  await click(q(el, '[data-prompt-save="guide"]'));
+  expect(sent).toEqual([{ guide: 'Start with the riskiest change.' }]);
+  expect(q(row, '.ib-chip')?.textContent).toBe('Custom');
+  expect(q(row, '[data-prompt-text="guide"]')?.textContent).toBe('Start with the riskiest change.');
+  // The reminder is untouched: the phone's list still reads Custom for the page.
+  expect(q(el, '[data-prompt-slot="shared"] .ib-chip')?.textContent).toBe('Default');
+  expect(promptsSummary({ ...model(), guide: { text: 'x', max: 12000 } })).toBe('Custom');
+  // Past the cap Save is refused.
+  await click(q(row, '[data-prompt-edit="guide"]'));
+  type(q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!, 'a'.repeat(12001));
+  expect(q<HTMLButtonElement>(el, '[data-prompt-save="guide"]')!.disabled).toBe(true);
+  expect(q(el, '[data-prompt-count]')?.textContent).toBe('12,001 / 12,000');
+  await click(q(el, '[data-prompt-cancel="guide"]'));
+  await click(q(row, '[data-prompt-reset="guide"]'));
+  expect(sent.at(-1)).toEqual({ guide: null });
+  expect(q(row, '.ib-chip')?.textContent).toBe('Default');
+});
+
 test.skipIf(!hasDom)('through the tailnet: read-only, no Edit anywhere', () => {
   const el = mount(model({ editable: false, shared: 'Mine.', runtimes: { 'claude-code': null, pi: 'Pi.', opencode: null } }));
   expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset], [data-prompt-use-shared]')).toHaveLength(0);
   expect(el.textContent).toContain('Change it on this computer.');
   expect(q(el, '[data-prompt-text="pi"]')?.textContent).toBe('Pi.');
+  // Guided reviews too: shown, never editable.
+  act(() => root!.render(<PromptsSection prompts={{ ...model({ editable: false }), guide: { text: 'Mine.', max: 12000 } }} />));
+  expect(q(el, '[data-prompt-text="guide"]')?.textContent).toBe('Mine.');
+  expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset]')).toHaveLength(0);
 });

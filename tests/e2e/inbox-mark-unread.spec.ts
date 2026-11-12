@@ -159,13 +159,12 @@ test('a thread read by opening it: the header’s Mark unread closes it, and the
   await openQuiet(page);
   await expect.poll(() => sectionOf(page, threads.deploy)).toBe('quiet');
 
-  // Opened from Quiet: the header's Mark read (nothing waits) is Mark unread.
+  // Opened from Quiet: the header's ⋯ offers Mark unread, and no Mark read (nothing waits).
   await row(page, threads.deploy).click();
-  const button = pane.locator('[data-mark-unread]');
-  await expect(button).toBeVisible();
-  // An icon (approval "inbox-thread-header"): its words are its name.
+  await pane.locator('[data-thread-more]').click();
+  const button = page.locator('[data-thread-menu] [data-thread-unread-item]');
   await expect(button).toHaveAccessibleName('Mark unread');
-  await expect(pane.locator('[data-mark-read]')).toHaveCount(0);
+  await expect(page.locator('[data-thread-menu] [data-thread-read-item]')).toHaveCount(0);
   await button.click();
 
   await expect(pane).toHaveCount(0);
@@ -244,9 +243,10 @@ test('the owner’s report (2026-11-02): the open row, and the row just left, of
   await expect(action(first, 'unread')).toBeVisible();
   await expect(action(first, 'read')).toHaveCount(0);
   await expect(row(page, first)).not.toHaveClass(/\bib-u\b/);
-  // The header says the same (the owner, 2026-11-02; before: Mark read).
-  await expect(pane.locator('[data-mark-unread]')).toBeVisible();
-  await expect(pane.locator('[data-mark-read]')).toHaveCount(0);
+  // The header's ⋯ says the same (the owner, 2026-11-02).
+  await pane.locator('[data-thread-more]').click();
+  await expect(page.locator('[data-thread-menu] [data-thread-unread-item]')).toBeVisible();
+  await page.locator('[data-thread-menu]').press('Escape');
   expect(await serverSection(first)).toBe('new');
   releaseLook();
   await expect.poll(() => serverSection(first)).toBe('quiet');
@@ -254,7 +254,9 @@ test('the owner’s report (2026-11-02): the open row, and the row just left, of
   // The look landed; the list still holds the row in New, and it still offers Mark unread (v0.28.45: Mark read).
   await row(page, first).hover();
   await expect(action(first, 'unread')).toBeVisible();
-  await expect(pane.locator('[data-mark-unread]')).toBeVisible();
+  await pane.locator('[data-thread-more]').click();
+  await expect(page.locator('[data-thread-menu] [data-thread-unread-item]')).toBeVisible();
+  await page.locator('[data-thread-menu]').press('Escape');
   expect(await sectionOf(page, first)).toBe('new');
 
   // Move to another thread: the row just left keeps Mark unread (v0.28.45: Mark read).

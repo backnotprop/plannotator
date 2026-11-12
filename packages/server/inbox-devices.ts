@@ -161,6 +161,13 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^health$/, window: () => "/api/inbox/health" },
   { method: "GET", route: /^threads$/, window: () => "/api/inbox/threads" },
   { method: "GET", route: /^projects$/, window: () => "/api/inbox/projects" },
+  // What's new (public release notes, read only): the release list, a release's notes and their saved images, so a
+  // phone reads them as the window does (owner ruling 2026-11-11: one person, the same app on every device).
+  { method: "GET", route: /^whats-new$/, window: () => "/api/inbox/whats-new" },
+  { method: "GET", route: /^whats-new\/releases$/, window: () => "/api/inbox/whats-new/releases" },
+  { method: "GET", route: /^whats-new\/image$/, window: () => "/api/inbox/whats-new/image" },
+  // A project's picture (a logo, read only): a linked machine's window shows that machine's project rows with it.
+  { method: "GET", route: /^projects\/([^/]+)\/picture$/, window: (m) => `/api/inbox/projects/${m[1]}/picture` },
   // The archived threads (Settings' Archived block), read only; before threads/:id, which would also match it.
   { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
@@ -236,6 +243,7 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A pending pasted-text upload's words (approval "inbox-paste-attachment"), read only: a linked machine's
   // window puts a long paste back in a reply to this machine's thread, as it uploaded it here.
   { method: "GET", route: /^uploads\/([^/]+)\/text$/, window: (m) => `/api/inbox/uploads/${m[1]}/text` },
+  { method: "GET", route: /^uploads\/([^/]+)\/image$/, window: (m) => `/api/inbox/uploads/${m[1]}/image` },
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },

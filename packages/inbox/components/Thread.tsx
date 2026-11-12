@@ -36,6 +36,8 @@ import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
+import { withPictures } from '../commentPictureFiles';
+import { CommentPictures, useCommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
 import { linkReplyFeedback, resolveReplyLink } from '../replyFileLinks';
 import { splitReplyFeedback } from '../replyFeedback';
@@ -67,7 +69,7 @@ import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
 import { reviewOpenPlan, type ReviewView } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
-import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
+import { MessageMenu, ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
 import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -599,6 +601,7 @@ export function MessageBody({
   // The files the reply's feedback names, as links (display only; replyFileLinks.ts).
   // Only the person's own message: an agent's text is drawn as it wrote it, whatever its headings say.
   const ownReply = message.author.kind === 'person';
+  const pictures = useCommentPictures();
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
@@ -1150,7 +1153,7 @@ export function MessageBody({
         suggestComment={comments?.suggest}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
-        allowImages={false}
+        allowImages={pictures}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
         // A click on a word of a message makes nothing (the owner, 2026-11-10): a thread is read and clicked
@@ -1419,8 +1422,8 @@ export interface ThreadPaneProps {
    */
   remote?: boolean | null;
   /**
-   * A tailnet guest's page (`tailnetGuest(settings)`): a launched agent's ⋯ has
-   * no Stop or Delete, as the server answers both `owner_only`.
+   * A tailnet guest's page (`tailnetGuest(settings)`): no thread PRs (they run this computer's `gh`), and the
+   * run line offers no Try again (starting an agent is the owner's).
    */
   guest?: boolean;
   /**
@@ -1779,13 +1782,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           copyAttach: attach
             ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
-          // A resting agent (no line) still runs in the background: Stop is offered then too. Never to a tailnet guest.
+          // A resting agent (no line) still runs in the background: Stop is offered then too.
           stop:
-            !guest && launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
+            launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
               ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null))
               : null,
-          // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
-          remove: phone || guest ? null : () => setConfirmDelete(true),
+          // On a phone too (owner ruling 2026-11-11: one person, the same app on every device).
+          remove: () => setConfirmDelete(true),
         }
       : null;
   // Archived (resolved). What an agent wrote after the archive line behaves as
@@ -3572,7 +3575,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return null;
   };
   const [openItemsRequest, setOpenItemsRequest] = useState(0);
-  // H (approval "inbox-keyboard-keys-2026-11-07", item 3): opens the header clock's menu; it never snoozes by itself.
+  // H (approval "inbox-keyboard-keys-2026-11-07", item 3): opens the header ⋯ menu at Snooze's times; it never snoozes by itself.
   const [snoozeRequest, setSnoozeRequest] = useState(0);
   const readKeysOn = !one && !artifactsOn;
   const readKeyAllowed = (event: KeyboardEvent) => {
@@ -3738,7 +3741,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             const target = keyTarget(event);
             if (target?.closest('[data-thread-id]') && keyboardFocused(target)) return false;
           } else if (origin !== 'thread') return false;
-          const clock = sectionRef.current?.querySelector<HTMLElement>('[data-thread-snooze]');
+          const clock = sectionRef.current?.querySelector<HTMLElement>('[data-thread-more][data-snooze-key]');
           return !!clock && clock.getAttribute('aria-expanded') !== 'true' && clock.getClientRects().length > 0;
         },
         handle: () => setSnoozeRequest((n) => n + 1),
@@ -4810,6 +4813,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const feedback = withSkillsBlock(annotationsFeedback, skills);
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(part.key) ?? [];
+        const files = withPictures(last ? uploads : [], own);
         requests.push({ messageId: target.message.id, input: {
           idempotency_key: sendKeys.current.get(part.key) ?? newUuid(),
           words: last ? words : '',
@@ -4821,7 +4825,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
           ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
           // The pasted files ride the reply that carries the words, as attachments.
-          ...(last && uploads.length > 0 ? { uploads } : {}),
+          ...(files.length > 0 ? { uploads: files } : {}),
           ...(tags.length > 0 ? { tags } : {}),
           // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
           // exactly these words when the `updated_at` they were saved as is not known here).
@@ -5942,7 +5946,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
   // The header's ⋯ More offers it where that button does not: a thread marked read, and a phone, whose bar has no read
   // button (approval "inbox-thread-header": its ⋯ sheet leads with the read actions).
-  const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
+  const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
@@ -6063,64 +6067,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }
       });
   };
-  // The read button (approval "inbox-thread-header", 2026-11-02): one icon before the subject, its words in its
-  // tooltip ("Mark read / quiet" with E, "Mark unread", "Read" while marked read) and as its name. A phone has none in its bar:
-  // the ⋯ sheet leads with the read action instead (`phoneMarkRead`, `markUnreadInMenu`).
-  const markReadAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
-  const markReadButton = phone ? null : markUnreadOffered ? (
-    <Tip content="Mark unread">
-      <button
-        type="button"
-        className="ib-iconbtn ib-readbtn"
-        data-mark-unread=""
-        aria-label="Mark unread"
-        onClick={(event) => {
-          // A double-click on Mark read: this button took its place after the first click. The second is not meant for it.
-          if (event.detail > 1) return;
-          onMarkUnread!();
-        }}
-      >
-        <Icon name="mail" size={17} />
-      </button>
-    </Tip>
-  ) : markReadOffered ? (
-    <Tip
-      content={
-        readAt !== null ? (
-          <span className="flex flex-col gap-1">
-            <span>Read</span>
-            <span className="text-muted-foreground">Move it back to the top</span>
-          </span>
-        ) : markReadEnabled ? (
-          withShortcut('Mark read / quiet', { scope: inboxThreadShortcuts, action: 'markRead' })
-        ) : (
-          <span className="flex flex-col gap-1">
-            <span>Mark read</span>
-            <span className="text-muted-foreground">Nothing here waits on you</span>
-          </span>
-        )
-      }
-    >
-      <button
-        type="button"
-        className="ib-iconbtn ib-readbtn"
-        data-mark-read=""
-        aria-label={readAt !== null ? 'Read' : 'Mark read'}
-        aria-pressed={readAt !== null}
-        aria-keyshortcuts={readAt === null && markReadEnabled ? markReadAria : undefined}
-        disabled={!markReadEnabled}
-        onClick={() => onMarkRead!(readAt === null)}
-      >
-        <Icon name="mailOpen" size={17} />
-      </button>
-    </Tip>
-  ) : null;
-  // A phone's ⋯ sheet offers every read action a desktop has (its bar has no read button, and a phone has no row menu
-  // and no E): Mark read whenever it can be done (a seen update the list still holds in New included, where a desktop
-  // reaches it by E or the row menu; never disabled there: the sheet lists what can be done), Move back to the top on
-  // a thread marked read (the pressed Read's click), and Mark unread (`markUnreadInMenu`).
-  const phoneMarkRead = phone && markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
-  const phoneMoveBack = phone && markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
+  // The ⋯ menu leads with the read actions (the owner, 2026-11-11: no read or Snooze icon in the bar, the title gets
+  // the room): Mark read whenever it can be done (never disabled: the menu lists what can be done), Move back to the
+  // top on a thread marked read, and Mark unread (`markUnreadInMenu`).
+  const menuMarkRead = markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
+  const menuMoveBack = markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
   // A thread's PRs: on this machine's own threads, for the person (a linked machine's and a tailnet guest's have none).
   const pullsOffered = !machine && !guest;
   const [addingPull, setAddingPull] = useState(false);
@@ -6212,6 +6163,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [reuseOffered, resolved, allFiles, box.open, reuseHeld],
   );
   return (
+    <CommentPictures thread={thread.thread_id} records={records}>
     <ReuseContext.Provider value={reuseApi}>
     <>
     <section
@@ -6291,14 +6243,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </>
         )}
-        {/* The bar (approval "inbox-thread-header", 2026-11-02): the read button and the Snooze clock, as icons, lead
-            before the subject; everything at the right is an icon with a tooltip (approval "inbox-thread-artifacts"):
-            Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close. A phone has ‹ Inbox, the
-            subject, Artifacts, Expand and ⋯: its read action and Snooze lead the ⋯ sheet. */}
+        {/* The bar: the subject first, then icons with tooltips (approval "inbox-thread-artifacts"): Artifacts,
+            Expand / Fold all, ⋯ More (its read actions and Snooze lead it; Archive is in it), then the close. */}
         {phone && artifactsOn ? null : (
           <>
-            {markReadButton}
-            {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} openRequest={snoozeRequest} />}
             {one && !artifactsOn && !barName ? (
               <span className="ib-sp" />
             ) : (
@@ -6368,12 +6316,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
-              markRead={phoneMarkRead}
-              moveBack={phoneMoveBack}
+              markRead={menuMarkRead}
+              moveBack={menuMoveBack}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
               launch={launchMenu}
               snooze={snoozeProps}
+              snoozeRequest={snoozeRequest}
               requestGuide={guideOffered ? () => void requestGuide() : undefined}
               addPull={pullsOffered && !artifactsOn ? () => setAddingPull(true) : undefined}
               postDecisions={
@@ -6668,7 +6617,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} machine={machine} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} machine={machine} onChanged={onChanged} />
                   </div>
                 </article>,
               );
@@ -7659,6 +7608,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     )}
     </>
     </ReuseContext.Provider>
+    </CommentPictures>
   );
 }
 

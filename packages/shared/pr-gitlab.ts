@@ -660,6 +660,23 @@ function commandFailure(result: CommandResult): string {
   return result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
 }
 
+/**
+ * GitLab's own words for a refused approval: the JSON `message` glab prints on
+ * stdout, else glab's stderr. Null when the failure is not a refusal (401/403).
+ */
+function glApprovalRefusal(result: CommandResult): string | null {
+  const text = `${result.stderr}\n${result.stdout}`;
+  if (!/\bHTTP 40[13]\b|\b40[13] (?:Unauthorized|Forbidden)\b/i.test(text)) return null;
+  let message = "";
+  try {
+    const body: unknown = JSON.parse(result.stdout);
+    if (isRecord(body)) message = stringValue(body.message) || stringValue(body.error);
+  } catch {
+    // Not JSON: glab's stderr carries the answer.
+  }
+  return message || result.stderr.trim().replace(/^glab:\s*/, "") || `exit code ${result.exitCode}`;
+}
+
 /** Approve the MR. Returns the failure message, or null on success. */
 async function approveGlMR(run: RunWithInput, host: string, mrEndpoint: string): Promise<string | null> {
   const result = await run(
@@ -667,7 +684,13 @@ async function approveGlMR(run: RunWithInput, host: string, mrEndpoint: string):
     apiArgs(host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
     "{}",
   );
-  return result.exitCode === 0 ? null : commandFailure(result);
+  if (result.exitCode === 0) return null;
+  // The person may approve their own MR unless the project forbids it; GitLab
+  // then answers 401 (also when they already approved). Say so in plain words.
+  const refusal = glApprovalRefusal(result);
+  return refusal
+    ? `GitLab refused the approval (${refusal}). The project may not let you approve this merge request, for example because you are its author, or you already approved it.`
+    : `Failed to approve MR: ${commandFailure(result)}`;
 }
 
 // GitLab records requested changes only for a reviewer, and runs a document's
@@ -978,21 +1001,35 @@ export async function submitGlMRReview(
   if (action === "approve" || action === "request_changes") {
     const verb = action === "approve" ? "approve MR" : "request changes on MR";
     try {
-      const failure = action === "approve"
-        ? await approveGlMR(runCommandWithInput, ref.host, mrEndpoint)
-        : await requestGlMRChanges(runtime, runCommandWithInput, ref);
-      if (failure === REQUEST_CHANGES_MISSING) {
-        postedAs = "comment";
-      } else if (failure) {
-        approval = "failed";
-        approvalError = `Failed to ${verb}: ${failure}`;
+      if (action === "approve") {
+        const failure = await approveGlMR(runCommandWithInput, ref.host, mrEndpoint);
+        if (failure) {
+          approval = "failed";
+          approvalError = failure;
+        } else {
+          approval = "succeeded";
+        }
       } else {
-        approval = "succeeded";
+        const failure = await requestGlMRChanges(runtime, runCommandWithInput, ref);
+        if (failure === REQUEST_CHANGES_MISSING) {
+          postedAs = "comment";
+        } else if (failure) {
+          approval = "failed";
+          approvalError = `Failed to ${verb}: ${failure}`;
+        } else {
+          approval = "succeeded";
+        }
       }
     } catch (error) {
       approval = "failed";
       const message = error instanceof Error ? error.message : String(error);
       approvalError = `Failed to ${verb}: ${message}`;
+    }
+    if (approval === "failed" && !reviewBodyPosted && failedFileComments.length === fileComments.length) {
+      // A decision refused before anything else landed changed nothing on the
+      // MR: an error, like Bitbucket, so the review stays open with no retry
+      // locked to it and the person can still comment or request changes.
+      throw new Error(approvalError);
     }
   }
 
