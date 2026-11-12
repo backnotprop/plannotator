@@ -136,8 +136,9 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
 import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
-import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
-import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@plannotator/shared/packed-app";
+import { encodeAppHtml, negotiateAppHtmlEncoding, prepareAppHtml } from "@plannotator/shared/app-html";
+import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASSETS_MARKER } from "@plannotator/shared/packed-app";
+import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
@@ -928,30 +929,53 @@ function etagMatches(header: string | null, etag: string): boolean {
 }
 
 /**
- * `/` through the tailnet listener (#2032): the page compressed as remote-mode
- * and `--tailscale` sessions serve theirs (#1617, `packages/shared/app-html.ts`),
- * brotli in practice since serve is HTTPS. The window's own loopback port keeps
- * the uncompressed `no-store` answer: on loopback the transfer is free and the
- * one-time compression pass only delays the first load.
+ * `/` on every listener the browser reaches (the window's loopback port, so a
+ * plain reverse proxy or ssh tunnel in front of it too, and the tailnet
+ * listener, #2032): the page compressed through the shared
+ * `packages/shared/app-html.ts` helper (brotli or gzip on `Accept-Encoding`,
+ * `Vary: Accept-Encoding`), made in brotli when the Inbox starts. `compress`
+ * is false only for a browser on this computer while that body is still being
+ * made (`compressWindowAsset`): it gets the plain page at once. Loopback once got the page
+ * uncompressed and `no-store`, which left a proxy or tunnel to that port with
+ * the whole 2 MB page on every load.
  *
  * Cache: `private, no-cache` with a weak ETag, not `no-store`. The page is the
- * same bytes until a restart to update swaps the binary, and a phone on cellular
- * opens it many times a day, so a revalidation that answers 304 saves the ~5 MB
- * body; `no-cache` still asks every time, so a new build is never missed. The tag
- * is weak because the br, gzip and identity bodies are one page (one tag fits all
- * three under `Vary: Accept-Encoding`). The data routes stay `no-store`.
- * The listener's checks (owner login, served Host, Sec-Fetch-Site) ran before this.
+ * same bytes until a restart to update swaps the binary, so a revalidation that
+ * answers 304 saves the body on every reload; `no-cache` still asks every time,
+ * so a new build is never missed. The tag is weak because the br, gzip and
+ * identity bodies are one page (one tag fits all three under
+ * `Vary: Accept-Encoding`). The data routes stay `no-store`.
+ * A listener's own checks (on the tailnet: owner login, served Host,
+ * Sec-Fetch-Site) ran before this.
  */
-async function tailnetWindowPage(req: Request, page: string): Promise<Response> {
+async function windowPage(req: Request, page: string, compress: boolean): Promise<Response> {
   const etag = windowPageEtag(page);
   const cacheHeaders = { "Cache-Control": "private, no-cache", ETag: etag, Vary: "Accept-Encoding" };
   if (etagMatches(req.headers.get("if-none-match"), etag)) {
     return new Response(null, { status: 304, headers: { ...WINDOW_PAGE_HEADERS, ...cacheHeaders } });
   }
-  const prepared = await prepareAppHtml(page, req.headers.get("accept-encoding"), true);
+  const prepared = await prepareAppHtml(page, req.headers.get("accept-encoding"), compress);
   const headers = { ...prepared.headers, ...WINDOW_PAGE_HEADERS, ...cacheHeaders, "Content-Type": "text/html; charset=utf-8" };
   // A Buffer is a valid fetch body; the lib types lag.
   return new Response(req.method === "HEAD" ? null : (prepared.body as BodyInit), { headers });
+}
+
+/** How long after start the window's lazy scripts start being compressed: after the first load's own work. */
+const LAZY_ASSET_WARM_DELAY_MS = 15_000;
+
+/** The text assets packed behind the window page (scripts, styles), by route path; none for an unpacked page. */
+function packedTextAssetPaths(bundle: string): string[] {
+  const markerAt = bundle.indexOf(PACKED_ASSETS_MARKER);
+  if (markerAt < 0) return [];
+  const from = markerAt + PACKED_ASSETS_MARKER.length;
+  try {
+    const index = JSON.parse(bundle.slice(from, bundle.indexOf("\n", from))) as Record<string, { base64?: true }>;
+    return Object.entries(index)
+      .filter(([, entry]) => !entry.base64)
+      .map(([path]) => path);
+  } catch {
+    return [];
+  }
 }
 
 function errorResponse(error: unknown): Response {
@@ -4677,6 +4701,49 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
   const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
+  // Every listener sends the page and its scripts compressed. Each compressed body is made once per Inbox run,
+  // off the event loop, and kept: the page and the entry script it asks for next now, in brotli (what Chromium
+  // asks of localhost and of an HTTPS address); gzip (a plain-http address, Safari) on first ask.
+  const compressedReady = new Set<string>();
+  const warmCompressed = (path: string, encoding: "br" | "gzip"): Promise<void> => {
+    const key = `${encoding} ${path}`;
+    if (compressedReady.has(key)) return Promise.resolve();
+    const made: Promise<boolean> =
+      path === "/" ? encodeAppHtml(windowApp.html, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
+    return made.then(
+      (ok) => {
+        if (ok) compressedReady.add(key);
+      },
+      () => {},
+    );
+  };
+  /**
+   * Whether this answer of the page or a script goes out compressed. Always, except to a browser on this
+   * computer (the window's port, no proxy in between) while that body is still being made: the transfer is
+   * free there, so it gets the plain body at once rather than wait on the one-time pass (the window opens the
+   * moment the Inbox starts). A proxy, a tunnel or the tailnet always waits for the compressed body.
+   */
+  const compressWindowAsset = (req: Request, via: RequestVia, path: string): boolean => {
+    if (via !== "local" || req.headers.has("x-forwarded-for")) return true;
+    const encoding = negotiateAppHtmlEncoding(req.headers.get("accept-encoding"));
+    if (encoding === "identity" || compressedReady.has(`${encoding} ${path}`)) return true;
+    void warmCompressed(path, encoding);
+    return false;
+  };
+  void warmCompressed("/", "br");
+  for (const entry of windowEntryScripts) void warmCompressed(entry, "br");
+  // The window's other text scripts (Mermaid, Graphviz, each code grammar…) are compressed one by one a while
+  // after start, so the first diagram or code block over a slow link never waits on its one-time pass either
+  // (the largest takes ~0.1-0.3 s). One at a time, off the event loop; a stop ends it.
+  const lazyAssetWarm = setTimeout(() => {
+    void (async () => {
+      for (const path of packedTextAssetPaths(options.htmlContent ?? "")) {
+        if (stopped) return;
+        await warmCompressed(path, "br");
+      }
+    })();
+  }, LAZY_ASSET_WARM_DELAY_MS);
+  lazyAssetWarm.unref?.();
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
@@ -6588,13 +6655,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
-        if (via === "tailnet") return tailnetWindowPage(req, page);
-        return new Response(req.method === "HEAD" ? null : page, {
-          headers: { ...WINDOW_PAGE_HEADERS, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-        });
+        return windowPage(req, page, compressWindowAsset(req, via, "/"));
       }
-      // The window's scripts, by exact name from the pack (404 for any other), compressed over the tailnet as the page is.
-      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
+      // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
+      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
       // The installed app's manifest and icons (inbox-app-icons.ts), of the same favicon style.
       if (req.method === "GET") {
@@ -6717,9 +6781,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     return served(req, "local");
   };
+  // What the window's own port answers the browser: the same answers, JSON compressed (inbox-encoding.ts). The
+  // device door calls `fetch` above in process and reads plain bodies, so the encoding sits only here and on the
+  // tailnet listener's dispatch.
+  const loopbackFetch = async (req: Request): Promise<Response> => encodeInboxResponse(req, await fetch(req));
 
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody, streamIdleMs: options.streamIdleMs, scheduleImageCapture: imageCapture.schedule });
-  const started = startOnLoopback(fetch, previous?.port ?? null);
+  const started = startOnLoopback(loopbackFetch, previous?.port ?? null);
   server = started.server;
   portChanged = started.portChanged;
   port = server.port as number;
@@ -6747,12 +6815,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     port: () => port,
     registry: () => registry,
-    dispatch: async (req) => markPlannotatorResponse(await served(req, "tailnet")),
-    // Compress the page, and the entry script it asks for next, for the tailnet before the first phone asks (#2032).
-    onListen: () => {
-      prewarmAppHtml(windowApp.html, "br");
-      for (const entry of windowEntryScripts) windowApp.answer(entry, "GET", "br", true).catch(() => {});
-    },
+    dispatch: async (req) => markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet"))),
     tailscale: options.tailscale,
     timers: options.tailscaleTimers,
     // Published by itself after Tailscale came back: every window's Settings row follows at once.
@@ -6880,6 +6943,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    clearTimeout(lazyAssetWarm);
     stopLoopWatch?.();
     releasePerfPhases?.();
     // The debug log's kept lines go in now (it keeps lines in memory for a moment).

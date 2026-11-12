@@ -289,10 +289,31 @@ function aliveStorage(): Storage | null {
   }
 }
 
+function noteFirstProtocol(active: ReturnType<typeof createDebugRecorder>): void {
+  if (typeof PerformanceObserver === 'undefined') return;
+  const observer = new PerformanceObserver((list) => {
+    const entry = list
+      .getEntries()
+      .find((e) => (e as PerformanceResourceTiming).nextHopProtocol && e.name.startsWith(window.location.origin)) as PerformanceResourceTiming | undefined;
+    if (!entry) return;
+    observer.disconnect();
+    if (recorder === active) active.note('protocol', { protocol: entry.nextHopProtocol });
+  });
+  try {
+    observer.observe({ type: 'resource', buffered: true });
+  } catch {
+    // An engine without resource timing: the line stays without a protocol.
+  }
+}
+
 function listen(active: ReturnType<typeof createDebugRecorder>): void {
   const state = () => ({ state: document.visibilityState, online: navigator.onLine });
   const navigation = performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined;
-  active.note('page_load', { ...state(), protocol: navigation?.nextHopProtocol || undefined });
+  const protocol = navigation?.nextHopProtocol || undefined;
+  active.note('page_load', { ...state(), protocol });
+  // A reload the server answered 304 (the page is cached with an ETag) has no protocol on its navigation entry:
+  // the first answer from the Inbox that came over the network says it instead.
+  if (!protocol) noteFirstProtocol(active);
   const alive = createAliveMarker({ storage: aliveStorage(), page: active.page });
   const gone = alive.previous();
   if (gone) active.note('renderer_gone', gone);
