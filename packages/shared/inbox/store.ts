@@ -6360,8 +6360,8 @@ export class InboxStore {
     const seq = this.messageSeq.get(message.id) ?? 0;
     // A New message, or a reply the person sent to another session, is
     // settled only by its delivery to the session it names, never by another
-    // agent's read; so is a reply that tags agents.
-    if (!message.to && !hasTags(message) && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
+    // agent's read; so is a reply that tags agents. One sent again (`sendAgain`) waits whatever was read.
+    if (!message.to && !hasTags(message) && message.sent_again_to !== session && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
     return true;
   }
 
@@ -7035,6 +7035,32 @@ export class InboxStore {
     const next = moved(message);
     this.appendMessage(next, at);
     return next;
+  }
+
+  /**
+   * Try again on a launched session's turn that ended in an error: the person's message that session took goes to
+   * it once more, as a new delivery (no `delivery`, no old mark or claim on it, the Claude Code mod's included), and
+   * waits for it as it did before it went in. Only a message of the person's that `session` itself took.
+   */
+  sendAgain(messageId: string, session: string): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message || message.author.kind !== "person" || isInboxNote(message) || message.delivery?.session !== session) {
+      throw new InboxError("message_not_found", `No message ${messageId} that session took.`);
+    }
+    const claims = [join(this.dir, "claims", message.id), join(this.dir, "claims", inboxClaimName(message.id, session))];
+    if (/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(session)) claims.push(join(this.dir, "..", "claude-code-mod", session, "inbox", "claims", message.id));
+    for (const claim of claims) {
+      try {
+        rmSync(claim, { recursive: true, force: true });
+      } catch {
+        // A leftover claim: that session reports the message instead of delivering it.
+      }
+    }
+    const at = this.stamp();
+    const { delivery: _delivered, ...rest } = message;
+    const again: InboxMessage = { ...rest, sent_again_to: session, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
+    this.appendMessage(again, at);
+    return again;
   }
 
   /** Whether a message of this session came through a waking connection: only such a session can be called ended. */
