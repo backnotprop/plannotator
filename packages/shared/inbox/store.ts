@@ -114,6 +114,7 @@ import { inboxWakeQuote } from "./wake-quote";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
+import type { InboxCloudWake } from "@plannotator/core/inbox-cloud";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -208,7 +209,7 @@ import {
   type InboxInitiative,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
-import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import { InboxError, inboxDir } from "./schema";
 import type { InboxLog, InboxLogFactory, InboxLogState, InboxStoreBackup } from "./store-log/log";
@@ -745,6 +746,7 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
 const SEND_APPENDED_HEADINGS: ReadonlySet<string> = new Set([
   `## ${INBOX_ACTIONS_HEADING}`,
   `# ${INBOX_MESSAGE_FEEDBACK_TITLE}`,
+  `# ${INBOX_OWN_MESSAGE_FEEDBACK_TITLE}`,
   `# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`,
   `# ${INBOX_GUIDE_FEEDBACK_TITLE}`,
 ]);
@@ -5679,8 +5681,9 @@ export class InboxStore {
    * the person selected, or a comment on a rendered diagram part, with
    * `diagramAnchor` and the part's label as `originalText`, or a Delete on
    * selected words (`type` "DELETION", no words of its own needed; approval
-   * "inbox-toolbar-delete"). Only an agent's
-   * message takes one, and only while it can be answered (an archive closes
+   * "inbox-toolbar-delete"). An agent's message takes one, and the person's own
+   * (approval "inbox-annotate-own-and-questions"), never one of the Inbox's own notes (a set-aside or reopened
+   * note, a 👍, a Tidy note); only while it can be answered (an archive closes
    * the messages before its line). The
    * record's key is the message: `path` is its id, `version` "current", and
    * `message` names it. Sent with the reply like an attachment's annotation.
@@ -5688,8 +5691,8 @@ export class InboxStore {
   saveMessageAnnotation(messageId: string, annotation: unknown): InboxAnnotationRecord {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-    if (message.author.kind !== "agent") {
-      throw new InboxError("annotation_not_allowed", "annotation: only an agent's message takes comments; this one is yours.", { field: "message_id" });
+    if (message.author.kind !== "agent" && (message.author.kind !== "person" || isInboxNote(message))) {
+      throw new InboxError("annotation_not_allowed", "annotation: one of the Inbox's own notes takes no comments.", { field: "message_id" });
     }
     if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
       throw new InboxError("validation_error", "annotation: an object.", { field: "annotation" });
@@ -6451,6 +6454,18 @@ export class InboxStore {
     const withdrawn: InboxMessage = { ...note, delivery: { state: "delivered", host, session: note.to.session, at } };
     this.appendMessage(withdrawn, at);
     return withdrawn;
+  }
+
+  recordCloudWake(messageId: string, wake: InboxCloudWake, session?: string, host = "cloud"): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message || message.author.kind !== "person") throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const before = message.cloud_wake;
+    if (before && before.state === wake.state && before.at === wake.at && before.next_at === wake.next_at && before.run_url === wake.run_url) return message;
+    const at = this.stamp();
+    const next: InboxMessage = { ...message, cloud_wake: wake };
+    this.appendMessage(next, at);
+    if (wake.state === "started" && session && this.isFor(next, session)) return this.recordDelivery(this.deliveryIdOf(next, session), { host, session });
+    return next;
   }
 
   /** What a delivery of this message to `session` goes by: the message's id, or a former owner's stop notice's own. */

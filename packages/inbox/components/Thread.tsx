@@ -40,7 +40,7 @@ import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
-import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
+import { annotationOf, attachmentFeedback, isFileComment, OWN_MESSAGE_COMMENT_ROW } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures, useCommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
@@ -76,6 +76,8 @@ import { reviewOpenPlan, type ReviewView } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
+import { CloudWakeLine } from '../cloud/CloudWakeLine';
+import { isInboxCloudHost } from '@plannotator/core/inbox-cloud';
 import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
@@ -1133,6 +1135,11 @@ export function MessageBody({
     const id = mark?.getAttribute('data-bind-id') ?? mark?.getAttribute('data-highlight-id');
     // A link in the highlight stays a link. A comment not sent yet (its draft mark) is the Viewer's: it opens the box.
     if (!id || target.closest('a, button') || mark?.classList.contains('comment-draft')) return;
+    // A press on a choice's words picks the choice (one click, as without comments); the comment there opens from
+    // the reply box's list. A press the card cancelled (a drag, a double-click) is the selection's, as below; on a card
+    // that takes no answer now, the press opens the comment as anywhere else.
+    const option = target.closest('[data-question-option]');
+    if (option && !event.defaultPrevented && !option.querySelector('input:disabled')) return;
     // A press that ended in a selection (a drag, a double or triple click) is the comment toolbar's.
     commentsRef.current?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
   };
@@ -1158,8 +1165,12 @@ export function MessageBody({
         onSelectAnnotation={comments ? selectBadge : noop}
         selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
-        // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
-        textDeletions={comments !== undefined}
+        // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete"). Not on the
+        // person's own words (approval "inbox-annotate-own-and-questions"): "Remove this" is about the agent's text.
+        textDeletions={comments !== undefined && message.author.kind === 'agent'}
+        // The whole question takes comments, wording, context and choices (approval "inbox-annotate-own-and-questions").
+        // A click on a choice still picks it; a drag or a double-click selects (QuestionBlock's own guard).
+        questionTextComments={comments !== undefined}
         suggestComment={comments?.suggest}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
@@ -1779,7 +1790,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const root = thread.messages[0]!;
   // A thread the person started (compose) is about the agent it is addressed to, never the person.
   const startedTo = root.started_by_person && root.to ? root.to : null;
-  const asker = startedTo ? hostName(startedTo.host) : agentName(root.author);
+  const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
+  const addresseeName = (host: string) => (isInboxCloudHost(host) && cloudName ? cloudName : hostName(host));
+  const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
   // Launch: the person started this agent from New message (packages/server/inbox-launch.ts).
   const launched = root.launch ?? null;
   // Launch is on for this thread (a launched thread whose read carries a run line).
@@ -2950,9 +2963,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       return next.size === current.size ? current : next;
     });
   }, [records]);
-  /** A message comment's row in the reply box's list: "Claude Code's message, 2:58 PM". */
+  /** A message comment's row in the reply box's list: "Claude Code's message, 2:58 PM"; on the person's own, "Your message, 2:58 PM". */
   const messageCommentName = (record: InboxAnnotationRecord) => {
     const message = thread.messages.find((m) => m.id === record.message_id);
+    if (message?.author.kind === 'person') return `${OWN_MESSAGE_COMMENT_ROW} ${whenTime(record.message?.at ?? message.created_at)}`;
     const who = message ? agentName(message.author) : 'Agent';
     return `${who}'s message, ${whenTime(record.message?.at ?? message?.created_at ?? '')}`;
   };
@@ -3228,6 +3242,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     }
     return attachmentFeedback(pending, allFiles, texts, thread.project.root, {
       personMessageIds,
+      // A comment on a question's words names the question and the choice (approval "inbox-annotate-own-and-questions").
+      messageBodies: new Map(thread.messages.map((m) => [m.id, m.body])),
       // A comment that tags agents is marked in the export (approval "inbox-tag-agents").
       tagNames: (ids) => ids.map((id) => tagOpts.find((o) => o.id === id)?.label ?? 'an agent'),
       // A comment on a question's prototype is filed under the option it shows (approval "inbox-question-tradeoffs").
@@ -5274,7 +5290,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // A reply the person sent to another session names the session that took it
   // ("Claude Code (another session)" when it is the asker's own host).
   const toName = (message: InboxMessageWire, to: { host: string; session: string }) =>
-    isRedirected(message) ? redirectedName(to, askedBy(message)) : hostName(to.host);
+    isRedirected(message) ? redirectedName(to, askedBy(message)) : addresseeName(to.host);
   // Where the person's last message is addressed: its own `to`, or, for a reply in a thread the
   // person started, the thread's (the server hands it to that session), unless it answers another
   // session that wrote in it (that session takes it, as any plain reply).
@@ -5356,8 +5372,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
   const heldHandoff = last.author.kind === 'person' && !!last.handoff && !last.handoff.settled_at && !last.handoff.undone_at;
-  const delivered: DeliveryLine | null =
-    heldHandoff && deliveredNow ? { state: 'queued', text: `Goes to ${handoffName(last)} once the Undo window ends.` } : deliveredNow;
+  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || isInboxCloudHost(lastTo?.host)) ? last : null;
+  const delivered: DeliveryLine | null = cloudLast
+    ? null
+    : heldHandoff && deliveredNow
+      ? { state: 'queued', text: `Goes to ${handoffName(last)} once the Undo window ends.` }
+      : deliveredNow;
   // No Send now because that session runs an older plugin than a restart loads (the "Steps" line,
   // owner approval "restart-warning"): only while the reply waits for a working session.
   const restart = delivered?.state === 'queued' && !last.deliver_now_at ? restartNote(recipientConnection) : null;
@@ -6705,7 +6725,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             <span>You started this thread</span>
             <span className="ib-tdot" aria-hidden="true" />
             <span>
-              to {hostName(startedTo.host)} in <bdi>{thread.project.name}</bdi>
+              to {addresseeName(startedTo.host)} in <bdi>{thread.project.name}</bdi>
             </span>
           </div>
         )}
@@ -7176,7 +7196,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       : undefined
                   }
                   comments={
-                    isAgent && liveMessage(message)
+                    // The person's own messages take comments too, never the Inbox's own notes (approval
+                    // "inbox-annotate-own-and-questions"; the store refuses those).
+                    (isAgent || !isInboxNote(message)) && liveMessage(message)
                       ? {
                           annotations: messageComments.get(message.id) ?? NO_ANNOTATIONS,
                           onSave: (annotation) => saveMessageComment(message.id, annotation),
@@ -7279,6 +7301,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     restartName={restartName}
                   />
                 )}
+                {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName(lastTo?.host ?? 'cloud')} time={whenTime} />}
                 {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.
                   <div className="ib-delivered" data-delivery={delivered.state} data-auto={delivered.autoAfterMin !== undefined ? '' : undefined} tabIndex={-1}>
