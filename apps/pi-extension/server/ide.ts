@@ -11,6 +11,7 @@ export function openEditorDiff(
 	newPath: string,
 ): Promise<{ ok: true } | { error: string }> {
 	return new Promise((resolve) => {
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const proc = spawn("code", ["--diff", oldPath, newPath], {
 			stdio: ["ignore", "ignore", "pipe"],
 		});

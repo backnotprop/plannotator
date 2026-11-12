@@ -480,7 +480,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
     const projects: MachineLaunchProject[] = [...machineGroups.groups.filter((g) => !g.asleep), ...machineGroups.groups.filter((g) => g.asleep)].flatMap((g) => g.projects);
     return { agents, projects, ...(offered?.scratch && !pulls ? { scratch: offered.scratch } : {}) };
   }, [model?.launch, pulls, onlyProjects?.join(), box, linkScratch, grouped, machineGroups, there.reads]);
-  const canStart = !!launch && launch.agents.length > 0 && (launch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
+  // A fresh Inbox has no projects yet: its scratch folder is where a first agent starts (the start block names it).
+  const startLaunch = useMemo(() => (launch && launch.projects.length === 0 && launch.scratch ? { ...launch, projects: [scratchProject(launch.scratch.root)] } : launch), [launch]);
+  const canStart = !!startLaunch && startLaunch.agents.length > 0 && (startLaunch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
   // The launch block of the machine a pick is on: this computer's, or that machine's last good read.
   const blockOf = (machine: string | null) => (machine ? there.reads.get(machine)?.launch : model?.launch);
   const start: (ComposeStart & { machine: string | null }) | null = useMemo(() => {
@@ -508,14 +510,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Add agent: the default start, once the launch block is read, unless the person chose To already.
   const launchPicked = useRef(false);
   useEffect(() => {
-    if (!request.launch || launchPicked.current || startPick || chosen || !launch || !canStart) return;
-    const project = defaultStartProject(launch, current);
+    if (!request.launch || launchPicked.current || startPick || chosen || !startLaunch || !canStart) return;
+    const project = defaultStartProject(startLaunch, current);
     if (!project) return;
     launchPicked.current = true;
-    const agent = launch.agents.find((a) => a.agent === request.launch!.agent) ?? launch.agents[0]!;
+    const agent = startLaunch.agents.find((a) => a.agent === request.launch!.agent) ?? startLaunch.agents[0]!;
     setStartPick({ agent: agent.agent, projectId: project.id, machine: (project as MachineLaunchProject).machine ?? null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.launch, launch, canStart, startPick, chosen, current]);
+  }, [request.launch, startLaunch, canStart, startPick, chosen, current]);
   // "+" on a project row and Add agent: an agent that machine doesn't have (or none started yet) becomes its first,
   // once its block is read.
   useEffect(() => {
@@ -1428,7 +1430,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     void fetchSkillCatalog().then((catalog) => (catalog.length > 0 ? slash() : none()));
   };
 
-  const toStart = launch && canStart && launch.projects.length > 0 ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null;
+  const toStart = startLaunch && canStart && startLaunch.projects.length > 0 ? { launch: startLaunch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null;
   const pickStart = (picked: ComposeStart) => {
     setToFilled(false);
     setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });

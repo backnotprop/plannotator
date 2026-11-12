@@ -727,7 +727,7 @@ test('Delete while --bg is still running: the session it makes is stopped and re
   }
 });
 
-test('phone: the To picker, the To sentence, the working line, the permission prompt; no Open in Terminal or Delete', async ({ browser }) => {
+test('phone: the To picker, the To sentence, the working line, the permission prompt; Delete, and no Open in Terminal', async ({ browser }) => {
   const { fake } = world;
   const phone = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
   const page = await phone.newPage();
@@ -760,9 +760,9 @@ test('phone: the To picker, the To sentence, the working line, the permission pr
     await expect(waiting.locator('[data-run-stop]')).toBeVisible();
     await expect(waiting.locator('[data-run-open]')).toHaveCount(0);
     await shot(page, '08-permission-prompt-v1-phone');
-    // ⋯ on a phone: no Open in Terminal, no Delete.
+    // ⋯ on a phone: no Open in Terminal (it would open on the Mac's screen); Delete as on the computer.
     await page.locator('[data-thread-more]').click();
-    await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Copy attach command', 'Stop Claude Code']);
+    await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Copy attach command', 'Stop Claude Code', 'Delete Claude Code session…']);
   } finally {
     fake.configure({ hold: false, waiting: false });
     await phone.close();

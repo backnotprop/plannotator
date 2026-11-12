@@ -88,7 +88,7 @@ import { LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@p
 import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -103,6 +103,7 @@ import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { pathFoldersOf } from "./env-path";
 import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
@@ -299,9 +300,11 @@ export function createInboxLaunch(options: {
   const readLogin = (): Promise<LaunchEnv> => {
     reading ??= (async () => {
       try {
-        // Windows has no login shell to read (`$SHELL -ilc`): the Inbox's own env stands in, and nothing runs.
-        const login = options.platform === "win32" ? {} : await options.loginEnv();
-        if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
+        // Windows has no login shell to read (`$SHELL -ilc`): the Inbox's own env stands in, through the same filter a
+        // login read gets (`launchPlainEnv`: no PLANNOTATOR_*, no per-session Claude names), and nothing runs. Never `{}`:
+        // a start with an empty env, or the Claude supervisor it starts, has no PATH, no USERPROFILE and no sign-in env.
+        const login = options.platform === "win32" ? launchPlainEnv(options.ownEnv(), [], "win32") : await options.loginEnv();
+        if (login.PATH) loginPath = pathFoldersOf(login.PATH, options.platform);
         const kept: LaunchEnv = {};
         for (const name of hostList.flatMap((host) => host.shellNames)) if (login[name] !== undefined) kept[name] = login[name]!;
         // Only whether these are set (a sign-in token, a cloud provider's switch): never the value.
@@ -517,6 +520,9 @@ export function createInboxLaunch(options: {
     return state.availability.value;
   };
   const refreshAvailable = (host: LaunchHost) => void available(host).then((value) => (stateOf(host).lastAvailable = value));
+  /** Whether it can start in at least one of these folders, by their own settings (never cached: a Send's folder, To's projects). */
+  const availableIn = (host: LaunchHost, folders: readonly string[]): Promise<LaunchAvailability> =>
+    host.available(folders).catch(() => ({ ok: false, missing: false, reason: "could not check" }) as LaunchAvailability);
 
   // ── The host's view: one `sessions` read per host, shared, at most every 10 s, only while something needs it ──
   const refreshHost = (host: LaunchHost): Promise<void> => {
@@ -1001,7 +1007,7 @@ ${result.text}`);
       const ended = launch.clone.ended_at ?? null;
       const newest = store
         .pendingReplies(root.to.session, { tags: true })
-        .filter((reply) => !reply.by_guest && reply.id !== root.id && ended !== null && reply.created_at > ended)
+        .filter((reply) => reply.id !== root.id && ended !== null && reply.created_at > ended)
         .at(-1);
       if (newest && memo.cloneFor !== newest.id) {
         memo.cloneFor = newest.id;
@@ -1023,11 +1029,8 @@ ${result.text}`);
     const memo = memoOf(launch);
     if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
-    // A tailnet guest's reply waits for the session as any reply does; only the owner's (or this computer's) starts it again.
-    const newest = store
-      .pendingReplies(root.to.session, { tags: true })
-      .filter((reply) => !reply.by_guest)
-      .at(-1);
+    // Anyone's reply starts it again: this computer's, the owner's over the tailnet, or a login the allow list let in.
+    const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
     if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
     respawn(root, host, newest.id);
@@ -1288,8 +1291,6 @@ ${result.text}`);
     if (door && !door.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     switch (match[2]) {
       case "stop": {
-        // Stop ends the owner's agent: never a guest's to do, as starting one isn't.
-        if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can stop an agent from this Inbox.");
         // Cancel during a clone (E1, E7): git is stopped, and the partly cloned folder goes.
         const cloning = clones.get(launch.id);
         if (cloning) {
@@ -1347,8 +1348,6 @@ ${result.text}`);
         return json({ ok: true, command });
       }
       case "delete": {
-        // Delete stops and removes the owner's agent: never a guest's to do.
-        if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can delete an agent from this Inbox.");
         // A Delete under way (a double click): the same answer, once it is done.
         const under = deleting.get(launch.id);
         if (under) return json(await under);
@@ -1659,7 +1658,10 @@ ${result.text}`);
       if (chosen && !isFolder(chosen.root)) {
         throw new InboxError("folder_missing", `${options.displayFolder(chosen.root)} isn't there any more. Pick another project. Nothing was sent.`, { field: "to.launch" });
       }
-      const ok = await available(host, true);
+      // In the folder it will start in, with that folder's own settings (a project can turn Claude Code's plugin on or
+      // off for itself). A scratch folder or one still to be made has none: the machine's own setup.
+      const startsIn = chosen ? chosen.root : toMake ? null : folderTarget;
+      const ok = startsIn ? await availableIn(host, [startsIn]) : await available(host, true);
       stateOf(host).lastAvailable = ok;
       if (!ok.ok) {
         // Sent from another machine: say it with this machine's name, as that machine's start row does.
@@ -1841,7 +1843,13 @@ ${result.text}`);
         hostList.map(async (host) => {
           const state = stateOf(host);
           // Not available last time: look again (the person may have just installed or updated it).
-          const ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
+          let ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
+          // Its plugin off for the machine but maybe on in a project's own settings: offered when one of the projects
+          // turns it on (Send checks the folder picked). A project on another drive is never read here.
+          if (!ok.ok && ok.code === "plugin_off") {
+            const local = projects.filter((p) => p.exists && !outsideHome(options.homeDir, p.root)).map((p) => p.root);
+            if (local.length > 0) ok = await availableIn(host, local);
+          }
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
@@ -2042,6 +2050,7 @@ async function chooseFolderInFinder(): Promise<string | null> {
     await Bun.sleep(600);
     return stub === "" ? null : stub;
   }
+  // windows-hide-guard: macOS only (osascript).
   const child = Bun.spawn(["/usr/bin/osascript", "-e", "activate", "-e", 'POSIX path of (choose folder with prompt "Pick a folder to start the agent in")'], {
     stdin: "ignore",
     stdout: "pipe",
