@@ -16,6 +16,7 @@ import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
 import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
 import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
+import { installLinearCards } from './linearCards';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
@@ -333,6 +334,8 @@ configurePlannotatorUI({
     },
   },
 });
+// Hover cards for Linear issue links, and bare identifiers of the workspace's teams as links (linearCards.tsx).
+if (typeof window !== 'undefined') installLinearCards();
 
 const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
 /** The list's ⋯ "Hide offline machines" (linked machines): kept in this browser, like the sidebar's state. */

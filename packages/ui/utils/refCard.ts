@@ -16,6 +16,8 @@
 
 import { forgeRefKey, parseForgeRefUrl, type ForgeRef, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 
+import { providedRefCardTarget } from './refCardProviders';
+
 export type { ForgeRef, ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 
 /** Fetch the card for a link. Resolve null when the host does not read that link. */
@@ -61,7 +63,7 @@ const cache = new Map<string, { at: number; promise: Promise<ForgeRefCardResult 
 /** The ref a link names, when a transport is installed to fetch it; else null (no card). */
 export function refCardTarget(href: string | null | undefined): ForgeRef | null {
   if (!transport || !href) return null;
-  return parseForgeRefUrl(href);
+  return parseForgeRefUrl(href) ?? providedRefCardTarget(href);
 }
 
 /** The card for a link, through the installed transport (shared and cached per ref). */
