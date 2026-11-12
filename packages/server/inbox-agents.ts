@@ -45,6 +45,12 @@ import {
   inboxElsewhereText,
   type InboxAgentId,
   type InboxConnectReport,
+  INBOX_MUSE_BIN,
+  INBOX_MUSE_CONFIG_FOLDER,
+  INBOX_MUSE_MCP_KEY,
+  INBOX_MUSE_SETTINGS_FILE,
+  INBOX_MUSE_SETTINGS_SEED,
+  museMcpEntry,
 } from "@plannotator/core/inbox-types";
 import {
   configuredInboxTool,
@@ -386,6 +392,9 @@ export function piAgentDir(e: AgentEnvironment): string {
 export function xdgConfigHome(e: AgentEnvironment): string {
   return envDir(e, "XDG_CONFIG_HOME") ?? join(e.homeDir, ".config");
 }
+export function museDir(e: AgentEnvironment): string {
+  return join(xdgConfigHome(e), INBOX_MUSE_CONFIG_FOLDER);
+}
 export function openCodeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "OPENCODE_CONFIG_DIR") ?? join(xdgConfigHome(e), "opencode");
 }
@@ -591,7 +600,7 @@ type ConnectWay =
   /** Run the agent's own `mcp add`; remove with its `mcp remove`. */
   | { kind: "cli"; bin: string; add: (command: readonly string[]) => string[]; remove: string[] }
   /** One key in a JSON file (`json`: how it is edited). */
-  | { kind: "json"; keys: readonly string[]; json?: JsonFileRules }
+  | { kind: "json"; keys: readonly string[]; json?: JsonFileRules; entry?: (command: readonly string[]) => Record<string, unknown> }
   /** `inboxTool` on for Plannotator's own extension/plugin. */
   | { kind: "tool"; host: InboxToolHost }
   /** Only a person can connect it; `why` says how. */
@@ -625,6 +634,7 @@ interface AgentSpec {
 export interface JsonFileRules {
   comments?: boolean;
   keepReadOnly?: boolean;
+  seed?: Readonly<Record<string, unknown>>;
 }
 
 const NAME = INBOX_MCP_SERVER_NAME;
@@ -1076,6 +1086,8 @@ export function agentVersionRun(e: AgentEnvironment, path: string, options: { ti
 /** Qwen Code's settings.json: JSON with comments, edited by Plannotator itself; a read-only one is left alone. */
 const QWEN_SETTINGS_RULES: JsonFileRules = { comments: true, keepReadOnly: true };
 
+const MUSE_SETTINGS_RULES: JsonFileRules = { seed: INBOX_MUSE_SETTINGS_SEED };
+
 /**
  * Qwen Code is connected by editing its user settings.json directly, never
  * with `qwen mcp add` / `remove`: those write back every MCP server with its
@@ -1202,6 +1214,13 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     raw: () => null,
   },
   {
+    id: "muse",
+    detect: (e) => !!e.which(INBOX_MUSE_BIN) || isDir(museDir(e)),
+    way: async () => ({ kind: "json", keys: [INBOX_MUSE_MCP_KEY], json: MUSE_SETTINGS_RULES, entry: museMcpEntry }),
+    file: (e) => join(museDir(e), INBOX_MUSE_SETTINGS_FILE),
+    raw: (e, read) => rawJsonEntry(join(museDir(e), INBOX_MUSE_SETTINGS_FILE), [INBOX_MUSE_MCP_KEY], false, read),
+  },
+  {
     id: "claude-app",
     detect: (e) => isDir(claudeAppDir(e)),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
@@ -1238,11 +1257,12 @@ export interface JsonEntryUndo {
 type WriteOutcome = { ok: true; changed: boolean; undo?: JsonEntryUndo } | { ok: false; reason: string };
 
 /** Delete a file Plannotator created once it holds nothing but the empty containers along `keys`. */
-function deleteIfOnlyOurs(path: string, keys: readonly string[]): void {
+function deleteIfOnlyOurs(path: string, keys: readonly string[], seed: Readonly<Record<string, unknown>> = {}): void {
   const read = readAgentFile(path);
   if (read.kind !== "file") return;
   let skeleton: unknown = {};
   for (const key of [...keys].reverse()) skeleton = { [key]: skeleton };
+  skeleton = { ...seed, ...(skeleton as Record<string, unknown>) };
   try {
     if (read.text.trim() && JSON.stringify(JSON.parse(read.text)) !== JSON.stringify(skeleton)) return;
     rmSync(read.target, { force: true });
@@ -1300,8 +1320,8 @@ function undoJsonEntry(text: string, undo: JsonEntryUndo | undefined, keys: read
 export function writeJsonEntry(
   path: string,
   keys: readonly string[],
-  value: { command: string; args: string[] } | undefined,
-  ours: readonly (readonly string[])[] = value ? [[value.command, ...value.args]] : [],
+  value: Record<string, unknown> | undefined,
+  ours: readonly (readonly string[])[] = value ? [entryArgv(value) ?? []] : [],
   undo?: JsonEntryUndo,
   rules: JsonFileRules = {},
 ): WriteOutcome {
@@ -1310,6 +1330,7 @@ export function writeJsonEntry(
   if (read.kind === "refused") return { ok: false, reason: `${path} can't be edited (${read.reason})` };
   if (read.kind === "missing" && value === undefined) return { ok: true, changed: false };
   const original = read.kind === "file" ? read.text : "";
+  const start = !original.trim() && value !== undefined && rules.seed ? `${JSON.stringify(rules.seed, null, 2)}\n` : original;
   if (original.trim()) {
     let parsed: unknown;
     try {
@@ -1330,7 +1351,7 @@ export function writeJsonEntry(
       ? { ok: true as const, changed: true, text: undone }
       : value === undefined
         ? removeJsonMember(original, keys, NAME, { comments })
-        : addJsonMember(original, keys, NAME, value, { comments });
+        : addJsonMember(start, keys, NAME, value, { comments });
   if (!edit.ok) return { ok: false, reason: `${path} can't be edited without reshaping it (${edit.reason}), so Plannotator left it as it was` };
   if (!edit.changed) return { ok: true, changed: false };
   if (rules.keepReadOnly && read.kind === "file" && !writableFile(read.target, read.mode)) {
@@ -1495,7 +1516,7 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
   if (way.kind === "json") {
     const [cmd, ...args] = command;
     const created = readAgentFile(file!).kind === "missing";
-    const result = writeJsonEntry(file!, way.keys, { command: cmd!, args }, undefined, undefined, way.json);
+    const result = writeJsonEntry(file!, way.keys, way.entry ? way.entry(command) : { command: cmd!, args }, [command], undefined, way.json);
     if (!result.ok) return { kind: "failed", reason: result.reason.split(e.homeDir).join("~"), path: file };
     return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at, ...(result.undo ? { undo: result.undo } : {}), ...(created ? { created: true } : {}) } };
   }
@@ -1803,7 +1824,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
         describe: `MCP server ${NAME} from ${label} (${displayPath(stray.path, e)}, that entry only)`,
         apply: async () => {
           const result = writeJsonEntry(stray.path, strayJson!.keys, undefined, strayOurs, stray.undo, strayJson!.rules);
-          if (result.ok && stray.created) deleteIfOnlyOurs(stray.path, strayJson!.keys);
+          if (result.ok && stray.created) deleteIfOnlyOurs(stray.path, strayJson!.keys, strayJson!.rules.seed);
           return result.ok ? null : result.reason;
         },
       });
@@ -1838,7 +1859,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
         describe: `MCP server ${NAME} from ${label} (${shown}, that entry only)`,
         apply: async () => {
           const result = writeJsonEntry(path, json.keys, undefined, ours, record.undo, json.rules);
-          if (result.ok && record.created) deleteIfOnlyOurs(path, json.keys);
+          if (result.ok && record.created) deleteIfOnlyOurs(path, json.keys, json.rules.seed);
           return result.ok ? null : result.reason;
         },
       });
@@ -1869,6 +1890,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
 /** The agents whose JSON file Plannotator edits itself: where their entry is and how the file is edited. */
 function jsonFileFor(id: InboxAgentId): { keys: readonly string[]; rules: JsonFileRules } | null {
   if (id === "qwen") return { keys: ["mcpServers"], rules: QWEN_SETTINGS_RULES };
+  if (id === "muse") return { keys: [INBOX_MUSE_MCP_KEY], rules: MUSE_SETTINGS_RULES };
   return id === "cursor" || id === "kiro" || id === "claude-app" ? { keys: ["mcpServers"], rules: {} } : null;
 }
 
@@ -2115,7 +2137,7 @@ export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options:
         if (json && added?.path) {
           beforeMoveRollback?.();
           const undone = writeJsonEntry(added.path, json.keys, undefined, added.command ? [added.command] : [], added.undo, json.rules);
-          if (undone.ok && added.created) deleteIfOnlyOurs(added.path, json.keys);
+          if (undone.ok && added.created) deleteIfOnlyOurs(added.path, json.keys, json.rules.seed);
           if (!undone.ok) {
             // Both stay: the new one is recorded too, so uninstall removes it.
             file.agents[id] = { ...previous!, strays: [...(previous!.strays ?? []), { path: added.path, ...(added.command ? { command: added.command } : {}), ...(added.undo ? { undo: added.undo } : {}), ...(added.created ? { created: true } : {}) }] };

@@ -243,6 +243,7 @@ const TAB_GLYPHS: Partial<Record<string, string>> = {
   // own icon (cline/cline assets/branding/logos/cline-icon-white.svg) as an outline.
   cline:
     'M9.6 5.3A2.55 2.55 0 1 1 14.4 5.3H17.9A2.4 2.4 0 0 1 20.3 7.7V10.6L22.9 13.6 20.3 16.7V19.6A2.4 2.4 0 0 1 17.9 22H6.1A2.4 2.4 0 0 1 3.7 19.6V16.7L1.1 13.6 3.7 10.6V7.7A2.4 2.4 0 0 1 6.1 5.3Z M8.9 11.6v4 M15.1 11.6v4',
+  muse: 'M5 19V5.5l7 8.5 7-8.5V19',
 };
 
 export function TabGlyph({ harness }: { harness: string }) {
@@ -269,6 +270,7 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
     case 'vscode':
     case 'dsh':
     case 'cline':
+    case 'muse':
       return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d={TAB_GLYPHS[host]} />

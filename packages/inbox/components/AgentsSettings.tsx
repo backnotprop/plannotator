@@ -291,6 +291,7 @@ export function repliesOf(row: InboxAgentRow): { text: string; wakes: boolean } 
 /** Agents whose instructions live in their own settings, not a file. */
 const NO_NOTE_FILE: Partial<Record<InboxAgentId, string>> = {
   kiro: 'Kiro CLI has no global instructions file, so there is no file to add a note to.',
+  muse: "Muse Code's user rules file has no documented place, so there is no file to add a note to.",
 };
 
 /**
