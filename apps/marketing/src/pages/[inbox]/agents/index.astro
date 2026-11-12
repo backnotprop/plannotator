@@ -260,7 +260,10 @@ const slot = ['claude-code', 'codex', 'pi', 'opencode', 'cursor', 'cline', 'amp'
     color: var(--muted-foreground);
   }
 
+  /* Positioned so the cells' screen-reader text (sr-only, absolute) stays
+     inside the scroll box instead of widening the page. */
   .ag-scroll {
+    position: relative;
     overflow-x: auto;
     border: 1px solid var(--border);
     border-radius: 14px;
@@ -280,7 +283,7 @@ const slot = ['claude-code', 'codex', 'pi', 'opencode', 'cursor', 'cline', 'amp'
 
   .ag-table th,
   .ag-table td {
-    padding: 0.625rem 0.75rem;
+    padding: 0.625rem 0.5rem;
     text-align: left;
     vertical-align: middle;
   }
@@ -310,6 +313,8 @@ const slot = ['claude-code', 'codex', 'pi', 'opencode', 'cursor', 'cline', 'amp'
     background: var(--card);
     box-shadow: 1px 0 0 var(--border);
   }
+
+  .ag-table .ag-sticky { padding-left: 0.75rem; }
 
   .ag-tier-row th {
     padding-top: 1rem;

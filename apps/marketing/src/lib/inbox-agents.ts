@@ -28,7 +28,7 @@ export interface Cell {
   label: string;
   /** The table's text for a `part` cell, when the label is too long for it. */
   short?: string;
-  /** One or two sentences (kept for the docs; not shown on the pages yet). */
+  /** One or two sentences behind the label. Not shown on the pages. */
   detail: string;
   /** Where the fact comes from (not shown). */
   src: string;
@@ -78,9 +78,9 @@ export interface Agent {
 }
 
 export const TIERS: { id: Tier; name: string; short: string }[] = [
-  { id: 'plugin', name: 'Native plug-in', short: 'Inbox built in. Your reply wakes it.' },
-  { id: 'hooks', name: 'Hooks and MCP', short: 'Plannotator’s hooks and commands. Inbox through MCP.' },
-  { id: 'mcp', name: 'MCP only', short: 'Inbox through MCP. It reads your reply when it checks.' },
+  { id: 'plugin', name: 'Native plug-in', short: 'Inbox built in and your reply wakes it' },
+  { id: 'hooks', name: 'Hooks and MCP', short: 'Plannotator’s hooks and commands plus the Inbox through MCP' },
+  { id: 'mcp', name: 'MCP only', short: 'Inbox through MCP and it reads your reply when it checks' },
 ];
 
 export const COLUMNS = {
@@ -142,7 +142,7 @@ const noBinary: Trouble = {
 };
 const notConnected = (name: string): Trouble => ({
   symptom: `\`plannotator inbox\` says it couldn’t connect ${name}`,
-  fix: 'It prints why and tries again the next time you run it. To connect it now use the step under Other ways.',
+  fix: 'It prints why and tries again the next time you run it. To connect it now follow Connect the Inbox yourself under Other ways.',
   src: 'packages/server/inbox-agents.ts formatConnectReport (Couldn’t connect / needs connecting by hand)',
 });
 const neverWoken = (name: string): Trouble => ({
@@ -683,7 +683,7 @@ export const AGENTS: Agent[] = [
       },
       {
         symptom: 'The installer says the Codex hooks file couldn’t be merged',
-        fix: 'Add the Stop hook by hand as shown under Other ways.',
+        fix: 'Follow Plan review hook by hand under Other ways.',
         src: 'SH:1711-1720',
       },
       { symptom: 'A `codex exec` run never got your reply', fix: 'One-shot runs end before a reply. It stays in the Inbox for a later run to read.', src: 'IB:325' },

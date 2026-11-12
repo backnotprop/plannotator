@@ -155,7 +155,7 @@ handling); instead each registration deletes entries whose pid is dead, and
 loopback port no longer accepts a connection, or that cannot be read. Commands
 list the project they detected (or `unknown`); only the plan review detects it.
 
-### T3 Code: Ask this session through an optional Claude hook (opt-in, unreleased)
+### T3 Code: Ask this session through an optional Claude hook (opt-in)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the
 Agent SDK, which loads `~/.claude/settings.json` hooks, so a Claude Bash hook
