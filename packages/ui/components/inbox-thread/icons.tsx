@@ -241,6 +241,7 @@ const TAB_GLYPHS: Partial<Record<string, string>> = {
   dsh: 'M6 4h5a7 7 0 0 1 0 14H6Z M3 21c2-1.5 4-1.5 6 0s4 1.5 6 0 4-1.5 6 0',
   // Cline: its bot head (the rounded head with a bump on top, pointed sides, two upright eyes), traced from Cline's
   // own icon (cline/cline assets/branding/logos/cline-icon-white.svg) as an outline.
+  hermes: 'M8 5v15 M16 5v15 M8 13.5h8 M8 8C6 7.6 4 6.8 2.5 5.2C3.3 8 5.4 9.8 8 10.4 M16 8c2-.4 4-1.2 5.5-2.8c-.8 2.8-2.9 4.6-5.5 5.2',
   cline:
     'M9.6 5.3A2.55 2.55 0 1 1 14.4 5.3H17.9A2.4 2.4 0 0 1 20.3 7.7V10.6L22.9 13.6 20.3 16.7V19.6A2.4 2.4 0 0 1 17.9 22H6.1A2.4 2.4 0 0 1 3.7 19.6V16.7L1.1 13.6 3.7 10.6V7.7A2.4 2.4 0 0 1 6.1 5.3Z M8.9 11.6v4 M15.1 11.6v4',
   // OpenClaw lobster mark, from openclaw/openclaw ui/src/components/icon-data-tools.ts, MIT, Copyright (c) 2026 OpenClaw Foundation.
@@ -276,6 +277,7 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
     case 'dsh':
     case 'cline':
     case 'openclaw':
+    case 'hermes':
       return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d={TAB_GLYPHS[host]} />
