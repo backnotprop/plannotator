@@ -1,29 +1,3 @@
-/**
- * A session that needs a restart after an update (owner approval
- * "restart-warning", 2026-10-19), proved in a real browser against the
- * compiled binary.
- *
- * Nothing is mocked: the binary runs `plannotator inbox --background` under a
- * temp PLANNOTATOR_DATA_DIR and HOME, whose `.claude/plugins/installed_plugins.json`
- * records Plannotator's Claude Code plugin 0.28.25 (the Inbox reads it as
- * Claude Code's registry; the real ~/.claude is never read). A Claude Code
- * agent writes through `plannotator inbox mcp` with the wake meta; its
- * connection is the bridge's real poll, driven as the mod drives it, saying
- * it loaded plugin 0.28.23 (`plugin: { version, root, loaded_at }`). The
- * person replies in the window. What is proved: the line under the reply
- * leads with `/reload-plugins` and its Copy, with `/exit` and the resume
- * command folded behind "Still no Send now after reloading?"; the sidebar's
- * "Reload Claude Code 6" and Settings → Agents' "Open sessions" (the same
- * lead, six sessions as a list, Copy restart only behind "Still listed after
- * reloading?"); the update variant (installed plugin behind this Inbox: the
- * update command first); the row going away by itself once the sessions run
- * the installed plugin; and a phone at 390 px, where nothing overflows.
- *
- * PNGs (the line collapsed and open, the sidebar row, Settings → Agents;
- * desktop and phone, light and dark) land in .local/proof/restart/, or in
- * PLANNOTATOR_RESTART_SHOTS when it names a folder.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -39,9 +13,7 @@ const proofDir = resolve(process.env.PLANNOTATOR_RESTART_SHOTS ?? join(resolve(p
 
 const BILLING_SESSION = '6f2c9e14-8b0d-4c5a-9e27-1d3b7a0c4f81';
 const PLAN_SESSION = 'a41d7e02-55c3-4b8e-8f10-6e9b2c7d3a55';
-/** A second Claude Code in the billing-api folder: each needs its own /reload-plugins. */
 const BILLING_SESSION_2 = '0c9b5a37-2e41-4f6d-9a08-7b3e1c5d9f20';
-/** Three more, so the list is six long. */
 const MORE_SESSIONS: [string, string, number, boolean][] = [
   ['d3e8f1a2-7c64-4b19-8e5d-2a9f0b6c1e47', 'web-app', 7, false],
   ['9a1f6c3b-0e2d-4d7a-b5c8-3f4e2a1b9c06', 'ledger-export', 10, true],
@@ -66,7 +38,6 @@ interface World {
 
 let world: World;
 
-/** Claude Code's plugin registry in the scratch HOME: which plugin version is installed. */
 function writePluginRegistry(root: string, folder: string, version: string): void {
   mkdirSync(folder, { recursive: true });
   writeFileSync(
@@ -84,7 +55,6 @@ function registry(): { port: number; token: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** One Claude Code session's connection, as the mod runs it: what it loaded, and whether a turn runs. */
 class Connection {
   private stopped = false;
   private loop: Promise<void>;
@@ -137,7 +107,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Nothing in the page scrolls sideways (the 320 px floor and a phone). */
 async function noOverflow(page: Page): Promise<void> {
   const wide = await page.evaluate(() => {
     const out: string[] = [];
@@ -159,7 +128,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-restart-e2e-');
   const dataDir = join(root, 'data');
-  // Claude Code's plugin registry, in the scratch HOME: plugin 0.28.25 installed.
   const pluginFolder = (version: string) => join(root, '.claude', 'plugins', 'cache', 'plannotator', 'plannotator', version);
   writePluginRegistry(root, pluginFolder('0.28.25'), '0.28.25');
   const env = {
@@ -290,7 +258,6 @@ test('the sidebar: "Reload Claude Code 6" opens Settings → Agents: the lead, s
 
   await sessions.getByRole('button', { name: 'Still listed after reloading?' }).click();
   await expect(restartButtons).toHaveCount(6);
-  // Two billing-api sessions: each Copy restart names when its session started, so they are told apart.
   await expect(sessions.getByRole('button', { name: 'Copy restart: the command that restarts the billing-api session started 9:14 AM' })).toBeVisible();
   await sessions.getByRole('button', { name: 'Copy restart: the command that restarts the billing-api session started 9:14 AM' }).click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`cd ~/code/billing-api && claude --resume ${BILLING_SESSION}`);
@@ -311,7 +278,6 @@ test('a phone at 390 px: the line, its fold, and Settings → Agents; nothing ov
     await expect(note).toBeVisible();
     await note.scrollIntoViewIfNeeded();
     await noOverflow(page);
-    // A tap at the lower edge of the lead's Copy copies (the fold's toggle below never takes it).
     await page.evaluate(() => navigator.clipboard.writeText(''));
     const copyBox = (await note.locator('[data-reload-lead] [data-restart-copy]').boundingBox())!;
     await page.touchscreen.tap(copyBox.x + copyBox.width / 2, copyBox.y + copyBox.height - 1);
@@ -346,8 +312,6 @@ test('a phone at 390 px: the line, its fold, and Settings → Agents; nothing ov
 });
 
 test('the installed plugin behind this Inbox: the update command leads, then /reload-plugins', async () => {
-  // "Behind this Inbox" needs a release build (CI compiles 0.0.0-dev, which never judges a plugin behind);
-  // the DOM test restartWarning.test.tsx covers this variant on an Inbox at 0.28.25 either way.
   const version = spawnSync(binary, ['--version'], { env: { ...process.env, HOME: world.root }, encoding: 'utf8' }).stdout.trim().split(' ').pop() ?? '';
   test.skip(!/^\d+\.\d+\.\d+$/.test(version), `the binary is ${version || 'unknown'}, not a release`);
   const { page } = world;
@@ -383,7 +347,6 @@ test('the row goes away by itself once the sessions run the installed plugin', a
   await page.goto(world.url);
   await expect(page.locator('[data-restart-sidebar]')).toBeVisible();
   for (const connection of world.connections) connection.plugin = CURRENT();
-  // Pushed on the event stream (checked every 5 s), no reload.
   await expect(page.locator('[data-restart-sidebar]')).toHaveCount(0, { timeout: 20_000 });
   expect(world.errors).toEqual([]);
 });

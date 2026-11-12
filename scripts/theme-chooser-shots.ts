@@ -1,20 +1,3 @@
-/**
- * Retake the "themes" dialog's pictures (packages/inbox/assets/theme-chooser/*.webp; the dialog:
- * packages/inbox/components/ThemeChooser.tsx). Not a test. One command, after `bun run build:hook`:
- *
- *   bun scripts/theme-chooser-shots.ts [--out <folder>]
- *
- * It starts a scratch Inbox of its own (a temp data dir and a temp HOME, in a child process; never the person's
- * Inbox, and no browser of theirs), writes three made-up threads, and opens the "Theme switch" thread in a headless
- * Chromium (Playwright's) once per picture: Plannotator Original and Modern in light and dark, and Catppuccin dark,
- * Solarized light and Tokyo Night dark for "Choose your own". The theme is set as a person's cookies set it
- * (`plannotator-theme`, `plannotator-light-theme`, `plannotator-dark-theme`).
- *
- *  - d-<theme>-<mode>.webp: a 1000x680 window at 2x, saved 1360x925 (the fan's sheets are 660 px wide, drawn at 2x).
- *  - p-<theme>-<mode>.webp: a 390x560 phone at 3x, saved 600x862 (the deck's sheets are at most 294 px wide).
- *
- * WebP at quality 0.84, encoded by that Chromium (no image tool to install). Look at each picture before committing.
- */
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,19 +19,16 @@ const SUBJECT = 'Theme switch';
 if (process.argv[2] === '--serve') await serve(process.argv[3]!);
 else await shoot();
 
-/** The child: a scratch Inbox with the made-up threads; prints `{ port }` and runs until killed. */
 async function serve(root: string): Promise<void> {
   const { refuseRealDataDir } = await import('../tests/helpers/real-data-dir');
   const { refuseRealHome } = await import('../tests/helpers/inbox-process');
   const dataDir = join(root, 'data');
   refuseRealDataDir(dataDir, 'theme-chooser-shots');
   refuseRealHome(process.env.HOME, 'theme-chooser-shots');
-  // config.json follows the env: the child was started with it, and it is named here too so nothing else can be read.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const { InboxStore } = await import('../packages/shared/inbox/store');
   const { startInboxServer } = await import('../packages/server/inbox');
   const past = '2026-10-01T10:00:00.000Z';
-  // The tour and the first-run asks are settled, so the window opens on the list.
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTour: { version: 2, seen_at: past, skipped_at: past }, inboxNotifications: { dismissed: true }, inboxAgentNotes: { offered: true }, inboxLaunch: { enabled: false } }));
   const store = InboxStore.open(dataDir);
   const projectRoot = join(root, 'plannotator');
@@ -93,7 +73,6 @@ async function shoot(): Promise<void> {
   const { NO_BROWSER } = await import('../tests/helpers/no-browser');
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-theme-chooser-shots-')));
   for (const name of ['data', 'home', 'xdg-config', 'xdg-data', 'codex', 'claude', 'gh']) mkdirSync(join(root, name));
-  // The scratch HOME is the child's from its start: the Inbox reads the home once.
   const child = spawn(process.execPath, [import.meta.path, '--serve', root], {
     cwd: root,
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -147,7 +126,6 @@ async function shoot(): Promise<void> {
         await page.goto(`http://localhost:${port}/`);
         await page.getByText(SUBJECT, { exact: true }).first().click();
         await page.getByText('Ship the theme switch in this release?').first().waitFor();
-        // Everything at its top, the pointer away, the highlighter and the fonts settled.
         await page.mouse.move(2, 2);
         await page.evaluate(() => {
           for (const el of document.querySelectorAll('*')) if (el.scrollTop) el.scrollTop = 0;

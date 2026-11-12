@@ -1,16 +1,3 @@
-/**
- * The Recommended tag's pill stays on the tag. With the Soft card switch on, a choice's
- * Recommended tag is a 999px pill; the rule used to match every `.rounded` inside the
- * choice, so an image in the choice's text became an oval and inline code a pill. Proved
- * in a real browser against the compiled binary: an agent asks two questions through
- * `plannotator inbox mcp` (a picture choice whose text holds a second image and inline
- * code, and a plain choice with inline code), and the image and the code keep ui's 4px
- * radius while each Recommended tag keeps its pill.
- *
- * Screenshots land in PLANNOTATOR_CHOICE_PILL_SHOTS (default .local/proof/choice-pill/).
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { deflateSync } from 'node:zlib';
@@ -24,7 +11,6 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = resolve(process.env.PLANNOTATOR_CHOICE_PILL_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'choice-pill'));
 
-/** A real PNG of `w` x `h` px in one colour. */
 function png(w: number, h: number, rgb: [number, number, number]): Buffer {
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
@@ -134,12 +120,10 @@ test('an image and inline code in a choice keep 4px; the Recommended tag keeps i
   expect(await tile.locator('[data-question-part="choice"] code').evaluate(radius)).toBe('4px');
   expect(await cards.nth(1).locator('[data-question-part="choice"] code').first().evaluate(radius)).toBe('4px');
 
-  // Both Recommended tags: the pill (Soft card on) and the tag's letter spacing, as before.
   for (const tag of [tile.locator('[data-question-tag="rec"]'), cards.nth(1).locator('[data-question-part="choice"] [data-question-tag="rec"]')]) {
     await expect(tag).toHaveText('Recommended');
     expect(await tag.evaluate(radius)).toBe('999px');
   }
-  // The eyebrow's Open tag keeps its own rule's pill, unchanged.
   const open = cards.nth(1).locator('[data-question-tag="open"]');
   await expect(open).toHaveText('Open');
   expect(await open.evaluate(radius)).toBe('999px');

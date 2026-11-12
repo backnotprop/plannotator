@@ -1,31 +1,3 @@
-/**
- * Shape in the real Inbox window (approvals "shape-inbox-placement" and
- * "shape-landing-grid"), against the compiled binary: boards are drawn with
- * the real `plannotator shape update`, threads come from agents on the MCP
- * shim, and Chromium drives the window. Everything runs in a scratch folder
- * (tests/e2e/inbox-shape-seed.ts); no port but the scratch Inbox's is used.
- *
- * What it proves:
- *  - Shape on, 3 or more boards: the sidebar's Shape row sits directly under
- *    Board (under Inbox when Board is off) with the changed count; the grid
- *    lists every board and Find narrows it;
- *  - the thread header's Pebble (a dot while it changed) opens the board over
- *    the thread, the board's Thread tab shows the thread's messages, and its
- *    × ("Close Shape"), Esc or Back closes it;
- *  - a drawing's `#…` link never changes the window's hash, and an https link
- *    opens a new tab (never this one);
- *  - a change waits for the agent until `shape read --notes` takes it, then
- *    the board says so with no reload;
- *  - fewer than 3 boards: no row, and ⌘K's "Shape" group finds a board with
- *    its project and "no thread";
- *  - Shape off: no row, no Pebble, no ⌘K group, `#shapes` goes to the Inbox,
- *    and every `/api/shapes` path is a 404.
- *
- * Shots (light, dark, phone) go to PLANNOTATOR_SHAPE_SHOTS (default
- * /tmp/shape-inbox).
- *
- * Build first: see inbox.spec.ts.
- */
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -53,11 +25,9 @@ async function world(options: Parameters<typeof seedShapeWorld>[0] extends infer
   return w;
 }
 
-/** A window on the world: notifications allowed (no banner), `window.open` recorded instead of opening anything. */
 async function open(browser: Browser, w: ShapeWorld, options: Parameters<Browser['newContext']>[0] = {}): Promise<{ context: BrowserContext; page: Page; errors: string[] }> {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...options });
   await context.grantPermissions(['notifications', 'clipboard-read', 'clipboard-write'], { origin: new URL(w.url).origin });
-  // Nothing leaves the machine: any request off the scratch Inbox fails.
   await context.route((url) => !['127.0.0.1', 'localhost'].includes(url.hostname), (route) => route.abort());
   await context.addInitScript(() => {
     (window as unknown as { __opened: unknown[] }).__opened = [];
@@ -86,7 +56,6 @@ const navOrder = (page: Page) => page.locator('.ib-side .ib-nav').evaluateAll((e
 test('on with 4 boards: the row under Board, the grid, the Pebble, the board over the thread, links kept in, a change delivered', async ({ browser }) => {
   const w = await world({ shape: true, boards: 'many' });
   const { context, page, errors } = await open(browser, w);
-  // The boards' changes ride the Inbox's one event stream: the window opens no second one (Chrome's six per host).
   const ownStreams: string[] = [];
   page.on('request', (request) => {
     if (new URL(request.url()).pathname === '/api/shapes/events') ownStreams.push(request.url());
@@ -97,24 +66,20 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   expect(await navOrder(page)).toEqual(['Inbox', 'Board', 'Shape']);
   await expect(row.locator('.ib-n')).toHaveText('4');
 
-  // The thread's Pebble, with its dot (it changed since the person looked).
   await page.goto(`${w.url}#thread=${w.threads.snooze}`);
   const pebble = page.locator(`[data-shape-pebble="${w.boards.snooze}"]`);
   await expect(pebble).toBeVisible();
   await expect(pebble.locator('.ib-shape-dot')).toBeVisible();
   await shot(page, 'thread-pebble');
 
-  // Opens over the thread; the hash names it.
   await pebble.click();
   const layer = page.locator(`[data-shape-layer="${w.boards.snooze}"]`);
   await expect(layer.getByRole('heading', { name: 'A one-time Snooze announcement' })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`#thread=${w.threads.snooze}&shape=${w.boards.snooze}$`));
   await page.waitForTimeout(2500);
   await shot(page, 'board-over-thread');
-  // Seen: the row's count drops by one.
   await expect(row.locator('.ib-n')).toHaveText('3');
 
-  // A drawing's links: `#…` scrolls inside it and the window's hash stays; https opens a new tab.
   const before = page.url();
   await layer.locator('[data-link="hash"]').click();
   await page.waitForTimeout(200);
@@ -123,7 +88,6 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   expect(page.url()).toBe(before);
   expect(await page.evaluate(() => (window as unknown as { __opened: unknown[][] }).__opened)).toEqual([['https://example.com/notes', '_blank', 'noopener,noreferrer']]);
 
-  // The Thread tab: the thread's own message.
   await layer.getByRole('button', { name: 'Chat' }).click();
   await layer.getByRole('tab', { name: 'Thread' }).click();
   await expect(layer.locator('[data-shape-message]')).toContainText('It shows once, ever, after 2 days of use.');
@@ -131,7 +95,6 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   await shot(page, 'board-thread-tab', 'light');
   await layer.getByRole('button', { name: 'Close panel' }).click();
 
-  // A change waits for the agent until its `shape read --notes` takes it: the board clears it with no reload.
   const noted = await page.request.post(`${w.url}api/shapes/${w.boards.snooze}/notes`, { data: { kind: 'change', v: 1, view: 'picture', part: 'row-1', text: 'Make it Thursday' } });
   expect(noted.status()).toBe(200);
   await expect(layer.locator('.shp-pill.waits')).toHaveText(/1 change waits for the agent/);
@@ -140,7 +103,6 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   expect(read.stdout).toContain('Make it Thursday');
   await expect(layer.locator('.shp-pill.waits')).toHaveCount(0);
 
-  // The board lies over the thread: its × closes it, and so do Esc and Back.
   await layer.getByRole('button', { name: 'Close Shape' }).click();
   await expect(layer).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`#thread=${w.threads.snooze}$`));
@@ -153,7 +115,6 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   await page.goBack();
   await expect(layer).toHaveCount(0);
 
-  // The grid: every board, Find narrows it, a card opens its board over its thread.
   await row.click();
   await expect(page).toHaveURL(/#shapes$/);
   const cards = page.locator('[data-shape-page] .shp-gcard');
@@ -194,7 +155,6 @@ test('fewer than 3 boards: no row, and ⌘K finds a board with its project and "
   await expect(found).toHaveCount(1);
   await expect(found).toContainText('Night mode for the reader');
   await expect(found).toContainText('pando · no thread');
-  // Its small preview is drawn (a thumb with no height drew nothing).
   await expect(found.locator('.shp-thumb-in')).toHaveCount(1);
   await expect(palette.getByText('Shape', { exact: true })).toBeVisible();
   await page.waitForTimeout(600);
@@ -227,7 +187,6 @@ test('Shape off: no row, no Pebble, no ⌘K group, #shapes goes to the Inbox, ev
   expect(shapeReads).toEqual([]);
   for (const path of ['api/shapes', `api/shapes/${w.boards.snooze}`, 'api/shapes/events']) expect((await page.request.get(`${w.url}${path}`)).status()).toBe(404);
   expect((await page.request.post(`${w.url}api/shapes/${w.boards.snooze}/notes`, { data: { kind: 'change', v: 1, view: 'picture', text: 'x' } })).status()).toBe(404);
-  // The agent's side is off too.
   const cli = w.shape(['--help']);
   expect(cli.status).toBe(1);
   expect(cli.stdout).toBe('');

@@ -1,27 +1,12 @@
-/**
- * A fake `codex` for voice dictation (packages/server/inbox-voice.ts): a scratch `bin/codex` that speaks just enough
- * of `codex app-server` over stdio. It answers `initialize`, `account/read` and `getAuthStatus` from `state.json`
- * (which a test changes between calls) and logs every start, call and stop to `calls.jsonl`. The real Codex is never
- * run, and nothing reads the person's `~/.codex`.
- *
- * Runs under Bun and node (the Inbox's world for the e2e spec starts it through the same PATH). POSIX only: a `.cmd`
- * shim is not worth a fake.
- */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface FakeCodexState {
-  /** `account/read`'s `account`; null is signed out. */
   account?: Record<string, unknown> | null;
-  /** `getAuthStatus`'s `authMethod`. */
   authMethod?: string | null;
-  /** The token before a refresh. */
   token?: string | null;
-  /** The token after `refreshToken: true`. */
   refreshedToken?: string | null;
-  /** This method gets a JSON-RPC error. */
   failMethod?: string;
-  /** Exit at once, as a Codex that cannot start does. */
   crash?: boolean;
 }
 
@@ -36,7 +21,6 @@ export interface FakeCodex {
   calls(): FakeCodexCall[];
   methods(): string[];
   starts(): number;
-  /** Every start has logged its stop. */
   allStopped(): boolean;
 }
 

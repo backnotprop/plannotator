@@ -1,11 +1,3 @@
-/**
- * "These might help" on a phone, with its keyboard up (the visual viewport
- * shrinks by the keyboard, as on an iPhone): the line lands in room kept for it,
- * so Send does not move, and Send and Cancel stay above the keyboard.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-feedback-search-phone-webkit.spec.ts`.
- */
 import { expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';

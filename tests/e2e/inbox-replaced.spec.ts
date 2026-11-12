@@ -1,21 +1,3 @@
-/**
- * Replaced questions (design record, not in this repo; direction A "Quiet"),
- * proved in a real browser against the compiled binary. Claude Code asks two
- * questions through `plannotator inbox mcp` (scripts/inbox-sim.ts); the
- * person picks on question 1 and starts a reply; the agent then replaces
- * question 1 (`supersedes`). The window shows the notice and the struck
- * chip, the old card goes Quiet (Replaced, the row, "Your pick … Not sent",
- * no controls), the links jump between the cards, Send stops once on the
- * stale guard (nothing sent, Esc keeps editing), and the next Send carries
- * the words only: the agent's reply never names the replaced pick. A second
- * thread is withdrawn whole: the held list says "1 new" and, shown, the row
- * leaves Stopped on you; its cards read "No longer applies".
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs light and dark at 1440 by 900 land in .local/proof/replaced/ (or
- * PLANNOTATOR_E2E_PROOF_DIR/replaced).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -105,7 +87,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-replaced-e2e-');
   const dataDir = join(root, 'data');
-  // Nothing here may reach the real tailscale CLI: a trap fails loudly first on PATH.
   const trap = join(root, 'bin');
   mkdirSync(trap);
   writeFileSync(join(trap, 'tailscale'), "#!/bin/sh\necho 'inbox-replaced.spec: tailscale must not run' >&2\nexit 97\n");
@@ -133,7 +114,6 @@ test.afterAll(async () => {
     await world.claude.close().catch(() => {});
     await world.context.close();
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -172,7 +152,6 @@ test('the agent replaces question 1 while the person types: the notice, the stru
   await expect(old.getByRole('button', { name: 'Skip' })).toHaveCount(0);
   const fresh = card(page, String(sent.message_id), String(sent.questions[0].key));
   await expect(fresh.locator('[data-replaces-line]')).toHaveText('Replaces Which way should the worker go on a Stripe 409?↑. Your pick there was not sent.');
-  // The derived subject follows the replacement.
   await expect(page.locator('h2.ib-subject')).toHaveText('How many times should the jobs queue retry a Stripe 409 before it dead-letters the job?');
   await old.scrollIntoViewIfNeeded();
   await shot('2-replaced-while-typing');
@@ -220,13 +199,10 @@ test('the guard shows once per replacement: the next Send carries the words only
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
   await expect(page.locator('.ib-delivered')).toContainText('Saved for Claude Code');
   await claude.nextReply(first.thread_id, 10);
-  // The Send also skips the questions it left open, each on the reply to its
-  // own message; the words ride the last reply. No reply carries the replaced pick.
   const thread = await claude.readThread(first.thread_id);
   const replies = (thread.messages as { author: { kind: string }; body: string }[]).filter((m) => m.author.kind === 'person');
   expect(replies.at(-1)!.body).toContain(WORDS);
   for (const r of replies) expect(r.body).not.toContain(PICK);
-  // The replaced card still shows the pick, never sent.
   await expect(card(page, first.message_id, first.questions[0]!.key).locator('[data-unsent-pick]')).toContainText('Not sent');
 });
 
@@ -237,7 +213,6 @@ test('a whole message withdrawn: the held list says "1 new"; shown, the row leav
   const row = page.locator(`.ib-lbody [data-thread-id="${second.thread_id}"]`);
   await page.locator('[data-inbox-notice]').click().catch(() => {});
   await expect(row).toHaveAttribute('data-section', 'stopped');
-  // Looked at once, so the withdrawal is the only news.
   await row.click();
   await expect(page.locator('section.ib-pane h2.ib-subject')).toHaveText('Which way should the worker go on a Stripe 409?');
   await page.keyboard.press('Escape');
@@ -255,14 +230,12 @@ test('a whole message withdrawn: the held list says "1 new"; shown, the row leav
   await shot('6-withdrawn-shown');
   await row.click();
   const pane = page.locator('section.ib-pane');
-  // The person looked at the asking message before the withdrawal, so it opens folded to a line; open it.
   const asking = pane.locator(`[data-message-article="${second.message_id}"]`);
   await expect(asking).toHaveAttribute('data-folded', '');
   await asking.locator('[data-fold-head]').click();
   const tags = pane.locator('[data-replaced-tag]');
   await expect(tags).toHaveText(['No longer applies', 'No longer applies']);
   await expect(pane.locator('[data-replaced-row]').first()).toContainText(/Claude Code said at \d{1,2}:\d{2} [AP]M that this no longer applies\. Read why/);
-  // The subject never followed a withdrawal.
   await expect(pane.locator('h2.ib-subject')).toHaveText('Which way should the worker go on a Stripe 409?');
   await pane.locator('[data-replaced-row]').first().scrollIntoViewIfNeeded();
   await shot('7-no-longer-applies');

@@ -1,30 +1,3 @@
-/**
- * A phone's keyboard never covers a full-screen box (the owner's iPhone, iOS 26
- * Safari: "I couldn't really see the input box" while replying from the image
- * viewer). Proved at 390 by 844 in WebKit and in Chromium against the compiled
- * binary, under a temp PLANNOTATOR_DATA_DIR (PLANNOTATOR_INBOX_CONNECT=0, no
- * browser, a tailscale trap first on PATH).
- *
- * The keyboard is simulated the way the window sees it: the visual viewport's
- * height drops by 336 px and it fires `resize` (phone.ts trackKeyboard then
- * sets `--ib-vvh`). Each test focuses a field, raises the keyboard, and
- * requires the field and its send control to end at or above the visual
- * viewport's bottom:
- *
- * - an image in full screen: its composer's Comment and Reply (the image shrinks
- *   above the card, the toolbar stays on screen);
- * - an HTML page in full screen: its Reply;
- * - the reply's comments list (the sheet from the bottom edge): editing a comment;
- * - Decision mode's full-screen card: its note;
- * - the Board's New card dialog, full screen on a phone: its notes and Add;
- * - the Feedback sheet: its message and Send.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-fullscreen-keyboard.spec.ts`.
- * PNGs (a grey box drawn where the keyboard is) land in PLANNOTATOR_E2E_SHOTS_DIR
- * (default .local/proof/fullscreen-keyboard).
- */
-
 import { chromium, expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -37,7 +10,6 @@ const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/fullscreen-keyboard'));
 
-/** An iPhone's keyboard with its suggestion bar, in CSS px. */
 const KEYBOARD = 336;
 const VIEWPORT = { width: 390, height: 844 };
 
@@ -50,7 +22,6 @@ h1{font:700 56px/1.05 Georgia,serif;margin:0 0 26px}footer{position:fixed;left:0
 </style><header>Fernway</header><main><div><h1>Almost yours.</h1><div class="card">Shipping address</div></div><div class="card">Order summary · $104.00</div></main>
 <footer>Continue to review →</footer>`;
 
-// Two questions: Decision mode's way in ("Decide these 2") shows from two.
 const BODY = [
   'The checkout on a phone, as a screenshot and as the page itself.',
   '',
@@ -88,9 +59,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(home);
   mkdirSync(trap);
   mkdirSync(dataDir, { recursive: true });
-  // Decision mode (an experiment) and the Board (off by default) on, and the Board's first-visit dialog already seen, in this Inbox's own config.
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true }, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
-  // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-fullscreen-keyboard: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
   const env = {
@@ -98,7 +67,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     HOME: home,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    // The Feedback sheet is opened (never sent): its Send, if ever pressed, goes nowhere real, never the live Worker.
     PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
@@ -139,10 +107,6 @@ test.afterAll(async () => {
 
 const fileUrl = (name: string) => `${world.url}#thread=${world.threadId}&file=${world.ids[name]}&view=full`;
 
-/**
- * Raises the simulated keyboard: the visual viewport loses its bottom KEYBOARD px and says so, as iOS Safari's
- * does (the layout viewport keeps its height). Waits for the window to follow (`--ib-vvh`).
- */
 async function keyboardUp(page: Page): Promise<number> {
   await page.evaluate((keyboard) => {
     const vv = window.visualViewport!;
@@ -151,15 +115,12 @@ async function keyboardUp(page: Page): Promise<number> {
   }, KEYBOARD);
   const visible = VIEWPORT.height - KEYBOARD;
   await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--ib-vvh'))).toBe(`${visible}px`);
-  // The layout follows on the next frame.
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   return visible;
 }
 
-/** The visual viewport's bottom edge, in layout coordinates (where the keyboard starts). */
 const keyboardTop = (page: Page) => page.evaluate(() => window.visualViewport!.offsetTop + window.visualViewport!.height);
 
-/** Every part ends at or above the keyboard and starts on screen. Soft: one run names every part the keyboard covers. */
 async function clearOfKeyboard(page: Page, parts: Record<string, Locator>): Promise<void> {
   const top = await keyboardTop(page);
   for (const [name, part] of Object.entries(parts)) {
@@ -170,7 +131,6 @@ async function clearOfKeyboard(page: Page, parts: Record<string, Locator>): Prom
   }
 }
 
-/** A grey box where the keyboard is, for the screenshot only; then gone again. */
 async function shot(page: Page, tag: string, name: string): Promise<void> {
   for (const scheme of ['dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
@@ -194,7 +154,6 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
     let contexts: BrowserContext[] = [];
     const tag = phone.browserName;
     test.beforeAll(async () => {
-      // The config's launch flags are Chromium's; WebKit launches with none.
       browser = phone.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
     });
     test.afterEach(async () => {
@@ -210,11 +169,9 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
       return context.newPage();
     }
 
-    // First, while the thread's foot holds no comment or draft that could rearrange it.
     test("Decision mode's card: its note stays above the keyboard", async () => {
       const page = await open();
       await page.goto(`${world.url}#thread=${world.threadId}`);
-      // The thread's open-questions list, then "Decide these 2" (the foot may still be settling its fit: try again).
       const decide = page.locator('[data-thread-decide]');
       await expect(async () => {
         if (!(await decide.isVisible())) await page.locator('section.ib-pane [data-open-questions]').first().click({ timeout: 2_000 });
@@ -237,7 +194,6 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
       await page.goto(fileUrl('checkout.png'));
       const card = page.locator('[data-fcomp]');
       await expect(card).toBeVisible();
-      // The card opens on Reply while a reply draft waits (an earlier pass's): pick Comment.
       await card.getByRole('radio', { name: 'Comment' }).click();
       const comment = card.getByRole('textbox', { name: 'Comment on checkout.png' });
       await comment.focus();
@@ -250,10 +206,8 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
         'the toolbar': page.locator('[data-full-view-bar]'),
         'the image': page.locator('.ib-imgstage'),
       });
-      // Directly above the keyboard, not somewhere up the screen.
       const cardBox = (await card.boundingBox())!;
       expect.soft(top - (cardBox.y + cardBox.height), 'the card sits on the keyboard').toBeLessThanOrEqual(24);
-      // The toolbar sits above the card, never under it.
       const bar = (await page.locator('[data-full-view-bar]').boundingBox())!;
       expect.soft(bar.y + bar.height, 'the toolbar ends above the card').toBeLessThanOrEqual(cardBox.y + 1);
 
@@ -268,18 +222,15 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
         'the toolbar': page.locator('[data-full-view-bar]'),
         'the image': page.locator('.ib-imgstage'),
       });
-      // Leave no reply draft behind for the later tests.
       await reply.fill('');
     });
 
     test('an HTML page in full screen: its Reply sits on the keyboard', async () => {
       const page = await open();
       await page.goto(fileUrl('checkout.html'));
-      // On a phone the page opens clear, the reply in its pill (approval "inbox-html-attachments-phone").
       await page.locator('[data-fcomp-pill]').click();
       const card = page.locator('[data-fcomp]');
       await expect(card).toBeVisible();
-      // The card opens on Comment unless a reply draft waits, as an image's does.
       await card.locator('[data-fcomp-mode="reply"]').click();
       const reply = card.locator('[data-fcomp-field] textarea');
       await reply.focus();
@@ -290,7 +241,6 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
 
     test("the reply's comments list: editing a comment stays above the keyboard", async () => {
       const page = await open();
-      // A comment on the image to edit (the composer's Comment).
       await page.goto(fileUrl('checkout.png'));
       const card = page.locator('[data-fcomp]');
       await expect(card).toBeVisible();
@@ -298,7 +248,6 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
       await card.getByRole('textbox', { name: 'Comment on checkout.png' }).fill(`Crop the header (${tag})`);
       await card.locator('.ib-csave').click();
       await page.goto(`${world.url}#thread=${world.threadId}`);
-      // A phone's reply box: its summary line over the row, then (with questions too) the sheet's Review comments.
       const line = page.locator('section.ib-pane .ib-rbox [data-reply-line] [data-foot-summary]');
       if (!(await line.isVisible())) await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /Reply|Edit draft/ }).first().click();
       await line.click();

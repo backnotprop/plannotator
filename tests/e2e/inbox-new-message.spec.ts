@@ -1,24 +1,3 @@
-/**
- * New message (PLAN step 8, the record's 5.1 and 5.2), proved in a real
- * browser against the compiled binary. The in-thread New message button is
- * off since 👍 Looks good (approval "inbox-acknowledge", 2026-10-15), so the
- * message is sent through its route, `POST /api/inbox/threads/:id/message`,
- * and the window still draws it: "to <host>", the queued line, then
- * "Delivered to <host>". The live sessions come from the route the button
- * read (`GET /api/inbox/threads/:id/sessions`). Nothing is mocked: the binary runs
- * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR and HOME,
- * a Pi agent writes through `plannotator inbox mcp` with the MCP SDK's stdio
- * client (scripts/inbox-sim.ts), and Chromium drives the window. The agent
- * connections are the bridge's real doors driven as a connection drives them
- * (the bearer token from inbox.json, a long-poll that says where the session
- * works and whether a turn runs, `delivered` once the turn is in); the Claude
- * Code mod's own code doing the same is apps/hook/hooks/mod/inbox.test.ts.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs of every proved state, light and dark at 1440 by 900, land in
- * .local/proof/new-message/ with a contact sheet.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -62,12 +41,6 @@ function registry(): { pid: number; port: number; token: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/**
- * One agent session's connection, as the mod, the Pi extension and the
- * OpenCode plugin run it: it long-polls for what the person sent it, saying
- * where it works and whether a turn runs, and is handed `message` commands.
- * `deliver` is the turn going in.
- */
 class Connection {
   readonly commands: InboxReplyCommand[] = [];
   private stopped = false;
@@ -155,7 +128,6 @@ async function threadMessages(): Promise<{ id: string; author: { kind: string };
 
 test.describe.configure({ mode: 'serial' });
 
-/** A window write, as the page sends it (no Origin from the test runner: the same-origin guard passes it). */
 async function windowPost(path: string, body: Record<string, unknown>): Promise<{ status: number; json: Record<string, any> }> {
   const response = await world.page.request.post(`${world.url.replace(/\/$/, '')}${path}`, { data: body });
   return { status: response.status(), json: (await response.json()) as Record<string, any> };
@@ -170,7 +142,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
-  // HOME is the temp root, so the project reads as ~/src/ledger, as the record draws it.
   const root = inboxScratch('plannotator-inbox-new-message-e2e-');
   const dataDir = join(root, 'data');
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
@@ -211,7 +182,6 @@ test.afterAll(async () => {
         .join('\n')}`,
     );
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -221,7 +191,6 @@ test('one live session (5.1): a message sent through the route is drawn "to Pi",
   await page.goto(`${world.url}#thread=${world.threadId}`);
   const pane = page.locator('section.ib-pane');
   await expect(pane.getByRole('heading', { name: SUBJECT })).toBeVisible();
-  // The button is gone from the thread; its route stays.
   await expect(pane.locator('[data-new-message]')).toHaveCount(0);
   const startedAt = Date.now() - 60 * 60_000;
   const writer = await connect(world.writer, startedAt);
@@ -230,7 +199,6 @@ test('one live session (5.1): a message sent through the route is drawn "to Pi",
   const sent = await windowPost(`/api/inbox/threads/${world.threadId}/message`, { session: world.writer, body: words, idempotency_key: 'nm-1' });
   expect(sent.status).toBe(200);
 
-  // The person's message in the thread, addressed to that session, waiting for its turn.
   const mine = pane.locator('article.ib-message[data-author="person"]');
   await expect(mine).toHaveCount(1);
   await expect(mine.locator('.ib-who')).toHaveText('You');
@@ -238,8 +206,6 @@ test('one live session (5.1): a message sent through the route is drawn "to Pi",
   await expect(mine.locator('.ib-to')).toHaveText('to Pi');
   await expect(mine).toContainText(words);
   const command = await waitFor('the message command', () => writer.commands[0]);
-  // The writer started this thread, so it already has the subject (which goes stale): a New message to it is titled
-  // with the thread's short name, or `a message` when the thread has none (this one has none), never the subject.
   expect(command).toMatchObject({ type: 'message', reply_to: null, thread_id: world.threadId, subject: null, body: words });
   const wake = inboxWakeText(command);
   expect(wake.split('\n').slice(0, 2)).toEqual([`Plannotator Inbox: a message (${command.id})`, INBOX_MESSAGE_INSTRUCTION]);
@@ -247,12 +213,10 @@ test('one live session (5.1): a message sent through the route is drawn "to Pi",
   expect(wake.endsWith(`\n\n${words}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
   const messages = await threadMessages();
   expect(messages.at(-1)).toMatchObject({ id: command.id, author: { kind: 'person' }, to: { host: 'pi', session: world.writer } });
-  // The session's connection polls idle: it takes it within seconds.
   await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Pi…');
 
   await writer.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
-  // Handed out once: a delivered message is never handed out again.
   await page.waitForTimeout(2_500);
   expect(writer.commands).toHaveLength(1);
   await shot('5.1-delivered');
@@ -280,7 +244,6 @@ test('two live sessions (5.2): the list puts the writer first; the picked sessio
   expect(writer.commands).toHaveLength(1);
   expect((await threadMessages()).at(-1)).toMatchObject({ id: command.id, to: { host: 'pi', session: 'pi-session-two' } });
 
-  // Its turn ends, then the turn goes in.
   await second.setBusy(false);
   await second.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
@@ -291,7 +254,6 @@ test('a session that stops polling leaves the list, and a message to it is refus
   const { page } = world;
   for (const connection of world.connections) await connection.stop();
   world.connections = [];
-  // Live means a poll within 30 s.
   await page.waitForTimeout(31_000);
   expect(await liveSessions()).toEqual([]);
   const refused = await windowPost(`/api/inbox/threads/${world.threadId}/message`, { session: world.writer, body: 'Anyone there?', idempotency_key: 'nm-3' });

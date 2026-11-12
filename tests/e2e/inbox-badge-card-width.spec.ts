@@ -1,22 +1,3 @@
-/**
- * The list badge's hover card sizes to its content (owner, 2026-10-31: "The
- * holds up box needs to be wider. So that it doesn't line break."). It was a
- * fixed 296 px, so labels like "The channel, and with it shapes 2 and 3" wrapped
- * and the thread's name was cut at 130 px. Now it is as wide as its longest
- * line, between 296 px and 460 px, never past the viewport less its 16 px
- * gutter; only a line past the cap wraps.
- *
- *  - Three ~45-character items each sit on one line at desktop width, and the
- *    thread's name in the header gets room past the old 130 px.
- *  - A thread name longer than the room still ends in an ellipsis, with the
- *    full name in its title; the card stays inside the window.
- *  - A very long label wraps once the card is at its cap, never wider.
- *  - A narrow window (390 px) keeps the card inside the viewport.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * Plain full-window PNGs land in PLANNOTATOR_BADGE_CARD_SHOTS when it is set.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -49,11 +30,6 @@ function question(text: string, holds?: string): string {
   return [':::question', text, ...(holds ? [`Holds up: ${holds}.`] : []), '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
 }
 
-/**
- * Open a row's card: on hover of a wide row's words (full-width mode, `WIDE_ROW_WAIT_WORDS`), else by the row's
- * keyboard focus. A wide row's filled question mark sits in its open counts, which the row's hover action covers, so
- * a pointer does not reach it there (approval "inbox-question-mark").
- */
 async function hoverBadge(page: Page, threadId: string): Promise<void> {
   await page.mouse.move(5, 5);
   await expect(card(page)).toHaveCount(0);
@@ -73,7 +49,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(shots, `${process.env.PLANNOTATOR_BADGE_CARD_SHOT_PREFIX ?? 'after'}-${name}.png`) });
 }
 
-/** What the open card looks like on screen: its box, and each row's lines. */
 async function measure(page: Page) {
   return card(page).evaluate((el) => {
     const r = el.getBoundingClientRect();
@@ -176,8 +151,6 @@ test('a window narrower than the card has room for: the card shifts in and stays
 });
 
 test('a narrow window (390): the card is capped to the viewport less its gutter', async ({ browser }) => {
-  // The phone layout draws the marks only and opens no card, so the cap is proved on the card's own CSS: a card
-  // with the longest line, drawn with the real classes, at 390 px.
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'light', reducedMotion: 'reduce' });
   try {
     const page = await context.newPage();

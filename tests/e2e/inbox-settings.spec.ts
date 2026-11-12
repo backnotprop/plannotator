@@ -1,24 +1,3 @@
-/**
- * Settings in sections (design of record `.product/approved/inbox-settings-tabs/`,
- * approved 2026-10-12), in a real browser against the compiled binary under
- * a temp PLANNOTATOR_DATA_DIR and HOME, with phones on and `tailscale` a
- * script on PATH (fake-tailscale.ts), so nothing reaches a real tailnet.
- *
- * Desktop (Chromium, 1440 by 900): the sidebar's Settings opens General on a
- * focused page (the Inbox sidebar slides away, its cookie unwritten); the
- * section nav is a list of links with aria-current, keyboard-followable,
- * focus on the new section's heading; every section has its address and a
- * deep link opens it; Back and Forward move between sections; "← Inbox"
- * returns to the thread the person was in, with the sidebar back; an old
- * `#settings` link still lands in Settings.
- *
- * Phone (WebKit, iPhone 15): `#settings` is the list of sections; a section
- * opens with "‹ Settings", whose Back is the browser's; Pair a phone starts
- * at step 1 and shows the code once Tailscale is on.
- *
- * PNGs, light and dark, land in .local/proof/settings/.
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -64,7 +43,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = { PATH: `${ts}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_INBOX_PHONES: '1' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
-  // One agent thread, so "← Inbox" has somewhere to return to.
   const project = join(root, 'billing');
   mkdirSync(project, { recursive: true });
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code', cwd: project });
@@ -106,7 +84,6 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
   await expect(nav.getByRole('link', { name: 'General' })).toHaveAttribute('aria-current', 'page');
   await shot(page, 'general');
 
-  // The keyboard: Tab to a section link, Enter follows it, focus lands on the new heading.
   await nav.getByRole('link', { name: 'General' }).focus();
   await page.keyboard.press('Tab');
   await expect(nav.getByRole('link', { name: 'Rows' })).toBeFocused();
@@ -131,7 +108,6 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
     await shot(page, name.toLowerCase());
   }
 
-  // Back and Forward walk the sections; ← Inbox ignores them and returns to the thread.
   await page.goBack();
   await expect(page).toHaveURL(/#settings\/storage$/);
   await page.goForward();
@@ -141,7 +117,6 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
   await expect.poll(() => sidebarState(page)).toBe('expanded');
   expect(await sidebarCookie(context)).toBe(cookieBefore);
 
-  // Deep links, and an old `#settings` link.
   await page.goto('about:blank');
   await page.goto(`${world.url}#settings/devices/pair`);
   await expect(page.locator('[data-pair-flow][data-pair-step="reach"]')).toBeVisible();
@@ -152,7 +127,6 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
 });
 
 test('iPhone (WebKit): the list of sections, a section with ‹ Settings, and Pair a phone from step 1 to the code', async () => {
-  // The config's launch args are Chromium-only; Linux WebKit refuses them (inbox-mobile.spec.ts does the same).
   const phoneBrowser = await webkit.launch({ args: [] });
   try {
     const context = await phoneBrowser.newContext({ ...devices['iPhone 15'] });

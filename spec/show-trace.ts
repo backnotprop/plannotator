@@ -1,10 +1,3 @@
-/**
- * Print a Quint ITF trace of spec/update-lifecycle.qnt as plain steps: the
- * action, the time, and only the fields that changed.
- *
- *   quint run ... --out-itf /tmp/trace.itf.json
- *   bun spec/show-trace.ts /tmp/trace.itf.json
- */
 import { readFileSync } from "node:fs";
 
 type Json = unknown;

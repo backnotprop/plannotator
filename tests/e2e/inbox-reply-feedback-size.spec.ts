@@ -1,23 +1,3 @@
-/**
- * The feedback a Send wrote after the person's words reads as part of their
- * reply, not as page headings (replyFeedback.ts; the owner's ask, 2026-10-31:
- * "Is there a reason the inline comments appear like so big? Like a header?
- * … A little smaller would be nice."). Proved against the compiled binary:
- * Claude Code sends a message with its own `#` and `##` headings, a picture
- * and a plan attached, then a question; the person sends two replies, one
- * with comments on the agent's message and on the files, one answering the
- * question with comments on a file (the sent reply drawn as words, answers,
- * then the rest). In both, "Feedback on …", each file's or message's name
- * and each "Feedback on: …" draw no larger than the reply's own text, and
- * the file's name still links to the file; the agent's own headings still
- * draw large, and the text the agent got is unchanged. Desktop and a phone's
- * width, light and dark.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * Full-window PNGs (1440 by 900 at 2x, light and dark, and a 390 px phone)
- * land in .local/proof/reply-feedback-size/ (or PLANNOTATOR_E2E_PROOF_DIR/reply-feedback-size).
- */
-
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,7 +21,6 @@ const NOTES = [
   'The retry button moved under the total, and the total is bold.',
 ].join('\n');
 
-/** The window's export (attachments.ts `attachmentFeedback`), as a Send writes it: comments on a message, then on the files. */
 const feedbackFor = (messageId: string) =>
   [
     '# Feedback on your messages',
@@ -95,7 +74,6 @@ const FILE_ONLY = [
 
 const px = (locator: Locator) => locator.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
 
-/** Each heading of the reply's feedback draws no larger than the reply's own text; the file names stay links. */
 async function expectTextSized(reply: Locator, label: string) {
   const words = await px(reply.locator('p').first());
   const title = reply.locator('h1', { hasText: label });
@@ -177,19 +155,16 @@ test('the feedback in a sent reply reads at text size; an agent message keeps it
       questions: [{ key: q.key, revision: 0, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ['Yes'] } }],
       feedback: FILE_ONLY,
     });
-    // What the agent gets is the feedback as written: the window's change is display only.
     const thread = (await (await fetch(`${url}/api/inbox/threads/${notes.thread_id}`)).json()) as { thread: { messages: { id: string; body: string }[] } };
     const bodyOf = (id: string) => thread.thread.messages.find((m) => m.id === id)!.body;
     expect(bodyOf(first.reply.id)).toContain(feedbackFor(notes.message_id));
     expect(bodyOf(second.reply.id)).toContain(FILE_ONLY);
 
-    // Both widths first, their shots taken before any check, so a failing run still leaves its pictures.
     const pages: Page[] = [];
     for (const [context, name] of [[desktop, 'desktop'], [phone, 'phone']] as const) {
       const page = await context.newPage();
       pages.push(page);
       await page.goto(`${url}/#thread=${notes.thread_id}`);
-      // Read messages fold to lines: open them all (on a phone the button may sit in a menu, so open each line).
       await expect(page.locator(`[data-message-article="${second.reply.id}"]`)).toBeVisible();
       const expand = page.getByRole('button', { name: 'Expand all messages' });
       if (await expand.isVisible()) await expand.click();
@@ -208,14 +183,11 @@ test('the feedback in a sent reply reads at text size; an agent message keeps it
     for (const page of pages) {
       const message = (id: string) => page.locator(`.ib-body[data-message-id="${id}"]`);
       const reply = message(first.reply.id);
-      // Comments on the agent's message, and on the files (a plain reply).
       await expectTextSized(reply, 'Feedback on your messages');
       await expectTextSized(reply, 'Feedback on the attached files');
       await expect(reply.locator('h2', { hasText: 'design/checkout.png' }).getByRole('link')).toBeVisible();
-      // A reply that answered a question: words, the answers list, then the feedback.
       await expectTextSized(message(second.reply.id), 'Feedback on the attached files');
 
-      // The agent's own headings still draw as headings.
       const agentBody = message(notes.message_id);
       const agentText = await px(agentBody.locator('p').first());
       expect(await px(agentBody.locator('h1', { hasText: 'Checkout redesign' }))).toBeGreaterThan(agentText * 1.3);

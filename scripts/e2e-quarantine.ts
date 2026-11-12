@@ -1,16 +1,3 @@
-/**
- * Runs the quarantined browser tests locally (tests/e2e/quarantine.json):
- * CI leaves them out, so this is where a fix is proved.
- *
- *   bun run test:e2e:quarantine                  # every spec that holds one
- *   bun run test:e2e:quarantine --repeat-each 5  # extra args go to Playwright
- *
- * It runs each such spec whole, in its file's order: the specs are serial and
- * share one Inbox, so a test alone would miss the state the tests before it
- * leave. `CI` is dropped from the env, so nothing is left out. Build the binary
- * first, as for `bun run test:e2e:inbox` (see tests/e2e/inbox.spec.ts). The
- * specs sandbox themselves (temp data dir and HOME, no browser opened).
- */
 import { resolve } from 'node:path';
 import { quarantineEntries } from '../tests/e2e/quarantine';
 

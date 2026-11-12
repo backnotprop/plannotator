@@ -1,23 +1,3 @@
-/**
- * A local fake of the Bitbucket Cloud REST API 2.0, for tests and the
- * headless UI check. It serves the recorded responses in this directory
- * (captured from api.bitbucket.org against a throwaway workspace, then
- * anonymized: workspace "ws", repo "repo", user "Ada Reviewer") and records
- * every request it receives.
- *
- * It models one repository `ws/repo` with PR #1 (`feature/smoke` → `main`):
- * the PR's `/diff` and `/diffstat` answer with the same redirect Bitbucket
- * sends, POSTed comments are appended to the comment list, and approve /
- * request-changes flip the caller's participant state, so a test can post a
- * review and read it back.
- *
- * Credentials are checked (Basic email:token, or Bearer token) but never
- * recorded: each request records only which scheme it used.
- *
- * Run standalone: `bun tests/test-fixtures/bitbucket/fake-bitbucket.ts [port]`
- * (expects `PLANNOTATOR_BITBUCKET_EMAIL` / `PLANNOTATOR_BITBUCKET_TOKEN`).
- */
-
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -28,7 +8,6 @@ const REPO_PREFIX = "/2.0/repositories/ws/repo";
 
 export interface RecordedRequest {
   method: string;
-  /** Path plus query, relative to the server origin. */
   path: string;
   auth: "basic" | "bearer" | "none" | "invalid";
   body?: unknown;
@@ -38,20 +17,14 @@ export interface FakeBitbucketOptions {
   email?: string;
   token: string;
   port?: number;
-  /** Paths (inline comment `path`) whose comment POSTs fail with 400. */
   failInlinePaths?: string[];
-  /** Fail every general (non-inline, non-reply) comment POST with 400. */
   failGeneralComments?: boolean;
-  /** Answer POST /approve and /request-changes with this status. */
   decisionStatus?: number;
-  /** Drop every file after the first N from the served diff (diffstat keeps them). */
   truncateDiffToFiles?: number;
-  /** Serve at most this many comments per page, with `next` links. */
   commentsPageLen?: number;
 }
 
 export interface FakeBitbucket {
-  /** API base to put in PLANNOTATOR_BITBUCKET_API_URL (ends in /2.0). */
   apiUrl: string;
   requests: RecordedRequest[];
   stop(): void;
@@ -125,7 +98,6 @@ export function startFakeBitbucket(options: FakeBitbucketOptions): FakeBitbucket
       if (req.method === "GET" && rest === "/pullrequests") return json(JSON.parse(fixture("pullrequests.json")));
       if (req.method === "GET" && rest === "/pullrequests/1") return json(pr);
 
-      // Same redirect shape Bitbucket answers with for a PR's diff and diffstat.
       const spec = `ws/repo:${HEAD.slice(0, 12)}%0D${BASE.slice(0, 12)}?from_pullrequest_id=1&topic=true`;
       if (req.method === "GET" && rest === "/pullrequests/1/diff") {
         return new Response("", { status: 302, headers: { location: `${origin}${REPO_PREFIX}/diff/${spec}` } });

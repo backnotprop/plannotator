@@ -1,14 +1,3 @@
-/**
- * Release (build job): the sha256 of every embedded page as the CLI serves
- * it, for scripts/smoke-pages.mjs, in `sha256sum` format.
- *
- * usage: bun scripts/page-digests.ts <file>...
- *
- * A packed page (build/pack-app.ts: the plan and review apps; build/pack-inbox.ts:
- * the Inbox window) is served as the page plus one file per packed chunk, so it
- * prints its page under its own name and each packed file under the file's
- * name; any other file (the phone's surface, the diagram engine) prints whole.
- */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";

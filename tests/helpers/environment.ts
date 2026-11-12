@@ -2,10 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/**
- * Create an environment-and-temp-directory fixture for integration tests.
- * Call reset before each test and restore from afterEach.
- */
 export function createTestEnvironment(
   envKeys: readonly string[],
   tempPrefix: string,

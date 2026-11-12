@@ -1,19 +1,3 @@
-/**
- * Every copy of the data-dir rule picks the same folder (#2305).
- *
- * The failure this catches: the rule lives in packages/shared/data-dir.ts and
- * is copied into the Claude Code mod (a hooks module imports only its own
- * files), the one-file Amp plugin and the three install scripts. If one copy
- * drifts, that host reads or writes a different folder than the binary, for
- * example the mod hands the Inbox a stray ~/.plannotator while the CLI uses
- * $XDG_DATA_HOME/plannotator. The shared resolver, the mod, the Amp plugin,
- * install.sh's block and (where pwsh is installed) install.ps1's block run
- * here against the same folders. install.cmd's block runs on Windows only
- * (windows.yml, scripts/check-data-dir-windows.ps1), so here only its marker
- * list is checked.
- *
- * Each scenario gets its own temp home; nothing outside it is touched.
- */
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -31,7 +15,6 @@ type Layout = { legacy?: string[]; xdg?: string[]; xdgVar?: "set" | "padded" | "
 type Expected = "legacy" | "xdg";
 
 let counter = 0;
-/** A fresh home holding the layout: each entry is a path inside the folder ("" makes just the folder). */
 function makeHome(layout: Layout): { home: string; xdgDataHome: string | undefined; xdgBase: string } {
   const home = join(root, `h${counter++}`);
   mkdirSync(home);
@@ -76,7 +59,6 @@ const SCENARIOS: Array<{ name: string; layout: Layout; expected: Expected }> = [
   { name: "both hold data", layout: { legacy: ["history"], xdg: ["history"] }, expected: "legacy" },
   { name: "~/.plannotator with data, XDG folder missing", layout: { legacy: ["history"] }, expected: "legacy" },
   { name: "relative XDG_DATA_HOME", layout: { legacy: [""], xdg: ["history"], xdgVar: "relative" }, expected: "legacy" },
-  // Each marker alone counts, on either side, so no copy may leave one out.
   ...DATA_DIR_MARKERS.map((marker) => ({
     name: `XDG folder holds only ${marker}, ~/.plannotator is stray`,
     layout: { legacy: STRAY, xdg: [marker] },
@@ -123,9 +105,6 @@ function resolverBlock(path: string): string {
 const installShBlock = resolverBlock(join(REPO, "scripts", "install.sh"));
 const installPs1Block = resolverBlock(join(REPO, "scripts", "install.ps1"));
 
-// install.ps1's block runs under pwsh where it is installed (CI's Linux
-// runners have it). The Windows workflow runs it, and install.cmd's block, on
-// Windows as well (scripts/check-data-dir-windows.ps1).
 const PWSH = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", "exit 0"]).status === 0;
 
 describe("every copy of the data-dir rule picks the same folder", () => {
@@ -163,8 +142,6 @@ describe("every copy of the data-dir rule picks the same folder", () => {
     }, 20_000);
   }
 
-  // The Windows workflow's checker only runs on a ci:full PR; a syntax error
-  // in it would first show there. Parsing it where pwsh exists finds it now.
   test.skipIf(!PWSH)("scripts/check-data-dir-windows.ps1 parses in PowerShell", () => {
     const script = join(REPO, "scripts", "check-data-dir-windows.ps1");
     const parsed = Bun.spawnSync({

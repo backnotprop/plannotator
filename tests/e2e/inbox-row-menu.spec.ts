@@ -1,20 +1,3 @@
-/**
- * The thread row's right-click menu, in a real Chromium against the compiled
- * binary, with an agent writing through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts):
- *
- *  - a right-click on a row opens the menu without opening the thread; Copy
- *    link puts the thread's address on the clipboard (read back here), Copy
- *    thread ID its id, each with a toast;
- *  - the keyboard: Shift+F10 on a focused row opens it, Escape and Tab put
- *    focus back on the row;
- *  - Mark read and Archive from the menu, with the row's own toasts.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * Screenshots at 1440, light and dark, land in /tmp/row-menu-shots/ (or
- * PLANNOTATOR_ROW_MENU_SHOTS).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -44,7 +27,6 @@ test.describe.configure({ mode: 'serial' });
 
 const rowButton = (page: Page, id: string) => page.locator(`.ib-lbody [data-thread-id="${id}"]`);
 const menu = (page: Page) => page.locator('[data-row-menu]');
-/** A screenshot once the menu's and the toast's entrances have played. */
 async function shot(page: Page, name: string) {
   await page.waitForTimeout(400);
   await page.screenshot({ path: join(shots, name) });
@@ -127,10 +109,8 @@ test('the keyboard: Shift+F10 on a focused row opens the menu, Escape and Tab gi
   await page.keyboard.press('Shift+F10');
   await expect(menu(page)).toBeVisible();
   await expect(menu(page)).toHaveAttribute('data-row-menu', threads.news);
-  // Focus moves into the menu; the arrows walk its items.
   await expect(menu(page)).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  // Star thread leads (approval "inbox-pinned-threads"), then Copy thread and Copy link.
   await expect(page.locator('[data-row-action="pin"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-row-action="copy-thread"]')).toBeFocused();
@@ -172,7 +152,6 @@ test('Mark read from the menu reads the row in place with its toast; the list’
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast).toContainText('Marked read');
   await expect(toast).toContainText('Nightly is green');
-  // The list holds still (approval "inbox-list-view", R7): the row stays where it was, not bold; no Quiet yet.
   await expect(rowButton(page, threads.news)).not.toHaveClass(/\bib-u\b/);
   await expect(page.locator('[data-section-id="quiet"]')).toHaveCount(0);
   await page.locator('[data-list-refresh]').click();
@@ -192,12 +171,10 @@ test('Archive from the menu shows the row archived in place with the Archived to
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast).toContainText('Archived');
   await expect(toast).toContainText('Release notes drafted');
-  // Archived in place, faded, until the list settles (R7); the list's title tidies it away.
   await expect(page.locator(`.ib-lbody [data-row="${threads.release}"]`)).toHaveAttribute('data-archived', '');
   await page.locator('[data-list-refresh]').click();
   await expect(rowButton(page, threads.release)).toHaveCount(0);
   await shot(page, '05-archived-dark.png');
-  // The search row's menu in dark, opened on the row at its right edge.
   await rowButton(page, threads.search).click({ button: 'right', position: { x: 1000, y: 10 } });
   await expect(menu(page)).toBeVisible();
   await page.locator('[data-row-action="copy-link"]').hover();

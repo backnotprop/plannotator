@@ -1,41 +1,3 @@
-// Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
-/**
- * Manual sandbox for JJ-backed code review.
- *
- * This creates a realistic local setup:
- *   - a bare Git repository that behaves like a tiny GitHub remote
- *   - a colocated JJ/Git working repo cloned from that remote
- *   - one committed JJ change after trunk
- *   - one current working-copy change on top
- *
- * Usage:
- *   bun run tests/manual/test-jj-review.ts [--keep] [--setup-only] [--with-evolog]
- *
- * Flags:
- *   --keep          Don't delete the sandbox after the server exits.
- *   --setup-only    Create the sandbox and print the path, but don't start the server.
- *   --with-evolog   Amend the current change a few times before launching, so the
- *                   "Evolution diff" mode appears in the UI with entries to pick from.
- *                   Without this flag a helper script is written to the sandbox that
- *                   you can run yourself at any time: `./create-evolog.sh`
- *
- * What to test in the review UI:
- *   1. The View dropdown lists JJ modes only:
- *      Current change, Last change, Line of work, All files.
- *      (With --with-evolog or after running create-evolog.sh: also Evolution diff.)
- *   2. Initial view is Current change, even if a saved Git default exists.
- *   3. Current change shows only the working-copy commit (@).
- *   4. Last change shows only the previous committed JJ change (@-).
- *   5. Line of work shows the mutable stack from its immutable base to @.
- *   6. All files shows the whole repository from root() to @.
- *   7. Hide whitespace re-runs JJ diff with -w.
- *   8. Staging controls are unavailable because JJ has no Git-style staging.
- *   9. (Evolog) Evolution diff shows what changed between amendments of @.
- *  10. (Evolog) The EvoLogPicker lists 3+ entries with commit IDs and ages.
- *  11. (Evolog) Selecting an older entry re-diffs against that snapshot.
- *  12. (Evolog) The "current" entry (index 0) is disabled in the picker.
- */
-
 import { $ } from "bun";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -319,7 +281,6 @@ async function createJjWorkspace(): Promise<void> {
   await $`jj config set --repo user.name ${JSON.stringify("Plannotator Test User")}`.cwd(jjRepo).quiet();
   await $`jj config set --repo user.email ${JSON.stringify("plannotator@example.com")}`.cwd(jjRepo).quiet();
 
-  // Change 1: committed JJ change after trunk(). This is what jj-last should show.
   await write("src/app.ts", lines([
     "import type { Config } from './config';",
     "import { Router } from './router';",
@@ -434,7 +395,6 @@ async function createJjWorkspace(): Promise<void> {
   await $`jj commit -m "feat: add request context middleware"`.cwd(jjRepo).quiet();
   await $`jj bookmark create review/jj-demo -r @-`.cwd(jjRepo).quiet();
 
-  // Change 2: current working-copy change (@). This is what jj-current should show.
   await write("src/config.ts", lines([
     "export interface Config {",
     "  port: number;",
@@ -691,19 +651,10 @@ async function createJjWorkspace(): Promise<void> {
     "3. Validate links in the serialized payload.",
   ]));
 
-  // Force JJ to snapshot the current working-copy change before Plannotator reads it.
   await $`jj status`.cwd(jjRepo).quiet();
 }
 
-/**
- * Amend the current working-copy change several times to create a realistic
- * evolution log. Simulates a typical iteration cycle: first pass, then
- * fixing issues you spotted, then responding to review feedback, then a
- * final polish. After this, `jj evolog -r @` will show 5 entries.
- */
 async function createEvologHistory(): Promise<void> {
-  // Amendment 1: noticed the audit log service is missing a metadata field
-  // that other services expect. Quick fix while the change is still fresh.
   await write("src/services/audit-log.ts", lines([
     "export interface AuditEvent {",
     "  type: string;",
@@ -724,9 +675,6 @@ async function createEvologHistory(): Promise<void> {
   await $`jj describe -m "feat: add config, audit log, and project API improvements"`.cwd(jjRepo).quiet();
   await $`jj status`.cwd(jjRepo).quiet();
 
-  // Amendment 2: reviewer pointed out the config should validate env vars
-  // instead of silently accepting garbage values. Also add a debug level
-  // to the logger since we're adding enableRequestTracing.
   await write("src/config.ts", lines([
     "export interface Config {",
     "  port: number;",
@@ -783,8 +731,6 @@ async function createEvologHistory(): Promise<void> {
   await $`jj describe -m "feat: add config validation, structured logger, audit log, and project API"`.cwd(jjRepo).quiet();
   await $`jj status`.cwd(jjRepo).quiet();
 
-  // Amendment 3: realized the archive job threshold should be configurable
-  // via config rather than hardcoded. Wire it through.
   await write("src/config.ts", lines([
     "export interface Config {",
     "  port: number;",
@@ -836,9 +782,6 @@ async function createEvologHistory(): Promise<void> {
   await $`jj describe -m "feat: config validation, structured logger, configurable archive threshold"`.cwd(jjRepo).quiet();
   await $`jj status`.cwd(jjRepo).quiet();
 
-  // Amendment 4: final cleanup — fix the invoice repository to use the
-  // status field properly and tighten the http client types. The kind of
-  // last-minute polish before marking a change as ready.
   await write("src/features/billing/invoices/repositories/invoice-repository.ts", lines([
     "import type { Invoice } from '../domain/invoice';",
     "",
@@ -891,12 +834,6 @@ async function createEvologHistory(): Promise<void> {
   await $`jj status`.cwd(jjRepo).quiet();
 }
 
-/**
- * Write a standalone shell script into the sandbox that creates evolog
- * history when run. This lets the user launch the sandbox without evolog,
- * verify the base modes work, then run the script and refresh to see the
- * Evolution diff mode appear.
- */
 async function writeEvologHelperScript(): Promise<void> {
   const script = `#!/usr/bin/env bash
 set -euo pipefail

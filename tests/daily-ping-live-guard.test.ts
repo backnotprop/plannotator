@@ -1,20 +1,3 @@
-/**
- * No test reaches the live daily ping (packages/shared/daily-ping.ts).
- *
- * Three guards:
- *  - the root: only a build release CI marks (`__PLANNOTATOR_RELEASE__`) may
- *    reach the live host, so a child a test spawns with a release
- *    `__CLI_VERSION__` and a replaced environment (no sandbox, no off switch)
- *    still has nowhere to send. No test file may make a marked build;
- *  - the preload turns the ping off for every test and every child that
- *    inherits its environment;
- *  - a test or e2e file that spawns with a release version, or runs the e2e
- *    release binary, must also name NO_ANON_PING or PLANNOTATOR_TEST_SANDBOX;
- *    so must a script or workflow that runs a binary under `env -i` (which
- *    drops CI's variables).
- * And the other way: release.yml still marks every artifact it ships, so
- * real users' pings are not silently lost.
- */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +9,6 @@ const repoRoot = resolve(import.meta.dir, "..");
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git", ".wrangler", ".claude", ".turbo"]);
 const SELF = relative(repoRoot, import.meta.path);
 
-/** Test files: *.test.*, *.spec.*, and everything under a tests/ or test/ folder. */
 function testFiles(dir: string, inTests = false): string[] {
   return readdirSync(dir).flatMap((name) => {
     if (SKIP_DIRS.has(name)) return [];
@@ -39,7 +21,6 @@ function testFiles(dir: string, inTests = false): string[] {
 
 const files = () => [...testFiles(join(repoRoot, "apps")), ...testFiles(join(repoRoot, "packages")), ...testFiles(join(repoRoot, "tests"), true), ...testFiles(join(repoRoot, "scripts"))];
 
-/** A child with a release version and the bare environment some tests hand their spawns. */
 async function probe(defineRelease: boolean): Promise<{ off: string | null; endpoint: string | null }> {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-ping-guard-"));
   try {
@@ -62,7 +43,6 @@ process.stdout.write(JSON.stringify({ off: dailyPingOff({ version: "0.28.10" }),
 describe("the live daily ping is out of reach of tests", () => {
   test("a child with a release version and a replaced environment has nowhere to send", async () => {
     expect(await probe(false)).toEqual({ off: "dev", endpoint: null });
-    // The control: the same child in a build release CI marked would send live. Nothing is sent here.
     expect((await probe(true)).endpoint).toBe(DAILY_PING_URL);
   });
 
@@ -70,7 +50,6 @@ describe("the live daily ping is out of reach of tests", () => {
     expect(process.env.NO_ANON_PING).toBe("1");
   });
 
-  // Only this file may name the mark: to check release.yml (below) and to build the probe's control.
   test("no test file makes a release-marked build", () => {
     const offenders = files()
       .map((f) => relative(repoRoot, f))
@@ -117,7 +96,6 @@ interface Step {
   run?: string;
 }
 const releaseJobs = () => (YAML.parse(readFileSync(join(workflowDir, "release.yml"), "utf-8")) as { jobs: Record<string, { steps?: Step[] }> }).jobs;
-/** A step's `run:` commands, one per line, shell comments dropped. */
 const commands = (step: Step) =>
   (step.run ?? "")
     .split("\n")

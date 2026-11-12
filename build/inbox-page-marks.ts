@@ -1,31 +1,11 @@
-/**
- * The Inbox window's stylesheet keys on page marks, not on `:has()` anchored on the page.
- *
- * Chromium has to look again at a `:has()` whose subject is `html`, `body`, `:root` or `.pn-inbox` whenever
- * anything under that element changes, and every part of a thread is under all four. On a long thread (hundreds of
- * highlighted code fences, about 440,000 elements) the 23 such rules in the window's sheets made every DOM change
- * cost about 40 ms of style work: a fence highlighted, a message arriving, a fold, an embed loading. With them
- * keyed on attributes it is under 1 ms.
- *
- * The sheets keep their `:has()` rules (they say what each look means, and other apps load them as written). This
- * plugin, in the window's build only, rewrites each one in place to the attribute its part holds while it is in the
- * page (`PAGE_MARKS`; the holders are packages/inbox/pageMarks.ts and ui's `pageMarks` option), with the same
- * specificity and in the same place in the cascade, and drops the rules keyed on what only the plan review and code
- * review apps draw (`NEVER_IN_THE_INBOX`). A mark here that no sheet uses any more fails the build, so a sheet that
- * changes its `:has()` cannot quietly bring the cost back; tests/inbox-page-marks.test.ts runs this over the real
- * sheets and fails on any `:has()` left on the page.
- */
 import type { Plugin } from 'vite';
 
 export interface PageMark {
-  /** The selector part as the sheet writes it. */
   has: string;
-  /** What the window's sheet says instead. Each attribute weighs what a class weighs, as `:has()` weighs its argument. */
   mark: string;
 }
 
 export const PAGE_MARKS: readonly PageMark[] = [
-  // inbox.css. Holders: packages/inbox/pageMarks.ts.
   { has: 'html:has(.pn-inbox)', mark: 'html[data-pn-inbox]' },
   { has: 'body:has(.pn-inbox)', mark: 'body[data-pn-inbox]' },
   { has: ':root[data-ib-keyboard-pin]:has(.pn-inbox)', mark: ':root[data-ib-keyboard-pin][data-pn-inbox]' },
@@ -33,22 +13,14 @@ export const PAGE_MARKS: readonly PageMark[] = [
   { has: '.pn-inbox:has(.ib-imgcompose)', mark: '.pn-inbox[data-ib-imgcompose]' },
   { has: '.pn-inbox:has(.ib-fcomp)', mark: '.pn-inbox[data-ib-fcomp]' },
   { has: '.pn-inbox:has(.ib-rpick)', mark: '.pn-inbox[data-ib-rpick]' },
-  // The argument weighs two classes: the mark twice.
   { has: 'body:has([data-shape-layer] .shp-dock)', mark: 'body[data-ib-shape-dock][data-ib-shape-dock]' },
   { has: 'body:has([data-shape-layer] .shp-pill)', mark: 'body[data-ib-shape-pill][data-ib-shape-pill]' },
-  // ui's theme.css and review-editor's comments.css. Holders: ui's `pageMarks` option (utils/pageMarks.ts).
   { has: 'body:has([data-popout=true])', mark: 'body[data-pn-popout]' },
   { has: 'html:has([data-selection-chooser])', mark: 'html[data-pn-selection-chooser]' },
 ];
 
-/**
- * Attributes only Plannotator's plan review and code review apps draw (packages/editor/App.tsx,
- * packages/review-editor/App.tsx), never the Inbox: theme.css's `html:has([…])` / `body:has([…])` rules on them
- * can never match in the window, so they go.
- */
 export const NEVER_IN_THE_INBOX: readonly string[] = ['data-pn-browser-canvas', 'data-pn-document-scroll', 'data-pn-compact-touch-layout'];
 
-/** `[a="b"]` and `[a='b']` read `[a=b]` when b is a name (the same selector), and runs of space one space. */
 export function normalizeSelector(selector: string): string {
   return selector
     .trim()
@@ -56,7 +28,6 @@ export function normalizeSelector(selector: string): string {
     .replace(/=\s*(["'])(-?[A-Za-z_][\w-]*)\1\s*\]/g, '=$2]');
 }
 
-/** Split on `sep` outside (), [], strings and escapes. */
 function splitTop(text: string, sep: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -87,13 +58,10 @@ function splitTop(text: string, sep: string): string[] {
 
 export interface RewriteResult {
   css: string;
-  /** How often each `PAGE_MARKS` entry was applied, by its `has`. */
   used: Map<string, number>;
-  /** The selectors dropped (`NEVER_IN_THE_INBOX`), normalized. */
   dropped: string[];
 }
 
-/** A style rule's selector list rewritten, or null when every selector goes. Unchanged text is returned as is. */
 function rewriteSelectors(prelude: string, used: Map<string, number>, dropped: string[]): string | null {
   if (!prelude.includes(':has(')) return prelude;
   let changed = false;
@@ -110,7 +78,6 @@ function rewriteSelectors(prelude: string, used: Map<string, number>, dropped: s
       continue;
     }
     for (const { has, mark } of PAGE_MARKS) {
-      // A whole compound only: `.pn-inbox:has(.ib-fcomp)` is not the start of `.pn-inbox:has(.ib-fcomp-x)`.
       const at = selector.indexOf(has);
       if (at < 0 || /[\w-]/.test(selector[at - 1] ?? '')) continue;
       selector = selector.slice(0, at) + mark + selector.slice(at + has.length);
@@ -123,19 +90,13 @@ function rewriteSelectors(prelude: string, used: Map<string, number>, dropped: s
   return kept.length === 0 ? null : kept.map((s) => s.trim()).join(', ');
 }
 
-/** At-rules whose block holds rules (rewritten); any other at-rule's block is copied as it is. */
 const GROUPS = /^@(media|supports|layer|container|scope|starting-style|document)\b/i;
 
-/**
- * `css` with the window's page marks. Comments, strings and every block's declarations are copied as they are; only
- * style rules' selector lists change.
- */
 export function rewriteInboxCss(css: string): RewriteResult {
   const used = new Map<string, number>();
   const dropped: string[] = [];
   let i = 0;
 
-  /** Index just past the `}` that closes the block opened at `open`, skipping strings and comments. */
   const blockEnd = (open: number): number => {
     let depth = 0;
     for (let j = open; j < css.length; j++) {
@@ -150,7 +111,6 @@ export function rewriteInboxCss(css: string): RewriteResult {
     throw new Error('inbox-page-marks: a block is not closed');
   };
 
-  /** Rules from `i` up to the `}` that closes the group (or the end); returns them rewritten. */
   const statements = (inGroup: boolean): string => {
     let out = '';
     let prelude = '';
@@ -159,7 +119,6 @@ export function rewriteInboxCss(css: string): RewriteResult {
       if (char === '/' && css[i + 1] === '*') {
         const end = css.indexOf('*/', i + 2);
         const stop = end < 0 ? css.length : end + 2;
-        // Between rules a comment goes out as it is; inside a prelude it stays in it.
         if (prelude.trim()) prelude += css.slice(i, stop);
         else {
           out += prelude + css.slice(i, stop);
@@ -198,9 +157,7 @@ export function rewriteInboxCss(css: string): RewriteResult {
             const start = ++i;
             const inner = statements(true);
             const was = css.slice(start, i);
-            i++; // the group's }
-            // A group every rule of which was dropped goes with them; one that was empty (`@layer x {}` orders the
-            // layers) stays.
+            i++;
             const empty = (text: string) => !text.replace(/\/\*[\s\S]*?\*\//g, '').trim();
             if (!empty(inner) || empty(was)) out += `${prelude}{${inner}}`;
           } else {
@@ -228,7 +185,6 @@ export function rewriteInboxCss(css: string): RewriteResult {
   return { css: statements(false), used, dropped };
 }
 
-/** The Vite plugin: the window's CSS with its page marks. A `PAGE_MARKS` entry no sheet used fails the build. */
 export function inboxPageMarks(): Plugin {
   const used = new Map<string, number>();
   let building = false;

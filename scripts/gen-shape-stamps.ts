@@ -1,23 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Writes packages/shared/shape/stamp-data.ts: the icons, logos and marks that
- * `plannotator shape update` draws in place of `data-icon`, `data-logo` and
- * `data-draw` (packages/shared/shape/stamps.ts). Nothing is fetched here or at
- * view time: it reads local copies only.
- *
- *   bun scripts/gen-shape-stamps.ts <unpacked simple-icons package folder>
- *
- * - Icons: every Lucide icon, from the lucide-react copy in node_modules (ISC).
- * - Logos: the slugs in LOGOS below, from an unpacked Simple Icons npm package
- *   (CC0): `npm pack simple-icons@16.36.0 && tar xzf simple-icons-16.36.0.tgz`,
- *   then pass the `package` folder. A slug it lacks is reported and skipped,
- *   and so is any logo Simple Icons lists under a licence of its own (some are
- *   CC BY, some NonCommercial): only CC0 drawings are bundled.
- * - Marks: the kit's own marks (packages/core/shape-kit.mjs, MARKS and CODEX),
- *   copied so the store needs no JavaScript kit at run time.
- *
- * Licences and the trademark note: packages/shared/shape/THIRD_PARTY_NOTICES.md.
- */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -28,7 +9,6 @@ if (!siDir || !existsSync(join(siDir, "icons"))) {
   process.exit(2);
 }
 
-// The logos a board is likely to name: payments, data, queues, hosting, tools, platforms.
 const LOGOS = `stripe paypal visa mastercard applepay googlepay shopify
 postgresql mysql sqlite mongodb redis supabase firebase neon planetscale turso upstash cockroachlabs clickhouse duckdb snowflake databricks prisma drizzle
 elasticsearch algolia meilisearch qdrant
@@ -46,7 +26,6 @@ figma notion linear jira trello asana zapier n8n dropbox icloud
 sentry datadog grafana prometheus newrelic pagerduty posthog mixpanel intercom zendesk hubspot statuspage
 vitest jest cypress npm pnpm homebrew minio backblaze cloudinary webrtc socketdotio pusher`.split(/\s+/);
 
-// Lucide: each icon module holds its drawing as `__iconData = { name, node: [[tag, attrs], …] }`.
 const lucidePkg = Bun.resolveSync("lucide-react/package.json", join(root, "packages/ui"));
 const lucideVersion = JSON.parse(readFileSync(lucidePkg, "utf8")).version as string;
 const lucideDir = join(dirname(lucidePkg), "dist/esm");
@@ -60,12 +39,10 @@ for (const f of readdirSync(join(lucideDir, "icons")).sort()) {
     .map(([tag, attrs]) => `<${tag} ${Object.entries(attrs).filter(([k]) => k !== "key").map(([k, v]) => `${k}="${v}"`).join(" ")}/>`)
     .join("");
 }
-// Lucide's older names (alert-triangle for triangle-alert…), from its dynamic import map.
 const aliases: Record<string, string> = {};
 const dyn = readFileSync(join(lucideDir, "dynamicIconImports.mjs"), "utf8");
 for (const m of dyn.matchAll(/"([a-z0-9-]+)": \(\) => import\('\.\/icons\/([a-z0-9-]+)\.mjs'\)/g)) if (m[1] !== m[2] && icons[m[2]!]) aliases[m[1]!] = m[2]!;
 
-// Simple Icons: the path from icons/<slug>.svg, the title and colour from data/simple-icons.json.
 const siVersion = JSON.parse(readFileSync(join(siDir, "package.json"), "utf8")).version as string;
 const siJson = JSON.parse(readFileSync(join(siDir, "data/simple-icons.json"), "utf8"));
 const bySlug = new Map((Array.isArray(siJson) ? siJson : siJson.icons).map((d: { slug: string }) => [d.slug, d]));
@@ -88,11 +65,9 @@ for (const slug of LOGOS) {
     continue;
   }
   const L = luminance(meta.hex);
-  // Too dark or too light to read on one of the two themes: it follows the board's ink instead.
   logos[slug] = { t: meta.title, d: readFileSync(file, "utf8").match(/<path d="([^"]+)"/)![1]!, c: L < 0.03 || L > 0.8 ? null : `#${meta.hex}` };
 }
 
-// The kit's marks, as `plannotator shape kit` draws them.
 const kit = readFileSync(join(root, "packages/core/shape-kit.mjs"), "utf8");
 const marks = JSON.parse(kit.match(/^const MARKS = (\{.*\});$/m)![1]!);
 const codex = kit.match(/^const CODEX = "([^"]+)";$/m)![1]!;

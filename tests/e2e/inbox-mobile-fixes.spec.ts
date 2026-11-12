@@ -1,25 +1,3 @@
-/**
- * Two phone bugs the owner reported (an iPhone, dark), proved against the
- * compiled binary on an iPhone 15 (WebKit) and a Pixel 7 (Chromium):
- *
- * 1. The question card's footer: Hide note, Skip and Accept recommended were
- *    squeezed until their words broke mid-word ("Acce pt reco mme nded")
- *    while "Picked 8:48 AM · in your draft" kept its room. Now no button
- *    shrinks or breaks a word, and the status takes its own line above the
- *    buttons when the row cannot hold both. And the radios: WebKit's native
- *    dark-scheme radio was a solid black disc, picked or not; picked now
- *    reads clearly different from unpicked, light and dark.
- * 2. Images on a phone: iOS offers no Paste for an image-only clipboard in a
- *    plain text field (WebKit's canPerformAction:paste: accepts only text and
- *    URL types outside rich editing), so the reply box and compose get an
- *    attach button on a phone; and an image copied from a page (it carries its
- *    URL as the plain text) now attaches when pasted.
- *
- * Build the binary first (see inbox.spec.ts). PNGs land in
- * .local/proof/mobile-fixes/ (and MOBILE_FIXES_SHOTS when set), named with
- * MOBILE_FIXES_SHOT_PREFIX (default `after`).
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -34,7 +12,6 @@ const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'mobile-fixes');
 const extraShots = process.env.MOBILE_FIXES_SHOTS ? resolve(process.env.MOBILE_FIXES_SHOTS) : null;
 const prefix = process.env.MOBILE_FIXES_SHOT_PREFIX ?? 'after';
-/** A `before` run (against the old binary, for the pictures) records the failures and goes on to the next picture. */
 const check = prefix === 'before' ? expect.soft : expect;
 const PASTED = /^pasted-image-\d{4}-\d\d-\d\d-\d{4}(-\d+)?\.png$/;
 
@@ -59,7 +36,6 @@ const QUESTIONS = [
   ':::',
 ].join('\n');
 
-// A 2×2 PNG: a real picture for the upload path.
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDK+mmyAAAAABJRU5ErkJggg==',
   'base64',
@@ -80,7 +56,6 @@ function registry(dataDir: string): { port: number; token: string } {
   return JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** A connection's long-poll: the session stays live, so compose can address it. */
 function keepLive(dataDir: string, session: string, host: string, project: string): () => Promise<void> {
   let stopped = false;
   const startedAt = Date.now() - 20 * 60_000;
@@ -103,7 +78,6 @@ function keepLive(dataDir: string, session: string, host: string, project: strin
 async function shot(page: Page, name: string): Promise<void> {
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
-    // The theme's colour transition settles before the picture.
     await page.waitForTimeout(1_500);
     const file = join(proofDir, `${prefix}-${name}-${scheme}.png`);
     await page.screenshot({ path: file });
@@ -140,10 +114,6 @@ test.afterAll(async () => {
   }
 });
 
-/**
- * Each footer button's words on one line, inside the button, and the
- * footer's parts inside the card. Returns the problems found.
- */
 async function footerProblems(page: Page, minTarget = 44): Promise<string[]> {
   return page.evaluate((minTarget) => {
     const out: string[] = [];
@@ -166,7 +136,6 @@ async function footerProblems(page: Page, minTarget = 44): Promise<string[]> {
       if (status) {
         const s = status.getBoundingClientRect();
         if (s.right > cardBox.right + 1) out.push(`the status runs past the card (${Math.round(s.right)} > ${Math.round(cardBox.right)})`);
-        // Never between the buttons: on the buttons' line (after them), or wholly above them.
         const buttons = [...foot.querySelectorAll('button')].map((b) => b.getBoundingClientRect());
         const top = Math.min(...buttons.map((b) => b.top));
         const sameLine = buttons.some((b) => s.top < b.bottom && s.bottom > b.top);
@@ -179,7 +148,6 @@ async function footerProblems(page: Page, minTarget = 44): Promise<string[]> {
   }, minTarget);
 }
 
-/** The radio dot's painted look: what tells picked from unpicked. */
 async function radioLooks(page: Page): Promise<{ checked: string; unchecked: string; checkedDot: string; uncheckedDot: string; uncheckedFill: string }> {
   return page.evaluate(() => {
     const card = document.querySelector('section.ib-pane fieldset[data-question-key]')!;
@@ -209,14 +177,11 @@ for (const phone of PHONES) {
     const errors: string[] = [];
 
     test.beforeAll(async () => {
-      // Each phone answers its own thread.
       const sent = await world.agent.send({ project_path: world.project, subject: `Board header copy (${phone.tag})`, body: QUESTIONS });
       threadId = sent.thread_id as string;
       browser = phone.engine === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
       context = await browser.newContext({ ...phone.device, colorScheme: 'dark' });
       page = await context.newPage();
-      // WebKit reports the window's own reads cut off by a navigation (page.goto) as "… due to access control
-      // checks": not an error of the page.
       page.on('pageerror', (error) => {
         if (!/due to access control checks/.test(error.message)) errors.push(error.message);
       });
@@ -232,12 +197,10 @@ for (const phone of PHONES) {
       const pane = page.locator('section.ib-pane');
       const cards = pane.locator('fieldset[data-question-key]');
       await expect(cards).toHaveCount(2);
-      // The first card: a note only, as in the owner's picture (Accept recommended stays offered).
       const first = cards.nth(0);
       await first.getByRole('button', { name: 'Add note' }).click();
       await first.locator('textarea').last().fill('For backlog items I’d like a way to tell the agent to start.');
       await expect(first.locator('.ib-qfoot-st')).toContainText('in your draft');
-      // The second card (pick any): one recommended box ticked plus a note; Accept stays offered.
       const second = cards.nth(1);
       await second.locator('label[data-question-option]').first().click();
       await second.getByRole('button', { name: 'Add note' }).click();
@@ -246,10 +209,6 @@ for (const phone of PHONES) {
       await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeVisible();
       await first.scrollIntoViewIfNeeded();
       await shot(page, `${phone.tag}-card-footer-390`);
-      // Narrower, never shorter or taller: Linux WebKit fires `resize` with the new visual viewport height while
-      // documentElement.clientHeight still holds the old one, and sends nothing once it catches up. Back from 844 px
-      // to the phone's 659, the Inbox read that as a keyboard (phone.ts trackKeyboard) and kept
-      // `data-ib-keyboard-pin`, so the radio picked next hid the reply foot (inbox.css) and Reply never showed.
       for (const width of [390, 320]) {
         await page.setViewportSize({ width, height: phone.device.viewport.height });
         await page.waitForTimeout(150);
@@ -272,11 +231,9 @@ for (const phone of PHONES) {
       for (const scheme of ['light', 'dark'] as const) {
         await page.emulateMedia({ colorScheme: scheme });
         const looks = await radioLooks(page);
-        // On a touch screen, drawn by the page, not the platform: the same in WebKit and Chromium.
         check(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
         check(looks.unchecked.startsWith('none|')).toBe(true);
         check(looks.checked).not.toBe(looks.unchecked);
-        // The picked radio carries the dot (its ::before at full size); the unpicked one is a hollow ring.
         check(looks.uncheckedDot).toMatch(/^matrix\(0, 0, 0, 0,/);
         check(looks.checkedDot).not.toBe(looks.uncheckedDot);
         check(looks.uncheckedFill).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
@@ -289,9 +246,6 @@ for (const phone of PHONES) {
       await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
       const box = pane.locator('.ib-rbox');
       await box.getByRole('textbox').fill(`From the ${phone.tag}: the header on my phone.`);
-      // The paperclip leads the box's row on a phone (approval "inbox-reply-box", T6; the owner: "I like attachment on
-      // left"): a round 36 px button (approval "inbox-phone-composer-picker") that takes a tap 44 px across, all of it
-      // the tap area, with nothing over it.
       const attach = box.locator('[data-reply-row] [data-reply-attach]');
       await expect(attach).toHaveCount(1);
       const clip = box.locator('[data-reply-row] .ib-rclip');
@@ -311,19 +265,16 @@ for (const phone of PHONES) {
           left: hit(r.left + 2, r.top + r.height / 2),
           top: hit(r.left + r.width / 2, r.top + 2),
           bottom: hit(r.left + r.width / 2, r.bottom - 2),
-          // 4 px more on every side takes the tap too (the 44 px): a point 3 px outside what is drawn.
           outsideLeft: hit(r.left - 3, r.top + r.height / 2),
           outsideTop: hit(r.left + r.width / 2, r.top - 3),
           outsideBottom: hit(r.left + r.width / 2, r.bottom + 3),
         };
       });
       expect(tapArea).toEqual({ left: true, top: true, bottom: true, outsideLeft: true, outsideTop: true, outsideBottom: true });
-      // What the photo library hands over: a file named image.png (iOS) with no name a person chose.
       await attach.setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
       await expect(box.locator('[data-compose-file="done"]')).toHaveCount(1);
       const name = (await box.locator('[data-compose-file]').getAttribute('data-compose-file-name'))!;
       expect(name).toMatch(PASTED);
-      // A paste on the reply box: an image.png beside `text` and `html`. Returns whether the browser's own paste was prevented.
       await box.getByRole('textbox').focus();
       const pasteWith = (text: string, html: string) =>
         page.evaluate(
@@ -339,14 +290,11 @@ for (const phone of PHONES) {
           { b64: PNG.toString('base64'), text, html },
         );
       const link = 'https://example.com/board/header.png';
-      // A spreadsheet cell whose value is a URL (its text, an HTML table, a picture of the cell): text, nothing attaches.
       expect(await pasteWith(link, `<table><tr><td>${link}</td></tr></table>`)).toBe(false);
       await page.waitForTimeout(300);
       await expect(box.locator('[data-compose-file]')).toHaveCount(1);
-      // An image copied from a page on a phone: its link as the text and an <img> of that link. It attaches.
       expect(await pasteWith(link, `<meta charset="utf-8"><img src="${link}">`)).toBe(true);
       await expect(box.locator('[data-compose-file="done"]')).toHaveCount(2);
-      // The URL never lands in the words.
       await expect(box.getByRole('textbox')).not.toHaveValue(/example\.com/);
       await shot(page, `${phone.tag}-reply-attached`);
       const names = await box.locator('[data-compose-file]').evaluateAll((els) => els.map((el) => el.getAttribute('data-compose-file-name')!));
@@ -361,14 +309,12 @@ for (const phone of PHONES) {
       await page.goto(world.url);
       await page.locator('[data-open-compose]').filter({ visible: true }).first().click();
       const dialog = page.locator('dialog[data-compose]');
-      // To is the pill in the foot's row; its list is a bottom sheet.
       const to = dialog.locator('.ib-cp-foot [data-compose-to]');
       await expect(to).not.toHaveAttribute('data-loading', /.*/, { timeout: 15_000 });
       await to.click();
       await dialog.locator('[data-compose-to-sheet] [data-compose-session="ses-pi"]').click();
       await expect(to).toHaveAttribute('data-compose-to', 'ses-pi');
       await dialog.getByRole('textbox', { name: 'Message' }).fill(`Compose from the ${phone.tag}.`);
-      // The paperclip is 36 px to the eye and 44 px to the touch (its `::after`).
       const clip = await dialog.locator('.ib-cp-clip').evaluate((el) => {
         const after = getComputedStyle(el, '::after');
         const r = el.getBoundingClientRect();
@@ -423,17 +369,14 @@ test.describe('a desktop, the thread beside a file (Chromium)', () => {
     await second.getByRole('button', { name: 'Add note' }).click();
     await second.locator('textarea').last().fill('Shipped too, after a week.');
     await expect(second.locator('.ib-qfoot-st')).toContainText('in your draft');
-    // Open the attached file beside the thread: the thread narrows to its column.
     await pane.getByRole('button', { name: 'Open board-notes.md' }).first().click();
     await expect(page.locator('.ib-pane.ib-withfile')).toBeVisible();
     const width = (await pane.locator('fieldset[data-question-key]').first().boundingBox())!.width;
     expect(width).toBeLessThan(470);
     check(await footerProblems(page, 0), `the card at ${Math.round(width)} px`).toEqual([]);
-    // The status no longer fits beside the buttons, so it sits above them.
     const status = (await first.locator('.ib-qfoot-st').boundingBox())!;
     const accept = (await first.getByRole('button', { name: 'Accept recommended' }).boundingBox())!;
     check(status.y + status.height).toBeLessThanOrEqual(accept.y + 1);
-    // A mouse and a trackpad keep the system's radios and checkboxes, as before.
     expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(false);
     const appearance = await first.locator('input[type="radio"]').first().evaluate((el) => getComputedStyle(el).appearance);
     expect(appearance).not.toBe('none');
@@ -446,7 +389,6 @@ test.describe('a desktop, the thread beside a file (Chromium)', () => {
     await page.goto(`${world.url}#thread=${threadId}`);
     const first = page.locator('section.ib-pane fieldset[data-question-key]').first();
     await expect(first).toBeVisible();
-    // Run alone, the note the test above wrote is not there yet: write it.
     if ((await first.locator('.ib-qfoot-st').count()) === 0) {
       await first.getByRole('button', { name: 'Add note' }).click();
       await first.locator('textarea').last().fill('For backlog items I’d like a way to tell the agent to start.');
@@ -454,7 +396,6 @@ test.describe('a desktop, the thread beside a file (Chromium)', () => {
     await expect(first.locator('.ib-qfoot-st')).toContainText('in your draft');
     await first.scrollIntoViewIfNeeded();
     expect(await footerProblems(page, 0)).toEqual([]);
-    // One row: the status on the buttons' line, after the last of them (no phone reordering on a mouse).
     const row = await first.evaluate((card) => {
       const foot = card.querySelector(':scope > div.border-t')!;
       const status = foot.querySelector('.ib-qfoot-st')!.getBoundingClientRect();

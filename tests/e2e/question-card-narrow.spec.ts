@@ -1,24 +1,3 @@
-/**
- * The question card (`:::question`, ui's QuestionBlock) in narrow columns,
- * proved in Chromium against the compiled binary: annotate, plan review and
- * the Inbox thread (full width, beside a file, on a phone), and the Inbox's
- * Decide dialog (its own card, the same footer actions).
- *
- * The owner's report: in a narrow column the footer's words broke inside
- * their buttons ("Add / note", "Accept / recommended") and the Accept pill
- * became a tall blob. Now no footer button's words ever wrap inside it: the
- * footer reflows as whole buttons, and only when they do not fit on one row
- * (Add note and Skip stay together, Accept recommended moves down whole, and
- * ends in an ellipsis only when even its own row is too short, its name
- * unchanged). A footer that fits on one row looks exactly as it did, on a
- * desktop and on a phone, whose touch targets grow invisibly.
- *
- * Every CLI runs under a temp PLANNOTATOR_DATA_DIR and HOME, opens no browser,
- * and is closed by this test. Build the binary first (see inbox.spec.ts).
- * PNGs land in QUESTION_CARD_SHOTS when it is set, named with
- * QUESTION_CARD_SHOT_PREFIX (default `after`); a `before` run (an older
- * binary, for the pictures) records the failures and goes on.
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -36,7 +15,6 @@ const check = prefix === 'before' ? expect.soft : expect;
 test.use({ actionTimeout: 15_000 });
 test.describe.configure({ mode: prefix === 'before' ? 'default' : 'serial' });
 
-/** The owner's card (a short pick-one with a recommendation), a long-label one, a pick-any and a text question. */
 const DOC = [
   '# Invoice rounding',
   '',
@@ -78,24 +56,14 @@ const DOC = [
 
 const CARD = 'fieldset[data-question-key]';
 
-/**
- * What is wrong with the question cards' footers under `scope`: a button
- * whose words take more than one line or overflow it, a button outside its
- * card, a hit area under `minTarget` px on a side, buttons drawn out of
- * their focus (DOM) order (`order`, default true), or a footer split over
- * rows although its parts fit on one. `oneRow`: every button must share
- * one row, whatever it measures.
- */
 async function footerProblems(page: Page, options: { scope?: string; minTarget?: number; oneRow?: boolean; order?: boolean } = {}): Promise<string[]> {
   return page.evaluate(({ scope, card, minTarget, oneRow, order }) => {
     const out: string[] = [];
-    /** The lines an element's visible words sit on: its text nodes' boxes (an icon is not a line). */
     const textLines = (el: Element): Set<number> => {
       const tops = new Set<number>();
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         if (!node.textContent?.trim()) continue;
-        // Visually hidden words (a 1 px clipped box) are no line of the button.
         const holder = node.parentElement!.getBoundingClientRect();
         if (holder.width <= 1 || holder.height <= 1) continue;
         const range = document.createRange();
@@ -121,8 +89,6 @@ async function footerProblems(page: Page, options: { scope?: string; minTarget?:
         const lines = textLines(button);
         if (lines.size > 1) out.push(`${name} wraps onto ${lines.size} lines`);
         const box = button.getBoundingClientRect();
-        // The words inside the button (an invisible ::before hit box may reach past it; words cut short with an
-        // ellipsis, the last resort in a very narrow card, are not words spilling out).
         if (getComputedStyle(button).textOverflow !== 'ellipsis') {
           const range = document.createRange();
           range.selectNodeContents(button);
@@ -131,7 +97,6 @@ async function footerProblems(page: Page, options: { scope?: string; minTarget?:
         }
         if (box.right > cardBox.right + 1 || box.left < cardBox.left - 1) out.push(`${name} sits outside the card`);
         if (minTarget) {
-          // The hit area: the button, or the invisible box its ::before draws around it, whichever is larger.
           const before = getComputedStyle(button, '::before');
           const hit = before.content !== 'none' && before.position === 'absolute'
             ? { w: Math.max(box.width, parseFloat(before.width) || 0), h: Math.max(box.height, parseFloat(before.height) || 0) }
@@ -140,7 +105,6 @@ async function footerProblems(page: Page, options: { scope?: string; minTarget?:
         }
         boxes.push(box);
       }
-      // Reading order: row by row, then along the line (right to left under dir="rtl").
       for (let i = 1; order && i < boxes.length; i++) {
         const a = boxes[i - 1]!;
         const b = boxes[i]!;
@@ -148,8 +112,6 @@ async function footerProblems(page: Page, options: { scope?: string; minTarget?:
         const inOrder = sameRow ? (rtl ? b.right <= a.left + 1 : b.left >= a.right - 1) : b.top >= a.bottom - 2;
         if (!inOrder) out.push(`card ${n + 1}: button ${i + 1} is drawn before button ${i}`);
       }
-      // One row: every part's middle within the first part's height. Required when asked, and whenever the
-      // footer's parts (its flex items, through any display: contents box) fit side by side.
       const parts: HTMLElement[] = [];
       const collect = (el: HTMLElement) => {
         for (const child of el.children as HTMLCollectionOf<HTMLElement>) {
@@ -170,7 +132,6 @@ async function footerProblems(page: Page, options: { scope?: string; minTarget?:
   }, { scope: options.scope ?? null, card: CARD, minTarget: options.minTarget ?? 0, oneRow: options.oneRow ?? false, order: options.order ?? true });
 }
 
-/** The Recommended tag in a choice row: one line, inside its row, never alone on a line its label left room on. */
 async function tagProblems(page: Page): Promise<string[]> {
   return page.evaluate((card) => {
     const out: string[] = [];
@@ -184,17 +145,10 @@ async function tagProblems(page: Page): Promise<string[]> {
   }, CARD);
 }
 
-/**
- * Where taps land on the question cards' footers under `scope`: every point of a grid (every 2 px) inside each
- * drawn (rounded) footer button must reach that button (`elementFromPoint`, then `closest('button')`), and no point of the
- * card's content (the parts above its footer) may reach a footer button. A button's invisible touch box (its ::before) that reaches
- * over a neighbour, or over the card's content, takes taps meant for it. Each footer is scrolled to the middle first.
- */
 async function tapProblems(page: Page, scope = 'body'): Promise<string[]> {
   const out: string[] = [];
   const count = await page.locator(`${scope} ${CARD}`).count();
   for (let n = 0; n < count; n++) {
-    // Centred, clear of a pane's sticky bars (the Inbox thread's foot).
     await page.locator(`${scope} ${CARD}`).nth(n).locator(':scope > div.border-t').evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(50);
     out.push(...(await page.evaluate(({ scope, card, n }) => {
@@ -206,7 +160,6 @@ async function tapProblems(page: Page, scope = 'body'): Promise<string[]> {
       const name = (b: Element | null) => (b ? `"${b.textContent?.trim()}"` : 'nothing');
       for (const button of buttons) {
         const r = button.getBoundingClientRect();
-        // The drawn shape is the rounded box (hit testing follows border-radius; a pill's corners are not the button).
         const radius = Math.min(parseFloat(getComputedStyle(button).borderTopLeftRadius) || 0, r.width / 2, r.height / 2);
         const drawn = (x: number, y: number) => {
           const cx = Math.min(Math.max(x, r.left + radius), r.right - radius);
@@ -223,7 +176,6 @@ async function tapProblems(page: Page, scope = 'body'): Promise<string[]> {
         }
         for (const [other, points] of wrong) problems.push(`card ${n + 1}: ${points} points inside ${name(button)} reach ${other}`);
       }
-      // The card's content (every part but the footer: the prompt, the choices, the Other row, the note).
       let stolen = 0;
       for (const part of fieldset.children) {
         if (part === foot) continue;
@@ -242,7 +194,6 @@ async function tapProblems(page: Page, scope = 'body'): Promise<string[]> {
   return out;
 }
 
-/** Pin every card under `scope` to `width` px (a column that wide), or back to its column (null). */
 async function cardWidth(page: Page, width: number | null, scope = 'body'): Promise<void> {
   await page.evaluate(({ width, scope, card }) => {
     document.querySelectorAll<HTMLElement>(`${scope} ${card}`).forEach((el) => {
@@ -263,13 +214,11 @@ async function shot(page: Page, name: string, target?: string): Promise<void> {
 
 const SCHEMES = ['light', 'dark'] as const;
 
-/** Light or dark: the theme cookie the review surfaces read, the media the Inbox follows. */
 async function scheme(page: Page, url: string, value: 'light' | 'dark'): Promise<void> {
   await page.context().addCookies([{ name: 'plannotator-theme', value, url }]);
   await page.emulateMedia({ colorScheme: value, reducedMotion: 'reduce' });
 }
 
-/** The cookies the review surfaces' one-time dialogs read, so nothing covers the document. */
 async function quietCookies(context: BrowserContext, url: string): Promise<void> {
   await context.addCookies(
     [
@@ -283,7 +232,6 @@ async function quietCookies(context: BrowserContext, url: string): Promise<void>
   );
 }
 
-/** Reload a review page: the answers this test made come back as a draft, which it dismisses. */
 async function reload(page: Page): Promise<void> {
   await page.reload();
   await expect(page.locator(CARD)).toHaveCount(4);
@@ -296,7 +244,6 @@ interface Session {
   close: () => Promise<void>;
 }
 
-/** `annotate <doc>`, or plan review (`plannotator` reading a PermissionRequest on stdin), in a scratch folder. */
 async function startReview(kind: 'annotate' | 'plan'): Promise<Session> {
   const root = inboxScratch(`plannotator-question-card-${kind}-`);
   const dataDir = join(root, 'data');
@@ -375,14 +322,11 @@ test('annotate: at every column width the footer buttons keep their words on one
   const session = await startReview('annotate');
   try {
     const { context, page } = await openReview(browser, session);
-    // The owner's column (560 px), narrower ones, and 200% zoom of 560 and 720 (280 and 360 CSS px).
-    // One row from 300 px up: the footer's parts need about 297 px of card, and fit on one row on main.
     for (const width of [200, 240, 280, 300, 320, 360, 400, 480, 560, 720]) {
       await cardWidth(page, width);
       check(await footerProblems(page, { oneRow: width >= 300 }), `cards ${width} px wide`).toEqual([]);
       check(await tagProblems(page), `cards ${width} px wide`).toEqual([]);
     }
-    // Each way the footer changes, narrow and wide: a note opened (Hide note), a skip (Unskip), a pick, Accept, Other typed.
     const first = page.locator(CARD).first();
     const third = page.locator(CARD).nth(2);
     for (const width of [280, 720]) {
@@ -403,10 +347,6 @@ test('annotate: at every column width the footer buttons keep their words on one
       await reload(page);
       await cardWidth(page, width);
     }
-    // A touch screen, where each footer button has an invisible 44 px touch box: at widths where the footer
-    // wraps, with the note closed and open, a tap inside a drawn button reaches that button, never its
-    // neighbour on the next row (a tap on Skip must not accept the recommendation), and a tap on the card's
-    // content never reaches the footer.
     {
       const touch = await openReview(browser, session, { hasTouch: true });
       expect(await touch.page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
@@ -425,12 +365,10 @@ test('annotate: at every column width the footer buttons keep their words on one
       await touch.context.close();
     }
 
-    // Narrower than Accept recommended itself: its words end in an ellipsis, its name stays whole.
     await cardWidth(page, 160);
     check(await footerProblems(page), 'cards 160 px wide').toEqual([]);
     await expect(page.locator(CARD).nth(1).getByRole('button', { name: 'Accept recommended', exact: true })).toHaveCount(1);
 
-    // Pictures: each column width, light and dark, the owner's card and the long-label card.
     for (const value of SCHEMES) {
       await scheme(page, session.url, value);
       await reload(page);
@@ -445,7 +383,6 @@ test('annotate: at every column width the footer buttons keep their words on one
       await cardWidth(page, null);
     }
 
-    // Right to left: the same reflow, mirrored; the primary action stays at the line's end.
     await scheme(page, session.url, 'light');
     await reload(page);
     await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'));
@@ -455,7 +392,6 @@ test('annotate: at every column width the footer buttons keep their words on one
       await shot(page, `annotate-rtl-${width}-light`, `${CARD} >> nth=0`);
     }
     if (prefix !== 'before') {
-      // One row, right to left: Accept recommended at the row's far (left) end, past Skip.
       await cardWidth(page, 560);
       const ends = await page.locator(CARD).first().evaluate((card) => {
         const box = card.getBoundingClientRect();
@@ -486,7 +422,6 @@ test('plan review: wide, narrow windows, 200% zoom and phones; a footer that fit
         await shot(page, `plan-${width}-${value}`, `${CARD} >> nth=0`);
       }
       await context.close();
-      // 200% zoom of a 1440 × 900 window: 720 × 450 CSS px at twice the pixels.
       const zoomed = await openReview(browser, session, { viewport: { width: 720, height: 450 }, deviceScaleFactor: 2, colorScheme: value });
       await scheme(zoomed.page, session.url, value);
       await zoomed.page.reload();
@@ -495,9 +430,6 @@ test('plan review: wide, narrow windows, 200% zoom and phones; a footer that fit
       await zoomed.page.locator(CARD).first().scrollIntoViewIfNeeded();
       await shot(zoomed.page, `plan-zoom200-${value}`, `${CARD} >> nth=0`);
       await zoomed.context.close();
-      // Phones: a 360 px Android, a 375 px iPhone (SE, mini) and a 390 px iPhone. Each card's footer fits on
-      // one row there and keeps it (the footer's parts need about 297 px of card); the touch targets grow
-      // invisibly, so the drawn footer is main's.
       for (const width of [360, 375, 390]) {
         const phone = await openReview(browser, session, { viewport: { width, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: value });
         await scheme(phone.page, session.url, value);
@@ -520,7 +452,6 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
   const root = inboxScratch('plannotator-question-card-inbox-');
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
-  // Decision mode is experimental: on in this Inbox's own config.
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   let agent: SimAgent | null = null;
@@ -551,9 +482,6 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
       check(await footerProblems(page, { scope: pane }), 'Inbox thread, full width').toEqual([]);
       await page.locator(`${pane} ${CARD}`).first().scrollIntoViewIfNeeded();
       await shot(page, `inbox-full-${value}`, `${pane} ${CARD} >> nth=0`);
-      // The thread's cards in narrow columns. At 300 px the footer fits and keeps one row. At 280 px it does not:
-      // the Inbox's own footer wraps in reverse (#2206), so Accept recommended goes above Add note and Skip there,
-      // as on main; the reading-order check is off for that.
       for (const width of [300, 280]) {
         await cardWidth(page, width, pane);
         check(await footerProblems(page, { scope: pane, oneRow: width >= 300, order: false }), `Inbox thread, cards ${width} px wide`).toEqual([]);
@@ -561,8 +489,6 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
         await shot(page, `inbox-card-${width}-${value}`, `${pane} ${CARD} >> nth=0`);
       }
       await cardWidth(page, null, pane);
-      // A touch screen outside the Inbox's phone layout (a tablet), cards narrow enough to wrap: a tap inside a
-      // drawn footer button reaches that button.
       {
         const tablet = await browser.newContext({ viewport: { width: 1024, height: 768 }, hasTouch: true, colorScheme: value });
         const t = await tablet.newPage();
@@ -587,7 +513,6 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
           await shot(page, `inbox-side-${width}-${value}`, `${pane} ${CARD} >> nth=0`);
         }
       }
-      // The Decide dialog: the thread's open questions, then "Decide these N".
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`${url}#thread=${threadId}`);
       await page.locator(`${pane} [data-open-questions]`).click();
@@ -624,17 +549,14 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
   }
 });
 
-/** The Decide card: its secondary actions keep their words on one line; a Recommended tag never squeezes its choice's words. */
 async function decideProblems(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
-    /** The lines an element's visible words sit on: its text nodes' boxes (an icon is not a line). */
     const textLines = (el: Element): Set<number> => {
       const tops = new Set<number>();
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         if (!node.textContent?.trim()) continue;
-        // Visually hidden words (a 1 px clipped box) are no line of the button.
         const holder = node.parentElement!.getBoundingClientRect();
         if (holder.width <= 1 || holder.height <= 1) continue;
         const range = document.createRange();

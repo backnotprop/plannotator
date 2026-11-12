@@ -1,26 +1,3 @@
-/**
- * An open plan in the real Inbox shows its Contents. On a desktop it is ui's
- * contents rail (Workspaces' rail, moved into @plannotator/ui): ticks in the
- * page's right gutter, 24 px right of the reading column, never in the
- * comments column and clear of the Select / Markup toolstrip and the
- * full-screen comments drawer. A tick opens the Contents panel to the left; a
- * heading picked there scrolls the document to it and is the one marked.
- * Side by side on a laptop (1440, 1512) the page's column keeps its left edge
- * and narrows on its right so the rail fits beside it (the owner's pick); a
- * file without a rail keeps today's column. Hide leaves Show (focused) and
- * Show brings the rail back (its current tick focused), across a reload too.
- * Where the gutter is too short even
- * so, the rail yields and the Contents button opens the rail's headings as a
- * sheet; Hide gathers that button and the toolstrip into the corner control
- * with the toolbar, and one press brings them back. On a phone the button and sheet: opened
- * mid-document it marks the section being read, its rows are 44 px touch
- * targets, and Escape closes it back to the button. A table popout covers the
- * rail: it is neither on top nor clickable while the popout is open. Plan
- * review draws no rail.
- *
- * Screenshots (one plain window per state) go to PLANNOTATOR_CONTENTS_SHOTS
- * when it is set. Build the binary first (see inbox.spec.ts).
- */
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,22 +23,18 @@ const plan = [
   '## Rollout',
   ...Array.from({ length: 12 }, (_, i) => `Rollout paragraph ${i + 1}: a shadow week before the switch.`),
   '## Risks',
-  // Enough below Rollout that a click can bring it to the top of the page.
   ...Array.from({ length: 30 }, (_, i) => `Risk paragraph ${i + 1}: Stripe rate limits and a slow dead-letter queue.`),
 ].join('\n\n');
 
 async function shot(page: Page, name: string): Promise<void> {
   if (!shots) return;
   mkdirSync(shots, { recursive: true });
-  // The pointer over a quiet spot (the window's left edge opens the sidebar), so no hover state is in the
-  // picture; the panel's fade done.
   const size = page.viewportSize()!;
   await page.mouse.move(size.width - 60, size.height - 120);
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(shots, `${name}.png`) });
 }
 
-/** A scratch Inbox with the plan sent in a thread, open in `view` in a `viewport` window; `run` gets its page and pane. */
 async function withPlan(
   browser: Browser,
   viewport: { width: number; height: number },
@@ -106,7 +79,6 @@ async function withPlan(
   }
 }
 
-/** The rail's ticks, its reading column and its scroll, once the (deferred) rail has drawn. */
 async function railParts(pane: Locator) {
   const rail = pane.locator('nav[aria-label="Document contents"]');
   await expect(rail).toBeVisible();
@@ -124,15 +96,12 @@ for (const layout of ['side', 'full'] as const) {
     await withPlan(browser, viewport, layout, async (page, pane) => {
       const { rail, ticks, lane, column, scroller, page: pageBox } = await railParts(pane);
       expect(await ticks.count()).toBe(HEADINGS.length);
-      // The dock 24 px right of the reading column, inside the page's own box (the comments column is outside it).
       expect(Math.round(lane.x - (column.x + column.width))).toBe(24);
       expect(lane.x + lane.width).toBeLessThanOrEqual(pageBox.x + pageBox.width);
       await expect(pane.locator('.ib-apanel nav[aria-label="Document contents"], .ib-apanel [data-contents]')).toHaveCount(0);
       await expect(pane.locator('[data-contents-open], [data-contents-show]')).toHaveCount(0);
-      // Vertically centred on the page.
       const railBox = (await rail.boundingBox())!;
       expect(Math.abs(railBox.y + railBox.height / 2 - (pageBox.y + pageBox.height / 2))).toBeLessThan(2);
-      // Clear of the toolstrip.
       const strip = (await pane.locator('.ib-toolstrip').boundingBox())!;
       expect(strip.x + strip.width).toBeLessThan(lane.x);
       await expect(ticks.first()).toHaveAttribute('aria-current', 'location');
@@ -145,7 +114,6 @@ for (const layout of ['side', 'full'] as const) {
       await ticks.nth(4).click();
       await expect(rail).toHaveAttribute('data-revealed', '');
       await expect(rail.locator('.pn-contents-rail-label')).toHaveText(HEADINGS);
-      // Every heading's breadcrumb names it.
       await expect(rail.getByRole('button', { name: 'Go to Refund worker plan / Design / Idempotency keys' })).toBeVisible();
       if (layout === 'side') await shot(page, 'final-side-1680-open-light');
 
@@ -155,17 +123,13 @@ for (const layout of ['side', 'full'] as const) {
         const heading = (await pane.locator('#rollout').boundingBox())!;
         return heading.y >= pageBox.y && heading.y < pageBox.y + pageBox.height / 2;
       }).toBe(true);
-      // The heading read now is the one marked, as in plan review's list. The pick marks it at once; the
-      // scroll's own event reads the position again a frame later, so look once that frame has run.
       await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
       await expect(rail.locator('[aria-current="location"] .pn-contents-rail-label')).toHaveText('Rollout');
 
-      // Escape closes the panel (focus anywhere), and full screen stays.
       await page.keyboard.press('Escape');
       await expect(rail).not.toHaveAttribute('data-revealed', '');
       if (layout === 'full') {
         await expect(pane).toHaveClass(/\bib-fullview\b/);
-        // The comments panel floats over the page's right side: the rail yields while it is open, never under it.
         await page.locator('[data-full-view-comments]').click();
         const drawer = (await pane.locator('[data-comments-drawer="open"]').boundingBox())!;
         await expect.poll(async () => {
@@ -178,7 +142,6 @@ for (const layout of ['side', 'full'] as const) {
   });
 }
 
-/** The page's reading column: its box, and the page's content box (inside its padding and scrollbar). */
 async function columnOf(pane: Locator) {
   const column = (await pane.locator('.ib-docscroll [data-doc-text-root]').boundingBox())!;
   const content = await pane.locator('.ib-docscroll').evaluate((el) => {
@@ -190,7 +153,6 @@ async function columnOf(pane: Locator) {
   return { column, content };
 }
 
-/** Today's column, without a rail: 640 px at most, centred in the page's content box. */
 function todaysColumn(content: { left: number; width: number }) {
   const width = Math.min(640, content.width);
   return { left: content.left + (content.width - width) / 2, width };
@@ -204,14 +166,11 @@ for (const [width, height, scheme] of [[1440, 900, 'light'], [1440, 900, 'dark']
       await expect(pane.locator('[data-contents-open], [data-contents-show]')).toHaveCount(0);
       const { column, content } = await columnOf(pane);
       const today = todaysColumn(content);
-      // The left edge where it is today; the column narrower than today's, never wider.
       expect(Math.abs(column.x - today.left)).toBeLessThan(1);
       expect(column.width).toBeLessThan(today.width);
-      // The dock clear of the text: 24 px right of the column, inside the page.
       expect(lane.x).toBeGreaterThanOrEqual(column.x + column.width + 23);
       const pageBox = (await pane.locator('.ib-docscroll').boundingBox())!;
       expect(lane.x + lane.width).toBeLessThanOrEqual(pageBox.x + pageBox.width);
-      // Every tick is on top where it sits (nothing covers it; it is clickable).
       const covered = await page.evaluate(() => [...document.querySelectorAll('.pn-contents-rail [data-contents-index]')].some((tick) => {
         const box = tick.getBoundingClientRect();
         const el = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
@@ -233,7 +192,6 @@ test('side by side at 1440: Hide then Show, focus following each; reloaded with 
     await rail.locator('[data-contents-hide]').focus();
     await page.keyboard.press('Enter');
     await expect(rail).toHaveCount(0);
-    // The column widens back without the gutter; Show stays, with focus, and no sheet button replaces it.
     await page.waitForTimeout(500);
     await expect(show).toBeVisible();
     await expect(show).toBeFocused();
@@ -244,7 +202,6 @@ test('side by side at 1440: Hide then Show, focus following each; reloaded with 
     await expect(rail.locator('[data-contents-index][aria-current="location"]')).toBeFocused();
     await expect(show).toHaveCount(0);
 
-    // Hidden again, then a reload: the choice is remembered, Show is offered (not the sheet) and works.
     await rail.locator('[data-contents-index]').first().click();
     await rail.locator('[data-contents-hide]').click();
     await expect(show).toBeVisible();
@@ -271,8 +228,6 @@ test('side by side at 1440: a file without a rail keeps today\'s column', async 
   }, 'light', short);
 });
 
-// Side by side always has room once the column narrows (the page is 496 px or more from 960 px up, the folded
-// layout included); a window under 960 px is full screen, whose 760 px column is not narrowed.
 test('full screen at 880 (a gutter under 68 px): the rail yields and the Contents button opens the sheet', async ({ browser }) => {
   await withPlan(browser, { width: 880, height: 900 }, 'full', async (page, pane) => {
     const open = pane.locator('[data-contents-open]');
@@ -285,8 +240,6 @@ test('full screen at 880 (a gutter under 68 px): the rail yields and the Content
     expect(await sheet.locator('nav[aria-label="Table of contents"] button').allTextContents()).toEqual(HEADINGS);
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
-    // Hide gathers the Contents button and the Select / Markup toolstrip with the toolbar into the corner control
-    // (approval "inbox-fullscreen-gather"); one press brings them back.
     const strip = pane.locator('.ib-toolstrip');
     await expect(strip).toBeVisible();
     await page.locator('[data-full-view-hide]').click();
@@ -304,7 +257,6 @@ test('phone: the sheet opened mid-document marks the section being read; 44 px r
   await withPlan(browser, { width: 390, height: 844 }, 'full', async (page, pane) => {
     const scroller = pane.locator('.ib-docscroll');
     await expect(pane.locator('nav[aria-label="Document contents"]')).toHaveCount(0);
-    // Halfway into Design: its heading has gone above the top, the next one is far below.
     await scroller.evaluate((el) => {
       const design = el.querySelector<HTMLElement>('#design')!;
       el.scrollTop += design.getBoundingClientRect().top - el.getBoundingClientRect().top + 300;
@@ -324,7 +276,6 @@ test('phone: the sheet opened mid-document marks the section being read; 44 px r
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
     await expect(open).toBeFocused();
-    // Escape closed the sheet only: full screen is still open.
     await expect(pane).toHaveClass(/\bib-fullview\b/);
   });
 });
@@ -339,7 +290,6 @@ test('side by side: a table popout covers the rail, which is neither on top nor 
     const popout = page.locator('[data-popout]');
     await expect(popout).toBeVisible();
 
-    // What is on top where the tick was: the popout (its scrim or dialog), never the rail.
     const onTop = await page.evaluate(({ x, y }) => {
       const el = document.elementFromPoint(x, y);
       return { inRail: !!el?.closest('.pn-contents-rail'), inPopout: !!el?.closest('[data-popout]') };
@@ -347,7 +297,6 @@ test('side by side: a table popout covers the rail, which is neither on top nor 
     expect(onTop.inRail).toBe(false);
     expect(onTop.inPopout).toBe(true);
     await expect(rail).toBeHidden();
-    // Not clickable: the tick cannot be clicked, and nothing behind the popout scrolls or opens.
     const before = await scroller.evaluate((el) => el.scrollTop);
     expect(await ticks.nth(2).click({ trial: true, timeout: 1_000 }).then(() => 'clickable', () => 'not clickable')).toBe('not clickable');
     await expect(rail).not.toHaveAttribute('data-revealed', '');
@@ -359,7 +308,6 @@ test('side by side: a table popout covers the rail, which is neither on top nor 
   });
 });
 
-/** Plan review (`plannotator` reading an ExitPlanMode PermissionRequest on stdin) in a scratch project. */
 async function startPlanReview(): Promise<{ url: string; close: () => Promise<void> }> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-contents-plan-');
@@ -384,7 +332,6 @@ async function startPlanReview(): Promise<{ url: string; close: () => Promise<vo
     url,
     close: async () => {
       if (child.exitCode === null) {
-        // A plan review ends with a decision; deny what is left so the CLI exits.
         await fetch(new URL('/api/deny', url), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -424,7 +371,6 @@ test('plan review is unchanged: its Contents list, and no rail', async ({ browse
     await page.goto(session.url);
     await expect(page.locator('#rollout')).toHaveCount(1);
     await expect(page.locator('nav[aria-label="Table of contents"]').first()).toBeVisible();
-    // Give a deferred rail every chance to appear: none does.
     await page.waitForTimeout(2_500);
     await expect(page.locator('nav[aria-label="Document contents"], .pn-contents-rail')).toHaveCount(0);
     await shot(page, 'final-plan-review-unchanged-light');

@@ -1,24 +1,9 @@
-/**
- * A scripted model endpoint for host proofs: an OpenAI-compatible
- * `/v1/chat/completions` server (streamed) that the REAL agent host (the Pi
- * binary in RPC mode, the installed OpenCode 2) is pointed at in place of a
- * provider. The host, the plugin and the Inbox under proof are all real; only
- * the model's words come from the test's script. Every request is kept, so a
- * proof can read what the host sent the model (its tool list, the turn's
- * text) exactly as a provider would have received it.
- */
-
 export interface ScriptedRequest {
-  /** The tool names offered with the request. */
   tools: string[];
-  /** The tool definitions as sent. */
   toolDefinitions: { name: string; description: string; parameters: unknown }[];
   messages: { role: string; content: unknown; tool_call_id?: string }[];
-  /** The request body's size in bytes, as the host sent it. */
   bodyBytes: number;
-  /** Each tool entry's size in bytes, as it sat in the body (its compact JSON), by name. */
   toolBytes: Record<string, number>;
-  /** Each tool entry's compact JSON, by name. */
   toolJson: Record<string, string>;
 }
 
@@ -32,14 +17,12 @@ export interface ScriptedModel {
   stop(): void;
 }
 
-/** The text of a chat message's content (a string, or text parts). */
 export function messageText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.map((part) => (part && typeof part === "object" && typeof part.text === "string" ? part.text : "")).join("");
 }
 
-/** The last message of a request that is not the system prompt. */
 export function lastMessage(request: ScriptedRequest): { role: string; text: string } {
   const last = request.messages[request.messages.length - 1];
   return { role: last?.role ?? "", text: messageText(last?.content) };

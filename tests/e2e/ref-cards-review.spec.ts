@@ -1,28 +1,3 @@
-/**
- * Hover cards for issue, PR and MR links in plan review, annotate and code review,
- * proved in a real Chromium against the compiled binary. Each session runs in
- * a scratch git repository whose `origin` is github.com/acme/widgets, under a
- * temp PLANNOTATOR_DATA_DIR and HOME, with a scripted `gh` and `glab` first on
- * PATH (fake-forge.ts: no real GitHub or GitLab, every call logged).
- *
- * Proves, in plan review: the plan's bare `#12` links into the repo and shows
- * its card after the pointer rests on it, read through `gh` once; nothing is
- * asked before a hover; a ref the forge does not know shows no card at all and
- * stays the plain link it was. In annotate: the same `#12` in a Markdown file
- * shows its card. In code review: a pasted PR link in a changed Markdown
- * file's Read view shows its card. The keyboard (plan review): Tab to `#12`
- * opens its card, Tab moves into it, Escape closes it, returns the focus to
- * the link and stops there. A touch screen (plan review): a tap follows the
- * link (the opened tab is stubbed), with no card and no CLI run. The card's
- * height (code review): a long description shows about eight lines (a 216 px
- * box) before it scrolls; in a window too short for the card (1440 by 480),
- * the header scrolls with the description and Open on GitHub stays in view.
- *
- * Screenshots (light and dark) go to PLANNOTATOR_REF_CARD_REVIEW_SHOTS when it
- * is set. Build the binary first (see inbox.spec.ts), then
- * `bun run test:e2e:inbox`.
- */
-
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -159,7 +134,6 @@ interface Session {
   close: () => Promise<void>;
 }
 
-/** Plan review (`plannotator` reading a PermissionRequest on stdin), `plannotator annotate plan.md` or `plannotator review`, in a repo whose origin is GitHub. */
 async function start(kind: 'plan' | 'annotate' | 'review'): Promise<Session> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-ref-cards-review-e2e-');
@@ -214,7 +188,6 @@ async function start(kind: 'plan' | 'annotate' | 'review'): Promise<Session> {
   }
   await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
   const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
-  /** Resolves when the child has exited, or after `ms`. */
   const exited = (ms: number) =>
     new Promise<void>((done) => {
       if (child.exitCode !== null || child.signalCode !== null) return done();
@@ -229,7 +202,6 @@ async function start(kind: 'plan' | 'annotate' | 'review'): Promise<Session> {
     await exited(5_000);
     // inbox-guard: own child (the CLI this test spawned, never an Inbox)
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-    // The folder is removed only once nothing is writing into it (an ENOTEMPTY otherwise).
     await exited(5_000);
     await removeInboxScratch(root);
   };
@@ -286,7 +258,6 @@ test('plan review: a #12 in the plan shows its card; an unknown ref shows none',
       const page = await open(browser, session.url, scheme);
       const issue = page.locator('a[href="https://github.com/acme/widgets/issues/12"]').first();
       await expect(issue).toBeVisible();
-      // Drawing the plan runs no forge CLI.
       await page.waitForTimeout(600);
       expect(session.forge.calls()).toEqual([]);
 
@@ -297,7 +268,6 @@ test('plan review: a #12 in the plan shows its card; an unknown ref shows none',
       expect(session.forge.calls()).toEqual(['gh number=12']);
       await shot(page, `plan-review-issue-${scheme}`);
 
-      // The pasted PR link gets its card too.
       await page.mouse.move(5, 5);
       await expect(card).toHaveCount(0);
       await page.locator('a[href="https://github.com/acme/widgets/pull/14"]').first().hover();
@@ -305,7 +275,6 @@ test('plan review: a #12 in the plan shows its card; an unknown ref shows none',
       await shot(page, `plan-review-pull-${scheme}`);
 
       if (scheme === 'light') {
-        // A ref the forge does not know: asked once, no card, the link unchanged.
         await page.mouse.move(5, 5);
         await expect(card).toHaveCount(0);
         const unknown = page.locator('a[href="https://github.com/acme/widgets/issues/99"]').first();
@@ -374,7 +343,6 @@ test('plan review: the keyboard opens the card on focus, Tab moves into it, Esca
   try {
     const page = await open(browser, session.url, 'light');
     await expect(page.locator(`a[href="${ISSUE_12}"]`).first()).toBeVisible();
-    // Tab until the link has the focus (the keyboard's own focus, so :focus-visible).
     let reached = false;
     for (let i = 0; i < 80 && !reached; i++) {
       await page.keyboard.press('Tab');
@@ -385,11 +353,9 @@ test('plan review: the keyboard opens the card on focus, Tab moves into it, Esca
     await expect(card).toContainText('Widgets wobble on Tuesdays');
     expect(session.forge.calls()).toEqual(['gh number=12']);
 
-    // Tab goes into the card, not past it.
     await page.keyboard.press('Tab');
     expect(await page.evaluate(() => !!document.activeElement?.closest('[data-ref-card]'))).toBe(true);
 
-    // Escape closes the card, gives the focus back to the link, and the app's own Escape does not also run.
     await page.evaluate(() => {
       const w = window as unknown as { escapes: number };
       w.escapes = 0;
@@ -411,7 +377,6 @@ test('plan review on a touch screen: a tap follows the link, shows no card and r
   const session = await start('plan');
   try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'light' });
-    // The tab the tap opens never reaches the real GitHub.
     await context.route('https://github.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>stub</title>' }));
     const seen: [string, string][] = [
       ['plannotator-theme', 'light'],
@@ -457,10 +422,8 @@ test('code review: a long description shows about eight lines before it scrolls'
     await page.locator('a[href="https://github.com/acme/widgets/issues/21"]').first().hover();
     const card = page.locator('[data-ref-card]');
     await expect(card).toContainText('Widget list jitters after a cold load');
-    // Room enough below the link: the description is the one scroller.
     const body = card.locator('[data-ref-card-scroll]');
     const box = await body.evaluate((el) => ({ height: el.getBoundingClientRect().height, scrolls: el.scrollHeight > el.clientHeight }));
-    // Capped (it scrolls), at 216 px: 132 px (about five lines) before.
     expect(box.scrolls).toBe(true);
     expect(box.height).toBeGreaterThanOrEqual(212);
     expect(box.height).toBeLessThanOrEqual(216);
@@ -474,7 +437,6 @@ test('code review: a long description shows about eight lines before it scrolls'
 test('code review in a short window: the header scrolls with the description and Open on GitHub stays in view', async () => {
   const session = await start('review');
   try {
-    // 480: the card kept its footer but squeezed the description to a line. 400: the footer was cut off.
     for (const height of [480, 400]) {
       const page = await open(browser, session.url, 'light', [['plannotator-markdown-view', 'read']], height);
       await page.getByText('doc.md', { exact: true }).first().click();
@@ -488,18 +450,15 @@ test('code review in a short window: the header scrolls with the description and
       const c = (await card.boundingBox())!;
       expect(c.y).toBeGreaterThanOrEqual(0);
       expect(c.y + c.height).toBeLessThanOrEqual(height);
-      // The footer's Open on GitHub sits whole inside the card (the card clips what does not fit).
       const openBox = (await card.locator('[data-ref-card-open]').boundingBox())!;
       expect(openBox.y).toBeGreaterThanOrEqual(c.y);
       expect(openBox.y + openBox.height).toBeLessThanOrEqual(c.y + c.height);
 
-      // One scroller holds the title and the description, with all the room the footer leaves (not a line of it).
       const scroller = card.locator('[data-ref-card-scroll]');
       await expect(scroller.locator('[data-ref-card-title]')).toHaveCount(1);
       const room = await scroller.evaluate((el) => ({ height: el.clientHeight, scrolls: el.scrollHeight > el.clientHeight }));
       expect(room.scrolls).toBe(true);
       expect(room.height).toBeGreaterThanOrEqual(c.height - (openBox.height + 24));
-      // Scrolling it brings the description's end and the comment into view, above the footer.
       await scroller.hover();
       await page.mouse.wheel(0, 600);
       await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);

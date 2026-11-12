@@ -1,9 +1,3 @@
-/**
- * `bun run test:sandbox` (scripts/test-sandbox.ts) is what agents run instead of
- * building a sandbox env by hand, so a slip here sends every such run to the
- * real home. Stand-in runners record what they were started with; no real
- * test runner, browser or Inbox starts.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -23,11 +17,6 @@ const plainFile = "tests/agents-md-size.test.ts";
 const domFile = "packages/ui/markdownEditorFidelity.test.tsx";
 const spec = "tests/e2e/annotate-added-folder.spec.ts";
 
-/**
- * A runner that records its argv, its env and the seeded .gitconfig, sets its
- * `trap`s, writes `ready`, then runs `body` (sh). Its own output goes nowhere,
- * so nothing it leaves running holds the test run's pipes open.
- */
 function fakeRunner({ trap = "", body = "" }: { trap?: string; body?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "test-sandbox-fake-"));
   dirs.push(dir);
@@ -47,7 +36,6 @@ function fakeRunner({ trap = "", body = "" }: { trap?: string; body?: string } =
     );
     return { argv: readFileSync(join(out, "argv"), "utf8").trim().split("\n"), env, gitconfig: readFileSync(join(out, "gitconfig"), "utf8") };
   };
-  /** Resolves once run `n` has set its traps. */
   const ready = async (n = 0) => {
     for (let i = 0; i < 200 && !existsSync(join(dir, `run-${n}`, "ready")); i++) await Bun.sleep(25);
     expect(existsSync(join(dir, `run-${n}`, "ready"))).toBe(true);
@@ -55,16 +43,8 @@ function fakeRunner({ trap = "", body = "" }: { trap?: string; body?: string } =
   return { bin, run, dir, ready };
 }
 
-/** A body that keeps the runner alive for up to 10 s, answering traps within 0.1 s. */
 const WAIT = "i=0; while [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done";
 
-/**
- * Every variable detectOrigin reads, found by running it over a recording
- * Proxy: first with nothing set, then with each name found so far set, until no
- * new name turns up (a marker read only once another is set, as DSH_SHELL's
- * exceptions are). `enumerated` is true when it lists the env's keys, which a
- * name list cannot cover.
- */
 function namesDetectOriginReads(): { names: Set<string>; enumerated: boolean } {
   const names = new Set<string>();
   let enumerated = false;
@@ -166,7 +146,6 @@ describe("the agent markers", () => {
   test("originMarkers() names every variable detectOrigin reads", () => {
     const { names, enumerated } = namesDetectOriginReads();
     expect(enumerated).toBe(false);
-    // A probe that stopped finding names would pass forever: today it finds 14.
     expect(names.size).toBeGreaterThan(10);
     const markers = new Set(originMarkers());
     expect([...names].filter((name) => !markers.has(name))).toEqual([]);
@@ -187,10 +166,8 @@ describe("a run", () => {
     GIT_DIR: "/outer/.git",
     GIT_WORK_TREE: "/outer",
     T3CODE_THREAD_ID: "t",
-    // Every variable detectOrigin reads, found by running it (not from the list under test).
     ...Object.fromEntries([...namesDetectOriginReads().names].map((name) => [name, name === "PLANNOTATOR_SESSION_TAG" ? "claude-code:caller" : name === "PLANNOTATOR_ORIGIN" ? "codex" : "1"])),
   };
-  /** One run with its own signal source, so a signal a test sends reaches only that run. */
   const start = (fake: ReturnType<typeof fakeRunner>, files = [plainFile]) => {
     const signals = new EventEmitter();
     const running = runSandbox({ files, passthrough: [] }, { bun: fake.bin, playwright: fake.bin }, parentEnv, { signals, graceMs: 300 });
@@ -211,10 +188,8 @@ describe("a run", () => {
     expect(env.NO_ANON_PING).toBe("1");
     expect(env.PLANNOTATOR_INBOX_CONNECT).toBe("0");
     expect(env.PLANNOTATOR_FEEDBACK_URL).toBe("http://127.0.0.1:9/feedback");
-    // The calling agent, remote mode and an outer repo never reach the tests: the child looks like CI.
     expect(detectOrigin(env)).toBe(detectOrigin({}));
     for (const key of [...namesDetectOriginReads().names, "DOM_TESTS", "SSH_CONNECTION", "PLANNOTATOR_REMOTE", "GIT_DIR", "GIT_WORK_TREE", "T3CODE_THREAD_ID"]) expect(env[key]).toBeUndefined();
-    // Switches CI leaves at their defaults stay unset.
     for (const key of ["PLANNOTATOR_UPDATE_CHECK", "PLANNOTATOR_INBOX_NOTES"]) expect(env[key]).toBeUndefined();
     expect(gitconfig).toContain("email =");
     expect(existsSync(root)).toBe(false);
@@ -256,7 +231,6 @@ describe("a run", () => {
     const sent = Date.now();
     signals.emit("SIGTERM", "SIGTERM");
     expect(await running).not.toBe(0);
-    // Well before the runner's own 10 s end.
     expect(Date.now() - sent).toBeLessThan(5_000);
     expect(readFileSync(join(fake.dir, "run-0", "term"), "utf8")).toContain("got");
     expect(existsSync(fake.run(0).env.PLANNOTATOR_TEST_SANDBOX!)).toBe(false);

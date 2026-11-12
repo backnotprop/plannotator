@@ -1,12 +1,3 @@
-/**
- * An agent's icon on an iPad, in WebKit, on a slow link: a long press on the mark opens the face picker, a tap on
- * "Sets" opens the icon dialog, and a tap on an icon applies it. WebKit sends no click for a touch whose pointerdown
- * was cancelled, so a picker place that cancels it cannot be tapped on an iPhone or iPad (Chromium clicks anyway).
- * Every Inbox answer waits 400 ms (a 3G round trip).
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-agent-icon-tap-webkit.spec.ts`.
- */
 import { expect, test, type Locator } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -43,7 +34,6 @@ test.afterAll(async () => {
 
 test.use({ hasTouch: true, deviceScaleFactor: 2, viewport: { width: 810, height: 1080 } });
 
-/** A finger held on the mark past the long press (pointer events, as WebKit sends them for a touch). */
 async function longPress(target: Locator): Promise<void> {
   const box = (await target.boundingBox())!;
   const at = { pointerType: 'touch', pointerId: 7, isPrimary: true, bubbles: true, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 };

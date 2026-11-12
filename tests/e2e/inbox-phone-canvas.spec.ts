@@ -1,22 +1,3 @@
-/**
- * The page canvas on a phone is the composer's colour. iOS 26 Safari shows
- * about 100 CSS px past the visual viewport, between the window and the
- * keyboard's ˄ ˅ ✓ bar, and paints it with the root canvas (html and body's
- * background). The owner's probe on iOS 26.6.1 proved it: the window's bottom
- * met the visual viewport's, and tinting html and body orange turned the band
- * orange. Theme.css paints body --background, so the band was a dark strip
- * under a card-coloured composer.
- *
- * Proved here, in WebKit (iPhone) and Chromium (Pixel) at 390 x 844, light and
- * dark and a switch between them: html's and body's computed background equal
- * the reply foot's and the compose sheet's. At 1440 x 900 (the desktop) the
- * root keeps main's paint: html none, body --background. A headless browser
- * has no keyboard and no Safari band: the owner's iPhone is the final check.
- *
- * Build the binary first (see inbox.spec.ts). CANVAS_SHOTS names a folder for
- * the pictures, CANVAS_SHOT_PREFIX their prefix (default `after`).
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -30,12 +11,10 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = process.env.CANVAS_SHOTS ? resolve(process.env.CANVAS_SHOTS) : null;
 const prefix = process.env.CANVAS_SHOT_PREFIX ?? 'after';
-/** A `before` run (the old binary, for the pictures) records the failures and goes on. */
 const check = prefix === 'before' ? expect.soft : expect;
 
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1440, height: 900 };
-/** Safari's band above the keyboard, drawn in the pictures by shortening the window over the canvas. */
 const BAND = 110;
 
 interface World {
@@ -76,7 +55,6 @@ test.afterAll(async () => {
   }
 });
 
-/** Computed backgrounds: html, body, the given surface, and what --background resolves to at the root. */
 async function paints(page: Page, surface: string): Promise<{ html: string; body: string; surface: string; background: string }> {
   return page.evaluate((surface) => {
     const bg = (el: Element) => getComputedStyle(el).backgroundColor;
@@ -89,9 +67,7 @@ async function paints(page: Page, surface: string): Promise<{ html: string; body
   }, surface);
 }
 
-/** The root and the surface agree once the theme's 150 ms colour transition is over. */
 async function expectCanvasIs(page: Page, surface: string, scheme: string): Promise<void> {
-  // Past the transition, so a colour read half way through a switch is never compared.
   await page.waitForTimeout(400);
   await expect
     .poll(async () => {
@@ -107,7 +83,6 @@ async function expectCanvasIs(page: Page, surface: string, scheme: string): Prom
   check(p.body, `${scheme}: body`).toBe(p.surface);
 }
 
-/** The picture: the window shortened by Safari's band, so the canvas shows where Safari shows it. */
 async function shot(page: Page, name: string): Promise<void> {
   if (!shots) return;
   await page.waitForTimeout(400);
@@ -146,21 +121,16 @@ for (const engine of ENGINES) {
       const pane = page.locator('section.ib-pane');
       const box = pane.locator('.ib-pfoot textarea');
       const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
-      // The other engine's words come back as a draft, and the box may open by itself: a click only while it is shut.
       await expect(box.or(open).first()).toBeVisible();
       if (!(await box.isVisible())) await open.click({ timeout: 5_000 }).catch(() => {});
       await box.fill('The second picture first, then the other two.');
       const seen = new Set<string>();
       for (const scheme of ['dark', 'light', 'dark'] as const) {
-        // The Inbox follows the system scheme by default: this is a live theme switch.
         await page.emulateMedia({ colorScheme: scheme });
-        // The page takes the scheme a moment after the system does (the root's `light` class): the canvas already
-        // equals the foot before that, in the old colours, so the colour is read only once the switch has landed.
         await expect(page.locator('html')).toHaveClass(scheme === 'light' ? /(^|\s)light(\s|$)/ : /^(?!.*(^|\s)light(\s|$))/);
         await expectCanvasIs(page, 'section.ib-pane .ib-pfoot', scheme);
         seen.add((await paints(page, 'section.ib-pane .ib-pfoot')).surface);
       }
-      // The switch happened: light and dark are two colours.
       expect(seen.size).toBe(2);
       for (const scheme of ['light', 'dark'] as const) {
         await page.emulateMedia({ colorScheme: scheme });
@@ -177,7 +147,6 @@ for (const engine of ENGINES) {
       await sheet.getByRole('textbox', { name: 'Message' }).fill('Other agents conduct the same analysis to see what instructions they get.');
       for (const scheme of ['light', 'dark'] as const) {
         await page.emulateMedia({ colorScheme: scheme });
-        // The paperclip row is transparent over the sheet: the sheet's colour is what meets the keyboard.
         await expectCanvasIs(page, 'dialog[data-compose]', scheme);
         await shot(page, `${engine.tag}-compose-${scheme}`);
       }

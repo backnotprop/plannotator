@@ -1,10 +1,3 @@
-/**
- * Which repo an annotate session links `#123` and `@name` to (#2290), run
- * against both servers: the source's own repo when it has one, else the repo
- * the session started from. Sessions read it from /api/plan's `repoInfo`; a
- * `display` with no `/` (a repo or folder name, not owner/repo) leaves the
- * document's refs as plain text (`forgeRefLinks`).
- */
 import "../setup/sandbox-data-dir";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
@@ -85,8 +78,6 @@ export function describeAnnotateRepoIdentity(name: string, startAnnotateServer: 
 			process.env.PLANNOTATOR_REMOTE = "0";
 
 			world = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-annotate-repo-identity-")));
-			// For git's global config only. os.homedir() ignores this, so it does not
-			// protect the data folder: the sandbox-data-dir import above does that.
 			process.env.HOME = join(world, "home");
 			mkdirSync(process.env.HOME);
 			launchRepo = makeRepo(join(world, "launch"), "https://github.com/acme/launch.git");
@@ -145,8 +136,6 @@ export function describeAnnotateRepoIdentity(name: string, startAnnotateServer: 
 				expect(await repoInfoOf(folderSession(join(otherRepo, "docs")))).toMatchObject(OTHER);
 			});
 
-			// With no remote the display is just the repo's name, with no `/`, so refs
-			// stay plain text: the launch repo's issues are not this repo's.
 			test("a repo with no remote keeps its own name, not the launch repo's links", async () => {
 				const localRepo = makeRepo(join(world, "local-only"));
 				const info = await repoInfoOf(fileSession(writeDoc(join(localRepo, "a.md"))));
@@ -157,13 +146,10 @@ export function describeAnnotateRepoIdentity(name: string, startAnnotateServer: 
 
 		describe("a rootless session uses the launch repo", () => {
 			test("a URL", async () => {
-				// The repo the URL would name if it were read as a relative path.
 				makeRepo(join(launchRepo, "https:", "example.com", "docs"), "git@gitlab.com:group/other.git");
 				expect(await repoInfoOf(fileSession("https://example.com/docs/a.md"))).toMatchObject(LAUNCH);
 			});
 
-			// Only `annotate` has a file: any other mode's filePath is a label, so
-			// it never picks the repo even when it reads like a path in another one.
 			test("the last message", async () => {
 				const info = await repoInfoOf({
 					...fileSession(writeDoc(join(otherRepo, "a.md"))),

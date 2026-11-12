@@ -1,35 +1,3 @@
-/**
- * The Inbox's worst case: a throwaway Inbox filled with the data that broke
- * the window in the stress test of 2026-10-12 (/tmp/break-ui-inbox, the fix
- * plan's PR 1): project folders in Japanese, Arabic, Vietnamese and Russian,
- * two folders named "api", a 54-character project name; an Arabic subject
- * and message; a derived subject cut across an emoji; a thread over four days
- * and one from last year; long, near-identical and Arabic file names, a file
- * changed since it was sent with comments on it; a message table and a
- * 390 by 4000 screenshot; a replaced question with a long prompt; a long URL
- * as a subject; a long archived thread; a log,
- * YAML, CSV, JSON, PDF, panorama, 1×1 image and minified bundle in one
- * message; a guided review with an unplaced file; question cards with an
- * unmatched recommendation, an unsent pick and a closed card; 46
- * projects; and, on request, enough waiting threads for a four-digit count.
- * Live agent sessions (for "Where should this reply go?" and New message)
- * are `LiveSessions`, against the running Inbox.
- *
- * The store is written directly (`InboxStore`, one writer, BEFORE the Inbox
- * starts on this data dir) with a clock of its own, because dates in the
- * past ("Sep 2" of last year) cannot be made through the agent path, which
- * stamps every line with now. Everything else is what an agent's
- * `send_message` would write. Never the real data dir: a scratch folder only
- * (`refuseRealDataDir`).
- *
- * Used by tests/e2e/inbox-worst-case.spec.ts (the width checks every Inbox
- * PR runs). By hand, against a compiled binary:
- *
- *   bun scripts/inbox-worst-case.ts --data-dir /tmp/inbox-worst/data [--bulk 1284]
- *   PLANNOTATOR_DATA_DIR=/tmp/inbox-worst/data HOME=/tmp/inbox-worst PLANNOTATOR_INBOX_CONNECT=0 \
- *     PLANNOTATOR_TEST_SANDBOX=/tmp/inbox-worst/data .local/plannotator inbox --background
- */
-
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -48,7 +16,6 @@ const CLAUDE: Agent = { kind: 'agent', host: 'claude-code', session: 'ses_wc_cla
 const PI: Agent = { kind: 'agent', host: 'pi', session: 'ses_wc_pi', name: 'Pi' };
 const CODEX: Agent = { kind: 'agent', host: 'codex', session: 'ses_wc_codex', name: 'Codex (northwind-industries-holdings platform reviewer)' };
 
-/** The project folders, by role: their real names are the point. */
 export const WORST_CASE_FOLDERS = {
   japanese: '請求サービス',
   arabic: 'خدمة-الفواتير',
@@ -87,17 +54,13 @@ export type WorstCaseThread =
 
 export interface WorstCaseWorld {
   dataDir: string;
-  /** The folder the projects are in (the Inbox's HOME is its parent, so paths read `~/src/…`). */
   src: string;
   projects: Record<keyof typeof WORST_CASE_FOLDERS, string>;
   threads: Record<WorstCaseThread, string>;
-  /** The attachment names in the `files` thread, by role. */
   files: { a: string; b: string; arabic: string; long: string; changed: string };
-  /** The attachment names in the `kinds` thread, by kind. */
   kinds: { log: string; yaml: string; csv: string; json: string; pdf: string; pano: string; dot: string; minified: string };
 }
 
-/** A message table, wide enough to fold a phone's cells to one letter a line before the fix. */
 const METRICS_TABLE = [
   '| Region | Captures | Refunds | Refund rate | p95 latency | Notes |',
   '| --- | ---: | ---: | ---: | ---: | --- |',
@@ -106,7 +69,6 @@ const METRICS_TABLE = [
   '| Asia Pacific | 455,020 | 9,912 | 2.18% | 731 ms | processor timeouts in ap-southeast-2 |',
 ].join('\n');
 
-/** A solid-striped PNG of `width` by `height` (a tall phone screenshot): stripes every 120 px so a crop shows. */
 export function stripedPng(width: number, height: number): Buffer {
   const row = width * 3 + 1;
   const raw = Buffer.alloc(row * height);
@@ -132,8 +94,8 @@ export function stripedPng(width: number, height: number): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
-  header[8] = 8; // bit depth
-  header[9] = 2; // RGB
+  header[8] = 8;
+  header[9] = 2;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
@@ -153,7 +115,6 @@ function crc32(bytes: Buffer): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** A git repository at `src/<folder>` (a project root, as an agent's project_path resolves). */
 function repo(src: string, folder: string): string {
   const dir = join(src, folder);
   mkdirSync(dir, { recursive: true });
@@ -163,12 +124,6 @@ function repo(src: string, folder: string): string {
 
 const question = (prompt: string, options: string[], extra: string[] = []) => [':::question', prompt, ...extra, '', ...options.map((o) => `- [ ] ${o}`), ':::'].join('\n');
 
-/**
- * Fill `dataDir` with the worst case. The Inbox must not be running on it
- * (the store has one writer): this refuses a data dir whose Inbox answers.
- * `now` is "today" (default the real now, so today's times read as the
- * clock); `bulk` adds that many waiting threads for a four-digit count.
- */
 export async function seedWorstCase(options: { dataDir: string; src?: string; now?: Date; bulk?: number }): Promise<WorstCaseWorld> {
   const dataDir = resolve(refuseRealDataDir(options.dataDir, 'inbox-worst-case'));
   if (existsSync(join(dataDir, 'inbox', 'inbox.json'))) throw new Error(`${dataDir} already has an Inbox: seed a fresh scratch data dir, before the Inbox starts`);
@@ -180,7 +135,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   const at = (date: Date) => {
     clock = date;
   };
-  // Successive lines a few seconds apart, so sections sort as they were written.
   const tick = () => {
     clock = new Date(clock.getTime() + 5_000);
   };
@@ -189,8 +143,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   const roots = Object.fromEntries(Object.entries(WORST_CASE_FOLDERS).map(([role, folder]) => [role, repo(src, folder)])) as Record<keyof typeof WORST_CASE_FOLDERS, string>;
   const project = (root: string) => store.ensureProject({ root, name: extractRepoName(root) ?? extractDirName(root) ?? 'project' });
   const ids = Object.fromEntries(Object.entries(roots).map(([role, root]) => [role, project(root).id])) as Record<keyof typeof WORST_CASE_FOLDERS, string>;
-  // A message with no thread name and no reply_to starts its own thread. Each
-  // such message also keeps a session of its own, so the data stays as it was.
   let sessions = 0;
   const send = (projectRole: keyof typeof WORST_CASE_FOLDERS, author: Agent, body: string, extra: { subject?: string; thread?: string; reply_to?: string; wakes?: boolean } = {}) => {
     tick();
@@ -200,13 +152,11 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
 
   const threads = {} as Record<WorstCaseThread, string>;
 
-  // Last year's thread and one from September this year: "Sep 2" must not sort under "Sep 10" as this year's.
   at(new Date(today.getFullYear() - 1, 8, 2, 16, 40));
   threads.lastYear = send('billing', CLAUDE, 'The ledger export from last year is archived in `exports/2025`. Nothing to do.', { subject: 'Ledger export archived (last year)' }).thread_id;
   at(new Date(today.getFullYear(), 8, 10, 9, 15));
   threads.thisYear = send('billing', PI, 'September close is done; the ledger balances.', { subject: 'September close' }).thread_id;
 
-  // A thread over four days: yesterday's message and today's must not both read "8:22 PM".
   at(daysAgo(3));
   const day1 = send('long', CLAUDE, 'Started the reconciliation job for the holdings ledger. I will report each day.', { thread: 'reconciliation-run' });
   threads.multiDay = day1.thread_id;
@@ -218,13 +168,10 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   send('long', CLAUDE, ['Today: the last three mismatches are a currency rounding rule.', '', question('Round half-even or half-up for JPY refunds?', ['Half-even', 'Half-up'])].join('\n'), { thread: 'reconciliation-run' });
 
   at(new Date(today.getTime() - 50 * 60_000));
-  // A derived subject (no subject given) cut at 120 code units across an emoji: it drew "�…".
-  // Exactly 118 characters before the emoji once whitespace is collapsed, so the 120-character cut lands inside it.
   const emojiLead = 'Should the refund worker retry the captures that the processor marked as pending for longer than the retry window, then '.slice(0, 117);
   const emojiPrompt = `${emojiLead}x🧾 and keep the original idempotency key on every retry?`;
   threads.emojiCut = send('japanese', CLAUDE, [question(emojiPrompt, ['Retry with the same key', 'Fail to the dead-letter queue'], ['Stopped: the retry worker cannot ship without this.'])].join('\n')).thread_id;
 
-  // Right-to-left: an Arabic subject (the list cut its first words), thread name and message.
   threads.arabic = send(
     'arabic',
     PI,
@@ -242,7 +189,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   threads.apiWork = send('apiWork', CLAUDE, 'The API rate limits are raised for the partner tier.', { subject: 'Partner rate limits raised' }).thread_id;
   threads.apiHome = send('apiHome', PI, 'The home API now serves the weather widget again.', { subject: 'Weather widget back' }).thread_id;
 
-  // Files: near-identical long names, an Arabic name, a 220-character name, a file changed since it was sent with comments on it.
   at(daysAgo(2, 15, 10));
   const docs = join(roots.long, 'docs');
   mkdirSync(docs, { recursive: true });
@@ -275,26 +221,21 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
       annotation: { id: `ann-wc-${n}`, type: 'COMMENT', blockId: 'block-0', startOffset: 0, endOffset: 7, originalText: 'Failed', text: `Comment ${n} on the retry policy.`, createdA: clock.getTime() },
     });
   }
-  // Edited after it was sent: the tile says it changed.
   const changedPath = join(docs, files.changed);
   writeFileSync(changedPath, `${readFileSync(changedPath, 'utf8')}\n\nEdited after it was sent: retries stop after five attempts.\n`);
-  // Sent two days ago and edited yesterday: every "when" about it names its day.
   const edited = daysAgo(1, 11, 4);
   utimesSync(changedPath, edited, edited);
 
   at(new Date(today.getTime() - 40 * 60_000));
-  // One long-named file alone: the file header names it (with several files the stepping bar does).
   const [longOnly] = await recordInboxAttachments(store.dir, [join(docs, files.long)], { base: roots.long, at: clock.toISOString() });
   tick();
   threads.longFile = store.sendMessage({ project_id: ids.long, author: { ...PI, session: 'ses_wc_longfile' }, body: 'The reconciliation file, final version.', subject: 'Reconciliation file', attachments: [longOnly!] }).message.thread_id;
 
-  // A thread read once, then eight new messages: on a phone "↓ N new" shows while they are below the view.
   const first = send('long', CODEX, 'Load test started against the holdings ledger.', { thread: 'load-test' });
   threads.pill = first.thread_id;
   store.markSeen(first.thread_id, store.messageCursor(first.id) ?? undefined);
   for (let n = 1; n <= 8; n++) send('long', CODEX, `Load test step ${n}: ${'p95 latency held under 400 ms while the refund worker drained its queue. '.repeat(3)}`, { thread: 'load-test' });
 
-  // A message with a table and a tall screenshot, under a long thread name.
   const shots = join(roots.billing, 'shots');
   mkdirSync(shots, { recursive: true });
   writeFileSync(join(shots, 'checkout-mobile-full-page.png'), stripedPng(390, 4000));
@@ -313,7 +254,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
     { subject: 'Refund metrics and the checkout page on a phone', thread: 'refund-metrics-for-partial-captures-and-chargebacks-q4' },
   ).thread_id;
 
-  // A replaced question with a long prompt: the "Replaces …" link broke the sentence and left its period alone.
   const old = send('billing', CLAUDE, question('Should the partial-capture refund worker retry against the processor with the original idempotency key when the processor answers 409?', ['Yes', 'No']), {
     subject: 'Retry rule for partial-capture refunds',
   });
@@ -326,19 +266,15 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
     { reply_to: old.id },
   );
 
-  // A question from a session that has ended (it woke through a connection and stopped polling).
   threads.ended = send('billing', { ...CLAUDE, session: 'ses_wc_gone' }, question('Ship the ledger migration tonight?', ['Yes, tonight', 'Wait for Monday']), { subject: 'Ledger migration tonight?', wakes: true }).thread_id;
   threads.ended2 = send('billing', { ...CLAUDE, session: 'ses_wc_gone2' }, question('Rotate the processor API key this week?', ['Yes', 'Next week']), { subject: 'Rotate the processor key?', wakes: true }).thread_id;
 
-  // HTML in a message that centres itself: its own align attribute, and its parent's.
   threads.centered = send('billing', PI, ['A release banner in HTML.', '', '<p align="center">Centered by its own attribute.</p>', '', '<div align="center">', '<p>Centered by its parent.</p>', '</div>'].join('\n'), { subject: 'Release banner' }).thread_id;
 
-  // Settings → Storage: a subject that is one long URL.
   threads.storageUrl = send('billing', PI, 'The incident write-up is published.', {
     subject: 'https://northwind-industries-holdings.atlassian.net/wiki/spaces/BILLING/pages/987654321/Incident+2026-10-04+partial+capture+refunds+double+posted',
   }).thread_id;
 
-  // Settings → Archived: a long subject under a long thread name, archived.
   const archived = send('billing', CLAUDE, 'Archived after the review.', {
     subject: 'Refund worker: retry policy for partial captures and the dead-letter queue for processor timeouts',
     thread: 'refund-worker-retry-policy-review',
@@ -350,7 +286,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   tick();
   send('billing', CLAUDE, question('Which ledger owns reversal entries?', ['The refunds ledger', 'The main ledger']), { subject: 'Ledger ownership' });
 
-  // Batch 2 (the fix plan's PR 8): every kind of file the file view broke on, in one message.
   at(new Date(today.getTime() - 30 * 60_000));
   const artifacts = join(roots.billing, 'artifacts');
   mkdirSync(artifacts, { recursive: true });
@@ -386,7 +321,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   writeFileSync(join(artifacts, kinds.pdf), '%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n');
   writeFileSync(join(artifacts, kinds.pano), stripedPng(8000, 300));
   writeFileSync(join(artifacts, kinds.dot), stripedPng(1, 1));
-  // One line of about 200 KB (the stress test's was 323 KB): a comment on it stored the whole line.
   writeFileSync(join(artifacts, kinds.minified), `!function(){${Array.from({ length: 6000 }, (_, n) => `var r${n}=t.refund(${n},"cap_${n}");`).join('')}}();\n`);
   const kindsRecorded = await recordInboxAttachments(store.dir, Object.values(kinds).map((name) => join(artifacts, name)), { base: roots.billing, at: clock.toISOString() });
   tick();
@@ -398,7 +332,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
     attachments: kindsRecorded,
   }).message.thread_id;
 
-  // A guided review with one section, a file left in "Everything else", and an overview heading written with ##.
   tick();
   const guideSnapshot = {
     ...FIXTURE_V1_LOCAL,
@@ -422,7 +355,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   writeBlob(store.dir, described.ref.sha256, Buffer.from(described.text, 'utf8'));
   threads.guide = guideMessage.thread_id;
 
-  // Question cards: a choice question whose recommendation names none of its choices, and a pick saved but not sent.
   const cardsMessage = send(
     'billing',
     PI,
@@ -437,13 +369,11 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   const paging = store.questionsOf(cardsMessage.id)[1]!;
   tick();
   store.savePicks(cardsMessage.id, [{ key: paging.key, revision: paging.revision, answer: { v: 1, key: paging.key, kind: 'single', prompt: paging.prompt, selected: ['Only above 10 an hour'] } }]);
-  // A thread marked read: its question closed unanswered, a read-only card with no Other answer.
   const closed = send('billing', CODEX, question('Keep the legacy refund endpoint for one more release?', ['Keep it', 'Remove it']), { subject: 'Legacy refund endpoint' });
   threads.closedCard = closed.thread_id;
   tick();
   store.markRead(closed.thread_id, true);
 
-  // 46 projects: the sidebar's list scrolls (the nav items shrank to 20 px past about 17).
   for (let n = 1; n <= 38; n++) {
     const root = repo(src, `client-portal-${String(n).padStart(2, '0')}`);
     tick();
@@ -451,7 +381,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
     store.markSeen(sent.thread_id);
   }
 
-  // A four-digit count: enough waiting threads in one project.
   if (options.bulk && options.bulk > 0) {
     const root = repo(src, 'bulk-load');
     const bulk = project(root).id;
@@ -464,11 +393,6 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
   return { dataDir, src, projects: roots, threads, files, kinds };
 }
 
-/**
- * Agent sessions live in one project, as the connections hold them: each
- * long-polls `/api/inbox/bridge/poll` with the registry's token, saying where
- * it works. `stop()` ends them all.
- */
 export class LiveSessions {
   private stopped = false;
   private readonly loops: Promise<void>[] = [];

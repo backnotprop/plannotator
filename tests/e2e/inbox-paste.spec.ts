@@ -1,28 +1,3 @@
-/**
- * Paste to attach (the owner: "When I'm writing a new message or even a
- * reply, I need to be able to paste in images"), proved in a real browser
- * against the compiled binary. Nothing is mocked: the binary runs
- * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR and
- * HOME, an agent writes through `plannotator inbox mcp` (scripts/inbox-sim.ts),
- * a connection's long-poll keeps one session live for compose, and Chromium
- * pastes real ClipboardEvents whose clipboardData carries an image (a
- * screenshot of the window itself).
- *
- *  1. Compose: a pasted screenshot attaches as `pasted-image-<date>-<time>.png`
- *     and rides the Send; a text paste is left to the browser.
- *  2. The reply box: two pasted images (one held mid-upload for the picture),
- *     Send carries both; the agent's read_thread names them; the sent reply
- *     shows them in the thread's tiles.
- *  3. The reply box's paperclip and drops (approval "inbox-reply-attach"):
- *     files dropped on the thread with the reply closed open it holding them,
- *     the paperclip and a drop on the box add more with their own names, a
- *     text drag is not taken, and Send carries them all to the agent.
- *  4. A phone: the tiles fit the reply box at 390 and 320 px.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs land in .local/proof/paste-images/ (and PASTE_SHOTS_DIR when set).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -68,7 +43,6 @@ function registry(dataDir: string): { port: number; token: string } {
   return JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** A connection's long-poll, saying where the session works: it stays live for compose. */
 function keepLive(dataDir: string, session: string, host: string, project: string): () => Promise<void> {
   let stopped = false;
   const startedAt = Date.now() - 20 * 60_000;
@@ -99,11 +73,6 @@ async function shot(page: Page, name: string, schemes: readonly ('light' | 'dark
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/**
- * A real ClipboardEvent on the focused element, its clipboardData carrying
- * the image (as a screenshot arrives: a file named image.png, no text) and,
- * when given, text. Returns whether the browser's own paste was prevented.
- */
 async function paste(page: Page, content: { png?: Buffer; text?: string }): Promise<boolean> {
   return page.evaluate(
     ({ b64, text }) => {
@@ -156,7 +125,6 @@ test.afterAll(async () => {
   }
 });
 
-/** A screenshot of part of the window: a real picture to paste. */
 async function screenshotBytes(page: Page, clip: { x: number; y: number; width: number; height: number }): Promise<Buffer> {
   return page.screenshot({ clip });
 }
@@ -168,7 +136,6 @@ test('compose: a pasted screenshot attaches with a dated name and rides the Send
   const picture = await screenshotBytes(page, { x: 0, y: 0, width: 760, height: 420 });
   await page.locator('.ib-side [data-open-compose]').click();
   const dialog = page.locator('dialog[data-compose]');
-  // A plain New message opens with To empty and focus on To: pick the session; focus moves to the message.
   const to = dialog.locator('.ib-cp-tobtn');
   await expect(to).toBeFocused();
   await expect(to).not.toHaveAttribute('data-loading', /.*/, { timeout: 15_000 });
@@ -179,14 +146,11 @@ test('compose: a pasted screenshot attaches with a dated name and rides the Send
   await expect(text).toBeFocused();
   await text.fill('The list header wraps on a narrow window. This is what I see:');
 
-  // Text alone: the browser's own paste, never prevented.
   expect(await paste(page, { text: 'plain words' })).toBe(false);
   await expect(dialog.locator('[data-compose-file]')).toHaveCount(0);
-  // A spreadsheet cell: its text plus the picture of it, a file named image.png. The text is the paste.
   expect(await paste(page, { png: picture, text: 'Q3\t1,204\t+8%' })).toBe(false);
   await page.waitForTimeout(300);
   await expect(dialog.locator('[data-compose-file]')).toHaveCount(0);
-  // A screenshot: the window takes it.
   expect(await paste(page, { png: picture })).toBe(true);
   const tile = dialog.locator('[data-compose-file="done"]');
   await expect(tile).toHaveCount(1);
@@ -216,7 +180,6 @@ test('the reply box: two pasted images (one still uploading), Send carries both 
   await expect(text).toBeFocused();
   await text.fill('The legend sits on top of the axis labels. Two shots: the full chart, and the corner.');
 
-  // The second upload is held until its picture is taken, so one tile shows as uploading.
   let release: () => void = () => {};
   const held = new Promise<void>((r) => (release = r));
   let uploads = 0;
@@ -230,7 +193,6 @@ test('the reply box: two pasted images (one still uploading), Send carries both 
   expect(await paste(page, { png: pictureB })).toBe(true);
   await expect(box.locator('[data-compose-file="uploading"]')).toHaveCount(1);
   await shot(page, '02-reply-two-pasted-one-uploading');
-  // Send while it uploads: nothing goes yet.
   await pane.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(pane.locator('.ib-error')).toContainText('Wait for the files to finish uploading');
   release();
@@ -256,11 +218,6 @@ test('the reply box: two pasted images (one still uploading), Send carries both 
   expect(world.errors).toEqual([]);
 });
 
-/**
- * A real DragEvent of `type` on the first element `selector` matches, its
- * dataTransfer carrying `files` (as the file manager hands them over) or text.
- * Returns whether the page took it.
- */
 async function dragOn(page: Page, selector: string, type: 'dragenter' | 'dragover' | 'drop', content: { files?: { name: string; type: string; b64: string }[]; text?: string }): Promise<boolean> {
   return page.evaluate(
     ({ selector, type, files, text }) => {
@@ -287,27 +244,22 @@ test('the reply box: files dropped on the thread open the reply holding them; th
   const picture = await screenshotBytes(page, { x: 0, y: 0, width: 640, height: 360 });
   const png = { name: 'ledger-q3-export.png', type: 'image/png', b64: picture.toString('base64') };
 
-  // A link dragged over the thread: not taken, no target.
   expect(await dragOn(page, 'section.ib-pane .ib-pbody', 'dragover', { text: 'https://example.com/q3' })).toBe(false);
   await expect(pane.locator('[data-pane-drop]')).toHaveCount(0);
-  // Files over the thread: the whole pane is the target.
   expect(await dragOn(page, 'section.ib-pane .ib-pbody', 'dragenter', { files: [png] })).toBe(true);
   expect(await dragOn(page, 'section.ib-pane .ib-pbody', 'dragover', { files: [png] })).toBe(true);
   await expect(pane.locator('[data-pane-drop]')).toBeVisible();
   await shot(page, '05-reply-dragover-pane', ['dark']);
   expect(await dragOn(page, 'section.ib-pane .ib-pbody', 'drop', { files: [png] })).toBe(true);
   await expect(pane.locator('[data-pane-drop]')).toHaveCount(0);
-  // The drop opened the reply box with the file.
   const box = pane.locator('.ib-rbox');
   await expect(box.locator('[data-compose-file="done"][data-compose-file-name="ledger-q3-export.png"]')).toHaveCount(1);
 
-  // The paperclip, beside Send in the box's row: any file, its own name kept.
   const clip = box.locator('[data-reply-row] label.ib-rclip');
   await expect(clip).toHaveAccessibleName('Attach files');
   await box.locator('[data-reply-attach]').setInputFiles({ name: 'currency-notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Currency\n\nEUR rows lose the column.\n') });
   await expect(box.locator('[data-compose-file="done"][data-compose-file-name="currency-notes.md"]')).toHaveCount(1);
 
-  // A drop on the box itself: a dashed "Drop to attach", the pane's target off.
   const zip = { name: 'exports-2026-10.zip', type: 'application/zip', b64: Buffer.from('PK\u0005\u0006' + '\u0000'.repeat(18), 'binary').toString('base64') };
   expect(await dragOn(page, 'section.ib-pane .ib-rbox textarea', 'dragover', { files: [zip] })).toBe(true);
   await expect(box).toHaveAttribute('data-drop-over', '');

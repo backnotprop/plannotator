@@ -1,28 +1,3 @@
-/**
- * The Inbox thread parity harness, one command:
- *
- *   bun run test:parity:inbox-thread [--base <ref>] [--base-binary <path>] [--candidate-binary <path>] [--out <dir>] [--keep]
- *
- * 1. The reference binary: a dev build (`__CLI_VERSION__="0.0.0-dev"`) of
- *    `--base` (default origin/main) in a temporary git worktree, cached in
- *    .local/parity/bin/base-<sha>/plannotator; or `--base-binary`.
- * 2. The candidate binary: a dev build of this checkout (review, hook, then
- *    compile; .local/parity/bin/candidate/plannotator); or `--candidate-binary`.
- * 3. One seeded data dir (tests/e2e/inbox-thread-parity-seed.ts), written by
- *    the reference binary in a scratch folder.
- * 4. tests/e2e/inbox-thread-parity.config.ts twice: the reference run writes
- *    the PNGs and the threads' outerHTML; the candidate run compares at zero
- *    pixels and writes its own outerHTML. Each project copies the seed and
- *    starts its own Inbox on the copy.
- * 5. The outerHTML diffed file by file; report.md and report.json in the
- *    evidence folder (default .local/parity/<UTC stamp>/). Exit 0 only when
- *    every screenshot and every DOM file is identical.
- *
- * Sandboxed like every Inbox test: scratch HOME and PLANNOTATOR_DATA_DIR,
- * PLANNOTATOR_BROWSER from tests/helpers/no-browser.ts, agent connect,
- * update checks, phones and the relay off. Never the real ~/.plannotator.
- */
-
 import { spawnSync, type SpawnSyncOptions } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -48,7 +23,6 @@ function log(line: string): void {
   process.stdout.write(`[parity] ${line}\n`);
 }
 
-/** The build order (review, then hook), then a dev compile, in `dir`. */
 function build(dir: string, outfile: string): void {
   mkdirSync(dirname(outfile), { recursive: true });
   const loud: SpawnSyncOptions = { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] };
@@ -113,7 +87,6 @@ interface Failure {
   message: string;
 }
 
-/** The candidate run's failed expectations, from Playwright's JSON report. */
 function failures(results: string): Failure[] {
   if (!existsSync(results)) return [{ test: '(the run)', project: '', message: 'no results.json' }];
   const report = JSON.parse(readFileSync(results, 'utf8')) as { suites: Suite[]; errors?: { message?: string }[] };
@@ -134,12 +107,10 @@ function failures(results: string): Failure[] {
   return out;
 }
 
-/** The snapshot a screenshot failure names ("Snapshot: folding-land.png", or the missing file's path). */
 function shotOf(message: string): string {
   return /Snapshot: (\S+)/.exec(message)?.[1] ?? /png\/[^/]+\/(\S+?\.png)/.exec(message)?.[1] ?? '(unknown)';
 }
 
-/** "510 pixels (ratio 0.01 of all image pixels) are different", or the first line. */
 function pixelsOf(message: string): string {
   return /\d+ pixels \(ratio [^)]*\) are different/.exec(message)?.[0] ?? /Expected an image \d+px by \d+px, received \d+px by \d+px[^.]*/.exec(message)?.[0] ?? message.split('\n')[0]!;
 }
@@ -168,13 +139,11 @@ async function main(): Promise<void> {
     else await removeInboxScratch(seedRoot);
   }
 
-  // Screenshots: every reference PNG was compared (or is missing in the candidate run).
   const pngs = files(join(out, 'reference', 'png')).filter((f) => f.endsWith('.png'));
   const failed = failures(join(out, 'candidate', 'results.json'));
   const pixel = failed.filter((f) => /toHaveScreenshot|Screenshot comparison failed|snapshot doesn't exist|pixels/.test(f.message));
   const other = failed.filter((f) => !pixel.includes(f));
 
-  // outerHTML (and each thread's page errors): every file, both ways.
   const refDom = join(out, 'reference', 'dom');
   const candDom = join(out, 'candidate', 'dom');
   const names = [...new Set([...files(refDom), ...files(candDom)])].sort();

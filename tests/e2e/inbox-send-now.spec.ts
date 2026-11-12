@@ -1,23 +1,3 @@
-/**
- * Queued, Sending, Send now (the owner's request, 2026-10-16: "The message
- * should be less deceiving. It should say this message is queued up or
- * something. And then maybe an option just to send it immediately."),
- * proved in a real browser against the compiled binary.
- *
- * Nothing is mocked: the binary runs `plannotator inbox --background` under a
- * temp PLANNOTATOR_DATA_DIR and HOME; a Claude Code agent writes through
- * `plannotator inbox mcp` with the wake meta (scripts/inbox-sim.ts), as the
- * mod does; its connection is the bridge's real doors driven as the mod
- * drives them (the bearer token from inbox.json, a long-poll saying where the
- * session works, whether a turn runs and that it can take a reply mid-turn,
- * `delivered` once the reply is in); the person's Send is the window's own
- * reply box. The mod's own code doing the delivery is
- * apps/hook/hooks/mod/inbox.test.ts (12, 13).
- *
- * PNGs (light, dark, and a phone) land in .local/proof/send-now/, or in
- * PLANNOTATOR_SEND_NOW_SHOTS when it names a folder.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -55,7 +35,6 @@ function registry(): { port: number; token: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** One Claude Code session's connection, as the mod runs it: busy or idle, and able to take a reply mid-turn. */
 class Connection {
   readonly commands: InboxReplyCommand[] = [];
   private stopped = false;
@@ -96,7 +75,6 @@ class Connection {
     }
   }
 
-  /** A turn starts or ends: said on the next poll, as the mod says it (no store line is written). */
   setBusy(busy: boolean): void {
     this.busy = busy;
   }
@@ -166,7 +144,6 @@ test.afterAll(async () => {
   }
 });
 
-/** A Claude Code session of its own (one `plannotator inbox mcp` process is one session): its message starts its own thread. */
 async function freshAgent(): Promise<SimAgent> {
   const agent = await SimAgent.connect({ binary, env: world.env, name: 'Claude Code', host: 'claude-code' });
   extraAgents.push(agent);
@@ -180,7 +157,6 @@ async function sessionOf(threadId: string): Promise<string> {
   return thread.messages[0]!.author.session;
 }
 
-/** The person replies in the window: Reply, type, Send. */
 async function replyInWindow(page: Page, words: string): Promise<void> {
   const pane = page.locator('section.ib-pane');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
@@ -211,21 +187,16 @@ test('Claude Code at work: the reply reads "Undelivered · … is working" with 
   const button = pane.locator('[data-send-now]');
   await expect(button).toBeVisible();
   await expect(button).toHaveText('Send now');
-  // The list row (approval "inbox-row-delivery", Ticks): its own subject, a clock before the time, the state in
-  // its name, and the thread's line as the tooltip.
   const row = page.locator(`.ib-lbody [data-thread-id="${sent.thread_id}"]`).first();
   const tick = row.locator('.ib-tick');
   await expect(tick).toHaveAttribute('data-tick', 'queued');
   await expect(tick).toHaveAttribute('aria-label', 'Queued for Claude Code,');
   await expect(row.locator('.ib-title')).toHaveText('Migration shipped');
   await expect(tick).not.toHaveAttribute('title', /./);
-  // Waiting on a busy agent (approval "inbox-busy-agent-reply"): "Undelivered" in place of the count, and on hover
-  // the row's own Send now takes the count's and the time's place (so the tick's tooltip is not offered then).
   await expect(row.locator('[data-undelivered]')).toHaveText(/^Undelivered/);
   await row.hover();
   await expect(page.locator(`[data-row="${sent.thread_id}"] > [data-row-send-now]`)).toBeVisible();
   await page.mouse.move(0, 0);
-  // Handed out without `now` while nobody pressed it.
   await expect.poll(() => connection.commands.length, { timeout: 15_000 }).toBe(1);
   expect(connection.commands[0]!.now).toBeUndefined();
   await shot(page, '1-queued-working');
@@ -238,7 +209,6 @@ test('Claude Code at work: the reply reads "Undelivered · … is working" with 
   await expect(tick).toHaveAttribute('data-tick', 'sending');
   await shot(page, '2-sending-now');
 
-  // The connection put it into the running turn.
   await connection.deliver(connection.commands[0]!.id);
   await expect(line).toHaveAttribute('data-delivery', 'delivered');
   await expect(line).toHaveText(/^Delivered to Claude Code, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
@@ -253,7 +223,6 @@ test('idle: "Sending to Claude Code…", no Send now', async () => {
   const sent = await (await freshAgent()).send({ project_path: world.ledger, subject: 'Export streams now', body: 'The export streams rows now. Peak memory went from 1.9 GB to 140 MB.' }, { wakes: true });
   const connection = new Connection(await sessionOf(sent.thread_id), false);
   world.connections.push(connection);
-  // A fresh load: a thread that arrived while another was open waits behind "N new" in the list.
   await page.goto(`${world.url}#thread=${sent.thread_id}`);
   await page.reload();
   const pane = page.locator('section.ib-pane');
@@ -278,8 +247,6 @@ test('an MCP-only agent: "Saved for … It sees it when it next reads this threa
   const line = pane.locator('[data-delivery]');
   await expect(line).toHaveText('Saved for Claude Code. It sees it when it next reads this thread.');
   await expect(pane.locator('[data-send-now]')).toHaveCount(0);
-  // The list holds still while the thread is open: when its first read came after the look, the row sits in
-  // Quiet (folded), where the reply shows in place.
   if ((await page.locator('[data-section-id="quiet"] .ib-band').count()) > 0) await openQuiet(page);
   const row = page.locator(`.ib-lbody [data-thread-id="${sent.thread_id}"]`).first();
   await expect(row.locator('.ib-tick')).toHaveAttribute('data-tick', 'saved');
@@ -317,12 +284,8 @@ test('on a phone: the queued line and Send now fit, and the button has a 44 px t
   }
 });
 
-// ── The list row's delivery glyph (approval "inbox-row-delivery", "Ticks") ──
-
-/** Where the row-ticks shots go: PLANNOTATOR_ROW_TICKS_SHOTS, else beside the send-now shots. */
 const ticksDir = resolve(process.env.PLANNOTATOR_ROW_TICKS_SHOTS ?? join(proofDir, 'row-ticks'));
 
-/** The window's own routes, from the page (its serverSession from health). */
 async function windowPost(page: Page, path: string, body: Record<string, unknown>): Promise<number> {
   return page.evaluate(
     async ({ path, body }) => {
@@ -410,13 +373,10 @@ test('the ticks on wide rows, beside a thread and on a phone, light and dark; th
     await expect(tickOf(p, acked.thread_id)).toHaveAttribute('aria-label', 'Looks good, queued for Claude Code,');
   };
 
-  // Wide rows, 1440.
   await page.reload();
   await openQuiet(page);
   await expectStates(page);
-  // Sent rows keep their own subject.
   await expect(page.locator(`.ib-lbody [data-thread-id="${saved.thread_id}"] .ib-title`).first()).toHaveText('App Store screenshots: light or dark?');
-  // The dots breathe, and stand still under reduced motion.
   const dot = tickOf(page, sending.thread_id).locator('.ib-dots i').first();
   expect(await dot.evaluate((el) => getComputedStyle(el).animationName)).toBe('ib-dots');
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -424,7 +384,6 @@ test('the ticks on wide rows, beside a thread and on a phone, light and dark; th
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await ticksShot(page, 'ticks-wide-1440');
 
-  // Beside a thread, 1280: the two-line rows carry the same glyphs.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`${world.url}#thread=${queued.thread_id}`);
   await expect(page.locator('section.ib-pane').getByRole('heading', { name: 'Retry policy for the Stripe webhook' })).toBeVisible();
@@ -433,7 +392,6 @@ test('the ticks on wide rows, beside a thread and on a phone, light and dark; th
   await ticksShot(page, 'ticks-beside-thread-1280');
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // A phone.
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'light' });
   try {
     const phone = await context.newPage();

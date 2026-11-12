@@ -1,25 +1,3 @@
-/**
- * Hover cards for issue, PR and MR links in an agent's message, proved in a
- * real browser against the compiled binary. `plannotator inbox --background`
- * runs under a temp data dir and HOME with a scripted `gh` and `glab` first
- * on PATH (fake-forge.ts: no real GitHub or GitLab, every call logged), and an
- * agent sends through `plannotator inbox mcp` a message whose bare `#12`
- * links to the project's GitHub origin, plus a pasted GitLab MR URL.
- *
- * Proves: opening the thread runs no forge CLI and asks nothing; a hover
- * opens the card after the delay with one CLI call per ref (a second hover
- * asks nothing); the states (merged with checks passed, open with checks
- * failing and changes requested, draft with checks running, an issue, not
- * found, a GitLab MR with its pipeline and approvals); a press pins the card,
- * it scrolls and stays when the pointer leaves; Escape closes it and leaves
- * the thread open; keyboard focus opens it, Tab moves in, Escape returns focus
- * to the link; a link inside the body asks before opening; on a phone a tap
- * shows a sheet and never follows the link.
- *
- * Screenshots go to PLANNOTATOR_REF_CARD_SHOTS when it is set. Build the
- * binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { devices, expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -81,7 +59,6 @@ const LONG_BODY = [
   '',
   '![before](https://example.com/before.png)',
   '',
-  // Raw HTML lands after the card's own pass over its links (HtmlBlock writes it in a passive effect).
   '<p>Logs: <a href="https://evil.example/raw" target="_blank">the raw log</a></p>',
   '',
   '<details open><summary>Trace</summary><a href="https://evil.example/details">the trace</a></details>',
@@ -194,7 +171,6 @@ async function shot(page: Page, name: string) {
 }
 
 async function hover(page: Page, href: string) {
-  // A link Escape gave focus back to keeps its ring; the pointer path starts from no focus.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(2, 2);
   await expect(card(page)).toHaveCount(0);
@@ -226,7 +202,6 @@ test.describe('ref hover cards', () => {
     } finally {
       await agent.close().catch(() => {});
     }
-    // `#12` links once the project's origin is read (in the background, inbox-repos.ts).
     await expect
       .poll(async () => ((await (await fetch(`${url}api/inbox/threads/${threadId}`)).json()) as { thread: { project: { repo: unknown } } }).thread.project.repo, { timeout: 20_000 })
       .toBeTruthy();
@@ -252,7 +227,6 @@ test.describe('ref hover cards', () => {
       expect(refRequests).toEqual([]);
       expect(forge.calls()).toEqual([]);
 
-      // A pass over a link shorter than the delay opens nothing and asks nothing.
       await ref(page, issueHref(15)).hover();
       await page.waitForTimeout(150);
       await page.mouse.move(2, 2);
@@ -260,7 +234,6 @@ test.describe('ref hover cards', () => {
       await expect(card(page)).toHaveCount(0);
       expect(forge.calls()).toEqual([]);
 
-      // Merged, checks passed, closes an issue. One call; a second hover asks nothing.
       await hover(page, issueHref(12));
       const c = card(page);
       await expect(c.locator('[data-ref-card-title]')).toContainText('Ship the widget picker');
@@ -273,14 +246,12 @@ test.describe('ref hover cards', () => {
       await hover(page, issueHref(12));
       expect(forge.calls()).toEqual(['gh number=12']);
 
-      // Open, checks failing, changes requested, the latest comment.
       await hover(page, issueHref(14));
       await expect(c.locator('[data-ref-card-checks="failure"]')).toHaveText(/2 failing, 1 running · 2 passed/);
       await expect(c.locator('[data-ref-card-review]')).toHaveText('Changes requested');
       await expect(c.locator('[data-ref-card-comment]')).toContainText('The rename test still fails on Linux');
       await shot(page, 'light-pr-checks-failing');
 
-      // A press pins it: it scrolls, stays when the pointer leaves, and Close appears.
       await c.locator('[data-ref-card-title]').click();
       await expect(c).toHaveAttribute('data-ref-card-pinned', '');
       const scroll = c.locator('[data-ref-card-scroll]');
@@ -293,8 +264,6 @@ test.describe('ref hover cards', () => {
       await expect(c).toBeVisible();
       await shot(page, 'light-pinned-scrolled');
 
-      // A link in the body has no href at all, so nothing opens it: not a middle-click, a modified
-      // click or the context menu. A click or Enter only asks; the confirm's Open is the one real link.
       await scroll.evaluate((el) => (el.scrollTop = 0));
       const report = c.getByRole('link', { name: 'the report' });
       expect(await scroll.locator('a[href]').count()).toBe(0);
@@ -312,7 +281,6 @@ test.describe('ref hover cards', () => {
       await expect(c.locator('[data-ref-card-confirm] a')).toHaveAttribute('href', 'https://evil.example/phish');
       expect(popups).toEqual([]);
       await c.locator('[data-ref-card-confirm]').getByRole('button', { name: 'Cancel' }).click();
-      // Raw-HTML links, and one inside <details>, are held the same way.
       for (const [name, url] of [
         ['the raw log', 'https://evil.example/raw'],
         ['the trace', 'https://evil.example/details'],
@@ -335,38 +303,32 @@ test.describe('ref hover cards', () => {
         expect(popups).toEqual([]);
       }
       expect(await scroll.locator('a[href]').count()).toBe(0);
-      // The image is drawn as its alt text, never loaded; nothing in the card shows a native tooltip.
       await expect(c.locator('[data-image-unavailable]')).toHaveText('before');
       expect(await c.locator('img[src^="https://"]').count()).toBe(0);
       expect(await c.locator('[title]:not([title=""])').count()).toBe(0);
 
-      // Escape closes it; the thread stays open.
       await page.keyboard.press('Escape');
       await expect(c).toHaveCount(0);
       await expect(page).toHaveURL(new RegExp(`#thread=${threadId}`));
       await expect(page.locator('[data-message-id]')).toBeVisible();
 
-      // Draft, checks running, review required.
       await hover(page, issueHref(15));
       await expect(c.locator('[data-ref-card-state]')).toHaveText('Draft');
       await expect(c.locator('[data-ref-card-checks="pending"]')).toHaveText(/2 running · 1 passed/);
       await expect(c.locator('[data-ref-card-review]')).toHaveText('Review required');
       await shot(page, 'light-pr-draft');
 
-      // An issue.
       await hover(page, issueHref(11));
       await expect(c.locator('[data-ref-card-state]')).toHaveText('Open');
       await expect(c).toContainText('good first issue');
       expect(await c.getAttribute('aria-label')).toBe('Issue #11: No way to pick a widget');
       await shot(page, 'light-issue');
 
-      // Not found: quiet, and still a way to GitHub.
       await hover(page, issueHref(404));
       await expect(c.locator('[data-ref-card-error="not_found"]')).toBeVisible();
       await expect(c.locator('[data-ref-card-open]')).toHaveAttribute('href', issueHref(404));
       await shot(page, 'light-not-found');
 
-      // A GitLab merge request, through glab.
       await hover(page, MR_URL);
       await expect(c.locator('[data-ref-card-title]')).toContainText('Cache the build layers !7');
       await expect(c.locator('[data-ref-card-checks="pending"]')).toHaveText(/Pipeline running · 2 of 4 jobs left/);
@@ -377,7 +339,6 @@ test.describe('ref hover cards', () => {
       await shot(page, 'light-gitlab-mr');
       expect(forge.calls()).toContain('glab mr iid=7');
 
-      // Keyboard: focus opens it, Tab moves in, Escape brings focus back to the link.
       await page.mouse.move(2, 2);
       await expect(c).toHaveCount(0);
       await page.keyboard.press('Shift');
@@ -389,7 +350,6 @@ test.describe('ref hover cards', () => {
       await expect(c).toHaveCount(0);
       expect(await ref(page, issueHref(12)).evaluate((el) => el === document.activeElement)).toBe(true);
 
-      // One CLI call per ref over the whole run.
       expect([...forge.calls()].sort()).toEqual(['gh number=11', 'gh number=12', 'gh number=14', 'gh number=15', 'gh number=404', 'glab mr iid=7']);
       expect(popups).toEqual([]);
     } finally {
@@ -429,7 +389,6 @@ test.describe('ref hover cards', () => {
       const open = await sheet.locator('[data-ref-card-open]').boundingBox();
       expect(open!.height).toBeGreaterThanOrEqual(44);
       await shot(page, 'phone-sheet-pr');
-      // The scrim closes it, and the tap does not land on what is under it.
       await page.locator('[data-ref-card-scrim]').tap({ position: { x: 20, y: 40 } });
       await expect(sheet).toHaveCount(0);
       expect(page.url()).toBe(before);

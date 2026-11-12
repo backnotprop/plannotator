@@ -1,18 +1,10 @@
-/**
- * A private certificate authority and a server certificate for 127.0.0.1,
- * made with `openssl` in a temp dir: the stand-in for a network that inspects
- * HTTPS with its own root, which Bun's built-in roots do not hold. Works with
- * OpenSSL and with macOS's LibreSSL.
- */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface SelfSignedTls {
-  /** The root's certificate (PEM), and its file: what NODE_EXTRA_CA_CERTS points at. */
   caPem: string;
   caFile: string;
-  /** The server's certificate and key, for Bun.serve({ tls }). */
   cert: string;
   key: string;
 }

@@ -1,13 +1,3 @@
-/**
- * The Inbox search proofs' world: the approved mock's store, written by real
- * agents through `plannotator inbox mcp` (scripts/inbox-sim.ts) and the
- * person's replies through the window's own routes. Seven projects (two
- * named "api", one Arabic, one Japanese, one 54 characters long), threads in
- * every section, two archived, attachments (a long SPIKE name, an Arabic
- * file name) and questions. Used by inbox-search.spec.ts and by
- * scripts/inbox-search-compare.ts (before and after screenshots).
- */
-
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
@@ -16,13 +6,11 @@ export interface SearchWorld {
   agents: SimAgent[];
   projects: Record<'plannotator' | 'workspaces' | 'apiWork' | 'apiPersonal' | 'arabic' | 'japanese' | 'northwind', string>;
   threads: Record<'relay' | 'retry' | 'ranking' | 'pagination' | 'cliPagination' | 'arabic' | 'japanese' | 'northwind' | 'release' | 'drafts' | 'schema', string>;
-  /** The retry thread's message that says "retry budget" (the landing target). */
   retryBudget: string;
 }
 
 const ask = (prompt: string, choices: string[], extra: string[] = []) => ['', ':::question', prompt, '', ...extra, ...(extra.length ? [''] : []), ...choices.map((c) => `- [ ] ${c}`), ':::'].join('\n');
 
-/** Write a file into a project and return its path (an agent attaches it). */
 function file(project: string, path: string, text: string): string {
   const full = join(project, path);
   mkdirSync(join(full, '..'), { recursive: true });
@@ -100,14 +88,12 @@ export async function seedSearchWorld(input: { binary: string; env: Record<strin
       file(projects.northwind, 'docs/spikes/SPIKE-claude-deploy-pipeline-investigation-for-northwind-customer-portal-20261011.md', '# Spike\n'),
     ],
   });
-  // The person answers it (the thread holds a long subject and a long name).
   {
     const question = (northwind.questions as { key: string; kind: string; prompt: string }[])[0]!;
     const answer = { v: 1, key: question.key, kind: question.kind, prompt: question.prompt, selected: ['Yes'] };
     await windowPost(input.url, `/api/inbox/messages/${msg(northwind)}/picks`, { questions: [{ key: question.key, revision: 0, answer }] });
     await windowPost(input.url, `/api/inbox/messages/${msg(northwind)}/reply`, { idempotency_key: 'k-northwind-pin', questions: [{ key: question.key, revision: 1 }] });
   }
-  // An unnamed thread (no `thread`): its results carry the subject in the thread chip.
   await pi.send({ project_path: projects.workspaces, subject: 'Flaky end-to-end test on the billing page since the Stripe SDK upgrade', body: 'The billing page test fails one run in five since the SDK upgrade; it passes again after each deploy. The checkout iframe loads late.' });
   await pause();
   const japanese = await opencode.send({ project_path: projects.japanese, subject: 'デプロイ後の決済エラーの調査（deploy 2026-10-12）', thread: 'deploy', body: '昨夜の deploy の後、決済APIのタイムアウトが3倍に増えました。原因は接続プールの上限です。修正版を用意しました。' });
@@ -131,11 +117,9 @@ export async function seedSearchWorld(input: { binary: string; env: Record<strin
     attachments: [file(projects.plannotator, 'adr/implementation/relay-rate-limits.md', '# Relay rate limits\n')],
   });
 
-  // Archived: the release checklist and the drafts migration (and the orders thread, answered).
   await windowPost(input.url, `/api/inbox/messages/${id(release)}/resolve`, { resolved: true });
   await windowPost(input.url, `/api/inbox/messages/${id(drafts)}/resolve`, { resolved: true });
   await windowPost(input.url, `/api/inbox/messages/${id(pagination)}/resolve`, { resolved: true });
-  // Looked at: the Recent group of an empty query.
   for (const t of [id(schema), id(retry), id(relay)]) await windowPost(input.url, `/api/inbox/threads/${t}/seen`);
 
   return {

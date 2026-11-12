@@ -1,7 +1,3 @@
-// A small in-browser stand-in for code review's hover search
-// (`/api/code-nav/hover`, ripgrep on the server): a symbol's definition and
-// references across the harness's files, in the same answer shape
-// (`CodeNavHoverResponse`), so the real TokenHoverCard draws it.
 import type { CodeNavHoverResponse } from '@plannotator/shared/code-nav';
 import { SOURCES } from './fixture';
 

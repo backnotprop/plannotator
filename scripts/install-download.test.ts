@@ -1,21 +1,3 @@
-/**
- * The installers' binary download continues where a dropped or stalled
- * connection stopped (install.sh download_release_binary, install.ps1
- * Invoke-ResumableDownload, install.cmd :DownloadBinary), instead of starting
- * the ~200 MB binary again from zero on every retry.
- *
- * A local HTTP server stands in for GitHub: the release URL redirects to a
- * one-time "signed" URL, as github.com does, and that URL serves the file with
- * Range support. Each test scripts what the signed URL does on each request
- * (cut the connection, stall, ignore the Range, send the wrong bytes, answer
- * 404). install.sh runs whole, in a sandbox HOME with --minimal, through a
- * `curl` on PATH that sends github.com to the local server and runs the real
- * curl. The PowerShell and cmd.exe downloads run as extracted functions.
- * Nothing reaches the network, and nothing outside a temp folder is written.
- *
- * Run: bun test scripts/install-download.test.ts
- */
-
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -27,8 +9,6 @@ import { NO_BROWSER } from "../tests/helpers/no-browser";
 const scriptsDir = import.meta.dir;
 const readScript = (name: string) => readFileSync(join(scriptsDir, name), "utf-8").replace(/\r\n?/g, "\n");
 
-// A file whose every line is numbered, so bytes written at the wrong offset
-// change its checksum. It is a shell script, in case anything runs it.
 const BINARY = Buffer.from(
   "#!/bin/sh\necho plannotator-fixture\nexit 0\n" +
     Array.from({ length: 30_000 }, (_, i) => `# line ${String(i).padStart(6, "0")}\n`).join(""),
@@ -36,7 +16,6 @@ const BINARY = Buffer.from(
 const BINARY_SHA256 = createHash("sha256").update(BINARY).digest("hex");
 const OLD = "#!/bin/sh\necho plannotator-old\n";
 
-/** What the signed URL does with one request. Missing entries serve normally. */
 type Plan =
   | { kind: "serve" }
   | { kind: "cut"; bytes: number }
@@ -56,9 +35,7 @@ interface SeenRequest {
 interface ReleaseServer {
   origin: string;
   requests: SeenRequest[];
-  /** Requests for the binary's github.com URL (each one attempt). */
   attempts(): SeenRequest[];
-  /** Requests for the signed URLs, in order. */
   signed(): SeenRequest[];
   close(): Promise<void>;
 }
@@ -86,7 +63,6 @@ async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
 
   const serveSigned = (sock: Socket, path: string, start: number | null) => {
     if (!issued.has(path)) {
-      // An expired or reused signed URL: GitHub's is good for one hour.
       send(sock, "403 Forbidden", { "Content-Length": 0 });
       return;
     }
@@ -100,8 +76,6 @@ async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
       if (plan.kind === "stall") return send(sock, "200 OK", { "Content-Length": total }, BINARY.subarray(0, plan.bytes), false);
       if (plan.kind === "garbage-cut") return send(sock, "200 OK", { "Content-Length": total }, Buffer.alloc(plan.bytes, 0x7a));
       if (plan.kind === "short-promise") return send(sock, "200 OK", { "Content-Length": total + 1 }, BINARY);
-      // No Content-Length: the body ends where the connection closes, so a
-      // client cannot tell it is short.
       if (plan.kind === "unsized-cut") return send(sock, "200 OK", {}, BINARY.subarray(0, plan.bytes));
       return send(sock, "200 OK", { "Content-Length": total }, BINARY);
     }
@@ -172,8 +146,6 @@ function sandbox() {
   const data = join(root, "data");
   for (const dir of [home, stub, data, join(home, "tmp"), join(home, ".local", "bin")]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(home, ".local", "bin", "plannotator"), OLD, { mode: 0o755 });
-  // github.com goes to the local server; any other https URL fails, so a
-  // test can never reach the network.
   writeFileSync(
     join(stub, "curl"),
     `#!/bin/bash
@@ -241,7 +213,6 @@ describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh
     expect(server.attempts()).toHaveLength(1);
     expect(server.signed()).toEqual([{ path: "/signed/1?sig=1", range: null }]);
     expect(r.leftovers).toEqual([]);
-    // Nothing new is printed on a healthy link.
     expect(r.out).not.toContain("trying again");
   }, 30_000);
 
@@ -251,7 +222,6 @@ describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh
     expect(r.code).toBe(0);
     expect(r.out).toContain("SHA256 verified");
     expect(r.installed.equals(BINARY)).toBe(true);
-    // Each attempt asked github.com again; no signed URL was used twice.
     expect(server.attempts()).toHaveLength(2);
     expect(server.signed()).toEqual([
       { path: "/signed/1?sig=1", range: null },
@@ -282,13 +252,11 @@ describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh
     const r = await runInstallSh(server);
     expect(r.code).toBe(0);
     expect(r.installed.equals(BINARY)).toBe(true);
-    // curl refuses the 200 to its Range (exit 33); the next attempt asks for no range.
     expect(server.signed().map((q) => q.range)).toEqual([null, "bytes=100000-", null]);
     expect(r.leftovers).toEqual([]);
   }, 30_000);
 
   test("every byte arrived but the connection ended badly: the next attempt finds nothing left (416) and installs", async () => {
-    // The #2788 case: an HTTP/2 stream reset after the last byte.
     const server = await startReleaseServer([{ kind: "short-promise" }]);
     const r = await runInstallSh(server);
     expect(r.code).toBe(0);
@@ -346,22 +314,11 @@ describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh
   }, 30_000);
 });
 
-// ---------------------------------------------------------------------------
-// install.ps1: Invoke-ResumableDownload, and the fallback to the download that
-// came before it (Invoke-ReleaseDownload), run under PowerShell 7 (and Windows
-// PowerShell 5.1 on Windows) against the same server.
-// ---------------------------------------------------------------------------
-
 const PS_SHELLS = (process.platform === "win32" ? ["pwsh", "powershell"] : ["pwsh"])
   .map((name) => Bun.which(name))
   .filter((path): path is string => !!path);
-// Windows PowerShell 5.1 on a CI runner takes many seconds per start.
 const PS_TIMEOUT_MS = process.platform === "win32" ? 300_000 : 60_000;
 
-/**
- * install.ps1 from the release download functions through the checksum
- * check, so a short file that a download let through still stops here.
- */
 function extractPs1DownloadRegion(): string {
   const ps = readScript("install.ps1");
   const start = ps.indexOf("function Invoke-ReleaseDownload {");
@@ -396,10 +353,6 @@ async function runPs1Download(shell: string, server: ReleaseServer, env: Record<
       `exit 0`,
     ].join("\n"),
   );
-  // The parent's environment (Windows PowerShell 5.1 needs its system
-  // variables); the driver writes only into its own temp folder. Without
-  // PSModulePath for Windows PowerShell 5.1: a CI step runs under pwsh, whose
-  // module path would hide 5.1's own modules (Get-FileHash).
   const parentEnv: Record<string, string | undefined> = { ...process.env };
   if (/^powershell(\.exe)?$/i.test(shell.split(/[\\/]/).pop() ?? "")) {
     for (const key of Object.keys(parentEnv)) if (key.toLowerCase() === "psmodulepath") delete parentEnv[key];
@@ -483,7 +436,6 @@ describe.skipIf(PS_SHELLS.length === 0)("install.ps1 resumes a broken binary dow
     }, PS_TIMEOUT_MS);
 
     test(`${name}: when the resumable download gives up, the earlier download gets the last word`, async () => {
-      // Four 404s end the resumable download; Invoke-WebRequest's first try works.
       const server = await startReleaseServer(Array.from({ length: 4 }, () => ({ kind: "status", code: 404 }) as Plan));
       const r = await runPs1Download(shell, server);
       expect(r.result).toBe("ok");
@@ -491,9 +443,6 @@ describe.skipIf(PS_SHELLS.length === 0)("install.ps1 resumes a broken binary dow
       expect(server.attempts()).toHaveLength(5);
     }, PS_TIMEOUT_MS);
 
-    // Windows PowerShell 5.1's Invoke-WebRequest can return without an error
-    // when the connection closes early (CI, run 42961988321). A body without
-    // a Content-Length does the same on every PowerShell.
     test(`${name}: a fallback download that ends short of the size seen is a failed attempt`, async () => {
       const cut0 = Array.from({ length: 4 }, () => ({ kind: "cut", bytes: 0 }) as Plan);
       const retried = await startReleaseServer([...cut0, { kind: "unsized-cut", bytes: 100_000 }]);
@@ -514,19 +463,12 @@ describe.skipIf(PS_SHELLS.length === 0)("install.ps1 resumes a broken binary dow
       const r = await runPs1Download(shell, server);
       expect({ result: r.result.slice(0, 6), attempts: server.attempts().length, out: r.result }).toMatchObject({
         result: "failed",
-        // 4 resumable attempts with no new bytes, then Invoke-WebRequest's 4
-        // (each fails, or ends short of the size the first attempts saw).
         attempts: 8,
       });
       expect(r.file).toBeNull();
     }, PS_TIMEOUT_MS);
   }
 });
-
-// ---------------------------------------------------------------------------
-// install.cmd: the :DownloadBinary subroutine under cmd.exe with the real
-// curl.exe (Windows only).
-// ---------------------------------------------------------------------------
 
 function extractCmdDownloadBinary(): string {
   const cmd = readScript("install.cmd");

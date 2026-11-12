@@ -1,14 +1,3 @@
-/**
- * After a New message (Compose) is sent, the list lights the new thread's row
- * the way a row lights when it comes in (`data-lit`, the `ib-lit` fade), without
- * opening the thread. Real browser, compiled binary, temp PLANNOTATOR_DATA_DIR
- * and HOME; the live agent is one bridge poll with the registry's token.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-sent-row-lit.spec.ts`.
- * PNGs land in .local/proof/sent-row-lit/ (and SENT_ROW_LIT_SHOTS when set).
- */
-
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -44,7 +33,6 @@ test('Send from Compose lights the new thread\'s row (data-lit), does not open i
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    // One poll makes the session live for 30 s.
     const { port, token } = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
     const poll = await fetch(`http://127.0.0.1:${port}${INBOX_BRIDGE_POLL_PATH}`, {
       method: 'POST',
@@ -69,7 +57,6 @@ test('Send from Compose lights the new thread\'s row (data-lit), does not open i
     await expect(lit).toHaveCount(1);
     const id = (await lit.first().getAttribute('data-thread-id'))!;
     await expect(lit.first()).toContainText('To Claude Code');
-    // Not opened: the list is the page, no thread pane, the hash names no thread.
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
     expect(new URL(page.url()).hash).not.toContain(id);
     for (const scheme of ['light', 'dark'] as const) {
@@ -78,9 +65,7 @@ test('Send from Compose lights the new thread\'s row (data-lit), does not open i
       await page.screenshot({ path: file });
       if (extraShots) copyFileSync(file, join(extraShots, `row-lit-${scheme}.png`));
     }
-    // The toast and its Open action are unchanged.
     await expect(page.locator('[data-inbox-toast] [data-toast-action]')).toHaveText('Open');
-    // The light is taken off once it has faded (3 s).
     await expect(lit).toHaveCount(0, { timeout: 8_000 });
     expect(errors).toEqual([]);
   } finally {

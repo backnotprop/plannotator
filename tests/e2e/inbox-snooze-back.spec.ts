@@ -1,27 +1,3 @@
-/**
- * "Back from snooze" in the open thread (approval `snooze-back-line`,
- * 2026-11-05), in real browsers against the compiled binary, with an agent
- * writing through `plannotator inbox mcp` (scripts/inbox-sim.ts) and short
- * snoozes through the window's own route:
- *
- *  - thread closed at the return: with news, the existing divider says it; with
- *    nothing new (the agent last, the person last, one message), the line sits
- *    above the last message; on screen on opening, a very long last message too;
- *  - gone on leaving; the first window to open gets it, a later one does not;
- *  - thread open at the return, in front: it appears at once, the row settles;
- *  - thread open at the return, in a background tab (focus really lost; hidden as a stand-in): it appears, but nothing
- *    counts as looked at until the tab comes to the front;
- *  - thread closed at the return, in a background tab;
- *  - re-snoozed: gone, and an Unsnooze does not bring it back; never for an
- *    Unsnooze; a phone in WebKit;
- *  - an agent archives a snoozed thread and the time passes: no stale
- *    "Snoozed until" line.
- *
- * HOME and the data dir are temp folders, as in inbox-snooze.spec.ts. PNGs land
- * in PLANNOTATOR_SNOOZE_BACK_SHOTS (default .local/proof/snooze-back). Build
- * the binary first (see inbox.spec.ts).
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -34,11 +10,9 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = resolve(process.env.PLANNOTATOR_SNOOZE_BACK_SHOTS ?? join(repo, '.local/proof/snooze-back'));
 
-/** Pinned on purpose: the approval names these exact words. */
 const WORDS = /^Back from snooze · \d{1,2}:\d{2} [AP]M$/;
 const LONG = ['The rollout, step by step.', ...Array.from({ length: 60 }, (_, i) => `Step ${i + 1}: the worker reads the event, checks the idempotency key, and writes the ledger row.`)].join('\n\n');
 
-/** How long a short snooze runs: long enough to do what a test does before it ends. */
 const SNOOZE_MS = 2500;
 
 interface World {
@@ -63,7 +37,6 @@ async function post(path: string, body: Record<string, unknown>): Promise<Respon
   return fetch(`${world.url}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: world.serverSession, ...body }) });
 }
 
-/** What the store says now, read without a look. */
 async function storeRow(id: string): Promise<{ snoozed: unknown; snooze_back: string | null; unread: boolean }> {
   const answer = (await (await fetch(`${world.url}/api/inbox/threads/${id}`)).json()) as { row: { snoozed: unknown; snooze_back: string | null; unread: boolean } };
   return answer.row;
@@ -80,7 +53,6 @@ async function snooze(id: string, ms: number | null = SNOOZE_MS): Promise<string
   return until;
 }
 
-/** A thread the person has read, from the agent's messages. */
 async function thread(bodies: string[]): Promise<{ id: string; root: string; project: string; last: string }> {
   const key = `case-${++count}`;
   const project = scratchProject(world.src, key);
@@ -91,7 +63,6 @@ async function thread(bodies: string[]): Promise<{ id: string; root: string; pro
   return { id: String(first.thread_id), root: String(first.message_id), project, last };
 }
 
-/** The return reached the store, and the row is on the list with its clock (a settled list holds it behind "N new", pressed here). */
 async function waitBack(page: Page, id: string): Promise<void> {
   await expect.poll(async () => Boolean((await storeRow(id)).snooze_back), { timeout: 20_000 }).toBe(true);
   await expect
@@ -106,7 +77,6 @@ async function waitBack(page: Page, id: string): Promise<void> {
     .toBeGreaterThan(0);
 }
 
-/** The line's next message, as the person reads it. */
 const messageBelow = (page: Page) => line(page).evaluate((el) => el.nextElementSibling?.getAttribute('data-message-article') ?? null);
 
 async function open(page: Page, id: string): Promise<void> {
@@ -118,9 +88,7 @@ async function close(page: Page): Promise<void> {
   await page.goto(`${world.url}/#`);
 }
 
-/** The page in light and in dark. */
 async function shot(page: Page, name: string): Promise<void> {
-  // Headless Chrome's "blocks notifications" card sits in the list; it says nothing about this line.
   const hide = page.locator('.ib-listcol').getByRole('button', { name: 'Hide', exact: true });
   if (await hide.count()) await hide.click();
   if (page.viewportSize()!.width > 600) await page.mouse.move(1000, 700);
@@ -195,7 +163,6 @@ test('closed at the return, with news: the divider says it, above the first new 
   await expect(page.getByText('New since you looked', { exact: true })).toHaveCount(0);
   await expect(backMark(page, t.id)).toHaveCount(0);
   await shot(page, 'closed-news');
-  // Gone on leaving: the next visit is an ordinary one.
   await close(page);
   await quietBand(page);
   await open(page, t.id);
@@ -286,7 +253,6 @@ test('open at the return, in front: it appears at once, the row settles, and the
   await expect(line(page)).toHaveText(WORDS, { timeout: 20_000 });
   expect(await messageBelow(page)).toBe(t.last);
   await expect(page.locator('[data-snooze-line]')).toHaveCount(0);
-  // Taken as a look: the store's entry ends and the row loses its clock.
   await expect.poll(async () => (await storeRow(t.id)).snooze_back).toBeFalsy();
   await expect(backMark(page, t.id)).toHaveCount(0);
   await expect(line(page)).toHaveText(WORDS);
@@ -315,13 +281,6 @@ test('open at the return while reading further down: the line draws above and th
   await close(page);
 });
 
-/**
- * A tab that really lost the focus to another tab. Playwright's headless shell
- * keeps every page "visible and focused"; full Chromium in new headless mode,
- * with the focus emulation off, gives a real `document.hasFocus() === false` and
- * real focus events. It stays `visibilityState: 'visible'` (nothing hides a
- * headless tab), so the hidden tab below is a stand-in.
- */
 async function backgroundTab(): Promise<{ page: Page; toBack: () => Promise<void>; toFront: () => Promise<void>; done: () => Promise<void> }> {
   const browser = await chromium.launch({ headless: true, channel: 'chromium' });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
@@ -357,7 +316,6 @@ test('open at the return, the tab in the background: the line is there, nothing 
     await snooze(t.id, 3000);
     await tab.toBack();
     await expect(line(page)).toHaveText(WORDS, { timeout: 20_000 });
-    // Not looked at: the return's clock stays on the row, after a good wait.
     await page.waitForTimeout(2000);
     expect((await storeRow(t.id)).snooze_back).toBeTruthy();
     await tab.toFront();
@@ -459,7 +417,6 @@ test('an Unsnooze before its time is no return: no line', async () => {
   await close(page);
 });
 
-/** A first message with a question, its pick saved and not sent: it stays open however long it is. */
 function asking(steps: number): string {
   return [...LONG.split('\n\n').slice(0, steps + 1), ':::question\nShip it on Monday?\n\n- [ ] Yes\n- [ ] No\n:::'].join('\n\n');
 }

@@ -1,34 +1,3 @@
-/**
- * The Board card's right-click menu (approval "inbox-board-card-menu",
- * layout A, with the toast and Undo the owner said yes to) in a real Chromium
- * against the compiled binary, agents writing cards through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *
- *  - a right-click on a lane card opens Open thread, the lanes (columns v2,
- *    its own checked), Done, Cancel…; it never opens the card;
- *  - a lane picked moves the card (the store too), with no toast, focus
- *    following the card into its new lane;
- *  - Done and a Cancel the menu started each show the one toast (a
- *    done card moves to the Done lane, focus with it); its Undo (and
- *    `Z`) puts the card back where it was, in the store too, and focus on
- *    the card in its lane; a card moved on while the toast is up:
- *    Undo sends nothing;
- *  - links in the Board body keep the platform's long-press callout;
- *  - Cancel… opens the card with the reason field focused;
- *  - moves from the opened card (its Move menu, its foot) show no toast;
- *  - Shift+F10 on a focused card opens it; Escape and Tab give focus back;
- *  - empty lane space, a lane heading, the opened card and a Cancelled row keep
- *    the browser's own menu;
- *  - a touch phone never opens it (a touch `contextmenu`, a long press);
- *  - the thread rows' menu, which shares the trigger's code, still works.
- *
- * The Inbox runs in a temp data dir with PLANNOTATOR_TEST_SANDBOX (its agent
- * home inside that dir) and PLANNOTATOR_INBOX_CONNECT=0; no card links a PR,
- * so nothing asks a forge. Full-window shots (1440 × 900 @2x) land in
- * PLANNOTATOR_BOARD_CARD_MENU_SHOTS (default /tmp/board-card-menu-shots).
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -62,14 +31,12 @@ const menu = (page: Page) => page.locator('[data-card-context-menu]');
 const menuItems = (page: Page) => menu(page).locator('[role="menuitem"], [role="menuitemradio"]');
 const toast = (page: Page) => page.locator('[data-inbox-toast]');
 
-/** The card as the store has it now (the window's own read). */
 const stored = (page: Page, id: string) =>
   page.evaluate(async (cardId) => {
     const model = (await (await fetch('/api/inbox/cards')).json()) as { cards: { id: string; column: string; aside_from: string | null; dropped: { reason: string | null } | null }[] };
     return model.cards.find((c) => c.id === cardId) ?? null;
   }, id);
 
-/** A person's move through the window's own route (setup only; the menu is what is under test). */
 const personMove = (page: Page, id: string, change: Record<string, unknown>) =>
   page.evaluate(
     async ({ cardId, body }) => {
@@ -79,23 +46,19 @@ const personMove = (page: Page, id: string, change: Record<string, unknown>) =>
     { cardId: id, body: change },
   );
 
-/** Record every `contextmenu` at the window (capture), to read later whether the page cancelled it. */
 const watchContextMenus = (page: Page) =>
   page.evaluate(() => {
     const w = window as unknown as { __ctx: Event[] };
     w.__ctx = [];
     window.addEventListener('contextmenu', (event) => w.__ctx.push(event), true);
   });
-/** Whether the last `contextmenu` was cancelled (ours opened) or left to the browser (its own menu). */
 const lastContextMenuCancelled = (page: Page) => page.evaluate(() => (window as unknown as { __ctx: Event[] }).__ctx.at(-1)?.defaultPrevented ?? null);
 
 async function shot(page: Page, name: string) {
-  // The menu's and the toast's entrances have played.
   await page.waitForTimeout(450);
   await page.screenshot({ path: join(shots, name) });
 }
 
-/** No toast shows within a moment (a move that should say nothing but the live region). */
 async function expectNoToast(page: Page) {
   await page.waitForTimeout(600);
   await expect(toast(page)).toHaveCount(0);
@@ -114,9 +77,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-board-card-menu-e2e-');
   const data = join(root, 'data');
   mkdirSync(data, { recursive: true });
-  // The Board on, its first-visit dialog already seen (inbox-board.spec.ts proves both).
   writeFileSync(join(data, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
-  // No HOME of our own: PLANNOTATOR_TEST_SANDBOX gives the Inbox a scratch agent home inside its data dir.
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
@@ -133,13 +94,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary, env, name: 'Codex', host: 'codex' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
-  // A card call never makes a project: a message does.
   const ticks = await claude.send({ project_path: project, subject: 'Phone pairing: QR screens', thread: 'qr', body: 'The QR screens are drawn; screenshots next.' });
   await codex.send({ project_path: project, subject: 'Export a guided review', body: 'Export is wired.' });
   const make = async (agent: SimAgent, title: string, fields: Record<string, unknown> = {}) =>
     ((await agent.card({ op: 'create', project_path: project, title, ...fields })).card as { id: string }).id;
   const ids: Record<string, string> = {};
-  // The designer's sandbox Board (NOTES.md pictures), oldest first so the lanes read as they did.
   ids.offline = await make(pi, 'Offline drafts');
   ids.slack = await make(claude, 'Slack bridge', { column: 'in_progress' });
   ids.dark = await make(pi, 'Dark mode for guides');
@@ -158,8 +117,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto(`${world.url}#board`);
   await expect(cardEl(page, ids.qr)).toBeVisible();
-  // One card parked by the person, as the designer's Board had it on ice: an older window's
-  // `icebox` op still works, and lands in Backlog (columns v2).
   await personMove(page, ids.offline, { op: 'icebox' });
   await expect(laneCard(page, 'backlog', ids.offline)).toBeVisible();
 });
@@ -177,7 +134,6 @@ test.afterAll(async () => {
 test('a right-click on a lane card opens the approved items, its column checked, without opening the card', async () => {
   const { page, ids } = world;
   const popup = await openMenu(page, ids.qr);
-  // The approved words and order (layout A), pinned on purpose: the opened card's Move menu, word for word.
   await expect(menuItems(page)).toHaveText(['Open thread', 'Backlog', 'Todo', 'In progress', 'In review', 'Done', 'Cancel…']);
   await expect(popup).toHaveAttribute('aria-label', 'Phone pairing QR');
   await expect(popup.getByRole('group', { name: 'Column' })).toBeVisible();
@@ -193,7 +149,6 @@ test('a right-click on a lane card opens the approved items, its column checked,
   await page.keyboard.press('Escape');
   await expect(menu(page)).toHaveCount(0);
   await expect(cardEl(page, ids.qr)).not.toHaveAttribute('data-menu', '');
-  // A card that links no thread has no Open thread.
   await openMenu(page, ids.dark);
   await expect(menuItems(page).first()).toHaveText('Backlog');
   await expect(menuItems(page)).toHaveCount(6);
@@ -204,7 +159,6 @@ test('Shift+F10 on a focused card opens it; Escape and Tab give focus back to th
   const { page, ids } = world;
   const button = cardButton(page, ids.qr);
   await expect(button).toHaveAttribute('aria-keyshortcuts', 'Shift+F10');
-  // A click opens the card, so the card is never announced as a menu button.
   await expect(button).not.toHaveAttribute('aria-haspopup', /.*/);
   await button.focus();
   await page.keyboard.press('Shift+F10');
@@ -233,7 +187,6 @@ test('a lane picked moves the card, in the store too, with no toast; focus follo
   expect((await stored(page, ids.export))?.column).toBe('in_review');
   await expect(cardButton(page, ids.export)).toBeFocused();
   await expectNoToast(page);
-  // The card's own column does nothing.
   await openMenu(page, ids.export);
   await menu(page).locator('[data-card-menu-to="in_review"]').click();
   await expect(menu(page)).toHaveCount(0);
@@ -246,7 +199,6 @@ test('Done from the menu: the toast, then Undo (and Z) put the card back in its 
   await menu(page).locator('[data-card-menu-to="done"]').click();
   await expect(toast(page)).toContainText('Done');
   await expect(toast(page)).toContainText('“Slack bridge”');
-  // It moves to the Done lane (its last seven days), and focus follows it there.
   await expect(laneCard(page, 'done', ids.slack)).toBeVisible();
   expect((await stored(page, ids.slack))?.column).toBe('done');
   await expect(cardButton(page, ids.slack)).toBeFocused();
@@ -257,7 +209,6 @@ test('Done from the menu: the toast, then Undo (and Z) put the card back in its 
   await expect(laneCard(page, 'in_progress', ids.slack)).toBeVisible();
   expect((await stored(page, ids.slack))?.column).toBe('in_progress');
   await expect(cardButton(page, ids.slack)).toBeFocused();
-  // The same with the toast's existing key.
   await openMenu(page, ids.slack);
   await menu(page).locator('[data-card-menu-to="done"]').click();
   await expect(toast(page)).toContainText('Done');
@@ -288,7 +239,6 @@ test('a card moved on while its toast is up: Undo sends nothing and says it has 
   await openMenu(page, ids.menu);
   await menu(page).locator('[data-card-menu-to="done"]').click();
   await expect(toast(page)).toContainText('Done');
-  // Moved on elsewhere (as an agent would) while the toast is up; the window hears of it.
   await personMove(page, ids.menu, { op: 'move', column: 'in_review' });
   await expect(laneCard(page, 'in_review', ids.menu)).toBeVisible();
   const posts: string[] = [];
@@ -316,14 +266,12 @@ test('links in the Board body keep the platform’s long-press callout (Base UI�
   const link = panel.locator('a[href="https://example.com/qr-spec"]');
   await expect(link).toBeVisible();
   const callout = await link.evaluate((el) => {
-    // The value the link inherits: the nearest inline one up the tree (Base UI's trigger sets `none` there).
     let inline: string | null = null;
     for (let node: HTMLElement | null = el as HTMLElement; node && !inline; node = node.parentElement) {
       const style = node.style as CSSStyleDeclaration & { WebkitTouchCallout?: string; webkitTouchCallout?: string };
       inline = style.WebkitTouchCallout || style.webkitTouchCallout || style.getPropertyValue('-webkit-touch-callout') || null;
     }
     const computed = getComputedStyle(el) as CSSStyleDeclaration & { webkitTouchCallout?: string };
-    // iOS-only: desktop WebKit and Chromium do not know the property.
     return { inline, supported: CSS.supports('-webkit-touch-callout', 'none'), computed: computed.webkitTouchCallout ?? '' };
   });
   expect(callout.inline).toBe('default');
@@ -349,7 +297,6 @@ test('Cancel… opens the card with the reason field focused; the cancel shows t
   expect((await stored(page, ids.dark))?.column).toBe('todo');
   await expect(laneCard(page, 'todo', ids.dark)).toBeVisible();
   await expect(cardButton(page, ids.dark)).toBeFocused();
-  // Closed and opened again later, the card is a plain open: its title, no reason field.
   await page.evaluate(() => (location.hash = '#board'));
   await expect(panel).toHaveCount(0);
   await cardButton(page, ids.dark).click();
@@ -373,7 +320,6 @@ test('moves from the opened card stay as they were: no toast from its Move menu 
   await expect.poll(async () => (await stored(page, ids.retry))?.column).toBe('todo');
   await page.evaluate(() => (location.hash = '#board'));
   await expect(panel).toHaveCount(0);
-  // Cancel… from the menu, then Keep: the foot's own Cancel… after it is the opened card's, so no toast.
   await openMenu(page, ids.retry);
   await menu(page).locator('[data-card-menu-action="drop"]').click();
   await expect(panel.locator('[data-drop-reason]')).toBeFocused();
@@ -400,7 +346,6 @@ test('the Cancelled page: a cancelled card is a row with Restore, and a right-cl
   await expect(menu(page)).toHaveCount(0);
   expect(await lastContextMenuCancelled(page)).toBe(false);
   await page.keyboard.press('Escape');
-  // Restore: back to where it was (Todo), no toast.
   await row.locator(`[data-card-restore="${ids.retry}"]`).click();
   await expect.poll(async () => (await stored(page, ids.retry))?.column).toBe('todo');
   await expectNoToast(page);
@@ -411,7 +356,6 @@ test('the Cancelled page: a cancelled card is a row with Restore, and a right-cl
 test('empty lane space, a lane heading and the opened card keep the browser’s own menu', async () => {
   const { page, ids } = world;
   await watchContextMenus(page);
-  // A card: ours (the control).
   await cardEl(page, ids.qr).click({ button: 'right' });
   await expect(menu(page)).toBeVisible();
   expect(await lastContextMenuCancelled(page)).toBe(true);
@@ -448,19 +392,16 @@ test('a touch phone never opens it: a touch contextmenu and a long press show no
     const card = cardEl(page, ids.qr);
     await expect(card).toBeVisible();
     await watchContextMenus(page);
-    // A long press as Chromium on Android reports it: a `contextmenu` from a touch pointer.
     await card.evaluate((el) => el.dispatchEvent(new PointerEvent('contextmenu', { bubbles: true, cancelable: true, pointerType: 'touch', button: 2 })));
     await page.waitForTimeout(300);
     await expect(menu(page)).toHaveCount(0);
     expect(await lastContextMenuCancelled(page)).toBe(false);
-    // A `contextmenu` with no pointer type just after a touch on the card (Android WebViews): nothing of ours either.
     await card.evaluate((el) => {
       el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'touch' }));
       el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
     });
     await page.waitForTimeout(300);
     await expect(menu(page)).toHaveCount(0);
-    // A held finger on the card: Base UI's own long press is off.
     const cdp = await phone.newCDPSession(page);
     const at = (await card.boundingBox())!;
     const point = { x: at.x + 30, y: at.y + at.height / 2 };

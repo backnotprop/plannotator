@@ -1,14 +1,3 @@
-/**
- * Run by the gh-account runtime tests (#2157) as a CHILD process whose env
- * already holds the fake gh's PATH, HOME and gh config dir from its first
- * instruction: a runtime that looks `gh` up through the PATH it started with
- * (Bun.spawn does) then can only ever find the fake. Never run it by hand
- * without that env.
- *
- *   bun gh-account-runtime-probe.ts bun|pi owner/repo number
- *
- * Prints one JSON line: { notice, hasChildEnv, user, repo, error, ghTokenInEnv }.
- */
 import { join } from "node:path";
 
 const [which, repoArg, numberArg] = process.argv.slice(2);

@@ -1,29 +1,3 @@
-/**
- * Stepping through a thread's attachments without leaving the viewer (design
- * record "inbox-attachment-stepping", v2, not in this repo), proved in a real
- * browser against the compiled binary. Nothing is mocked: `plannotator inbox
- * --background` runs under a temp PLANNOTATOR_DATA_DIR and HOME with a
- * tailscale trap first on PATH; one agent sends two messages carrying five
- * files of five kinds (markdown, HTML, Mermaid, a PNG the browser takes, a
- * PDF) through `plannotator inbox mcp`; Chromium drives the window.
- *
- * Proves: the bar under the file says "1 of 5 · SCOPE.md" and the header
- * drops the name; `]` and the › button step in thread order across the two
- * messages, keeping the frame (full screen stays full screen, with its
- * toolbar) and replacing the route; › greys at the end,
- * keeps focus, and says "Last file in this thread"; the list opens
- * upward, grouped by message, and jumps; inside the HTML page a plain `]`
- * steps while armed (Annotate) and does nothing in Interact or in the page's
- * text field; a typed image comment never stops a step (its words wait for
- * that image, back in its box when it opens again); one Back returns
- * to the thread; on a phone (always full screen) the toolbar's ⋯ opens every
- * file of the thread as a sheet.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-attachment-stepping.spec.ts`.
- * PNGs, light and dark, land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/attachment-stepping).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -109,12 +83,10 @@ async function shot(name: string): Promise<void> {
 }
 
 const pane = () => world.page.locator('[data-attachment-pane]');
-/** The position: the stepper's label beside the thread, the toolbar's N/M in full screen (both name it the same way). */
 const label = () => world.page.locator('[data-step-label], [data-full-view-position]');
 const nextButton = () => world.page.locator('[data-step-next]');
 const htmlFrame = () => world.page.frameLocator('[data-attachment-pane] iframe').first();
 
-/** "2 of 5, checkout-flow.html": the open file as the stepper names it. */
 async function expectAt(position: number, name: string): Promise<void> {
   await expect(label()).toHaveAttribute('aria-label', `${position} of 5, ${name}. Show every file in this thread`);
   await expect(pane()).toHaveAttribute('data-attachment-pane', world.ids[name]!);
@@ -132,7 +104,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const trap = join(root, 'trap');
   mkdirSync(home);
   mkdirSync(trap);
-  // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-attachment-stepping: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
   const env = { PATH: `${trap}:${process.env.PATH ?? ''}`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
@@ -148,7 +119,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'proto', 'checkout-flow.html'), CHECKOUT);
   writeFileSync(join(project, 'docs', 'retry-states.mmd'), STATES);
   writeFileSync(join(project, 'docs', 'refund-policy.pdf'), PDF);
-  // A real phone screenshot, taken by the browser.
   const maker = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   const makerPage = await maker.newPage();
   await makerPage.setContent(CHECKOUT);
@@ -176,7 +146,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   };
 });
 
-/** A view pressed in a test is remembered: forgotten after each, so the next opens by today's rule (file-view.ts). */
 test.afterEach(async () => forgetFileViewChoice(world?.page));
 
 test.afterAll(async () => {
@@ -185,7 +154,6 @@ test.afterAll(async () => {
     await world.claude.close().catch(() => {});
     await world.context.close();
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -223,10 +191,8 @@ test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the
   await expect(page.getByRole('navigation', { name: 'Files in this thread' })).toBeVisible();
   const tile = page.locator(`.ib-att-t[data-attachment-id="${world.ids['SCOPE.md']}"]`);
   await expect(tile).toHaveAttribute('aria-current', 'true');
-  // It keeps its words: the highlight and aria-current alone say which file is open.
   await expect(tile.locator('.ib-open')).toHaveText('Open');
   await expect(tile).toHaveAttribute('aria-label', 'Open SCOPE.md');
-  // The bar is a row of the pane under the file, never over it.
   const geometry = await page.evaluate(() => {
     const body = document.querySelector('[data-attachment-pane] .ib-vbody')!.getBoundingClientRect();
     const bar = document.querySelector('[data-view-foot]')!.getBoundingClientRect();
@@ -238,7 +204,6 @@ test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the
 
 test('] and › step in thread order, keep the frame, and replace the route; inside the HTML page ] steps only while armed', async () => {
   const page = world.page;
-  // Full screen: a step keeps it (and its toolbar), the route is replaced.
   await pane().getByRole('button', { name: 'Full screen' }).click();
   await expect(pane()).toHaveClass(/ib-full/);
   const historyBefore = await page.evaluate(() => history.length);
@@ -250,18 +215,14 @@ test('] and › step in thread order, keep the frame, and replace the route; ins
   expect(await page.evaluate(() => history.length)).toBe(historyBefore);
   await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
   await shot('02-full-html');
-  // Beside the thread for the rest: a step keeps that frame too.
   await page.getByRole('button', { name: 'Side by side' }).click();
   await expect(pane()).not.toHaveClass(/ib-full/);
 
-  // The page's text field keeps [ and ], armed or not.
-  // (A click would pin the field while armed: focus it the way Tab would.)
   await htmlFrame().locator('#promo').evaluate((el) => (el as HTMLElement).focus());
   await page.keyboard.type('a]b[');
   await expect(htmlFrame().locator('#promo')).toHaveValue('a]b[');
   await expectAt(2, 'checkout-flow.html');
 
-  // Armed (Annotate): a plain ] pressed in the page steps.
   await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'true');
   await htmlFrame().locator('header').evaluate((el) => {
     el.setAttribute('tabindex', '-1');
@@ -270,7 +231,6 @@ test('] and › step in thread order, keep the frame, and replace the route; ins
   await page.keyboard.press(']');
   await expectAt(3, 'retry-states.mmd');
 
-  // Back to the page, then Interact: ] belongs to the page, nothing steps.
   await page.keyboard.press('[');
   await expectAt(2, 'checkout-flow.html');
   await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
@@ -284,7 +244,6 @@ test('] and › step in thread order, keep the frame, and replace the route; ins
   await page.waitForTimeout(400);
   await expectAt(2, 'checkout-flow.html');
 
-  // The › button steps on to the end, focus staying on it.
   await nextButton().click();
   await expectAt(3, 'retry-states.mmd');
   await nextButton().click();
@@ -294,7 +253,6 @@ test('] and › step in thread order, keep the frame, and replace the route; ins
   await expect(pane().locator('[data-download-card]')).toBeVisible();
   await expect(nextButton()).toHaveAttribute('aria-disabled', 'true');
   await expect(nextButton()).toHaveAttribute('aria-label', 'Next file');
-  // aria-disabled, not disabled: it keeps focus, and Enter on it says where you are.
   await nextButton().press('Enter');
   await expect(page.locator('[data-step-end-note]')).toHaveText('Last file in this thread');
   await expectAt(5, 'refund-policy.pdf');
@@ -350,7 +308,6 @@ test('a typed image comment never stops a step: its words wait for the image and
   const box = pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' });
   await box.fill('The Pay button sits under the fold on an iPhone SE. Move it up?');
   await nextButton().click();
-  // The first press steps: no question row, nothing saved.
   await expectAt(5, 'refund-policy.pdf');
   await expect(page.locator('[data-step-guard]')).toHaveCount(0);
   const saved = async () => {
@@ -360,12 +317,10 @@ test('a typed image comment never stops a step: its words wait for the image and
     return model.annotations.filter((a) => a.attachment_id === world.ids['checkout-mobile.png']).map((a) => a.annotation.text);
   };
   expect(await saved()).toEqual([]);
-  // Back on the image: the words are in its box again.
   await page.locator('[data-step-prev]').click();
   await expectAt(4, 'checkout-mobile.png');
   await expect(pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' })).toHaveValue('The Pay button sits under the fold on an iPhone SE. Move it up?');
   await shot('05-kept');
-  // Cleared on the comment itself: nothing waits.
   await pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' }).fill('');
   await nextButton().click();
   await expectAt(5, 'refund-policy.pdf');

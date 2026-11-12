@@ -1,12 +1,3 @@
-/**
- * A made-up fetchable icon set for tests (packages/server/inbox-icon-set-fetch.ts): generated 16 px pixel creatures
- * (a mirrored random pattern per number, its own colour), served by a local HTTP server on 127.0.0.1 with the pointer,
- * the manifest, a names file and one PNG per number. Nothing comes from outside: every picture is drawn here.
- *
- * Knobs for the refusals: `notImage` (numbers answered with HTML), `huge` (numbers answered with a 600 KB PNG),
- * `failFrom` (numbers at or past it answer 503 until `heal()`), `redirect` (numbers answered with a redirect to a URL),
- * `delayMs` (each icon waits, so a download can be watched filling in). `hits` counts every request by path.
- */
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { deflateSync } from 'node:zlib';
@@ -35,7 +26,6 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
   return out;
 }
 
-/** An RGBA PNG of `size` px from a pixel function (`padTo`: a text chunk makes it about that many bytes). */
 export function png(size: number, pixel: (x: number, y: number) => [number, number, number, number], padTo = 0): Uint8Array {
   const raw = new Uint8Array(size * (size * 4 + 1));
   for (let y = 0; y < size; y++) {
@@ -68,7 +58,6 @@ const hsl = (h: number, s: number, l: number): [number, number, number] => {
   return [f(0), f(8), f(4)];
 };
 
-/** Creature n: a 16 px mirrored blob with two eyes and an outline, in its own hue. */
 export function creature(n: number, padTo = 0): Uint8Array {
   let seed = (n * 2654435761) >>> 0;
   const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
@@ -94,7 +83,6 @@ export interface FakeIconSet {
   stop: () => Promise<void>;
 }
 
-/** Serves the set on 127.0.0.1 (node:http, so a Playwright spec under Node can run it too). */
 export async function serveFakeIconSet(options: { id?: string; name?: string; count?: number; notImage?: number[]; huge?: number[]; failFrom?: number; redirect?: Record<number, string>; delayMs?: number; names?: boolean; padTo?: number } = {}): Promise<FakeIconSet> {
   const id = options.id ?? 'blobs';
   const count = options.count ?? 24;

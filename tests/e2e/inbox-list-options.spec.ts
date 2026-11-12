@@ -1,38 +1,3 @@
-/**
- * The list's look options (approval "inbox-list-options", 2026-10-30; packages/inbox/listLook.ts), proved in a real
- * Chromium against the compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR; agents write through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts). Nothing is mocked.
- *
- *  - Beside an open thread, by mouse: the ⋮ menu's four checkboxes start unchecked and the list is today's. Each
- *    one, ticked, changes the rows at once and leaves the menu open: the title in its pill on one line; compact rows
- *    about 20 px shorter, the title on line 1, the project cut first (down to its floor), the time never; no agents'
- *    tiles at the same height. A reload keeps all three. Sent and pinned rows keep their marks; a wider column too.
- *  - By keyboard: Enter opens the menu, the arrows reach an option, Space and Enter tick it, the menu stays open,
- *    Escape closes it and gives focus back to ⋮.
- *  - The wide one-line list: the title in its pill, compact changes nothing, the marks go; in one project's list
- *    the title takes the agents' column.
- *  - A 390 px phone, from the ⋮ sheet: compact rows on two lines, the time never cut.
- *  - A 320 px phone with the worst rows (a long project with a long name: unread, pinned, Sent): compact keeps
- *    about ten characters of each name visible (the project's floor drops on a narrow phone), the time never cut.
- *  - With the agents' icons hidden, Chromium's accessibility tree still names them on every shape (a display: none
- *    would drop them).
- *  - Smaller thread names: an unread name at the read size (13.5 px beside a thread, 14 px on a phone), still bold,
- *    in its pill too; read rows, Sent rows and the wide one-line row are the same with it on or off; off is today's
- *    bigger unread name (15 px, 16 px on a phone); a reload keeps it.
- *  - Settings → Rows (approval "inbox-customize-rows"): the ⋮ menu's plain checkboxes (no icons, the boxes where
- *    Refresh's icon is, every label and "Customize rows…" on one edge, beside a thread and on a phone); a choice in
- *    one window shows in another browser at once and is saved in config.json `inboxRows`; on 390 and 320 px phones,
- *    four looks keep every row inside the screen, the time whole and the questions and warnings inside the row, name
- *    first leads with the name, and the Rows page itself fits; a relative time is heard in words. Unread "Dot": an
- *    unread row, wide and beside a thread, keeps its whole pill, its keyboard focus ring and its hover pill, and a
- *    selected unread row its selection pill, with the 6 px dot.
- *  The look is the person's, kept by this one Inbox: each test starts from every option off.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-list-options.spec.ts`.
- * PNGs land in PLANNOTATOR_E2E_PROOF_DIR/list-options, or .local/proof/list-options/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -73,7 +38,6 @@ test.beforeAll(async () => {
   const project = (name: string) => scratchProject(src, name);
   const ask = (q: string) => [':::question', q, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
   say = async (agent: SimAgent, name: string, thread: string, subject: string, body: string) => (await agent.send({ project_path: project(name), thread, subject, body })).thread_id;
-  // The approved pictures' rows: a long project with a long name, short projects, a long name that wraps today.
   threads.release = await say(pi!, 'plannotator', 'Release 0.28.41', 'Release notes for 0.28.41: check the contributor credits', 'Release notes are drafted.');
   threads.refund = await say(claude!, 'billing-svc', 'Refund events', 'Trust the webhook or poll Stripe every 10 minutes?', 'Webhook or poll.');
   threads.csv = await say(codex!, LONG_PROJECT, 'CSV export', 'Approve the CSV column order for the finance export', 'Column order attached.');
@@ -85,7 +49,6 @@ test.beforeAll(async () => {
   threads.ledger = await say(claude!, LONG_PROJECT, 'Ledger reconciliation dry run for the quarter-end close across every subsidiary', 'Dry run the ledger reconciliation against last quarter', ask('Run it tonight?'));
   for (const agent of [codex!, pi!, opencode!]) await agent.send({ project_path: project(LONG_PROJECT), reply_to: threads.ledger, body: `${agent.name} checked its part.` });
   expect(new Set(Object.values(threads)).size, 'eight threads').toBe(8);
-  // Read rows (the Quiet ones and the open thread), a Sent row (the person replied to Refund events), a pin.
   const health = (await (await fetch(new URL('/api/inbox/health', url))).json()) as { serverSession: string };
   post = async (path: string, body: object) => {
     const res = await fetch(new URL(path, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, serverSession: health.serverSession }) });
@@ -98,7 +61,6 @@ test.beforeAll(async () => {
   for (const p of model.projects) projectIds[p.name] = p.id;
 });
 
-// The look is the person's, kept by this one Inbox (config.json `inboxRows`): each test starts from every option off.
 test.beforeEach(async () => {
   await post('/api/inbox/settings', { rows: [] });
 });
@@ -126,10 +88,8 @@ async function lookClasses(page: Page): Promise<string[]> {
 
 const option = (page: Page, key: string) => page.locator(`[data-tidy-menu-popup] [data-list-look="${key}"]`);
 
-/** The Ledger row's agents, as the accessibility tree names them (its first message and three replies). */
 const LEDGER_AGENTS = 'img "Claude Code, Codex, Pi and OpenCode"';
 
-/** With the icons hidden, a screen reader still hears who: the row's accessibility tree keeps the agents. */
 async function agentsAnnounced(page: Page, rowClass: string) {
   const snapshot = await page.locator(`.ib-lbody .${rowClass}[data-thread-id="${threads.ledger}"]`).ariaSnapshot();
   expect(snapshot, 'the agents are still in the accessibility tree').toContain(LEDGER_AGENTS);
@@ -147,7 +107,6 @@ interface Geometry {
   projectLeft: number | null;
 }
 
-/** A row's measured shape: its height, its lines, its title, project, tiles and time. */
 async function geometry(page: Page, rowClass: string, id: string): Promise<Geometry> {
   return page.evaluate(
     ([rowClass, id]) => {
@@ -183,7 +142,6 @@ async function all(page: Page, rowClass: string): Promise<Record<string, Geometr
   return out;
 }
 
-/** The time is whole and inside its row, after the title: it never gives way. */
 function timeWhole(g: Geometry, name: string) {
   expect(g.time.cut, `${name}: time cut`).toBe(false);
   expect(g.time.right, `${name}: time inside the row`).toBeLessThanOrEqual(g.rowRight + 0.5);
@@ -199,7 +157,6 @@ test('beside a thread, by mouse: each option changes the rows at once, keeps the
     await openQuiet(page);
     await page.evaluate(() => document.fonts.ready);
 
-    // Today's list: no option on, three lines, the title plain on its own line.
     expect(await lookClasses(page)).toEqual([]);
     const today = await all(page, 'ib-nrow');
     for (const [name, g] of Object.entries(today)) {
@@ -213,7 +170,6 @@ test('beside a thread, by mouse: each option changes the rows at once, keeps the
     for (const key of ['highlight', 'compact', 'hideAgents', 'smallNames']) await expect(option(page, key)).toHaveAttribute('aria-checked', 'false');
     await page.screenshot({ path: join(proofDir, 'menu-open.png') });
 
-    // Highlight thread subject: the title in its pill, one line, cut with "…"; the menu stays open.
     await option(page, 'highlight').click();
     await expect(option(page, 'highlight')).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('[data-tidy-menu-popup]')).toBeVisible();
@@ -227,7 +183,6 @@ test('beside a thread, by mouse: each option changes the rows at once, keeps the
     const fill = await page.locator(`.ib-nrow[data-thread-id="${threads.token}"] .ib-rowkey`).evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(fill, 'the pill has its fill').not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
 
-    // Compact rows: two lines, about 20 px shorter; the project gives way first, the time never.
     await option(page, 'compact').click();
     await expect(option(page, 'compact')).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('.ib-lbody .ib-l2')).toHaveCount(0);
@@ -238,17 +193,13 @@ test('beside a thread, by mouse: each option changes the rows at once, keeps the
       expect(pill[name]!.h - g.h, `${name}: about 20 px shorter`).toBeLessThanOrEqual(24);
       timeWhole(g, name);
     }
-    // Long project, long name: the project is cut to its floor (136 px with its tiles), then the name.
     expect(compact.ledger!.project).toMatchObject({ cut: true });
     expect(compact.ledger!.project!.w + compact.ledger!.tiles + 6).toBeGreaterThanOrEqual(135);
     expect(compact.ledger!.title.cut).toBe(true);
-    // A short project and a short name: nothing is cut.
     for (const name of ['token', 'refund', 'release']) expect([compact[name]!.project!.cut, compact[name]!.title.cut], name).toEqual([false, false]);
-    // A Sent row keeps its words on line 2; a pinned row its pin.
     await expect(page.locator(`.ib-lbody [data-section-id="sent"] .ib-nrow[data-thread-id="${threads.refund}"] .ib-l1 .ib-title`)).toBeVisible();
     await expect(page.locator(`.ib-nrow[data-thread-id="${threads.token}"] [data-pin-mark]`)).toBeVisible();
 
-    // Hide agent icons: no tiles, the project starts the row, the height is kept; a screen reader still hears who.
     await option(page, 'hideAgents').click();
     await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'true');
     const hidden = await all(page, 'ib-nrow');
@@ -263,7 +214,6 @@ test('beside a thread, by mouse: each option changes the rows at once, keeps the
     await expect(page.locator('[data-tidy-menu-popup]')).toHaveCount(0);
     await page.screenshot({ path: join(proofDir, 'all-three.png') });
 
-    // A reload keeps all three.
     await page.reload();
     await expect(page.locator(`.ib-nrow[data-thread-id="${threads.ledger}"]`)).toBeVisible();
     expect(await lookClasses(page)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-noagents']);
@@ -272,7 +222,6 @@ test('beside a thread, by mouse: each option changes the rows at once, keeps the
     for (const key of ['highlight', 'compact', 'hideAgents']) await expect(option(page, key)).toHaveAttribute('aria-checked', 'true');
     await page.keyboard.press('Escape');
 
-    // A wider column (still under the wide rows' 900 px): nothing is cut on the short rows, the time still whole.
     await context.addCookies([{ name: 'plannotator-inbox-list-width', value: '760', url }]);
     await page.reload();
     await openQuiet(page);
@@ -292,7 +241,6 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
     const page = await context.newPage();
     await page.goto(`${url}#thread=${threads.opened}`);
     await expect(page.locator(`.ib-nrow[data-thread-id="${threads.ledger}"]`)).toBeVisible();
-    // A fresh browser: today's list.
     expect(await lookClasses(page)).toEqual([]);
     const trigger = page.locator('[data-tidy-menu]');
     await trigger.focus();
@@ -309,11 +257,9 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
     await page.keyboard.press('Enter');
     await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('[data-tidy-menu-popup]')).toBeVisible();
-    // Space again unticks.
     await page.keyboard.press(' ');
     await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'false');
     expect(await lookClasses(page)).toEqual(['ib-lk-compact']);
-    // The fourth option, the last one, by the arrows too.
     await page.keyboard.press('ArrowDown');
     expect(await highlighted()).toBe('smallNames');
     await page.keyboard.press(' ');
@@ -327,7 +273,6 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
   }
 });
 
-/** A row's name as drawn: its size, weight and tracking. */
 async function nameFont(page: Page, rowClass: string, id: string): Promise<{ size: string; weight: string; spacing: string }> {
   return page.locator(`.ib-lbody .${rowClass}[data-thread-id="${id}"]`).first().evaluate((row) => {
     const name = row.querySelector<HTMLElement>('.ib-title, .ib-m2')!;
@@ -348,7 +293,6 @@ test('smaller thread names: unread names at the read size, still bold; read, Sen
       await page.goto(`${url}${shape.go}`);
       await expect(page.locator(`.ib-lbody .${shape.rowClass}[data-thread-id="${threads.ledger}"]`)).toBeVisible();
       await openQuiet(page);
-      // Off (a fresh browser): today's bigger unread name; a read row (CSV export) and a Sent row (Refund events) at the read size.
       const unread = await nameFont(page, shape.rowClass, threads.ledger);
       const read = await nameFont(page, shape.rowClass, threads.csv);
       const sent = await nameFont(page, shape.rowClass, threads.refund);
@@ -362,11 +306,9 @@ test('smaller thread names: unread names at the read size, still bold; read, Sen
       await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true');
       await expect(page.locator('[data-tidy-menu-popup]')).toBeVisible();
       expect(await lookClasses(page)).toEqual(['ib-lk-small']);
-      // On: the unread name drops to the read size, still bold; read and Sent rows unchanged.
       expect(await nameFont(page, shape.rowClass, threads.ledger), `${shape.name}: smaller unread name`).toEqual({ size: shape.small, weight: '600', spacing: 'normal' });
       expect(await nameFont(page, shape.rowClass, threads.csv)).toEqual(read);
       expect(await nameFont(page, shape.rowClass, threads.refund)).toEqual(sent);
-      // In its pill too.
       await option(page, 'highlight').click();
       await expect(page.locator(`.ib-lbody .${shape.rowClass}[data-thread-id="${threads.ledger}"] .ib-rowkey`)).toBeVisible();
       expect((await nameFont(page, shape.rowClass, threads.ledger)).size, `${shape.name}: in its pill`).toBe(shape.small);
@@ -375,7 +317,6 @@ test('smaller thread names: unread names at the read size, still bold; read, Sen
       await expect(page.locator('[data-tidy-menu-popup]')).toHaveCount(0);
       await page.mouse.move(1, 1);
       await page.screenshot({ path: join(proofDir, `small-names-on-${shape.rowClass}.png`) });
-      // A reload keeps it; turned off, today's again.
       await page.reload();
       await expect(page.locator(`.ib-lbody .${shape.rowClass}[data-thread-id="${threads.ledger}"]`)).toBeVisible();
       expect(await lookClasses(page)).toEqual(['ib-lk-small']);
@@ -389,7 +330,6 @@ test('smaller thread names: unread names at the read size, still bold; read, Sen
     }
   }
 
-  // The wide one-line list was never bigger: the same with it on.
   const context = await desktop(browser);
   try {
     const page = await context.newPage();
@@ -422,13 +362,11 @@ test('the wide one-line list: the pill, compact changes nothing, the marks go; o
     await expect(page.locator(`.ib-row[data-thread-id="${threads.ledger}"] .ib-subj > .ib-rowkey > .ib-title`)).toBeVisible();
     expect((await ledger.boundingBox())!.height).toBe(before);
     expect((await page.locator(`.ib-row[data-thread-id="${threads.ledger}"] .ib-ags`).boundingBox())!.width).toBeLessThanOrEqual(1);
-    // The marks gone, the project starts its cell again: no empty slot where the marks were.
     const [cellBox, projectBox] = await Promise.all([ledger.locator('.ib-from').boundingBox(), ledger.locator('.ib-p').boundingBox()]);
     expect(Math.abs(projectBox!.x - cellBox!.x)).toBeLessThanOrEqual(0.5);
     await agentsAnnounced(page, 'ib-row');
     await page.screenshot({ path: join(proofDir, 'wide-all-three.png') });
 
-    // One project's list: the agents were its whole first cell; the title takes that column.
     expect(projectIds[LONG_PROJECT], 'the long project').toBeTruthy();
     await page.goto(`${url}#project=${projectIds[LONG_PROJECT]}`);
     const row = page.locator(`.ib-row[data-thread-id="${threads.ledger}"]`);
@@ -474,11 +412,9 @@ test('a 390 px phone, from the ⋮ sheet: compact rows on two lines, the time ne
   }
 });
 
-/** How many of a row's title characters show whole before its "…" (the title is one text node). */
 async function shownChars(page: Page, id: string): Promise<{ shown: number; length: number }> {
   return page.locator(`.ib-lbody .ib-mrow[data-thread-id="${id}"] .ib-m2`).evaluate((el) => {
     const text = el.firstChild as Text;
-    // The cut text's room, less the "…" (about 6 px at this size).
     const edge = el.getBoundingClientRect().left + el.clientWidth - (el.scrollWidth > el.clientWidth + 0.5 ? 6 : 0) + 0.5;
     const range = document.createRange();
     let shown = 0;
@@ -492,7 +428,6 @@ async function shownChars(page: Page, id: string): Promise<{ shown: number; leng
 }
 
 test('a 320 px phone with the worst rows: compact keeps about ten characters of each name, the time whole', async ({ browser }) => {
-  // The worst rows: a long project with a long name, unread (Ledger), pinned, and Sent.
   const [claude, codex] = agents;
   const vendor = await say(claude!, LONG_PROJECT, 'Pinned vendor invoices waiting on the accounts payable sign-off', 'Vendor invoices are waiting', 'Sign off today?');
   const audit = await say(codex!, LONG_PROJECT, 'Superseded audit trail entries from the old ledger importer', 'Old audit entries', 'Delete them?');
@@ -521,7 +456,6 @@ test('a 320 px phone with the worst rows: compact keeps about ten characters of 
         timeWhole(g, `${shot} ${name}`);
         const { shown, length } = await shownChars(page, id);
         expect(shown, `${shot} ${name}: about ten characters of "${length}" show`).toBeGreaterThanOrEqual(Math.min(10, length));
-        // The long project still gives way first: it is cut before the title.
         if (name !== 'rate') expect(g.project?.cut, `${shot} ${name}: the project gives way first`).toBe(true);
       }
       if (rows.includes('hideAgents')) await agentsAnnounced(page, 'ib-mrow');
@@ -532,12 +466,9 @@ test('a 320 px phone with the worst rows: compact keeps about ten characters of 
   }
 });
 
-// Settings → Rows (approval "inbox-customize-rows", 2026-11-02).
-
 const phoneContext = (browser: Browser, width: number) =>
   browser.newContext({ viewport: { width, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'light', reducedMotion: 'reduce' });
 
-/** Where the ⋮ menu's labels start: each checkbox's, "Customize rows…"'s, and Refresh's icon beside the boxes. */
 async function menuEdges(page: Page) {
   return page.locator('[data-tidy-menu-popup]').evaluate((popup) => {
     const left = (el: Element | null) => (el ? Math.round(el.getBoundingClientRect().left * 2) / 2 : null);
@@ -549,7 +480,6 @@ async function menuEdges(page: Page) {
       boxWidths: items.map((i) => Math.round(i.querySelector('.ib-pmi-box')!.getBoundingClientRect().width)),
       icon: left(refresh),
       iconWidth: Math.round(refresh!.getBoundingClientRect().width),
-      // Drawings other than a ticked box's ✓: none.
       icons: items.filter((i) => [...i.querySelectorAll('svg')].some((svg) => !svg.closest('.ib-pmi-box[data-on]'))).length,
       customizeIcons: popup.querySelectorAll('[data-customize-rows] svg').length,
     };
@@ -558,7 +488,6 @@ async function menuEdges(page: Page) {
 
 test('the ⋮ menu: plain checkboxes on one edge with "Customize rows…", which opens Settings → Rows', async ({ browser }) => {
   for (const shape of ['desktop', 'phone'] as const) {
-    // The desktop's tick is the person's look, so the phone would open with it: start each from every option off.
     await post('/api/inbox/settings', { rows: [] });
     const context = shape === 'desktop' ? await desktop(browser) : await phoneContext(browser, 390);
     try {
@@ -599,13 +528,9 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
 
     await settings.locator('[data-rows-control="spacing"] label', { hasText: 'Roomy' }).click();
     await settings.locator('.ib-rws-presets button', { hasText: 'Detailed' }).click();
-    // Another browser (another cookie jar), no reload: the Detailed look.
-    // Detailed has no subject pill since approval "inbox-rows-dialog" (round 7b).
     await expect.poll(() => lookClasses(list)).toEqual(['ib-lk-roomy', 'ib-lk-pv2']);
     const saved = (await (await fetch(new URL('/api/inbox/settings', url))).json()) as { rows: string[] };
-    // Detailed also turns letter marks on, with the repo's logo (approval "inbox-rows-dialog").
     expect(saved.rows).toEqual(['roomy', 'previewTwo', 'marksThreads', 'marksProjects', 'repoLogo']);
-    // A wide row with Roomy is 60 px tall.
     expect(Math.round((await list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`).boundingBox())!.height)).toBe(60);
     await list.reload();
     await expect(list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
@@ -617,20 +542,16 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
   }
 });
 
-/** A row's ::before (the hover and selection pill, the focus ring) and ::after (the Dot), with the row's box. */
 async function rowMarks(page: Page, selector: string) {
   return page.locator(selector).evaluate((row) => {
     const mark = (which: string) => {
       const s = getComputedStyle(row, which);
       return { content: s.content, w: parseFloat(s.width), h: parseFloat(s.height), bg: s.backgroundColor, shadow: s.boxShadow };
     };
-    // The pill is placed in the row's padding box (inside its rule).
     return { pill: mark('::before'), dot: mark('::after'), w: row.clientWidth, h: row.clientHeight, focusVisible: row.matches(':focus-visible') };
   });
 }
 
-// Review of #2516: the Dot was drawn as the row's ::before, which is also its hover and selection pill and its focus
-// ring, so an unread row lost all three while the Dot was on.
 test('Unread "Dot": its own mark; an unread row keeps its focus ring, hover pill and selection pill, wide and beside a thread', async ({ browser }) => {
   await post('/api/inbox/settings', { rows: ['smallNames', 'unreadDot'] });
   const context = await desktop(browser);
@@ -647,11 +568,9 @@ test('Unread "Dot": its own mark; an unread row keeps its focus ring, hover pill
       const rest = await rowMarks(page, row);
       expect([rest.dot.w, rest.dot.h], `${shape}: the dot`).toEqual([6, 6]);
       expect(rest.dot.bg, `${shape}: the dot's accent`).not.toBe('rgba(0, 0, 0, 0)');
-      // The pill is still the whole row, 3 px inside it top and bottom.
       expect(Math.round(rest.pill.w), `${shape}: the pill's width`).toBe(Math.round(rest.w));
       expect(Math.round(rest.pill.h), `${shape}: the pill's height`).toBe(Math.round(rest.h - 6));
 
-      // Keyboard focus (a key first, so the focus that follows is `:focus-visible`): the ring on the pill.
       await page.mouse.move(5, 5);
       await page.keyboard.press('Shift');
       await page.locator(row).focus();
@@ -661,17 +580,14 @@ test('Unread "Dot": its own mark; an unread row keeps its focus ring, hover pill
       expect(Math.round(focused.pill.w), `${shape}: the ring round the whole row`).toBe(Math.round(focused.w));
       expect(focused.dot.w, `${shape}: the dot stays`).toBe(6);
 
-      // Hover: the pill.
       await page.locator(row).hover();
       await expect.poll(async () => (await rowMarks(page, row)).pill.bg, `${shape}: the hover pill`).not.toBe('rgba(0, 0, 0, 0)');
       await page.mouse.move(5, 5);
       await page.locator(row).blur();
     }
 
-    // Selected and unread (the open thread marked unread): the selection pill and the dot.
     await post(`/api/inbox/threads/${threads.opened}/mark-unread`, {});
     const selected = `.ib-lbody .ib-nrow.ib-sel.ib-u[data-thread-id="${threads.opened}"]`;
-    // A read thread waits on no one: its row is in Quiet, folded by default.
     await openQuiet(page);
     await expect(page.locator(selected)).toBeVisible();
     const marks = await rowMarks(page, selected);
@@ -684,7 +600,6 @@ test('Unread "Dot": its own mark; an unread row keeps its focus ring, hover pill
   }
 });
 
-/** Each phone row inside the screen, its time whole and its question count and badges inside the row. */
 async function phoneRowsWhole(page: Page, label: string) {
   const report = await page.evaluate(() => {
     const vw = document.documentElement.clientWidth;
@@ -728,7 +643,6 @@ test('Rows options on 390 and 320 px phones: every row inside the screen, the ti
         await openQuiet(page);
         await page.evaluate(() => document.fonts.ready);
         await phoneRowsWhole(page, `${width} ${shot}`);
-        // Name first: the name leads line 1, the time ends it.
         if (rows.includes('titleFirst')) {
           const g = await geometry(page, 'ib-mrow', threads.ledger);
           expect(g.title.inL1, `${width} ${shot}: the name on line 1`).toBe(true);
@@ -737,7 +651,6 @@ test('Rows options on 390 and 320 px phones: every row inside the screen, the ti
           if (!rows.includes('compact')) expect((await shownChars(page, threads.ledger)).shown, `${width} ${shot}: a name worth reading`).toBeGreaterThanOrEqual(20);
         }
         if (rows.includes('relativeTime')) {
-          // "4m" on screen; a screen reader hears "4 minutes ago" instead, never both.
           const time = page.locator(`.ib-lbody .ib-mrow[data-thread-id="${threads.ledger}"] .ib-t [data-relative-time]`);
           await expect(time.locator('[aria-hidden="true"]')).toHaveText(/^(now|\d+[mhd])$/);
           const heard = await page.locator(`.ib-lbody .ib-mrow[data-thread-id="${threads.ledger}"]`).ariaSnapshot();
@@ -746,7 +659,6 @@ test('Rows options on 390 and 320 px phones: every row inside the screen, the ti
         }
         await page.screenshot({ path: join(proofDir, `rows-phone-${width}-${shot}.png`) });
       }
-      // The page itself on this phone: one picture, nothing wider than the screen.
       await page.goto(`${url}#settings/rows`);
       await expect(page.locator('[data-settings-rows]')).toBeVisible();
       await expect(page.locator('[data-rows-preview]')).toHaveCount(1);

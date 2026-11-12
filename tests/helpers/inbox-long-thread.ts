@@ -1,11 +1,3 @@
-/**
- * A long Inbox thread for size checks on the MCP results
- * (packages/server/inbox-mcp-size.test.ts): an agent asks, the person
- * answers, `rounds` times, through the real doors (the MCP client for the
- * agent, the window's routes for the person). Every agent message carries a
- * paragraph of prose and a two-question block; every third one attaches a
- * file. The server must be one the caller started under a scratch data dir.
- */
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
@@ -48,11 +40,6 @@ function body(round: number): string {
   ].join("\n");
 }
 
-/**
- * `rounds` agent messages, each answered by the person except the last,
- * which stays open: 2 * rounds - 1 messages. With `answerLast`, the last one
- * is answered too, but only once the caller asks (the reply a wait sees).
- */
 export async function seedLongThread(options: {
   client: Client;
   port: number;

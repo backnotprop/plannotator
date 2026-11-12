@@ -1,8 +1,3 @@
-/**
- * A real `git diff` (taken from a repo, nothing hand-written) that the review app's file tree cannot hold one row per
- * file for: `docs` becomes `docs/index.md` and `docs/guide/intro.md`, and a symlink becomes a regular file (the same
- * path twice). Its git order also differs from the tree's: root files sort before `src/`, the tree puts folders first.
- */
 export const COLLIDING_PATHS_DIFF = `diff --git a/README.md b/README.md
 index 3367afd..3e75765 100644
 --- a/README.md

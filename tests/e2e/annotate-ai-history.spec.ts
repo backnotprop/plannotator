@@ -1,15 +1,3 @@
-/**
- * #1001: one Ask AI chat for the whole session, against the compiled binary
- * and real files; only the AI transport is intercepted.
- *
- * - Annotate: switching files keeps the chat and its session. A question on a
- *   new file carries one short note naming that file's absolute path (and the
- *   one viewed before), never the document's text; a second question on the
- *   same file carries nothing; a busy question retried after a switch keeps
- *   the document it was asked about.
- * - Plan review: a revision keeps the chat; the next question names the new
- *   version's history file instead of pasting the revised plan.
- */
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -47,7 +35,6 @@ async function readyUrl(ready: string): Promise<string> {
   return JSON.parse(readFileSync(ready, 'utf8').trim().split('\n')[0]!).url;
 }
 
-/** Fakes /api/ai/*: `busyFirst` answers the first query with agent_busy. */
 async function fakeAI(page: Page, options: { bridge: boolean; busyFirst: boolean }) {
   let sessions = 0;
   const sessionBodies: unknown[] = [];
@@ -133,8 +120,6 @@ test('Ask AI keeps the chat across files and names each file by path', async ({ 
     await expect(page.getByText('Answer 2', { exact: true })).toBeVisible();
 
     const [first, retried] = ai.queries;
-    // The first question creates the session from the file on screen, so it
-    // carries no note; the retry after the switch is the same question.
     expect(first!.prompt).toBe('Question on alpha');
     expect(retried!.prompt).toBe(first!.prompt);
     expect(first!.draftAnnotations).toContain('Keep this draft separate');
@@ -145,7 +130,6 @@ test('Ask AI keeps the chat across files and names each file by path', async ({ 
     expect(onBeta.sessionId).toBe('s-1');
     expect(onBeta.prompt).toMatch(/now looking at \/\S*\/docs\/beta\.md\./);
     expect(onBeta.prompt).toMatch(/Viewed earlier in this chat, most recent first: \/\S*\/docs\/alpha\.md\./);
-    // Local files are named, never pasted, and drafts never ride the prompt.
     expect(onBeta.prompt).not.toContain('Beta content');
     expect(onBeta.prompt).not.toContain('Alpha content');
     expect(onBeta.prompt).not.toContain('Keep this draft separate');
@@ -186,7 +170,6 @@ test('Ask AI keeps the chat across a plan revision and names the new version fil
     await page.getByRole('button', { name: 'Show AI chat', exact: true }).click();
     await ask(page, 'Question on v1', 'Answer 1');
     expect(ai.queries[0]!.prompt).toBe('Question on v1');
-    // The session itself is made from the plan on screen (unchanged behavior).
     expect(JSON.stringify(ai.sessionBodies[0])).toContain('First draft sentinel alpha.');
 
     writeFileSync(revision, JSON.stringify({ seq: 1, plan: v2 }));

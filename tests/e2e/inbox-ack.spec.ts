@@ -1,26 +1,3 @@
-/**
- * 👍 Looks good (approval "inbox-acknowledge", 2026-10-15, amended
- * 2026-10-16: it is sent through to the agent), proved in a real browser
- * against the compiled binary, with an agent writing through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *
- *  - the thread's foot is Reply and Looks good side by side, with no New
- *    message button; a thread with an open question shows Reply alone;
- *  - a click presses the button, draws the line ("goes to Claude Code in a
- *    few seconds") and no toast, the agent's thread gains no message, and
- *    the row reads "👍 Looks good" in Quiet once the thread is left;
- *  - after the Undo window the agent's read_thread shows the 👍, and the
- *    line says "Delivered to Claude Code";
- *  - a message from a waking connection: the line says Queued, the bridge
- *    hands its session one command whose wake names the message, and once
- *    delivered the line says Delivered;
- *  - Z takes it back;
- *  - on a phone (WebKit, iPhone 15) both buttons are 44 px, side by side.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/ack/.
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -128,7 +105,6 @@ test('the foot is Reply and Looks good side by side; no New message button; a qu
   await expect(ack).toBeVisible();
   expect(await footButtons(page)).toEqual(['Reply', '👍Looksgood']);
   await expect(page.locator('[data-new-message]')).toHaveCount(0);
-  // Side by side, a normal gap, both the foot's height.
   const [reply, thumbs] = await Promise.all([page.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).boundingBox(), ack.boundingBox()]);
   expect(Math.abs(reply!.y - thumbs!.y)).toBeLessThanOrEqual(1);
   expect(thumbs!.x - (reply!.x + reply!.width)).toBeGreaterThan(0);
@@ -138,7 +114,6 @@ test('the foot is Reply and Looks good side by side; no New message button; a qu
   await page.goto(`${world.url}#thread=${threads.question}`);
   await expect(page.locator('section.ib-pane [data-question-key]').first()).toBeVisible();
   await expect(page.locator('section.ib-pane [data-ack]')).toHaveCount(0);
-  // One open question: Reply plus the open-questions list (which holds Re-ask); never Looks good.
   expect(await footButtons(page)).toEqual(['Reply', '1openquestion']);
   await shot(page, '02-open-question');
 });
@@ -151,11 +126,9 @@ test('a click: pressed, the line and no toast, nothing sent yet; the row reads L
   await expect(ack).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('[data-ack-pill]')).toHaveAttribute('data-ack-pill', 'pending');
   await expect(page.locator('[data-ack-pill]')).toContainText('goes to Claude Code in a few seconds');
-  // No toast after a reaction (approval "inbox-reaction-tray"): the line under the message is the confirmation.
   await expect(page.locator('[data-inbox-toast]')).toHaveCount(0);
   await page.setViewportSize({ width: 1440, height: 900 });
   await shot(page, '03-after');
-  // The agent's thread still holds its one message (the note that carries the 👍 is never listed).
   const thread = await claude.readThread(threads.merged);
   expect((thread.messages as { author: { kind: string } }[]).map((m) => m.author.kind)).toEqual(['agent']);
 
@@ -189,24 +162,19 @@ test('a waking connection: Queued, then one wake naming the message, then Delive
   const base = `http://127.0.0.1:${registry.port}`;
   const thread = (await (await fetch(`${base}/api/inbox/threads/${threads.wake}`)).json()) as { thread: { messages: { id: string; author: { session: string }; ack?: { settled_seq?: number | null } | null }[] } };
   const session = thread.thread.messages[0]!.author.session;
-  // The Undo window passes: the line says Queued (this message came through a waking connection).
   await expect(async () => {
     await page.goto(`${world.url}#thread=${threads.wake}`);
     await expect(page.locator('[data-ack-pill]')).toHaveAttribute('data-ack-pill', 'queued', { timeout: 1_000 });
   }).toPass({ timeout: 20_000 });
-  // The same honest words as a reply's line: no connection polls for that session yet.
   await expect(page.locator('[data-ack-pill]')).toContainText('Queued for Claude Code; it gets this when its session is back.');
   const bridge = (path: string, body: unknown) =>
     fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registry.token}` }, body: JSON.stringify(body) });
-  // The session polls while a turn runs: "is working", no Send now and no countdown (a 👍 asks nothing of the
-  // agent and waits for the turn to end: the owner's decision, INBOX_AUTO_SEND_ACK_NOTES false).
   expect((await bridge('/api/inbox/bridge/poll', { session, host: 'claude-code', waitMs: 0, busy: true, send_now: true })).status).toBe(200);
   await page.goto(`${world.url}#thread=${threads.wake}`);
   await expect(page.locator('[data-ack-pill]')).toContainText(/Undelivered(?: \d+ min)? · Claude Code is working · it gets this when its turn ends/);
   await expect(page.locator('[data-ack-pill]')).not.toContainText('by itself');
   await expect(page.locator('[data-send-now]')).toHaveCount(0);
   await shot(page, '06-queued');
-  // The session's connection polls: one command, the wake naming the message.
   const polled = (await (await bridge('/api/inbox/bridge/poll', { session, host: 'claude-code', waitMs: 0 })).json()) as { commands: InboxReplyCommand[] };
   expect(polled.commands).toHaveLength(1);
   const command = polled.commands[0]!;
@@ -226,9 +194,6 @@ test('Z takes it back; no page errors', async () => {
   const ack = page.locator('section.ib-pane [data-ack]');
   await ack.click();
   await expect(ack).toHaveAttribute('aria-pressed', 'true');
-  // The button is pressed once the thread is read again, but the unseen toast (whose Undo Z runs)
-  // is kept only after the list read that follows it (App.tsx `acknowledge`): a Z pressed in
-  // between does nothing. Wait for the line under the message, as a person sees it before pressing Z.
   await expect(page.locator('[data-ack-pill]')).toHaveAttribute('data-ack-pill', 'pending');
   await expect(async () => {
     await page.locator('body').press('z');

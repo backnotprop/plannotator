@@ -1,21 +1,3 @@
-/**
- * Files attached to a reply draft sync to every device and go with whichever
- * one sends (the owner, 2026-11-02: "ideally it just syncs"), proved against
- * the compiled binary under a temp PLANNOTATOR_DATA_DIR (PLANNOTATOR_INBOX_CONNECT=0,
- * no browser opened by the Inbox, no update check):
- *
- * - At a desktop viewport the person writes a reply and attaches a picture and
- *   a notes file with the paperclip, then leaves (the page closes).
- * - At an iPhone viewport the same thread opens with the draft's words and
- *   both file tiles back in the reply box; each tile's × has a 44 px target.
- * - Send on the phone carries the words and both files: the agent reads them
- *   as the reply's attachments, the picture byte for byte, and the draft is done.
- *
- * Agents write through `plannotator inbox mcp` (scripts/inbox-sim.ts). Build the
- * binary first (see inbox.spec.ts). PLANNOTATOR_E2E_SHOTS_DIR names a folder for
- * the pictures (default .local/proof/reply-draft-files).
- */
-
 import { devices, expect, test, type Browser } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -80,7 +62,6 @@ test.afterAll(async () => {
 test('a draft started on the computer with a picture and a file opens on the phone with its tiles, and the phone sends them', async ({ browser }: { browser: Browser }) => {
   const draftUrl = new URL(`/api/inbox/threads/${world.thread}/draft`, world.url).href;
 
-  // The computer: words and two files, attached with the paperclip; then the page goes.
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await desk.newPage();
   await page.goto(`${world.url}#thread=${world.thread}`);
@@ -102,7 +83,6 @@ test('a draft started on the computer with a picture and a file opens on the pho
   await page.screenshot({ path: join(shotsDir, 'desktop-draft-with-files-1440.png') });
   await desk.close();
 
-  // The phone: the same thread opens with the words and both tiles in the reply box.
   const phone = await browser.newContext({ ...devices['iPhone 13'], colorScheme: 'light' });
   const mobile = await phone.newPage();
   await mobile.goto(`${world.url}#thread=${world.thread}`);
@@ -112,10 +92,7 @@ test('a draft started on the computer with a picture and a file opens on the pho
   await expect(tiles).toHaveCount(2);
   await expect(tiles.nth(0)).toHaveAttribute('data-compose-file-name', 'header-jump.png');
   await expect(tiles.nth(1)).toHaveAttribute('data-compose-file-name', 'header-notes.md');
-  // Each tile's × is a finger's target on a phone: its drawn 26 px grows to a
-  // 44 px hit area, so a tap 8 px outside the drawn box still lands on it.
   for (const tile of await tiles.all()) {
-    // The words and files scroll in the box's capped region (approval "inbox-reply-box", D1): the tile in view first.
     await tile.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     const hits = await tile.locator('.ib-cp-fx').evaluate((button) => {
       const r = button.getBoundingClientRect();
@@ -130,7 +107,6 @@ test('a draft started on the computer with a picture and a file opens on the pho
   await mobile.screenshot({ path: join(shotsDir, 'phone-draft-tiles-390.png') });
   await box.screenshot({ path: join(shotsDir, 'phone-draft-tiles-box-390.png') });
 
-  // Send on the phone: the agent gets the words and both files, and the draft is done.
   await mobile.locator('section.ib-pane .ib-rbox [data-reply-send]').click();
   const reply = (await world.agent.nextReply(world.thread)) as { body: string; attachments?: { name: string; path: string }[] };
   expect(reply.body.startsWith(WORDS)).toBe(true);

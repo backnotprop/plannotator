@@ -1,20 +1,3 @@
-/**
- * Reply drafts and the Draft label (approval "inbox-reply-drafts", variant
- * Label), proved in a real browser against the compiled binary: words typed
- * in a thread's reply box are kept as a server draft while typing, and come
- * back when the person leaves the thread and opens it again, reloads the
- * page, or restarts the Inbox. The list row says "Draft · Your reply" ("Draft" beside a thread or on a phone) and
- * the thread stays out of Quiet after it is looked at; a thread holding only
- * a pick not sent stays out of Quiet too ("Draft · 1 pick"). The sidebar's
- * Drafts row counts them and its page lists them above the messages.
- * Discard drops the words; the Send that carries them clears them.
- *
- * Agents write through `plannotator inbox mcp` (scripts/inbox-sim.ts). PNGs
- * (desktop 1440, beside a thread at 1280, inside the thread, a phone, dark)
- * land in .local/proof/reply-drafts/ (or PLANNOTATOR_E2E_PROOF_DIR).
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -49,7 +32,6 @@ const row = (page: Page, threadId: string) => page.locator(`.ib-lbody [data-thre
 const sectionOf = (page: Page, threadId: string) => row(page, threadId).getAttribute('data-section');
 const pane = (page: Page) => page.locator('section.ib-pane');
 const box = (page: Page) => pane(page).locator('textarea');
-/** The thread's reply draft as the Inbox holds it: its words, or null. (`world.url` ends in `/`: a `//api/…` path is the page's 404.) */
 const draftWords = async (threadId: string) =>
   ((await (await fetch(new URL(`/api/inbox/threads/${threadId}/draft`, world.url))).json()) as { draft: { body: string } | null }).draft?.body ?? null;
 
@@ -110,22 +92,16 @@ test('type, leave: the words are kept, the row says "Draft · Your reply", and t
   await row(page, threads.news).click();
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   await box(page).fill(WORDS);
-  // Saved, silently on a computer (approval "inbox-reply-box", T6): no Draft pill or Saved time in the box; Discard is
-  // the bin in the box's row.
   await expect.poll(() => draftWords(threads.news)).toBe(WORDS);
   await expect(pane(page).locator('[data-draft-head]')).toHaveCount(0);
   await expect(pane(page).locator('[data-reply-row] [data-reply-discard]')).toHaveAccessibleName('Discard draft');
   await page.setViewportSize({ width: 1280, height: 860 });
   await shot(page, 'inside-thread-draft-1280');
-  // Leave the thread: the row it settles in says what waits.
   await pane(page).getByRole('button', { name: 'Close the thread' }).click();
   await expect(pane(page)).toHaveCount(0);
-  // A wide row in a list of 1150px or more draws the full words (the owner, 2026-10-29); a narrower one (1280's list
-  // is about 1030px), a two-line or a phone row "Draft" (option A).
   await expect(row(page, threads.news).locator('[data-draft-label]')).toHaveText('Draft');
   await expect(row(page, threads.news).locator('.ib-c')).toHaveAttribute('data-count-words', 'Draft · Your reply');
   expect(await sectionOf(page, threads.news)).toBe('new');
-  // Not bold: nothing new arrived; the label says what is there.
   await expect(row(page, threads.news)).not.toHaveClass(/\bib-u\b/);
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(row(page, threads.news).locator('[data-draft-label]')).toHaveText('Draft · Your reply');
@@ -148,10 +124,8 @@ test('a restart of the Inbox keeps them', async () => {
   world.url = startInbox();
   rememberInboxOf(world.dataDir);
   await page.goto(`${world.url}#thread=${threads.news}`);
-  // The same address: a hash change would keep the old page (and its old server session), so load it again.
   await page.reload();
   await expect(box(page)).toHaveValue(WORDS);
-  // The old page lost its stream while the Inbox was down, by design.
   world.errors.splice(mark, world.errors.length - mark, ...world.errors.slice(mark).filter((e) => !/net::ERR_(CONNECTION_REFUSED|CONNECTION_RESET|INCOMPLETE_CHUNKED_ENCODING)/.test(e)));
 });
 
@@ -167,7 +141,6 @@ test('a pick not sent: "Draft" on the card and the foot; the thread stays out of
   await expect(row(page, threads.picks).locator('.ib-c')).toHaveAttribute('data-count-words', 'Draft · 1 pick');
   await page.setViewportSize({ width: 1280, height: 860 });
   await shot(page, 'inside-thread-picks-1280');
-  // Beside another thread: both drafts' rows in the narrow list.
   await row(page, threads.asks).click();
   await expect(pane(page).getByRole('heading', { name: 'Skip the tour for returning users?' })).toBeVisible();
   await expect(row(page, threads.picks).locator('.ib-c')).toHaveAttribute('data-count-words', 'Draft · 1 pick');
@@ -211,7 +184,6 @@ test('dark and a phone: the label and the pill read', async () => {
     await shot(p, 'phone-list');
     await p.locator(`[data-thread-id="${threads.news}"]`).tap();
     await expect(p.locator('section.ib-pane textarea')).toHaveValue(WORDS);
-    // Discard's hit area is 44px tall on a phone.
     const discard = await p.locator('[data-draft-discard]').evaluate((el) => {
       const after = getComputedStyle(el, '::after');
       return el.getBoundingClientRect().height - parseFloat(after.top) - parseFloat(after.bottom);

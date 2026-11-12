@@ -1,11 +1,3 @@
-/**
- * The tripwire `gh` (tests/setup/gh-tripwire.ts) is what every test reaches,
- * whichever way it spawns, and a test that reaches it fails.
- *
- * The in-process cases run the tripwire on purpose and take their own calls
- * (takeGhTripwireCalls), so the preload's afterEach check passes here; the
- * last case runs a child `bun test` that does not, and must fail.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -77,8 +69,6 @@ describe("gh's config and tokens", () => {
   });
 
   test("only the fake token reaches this process or a child spawned without env", () => {
-    // GH_TOKEN / GH_ENTERPRISE_TOKEN hold a fake, so gh never falls back to the
-    // keyring; GITHUB_TOKEN / GITHUB_ENTERPRISE_TOKEN are unset.
     expect(process.env.GH_TOKEN).toBe(GH_FAKE_TOKEN);
     expect(process.env.GH_ENTERPRISE_TOKEN).toBe(GH_FAKE_TOKEN);
     expect(process.env.GITHUB_TOKEN).toBeUndefined();
@@ -110,7 +100,6 @@ describe("a test that runs gh fails", () => {
     expect(output).toContain("gh api user --jq .login");
     expect(output).toMatch(/\(fail\) asks gh who the user is/);
     expect(output).toMatch(/\b1 pass\b[\s\S]*\b1 fail\b/);
-    // The child's tripwire is its own: nothing reached this run's log.
     expect(takeGhTripwireCalls()).toEqual([]);
   });
 });

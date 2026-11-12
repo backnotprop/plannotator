@@ -1,11 +1,3 @@
-/**
- * The VS Code Guides webviews render agent-written markdown and Mermaid
- * (apps/vscode-extension/src/guides/webview). Nothing an agent writes may run
- * or navigate. happy-dom cannot run DOMPurify faithfully (it keeps a
- * `<script>`), so this proof runs the webview's own `markdown.ts` and
- * `diagram.ts`, bundled as the extension bundles them, in real Chromium under
- * the webview's CSP. No binary or VS Code is needed.
- */
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -36,7 +28,6 @@ const host = () => document.getElementById('host')!;
 };
 `);
   const out = join(work, 'bundle.js');
-  // The extension's own webview build options (define, aliases, minify), with this entry.
   const build = join(work, 'build.ts');
   writeFileSync(build, `
 import { build } from ${JSON.stringify(join(EXTENSION, 'node_modules/esbuild/lib/main.js'))};
@@ -54,7 +45,6 @@ test.afterAll(() => {
   if (work) rmSync(work, { recursive: true, force: true });
 });
 
-/** The webview's CSP: scripts only by nonce, inline styles allowed (webview-host.ts). */
 async function open(page: import('@playwright/test').Page) {
   const nonce = 'pn-test-nonce';
   const errors: string[] = [];
@@ -145,7 +135,6 @@ test("a diagram cannot loosen Mermaid's security level or bind a click to script
   const attrs = await allAttributes(page);
   expect(attrs.filter((a) => /@on|javascript:/i.test(a))).toEqual([]);
   expect(await page.evaluate(() => Array.from(document.querySelectorAll('#host img, #host script, #host a[href]')).map((e) => e.outerHTML))).toEqual([]);
-  // Only the guide link survives, as a data-link the webview's own handler acts on.
   expect(await page.evaluate(() => Array.from(document.querySelectorAll('#host [data-link]')).map((e) => e.getAttribute('data-link')))).toEqual(['symbol:computeBackoff']);
 });
 
@@ -156,7 +145,6 @@ test('agent text cannot set the attributes the webview acts on (data-external, d
     '<a href="https://example.com/ok" data-external="https://evil.example/b">a real link</a> [md](https://example.com/md) [sym](symbol:computeBackoff)',
   ].join('\n\n'));
   const marked = await page.evaluate(() => Array.from(document.querySelectorAll('#host [data-external], #host [data-link], #host [data-popover-action], #host [data-popover-link]')).map((el) => [el.tagName.toLowerCase(), el.textContent, el.getAttribute('data-external'), el.getAttribute('data-link')]));
-  // Only real links carry them, set from their own href by the extension.
   expect(marked).toEqual([
     ['a', 'a real link', 'https://example.com/ok', null],
     ['a', 'md', 'https://example.com/md', null],

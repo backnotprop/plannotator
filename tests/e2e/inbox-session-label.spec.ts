@@ -1,33 +1,3 @@
-/**
- * Session labels in the To picker (approval `.product/approved/inbox-session-label/`,
- * issue #2450), on the compiled binary. Ten live sessions of one project, the
- * approved pictures' fixture: most labelled, a 60-character Latin label, a CJK
- * label on Pi, two with none. Nothing is mocked: `plannotator inbox --background`
- * under a temp HOME and PLANNOTATOR_DATA_DIR, and each session is the bridge's
- * real long-poll with a `label`. No real agent runs.
- *
- * At 1440 px (and in the Board's New card at 390 px, which keeps this picker):
- *  - every row keeps its mark right against the agent's name, the name on one
- *    line and whole, and the labels in one column (Pi's short name keeps the
- *    column's gap, as the owner saw it);
- *  - a label is one line: it is cut with "…" and keeps the folder's room;
- *  - a row with no label keeps its words;
- *  - To is one line, label then project, and a label never wraps it.
- * At 390 and 320 px New message's To is a pill in the foot's row and its list a
- * bottom sheet (approval "inbox-phone-composer-picker"):
- *  - a row leads with the session's label (one line, cut with "…") and names
- *    its agent and project under it, never cut (that line wraps); a row with no label
- *    leads with its agent;
- *  - the pill says the label on one line, cut with "…", clear of Send, and its
- *    accessible name says the label and the project whole.
- * Then: the filter finds a label, Latin or CJK; a label that changes or clears
- * reaches an open picker and To; the Board's New card, which shares the picker,
- * still opens and picks.
- *
- * Build the binary first (see inbox.spec.ts). SESSION_LABEL_SHOTS_DIR: where to
- * write the full-window PNGs (none when unset).
- */
-
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -41,10 +11,8 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shotsDir = process.env.SESSION_LABEL_SHOTS_DIR ? resolve(process.env.SESSION_LABEL_SHOTS_DIR) : null;
 
-/** Exactly 60 characters: the cap. */
 const LONG = 'Rework billing export so very large CSV files stream to disk';
 const CJK = '冲突筛查圆桌 · kelu';
-/** 60 CJK characters: twice the width of LONG, with no space to break at. */
 const LONG_CJK = '冲突筛查圆桌会议纪要与下一步行动清单汇总整理并同步给所有参与方确认后归档到项目知识库供后续查阅和复盘使用的完整版本草稿版';
 
 const SESSIONS: { session: string; host: string; label?: string }[] = [
@@ -70,7 +38,6 @@ interface World {
 
 let world: World;
 
-/** One live session: the bridge's long-poll. `label` is read for every poll, as a connection does. */
 class Poll {
   private stopped = false;
   private readonly loop: Promise<void>;
@@ -140,11 +107,9 @@ test.afterAll(async () => {
 
 const options = (dialog: Locator) => dialog.locator('[role="listbox"] > [role="option"]');
 
-/** Opens New message with the picker open, all ten sessions in it. */
 async function openPicker(page: Page, phone: boolean): Promise<Locator> {
   await page.locator(phone ? '.ib-lhead [data-open-compose]' : '.ib-side [data-open-compose]').first().click();
   const dialog = page.locator('dialog[data-compose]');
-  // A phone's To is the pill in the foot's row, and its list a bottom sheet.
   const to = dialog.locator(phone ? '.ib-cp-foot [data-compose-to]' : '.ib-cp-tobtn');
   await expect(to).not.toHaveAttribute('data-loading', /.*/, { timeout: 20_000 });
   await to.click();
@@ -168,7 +133,6 @@ interface RowFacts {
   folderWidth: number;
 }
 
-/** Every number the checks below need, one row at a time. */
 function rowFacts(dialog: Locator): Promise<RowFacts[]> {
   return options(dialog).evaluateAll((rows) =>
     rows.map((row) => {
@@ -197,7 +161,6 @@ function rowFacts(dialog: Locator): Promise<RowFacts[]> {
   );
 }
 
-/** What holds for every row at every width: the mark against the name, the name on one line and whole, the label on one line. */
 function expectCleanRows(rows: RowFacts[], width: number): void {
   expect(rows).toHaveLength(SESSIONS.length);
   for (const row of rows) {
@@ -248,7 +211,6 @@ async function pick(dialog: Locator, session: string, to = '.ib-cp-tobtn'): Prom
   await expect(dialog.locator(to)).toHaveAttribute('data-compose-to', session);
 }
 
-/** A phone's To: the pill in the foot's row. */
 const PILL = '.ib-cp-foot [data-compose-to]';
 
 interface SheetRowFacts {
@@ -268,7 +230,6 @@ interface SheetRowFacts {
   rowRight: number;
 }
 
-/** A phone's sheet, one row at a time: the title (the label, else the agent) and the line under it. */
 function sheetRowFacts(dialog: Locator): Promise<SheetRowFacts[]> {
   return dialog.locator('[data-compose-to-sheet] [role="listbox"] > [role="option"]').evaluateAll((rows) =>
     rows.map((row) => {
@@ -276,7 +237,6 @@ function sheetRowFacts(dialog: Locator): Promise<SheetRowFacts[]> {
       const title = row.querySelector<HTMLElement>('.ib-sheet-t')!;
       const detail = row.querySelector<HTMLElement>('.ib-sheet-d')!;
       const oneLine = (el: HTMLElement) => el.getBoundingClientRect().height < (parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.3) * 1.5;
-      // Where the project's own letters end, against the end of the line that holds them.
       const text = detail.firstChild as Text;
       const at = (text.data ?? '').indexOf('ai-collab');
       const range = document.createRange();
@@ -304,7 +264,6 @@ function sheetRowFacts(dialog: Locator): Promise<SheetRowFacts[]> {
   );
 }
 
-/** A phone's pill: what it says, on one line, in the foot's row and clear of Send. */
 const pillFacts = (dialog: Locator) =>
   dialog.evaluate((el) => {
     const foot = el.querySelector('.ib-cp-foot')!.getBoundingClientRect();
@@ -333,7 +292,6 @@ const pillFacts = (dialog: Locator) =>
   });
 
 function expectOneLinePill(pill: Awaited<ReturnType<typeof pillFacts>>): void {
-  // One line: the pill is its 36 px, and so the foot is one row.
   expect(pill.height).toBeCloseTo(36, 0);
   expect(pill.footHeight).toBeLessThanOrEqual(56);
   expect(pill.whiteSpace).toBe('nowrap');
@@ -357,11 +315,9 @@ test('a desktop window: labels in one column, the folder kept, To one line, the 
     expectCleanRows(rows, 1440);
     const by = (session: string) => rows.find((row) => row.session === session)!;
 
-    // One column: Pi's short name keeps the gap, so its label starts where every other does.
     expect(new Set(rows.map((row) => Math.round(row.labelLeft))).size).toBe(1);
     for (const row of rows) expect(row.height).toBeLessThan(40);
 
-    // The long label is cut and keeps the folder's room; the unlabelled rows keep their words.
     expect(by('ses-long').labelCut).toBe(true);
     expect(by('ses-long').folderWidth).toBeGreaterThan(70);
     expect(by('ses-plain-1').labelText).toBe('ai-collab');
@@ -369,7 +325,6 @@ test('a desktop window: labels in one column, the folder kept, To one line, the 
     expect(by('ses-login').labelText).toBe('Fix login redirect');
     expect(by('ses-cjk').labelText).toBe(CJK);
 
-    // The cut label's whole text is a tooltip; one that fits has none.
     await dialog.locator('[data-compose-session="ses-long"] .ib-cp-op').hover();
     await expect(page.locator('[data-pn-tooltip]')).toHaveText(LONG);
     await page.mouse.move(0, 0);
@@ -379,7 +334,6 @@ test('a desktop window: labels in one column, the folder kept, To one line, the 
     await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
     await page.mouse.move(0, 0);
 
-    // The filter finds a label, in either script.
     const filter = dialog.getByRole('combobox', { name: 'Find an agent or project' });
     await filter.fill('stripe');
     await expect(options(dialog)).toHaveCount(1);
@@ -390,7 +344,6 @@ test('a desktop window: labels in one column, the folder kept, To one line, the 
     await filter.fill('');
     await expect(options(dialog)).toHaveCount(SESSIONS.length);
 
-    // To: agent, label, project, on one line; the approved picture has the picker open over it.
     await pick(dialog, 'ses-login');
     const line = await toLine(dialog);
     expect(line.agent).toBe('Claude Code');
@@ -401,7 +354,6 @@ test('a desktop window: labels in one column, the folder kept, To one line, the 
     await expect(options(dialog)).toHaveCount(SESSIONS.length);
     await shot(page, 'to-after');
 
-    // The longest label in To is cut, on one line, whichever script.
     await pick(dialog, 'ses-long');
     expectOneLineTo(await toLine(dialog));
     expect(errors).toEqual([]);
@@ -419,12 +371,10 @@ for (const width of [390, 320]) {
     try {
       await page.goto(world.url);
       const dialog = await openPicker(page, true);
-      // The sheet, not the full-screen list a phone had before.
       await expect(dialog.locator('[data-compose-to-sheet]')).toBeVisible();
       await expect(dialog.locator('[data-compose-picker]')).toHaveCount(0);
       const rows = await sheetRowFacts(dialog);
       expect(rows).toHaveLength(SESSIONS.length);
-      // Every row: the mark against the words (the row's 12 px gap), the words in one column, the title one line, inside the window.
       expect(new Set(rows.map((row) => Math.round(row.titleLeft))).size).toBe(1);
       for (const row of rows) {
         expect(row.markGap, `${row.session}: the mark sits against the words`).toBeLessThanOrEqual(12.5);
@@ -436,18 +386,15 @@ for (const width of [390, 320]) {
         expect(row.rowLeft, row.session).toBeGreaterThanOrEqual(0);
         expect(row.rowRight, row.session).toBeLessThanOrEqual(width);
         expect(row.labelled, row.session).toBe(!!SESSIONS.find((session) => session.session === row.session)!.label);
-        // Only the 60-character label is cut; an agent's name and a short label are whole.
         expect(row.titleCut, `${row.session}: the title is whole`).toBe(row.session === 'ses-long');
       }
       const by = (session: string) => rows.find((row) => row.session === session)!;
-      // A label leads its row, with the agent and the project under it; a row with no label leads with its agent.
       expect(by('ses-login').title).toBe('Fix login redirect');
       expect(by('ses-login').detail).toMatch(/^Claude Code · ai-collab( · |$)/);
       expect(by('ses-cjk').title).toBe(CJK);
       expect(by('ses-cjk').detail).toMatch(/^Pi · ai-collab( · |$)/);
       expect(by('ses-plain-1').title).toBe('Claude Code');
       expect(by('ses-plain-1').detail).toMatch(/^ai-collab( · |$)/);
-      // The long label is cut with an ellipsis; the project under it is still there, whole.
       expect(by('ses-long').title).toBe(LONG);
       expect(by('ses-long').titleOverflow).toBe('ellipsis');
       expect(by('ses-long').detail).toMatch(/^Claude Code · ai-collab( · |$)/);
@@ -455,7 +402,6 @@ for (const width of [390, 320]) {
 
       await pick(dialog, 'ses-long', PILL);
       await shot(page, `phone-${width}-to-long`);
-      // To says the label, cut on one line; the whole of it, and the project, are in its name.
       const line = await pillFacts(dialog);
       expectOneLinePill(line);
       expect(line.words).toBe(LONG);
@@ -470,9 +416,7 @@ for (const width of [390, 320]) {
       await pick(dialog, 'ses-plain-1', PILL);
       const plain = await pillFacts(dialog);
       expectOneLinePill(plain);
-      // No label: the agent alone (the project is in the pill's name, and in the sheet).
       expect(plain.words).toBe('Claude Code');
-      // At 320 px the row leaves the name about its own width: it may end in an ellipsis there.
       if (width >= 360) expect(plain.wordsCut).toBe(false);
       expect(plain.name).toBe('To: Claude Code in ai-collab. Change');
       expect(errors).toEqual([]);
@@ -503,13 +447,11 @@ test('a label that changes or clears reaches an open picker and To; 60 CJK chara
     await page.keyboard.press('Escape');
     expectOneLineTo(await toLine(dialog));
 
-    // Cleared: the same session, under the same id, and To falls back to the project.
     login.label = '';
     await expect(dialog.locator('.ib-cp-tod')).toHaveText('· ai-collab', { timeout: 12_000 });
     await dialog.locator('.ib-cp-tobtn').click();
     await expect(row).toHaveText('ai-collab');
 
-    // No label anywhere: the columns are the ones the approved "before" picture has.
     for (const poll of world.polls.values()) poll.label = '';
     await expect(dialog.locator('[role="listbox"]')).not.toHaveAttribute('data-session-labels', /.*/, { timeout: 12_000 });
     await shot(page, 'to-before');
@@ -535,7 +477,6 @@ test("the Board's New card shares the picker: its rows show labels, a pick works
       const to = dialog.locator('[data-compose-to]');
       await expect(to).toHaveAttribute('data-compose-to', /.+/, { timeout: 20_000 });
       await expect(to).toHaveAttribute('aria-label', 'To: choose an agent', { timeout: 20_000 });
-      // Choosing Send opens the picker once the live sessions are known; before that it stays shut.
       if ((await to.getAttribute('aria-expanded')) !== 'true') await to.click();
       await expect(options(dialog)).toHaveCount(SESSIONS.length, { timeout: 20_000 });
       await expect(dialog.locator('[data-compose-session="ses-login"]')).toContainText('Fix login redirect', { timeout: 12_000 });

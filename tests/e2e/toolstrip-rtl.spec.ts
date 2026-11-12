@@ -1,16 +1,3 @@
-/**
- * The annotation toolstrip in both reading directions, against the compiled
- * binary (`plannotator annotate`): each expanded button's label sits after its
- * icon (right of it left to right, left of it right to left) and inside its
- * button. The label is placed with `inset-inline-start`; a physical `left`
- * put it over the icon under dir="rtl".
- *
- * Runs in two projects of playwright.config.ts: `chromium` (every spec) and
- * `webkit` (the WebKit-only specs and this one). Build the binary first (see inbox.spec.ts).
- * Screenshots land in .local/proof/toolstrip-rtl/ (or
- * $PLANNOTATOR_E2E_PROOF_DIR/toolstrip-rtl).
- */
-
 import { expect, test, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -69,7 +56,6 @@ test('Annotate: the toolstrip label sits after its icon, left to right and right
     child = spawn(binary, ['annotate', doc], { env, cwd: root, stdio: 'ignore' });
     await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
     url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
-    // The first-run dialogs (plan look, terminal tools, Ask this session, the agent tool) already answered.
     await page.context().addCookies(
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
@@ -84,8 +70,6 @@ test('Annotate: the toolstrip label sits after its icon, left to right and right
     await expect(page.getByRole('dialog')).toHaveCount(0);
     for (const dir of ['ltr', 'rtl'] as const) {
       await page.evaluate((d) => { document.documentElement.dir = d; }, dir);
-      // Expand an inactive button too. The pointer, not hover(): the sticky lane above
-      // the document holds the same buttons.
       const box = await page.locator('button[aria-pressed="false"]:visible', { hasText: 'Comment' }).last().boundingBox();
       expect(box, `${dir}: the Comment button is on screen`).not.toBeNull();
       await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);

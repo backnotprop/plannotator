@@ -1,13 +1,3 @@
-/**
- * Guard for the browser-test quarantine (tests/e2e/quarantine.json, read by
- * tests/e2e/quarantine.ts for playwright.config.ts).
- *
- * What it catches: an entry with no reason or no failing runs behind it (the
- * list growing silently), an entry whose test was renamed or removed (it would
- * leave out nothing, or the wrong test, while looking quarantined), and a
- * filter that stops leaving the tests out in CI, leaves out a neighbour, or
- * leaves something out locally.
- */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -16,7 +6,6 @@ import { quarantineEntries, quarantineFilter, quarantinedTests, type QuarantineE
 const e2eDir = resolve(import.meta.dir, '../tests/e2e');
 const entries = quarantineEntries();
 
-/** The titles given to `test(...)` in a spec, with their string escapes undone. */
 function testTitles(spec: string): string[] {
   const source = readFileSync(join(e2eDir, spec), 'utf8');
   const titles: string[] = [];
@@ -24,7 +13,6 @@ function testTitles(spec: string): string[] {
   return titles;
 }
 
-/** Playwright's grep title for a test: project, file, describe titles, title. */
 const grepTitle = (spec: string, title: string, describe = '') => ['', 'chromium', spec, describe, title].filter((part, i) => i === 0 || part).join(' ');
 
 describe('the e2e quarantine', () => {

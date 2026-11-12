@@ -1,24 +1,3 @@
-/**
- * Links in annotate's HTML surfaces follow one rule with the Inbox (the
- * owner's ruling html-link-click and its amendment, 2026-10-20), proved in a
- * real browser against the compiled binary: armed (Annotate, the default), a
- * plain click on a link follows it and a Cmd/Ctrl-click pins it for a
- * comment; on a phone a tap follows and a press-and-hold pins, and the
- * release after a hold follows nothing. On a touchscreen laptop (touch seen,
- * then a mouse drag) a selection across a link still quotes the link's words.
- * Shift-click joins more elements, a link among them, to one comment.
- *
- * Two surfaces: a local HTML file (`plannotator annotate index.html`, the
- * srcdoc viewer) and a live app (`plannotator annotate http://localhost:<port>/`,
- * the loopback proxy), where following a link is the app navigating for real.
- * The live app is a tiny loopback server started here; nothing is mocked.
- * Each annotate CLI runs under a temp PLANNOTATOR_DATA_DIR and HOME and is
- * closed with /api/exit.
- *
- * Screenshots go to PLANNOTATOR_HTML_LINKS_SHOTS when it is set.
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -41,7 +20,6 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(shots, `${name}.png`) });
 }
 
-/** A live app on loopback: two pages that link to each other. */
 async function liveApp(): Promise<{ server: Server; origin: string }> {
   const pages: Record<string, string> = {
     '/': `<!doctype html><html><head><meta charset="utf-8"><title>Live home</title>${STYLE}</head><body><h1>Live home</h1><p>An app running on this computer.</p><p><a href="/settings">Settings</a></p><script>/* A press library's shape: open on pointerdown, closed on pointerup or pointercancel. */window.__press=false;window.__cancels=0;var l=document.querySelector('a');l.addEventListener('pointerdown',function(){window.__press=true});l.addEventListener('pointerup',function(){window.__press=false});l.addEventListener('pointercancel',function(){window.__press=false;window.__cancels++});</script></body></html>`,
@@ -61,7 +39,6 @@ async function liveApp(): Promise<{ server: Server; origin: string }> {
   return { server, origin: `http://localhost:${(server.address() as AddressInfo).port}` };
 }
 
-/** `plannotator annotate <target>` in a scratch folder; resolves its session URL. */
 async function annotate(target: (root: string) => string) {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-annotate-htmllinks-e2e-');
@@ -102,7 +79,6 @@ async function annotate(target: (root: string) => string) {
 
 async function newSession(browser: Browser, url: string, options: Parameters<Browser['newContext']>[0] = {}): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext(options);
-  // The first-run dialogs already answered.
   await context.addCookies(
     [
       ['plannotator-plan-look-choice-resolved', 'true'],
@@ -117,7 +93,6 @@ async function newSession(browser: Browser, url: string, options: Parameters<Bro
   return { context, page };
 }
 
-/** Press and hold for `ms`, then lift: a real touch in Chromium (DevTools protocol), the page's touch events in WebKit. */
 async function holdLink(page: Page, link: Locator, browserName: string, ms = 750) {
   const box = (await link.boundingBox())!;
   const x = box.x + Math.min(12, box.width / 2);
@@ -184,11 +159,6 @@ test('a local HTML file, armed: a plain click follows the link, a Cmd/Ctrl-click
   }
 });
 
-/**
- * A click with Shift held down first, as a person makes it: the composer over
- * the page lets the pointer through while Shift is held, once the pointer is
- * over the page (waited for here, so the press lands on the page, not the composer).
- */
 async function shiftClick(page: Page, target: Locator) {
   const box = (await target.boundingBox())!;
   const x = box.x + Math.min(10, box.width / 2);
@@ -214,7 +184,6 @@ test('a local HTML file, armed: shift-click joins more elements to one comment, 
       await shiftClick(page, frame.locator('#lead'));
       await shiftClick(page, frame.getByRole('link', { name: 'the detail page' }));
       await expect(page.locator('[data-target-chip]')).toHaveCount(3);
-      // The link was added, not followed.
       await expect(frame.locator('h1')).toHaveText('Report index');
       await shot(page, 'annotate-shift-click-three-targets');
     } finally {
@@ -232,17 +201,13 @@ test('a touchscreen laptop: after a touch, a mouse drag across a link still quot
     try {
       const frame = page.frameLocator('iframe[sandbox]');
       await expect(frame.locator('h1')).toHaveText('Report index');
-      // One touch: a tap on the heading pins it; Escape closes the composer.
       await frame.locator('h1').tap();
       const composer = page.locator('[data-comment-popover]');
       await expect(composer).toBeVisible();
-      // A touch-opened composer is the full-screen dialog, which takes focus on a 0 ms timer and handles
-      // Escape itself; pressed before that timer runs (a loaded runner), the key goes nowhere.
       await expect(page.getByRole('dialog', { name: 'Comment' })).toBeFocused();
       await page.keyboard.press('Escape');
       await expect(composer).toHaveCount(0);
       expect(await frame.locator('body').evaluate((b) => b.hasAttribute('data-plannotator-touch'))).toBe(true);
-      // A mouse drag from the paragraph's first word to its last, across the link.
       const lead = frame.locator('#lead');
       const box = (await lead.boundingBox())!;
       const right = await lead.evaluate((p) => {
@@ -257,7 +222,6 @@ test('a touchscreen laptop: after a touch, a mouse drag across a link still quot
       await page.mouse.move(box.x + right - 1, box.y + box.height / 2, { steps: 5 });
       await page.mouse.up();
       expect(await lead.evaluate(() => (getSelection()?.toString() ?? '').replace(/\s+/g, ' ').trim())).toBe('Start with the detail page today.');
-      // The selection toolbar's Comment opens the composer quoting the whole sentence, link words included.
       await page.getByRole('button', { name: 'Comment', exact: true }).click();
       await expect(composer).toBeVisible();
       await expect(composer).toContainText('Start with the detail page today.');
@@ -306,7 +270,6 @@ for (const phone of [
   test(`a live app on a phone, ${phone.name}: a tap follows a link, a press-and-hold pins it and navigates nothing`, async () => {
     const app = await liveApp();
     const { url, close } = await annotate(() => `${app.origin}/`);
-    // (WebKit launches without the config's Chromium flags, --use-mock-keychain and --password-store=basic, which Linux WebKit exits on.)
     const browser = phone.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
     try {
       const { context, page } = await newSession(browser, url, { ...phone.device });
@@ -317,7 +280,6 @@ for (const phone of [
       await expect(composer).toBeVisible();
       await page.waitForTimeout(600);
       await expect(frame.locator('h1')).toHaveText('Live home');
-      // The app's press ended (the bridge stopped the release and sent cancels in its place).
       const press = await frame.locator('body').evaluate(() => ({ press: (window as unknown as { __press: boolean }).__press, cancels: (window as unknown as { __cancels: number }).__cancels }));
       expect(press.press).toBe(false);
       if (phone.browserName === 'chromium') expect(press.cancels).toBeGreaterThanOrEqual(1);
@@ -337,7 +299,6 @@ for (const phone of [
 
   test(`a local HTML file on a phone, ${phone.name}: a tap follows a link, a press-and-hold pins it`, async () => {
     const { url, close } = await annotate(writeSite);
-    // (WebKit launches without the config's Chromium flags, --use-mock-keychain and --password-store=basic, which Linux WebKit exits on.)
     const browser = phone.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
     try {
       const { context, page } = await newSession(browser, url, { ...phone.device });

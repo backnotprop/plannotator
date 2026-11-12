@@ -1,15 +1,3 @@
-/**
- * Shape's `data-code` reader against the board itself, in a real browser:
- * every code that survives Shape's own sanitizer (sanitizeShapeHtml: DOMPurify
- * on DOMParser, scripting off) and is drawn by the board's innerHTML in a
- * shadow root (scripting on) must be one the reader (core's
- * shapeHtmlDataCodes) found in the source. The checks that use the reader
- * (Shape's unreadable-code problem, a Show me drawing's or a drawn overview's
- * files) refuse what they read; a code they never read would reach the board
- * unchecked. Every payload of the reviews, then random markup made of the
- * pieces that move a parser. No server, no binary: the two functions are
- * bundled for the page.
- */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,7 +41,6 @@ test('every data-code the board draws after sanitizing is one the reader read', 
 
   const result = await page.evaluate((sources) => {
     const w = window as unknown as { sanitizeShapeHtml: (html: string) => string; shapeHtmlDataCodes: (html: string) => string[] };
-    // The sanitizer refuses to run (empty output) if it failed its own proof: that must not pass as "nothing drawn".
     if (!w.sanitizeShapeHtml('<div data-mark="a" data-code="a.ts#L1">kept</div>').includes('kept')) return { sanitizerWorks: false, drawn: 0, missed: [] as string[] };
     const missed: string[] = [];
     let drawn = 0;
@@ -62,7 +49,6 @@ test('every data-code the board draws after sanitizing is one the reader read', 
       document.body.append(host);
       const root = host.attachShadow({ mode: 'open' });
       root.innerHTML = `<div class="board">${w.sanitizeShapeHtml(source)}</div>`;
-      // DOMPurify trims every attribute value (String.prototype.trim, so U+00A0 too); the checks trim the reader's.
       const read = new Set(w.shapeHtmlDataCodes(source).map((value) => value.trim()));
       for (const el of root.querySelectorAll('[data-code]')) {
         drawn++;
@@ -75,6 +61,5 @@ test('every data-code the board draws after sanitizing is one the reader read', 
 
   expect(result.sanitizerWorks).toBe(true);
   expect(result.missed.slice(0, 5)).toEqual([]);
-  // The corpus draws codes at all (the reviews' payloads each draw one).
   expect(result.drawn).toBeGreaterThan(DATA_CODE_BYPASSES.length);
 });

@@ -1,14 +1,3 @@
-/**
- * A fake `gh` for tests of which signed-in account a GitHub PR review runs as
- * (#2157). `makeFakeGh` writes a `gh` into a scratch bin folder (a sh wrapper
- * that runs this file with bun); put that folder first on PATH. The real gh,
- * the real ~/.config/gh and the network are never touched.
- *
- * The fake knows a few accounts on one host. It acts as the account whose
- * token is in GH_TOKEN / GH_ENTERPRISE_TOKEN, else as the active one, and
- * answers only what that account may read. Every call is logged (args and
- * the account it acted as, never a token) to `log`.
- */
 import { spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,7 +7,6 @@ export interface FakeGhAccount {
   login: string;
   token: string;
   active?: boolean;
-  /** `success` by default; anything else is a broken login gh can't use. */
   state?: string;
   tokenSource?: string;
 }
@@ -26,44 +14,26 @@ export interface FakeGhAccount {
 export interface FakeGhScenario {
   host?: string;
   accounts: FakeGhAccount[];
-  /** `owner/repo` → the logins that can read it, and its PR numbers. */
   repos: Record<string, { readers: string[]; prs: number[] }>;
-  /** false: answer `--json` like a gh before v2.81.0 (unknown flag). Default true. */
   jsonStatus?: boolean;
-  /** true: `gh auth token --user` is refused (an old gh without --user). */
   noTokenUser?: boolean;
-  /** true: every `gh api` call fails as if offline. */
   offline?: boolean;
-  /** Logins whose `gh api` calls fail as if offline (no verdict). */
   offlineFor?: string[];
-  /** true: refuse `gh auth status --active` (an older gh). */
   noActiveFlag?: boolean;
-  /** A local git repository `gh repo clone` clones (it holds refs/pull/N/head). */
   cloneSource?: string;
-  /** true: also put a `git` first on PATH that logs which account's token it got, then runs the real git. */
   wrapGit?: boolean;
-  /**
-   * true: a GH_TOKEN that names no account is a token GitHub rejects, and
-   * `gh auth status` / `gh auth token --user` answer like the real gh then:
-   * the env token listed first, active, failed, with no login; the signed-in
-   * accounts after it, inactive. Every other command fails Bad credentials.
-   */
   rejectEnvToken?: boolean;
-  /** Set by makeFakeGh: the real git, for `repo clone` and the git wrapper. */
   realGit?: string;
 }
 
 export interface FakeGhCall {
   args: string[];
-  /** gh: the account it acted as. git: the account whose token was in its env, or null. */
   as: string | null;
-  /** Present on a call to the git wrapper. */
   git?: true;
 }
 
 export interface FakeGh {
   binDir: string;
-  /** Env to spawn with: PATH (fake first), a scratch HOME and gh config dir. */
   env: Record<string, string>;
   calls(): FakeGhCall[];
   cleanup(): void;
@@ -91,7 +61,6 @@ export function makeFakeGh(scenario: FakeGhScenario): FakeGh {
     chmodSync(git, 0o755);
   }
   const PATH = `${binDir}:/usr/bin:/bin`;
-  // The command the code under test runs as `gh` must be this fake, never the real gh.
   if (Bun.which("gh", { PATH }) !== gh) {
     rmSync(root, { recursive: true, force: true });
     throw new Error(`fake gh: ${gh} is not what PATH finds as gh`);
@@ -114,13 +83,6 @@ export function makeFakeGh(scenario: FakeGhScenario): FakeGh {
   };
 }
 
-/**
- * Run a PR runtime (`bun`: packages/server/pr.ts, `pi`: the Pi extension's)
- * in a child process whose env is only the fake's (PATH with the fake gh
- * first, scratch HOME and gh config dir): it checks auth for acme/widgets#7,
- * then reads the user and fetches the PR. Two accounts: tobey (active) and
- * tobey-work; `readers` says which can read the repo.
- */
 export async function probeGhAccountRuntime(
   which: "bun" | "pi",
   readers: string[],
@@ -142,8 +104,6 @@ export async function probeGhAccountRuntime(
   }
   return { fake, out: JSON.parse(stdout.trim().split("\n").at(-1)!) as Record<string, unknown> };
 }
-
-// --- The fake itself, when run as `gh` ---
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -173,8 +133,6 @@ function runFake(args: string[]): number {
     const onlyActive = args.includes("--active");
     if (onlyActive && scenario.noActiveFlag) return err("unknown flag: --active\n\nUsage:  gh auth status [flags]");
     if (envRejected) {
-      // The real gh: the rejected env token is the active source; the
-      // keyring accounts are still listed, none of them active.
       const rest = onlyActive ? [] : scenario.accounts.map((a) => ({ ...a, active: false }));
       if (args.includes("--json")) {
         if (scenario.jsonStatus === false) return err('unknown flag: --json\n\nUsage:  gh auth status [flags]');
@@ -220,7 +178,6 @@ function runFake(args: string[]): number {
         "",
       );
     }
-    // Like gh: any broken account listed makes the text form exit 1, on stderr.
     if (listed.some((a) => (a.state ?? "success") !== "success")) return err(lines.join("\n"));
     out(lines.join("\n"));
     return 0;
@@ -264,7 +221,6 @@ function runFake(args: string[]): number {
     return err("gh: Not Found (HTTP 404)");
   }
   if (cmd === "repo" && sub === "clone") {
-    // gh repo clone OWNER/REPO DEST -- <git clone flags>
     const [, , target, dest, , ...gitFlags] = args;
     if (!readable(target)) return err(`GraphQL: Could not resolve to a Repository with the name '${target}'. (repository)`);
     if (!scenario.cloneSource || !scenario.realGit) return err("fake gh: no cloneSource");
@@ -300,7 +256,6 @@ function runFake(args: string[]): number {
   return err(`fake gh: unsupported ${args.join(" ")}`);
 }
 
-/** The git wrapper: log which account's token git got (never the token), then run the real git. */
 function runFakeGit(args: string[]): number {
   const scenario = JSON.parse(readFileSync(process.env.FAKE_GH_SCENARIO!, "utf-8")) as FakeGhScenario;
   const host = scenario.host ?? "github.com";

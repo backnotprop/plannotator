@@ -1,18 +1,3 @@
-/**
- * Ctrl+C / Cmd+C on words highlighted in an agent's message, proved in a real
- * browser against the compiled binary, with an agent writing through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts).
- *
- * web-highlighter clears the browser's selection on mouseup, and the
- * composer's textarea takes the focus once Comment is pressed; the page puts
- * the words on the clipboard itself (utils/highlightCopy). Failures to catch:
- * the toolbar or composer stage leaving the clipboard as it was (a sentinel
- * written first tells "nothing" from "empty"), and words the person typed and
- * selected in the composer losing to the highlight.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -32,7 +17,6 @@ const BODY = [
 
 const SENTINEL = 'clipboard before the copy';
 
-/** Seeds the clipboard, presses Ctrl+C (Cmd+C on a Mac) and reads it back. */
 async function copied(page: Page): Promise<string> {
   await page.evaluate((s) => navigator.clipboard.writeText(s), SENTINEL);
   await page.keyboard.press('ControlOrMeta+c');
@@ -40,7 +24,6 @@ async function copied(page: Page): Promise<string> {
   return page.evaluate(() => navigator.clipboard.readText());
 }
 
-/** Drag across `phrase` in the message the way a person does, from its first letter to its last. */
 async function dragSelect(page: Page, messageId: string, phrase: string): Promise<void> {
   await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
   const points = await page.evaluate(({ id, words }) => {
@@ -99,7 +82,6 @@ test('Inbox thread message: Ctrl+C copies the highlighted words with the toolbar
     await expect(composer).toBeFocused();
     expect(await copied(page), 'composer open, empty textarea').toBe('dead-letter queue');
 
-    // A caret after typed words still copies the highlight; typed words selected copy natively.
     await composer.fill('How long does a job stay there?');
     expect(await copied(page), 'caret after typed words').toBe('dead-letter queue');
     await composer.evaluate((t: HTMLTextAreaElement) => t.setSelectionRange(0, 8));

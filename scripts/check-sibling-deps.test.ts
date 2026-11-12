@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { siblingDependencyGaps } from "./check-sibling-deps";
 
-// The registry is injected: these never touch the network.
 const repo = [
 	{ name: "@plannotator/core", version: "0.25.14" },
 	{ name: "@plannotator/ui", version: "0.53.1", dependencies: { "@plannotator/core": "0.25.14", react: "^19" } },

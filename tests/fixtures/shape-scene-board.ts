@@ -1,7 +1,3 @@
-/**
- * A board with one scene (invented content: a ball that turns a lamp on), for the store's tests and the
- * Pi/Bun parity test: the scene must come back from either runtime as the agent wrote it.
- */
 import type { ShapeBoard } from "../../packages/core/shape";
 
 export function sceneBoard(): ShapeBoard {

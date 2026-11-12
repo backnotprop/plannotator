@@ -1,26 +1,3 @@
-/**
- * Fake agent CLIs for the Inbox's agent connections (packages/server/
- * inbox-agents.ts). A test makes a scratch root with a `home/` and a `bin/`
- * of fakes, and runs everything with HOME, XDG_CONFIG_HOME, CODEX_HOME,
- * CLAUDE_CONFIG_DIR, PI_CODING_AGENT_DIR and OPENCODE_CONFIG_DIR pointing
- * inside it and PATH = that `bin/` plus /usr/bin:/bin. The real agent CLIs are
- * never run and the real home is never touched.
- *
- * Each fake records its argv (one JSON line per call in `calls.log`) and
- * does what its real CLI's `mcp add` / `mcp remove` does to its config file,
- * so a read after the add finds the entry. `FAKE_AGENT_FAIL=codex,gemini`
- * makes those exit 3 with a message; `FAKE_AGENT_HANG=amp` makes its `mcp`
- * call hang, `FAKE_AGENT_HANG_VERSION=amp` its `--version`;
- * `FAKE_AGENT_GRANDCHILD=codex` leaves a 30 s grandchild holding its output.
- *
- * Every fake process writes its pid under `pids/`. `remove()` proves none is
- * still running: one that is (a hung CLI the code under test left behind) is
- * killed, and `remove()` throws, failing the test. Only pids a fake wrote,
- * whose command line is still this root's fake script, are ever signalled.
- *
- * Node-safe (the Playwright specs run it under node): the fakes run on this
- * process's own runtime (`process.execPath`).
- */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,20 +11,11 @@ export interface FakeAgents {
   home: string;
   bin: string;
   log: string;
-  /** The environment every process of the test runs with. */
   env: Record<string, string>;
-  /** Put these fakes on PATH (the others are absent: the agent is not installed). */
   install(...bins: FakeAgentBin[]): void;
-  /** Every recorded call: `{ name, args }`. */
   calls(): { name: string; args: string[] }[];
-  /** The fake processes still running (zombies count as gone): `{ pid, name, args }`. */
   live(): { pid: number; name: string; args: string[] }[];
-  /** Kill every fake process still running (only this root's); returns what was running. */
   stopAll(): { pid: number; name: string; args: string[] }[];
-  /**
-   * Waits briefly for the fakes to end, kills any still running, removes the
-   * root, and throws when one had to be killed: nothing may outlive a test.
-   */
   remove(): void;
 }
 
@@ -243,7 +211,6 @@ function main() {
 }
 `;
 
-/** A scratch root with a home and an empty bin of fakes. */
 export function createFakeAgents(prefix = "plannotator-agents-"): FakeAgents {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   const home = join(root, "home");
@@ -299,13 +266,11 @@ export function createFakeAgents(prefix = "plannotator-agents-"): FakeAgents {
         const line = (ps.stdout ?? "").trim();
         if (ps.status !== 0 || !line) continue;
         const [stat = "", ...command] = line.split(/\s+/);
-        // A zombie has ended (its parent has not reaped it yet); a reused pid is not ours.
         if (stat.startsWith("Z") || !command.join(" ").includes(script)) continue;
         let call = { name: "?", args: [] as string[] };
         try {
           call = JSON.parse(readFileSync(join(pids, entry), "utf8")) as typeof call;
         } catch {
-          // Written as it started; the pid alone is enough.
         }
         found.push({ pid, ...call });
       }
@@ -317,14 +282,12 @@ export function createFakeAgents(prefix = "plannotator-agents-"): FakeAgents {
         try {
           process.kill(pid, "SIGKILL");
         } catch {
-          // Ended meanwhile.
         }
       }
       for (let waited = 0; waited < 2000 && this.live().length > 0; waited += 50) sleepSync(50);
       return running;
     },
     remove() {
-      // A run the code under test stopped is gone at once; give a SIGKILL in flight a moment.
       for (let waited = 0; waited < 1500 && this.live().length > 0; waited += 50) sleepSync(50);
       const survivors = this.stopAll();
       rmSync(root, { recursive: true, force: true });

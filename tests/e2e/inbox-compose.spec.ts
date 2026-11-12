@@ -1,26 +1,3 @@
-/**
- * Compose: a new message to a connected agent (approval record
- * "inbox-compose-to-agent"), proved in a real browser against the compiled
- * binary. Nothing is mocked: the binary runs `plannotator inbox --background`
- * under a temp PLANNOTATOR_DATA_DIR and HOME, an agent writes through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts), and the agent connections
- * are the bridge's real doors driven as a connection drives them (the bearer
- * token from inbox.json, a long-poll saying where the session works, and
- * `delivered` once the turn is in). Chromium drives the window.
- *
- *  1. No agent: compose says so, Send does nothing but say why, a file
- *     attaches, Escape keeps it as a draft (Reopen restores it), the draft waits under
- *     Drafts (the row appears only then).
- *  2. An agent connects: the draft reopens with To prefilled; Send starts a
- *     thread the person wrote, handed to that session alone as a new-thread
- *     wake with the file named; Delivered; the agent's reply_to answer lands
- *     in the same thread.
- *  3. The ⌘K Actions group, the To picker over two projects, and a phone.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs land in .local/proof/compose/ (and COMPOSE_SHOTS_DIR when set).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -61,7 +38,6 @@ function registry(): { port: number; token: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** One agent session's connection, as the mod, Pi and OpenCode run it. */
 class Connection {
   readonly commands: InboxReplyCommand[] = [];
   private stopped = false;
@@ -98,7 +74,6 @@ class Connection {
     expect((await this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'delivered', id })).status).toBe(200);
   }
 
-  /** The agent answers in the thread through the Inbox's MCP, as this session. */
   async answer(replyTo: string, body: string): Promise<void> {
     const { port } = registry();
     const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
@@ -200,7 +175,6 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('[data-compose-to="none"]')).toHaveText('No agent is running');
   await expect(dialog.locator('[data-compose-note="none"]')).toContainText('Nothing can be sent until one is.');
-  // An empty compose closes without asking and creates nothing.
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 
@@ -208,13 +182,11 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
   const text = dialog.getByRole('textbox', { name: 'Message' });
   await expect(text).toBeFocused();
   await text.fill('Idea: let the Inbox list show which agent session wrote each thread.\n\nA small chip on each row would do.');
-  // The thread chip names it from the message, short, and stays a field the person can type in.
   await expect(dialog.getByRole('textbox', { name: 'Thread name' })).toHaveValue('Inbox list');
   await expect(dialog.locator('[data-compose-thread-name]')).toHaveAttribute('data-compose-thread-name', 'auto');
   await dialog.locator('[data-compose-attach]').setInputFiles(join(world.root, 'notes.md'));
   await expect(dialog.locator('[data-compose-file="done"]')).toHaveCount(1);
   await expect(dialog.locator('[data-compose-file="done"]')).toContainText('Markdown');
-  // A dotenv file is refused in its own tile.
   await dialog.locator('[data-compose-attach]').setInputFiles({ name: '.env.local', mimeType: 'text/plain', buffer: Buffer.from('SECRET=1') });
   await expect(dialog.locator('[data-compose-file="refused"]')).toContainText('Not attached: .env files often hold secrets.');
   await dialog.locator('[data-compose-file="refused"] button').click();
@@ -225,14 +197,12 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
   await expect(dialog.locator('[data-compose-save]')).toBeVisible();
   await shot(page, '03-no-agent-save-draft');
 
-  // One Escape keeps it as a draft and leaves, with no question (approval "inbox-compose-escape-keeps").
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast).toContainText('Draft saved');
   await expect(toast).toContainText('It never sends itself');
   await shot(page, '03b-escape-keeps-draft');
-  // Reopen: the same words and file, as they were; unchanged, Escape closes again saving nothing new.
   await toast.locator('[data-toast-action]', { hasText: 'Reopen' }).click();
   await expect(dialog).toBeVisible();
   await expect(text).toHaveValue('Idea: let the Inbox list show which agent session wrote each thread.\n\nA small chip on each row would do.');
@@ -248,8 +218,6 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
   await expect(row).toContainText('Idea: let the Inbox list show which agent session wrote…');
   await shot(page, '04-drafts-list');
 
-  // A phone with no agent running: empty, the top bar shows the disabled Send; once something is written,
-  // it offers Save draft in Send's place.
   const phone = await world.context.browser()!.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'dark' });
   const mobile = await phone.newPage();
   try {
@@ -263,7 +231,6 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveText('Save draft');
     await sheet.getByRole('textbox', { name: 'Message' }).blur();
     await shot(mobile, '10b-phone-no-agent', ['dark', 'light']);
-    // Emptied, Cancel closes keeping nothing (with words it keeps a draft: composeEscape.test.tsx).
     await sheet.getByRole('textbox', { name: 'Message' }).fill('');
     await sheet.locator('[data-compose-cancel]').click();
     await expect(sheet).toHaveCount(0);
@@ -282,7 +249,6 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   await row.locator('.ib-draft-open').click();
   const dialog = page.locator('dialog[data-compose]');
   await expect(dialog.locator('h2')).toHaveText('Draft');
-  // Saved with nobody in To, it reopens with To empty though two sessions are live: never filled by itself.
   const to = dialog.locator('.ib-cp-tobtn');
   await expect(to).not.toHaveAttribute('data-loading', /.*/, { timeout: 15_000 });
   await expect(to).toHaveAttribute('data-compose-to', 'choose');
@@ -291,7 +257,6 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   await expect(dialog.locator('[data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
   await to.click();
   await expect(dialog.locator('[data-compose-picker]')).toBeVisible();
-  // One line per live session (ledger and billing, one each): no project headers, so no start times.
   await expect(dialog.locator('[role="listbox"] > [role="option"]')).toHaveCount(2);
   await expect(dialog.locator('[data-compose-started]')).toHaveCount(0);
   await shot(page, '01-compose-to-picker');
@@ -304,7 +269,6 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast.locator('.ib-tdetail')).toHaveText('in ledger');
   await expect(page.locator('[data-inbox-live]')).toHaveText('Sent to Claude Code in ledger. It takes it as its next turn.');
-  // The draft is gone; with none left, so is the sidebar row.
   await expect(page.locator('[data-drafts-nav]')).toHaveCount(0);
   await toast.locator('[data-toast-action]').click();
 
@@ -318,11 +282,9 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   const pane = page.locator('section.ib-pane');
   await expect(pane.locator('[data-started-by]')).toHaveText(/You started this thread\s*to Claude Code in ledger/);
   await expect(pane.locator('[data-attachment-name="notes.md"]').first()).toBeVisible();
-  // The session's connection polls idle: it takes it within seconds.
   await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Claude Code…');
   const listRow = page.locator(`.ib-listcol [data-thread-id="${command.thread_id}"]`).first();
   await expect(listRow).toContainText('To Claude Code');
-  // The thread's name as compose showed it, the row's title (approval "list-rows-mail-icons").
   await expect(listRow.locator('.ib-title, .ib-m2').first()).toContainText('Inbox list');
   await claude.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Claude Code, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
@@ -333,11 +295,6 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   expect(world.errors).toEqual([]);
 });
 
-// The failure this guards (the owner, 2026-10-16: "When I create a new thread
-// and hit send, why doesn't it show up in the Sent list? I don't see it in
-// the inbox list at all."): with a thread open, the held list took no new
-// row, so the thread the person just started was missing until they closed
-// the one they were reading.
 test('Send with a thread open: the new thread is in Sent at once, "To Claude Code", while the thread stays open and the other rows keep their order', async () => {
   const { page } = world;
   const { port } = registry();
@@ -367,7 +324,6 @@ test('Send with a thread open: the new thread is in Sent at once, "To Claude Cod
   const row = page.locator(`.ib-listcol .ib-lbody [data-section-id="sent"] [data-thread-id="${id}"]`);
   await expect(row).toBeVisible();
   await expect(row).toContainText('To Claude Code');
-  // The thread being read is still open, and every other row is where it was.
   await expect(pane).toBeVisible();
   expect(page.url()).toContain(reading.thread_id);
   expect((await rows()).filter((t) => t !== id)).toEqual(before);
@@ -390,13 +346,11 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
   await expect(dialog.locator('.ib-cp-tobtn')).toHaveAttribute('data-compose-to', 'ses-other');
   await dialog.getByRole('textbox', { name: 'Message' }).fill('Billing: retry the Stripe webhook on a 409 instead of failing the run.');
   await shot(page, '01b-compose-from-palette');
-  // Emptied, Escape closes keeping nothing.
   await dialog.getByRole('textbox', { name: 'Message' }).fill('');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(page.locator('[data-drafts-nav]')).toHaveCount(0);
 
-  // A phone: the list header's compose icon, the sheet, Save draft from its top bar, the Drafts page.
   const phone = await world.context.browser()!.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'dark' });
   const mobile = await phone.newPage();
   try {
@@ -404,12 +358,10 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     await mobile.locator('.ib-lhead [data-open-compose]').click();
     const sheet = mobile.locator('dialog[data-compose]');
     await expect(sheet.locator('.ib-cp-bar h2')).toHaveText('New message');
-    // Empty: no Save draft, and Send at the foot is disabled.
     await expect(sheet.locator('.ib-cp-foot [data-compose-to]')).not.toHaveAttribute('data-loading', /.*/);
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveCount(0);
     await expect(sheet.locator('.ib-cp-foot [data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
     await sheet.getByRole('textbox', { name: 'Message' }).fill('Rename the Quiet section to “Done”? Quiet reads like “muted” to me.');
-    // To (the pill in the foot's row) starts empty: the top bar offers Save draft until a session is picked.
     await expect(sheet.locator('.ib-cp-foot [data-compose-to]')).toHaveAttribute('data-compose-to', 'choose');
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveText('Save draft');
     await sheet.locator('.ib-cp-foot [data-compose-to]').click();
@@ -420,14 +372,11 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     await expect(sheet).toHaveCount(0);
     await mobile.goto(`${world.url}#drafts`);
     await expect(mobile.locator('[data-drafts-page]')).toBeVisible();
-    // The message went (the session was live): no draft was left.
     await expect(mobile.locator('[data-draft-id]')).toHaveCount(0);
     await mobile.locator('.ib-drafts [data-open-compose], .ib-drafts .ib-lhead-compose').first().click();
     await mobile.locator('dialog[data-compose] [data-compose-text] textarea').fill('A draft kept from a phone.');
-    // Kept for a live session (the Drafts page's "is live" chip, later): To is picked, never filled by itself.
     await mobile.locator('dialog[data-compose] .ib-cp-foot [data-compose-to]').click();
     await mobile.locator('dialog[data-compose] [data-compose-session="ses-claude"]').click();
-    // Cancel keeps it as a draft, with no question.
     await mobile.locator('dialog[data-compose] [data-compose-cancel]').click();
     await expect(mobile.locator('dialog[data-compose]')).toHaveCount(0);
     await expect(mobile.locator('[data-draft-id]')).toHaveCount(1);
@@ -445,7 +394,6 @@ test('the session stops before it takes a message: Not delivered, and Send to an
   const stays = world.connections.find((c) => c.session === 'ses-claude')!;
   await page.goto(world.url);
   const dialog = page.locator('dialog[data-compose]');
-  // A message to the session that will stop, and a draft for it.
   for (const words of ['Check the retry budget on the relay.', 'Billing: retry the Stripe webhook on a 409 instead of failing the run.']) {
     await page.locator('.ib-side [data-open-compose]').click();
     await dialog.locator('.ib-cp-tobtn').click();
@@ -454,13 +402,11 @@ test('the session stops before it takes a message: Not delivered, and Send to an
     if (words.startsWith('Check')) {
       await dialog.locator('[data-compose-send]').click();
     } else {
-      // Escape keeps it as a draft.
       await page.keyboard.press('Escape');
     }
     await expect(dialog).toHaveCount(0);
   }
   const command = await waitFor('the message to ses-gone', () => gone.commands[0]);
-  // A draft with no agent chosen, for the Drafts page's three chips.
   const { port } = registry();
   await fetch(`http://127.0.0.1:${port}/api/inbox/drafts/drf_01M4XZ7Q2V8D9C1X5RZ3N0AB4T`, {
     method: 'POST',
@@ -469,7 +415,6 @@ test('the session stops before it takes a message: Not delivered, and Send to an
   });
   await gone.stop();
 
-  // Not live after 30 s; "ended" once its last poll is a minute old (the asker grace).
   await page.goto(`${world.url}#thread=${command.thread_id}`);
   const pane = page.locator('section.ib-pane');
   await expect(pane.locator('[data-delivery="undelivered"]')).toHaveText(
@@ -496,7 +441,6 @@ test('the session stops before it takes a message: Not delivered, and Send to an
   await expect(dialog.locator('[data-compose-note="ended"]')).toContainText('The Claude Code session this draft was for has ended.');
   await expect(dialog.locator('[data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
   await shot(page, '05-reopened-draft-agent-ended');
-  // Never re-addressed on its own: closing unchanged asks nothing and keeps the ended session.
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   const kept = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/drafts`)).json()) as { drafts: { to: { session: string } | null }[] };

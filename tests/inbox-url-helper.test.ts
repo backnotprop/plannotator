@@ -3,11 +3,6 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { inboxUrl } from '../packages/inbox/inboxUrl';
 
-// Every Inbox server URL the window builds goes through `inboxUrl`
-// (packages/inbox/inboxUrl.ts), so routing another machine's threads later
-// changes one file. A raw `/api/inbox` string anywhere else in the window's
-// source is the regression this guards. Comments may still name routes.
-
 const root = resolve(import.meta.dir, '..');
 const WINDOW = join(root, 'packages/inbox');
 
@@ -22,7 +17,6 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-/** Drop block comments and `//` line comments (a `//` after a quote or colon, as in `https://`, is not one). */
 function withoutComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
 }

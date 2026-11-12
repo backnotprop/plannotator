@@ -1,11 +1,3 @@
-/**
- * A sandboxed Inbox with Shape boards, for the Shape specs and their shots.
- * Everything lives in a scratch folder (inboxScratch): its data dir, its
- * config.json (Shape switched on or not), its projects. The threads come from
- * agents on the MCP stdio shim (SimAgent) and the boards from the real
- * `plannotator shape update`, exactly as an agent makes them. Invented
- * content only.
- */
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -16,7 +8,6 @@ import { inboxScratch, rememberInboxOf } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 
-/** The sandbox env every process of the world runs with (never the person's data, Inbox or agents). */
 export function shapeWorldEnv(root: string): Record<string, string> {
   const scratchConfig = join(root, 'config-home');
   mkdirSync(scratchConfig, { recursive: true });
@@ -31,7 +22,6 @@ export function shapeWorldEnv(root: string): Record<string, string> {
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_TEST_SANDBOX: '1',
-    // Agents' own config folders, read by the Inbox's skill list: scratch ones.
     CLAUDE_CONFIG_DIR: join(scratchConfig, 'claude'),
     CODEX_HOME: join(scratchConfig, 'codex'),
     XDG_CONFIG_HOME: join(scratchConfig, 'xdg'),
@@ -85,29 +75,22 @@ export interface ShapeWorld {
   projects: Record<string, string>;
   threads: Record<string, string>;
   boards: Record<string, string>;
-  /** Runs `plannotator shape …` as an agent of this world would. */
   shape: (args: string[], cwd?: string) => { status: number | null; stdout: string; stderr: string };
 }
 
-/**
- * The world: three projects, threads from Claude Code, and boards. `boards: 'many'` makes four (the sidebar row
- * shows), `'few'` two (search only). `shape`: config.json `inboxShape`; `board`: `inboxBoard`.
- */
-export async function seedShapeWorld(options: { binary: string; /** config.json `inboxShape` once the boards are drawn. */ shape: boolean; board?: boolean; boards?: 'many' | 'few' | 'none'; prefix?: string }): Promise<ShapeWorld> {
+export async function seedShapeWorld(options: { binary: string; shape: boolean; board?: boolean; boards?: 'many' | 'few' | 'none'; prefix?: string }): Promise<ShapeWorld> {
   const root = inboxScratch(options.prefix ?? 'plannotator-inbox-shape-');
   const env = shapeWorldEnv(root);
   const dataDir = env.PLANNOTATOR_DATA_DIR;
   markTourDecided(dataDir);
   const configPath = join(dataDir, 'config.json');
   const writeConfig = (change: Record<string, unknown>) => writeFileSync(configPath, JSON.stringify({ ...(JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>), ...change }));
-  // On while the boards are drawn (the command is refused while Shape is off); the switch is set as asked after.
   writeConfig({ inboxShape: true, inboxBoard: options.board ?? true });
   const started = spawnSync(options.binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   if (started.status !== 0) throw new Error(`inbox --background: ${started.stderr}`);
   rememberInboxOf(dataDir);
   const src = join(root, 'src');
   const projects = { plannotator: scratchProject(src, 'plannotator'), relay: scratchProject(src, 'relay'), pando: scratchProject(src, 'pando') };
-  // Each message starts a thread of its own.
   const claude = await SimAgent.connect({ binary: options.binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary: options.binary, env, name: 'Codex', host: 'codex' });
   const threads: Record<string, string> = {};

@@ -1,13 +1,3 @@
-/**
- * The window has nothing to scroll, in a real browser against the compiled
- * binary. The Inbox's live region is 1 px of absolutely placed text. Left at
- * its static place, under the whole page, it made `#root` 1 px taller than the
- * window: `overflow: hidden` still scrolls when something scrolls into view, so
- * a click or a focus during the panes' move after Escape lifted every pane by
- * 1 px until a reload.
- *
- * Build the binary first (see inbox.spec.ts).
- */
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -70,7 +60,6 @@ test.afterAll(async () => {
   }
 });
 
-/** How far the page's own frame can scroll: what a scroll into view could move. */
 const overflow = (on: Page) =>
   on.evaluate(() =>
     [document.documentElement, document.body, document.querySelector('#root')!, document.querySelector('.pn-inbox')!]

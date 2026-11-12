@@ -1,8 +1,3 @@
-/**
- * The world and the window states for inbox-window-controls.spec.ts: an Inbox
- * under a scratch HOME and data folder, a scripted `gh` and `glab` first on
- * PATH, and one thread with a picture, a guided review and a Shape board.
- */
 import { type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -18,17 +13,12 @@ const repo = resolve(__dirname, '../..');
 
 export interface ControlsWorld {
   url: string;
-  /** The thread with the picture. */
   picture: string;
-  /** The thread and message of the guided review. */
   thread: string;
   guide: string;
   board: string;
-  /** The thread with two open questions: Decision mode's way in. */
   questions: string;
-  /** A message with a table: the table's toolbar. */
   table: string;
-  /** An agent's code review: the full-window review. */
   review: { thread: string; message: string };
   agents: SimAgent[];
 }
@@ -93,7 +83,6 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
   };
 }
 
-/** Load a route on a fresh page, with the sidebar docked open or collapsed (nothing on a phone: it has no docked sidebar). */
 export async function openRoute(page: Page, world: ControlsWorld, hash: string, sidebar: 'open' | 'collapsed' = 'open'): Promise<void> {
   const wanted = sidebar === 'open' ? 'expanded' : 'collapsed';
   const settled = () => page.waitForTimeout(500);
@@ -104,9 +93,7 @@ export async function openRoute(page: Page, world: ControlsWorld, hash: string, 
   await settled();
   const docked = page.locator('.ib-sb');
   const isDocked = (await docked.count()) > 0;
-  // The list's own toggle first: a layer on the route may cover the window's.
   if (isDocked && (await docked.getAttribute('data-state')) !== wanted) {
-    // The peek, out over the toggle, would take the click.
     await clearSidebarPeek(page);
     await page.locator('.ib-lhead .ib-sb-trigger').click({ timeout: 10_000 });
     await settled();
@@ -117,14 +104,12 @@ export async function openRoute(page: Page, world: ControlsWorld, hash: string, 
     }, hash);
     await settled();
   }
-  // Settings holds its own open or closed, and shows no toggle off a phone.
   if (isDocked && hash === '#settings' && (await docked.getAttribute('data-state')) !== wanted) {
     await page.keyboard.press('ControlOrMeta+b');
     await settled();
   }
 }
 
-/** The picture of the thread, opened and taken to full screen (a phone opens it there at once). */
 export async function openFullScreenFile(page: Page, world: ControlsWorld, threadId: string): Promise<void> {
   await openRoute(page, world, `#thread=${threadId}`);
   await page.locator('.ib-att-t').first().click();

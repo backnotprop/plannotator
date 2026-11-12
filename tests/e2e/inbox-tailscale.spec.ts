@@ -1,21 +1,3 @@
-/**
- * "Over your tailnet" in the Inbox window's Settings, proved in a real
- * browser against the compiled binary under a temp PLANNOTATOR_DATA_DIR and
- * HOME, with `tailscale` a script on PATH that keeps its serve config in a
- * file (CI has no tailnet, and the real CLI must never run here).
- *
- * Proved: the switch publishes at once (the row shows the tailnet address,
- * config.json and the fake serve config agree, the mapping is the Inbox's
- * own port pointed at another loopback port), off takes it down; with
- * Tailscale stopped the switch stays on and the error says why; an Inbox
- * started with `--tailscale` says "On for this run" and "Keep it on at
- * every start" saves the switch; a hand-made mapping onto the window's own
- * port is refused, named in Settings, and replaced on request.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs, light and dark at 1440 by 900, land in .local/proof/tailscale/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -30,7 +12,6 @@ const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo
 const MAGIC = 'studio.tail0000.ts.net';
 const OWNER = 'owner@example.com';
 
-/** The fake CLI (run by this Node): `status --json`, `serve status --json`, serve on and off; `down` in the mode file fails every call. */
 const FAKE = `
 const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 const [state, mode] = process.argv.slice(2, 4);
@@ -84,22 +65,13 @@ async function shot(name: string): Promise<void> {
 }
 
 function startInbox(args: string[]): string {
-  // PATH: the fake first, then this Node; no system directory, so no real tailscale is ever reachable. Node's folder
-  // may hold agent CLIs (npm puts gemini, pi, copilot there): the test sandbox makes the Inbox look up none.
   const env = { PATH: `${world.bin}:${dirname(process.execPath)}`, PLANNOTATOR_TEST_SANDBOX: world.root, HOME: world.root, PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
   const started = spawnSync(binary, ['inbox', '--background', ...args], { env, encoding: 'utf8', timeout: 60_000 });
-  // Every start's pid, before anything can fail: the teardown signals each one.
   rememberInboxOf(world.dataDir);
   expect(started.status, started.stderr).toBe(0);
   return started.stdout.trim();
 }
 
-/**
- * SIGTERM, then wait until the PROCESS is gone, not only its port: a stopping
- * Inbox still runs its clean stop (the tailnet mapping) after it stops
- * listening, and the next start must not overlap it. Only the proven Inbox
- * this spec started (inbox-scratch.ts).
- */
 async function stopInbox(): Promise<void> {
   await stopScratchInbox(world.dataDir);
 }
@@ -128,7 +100,6 @@ test.afterAll(async () => {
   try {
     await world?.context.close();
   } finally {
-    // Every Inbox this spec started (each start's pid, and inbox.json's), then the folder.
     await removeInboxScratch();
   }
 });
@@ -187,7 +158,6 @@ test('started with --tailscale: on for this run, and "Keep it on at every start"
   await expect.poll(() => fetch(`${world.url}api/inbox/health`).then(() => 'up', () => 'down')).toBe('down');
   world.url = startInbox(['--tailscale']);
   const { page } = world;
-  // The same port and hash as before: a fresh document, not a same-document hop.
   await page.goto('about:blank');
   await page.goto(`${world.url}#settings/devices`);
   const block = page.locator('[data-settings-tailscale]');
@@ -211,7 +181,6 @@ test("a hand-made mapping onto the window's own port: Settings says it exposes t
   const toggle = block.getByRole('switch', { name: 'Reach the Inbox over Tailscale' });
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  // The user's workaround, then a request through it as serve sends it.
   writeFileSync(join(world.root, 'serve.json'), JSON.stringify({ [String(port)]: `http://127.0.0.1:${port}` }));
   const through = await fetch(`http://127.0.0.1:${port}/api/inbox/threads`, { headers: { 'X-Forwarded-For': '100.64.0.9', 'Tailscale-User-Login': 'someone@example.com' } });
   expect(through.status).toBe(403);

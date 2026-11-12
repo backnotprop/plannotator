@@ -1,14 +1,3 @@
-/**
- * Random markup for the `data-code` reader's tests (shapeHtmlDataCodes): the
- * pieces that move an HTML parser (comments and their odd ends, raw-text and
- * RCDATA elements, noscript, script escapes, quotes, end tags with
- * attributes, svg, math, CDATA), with a fresh `data-code` value each time, so
- * a code missed names its case; some values carry a character reference or a
- * NULL, so a value read otherwise than the browser reads it is a miss too.
- * Seeded, so a failure comes back.
- */
-
-/** A small seeded generator (mulberry32). */
 export function seededRandom(seed: number): () => number {
   let s = seed >>> 0;
   return () => {
@@ -30,10 +19,8 @@ const PIECES = [
   '"', "'", "=", " ", "/", ">", "<", "x", "text", "&quot;", "\n",
 ];
 
-/** What a value may carry: references a browser decodes once (`&#38;#x2F;` stays `&#x2F;`), and a NULL. */
 const VALUE_TAILS = ["&amp;", "&AMP;", "&nbsp;", "&lt;", "&QUOT;", "&#38;#x2F;", "&#x41;", "&#65;", "&#0;", "\u0000", "&amp;lt;"];
 
-/** Markup of 4 to 17 pieces; `code()` names each `data-code` value. */
 export function htmlSoup(next: () => number, code: () => string): string {
   let html = "";
   const count = 4 + Math.floor(next() * 14);
@@ -50,7 +37,6 @@ export function htmlSoup(next: () => number, code: () => string): string {
   return html;
 }
 
-/** The delta-3 and delta-4 reviews' payloads: each hid `src/zzz.ts#L1` from an earlier reader. */
 export const DATA_CODE_BYPASSES: readonly string[] = [
   '<!--><div data-mark="a" data-code="src/zzz.ts#L1">',
   '<!---><div data-code="src/zzz.ts#L1">',

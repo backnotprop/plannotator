@@ -1,28 +1,15 @@
-/**
- * The world of the search type filter's proofs (approval
- * "inbox-search-type-filter"), the store its design pictures were made from:
- * four agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts)
- * about a push relay, in five projects, and one reply by the person. "relay"
- * matches six threads (one more than the Threads cap), ten files (twice the
- * Files cap), two projects and a dozen messages. Used by
- * inbox-search-type-filter.spec.ts.
- */
-
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 
 export interface TypeWorld {
   agents: SimAgent[];
-  /** The ten attachments whose names say "relay" (the Files a "relay" query finds). */
   relayFiles: number;
-  /** Add a thread in a project with a 54-character name (the filter row's worst case); returns the name. */
   longProject: () => Promise<string>;
 }
 
 const ask = (prompt: string, choices: string[]) => ['', ':::question', prompt, '', ...choices.map((c) => `- [ ] ${c}`), ':::'].join('\n');
 
-/** Write a file into a project and return its path (an agent attaches it). */
 function file(project: string, path: string, text: string): string {
   const full = join(project, path);
   mkdirSync(join(full, '..'), { recursive: true });

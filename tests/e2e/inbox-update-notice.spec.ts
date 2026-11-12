@@ -1,19 +1,3 @@
-/**
- * A new release shows in the Inbox within minutes, in a real Chromium.
- *
- * A release-version Inbox (the CLI from source with --define
- * __CLI_VERSION__) under a temp HOME and data dir, with no answer cached and
- * a fake GitHub on loopback: the "latest release" page redirects to a newer
- * tag, and the API answers 403 (its rate limit), as it can on a busy IP.
- * Before this change the only source was the API, so a 403 hid the button
- * for hours. Now the page answers and the Update button shows at once; a
- * newer release the page names after that shows on the next page load.
- *
- * PLANNOTATOR_E2E_RELEASE_BINARY names a binary compiled with
- * __CLI_VERSION__="0.28.10" to run instead of the CLI from source (CI does).
- * Needs the built apps (apps/hook/dist), as the other specs do.
- */
-
 import { expect, test } from '@playwright/test';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
@@ -67,7 +51,6 @@ test.beforeAll(async () => {
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
-      // A release version: never the live daily ping (packages/shared/daily-ping.ts).
       NO_ANON_PING: '1',
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER,
@@ -95,7 +78,6 @@ test.afterAll(async () => {
   try {
     github?.close();
   } finally {
-    // The Inbox (proven, SIGTERM then SIGKILL), then the folder (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -108,8 +90,6 @@ test('the Update button shows without waiting an hour, though the API is rate li
   expect(requests).toContain('HEAD /r/p/releases/latest');
   expect(requests).not.toContain('GET /api/releases/latest');
 
-  // A newer release a minute later: a page load asks again (at most once a
-  // minute), so wait out the minute instead of an hour.
   latest = '0.28.13';
   const asked = requests.filter((r) => r === 'HEAD /r/p/releases/latest').length;
   await page.waitForTimeout(61_000);

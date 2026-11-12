@@ -1,7 +1,5 @@
-/** Real PNG files for the browser proofs, written without an image library. */
 import { deflateSync } from 'node:zlib';
 
-/** A real PNG of `w` x `h` px: a coloured frame on a light ground (so the tiles differ at a glance). */
 export function png(w: number, h: number, rgb: [number, number, number]): Buffer {
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;

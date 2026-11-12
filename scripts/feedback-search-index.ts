@@ -1,22 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Writes packages/inbox/feedbackSearch.data.json, what the Feedback form's "These
- * might help" searches. The owner runs it while preparing a release, with `gh`
- * logged in (.agents/skills/release/SKILL.md). CI and the builds never run it.
- *
- * Reads, read-only, from the public repo: open issue titles, open and merged PR
- * titles, and published release notes (the new release's come from
- * RELEASE_NOTES_v<version>.md in the checkout). Never a draft release, because
- * the logged in owner can see drafts that nobody else can.
- *
- * A closed issue goes in only when it was fixed and the notes say in which
- * release: the first release whose notes link the PR that closed it (the
- * latest of them, when several did), else the first that links the issue. Its
- * row carries that version, so the form can say "Fixed in 0.28.52". The window
- * never asks GitHub: it reads only this file.
- *
- *   bun scripts/feedback-search-index.ts
- */
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { SearchData, SearchFeature } from '../packages/inbox/feedbackSearch';
@@ -26,7 +8,6 @@ const REPO_URL = `https://github.com/${REPO}`;
 const DOCS = 'https://plannotator.ai/docs/reference/inbox/';
 const OUT_FILE = 'packages/inbox/feedbackSearch.data.json';
 
-/** By hand: the features people ask for by another name ("done button" for Archive). Check each against the product when you add one. */
 export const FEATURES: SearchFeature[] = [
   { title: 'Archive', names: ['done button', 'mark done', 'mark as done', 'done state', 'finish thread', 'close thread', 'delete thread', 'remove thread', 'dismiss thread', 'trash thread', 'trash folder', 'trash button', 'trash can', 'move to trash'], definition: "In a thread's ⋯ menu. Unarchive reopens it.", url: `${DOCS}#what-you-see` },
   { title: 'Mark unread', names: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread', 'keep unread'], definition: "On a thread's row and in its header.", url: `${REPO_URL}/releases/tag/v0.28.43` },
@@ -56,18 +37,14 @@ export interface ClosedIssue extends Titled {
   closedByPullRequestsReferences?: { number: number; repository?: { name: string; owner?: { login: string } } }[];
 }
 
-/** #956: a security report. #925: a question, not a known problem. */
 const SKIPPED_ISSUES = new Set([925, 956]);
-/** Bots and trackers. */
 const NOT_A_REQUEST = /^(chore\(deps\)|bump |dependency dashboard|pre-release manual qa)/i;
-/** Sections of release notes that are people or install steps. */
 const NOT_A_FEATURE = /^(what's changed|what's new|install|new contributors|community|contributors|thanks|full changelog|plannotator( inbox)?$|plannotator\.ai$|smaller |additional |behavior changes|documentation updates|features$|ux( improvements)?$|tidy$|tl;dr$|not yet on$|v\d)/i;
 const HAS_EMAIL = /[\w.+-]+@[\w-]+\.[a-z]{2,}/i;
 
 const plain = (text: string) => text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/`|\*/g, '').replace(/\s+/g, ' ').trim();
 const pullTitle = (title: string) => plain(title).replace(/^(fix|feat|chore|docs|refactor|test|ci|perf|build|style)(\([^)]*\))?!?:\s*/i, '').replace(/^./, (first) => first.toUpperCase());
 
-/** The headings under "What's New" in one release's notes. */
 export function releaseTitles(body: string): string[] {
   const start = body.search(/^## What's New\b/m);
   if (start < 0) return [];
@@ -76,12 +53,10 @@ export function releaseTitles(body: string): string[] {
 }
 
 const version = (tag: string) => tag.replace(/^v/, '').split('.').map(Number);
-/** Below zero when `a` is the older version ("v0.28.9" before "0.28.52"). */
 const compareVersions = (a: string, b: string) => version(a).reduce((order, part, at) => order || part - version(b)[at]!, 0);
 const olderFirst = (a: Release, b: Release) => compareVersions(a.tag, b.tag);
 const published = (release: Release) => !release.draft && !release.prerelease && /^v\d+\.\d+\.\d+$/.test(release.tag);
 
-/** Each issue or PR number this repo's notes link, with the first release (oldest) that links it, without its "v". */
 export function firstReleases(releases: Release[]): Map<number, string> {
   const first = new Map<number, string>();
   for (const release of releases.filter(published).sort(olderFirst)) {
@@ -92,17 +67,14 @@ export function firstReleases(releases: Release[]): Map<number, string> {
   return first;
 }
 
-/** The release that fixed a closed issue, or null when it was not fixed (not planned, a duplicate) or no notes say. */
 export function fixedIn(issue: ClosedIssue, first: Map<number, string>): string | null {
   if (issue.stateReason !== 'COMPLETED') return null;
-  // A PR in another repository (a fork) never ships in these notes.
   const pulls = (issue.closedByPullRequestsReferences ?? []).filter((pull) => !pull.repository || (pull.repository.name === 'plannotator' && (pull.repository.owner?.login ?? 'backnotprop') === 'backnotprop'));
   const shipped = pulls.map((pull) => first.get(pull.number)).filter((tag): tag is string => tag !== undefined);
   if (shipped.length) return shipped.sort(compareVersions).at(-1)!;
   return first.get(issue.number) ?? null;
 }
 
-/** Open issues, then fixed issues, then PRs, then release notes, each newest first; a title twice stays once. */
 export function buildSearchData(input: { issues: Titled[]; closedIssues?: ClosedIssue[]; pulls: Titled[]; releases: Release[] }): SearchData {
   const newest = (a: Titled, b: Titled) => b.number - a.number;
   const listed = (issue: Titled) => !SKIPPED_ISSUES.has(issue.number) && !issue.labels?.some((label) => label.name === 'security');

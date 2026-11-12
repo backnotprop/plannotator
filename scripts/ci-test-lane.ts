@@ -1,32 +1,8 @@
-/**
- * One lane of the Test workflow (.github/workflows/test.yml).
- *
- *   bun run scripts/ci-test-lane.ts <lane>
- *
- * The suite used to run as two serial processes in one job (`bun test`, about
- * 22 min, then the DOM list under --isolate, about 20 min), which ran into the
- * job's 45 min timeout. The same files now run in parallel jobs, one lane each:
- *
- *  - `heavy-*`: the files that drive real agent processes against a real Inbox
- *    take 1.5 to 4 min each, so each one runs on its own (one process per file).
- *  - `unit-1`..`unit-N`: everything else in the plain `bun test` sweep, split by
- *    Bun's own `--shard=k/N`. Bun shards the file list it discovers, so a new
- *    test file always lands in some shard. The heavy files are left out with
- *    `--path-ignore-patterns`, and because a CLI `--path-ignore-patterns`
- *    REPLACES bunfig.toml's `pathIgnorePatterns` (it does not add to them), the
- *    bunfig patterns are read from bunfig.toml and passed again.
- *  - `dom-1`..`dom-N`: tests/dom-test-list.txt with happy-dom and `--isolate`,
- *    split by `--shard=k/N`.
- *
- * scripts/ci-test-lanes.test.ts holds the workflow's matrix to exactly these
- * lanes, so a lane cannot be dropped without the guard failing.
- */
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const repoRoot = resolve(import.meta.dir, '..');
 
-/** Files that run on their own, one lane per entry, one process per file. */
 export const HEAVY_LANES: Readonly<Record<string, readonly string[]>> = {
   'heavy-mod': ['apps/hook/hooks/mod/inbox.test.ts'],
   'heavy-agents': ['apps/opencode-plugin/inbox-v2-wake.test.ts', 'apps/pi-extension/inbox.test.ts'],
@@ -47,7 +23,6 @@ export function laneNames(): string[] {
   ];
 }
 
-/** bunfig.toml's [test] pathIgnorePatterns, the ones the plain sweep honours. */
 export function bunfigIgnorePatterns(): string[] {
   const config = Bun.TOML.parse(readFileSync(join(repoRoot, 'bunfig.toml'), 'utf8')) as {
     test?: { pathIgnorePatterns?: unknown };
@@ -59,7 +34,6 @@ export function bunfigIgnorePatterns(): string[] {
   return patterns as string[];
 }
 
-/** The paths in tests/dom-test-list.txt, in order. */
 export function domList(): string[] {
   return readFileSync(join(repoRoot, DOM_LIST), 'utf8')
     .split('\n')
@@ -72,7 +46,6 @@ export interface LaneRun {
   env: Record<string, string>;
 }
 
-/** The `bun test` runs that make up one lane, run one after another. */
 export function laneRuns(lane: string): LaneRun[] {
   const heavy = HEAVY_LANES[lane];
   if (heavy) return heavy.map((file) => ({ args: ['test', `./${file}`], env: {} }));
@@ -104,8 +77,6 @@ if (import.meta.main) {
     process.exit(2);
   }
   const runs = laneRuns(lane);
-  // A missing file would make `bun test` treat the path as a filter that
-  // matches nothing; refuse it here so a renamed file fails loudly.
   for (const file of lane.startsWith('dom-') ? domList() : HEAVY_LANES[lane] ?? []) {
     if (!existsSync(join(repoRoot, file))) {
       console.error(`${file}: listed for lane ${lane} but not found`);

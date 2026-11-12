@@ -1,7 +1,3 @@
-/**
- * `tailscale` as a script, for a real server's "Reach from my tailnet" (`startInboxServer`'s `tailscale`): this
- * machine's owner, serve status, serve on and off. Nothing runs the real CLI.
- */
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 
 export const TAILNET_MAGIC = "macbook-pro.tail0000.ts.net";

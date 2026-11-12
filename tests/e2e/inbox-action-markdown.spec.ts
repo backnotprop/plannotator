@@ -1,14 +1,3 @@
-/**
- * An action item's why drawn as markdown (the owner's report on 0.28.31:
- * `**App Manifest**` and code in backticks showed as raw marks), proved in a
- * real browser against the compiled binary with the owner's exact text, on a
- * desktop and a phone (WebKit, iPhone 15), light and dark: bold and code are
- * drawn, no raw marks show, and nothing overflows the card on the phone.
- *
- * Build the binary first (see inbox.spec.ts). PNGs land in
- * <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/action-markdown/.
- */
-
 import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -21,7 +10,6 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'action-markdown');
 
-/** The owner's action item, word for word. */
 const SLACK = [
   'The harness is set up.',
   '',
@@ -69,7 +57,6 @@ async function check(page: Page, shot: string): Promise<void> {
   await expect(why.locator('strong')).toHaveText(['App Manifest', 'Save', 'Install App', 'Reinstall']);
   await expect(why.locator('code')).toHaveText(['slack-app.yaml', 'xoxb-...', 'pbpaste > /tmp/sfharness/slack-bot']);
   expect(await why.textContent()).not.toMatch(/\*\*|`/);
-  // Nothing wider than the card.
   const fit = await card.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
   expect(fit.scroll).toBeLessThanOrEqual(fit.client);
   await page.waitForTimeout(250);

@@ -1,26 +1,3 @@
-/**
- * On a desktop, a question's picture choices keep clear of the option card
- * (follows "inbox-option-card-phone"; the owner met it on desktop too): at Fit
- * the picture sits wholly above the card, the pan stops exactly at the card,
- * a zoomed picture may still slide under it, stepping between choices never
- * moves the card (it holds the end note's row on every choice), and Hide takes
- * the card with the rest so the picture refits to the whole pane, and so does
- * the comment box's ⌄, the same gather into the corner control (approval
- * "inbox-fullscreen-gather"; one press on it brings the card back). The card is
- * one row (approval "inbox-option-card-lean"): ‹ Previous and Next › that step
- * like [ and ], marked disabled at the ends, the letter, the name (a long one
- * cut with its full name on hover), "Recommended" when there is one. It is one
- * box on every step (the widest name of the set sets its width), so the arrows
- * stay under a still mouse; it lets every pointer through to the picture; a
- * panned picture holds its place when the room around it changes. Zooming
- * in and out and panning to all four edges keep working. A plain picture (no
- * card) keeps today's Fit.
- *
- * Boxes are measured, never fitted to text, so fonts of any runner do. Build
- * the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-option-card-desktop.spec.ts`.
- */
-
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -170,7 +147,6 @@ const same = (a: Box, b: Box) => {
 
 const clearOfCard = (l: Layout) => expect(l.image.bottom).toBeLessThanOrEqual(l.card!.top + 0.5);
 
-/** Drags the picture the same way until it stops moving. */
 async function panTo(page: Page, side: 'top' | 'bottom' | 'left' | 'right') {
   const dx = side === 'left' ? 120 : side === 'right' ? -120 : 0;
   const dy = side === 'top' ? 120 : side === 'bottom' ? -120 : 0;
@@ -212,7 +188,6 @@ for (const { width, height } of [
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(String(e)));
 
-      // Fit, wide picture: wholly above the card, and the card has the same box on every choice.
       await open(page, url, thread, 'B');
       const fit = await layout(page);
       clearOfCard(fit);
@@ -223,7 +198,6 @@ for (const { width, height } of [
       for (const gone of ['.ib-optcap-q', '.ib-optcap-dots', '[data-option-end]', '.ib-optcap-hold']) await expect(page.locator(gone)).toHaveCount(0);
       await shot(page, `${width}x${height}-B-fit`);
 
-      // Zoom in (Actual size is bigger than the clear space), pan to all four edges; out again to the same Fit.
       await page.locator('[data-image-fit]').click();
       await expect(page.locator('[data-image-zoom-stage]')).toHaveAttribute('data-image-zoom-stage', 'actual');
       await atRest(page);
@@ -240,7 +214,6 @@ for (const { width, height } of [
       await atRest(page);
       same((await layout(page)).image, fit.image);
 
-      // The wheel zooms about the pointer, in and out; zoomed in, the picture slides under the card.
       await page.mouse.move((fit.stage.left + fit.stage.right) / 2, (fit.image.top + fit.image.bottom) / 2);
       await page.keyboard.down('Control');
       for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -200);
@@ -257,13 +230,11 @@ for (const { width, height } of [
       const out = await layout(page);
       expect(out.scale).toBeLessThan(zoomed.scale);
 
-      // Stepping: every picture clear of the card, and the card where it was.
       for (const letter of ['C', 'D']) {
         await step(page, ']', letter);
         const l = await layout(page);
         same(l.card!, card);
         if (letter === 'D') clearOfCard(l);
-        // A panorama is as wide as it likes: its height is above the card.
         expect(l.image.bottom).toBeLessThanOrEqual(card.top + 0.5);
       }
       await step(page, '[', 'C');
@@ -271,7 +242,6 @@ for (const { width, height } of [
       await step(page, '[', 'A');
       const tall = await layout(page);
       same(tall.card!, card);
-      // A tall picture reads from the top, so its lower part starts under the card; a pan brings every part clear.
       expect(tall.image.top).toBeGreaterThanOrEqual(tall.stage.top - 0.5);
       const tallBottom = await panTo(page, 'bottom');
       expect(Math.abs(tallBottom.image.bottom - card.top), 'a tall picture stops at the card').toBeLessThan(1);
@@ -279,7 +249,6 @@ for (const { width, height } of [
       expect(tallTop.image.top).toBeGreaterThanOrEqual(tallTop.stage.top - 0.5);
       await shot(page, `${width}x${height}-A-bottom-stop`);
 
-      // Hide takes the card with the rest, and the picture refits to the whole pane.
       await step(page, ']', 'B');
       await page.locator('[data-full-view-bar] button[aria-label="Hide tools"]').click();
       await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
@@ -336,17 +305,14 @@ for (const { width, height } of [
       const note = async (tall = false) => {
         const l = await layout(page);
         heights.add(Math.round(l.card!.bottom - l.card!.top));
-        // A tall picture reads from the top: its lower part starts under the card until panned.
         if (!tall) clearOfCard(l);
         return l;
       };
 
-      // The first option: Previous is disabled and does nothing; Next steps.
       await open(page, url, thread, 'A');
       await note(true);
       await expect(prev).toHaveAttribute('aria-disabled', 'true');
       await expect(next).not.toHaveAttribute('aria-disabled', 'true');
-      // aria-disabled, not disabled: focus can stay on it, and a click is let through to do nothing (force: Playwright treats it as disabled).
       await prev.click({ force: true });
       await atRest(page);
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'A');
@@ -354,10 +320,8 @@ for (const { width, height } of [
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'B');
       await atRest(page);
       await note();
-      // Focus stays on the arrow that was used.
       await expect(next).toBeFocused();
 
-      // The long name (C) is cut, whole on hover, and the card is still one row and clear.
       await next.click();
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
       await atRest(page);
@@ -370,7 +334,6 @@ for (const { width, height } of [
       await expect(page.locator('.ib-optcap-tip')).toHaveText(/A panorama with a very long name/);
       await shot(page, `${width}x${height}-C-long-name`);
 
-      // The last option: Next is disabled and does nothing; Previous steps back.
       await next.click();
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'D');
       await atRest(page);
@@ -385,8 +348,6 @@ for (const { width, height } of [
       await atRest(page);
       expect([...heights], 'one height on every option').toHaveLength(1);
 
-      // The comment box's ⌄ gathers the tools into the corner control (approval "inbox-fullscreen-gather"): the card
-      // goes with them and the picture refits to the room it gets; one press on the corner control brings both back.
       await step(page, ']', 'D');
       const before = await layout(page);
       await page.locator('[data-fcomp-minimize]').click();
@@ -412,7 +373,6 @@ for (const { width, height } of [
     }
   });
 
-/** What a person's pointer does to the picture: where it sits and how big, read from the page. */
 const scaleOf = async (page: Page) => (await layout(page)).scale;
 
 test('the card is one box on every step, so three clicks on Next with the mouse held still go A, B, C, D', async () => {
@@ -435,7 +395,6 @@ test('the card is one box on every step, so three clicks on Next with the mouse 
       arrows.push({ prev: Math.round(p.x), next: Math.round(n.x) });
     };
     await measure();
-    // The mouse goes to Next once and stays: every click lands on the arrow, whatever the name in front of it.
     const at = (await next.boundingBox())!;
     const x = at.x + at.width / 2;
     const y = at.y + at.height / 2;
@@ -469,7 +428,6 @@ test('a panned picture holds its place when the room around it changes: Hide, th
       const context = await browser.newContext({ viewport: { width, height } });
       const page = await context.newPage();
       await open(page, url, thread, 'A');
-      // The tall picture reads from the top; scroll it down part of the way (not to its stop, where the new room would move it) and note where it is.
       const stageBox = (await layout(page)).stage;
       await page.mouse.move((stageBox.left + stageBox.right) / 2, 300);
       await page.mouse.wheel(0, 400);
@@ -484,7 +442,6 @@ test('a panned picture holds its place when the room around it changes: Hide, th
       await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
       await holds('Hide');
       await context.close();
-      // ⌄ and the Reply tab on a fresh page (Hide left the tools gathered).
       const again = await browser.newContext({ viewport: { width, height } });
       const second = await again.newPage();
       await open(second, url, thread, 'A');
@@ -527,7 +484,6 @@ test('the card lets the pointer through: a pinch or wheel over the name or an ar
       const box = (await page.locator(selector).first().boundingBox())!;
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     };
-    // Ctrl + wheel (a trackpad pinch) over each part of the card: the picture zooms, and the page's own zoom is held off.
     for (const selector of ['.ib-optcap-main .ib-optcap-label', '[data-option-step="next"]', '[data-option-step="prev"]', '.ib-optcap-main .ib-optcap-letter']) {
       await page.locator('[data-image-fit]').click();
       await page.locator('[data-image-fit]').click();
@@ -541,10 +497,8 @@ test('the card lets the pointer through: a pinch or wheel over the name or an ar
       await atRest(page);
       expect(await scaleOf(page), `a pinch over ${selector}`).toBeGreaterThan(before);
     }
-    // The arrow still steps on a click.
     await page.locator('[data-option-step="next"]').click();
     await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
-    // A plain wheel over the name scrolls a tall picture, and a drag that starts on the name pans it.
     await step(page, '[', 'B');
     await step(page, '[', 'A');
     const tall = await layout(page);
@@ -582,7 +536,6 @@ test('the full name of a cut name shows on hover and goes with the step; the las
     await page.mouse.move(box.x + 20, box.y + box.height / 2);
     await page.mouse.move(box.x + 24, box.y + box.height / 2);
     await expect(tip).toHaveText(/A panorama with a very long name/);
-    // A step takes the tip with it, and the next name (not cut) never shows one.
     await page.keyboard.press(']');
     await expect(caption(page)).toHaveAttribute('data-option-caption', 'D');
     await expect(tip).toHaveCount(0);
@@ -590,10 +543,8 @@ test('the full name of a cut name shows on hover and goes with the step; the las
     await page.mouse.move(box.x + 34, box.y + box.height / 2);
     await expect(tip).toHaveCount(0);
 
-    // The last option is said where nothing on screen says it (the thread has one other file: the mockup).
     await expect(page.locator('[data-step-live]')).toHaveText('Option D of 4: D photo. Last option. 1 other file under the 4/4 button');
 
-    // Reduced motion: Hide and minimize take the card with no fade at all.
     const fade = () => page.locator('.ib-optcap').evaluate((el) => getComputedStyle(el).transitionDuration);
     expect(await fade()).toBe('0s');
     await page.locator('[data-full-view-bar] button[aria-label="Hide tools"]').click();
@@ -618,20 +569,17 @@ test('the comment box\'s ⌄ takes the card with the tools and restoring waits f
     const opacity = () => page.locator('.ib-optcap').evaluate((el) => (getComputedStyle(el).visibility === 'hidden' ? 0 : Number(getComputedStyle(el).opacity)));
     await page.locator('[data-fcomp-minimize]').click();
     await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
-    // Gathered as Hide gathers (approval "inbox-fullscreen-gather"): the card goes with the tools, in place (the foot does not move).
     await expect.poll(opacity, 'the card goes with the tools').toBe(0);
     await page.locator('[data-full-view-handle]').click();
     await page.waitForTimeout(60);
     expect(await opacity(), 'not back while the picture is still easing').toBeLessThan(0.1);
     await expect.poll(opacity).toBe(1);
 
-    // A comment typed on the picture, then Next: it steps on that press (nothing asks) and focus stays on the arrow.
     await page.getByPlaceholder(/Comment on this image/).fill('A note on this picture');
     await page.locator('[data-option-step="next"]').click();
     await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
     await expect(page.locator('[data-step-guard]')).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-option-step'))).toBe('next');
-    // Back on B: the words wait in its box.
     await page.locator('[data-option-step="prev"]').click();
     await expect(caption(page)).toHaveAttribute('data-option-caption', 'B');
     await expect(page.getByPlaceholder(/Comment on this image/)).toHaveValue('A note on this picture');

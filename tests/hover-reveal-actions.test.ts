@@ -2,21 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
-// #2062: Tailwind v4 compiles `group-hover:` (and `hover:`) inside
-// `@media (hover: hover)`. A control written `opacity-0 group-hover:opacity-100`
-// therefore never shows on a device that reports `(hover: none)`: phones,
-// tablets, and some desktop Chrome builds with a plain mouse. Comment cards in
-// code review lost Edit / Copy / Delete that way.
-//
-// The rule: a class string that reveals something on group hover must also
-// reveal it under `[@media(hover:none)]` (same opacity) and to the keyboard
-// (`focus-within` or `focus-visible`). Purely decorative hover effects are
-// listed below with the reason they are exempt.
-
 const root = resolve(import.meta.dir, '..');
 const SCANNED = ['packages/review-editor', 'packages/ui/components', 'packages/editor', 'packages/guide-viewer'];
 
-/** file → a substring of the exempt class string, and why. */
 const DECORATIVE: Array<{ file: string; marker: string; why: string }> = [
   { file: 'packages/ui/components/KeyboardShortcuts.tsx', marker: 'pointer-events-none group-hover:opacity-100', why: 'an explanatory tooltip, not a control' },
   { file: 'packages/review-editor/components/PRChecksTab.tsx', marker: 'text-muted-foreground/30 ml-auto', why: 'an external-link glyph inside a row that is itself the link' },
@@ -36,7 +24,6 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-/** Every quoted or template string on a line that carries a group-hover reveal. */
 function revealStrings(source: string): string[] {
   const found: string[] = [];
   for (const line of source.split('\n')) {
@@ -55,8 +42,6 @@ describe('controls revealed on hover have a path without hover (#2062)', () => {
   });
 
   test('the scan finds the controls it guards', () => {
-    // A rename or a reformatting that hides the class strings from the scan
-    // would otherwise turn this whole file into a silent pass.
     expect(reveals.some((r) => r.file.endsWith('CommentActions.tsx'))).toBe(true);
     expect(reveals.length).toBeGreaterThan(10);
   });

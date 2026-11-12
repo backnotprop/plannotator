@@ -1,25 +1,3 @@
-/**
- * Full screen's comments float over the page and move with the other floating tools (the owner's call, 2026-11-05),
- * proved in Chromium against the compiled binary. `plannotator inbox --background` runs under a temp PLANNOTATOR_DATA_DIR and
- * HOME; one agent sends a pricing page and a checkout screenshot, the person comments and replies, the agent sends new
- * versions, and the person comments again (so the panel lists current and earlier comments).
- *
- * Proves, on a desktop:
- *  - the count opens the panel over the page's right side: the page keeps its whole width, the toolbar does not move;
- *  - » (the top bar's Hide tools) and the reply card's ⌄ (the bottom bar's) each take the panel away with the tools,
- *    and the corner control brings it back open;
- *  - the panel closes by its × and the count, and on its own when full screen ends or another file opens, but stays
- *    open (focus on the card) when a comment on another file is picked in it;
- *  - a comment picked in the panel whose mark is under it scrolls the page so the mark shows below the panel;
- *  - at 1280 px the reply card moves left so it never runs under the panel;
- *  - a 390 px phone keeps the bottom sheet.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-floating-comments.spec.ts`.
- * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/floating-comments); with PLANNOTATOR_E2E_VIDEO_DIR
- * set, the walk-through test also records a video there.
- */
-
 import { devices, expect, test, type Browser, type BrowserContext, type Frame, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -40,7 +18,6 @@ const QUOTES = [
   ['The bank sync has not missed a night.', 'A controller at a logistics firm'],
 ];
 
-/** The pricing page, first or second version. A band far down the page ends at its right edge. */
 function pricing(v: 1 | 2): string {
   const head = v === 2 ? 'Your bank, synced. Your receipts, filed.' : 'Bookkeeping that runs itself';
   const sub = v === 2 ? 'Ledger pulls transactions from 11,000 banks every night and matches each receipt you forward.' : 'The finance platform for growing teams.';
@@ -76,7 +53,6 @@ footer,.band{display:flex;justify-content:space-between;align-items:center;paddi
 </body></html>`;
 }
 
-/** The checkout screen, drawn once in the browser and saved as a PNG. */
 const CHECKOUT = (v: 1 | 2) => `<!doctype html><meta charset="utf-8"><style>
 body{margin:0;font:15px/1.45 system-ui,sans-serif;background:#eef1f6;color:#1d2433}
 main{padding:36px 48px} h1{font-size:26px;margin:0 0 20px} .card{background:#fff;border-radius:12px;padding:22px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
@@ -130,7 +106,6 @@ async function drawCheckout(browser: Browser, v: 1 | 2): Promise<void> {
   await maker.close();
 }
 
-/** A page and a screenshot: three comments on each sent, new versions, two current comments on each. */
 async function pricingThread(browser: Browser): Promise<Thread> {
   writeFileSync(join(world.project, 'site', 'pricing.html'), pricing(1));
   await drawCheckout(browser, 1);
@@ -155,7 +130,6 @@ async function pricingThread(browser: Browser): Promise<Thread> {
   return { thread: first.thread_id, files: v2 };
 }
 
-/** One page with 30 earlier comments over two replies, and two current ones. */
 async function longThread(): Promise<Thread> {
   writeFileSync(join(world.project, 'site', 'welcome.html'), pricing(1));
   const s1 = await world.agent.send({ project_path: world.project, subject: 'Welcome page', thread: 'welcome', body: 'First pass at the welcome page.', attachments: ['site/welcome.html'] });
@@ -187,7 +161,6 @@ test.beforeAll(async ({ browser }) => {
   const trap = join(root, 'trap');
   mkdirSync(home);
   mkdirSync(trap);
-  // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-floating-comments: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
   const env = {
@@ -236,7 +209,6 @@ const panel = (page: Page) => pane(page).locator('.ib-apanel');
 const count = (page: Page) => page.locator('[data-full-view-bar] [data-full-view-comments]');
 const handle = (page: Page) => page.locator('[data-full-view-handle]');
 const box = async (page: Page, selector: string) => page.locator(selector).first().boundingBox();
-/** The panel's box once its slide-in or its way back from the corner has ended. */
 async function panelAtRest(page: Page) {
   await expect(panel(page)).toBeVisible();
   await expect.poll(() => panel(page).evaluate((el) => el.getAnimations().filter((a) => a.playState === 'running').length)).toBe(0);
@@ -251,14 +223,12 @@ async function open(context: BrowserContext, t: Thread, name: string): Promise<P
   return page;
 }
 
-/** The page's frame (the HTML file, served by the Inbox at /api/inbox/pages/<id>). */
 const isPageFrame = (f: Frame) => /\/api\/inbox\/pages\/[0-9a-f]+$/.test(f.url());
 async function pageFrame(page: Page): Promise<Frame> {
   await expect.poll(() => page.frames().some(isPageFrame)).toBe(true);
   return page.frames().find(isPageFrame)!;
 }
 
-/** A comment's mark on the HTML page, in the window's coordinates. */
 async function markBox(page: Page, id: string): Promise<{ left: number; top: number; right: number; bottom: number } | null> {
   const frame = await pageFrame(page);
   const at = (await pane(page).locator('iframe').first().boundingBox())!;
@@ -304,17 +274,13 @@ test('the panel floats over the page: the page keeps its width and the toolbar s
   expect(frameAfter.width).toBe(frameBefore.width);
   expect(frameAfter.width).toBe(1440);
   expect((await box(page, '[data-full-view-bar]'))!.x).toBe(barBefore.x);
-  // At rest (it slides in 12 px): 12 px from the window's right edge.
   await expect.poll(async () => { const b = (await panel(page).boundingBox())!; return b.x + b.width; }).toBe(1440 - 12);
   const p = await panelAtRest(page);
   expect(p.y).toBeGreaterThanOrEqual(barBefore.y + barBefore.height);
-  // Its foot is as it was.
   await expect(panel(page).locator('[data-full-view-foot]')).toContainText('are on other files');
   await expect(panel(page).getByRole('button', { name: 'Write the reply' })).toBeVisible();
-  // The reply card is clear of it.
   const card = (await box(page, '[data-fcomp]'))!;
   expect(card.x + card.width).toBeLessThanOrEqual(p.x);
-  // Open with the earlier comments showing too.
   const earlier = panel(page).locator('[data-earlier-row]');
   if ((await earlier.getAttribute('aria-expanded')) === 'false') await earlier.click();
   await expect(panel(page).locator('[data-earlier-comment]')).toHaveCount(3);
@@ -336,7 +302,6 @@ test('putting the top bar or the reply card away takes the panel with them; the 
   const page = await open(context, world.two, 'pricing.html');
   await count(page).click();
   await expect(panel(page)).toBeVisible();
-  // The top bar's » Hide tools.
   await page.locator('[data-full-view-hide]').click();
   await expect(pane(page)).toHaveAttribute('data-tools', 'tucked');
   await expect(panel(page)).toBeHidden();
@@ -345,7 +310,6 @@ test('putting the top bar or the reply card away takes the panel with them; the 
   await handle(page).click();
   await expect(panel(page)).toBeVisible();
   await expect(page.locator('[data-full-view-bar]')).toBeVisible();
-  // The bottom bar's ⌄ (the reply card's minimize).
   await page.locator('[data-fcomp] [data-fcomp-minimize]').click();
   await expect(pane(page)).toHaveAttribute('data-tools', 'tucked');
   await expect(panel(page)).toBeHidden();
@@ -362,13 +326,11 @@ test('the panel closes on its own when full screen ends or another file opens', 
   const page = await open(context, world.two, 'pricing.html');
   await count(page).click();
   await expect(panel(page)).toBeVisible();
-  // Another file of the thread (`]`, from the window): full screen stays, the panel goes.
   await pane(page).focus();
   await page.keyboard.press(']');
   await expect(pane(page)).toHaveAttribute('data-attachment-pane', world.two.files['checkout.png']!);
   await expect(pane(page)).toHaveAttribute('data-full-view', '');
   await expect(panel(page)).toBeHidden();
-  // Full screen ends (Side by side), and starts again: the panel stays closed.
   await count(page).click();
   await expect(panel(page)).toBeVisible();
   await page.locator('[data-full-view-exit="exit"]').click();
@@ -384,7 +346,6 @@ test('a comment on another file picked in the panel opens that file with the pan
   const page = await open(context, world.two, 'pricing.html');
   await count(page).click();
   await panelAtRest(page);
-  // The panel lists every file's comments: c3 is on the checkout screen.
   await panel(page).locator('[data-annotation-id="c3"]').first().click();
   await expect(pane(page)).toHaveAttribute('data-attachment-pane', world.two.files['checkout.png']!);
   await expect(pane(page)).toHaveAttribute('data-full-view', '');
@@ -398,7 +359,6 @@ test('a picked comment whose mark is under the panel scrolls the page so the mar
   const page = await open(context, world.two, 'pricing.html');
   await count(page).click();
   const p = await panelAtRest(page);
-  // Bring the mark under the panel first, as the page's own scroll would (marks are drawn only on screen).
   const frame = await pageFrame(page);
   await expect.poll(() => frame.evaluate(() => !!document.getElementById('sales'))).toBe(true);
   await frame.evaluate(() => document.getElementById('sales')!.scrollIntoView({ block: 'center' }));
@@ -429,7 +389,6 @@ test('an image at 1440, and HTML at 1280 with the reply card clear of the panel'
   await expect(panel(page)).toBeVisible();
   const p = await panelAtRest(page);
   const card = (await box(page, '[data-fcomp]'))!;
-  // Centred it would come within 12 px of the panel (round 3's card is 600 px, #2846): it moves left, keeping its width.
   expect(centred.x + centred.width).toBeGreaterThan(p.x - 12);
   expect(card.x).toBeLessThan(centred.x);
   expect(card.x + card.width).toBeLessThanOrEqual(p.x - 12);

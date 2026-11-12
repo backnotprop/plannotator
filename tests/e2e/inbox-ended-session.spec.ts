@@ -1,22 +1,3 @@
-/**
- * Replying when the session that asked has ended (design record "replying
- * when the asking agent's session has ended", not in this repo), proved in a
- * real browser against the compiled binary. Nothing is mocked: the binary
- * runs `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR and
- * HOME, a Pi agent asks through `plannotator inbox mcp` (scripts/inbox-sim.ts),
- * and the agent connections are the bridge's real doors driven as a
- * connection drives them (inbox-new-message.spec.ts has the same harness).
- *
- * Two sessions: the one that asked polls once and stops; a second one keeps
- * polling. The person replies; Send opens the recipient pill's list once
- * (approval "inbox-reply-recipient"), the person picks the second session,
- * and the reply reaches it with the line saying the asker ended. Then the second one
- * stops too, and a reply with nothing live is saved for the next agent.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs, light and dark at 1440 and 390, land in .local/proof/ended-session/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -72,7 +53,6 @@ function registry(): { pid: number; port: number; token: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** One agent session's connection: long-polls for what the person sent it, and acknowledges a delivery. */
 class Connection {
   readonly commands: InboxReplyCommand[] = [];
   private stopped = false;
@@ -126,7 +106,6 @@ async function shot(name: string): Promise<void> {
   const page = world.page;
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
-    // A resize moves the thread's scroll: its end is where the note, the form or the latest reply is.
     await page.locator('section.ib-pane').evaluate((pane) => {
       for (const el of [pane, ...pane.querySelectorAll('*')]) if (el.scrollHeight > el.clientHeight + 1 && getComputedStyle(el).overflowY !== 'visible') el.scrollTop = el.scrollHeight;
     });
@@ -176,7 +155,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   });
   const ledger = scratchProject(join(root, 'src'), 'ledger');
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
-  // Sent as a waking connection sends (the Inbox records `wakes`): only such a session is ever called ended.
   const sent = await pi.send({ project_path: ledger, subject: 'Retry policy for the nightly ledger sync', body: QUESTION }, { wakes: true });
   world = { root, dataDir, url, ledger, pi, context, page, errors, threadId: sent.thread_id as string, asker: '', connections: [] };
   const [first] = await threadMessages();
@@ -191,14 +169,12 @@ test.afterAll(async () => {
     await world.pi.close().catch(() => {});
     await world.context.close();
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
 
 test('the asking session stopped and another is live: the thread says so, Send asks where the reply goes, and the picked session is woken with the line saying the asker ended', async () => {
   const { page } = world;
-  // The asking session polls once, then stops (it ended); a second Pi session keeps polling.
   const asker = new Connection(world.asker, Date.now() - 60 * 60_000);
   await page.waitForTimeout(1_500);
   await asker.stop();
@@ -208,7 +184,6 @@ test('the asking session stopped and another is live: the thread says so, Send a
   await page.goto(`${world.url}#thread=${world.threadId}`);
   const pane = page.locator('section.ib-pane');
   await expect(pane.getByRole('heading', { name: 'Retry policy for the nightly ledger sync' })).toBeVisible();
-  // Ended means 60 s with no poll (the grace), read on the window's 10 s refresh.
   const note = pane.locator('[data-asker-ended="live"]');
   await expect(note).toBeVisible({ timeout: 100_000 });
   await expect(note).toHaveText("This Pi session has ended. Send your reply to another session, or archive it if it's done.");
@@ -216,9 +191,7 @@ test('the asking session stopped and another is live: the thread says so, Send a
   await expect(foot.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
   await expect(foot.getByRole('button', { name: 'Send to another session' })).toBeVisible();
   await expect(foot.getByRole('button', { name: 'Archive', exact: true })).toBeVisible();
-  // The list says so too, without being told again: the row reads the same session's state.
   await expect(page.locator(`[data-row-ended]`).first()).toHaveText('Session ended');
-  // A phone keeps the open questions' words: the two extra buttons take a line of their own under Reply.
   await page.setViewportSize({ width: 390, height: 844 });
   const replyBox = (await foot.getByRole('button', { name: 'Reply', exact: true }).boundingBox())!;
   const sendBox = (await foot.getByRole('button', { name: 'Send to another session' }).boundingBox())!;
@@ -226,8 +199,6 @@ test('the asking session stopped and another is live: the thread says so, Send a
   await expect(foot.locator('[data-open-questions]')).toHaveAttribute('data-label-form', 'full');
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(pane.locator('article.ib-message[data-author="agent"] .ib-to').first()).toHaveText('to you · session ended');
-  // "session ended" is drawn whole in the head row in a narrow thread too (inbox-polish, item 5): a thread of
-  // about 568 px (a 1180 px window beside the list) and one of 440 px (the width beside an open file).
   const ended = pane.locator('article.ib-message[data-author="agent"] [data-session-ended]').first();
   expect(await cutInHeadRow(ended)).toBeNull();
   await page.setViewportSize({ width: 1180, height: 900 });
@@ -251,16 +222,12 @@ test('the asking session stopped and another is live: the thread says so, Send a
   const box = pane.getByRole('textbox', { name: 'Reply to Pi' });
   const words = 'Go with backoff, but cap the total wait at 10 minutes so it finishes before the 2 AM export.';
   await box.fill(words);
-  // The box open: the recipient pill under it names the asker, ended, in the note's place (approval
-  // "inbox-reply-recipient"); the note's always-mounted status region stays.
   const pill = pane.locator('[data-recipient]');
   await expect(pill).toHaveAttribute('aria-label', 'To Pi, ended. Change who gets this reply');
   await expect(pane.locator('[data-asker-note]')).toHaveAttribute('role', 'status');
   await expect(pane.locator('[data-asker-ended]')).toHaveCount(0);
   await shot('1-ended');
 
-  // Send does not send: the pill's list opens once, the live session first and the asker, ended, last.
-  // "Where should this reply go?" is gone.
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   const list = pane.locator('[data-recipient-list]');
   await expect(list).toBeVisible();
@@ -270,13 +237,11 @@ test('the asking session stopped and another is live: the thread says so, Send a
   await shot('2-choose');
   expect((await threadMessages()).filter((m) => m.author.kind === 'person')).toHaveLength(0);
 
-  // Esc closes the list; the thread stays open with the words.
   await page.keyboard.press('Escape');
   await expect(list).toHaveCount(0);
   await expect(pane.getByRole('heading', { name: 'Retry policy for the nightly ledger sync' })).toBeVisible();
   await expect(box).toHaveValue(words);
 
-  // The live session picked by name: the pill names it, and Mod+Enter sends to it.
   await pill.click();
   await list.locator('[data-recipient-row="pi-session-taker"] .ib-rpick-name').click();
   await expect(list).toHaveCount(0);
@@ -284,7 +249,6 @@ test('the asking session stopped and another is live: the thread says so, Send a
   await box.focus();
   await page.keyboard.press('ControlOrMeta+Enter');
 
-  // The reply, addressed to the picked session, and its wake.
   const command = await waitFor('the redirected reply handed to the second session', () => taker.commands[0]);
   expect(command).toMatchObject({ type: 'reply', thread_id: world.threadId, redirected_from: 'Pi' });
   const lines = inboxWakeText(command).split('\n');
@@ -293,7 +257,6 @@ test('the asking session stopped and another is live: the thread says so, Send a
   expect((await threadMessages()).at(-1)).toMatchObject({ id: command.id, to: { host: 'pi', session: 'pi-session-taker' } });
   const mine = pane.locator('article.ib-message[data-author="person"]');
   await expect(mine.locator('.ib-to')).toHaveText('to Pi (another session)');
-  // The taker's connection polls idle: it takes it within seconds.
   await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Pi (another session)…');
 
   await taker.deliver(command.id);
@@ -307,12 +270,10 @@ test('nothing live: the note says the reply will wait, Send sends at once, and t
   const { page } = world;
   for (const connection of world.connections) await connection.stop();
   world.connections = [];
-  // The asking session asks again in the thread (it is still the ended one).
   const messages = await threadMessages();
   await world.pi.send({ project_path: world.ledger, reply_to: messages.at(-1)!.id, body: 'One more: should a failed retry page on-call at night?' }, { wakes: true });
   const pane = page.locator('section.ib-pane');
   const note = pane.locator('[data-asker-ended="none-live"]');
-  // The send itself is presence (an MCP call naming the session): ended again 60 s after it.
   await expect(note).toBeVisible({ timeout: 100_000 });
   await expect(note).toHaveText('This Pi session has ended, and no agent is running in ledger now. A reply waits here until that session is resumed.');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
@@ -340,11 +301,9 @@ test('a saved reply moves to a session that started later, which then keeps the 
   await pane.locator('[data-readdress-open]').click();
   await pane.locator('[data-readdress-session="pi-session-late"]').click();
   await shot('5-move');
-  // On a phone a long session name wraps the buttons, and Cancel stays on the screen.
   await page.setViewportSize({ width: 320, height: 700 });
   const form = pane.locator('[data-readdress-choice]');
   await form.getByRole('button', { name: 'Cancel' }).scrollIntoViewIfNeeded();
-  // Against the form, which a sideways scroll moves with its buttons: a row too wide for it runs off the screen.
   const inside = await form.evaluate((el) => {
     const edge = el.getBoundingClientRect().right;
     return [...el.querySelectorAll('.ib-route-acts .ib-btn')].map((button) => button.getBoundingClientRect().right <= edge + 0.5);
@@ -391,7 +350,6 @@ test('handed on, the new owner took it and ended without writing: a later reply 
   await gone.deliver(taken.id);
   await gone.stop();
 
-  // Words for the new owner, saved once it has ended (60 s with no poll).
   await page.reload();
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await pane.locator('textarea:not([data-question-other])').first().fill('Also cap the retries at five.');
@@ -405,7 +363,6 @@ test('handed on, the new owner took it and ended without writing: a later reply 
   const moved = await waitFor('the moved reply handed to the other session', () => late.commands.find((c) => c.id === moving.id));
   await late.deliver(moved.id);
 
-  // Its answer does not hand the thread back to the session that ended, and the header no longer says it did.
   await world.pi.send({ project_path: world.ledger, reply_to: moved.id, agent_session: 'pi-session-late', body: 'Capped at five.' } as never, { wakes: true });
   await expect(pane.locator('[data-thread-owner]')).toHaveCount(0);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();

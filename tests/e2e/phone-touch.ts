@@ -1,16 +1,6 @@
-/**
- * A phone's finger for the e2e specs (inbox-phone-stepping.spec.ts,
- * inbox-image-swipe.spec.ts), and the small PNGs they attach.
- *
- * Chromium gets real touches through the DevTools protocol (the browser's own
- * gesture handling runs, and pointer events with it). WebKit has no such
- * channel, so its touch events are dispatched where the finger is, as iOS
- * sends them to the page (no pointer events: an image never pans under them).
- */
 import type { Page } from '@playwright/test';
 import { deflateSync } from 'node:zlib';
 
-/** A small PNG drawn here (a two-tone gradient with bands), `width` × `height`. */
 export function png(width: number, height: number, hue: [number, number, number]): Buffer {
   const table = Array.from({ length: 256 }, (_, n) => {
     let c = n;
@@ -54,7 +44,6 @@ export interface Point {
   y: number;
 }
 
-/** Two real fingers (Chromium only, the DevTools protocol): down at `from`, moved to `to` together, lifted. */
 export async function pinch(page: Page, from: [Point, Point], to: [Point, Point], moves = 12): Promise<void> {
   const cdp = await page.context().newCDPSession(page);
   const at = (t: number) => from.map((a, id) => ({ id, x: a.x + (to[id]!.x - a.x) * t, y: a.y + (to[id]!.y - a.y) * t }));
@@ -67,7 +56,6 @@ export async function pinch(page: Page, from: [Point, Point], to: [Point, Point]
   await cdp.detach();
 }
 
-/** A real long press (Chromium only, the browser's own gesture): it selects the word under it, as on Android. */
 export async function longPress(page: Page, at: Point, duration = 1_000): Promise<void> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Input.synthesizeTapGesture', { x: at.x, y: at.y, duration, tapCount: 1, gestureSourceType: 'touch' });
@@ -75,13 +63,10 @@ export async function longPress(page: Page, at: Point, duration = 1_000): Promis
 }
 
 export interface Finger {
-  /** Put one finger down at (x, y) and move it by (dx, dy) in `moves` moves. */
   down(x: number, y: number, dx: number, dy: number, moves?: number): Promise<void>;
-  /** Lift it. */
   up(): Promise<void>;
 }
 
-/** One finger, real (Chromium, the DevTools protocol) or as iOS sends its events to the page (WebKit). */
 export async function finger(page: Page, browserName: 'chromium' | 'webkit'): Promise<Finger> {
   if (browserName === 'chromium') {
     const cdp = await page.context().newCDPSession(page);
@@ -105,7 +90,6 @@ export async function finger(page: Page, browserName: 'chromium' | 'webkit'): Pr
     async down(x, y, dx, dy, moves = 10) {
       await page.evaluate(
         async ({ x, y, dx, dy, moves }) => {
-          // The element under the finger, inside shadow roots too (iOS targets the innermost one; Pierre's code is in shadow roots).
           let target = document.elementFromPoint(x, y)!;
           while (target.shadowRoot) {
             const inner = target.shadowRoot.elementFromPoint(x, y);

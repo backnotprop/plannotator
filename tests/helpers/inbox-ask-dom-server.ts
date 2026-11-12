@@ -1,25 +1,3 @@
-/**
- * A real Inbox for the Ask AI window's DOM tests, as its own process (under
- * DOM_TESTS=1 happy-dom replaces Response, which Bun.serve cannot answer with).
- *
- *   bun tests/helpers/inbox-ask-dom-server.ts <data dir> <projects dir>
- *
- * Seeds a project with one thread per test need, each owned by a live scripted
- * agent (tests/helpers/inbox-ask-agent.ts) on its own session: `first`,
- * `second`, `mine` (for a reply), `busy`, `moved`, `flaky`, `note`, `damaged`,
- * and `resolved`, which the person archived. `session-new-owner` owns nothing
- * until a test hands `moved` to it.
- * Prints one JSON line naming the threads, and `control`, the port a test
- * drives the agents through:
- *
- *   POST /busy     `{ session, busy }`
- *   POST /hand-off `{}`: session-new-owner replies in `moved`, and owns it now
- *   GET  /agent?session=…  `{ asked, interrupts }`
- *
- * Runs until killed. Ask has no switch, and Code review stays off. A question with "slowly" in
- * it is not answered for 20 seconds, and one with "flaky" in it fails the first
- * time it is asked.
- */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -56,7 +34,6 @@ const agents = new Map(
       token: server.token,
       session,
       project,
-      // The test's question comes back in the words, so a test can tell whose answer it reads.
       reply: async (text) => {
         const question = text.trim().split("\n").at(-1) ?? "";
         if (question.includes("slowly")) await new Promise((done) => setTimeout(done, 20_000));

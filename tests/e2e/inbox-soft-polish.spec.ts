@@ -1,26 +1,3 @@
-/**
- * The Soft look's polish pass (owner, 2026-10-17), proved in a real browser
- * against the compiled binary:
- *
- *  - Mark read's `E` is a keycap inside its borderless button, centred on it;
- *  - a tile's Open holds no room, at rest or shown (hover, keyboard focus), so
- *    a name is never cut more than in today's look and never differently when
- *    Open shows, left to right and right to left; a screen without hover keeps
- *    its room (inbox-attachment-hover.spec.ts proves nothing moves);
- *  - layout corners one step smaller (panes 10, row pills 8, tiles 10), buttons
- *    unchanged;
- *  - the text size (`--inbox-text-size`, the Text size setting, 14 by default):
- *    13 takes the base to 13 with the window and ui's drawing following,
- *    nothing under 11 px, and 15 grows every size;
- *  - list rows with no line between them, at today's pitch, light and dark,
- *    beside an open thread and on a phone.
- *
- * Each part is checked against its switch turned off (today's look) in the same
- * page, by a style that sets the switch to `initial`. Build the binary first
- * (see inbox.spec.ts), then `bun run test:e2e:inbox`. PNGs land in
- * .local/proof/soft-polish/.
- */
-
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -47,7 +24,6 @@ interface World {
 
 let world: World;
 
-/** Turns one Soft switch off (today's look) until the returned function runs. */
 async function todays(page: Page, ...switches: string[]): Promise<() => Promise<void>> {
   const css = `.pn-inbox, :root.light .pn-inbox { ${switches.map((s) => `--ib-soft-${s}: initial !important;`).join(' ')} }`;
   const handle = await page.addStyleTag({ content: css });
@@ -91,7 +67,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'docs', 'retry-plan.md'), '# Retry plan\n\nRetry once with the same key.\n');
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const first = await claude.send({ project_path: project, subject: 'Refund worker: retry a 409?', thread: 'refunds', body: ASK, attachments: [`docs/${LONG}`, `docs/${RTL}`, 'docs/retry-plan.md'] });
-  // Each in a thread of its own, under its own name.
   for (const subject of ['Nightly build is green', 'Ledger ownership', 'Rotate the processor key?', 'Idempotency cache and paging']) {
     await new Promise((r) => setTimeout(r, 15));
     await claude.send({ project_path: project, subject, thread: subject.toLowerCase().replace(/\W+/g, '-').replace(/-$/, ''), body: `${subject}. Details in the runbook.` });
@@ -127,9 +102,7 @@ test("rows have no line between them at today's pitch; the hover pill still mark
   await back();
   expect(today.map((r) => r.h)).toEqual(soft.map((r) => r.h));
   expect(today[0]!.line).not.toBe('rgba(0, 0, 0, 0)');
-  // Dark too.
   await page.evaluate(() => document.documentElement.classList.replace('light', 'dark'));
-  // (ui fades colours over 150 ms when the theme changes.)
   await expect.poll(() => rows.first().evaluate((e) => getComputedStyle(e).borderBottomColor)).toBe('rgba(0, 0, 0, 0)');
   await page.evaluate(() => document.documentElement.classList.replace('dark', 'light'));
   await rows.nth(1).hover();
@@ -143,9 +116,7 @@ test('beside an open thread the two-line rows have no line either', async () => 
   const rows = page.locator('.ib-nrow');
   await expect(rows.first()).toBeVisible();
   for (const line of await rows.evaluateAll((els) => els.map((e) => getComputedStyle(e).borderBottomColor))) expect(line).toBe('rgba(0, 0, 0, 0)');
-  // The open row's pill reads with no lines around it.
   expect(await page.locator('.ib-nrow.ib-sel').evaluate((e) => getComputedStyle(e, '::before').backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
-  // Only the rows lose their lines: the thread's own lines (its header's, its foot's) keep today's colour.
   const lines = () => page.evaluate(() => [getComputedStyle(document.querySelector('.ib-phead')!).borderBottomColor, getComputedStyle(document.querySelector('.ib-pfoot')!).borderTopColor]);
   const soft = await lines();
   const back = await todays(page, 'rows');
@@ -156,7 +127,6 @@ test('beside an open thread the two-line rows have no line either', async () => 
   await shot(page, '2-thread');
 });
 
-// The header's controls are icon buttons (approval "inbox-thread-header"); Mark read and its E live in the ⋯ menu.
 test("the header's icon buttons fill on hover in both looks", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
@@ -166,8 +136,6 @@ test("the header's icon buttons fill on hover in both looks", async () => {
   await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
   await page.locator('.ib-phead').screenshot({ path: join(proofDir, '3-header-hover.png') });
   await page.mouse.move(700, 880);
-  // Soft's `hbtns` switch now reaches the header only through the icon buttons' hover (`--ib-hb-hover-s`): the labelled
-  // `.ib-hbtn` buttons are gone.
   const back = await todays(page, 'hbtns');
   await button.hover();
   await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
@@ -196,7 +164,6 @@ test("a tile's Open holds no room, at rest or shown (hover, keyboard focus): it 
           shown: head.clientWidth,
           position: getComputedStyle(openEl).position,
           opacity: Number(getComputedStyle(openEl).opacity),
-          // The name's end (the extension) and its start are both inside the text box.
           tailInside: tail.left >= text.left - 0.5 && tail.right <= text.right + 0.5,
           nameInside: name.left >= text.left - 0.5 && name.right <= text.right + 0.5,
           openInside: open.right <= t.getBoundingClientRect().right,
@@ -209,17 +176,14 @@ test("a tile's Open holds no room, at rest or shown (hover, keyboard focus): it 
     const today = await measure();
     await back();
     expect(today.position).toBe('static');
-    // At rest more of the name shows than in today's look, where Open keeps its room.
     expect(rest.shown, name).toBeGreaterThan(today.shown);
     await tile.hover();
     await expect.poll(async () => (await measure()).opacity).toBe(1);
     const hovered = await measure();
-    // Out of the row still: the name is cut exactly as at rest (inbox-attachment-hover.spec.ts proves every box).
     expect(hovered.position, name).toBe('absolute');
     expect(hovered, `${name} hovered`).toMatchObject({ tailInside: true, nameInside: true, openInside: true });
     expect(hovered.shown, name).toBe(rest.shown);
     await page.locator('.ib-atts').last().screenshot({ path: join(proofDir, `4-tiles-hover-${name === LONG ? 'ltr' : 'rtl'}.png`) });
-    // From the keyboard: focus-visible shows Open the same way.
     await page.mouse.move(700, 880);
     await expect.poll(async () => (await measure()).opacity).toBe(0);
     await tile.focus();
@@ -244,7 +208,6 @@ test('layout corners are one step smaller; buttons keep theirs', async () => {
   expect(await r('.ib-band')).toBe('8px');
   expect(await r('.ib-att-t')).toBe('10px');
   expect(await r('.pn-inbox fieldset.question-block')).toBe('12px');
-  // Buttons are not layout: the header's and the foot's keep their corners.
   expect(await r('section.ib-pane [data-thread-more]')).toBe('10px');
   expect(await r('.ib-pfoot .ib-btn')).toBe('999px');
 });
@@ -272,7 +235,6 @@ test("the text size is 14 by default; at 13 the base is 13 and every size follow
   expect(on.base).toBe('13px');
   expect(parseFloat(on.prompt)).toBeCloseTo(15 * (13 / 14), 1);
   expect(parseFloat(on.subject)).toBeLessThan(parseFloat(off.subject));
-  // One knob: every text that was 11 px or more is still at least 11 px, and none grew.
   expect(on.each.length).toBe(off.each.length);
   for (let i = 0; i < off.each.length; i++) {
     expect(on.each[i]!).toBeLessThanOrEqual(off.each[i]! + 0.01);

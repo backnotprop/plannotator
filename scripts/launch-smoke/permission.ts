@@ -1,35 +1,3 @@
-/**
- * Launch PR 2, the real-CLI smoke for permission prompts answered in the Inbox.
- * Manual, NEVER in CI: it starts a real Claude Code session. Run by hand:
- *
- *   bun scripts/launch-smoke/permission.ts <scratch dir under .ops/work/launch-pr2-smoke/> <plannotator binary built from this branch>
- *
- * The binary is the permission hook's command (`<binary> inbox permission-hook`
- * in the launch's settings file): this process hosts the Inbox from source,
- * and its own argv is this script.
- *
- * Manual permission mode: the person's own default mode may approve a command
- * by itself (`auto`), so no prompt would show. A `claude` wrapper first on the
- * PATH adds `--permission-mode default` to the `--bg` call alone; every other
- * call passes through unchanged.
- *
- * What it proves, through the real Inbox endpoints as the window uses them:
- *  - The session's first Bash call asks in the launch thread (a `perm:` author),
- *    the run line reads `waiting_answer`, and Claude's own list says the
- *    session waits. Allow once: the command runs.
- *  - The second asks again. Deny with a reason: the command never runs, the
- *    transcript carries the deny message, and the agent goes on and answers.
- *  - The questions never reach the session's own poll; the agent answers once.
- *
- * Isolation: a test Inbox in this process on <scratch>/data with its own
- * config.json, never the person's Inbox or ~/.plannotator; a stand-in login
- * shell with a clean env. Claude's own login lives under the real HOME, so
- * HOME stays real for `claude` (nothing is written to ~/.claude but the
- * session's transcript). Teardown deletes the launch (stop, rm), stops and
- * removes anything still listed in the scratch folder, and deletes the launch
- * folders (they hold keys) and the token file.
- */
-
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
@@ -64,7 +32,6 @@ writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enab
 
 const realClaude = Bun.which("claude");
 if (!realClaude) throw new Error("claude is not on PATH");
-// The wrapper: `--bg` in manual permission mode, every other call as it is.
 const wrapper = join(binDir, "claude");
 writeFileSync(
   wrapper,
@@ -73,7 +40,6 @@ writeFileSync(
 chmodSync(wrapper, 0o755);
 const cleanPath = `${binDir}:${dirname(realClaude)}:/usr/bin:/bin:/usr/sbin:/sbin`;
 process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
-// The stand-in login shell: a clean env, the wrapper first on PATH.
 const shell = join(root, "login-shell.sh");
 writeFileSync(shell, `#!/bin/sh\nexec /usr/bin/env -i HOME="${homedir()}" USER="$USER" SHELL="${shell}" PATH="${cleanPath}" LANG=en_US.UTF-8 /bin/sh -c "$2"\n`);
 chmodSync(shell, 0o755);
@@ -120,7 +86,6 @@ const transcriptOf = (session: string): string => {
   }
   return "";
 };
-/** The person's answer, as the window sends it: one reply that picks and sends. */
 const answer = async (message: any, pick: { selected: string[]; other?: string }, key: string) => {
   const q = message.questions[0];
   return api(`/api/inbox/messages/${message.id}/reply`, {
@@ -156,7 +121,6 @@ try {
   results.settings_hook = settings.hooks?.PermissionRequest?.[0]?.hooks?.[0]?.command?.replace(realpathSync(binary), "<binary>");
   results.settings_hook_timeout_s = settings.hooks?.PermissionRequest?.[0]?.hooks?.[0]?.timeout;
 
-  // ── 1: Allow once ──
   const started = Date.now();
   const first = await until("the first permission question", 240_000, async () => (await permQuestions(threadId))[0]);
   results.q1_after_s = Math.round((Date.now() - started) / 1000);
@@ -173,8 +137,6 @@ try {
   results.q1_host = listed.map((a) => ({ state: a.state, status: a.status, waitingFor: a.waitingFor }));
   results.allowed_before_answer = existsSync(join(work, "allowed.txt"));
   log(`question 1 after ${results.q1_after_s}s: ${results.q1_prompt}; host ${JSON.stringify(results.q1_host)}`);
-  // Wait past the host's settle time and two host reads (the thread reads below ask for them): a live question
-  // must not read as answered in Terminal while Claude Code waits on the hook.
   const holdEnd = Date.now() + 25_000;
   const hostSeen = new Set<string>();
   while (Date.now() < holdEnd) {
@@ -192,14 +154,12 @@ try {
   results.allowed_after_answer_ms = Date.now() - allowedAt;
   log(`allowed.txt made ${results.allowed_after_answer_ms} ms after Allow once`);
 
-  // ── 2: Deny with a reason ──
   const second = await until("the second permission question", 120_000, async () => (await permQuestions(threadId)).find((m) => m.id !== first.id));
   results.q2_prompt = second.questions[0].prompt;
   results.q2_body = second.body;
   const reason = "Only the first file is needed for this test.";
   const a2 = await answer(second, { selected: [], other: reason }, "smoke-perm-answer-2");
   results.a2_status = a2.status;
-  // Any later prompt (the `ls`, when the person's setup does not allow it already) is allowed once and counted.
   const extra: string[] = [];
   const reply = await until("the agent's answer", 180_000, async () => {
     for (const m of await permQuestions(threadId)) {

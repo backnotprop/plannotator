@@ -1,17 +1,3 @@
-/**
- * Ctrl+C / Cmd+C once the selection's comment composer is open (annotate).
- *
- * web-highlighter clears the browser's selection on mouseup and paints the
- * yellow pending highlight; the page put the words on the clipboard itself,
- * but only while the selection toolbar was up. Pressing the toolbar's Comment
- * moves the focus into the composer's textarea, and from then on Ctrl+C
- * copied nothing. Failures to catch: the composer stage leaving the clipboard
- * as it was (a sentinel written first tells "nothing" from "empty"), and text
- * typed and selected in the textarea losing to the highlight.
- *
- * Against the compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR,
- * headless. Build the binary first (see inbox.spec.ts).
- */
 import { expect, test, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -22,7 +8,6 @@ import { NO_BROWSER } from '../helpers/no-browser';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 
-// Every first-run dialog already seen, so the page opens on the session.
 const COOKIES: [string, string][] = [
   ['plannotator-plan-look-choice-resolved', 'true'],
   ['plannotator-plan-look-v2', 'resolved'],
@@ -42,7 +27,6 @@ const COOKIES: [string, string][] = [
 
 const SENTINEL = 'clipboard before the copy';
 
-/** Seeds the clipboard, presses Ctrl+C (Cmd+C on a Mac) and reads it back. */
 async function copied(page: Page): Promise<string> {
   await page.evaluate((s) => navigator.clipboard.writeText(s), SENTINEL);
   await page.keyboard.press('ControlOrMeta+c');
@@ -77,7 +61,6 @@ test('annotate: Ctrl+C copies the highlighted words with the comment composer op
     const page = await context.newPage();
     await page.goto(url);
 
-    // Drag along the line from its first word.
     const para = page.getByText('The refund service retries', { exact: false }).first();
     const box = (await para.boundingBox())!;
     await page.mouse.move(box.x + 1, box.y + 8);
@@ -89,13 +72,11 @@ test('annotate: Ctrl+C copies the highlighted words with the comment composer op
     expect(selected, 'toolbar up: the highlighted words').not.toBe(SENTINEL);
     expect('The refund service retries a failed payout'.startsWith(selected), `a prefix of the line: ${selected}`).toBe(true);
 
-    // The toolbar's Comment: the composer's textarea takes the focus.
     await page.locator('.annotation-toolbar button.text-annotation-comment').click();
     const area = page.locator('[data-comment-popover] textarea');
     await expect(area).toBeFocused();
     expect(await copied(page), 'composer open, empty textarea: the same words').toBe(selected);
 
-    // Text the person typed and selected copies natively.
     await area.fill('Why three times?');
     await area.evaluate((t: HTMLTextAreaElement) => t.setSelectionRange(4, 15));
     expect(await copied(page), 'typed text selected: native copy').toBe('three times');

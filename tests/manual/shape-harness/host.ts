@@ -1,13 +1,3 @@
-// ┌──────────────────────────────────────────────────────────────────────────┐
-// │ HARNESS HOST AND STAND-IN AGENT. IN MEMORY. SCRIPTED. NOT A MODEL.       │
-// │                                                                          │
-// │ A ShapeHost over an in-memory store, for screenshots and for trying the  │
-// │ board by hand. Its "agent" matches what you marked and wrote against     │
-// │ three canned cases and writes a canned new version. It never calls a     │
-// │ model, a CLI, a server or the Inbox. In the product the answer comes     │
-// │ from the shape's session and a change is a version the agent writes      │
-// │ with `plannotator shape update`.                                         │
-// └──────────────────────────────────────────────────────────────────────────┘
 import {
   shapeNoteId,
   shapeParts,
@@ -25,10 +15,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface HarnessOptions {
   stage: 'before' | 'after';
-  /** Open on v2 and move to v3: "what changed since you looked". */
   since: boolean;
   session: ShapeSessionStatus['state'];
-  /** Seed notes (a waiting change, an answered ask). */
   notes: boolean;
 }
 
@@ -82,7 +70,6 @@ export function createHarnessHost(opts: HarnessOptions): ShapeHost & { id: strin
   const listeners = new Set<(e: ShapeEvent) => void>();
   const emit = (e: ShapeEvent) => listeners.forEach((l) => l(e));
 
-  /** The stand-in agent: an answer, and maybe a new version. */
   const agent = (input: ShapeNoteInput): { answer: string; next: SnoozeModel | null } => {
     const t = input.text;
     const part = input.part ?? '';

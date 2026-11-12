@@ -1,17 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Release-time check: a package about to be published must not depend on a
- * sibling repo package at a version npm doesn't have. ui 0.53.1 pins
- * @plannotator/core 0.25.14 while npm has 0.25.13, so publishing ui before
- * core ships a ui that fails to install with ETARGET.
- *
- *   bun scripts/check-sibling-deps.ts @plannotator/core @plannotator/ui
- *
- * Name every package this release publishes. A sibling named there counts at
- * its repo version (publish it first); any other sibling must already have a
- * matching version on npm. `workspace:` specs are read the way `bun pm pack`
- * rewrites them. Reads the npm registry, so it is not a unit test.
- */
 import { resolve } from "node:path";
 import { findRepoPackages, type PackageManifest } from "../tests/helpers/published-packages";
 
@@ -22,7 +9,6 @@ export interface SiblingGap {
 	reason: string;
 }
 
-/** The range a published manifest ends up with, or null for a spec this check doesn't read (npm:, file:, git). */
 function publishedRange(spec: string, siblingVersion: string): string | null {
 	if (spec.startsWith("workspace:")) {
 		const rest = spec.slice("workspace:".length);

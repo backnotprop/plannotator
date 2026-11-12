@@ -1,24 +1,3 @@
-/**
- * Guard for the two CI tiers (docs/agent-guides/project-and-development.md,
- * "CI tiers").
- *
- * The merge script merges a PR only when its fast-tier checks and every
- * `Full CI (all green)` check on its head succeeded. Each failure this
- * catches would let a PR merge with part of the heavy tier never run, or
- * leave main without its runs of the full browser suite:
- *  - a heavy job missing from its workflow's gate (a skipped or failed job
- *    would not hold the gate back);
- *  - a heavy workflow that does not run when the `ci:full` label is added, or
- *    a root job that ignores the label;
- *  - the fast tier rerunning (and cancelling itself) on every label change;
- *  - a heavy workflow running again after every merge to main (the train
- *    already ran it on the merged tree), or losing the nightly and manual runs
- *    that cover main and that a release dispatches before its tag;
- *  - the full browser suite (inbox-e2e.yml) running on every `ci:full` PR
- *    again, losing its two-hourly run on main, its head check or its blame
- *    job, or a PR's `ci:e2e` run not being held to its gate;
- *  - the browser smoke (browser-smoke.yml) no longer running on every PR.
- */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -28,10 +7,8 @@ const GATE = 'Full CI (all green)';
 const LABEL_CHECK = "contains(github.event.pull_request.labels.*.name, 'ci:full')";
 const HEAVY = ['windows.yml', 'release.yml', 'inbox-pi.yml', 'inbox-claude-code.yml', 'relay.yml'];
 const FAST = ['test.yml', 'security.yml', 'browser-smoke.yml'];
-/** The full browser suite: on main every two hours, on a PR only with one of these labels. */
 const E2E = 'inbox-e2e.yml';
 const E2E_LABELS = ['ci:e2e', 'ci:e2e-all'];
-/** Heavy workflows that cover main nightly; release.yml runs on its tags instead. */
 const NIGHTLY = HEAVY.filter((file) => file !== 'release.yml');
 
 type Job = { name?: string; if?: string; needs?: string | string[]; steps?: { run?: string }[] };
@@ -50,7 +27,6 @@ function workflow(file: string): Workflow {
 }
 
 const needsOf = (job: Job) => (job.needs === undefined ? [] : [job.needs].flat());
-/** Jobs that never run on a PR: the release's tag-only publishing jobs. */
 const tagOnly = (job: Job) => (job.if ?? '').includes("startsWith(github.ref, 'refs/tags/v')");
 
 describe('CI tiers', () => {

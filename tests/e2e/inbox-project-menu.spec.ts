@@ -1,20 +1,3 @@
-/**
- * The project menu (design record "inbox-project-menu", approved
- * 2026-10-14), in a real browser against the compiled binary, with agents
- * writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *
- *  - ⋯ shows on keyboard focus; Enter opens the menu, the arrows move, and
- *    Escape puts focus back on ⋯;
- *  - Mark all as read takes every waiting thread of the project, warns that
- *    an agent was stopped, and Z undoes the whole batch;
- *  - Archive all from the keyboard hides the project, focus lands on Inbox
- *    (never the page), and the agent's next reply brings the project back;
- *  - a phone: ⋯ always shown in the navigation sheet, the menu a sheet.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs land in .local/proof/project-menu/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -102,7 +85,6 @@ test('the keyboard reaches ⋯, Enter opens the menu, Escape gives focus back', 
   const more = billing.locator('.ib-pmore');
   await expect(more).toHaveCSS('opacity', '0');
   await billing.locator('.ib-proj').focus();
-  // The count steps aside for ⋯ for the eye only: a screen reader still hears it with the project.
   await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Tab');
   await expect(billing.locator('.ib-proj')).toBeFocused();
@@ -131,24 +113,19 @@ test('Mark all as read takes every waiting thread, warns, and Z undoes the batch
   await page.locator('[data-project-action="read"]').click();
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast).toContainText('Marked 3 threads read');
-  // The warning is the whole detail; the project rides only the live region.
   await expect(toast.locator('.ib-tdetail')).toHaveText('Claude Code was stopped');
   await expect(page.locator('[data-inbox-live]')).toHaveText('Marked 3 threads read in billing. Claude Code was stopped. Press Z to undo.');
   await page.screenshot({ path: join(proofDir, '02-mark-all-read.png') });
-  // The list holds still (approval "inbox-list-view", R7): every row read in place, none moved.
   for (const [id, group] of [[threads.worker, 'stopped'], [threads.search, 'waiting'], [threads.news, 'new']] as const) {
     await expect(page.locator(`.ib-lbody [data-thread-id="${id}"]`)).not.toHaveClass(/\bib-u\b/);
     expect(await sectionOf(page, id)).toBe(group);
   }
-  // The list's title tidies it: each in Quiet.
   await page.locator('[data-list-refresh]').click();
   await page.locator('[data-section-id="quiet"] .ib-band').click();
   for (const id of [threads.worker, threads.search, threads.news]) await expect.poll(() => sectionOf(page, id)).toBe('quiet');
-  // The other project is untouched.
   await expect.poll(() => sectionOf(page, threads.docs)).toBe('waiting');
   await page.locator('body').focus();
   await page.keyboard.press('z');
-  // Undone in place (bold again in Quiet); the next tidy puts each back where it was.
   await expect(page.locator(`.ib-lbody [data-thread-id="${threads.news}"]`)).toHaveClass(/\bib-u\b/);
   await page.locator('[data-list-refresh]').click();
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
@@ -164,7 +141,6 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   await expect(billing.locator('.ib-pmore')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-project-menu]')).toBeVisible();
-  // Focus moves into the menu (its first item) a frame after it opens.
   await expect(page.locator('[data-project-action="read"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-project-action="archive"]')).toBeFocused();
@@ -173,7 +149,6 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   await expect(billing).toHaveCount(0);
   await expect(page.locator('.ib-nav', { hasText: 'Inbox' }).first()).toBeFocused();
   await page.screenshot({ path: join(proofDir, '03-archive-all-hidden.png') });
-  // The agent answers in one of the archived threads: it comes back, and the project with it.
   await world.agent.send({ project_path: world.billing, body: 'One more thing on search.', reply_to: world.messages.search });
   await page.reload();
   await expect(row(page, 'billing')).toBeVisible();
@@ -192,7 +167,6 @@ test('a phone: ⋯ always shown in the sheet, the menu a sheet titled by the pro
   const menu = page.locator('[data-project-menu]');
   await expect(menu.locator('.ib-pm-title')).toHaveText('docs');
   const box = await menu.boundingBox();
-  // A sheet from the bottom edge, across the screen.
   expect(box!.width).toBeGreaterThan(360);
   expect(box!.y + box!.height).toBeGreaterThan(844 - 24);
   await page.waitForTimeout(300);

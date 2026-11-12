@@ -2,14 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
-// Shape's board (packages/ui/components/shape) draws in the Inbox, in the
-// standalone Shapes page and in hosts that are not Plannotator at all; each
-// passes a ShapeHost. A request, a read of the page's address or storage, or an
-// import of an app's own code (the guide chain, code review, the Inbox, the
-// server-side shared package) in this folder is the regression this guards:
-// the board would work in one host and fail in the next. The guide chain and
-// the code hover card come in as props for exactly this reason.
-
 const root = resolve(import.meta.dir, '..');
 const UI = join(root, 'packages/ui');
 const SHAPE = join(UI, 'components/shape');
@@ -30,7 +22,6 @@ function importsOf(source: string): string[] {
   return [...source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"]+)['"]/g)].map((match) => match[1]!);
 }
 
-/** ui's own files and the dependencies ui already ships with. */
 function allowedImport(file: string, specifier: string): boolean {
   if (specifier.startsWith('.')) return resolve(dirname(file), specifier).startsWith(`${UI}/`);
   return /^(react|react-dom|@plannotator\/core|@pierre\/diffs|dompurify)(\/|$)/.test(specifier);

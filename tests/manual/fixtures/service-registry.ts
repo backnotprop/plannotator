@@ -1,10 +1,3 @@
-/**
- * Service Registry
- *
- * Manages service lifecycle, dependency injection, and health monitoring
- * for the Acme API platform.
- */
-
 export interface ServiceConfig {
   name: string;
   version: string;
@@ -30,7 +23,6 @@ export interface Service {
 
 type ServiceFactory = (config: ServiceConfig) => Service;
 
-// Default configurations for well-known services
 const DEFAULT_CONFIGS: Record<string, Partial<ServiceConfig>> = {
   database: { timeout: 5000, retries: 3 },
   cache: { timeout: 2000, retries: 1 },
@@ -46,10 +38,6 @@ export class ServiceRegistry {
   private startOrder: string[] = [];
   private isShuttingDown = false;
 
-  /**
-   * Register a service factory for lazy instantiation.
-   * The factory is called when the service is first requested.
-   */
   registerFactory(name: string, factory: ServiceFactory): void {
     if (this.factories.has(name)) {
       throw new Error(`Factory already registered for service: ${name}`);
@@ -57,9 +45,6 @@ export class ServiceRegistry {
     this.factories.set(name, factory);
   }
 
-  /**
-   * Get a service by name. Creates it from the factory if not yet instantiated.
-   */
   async getService(name: string): Promise<Service> {
     const existing = this.services.get(name);
     if (existing) return existing;
@@ -84,10 +69,6 @@ export class ServiceRegistry {
     return service;
   }
 
-  /**
-   * Start all registered services in dependency order.
-   * Services are started sequentially to respect dependencies.
-   */
   async startAll(): Promise<void> {
     console.log(`Starting ${this.services.size} services...`);
 
@@ -108,10 +89,6 @@ export class ServiceRegistry {
     }
   }
 
-  /**
-   * Stop all services in reverse startup order.
-   * Ensures graceful shutdown with proper resource cleanup.
-   */
   async stopAll(): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
@@ -136,10 +113,6 @@ export class ServiceRegistry {
     this.isShuttingDown = false;
   }
 
-  /**
-   * Run health checks on all active services.
-   * Returns a summary of the overall system health.
-   */
   async healthCheckAll(): Promise<Map<string, ServiceHealth>> {
     const results = new Map<string, ServiceHealth>();
 
@@ -160,9 +133,6 @@ export class ServiceRegistry {
     return results;
   }
 
-  /**
-   * List all registered service names and their current status.
-   */
   listServices(): Array<{ name: string; running: boolean; health?: ServiceHealth }> {
     return Array.from(this.factories.keys()).map(name => {
       const service = this.services.get(name);
@@ -174,16 +144,10 @@ export class ServiceRegistry {
     });
   }
 
-  /**
-   * Get the count of currently running services.
-   */
   get runningCount(): number {
     return this.services.size;
   }
 
-  /**
-   * Check if a specific service is currently running.
-   */
   isRunning(name: string): boolean {
     return this.services.has(name);
   }

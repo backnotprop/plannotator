@@ -1,23 +1,3 @@
-/**
- * The list's "N new" line and the project a session started in a checkouts folder files under, proved
- * against the compiled binary with agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts).
- *
- * The owner, 2026-11-02: the held line read "1 new in appnotes · Users/ramos/workspaces/projects" on two
- * lines beside Show. `~/workspaces/projects/appnotes` is a plain folder of notes whose `worktrees` folder
- * holds the repository's checkouts (`worktrees/main` and linked worktrees); a session started in the folder
- * made a folder project beside the repository's, both "appnotes", and the window's name climbed to the root.
- *
- * - An Inbox from before the fix left a folder project beside the repository's: the first start folds it into
- *   the repository's project (Combine projects' write), so the list and the sidebar read one "appnotes".
- * - A session started in that folder files into the repository's project (no folder project is made).
- * - The line is ONE line at 1440 px (the list wide, and narrow beside a thread), on a 390 px phone and on a
- *   320 px one: the count and Show keep their size, a long project name is cut with "…", and on a desktop the
- *   whole line is the tooltip while it is cut.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-held-notice-line.spec.ts`.
- */
-
 import { devices, expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
@@ -36,7 +16,6 @@ interface World {
   folder: string;
   main: string;
   long: string;
-  /** The folder project an earlier Inbox made, and the thread it holds. */
   old: { id: string; thread: string };
   repo: string;
 }
@@ -55,11 +34,9 @@ test.describe.configure({ mode: 'serial' });
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-heldline-e2e-');
-  // Never a real agent's CLI: no connection runs (PLANNOTATOR_INBOX_CONNECT=0), and stubs that refuse come first on PATH.
   const stubs = join(root, 'bin');
   mkdirSync(stubs, { recursive: true });
   for (const name of ['claude', 'codex', 'opencode', 'pi', 'gemini', 'cursor-agent', 'amp']) writeFileSync(join(stubs, name), '#!/bin/sh\necho "this stub never runs" >&2\nexit 1\n', { mode: 0o755 });
-  // HOME is this world's temp folder (the owner's `~/src/…` layout sits under it): the sandbox keeps this Inbox out of any real skill folder.
   const scratch = scratchEnv(root, { home: root });
   const dataDir = scratch.PLANNOTATOR_DATA_DIR;
   const env = {
@@ -71,7 +48,6 @@ test.beforeAll(async () => {
     CLAUDE_CONFIG_DIR: join(root, 'claude-config'),
   };
 
-  // The owner's layout: a plain folder of notes, the repository's main checkout and a linked worktree in its `worktrees`.
   const folder = join(root, 'src', 'workspaces', 'projects', 'appnotes');
   mkdirSync(join(folder, 'worktrees'), { recursive: true });
   writeFileSync(join(folder, 'DESIGN.md'), '# Design\n');
@@ -82,7 +58,6 @@ test.beforeAll(async () => {
   git(main, 'commit', '-qm', 'init');
   git(main, 'worktree', 'add', '-q', join(folder, 'worktrees', 'agent-pr-plan-box'), '-b', 'agent-pr-plan-box');
   const long = scratchProject(join(root, 'src'), LONG);
-  // What an Inbox from before the fix left: the repository's project, and a folder project for `appnotes` beside it.
   const before = InboxStore.open(dataDir);
   const repoProject = before.ensureProject({ name: 'main', root: realpathSync(main) });
   const oldProject = before.ensureProject({ name: 'appnotes', root: realpathSync(folder) });
@@ -110,7 +85,6 @@ test('the folder project an earlier Inbox made is folded into the repository pro
   try {
     const page = await context.newPage();
     await page.goto(world.url);
-    // The old thread is in the list under the one "appnotes"; the sidebar names it once.
     await expect(page.locator(`.ib-listcol [data-thread-id="${world.old.thread}"]`)).toContainText('appnotes');
     await expect(page.locator(`.ib-listcol [data-thread-id="${world.old.thread}"]`)).not.toContainText('appnotes ·');
     await expect(page.locator('.ib-listcol .ib-lbody [data-thread-id]').filter({ hasText: 'appnotes ·' })).toHaveCount(0);
@@ -139,7 +113,6 @@ test("a session started in the checkouts' folder files into the repository's pro
   expect(list.projects.map((p) => p.root)).not.toContain(world.folder);
 });
 
-/** An agent writes in the long-named project while the person reads a thread: the list holds it behind "1 new". */
 async function newsWhileReading(page: Page, phone: boolean): Promise<void> {
   await page.goto(world.url);
   const first = page.locator('.ib-listcol .ib-lbody [data-thread-id]').first();
@@ -152,7 +125,6 @@ async function newsWhileReading(page: Page, phone: boolean): Promise<void> {
   await expect(page.locator('[data-inbox-notice]')).toContainText(`1 new in ${LONG}`);
 }
 
-/** The line's geometry: one line, Show whole inside it, and whether the project name is cut. */
 function lineOf(page: Page) {
   return page.locator('[data-inbox-notice]').evaluate((button) => {
     const box = button.getBoundingClientRect();
@@ -192,7 +164,6 @@ for (const shape of [
       expect(line.oneLine, JSON.stringify(line)).toBe(true);
       expect(line.showInside, JSON.stringify(line)).toBe(true);
       expect(line.height).toBeLessThanOrEqual(shape.phone ? 46 : 40);
-      // Too long for a phone or the list beside a thread: cut with "…", never wrapped.
       if (shape.phone || !shape.close) expect(line.cut).toBe(true);
       if (!shape.phone && line.cut) {
         await page.locator('[data-inbox-notice]').hover();

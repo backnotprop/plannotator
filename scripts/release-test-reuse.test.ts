@@ -1,16 +1,3 @@
-/**
- * Guard for the reuse of main's Test run on a version-only release tag
- * (scripts/release-test-reuse.ts, the `test` job of release.yml).
- *
- * Each failure this catches would let a release skip `bun test` on code that
- * Test never passed: a changed file outside the bump files, a version file
- * with more than its version changed, a broken or new search index, a run
- * that is not a passed push to main of this repo, a run on a commit outside
- * the tag's history, a pull_request run, or an API or git failure that does
- * not give the full tests. The rest would make reuse never happen: a real
- * bump (all 10 files and the index) or an unchanged tree not reused, or the
- * bump file list drifting from scripts/check-release-version.mjs.
- */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -73,7 +60,6 @@ const marketplace = (version: string, description = 'Copilot') =>
 const openpackage = (version: string, description = 'Plans') => `name: plannotator\nversion: ${version}\ndescription: ${description}\n`;
 const index = (titles: string[]) => `${JSON.stringify({ features: [], links: titles.map((title, i) => ({ title, path: `issues/${i + 1}` })) }, null, 1)}\n`;
 
-/** Every bump file at `version`. */
 const bumpFiles = (version: string, indexTitles = ['a']): Record<string, string> => ({
   ...Object.fromEntries(JSON_VERSION_FILES.map((f) => [f, pkg(version)])),
   [MARKETPLACE_FILE]: marketplace(version),
@@ -81,7 +67,6 @@ const bumpFiles = (version: string, indexTitles = ['a']): Record<string, string>
   [FEEDBACK_INDEX_FILE]: index(indexTitles),
 });
 
-/** A scratch repo with the bump files at 1.0.0 and a source file; returns its first commit. */
 const fresh = () => {
   repo = mkdtempSync(join(tmpdir(), 'release-test-reuse-'));
   scratchDirs.push(repo);
@@ -103,7 +88,6 @@ const passedRun = (id: number, sha: string, over: FakeRun = {}): FakeRun => ({
   ...over,
 });
 
-/** Deps on the scratch repo, with a runs list (or an API that throws). */
 const deps = (runs: FakeRun[] | Error, calls: string[] = []): Deps => ({
   git: (args) => git(...args),
   gitCode: (args) => spawnGit(args).exitCode ?? -1,
@@ -120,7 +104,6 @@ describe('a version-only tag reuses the nearest passed Test run on main', () => 
     const mid = commit({ 'src/a.ts': 'export const a = 2;\n' }, 'feature');
     commit({ ...bumpFiles('1.0.1', ['a', 'b']), 'RELEASE_NOTES_v1.0.1.md': '# notes\n' }, 'chore: bump version to 1.0.1');
     const calls: string[] = [];
-    // Newest first; the older passed run on `base` is further away than `mid`.
     const d = decide(ENV, deps([passedRun(20, mid), passedRun(10, base)], calls));
     expect(d.reuse).toBe(true);
     expect(d.run).toEqual({ id: 20, url: `https://github.com/${REPO}/actions/runs/20`, sha: mid });
@@ -140,7 +123,6 @@ describe('a version-only tag reuses the nearest passed Test run on main', () => 
     const base = fresh();
     const mid = commit({ 'src/a.ts': 'export const a = 2;\n' }, 'feature');
     commit(bumpFiles('1.0.1'), 'bump');
-    // base's run is listed first, but mid..tag is the smaller step and is a bump.
     expect(decide(ENV, deps([passedRun(30, base), passedRun(20, mid)])).run?.sha).toBe(mid);
   });
 
@@ -152,7 +134,6 @@ describe('a version-only tag reuses the nearest passed Test run on main', () => 
 });
 
 describe('anything else runs the full tests', () => {
-  /** The decision for a bump commit on top of a passed `base` that also applies `extra`. */
   const withExtra = (extra: Record<string, string | null>) => {
     const base = fresh();
     commit({ ...bumpFiles('1.0.1'), ...extra }, 'bump plus');
@@ -206,7 +187,6 @@ describe('anything else runs the full tests', () => {
     commit(bumpFiles('1.0.1'), 'bump');
     expect(decide(ENV, deps([passedRun(9, side)])).why).toContain('no passed Test run on main');
     expect(decide(ENV, deps([])).reuse).toBe(false);
-    // A sha this clone does not have is not an ancestor either.
     expect(decide(ENV, deps([passedRun(9, 'f'.repeat(40))])).reuse).toBe(false);
     expect(decide(ENV, deps([passedRun(9, base)])).reuse).toBe(true);
   });
@@ -260,7 +240,6 @@ describe('the bump file list', () => {
 
   test('is exactly the files scripts/check-release-version.mjs checks, plus the search index', () => {
     const checker = readFileSync(join(root, 'scripts/check-release-version.mjs'), 'utf8');
-    // Quoted .json/.yml paths only: the Droid manifest is named in a comment, unquoted, because it is exempt.
     const checked = [...checker.matchAll(/"([^"\s]+\.(?:json|yml))"/g)].map((m) => m[1]);
     expect([...checked].sort()).toEqual(BUMP_FILES.filter((f) => f !== FEEDBACK_INDEX_FILE).sort());
   });

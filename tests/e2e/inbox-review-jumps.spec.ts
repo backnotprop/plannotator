@@ -1,13 +1,3 @@
-/**
- * Moving around a very large review in the Inbox, in a real browser against the compiled binary: `plannotator inbox
- * --background` with a scratch HOME and data folder, a simulated agent submitting through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts), Chromium driving the window. Build first (see inbox.spec.ts).
- *
- * What is proved: a jump from the file list lands with its file at its place (16 px from the top of the view), once
- * the files around it have settled their heights, and mounts nothing it passes; End does not mount what it passes;
- * files just off screen are ready; a 30,000-line diff does not freeze the window, whether jumped to or passed.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -20,7 +10,6 @@ import { blankOnScreen } from './on-screen-files';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
-/** Where a jump puts its file: the `scroll-mt-4` of the file's box. */
 const PLACE = 16;
 
 test.describe.configure({ mode: 'serial' });
@@ -37,7 +26,6 @@ interface Fixture {
   patch: string;
 }
 
-/** 300 files, one in five a rename or a binary: their first height estimate is far from what they draw. */
 function manyFiles(): Fixture {
   const paths: string[] = [];
   let patch = '';
@@ -60,7 +48,6 @@ function manyFiles(): Fixture {
   return { paths, patch };
 }
 
-/** 40 files with a 30,000-line diff in the middle. */
 function oneHugeFile(): Fixture {
   const paths: string[] = [];
   let patch = '';
@@ -121,7 +108,6 @@ test.afterAll(async () => {
   await removeInboxScratch();
 });
 
-/** The review's scroller in All files, every file listed, with the mounts it ever makes counted. */
 async function openFiles({ paths, patch }: Fixture): Promise<Locator> {
   const review = await world.claude.submitGuide({
     project_path: world.project,
@@ -174,7 +160,6 @@ const placeOf = (body: Locator, path: string) => body.evaluate((el, p) => {
   return Math.round(shell.getBoundingClientRect().top - el.getBoundingClientRect().top);
 }, path);
 
-/** Where the file sits once it has stopped moving for half a second. */
 async function settledPlace(page: Page, body: Locator, path: string): Promise<number> {
   let last = Number.NaN;
   let stillSince = Date.now();
@@ -188,10 +173,8 @@ async function settledPlace(page: Page, body: Locator, path: string): Promise<nu
   return last;
 }
 
-/** Files on screen with no line drawn, leaving out the renames and binaries, which have none to draw. */
 const blankCode = async (body: Locator) => (await blankOnScreen(body)).filter((path) => !path.includes('/moved/') && !path.startsWith('assets/'));
 
-/** Goes to a file from the menu of changed files in the review's top bar. */
 async function jumpToFile(page: Page, path: string) {
   await page.locator('[data-review-message] [data-review-jump]').click();
   await page.locator(`[data-review-files] [data-review-jump-row="${path}"]`).click();
@@ -201,7 +184,6 @@ test('a jump far down a review of 300 files lands exactly, and mounts nothing it
   const { page } = world;
   const fixture = manyFiles();
   const body = await openFiles(fixture);
-  // Down, far up, and down again: each lands where the heights above it have never been measured.
   for (const [index, passedFrom, passedTo] of [[150, 20, 140], [40, 50, 140], [280, 50, 270]] as const) {
     await forget(page);
     await jumpToFile(page, fixture.paths[index]);
@@ -218,8 +200,6 @@ test('a jump far down a review of 300 files lands exactly, and mounts nothing it
   expect(world.errors).toEqual([]);
 });
 
-// The Inbox's readers fit their boxes to their content, so a jump there goes at once however near (GuideFileCard); the
-// smooth nearby jump of other readers is GuideViewportManager.test.tsx's. Here only where the file lands is checked.
 test('a jump to a file nearby lands exactly', async () => {
   const { page } = world;
   const fixture = manyFiles();
@@ -236,7 +216,6 @@ test('End goes to the bottom without mounting the files on the way; a file just 
   const body = await openFiles(fixture);
   await page.waitForTimeout(800);
 
-  // At rest: the window reaches past the view, so the next files are mounted before they are on screen.
   const aheadMounted = await body.evaluate((el) => {
     const bottom = el.getBoundingClientRect().bottom;
     const shell = [...el.querySelectorAll<HTMLElement>('[data-guide-file-shell]')].find((candidate) => {
@@ -284,7 +263,6 @@ test('a 30,000-line diff: jumping to it draws it with no freeze, and End and Hom
   await jumpToFile(page, fixture.paths[20]);
   expect(await settledPlace(page, body, huge)).toBe(PLACE);
   await expect.poll(() => blankOnScreen(body), { timeout: 10_000 }).toEqual([]);
-  // Highlighting it on the main thread takes 1,500 ms and up, here and on any slower machine.
   await page.waitForTimeout(3_000);
   expect(await longestTask(page)).toBeLessThan(1_200);
   expect(world.errors).toEqual([]);

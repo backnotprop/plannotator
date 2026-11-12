@@ -1,18 +1,3 @@
-/**
- * The bunfig preload's data-dir sandbox (tests/setup/feedback-archive-off.ts),
- * as an import that works without bunfig. Bun reads only the bunfig.toml in
- * the directory `bun test` runs from, so a run from a folder without one (or
- * by absolute path from elsewhere) skips the preload; the Playwright specs run
- * under node with no preload at all. Every Inbox test helper imports this
- * first, and it does what the preload does: PLANNOTATOR_DATA_DIR becomes a
- * fresh temp folder (removed when the process exits), marked with
- * PLANNOTATOR_TEST_SANDBOX, unless it already is a scratch folder (inside the
- * OS temp dir or /tmp, such as CI's `mktemp -d`, or the sandbox the preload
- * marked). A value from the person's shell (`/custom`, `~/.plannotator`) is
- * their real Inbox and is replaced, never used.
- *
- * Node-safe (no Bun APIs).
- */
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +13,6 @@ if (!current || !isScratchDataDir(current)) {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {
-      // Best effort: it is a temp folder.
     }
   });
 }

@@ -1,21 +1,3 @@
-/**
- * Ask, Add or Hand off from the reply box's one line (approval
- * "inbox-tag-handoff", option A2), proved in a real browser against the
- * compiled binary.
- *
- * Nothing is mocked: the binary runs `plannotator inbox --background` under a
- * temp PLANNOTATOR_DATA_DIR and HOME, with the tag world of inbox-tags.spec.ts
- * (tests/helpers/inbox-tag-world.ts): live connections poll the bridge's real
- * doors as the Claude Code mod, Pi and OpenCode do. Claude Code in
- * billing-api owns the threads. The person picks a tag in the window's own
- * reply box and switches the line with its links.
- *
- * The Undo window is the binary's own (10 s), so the hand-off tests wait it out.
- *
- * PNGs (1440 and 390, light and dark) land in .local/proof/tag-handoff/, or
- * in PLANNOTATOR_TAG_HANDOFF_SHOTS when it names a folder.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -65,7 +47,6 @@ const lastPersonMessage = async (threadId: string) => (await messages(threadId))
 const connection = (session: string) => world.tags.connections.find((c) => c.session === session)!;
 const handed = (session: string, id: string) => connection(session).commands.find((c) => c.id === id);
 
-/** An agent writing in a thread through the Inbox's own /mcp, as its plugin does. */
 async function agentWrites(args: Record<string, unknown>): Promise<void> {
   const res = await fetch(`${world.url}/mcp`, {
     method: 'POST',
@@ -86,7 +67,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Open a thread and its reply box, empty. */
 async function openReply(page: Page, threadId: string): Promise<Locator> {
   await page.goto(`${world.url}#thread=${threadId}`);
   const pane = page.locator('section.ib-pane');
@@ -101,7 +81,6 @@ async function openReply(page: Page, threadId: string): Promise<Locator> {
   return box;
 }
 
-/** Type `@query`, arrow onto the row of `session`, and pick it: the picker's own keys. */
 async function tag(page: Page, box: Locator, query: string, session: string): Promise<void> {
   await box.pressSequentially(`@${query}`);
   await expect(page.locator(`[data-tag-option="${session}"]`)).toBeVisible();
@@ -179,7 +158,6 @@ test('Ask, unchanged: the line offers the switches, and Send with none clicked i
   await expect(line(page)).toHaveCount(0);
   const sent = await lastPersonMessage(world.tags.ids.t1);
   expect(sent.body).toContain('raise the visibility timeout');
-  // The wire and the store as before: a plain tag, no hand-off, addressed to whom it answers.
   expect(sent.tags?.map((t) => [t.session, t.wakes, t.joined ?? false, t.handed_away ?? false])).toEqual([[S.pi, true, false, false]]);
   expect(sent.handoff ?? null).toBeNull();
   expect(sent.to?.session ?? S.owner).toBe(S.owner);
@@ -189,7 +167,6 @@ test('Ask, unchanged: the line offers the switches, and Send with none clicked i
   expect(inboxWakeText(handed(S.pi, sent.id)!).split('\n')[1]).toBe(INBOX_TAGGED_INSTRUCTION);
   await expect.poll(() => !!handed(S.owner, sent.id), { timeout: 15_000 }).toBe(true);
   expect(handed(S.owner, sent.id)!.handed_away).toBeUndefined();
-  // The thread after an Ask looks as before: no move line, no new owner.
   await expect(page.locator('[data-thread-move]')).toHaveCount(0);
   await expect(page.locator('[data-thread-owner]')).toHaveCount(0);
   expect(world.errors).toEqual([]);
@@ -214,7 +191,6 @@ test('Add: the agent joins with the added wake, the thread says so, and a later 
   await expect.poll(() => !!handed(S.opencode, sent.id), { timeout: 15_000 }).toBe(true);
   expect(handed(S.opencode, sent.id)).toMatchObject({ added: true, tagged: { owner: 'Claude Code' } });
   expect(inboxWakeText(handed(S.opencode, sent.id)!).split('\n')[1]).toBe(INBOX_ADDED_INSTRUCTION);
-  // The owner keeps the thread: a plain reply, no tag typed, goes to it and to the added session.
   const again = await openReply(page, world.tags.ids.t3);
   await again.pressSequentially('Also check the retry counts.');
   await expect(line(page)).toHaveCount(0);
@@ -248,7 +224,6 @@ test('Hand off, then Undo inside the window: nobody is handed it while held, and
   await shot(page, '4-after-send-undo-desktop');
   const sent = await lastPersonMessage(world.tags.ids.t1);
   expect(sent.to).toEqual({ host: 'pi', session: S.pi });
-  // Held: neither side is handed it inside the window.
   await page.waitForTimeout(2_000);
   expect(handed(S.pi, sent.id)).toBeUndefined();
   expect(handed(S.owner, sent.id)).toBeUndefined();
@@ -261,7 +236,6 @@ test('Hand off, then Undo inside the window: nobody is handed it while held, and
   expect(undone.tags?.map((t) => [t.session, t.handed_away ?? false])).toEqual([[S.pi, false]]);
   await expect(page.locator('[data-thread-move]')).toHaveCount(0);
   await expect(page.locator('[data-thread-owner]')).toHaveCount(0);
-  // As an Ask, at once: Pi tagged, the owner as before, nobody told to stop.
   await expect.poll(() => !!handed(S.pi, sent.id), { timeout: 15_000 }).toBe(true);
   expect(handed(S.pi, sent.id)!.handoff).toBeUndefined();
   expect(handed(S.pi, sent.id)!.tagged).toEqual({ owner: 'Claude Code' });
@@ -280,7 +254,6 @@ test('Hand off settles: the new owner gets the hand-off wake, the former owner o
   await send(page);
   await expect(page.locator('[data-thread-move="handoff"] [data-handoff-undo]')).toBeVisible();
   const sent = await lastPersonMessage(world.tags.ids.t1);
-  // The window ends (10 s), then each side is handed its part.
   await expect.poll(async () => !!(await lastPersonMessage(world.tags.ids.t1)).handoff?.settled_at, { timeout: 25_000 }).toBe(true);
   await expect.poll(() => !!handed(S.pi, sent.id), { timeout: 15_000 }).toBe(true);
   const piWake = inboxWakeText(handed(S.pi, sent.id)!).split('\n');
@@ -292,21 +265,17 @@ test('Hand off settles: the new owner gets the hand-off wake, the former owner o
   expect(told.handed_away).toEqual({ to: 'Pi' });
   expect(told.body).toBe(inboxHandedAwayLine('Pi'));
   expect(inboxWakeText(told)).not.toContain('the queue work is yours now.');
-  // The thread after the hand-off: who has it, no Undo any more.
   await expect(page.locator('[data-thread-owner]')).toContainText('Now with Pi');
   await expect(page.locator('[data-handoff-undo]')).toHaveCount(0);
-  // The former owner's line: told to stop when its turn ends, with no Send now (the notice never interrupts a turn).
   const formerLine = page.locator(`[data-tag-line="${S.owner}"]`);
   await expect(formerLine).toContainText('Claude Code (billing-api) is told to stop when its turn ends.');
   await expect(formerLine.locator('[data-send-now]')).toHaveCount(0);
-  // The former owner's stop notice is not shown as a tag the person typed.
   const handOffMessage = page.locator('article.ib-message').filter({ hasText: 'the queue work is yours now.' });
   await expect(handOffMessage).toHaveCount(1);
   await expect(handOffMessage).toContainText('to Pi');
   await expect(handOffMessage.locator('[data-tagged-names]')).toHaveCount(0);
   await shot(page, '5-thread-after-handoff-desktop');
 
-  // The former owner writes again; the person's next reply still goes to Pi.
   await agentWrites({ agent_host: 'claude-code', agent_name: 'Claude Code', project_path: world.tags.projects.billing, agent_session: S.owner, reply_to: world.tags.ids.t1msg, body: 'Noted, stopping here.' });
   const next = await openReply(page, world.tags.ids.t1);
   await expect(page.locator('section.ib-pane').getByRole('textbox', { name: /^Reply to Pi/ })).toBeVisible();

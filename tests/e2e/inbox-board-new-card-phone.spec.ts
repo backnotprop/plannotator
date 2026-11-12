@@ -1,27 +1,3 @@
-/**
- * On a phone the Board's New card window is the whole screen (the owner,
- * 2026-11-02: at 320 px it was about 286 px wide and sat on the left). The
- * phone rule gave the dialog `width: 100vw` and `margin: 0`, but a modal
- * <dialog> keeps the browser's own `max-width: calc(100% - 6px - 2em)`, so the
- * width was capped and the box sat at the left edge.
- *
- * Proved against the compiled binary at 320, 360, 375, 390 and 430 px, at the
- * default text size and the largest (15), each in one colour scheme: the
- * window's box is the viewport's, Cancel and Add sit in its top bar inside the
- * screen, and nothing scrolls sideways. With a keyboard up (`--ib-vvh`, as
- * phone.ts sets it on an iPhone) the window ends at the keyboard's top and the
- * title and notes are above it. At 1440 px the window is as before: 760 px wide
- * and centred.
- *
- * Not proved here: the left, right and bottom safe areas (Chromium has no
- * `env(safe-area-inset-*)` to emulate; a phone on its side shows them), and the
- * layout in the other colour scheme: each phone test only takes a PNG in light
- * and in dark for a person to look at.
- *
- * Build the binary first (see inbox.spec.ts). PNGs land in
- * .local/proof/new-card-phone/ (PLANNOTATOR_E2E_SHOTS_DIR names another folder).
- */
-
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -58,7 +34,6 @@ test.beforeAll(async () => {
   url = started.stdout.trim();
   await post('settings', { board: { on: true } });
   await post('board/intro', {});
-  // A message makes the project a New card goes to.
   claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   await claude.send({ project_path: scratchProject(join(root, 'src'), 'plannotator'), subject: 'Checkout drawer', thread: 'drawer', body: 'Starting on the drawer.' });
 });
@@ -85,7 +60,6 @@ async function openNewCard(page: Page): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
 }
 
-/** The window's box, its top bar's controls, the fields' boxes, and how far the page scrolls sideways. */
 async function readWindow(page: Page) {
   return page.locator('dialog[data-dialog="new-card"]').evaluate((dialog) => {
     const box = (el: Element | null) => {
@@ -116,7 +90,6 @@ for (const size of [14, 15]) {
         await openNewCard(page);
         await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--inbox-text-size').trim())).toBe(size === 14 ? '' : '15');
         await expect(page.locator('dialog[data-dialog="new-card"]')).toHaveClass(/ib-ncd-phone/);
-        // PNGs only, for a person to look at: the measures below run once, in this test's own scheme.
         for (const shotScheme of ['light', 'dark'] as const) {
           await page.emulateMedia({ colorScheme: shotScheme });
           await page.waitForTimeout(150);
@@ -126,20 +99,17 @@ for (const size of [14, 15]) {
 
         const m = await readWindow(page);
         const d = m.dialog;
-        // The window's box is the screen's: no gap on either side, none above or below.
         expect(d.x, `the window starts at ${d.x}`).toBeCloseTo(0, 0);
         expect(d.y, `the window's top is at ${d.y}`).toBeCloseTo(0, 0);
         expect(d.w, `the window is ${d.w} px wide on a ${m.vw} px screen`).toBeCloseTo(m.vw, 0);
         expect(d.h, `the window is ${d.h} px tall on a ${m.vh} px screen`).toBeCloseTo(m.vh, 0);
         expect(m.scrollX, 'nothing scrolls sideways').toBeLessThanOrEqual(0);
-        // Cancel and Add in the top bar, inside the screen, each a 44 px target.
         expect(m.bar.map((b) => b.name)).toEqual(['Cancel', 'Add']);
         for (const b of m.bar) {
           expect(b.x, `${b.name} starts inside the screen`).toBeGreaterThanOrEqual(0);
           expect(b.right, `${b.name} ends inside the screen`).toBeLessThanOrEqual(m.vw + 0.5);
           expect(b.h, `${b.name} is ${Math.round(b.h)} px tall`).toBeGreaterThanOrEqual(43.9);
         }
-        // The fields span the window, not a 286 px column.
         expect(m.title.right, 'the title field reaches the right side').toBeGreaterThan(m.vw - 40);
         expect(m.notes.right, 'the notes field reaches the right side').toBeGreaterThan(m.vw - 40);
       } finally {
@@ -156,7 +126,6 @@ test('with a keyboard up the window ends at its top, the title and notes above i
     try {
       const page = await context.newPage();
       await openNewCard(page);
-      // phone.ts sets --ib-vvh to the visual viewport's height while an iPhone's keyboard is up.
       const visible = 420;
       await page.evaluate((h) => document.documentElement.style.setProperty('--ib-vvh', `${h}px`), visible);
       await page.waitForTimeout(100);

@@ -1,24 +1,3 @@
-/**
- * The Inbox window on a phone (reached over the tailnet with `plannotator
- * inbox --tailscale`), proved in WebKit with the iPhone 15's descriptor and
- * in Chromium with the Pixel 7's, against the compiled binary under a temp
- * PLANNOTATOR_DATA_DIR. One screen at a time, like a mail app:
- *
- * - no screen scrolls sideways or draws past the window (the list, the
- *   project's list, a thread, an open file, the sheet, Settings);
- * - the list's rows and the thread's headers hold their parts without one
- *   box over another (the report: the time and the agent's mark overlapped);
- * - the primary actions are at least 44 px and the reply box is 16 px text,
- *   so iOS never zooms the page when it takes focus;
- * - a row opens the thread over the whole window, Back (or the browser's
- *   own back, the iOS swipe) returns to the list where it was scrolled, and
- *   a file opens over the thread with Back to it.
- *
- * And a desktop window keeps its two panes. Build the binary first (see
- * inbox.spec.ts), then `bun run test:e2e:inbox`. PNGs land in
- * .local/proof/mobile/.
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -44,12 +23,10 @@ let world: World;
 
 const LONG_URL =
   'https://hooks.example.com/stripe/v1/refunds/reconcile/billing-svc/production/us-east-1/account-0001-placeholder-0002-placeholder-0003?sig=9f8e7d6c5b4a3928170615243342516071829304a5b6c7d8e9f0&replay=true';
-// (Made-up strings, nothing like a real key: a secret scanner must never mistake them for one.)
 const LONG_KEY = `example_key_${'a1B2c3D4e5F6g7H8'.repeat(5)}`;
 const LONG_TOKEN = `example_token_${'0123456789abcdef'.repeat(6)}`;
 const LONG_ID = `idem_01HZX9QW3E5R7T9Y1U3I5O7P9A1S3D5F7G9H1J3K5L7Z9X1C3V5B7N9M1Q3W5E7R9T1Y3U5I7O9P1A3S5D7F9G1H3J5K7L9`;
 
-/** The question card and its eyebrow's tags stay inside the thread's column. */
 async function cardFits(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
@@ -78,7 +55,6 @@ test.beforeAll(async () => {
   const trap = join(root, 'trap');
   mkdirSync(home);
   mkdirSync(trap);
-  // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-mobile: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
   const env = { PATH: `${trap}:${process.env.PATH ?? ''}`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
@@ -93,7 +69,6 @@ test.beforeAll(async () => {
   mkdirSync(join(billing, 'docs'));
   writeFileSync(join(billing, 'docs', 'retry-policy.md'), '# Retry policy\n\nFailed refunds are retried with exponential backoff, five times at most.\n');
   writeFileSync(join(billing, 'docs', 'on-call.md'), '# On-call\n\nThe on-call is paged once per refund, not once per attempt.\n');
-  // One agent session per thread.
   const agents: SimAgent[] = [];
   const agent = async (name: string, host: string) => {
     const made = await SimAgent.connect({ binary, env, name, host });
@@ -124,7 +99,6 @@ test.beforeAll(async () => {
     attachments: ['docs/retry-policy.md', 'docs/on-call.md'],
   });
   const holding = await (await agent('OpenCode', 'opencode')).send({ project_path: docs, subject: 'Install page: detect the installed agents or ask the reader which one they use', body: DEMO_MESSAGES.holding });
-  // What an agent pastes: a long URL, a key in inline code, a bare token, and a choice that is one long ID.
   const tokens = await (await agent('Claude Code', 'claude-code')).send({
     project_path: billing,
     subject: 'Webhook URL and key rotation',
@@ -150,7 +124,6 @@ test.beforeAll(async () => {
     subject: 'Stripe 409 on the retry worker: which way should it go before I ship it',
     body: DEMO_MESSAGES.stopped,
   });
-  // Enough rows that the list scrolls on a phone.
   for (let i = 1; i <= 10; i++) await (await agent("OpenCode", "opencode")).send({ project_path: docs, subject: `Docs build ${i} finished`, body: DEMO_MESSAGES.news });
   world = {
     root,
@@ -166,12 +139,10 @@ test.afterAll(async () => {
   try {
     if (world) await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
   } finally {
-    // Stops only the Inbox this spec provably started, even when beforeAll failed half way (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
 
-/** What sticks out sideways: the page itself, any box past the window, any container that scrolls sideways. */
 async function sideways(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const W = window.innerWidth;
@@ -182,7 +153,6 @@ async function sideways(page: Page): Promise<string[]> {
     for (const el of document.querySelectorAll('.pn-inbox *')) {
       const style = getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden') continue;
-      // A code block may scroll its own long lines; nothing else scrolls sideways.
       if (el.closest('pre, code, table, [data-code-view], .ib-cmd')) continue;
       if ((style.overflowX === 'auto' || style.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) {
         out.push(`${name(el)} scrolls sideways (${el.scrollWidth} in ${el.clientWidth})`);
@@ -199,7 +169,6 @@ async function sideways(page: Page): Promise<string[]> {
   });
 }
 
-/** Pairs of parts drawn over each other inside each row or header matched by `selector`, and parts cut off by it. */
 async function overlaps(page: Page, selector: string, parts: string): Promise<string[]> {
   return page.evaluate(
     ({ selector, parts }) => {
@@ -237,7 +206,6 @@ async function overlaps(page: Page, selector: string, parts: string): Promise<st
   );
 }
 
-/** The primary actions on screen smaller than a thumb (44 by 44). */
 async function smallTargets(page: Page, selector: string): Promise<string[]> {
   return page.locator(selector).evaluateAll((els) =>
     els
@@ -248,12 +216,6 @@ async function smallTargets(page: Page, selector: string): Promise<string[]> {
   );
 }
 
-/**
- * Controls whose hit area is shorter than a thumb (44 px): a tap 21 px above
- * or below the middle must still land on the control (or inside it). The
- * look may stay small; only where a tap lands is measured. Returns how many
- * were measured, so a test can tell "all fine" from "none found".
- */
 async function shortHitAreas(page: Page, selector: string): Promise<{ measured: number; short: string[] }> {
   return page.locator(selector).evaluateAll((els) => {
     const short: string[] = [];
@@ -283,14 +245,10 @@ for (const phone of [
   { name: 'Pixel 7 (Chromium)', device: devices['Pixel 7'], browserName: 'chromium' as const },
 ]) {
   test.describe(phone.name, () => {
-    // The descriptor's context options (viewport, scale, touch, mobile, user agent); its browser is launched below.
     const { defaultBrowserType: _browser, ...device } = phone.device;
     let browser: Browser | null = null;
     let contexts: BrowserContext[] = [];
-    // A describe group cannot pick a browser through test.use (it forces a new worker), so it launches its own.
     test.beforeAll(async () => {
-      // The config's launch options are Chromium flags (--use-mock-keychain, --password-store=basic), and the
-      // runner applies them to every launch. WebKit on Linux exits on flags it does not know, so it launches with none.
       browser = phone.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
     });
     test.afterEach(async () => {
@@ -320,7 +278,6 @@ for (const phone of [
       await shot(page, '1-list');
       expect(await sideways(page)).toEqual([]);
       expect(await overlaps(page, '.ib-mrow', ROW_PARTS)).toEqual([]);
-      // Each row: who and when on the first line, the subject under it, the time at the right edge.
       const row = page.locator(`.ib-mrow[data-thread-id="${world.threads.stopped}"]`);
       await expect(row.locator('.ib-m2')).toHaveText('Stripe 409 on the retry worker: which way should it go before I ship it');
       const [rowBox, timeBox, subjectBox] = await Promise.all([row.boundingBox(), row.locator('.ib-t').boundingBox(), row.locator('.ib-m2').boundingBox()]);
@@ -328,7 +285,6 @@ for (const phone of [
       expect(subjectBox!.y).toBeGreaterThan(timeBox!.y);
       expect(await smallTargets(page, '.ib-mrow, .ib-lhead .ib-sb-trigger')).toEqual([]);
 
-      // One project's list: the same rows (the wide row's columns once left the subject no room).
       await page.goto(`${world.url}#project=${(await page.evaluate(() => fetch('/api/inbox/projects').then((r) => r.json()))).projects.find((p: { name: string }) => p.name === 'billing-svc').id}`);
       await expect(page.locator('.ib-lhead h1')).toHaveText('billing-svc');
       await expect(page.locator('.ib-mrow').first()).toBeVisible();
@@ -337,7 +293,6 @@ for (const phone of [
       expect(await sideways(page)).toEqual([]);
       expect(await overlaps(page, '.ib-mrow, .ib-lhead', `${ROW_PARTS}, h1, .ib-sb-trigger`)).toEqual([]);
 
-      // The navigation is a sheet.
       await page.locator('.ib-lhead .ib-sb-trigger').click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await shot(page, '3-sheet');
@@ -354,7 +309,6 @@ for (const phone of [
       await expect(page.locator('.ib-mrow').first()).toBeVisible();
       for (const id of [world.threads.stopped, world.threads.tokens, world.threads.holding]) await expect(page.locator(`.ib-mrow[data-thread-id="${id}"]`)).toBeVisible();
       const pane = page.locator('section.ib-pane');
-      // Scrolled down to a row whose section opening it does not change, it opens its thread; Back returns to the list scrolled where it was.
       const holdingRow = page.locator(`.ib-mrow[data-thread-id="${world.threads.holding}"]`);
       await holdingRow.evaluate((row) => {
         const el = row.closest(".ib-lbody")!;
@@ -373,7 +327,6 @@ for (const phone of [
       await list.evaluate((el) => el.scrollTo({ top: 0 }));
       await page.locator(`.ib-mrow[data-thread-id="${world.threads.stopped}"]`).click();
       await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
-      // One screen: the thread spans the window and the list is gone from view.
       const viewport = page.viewportSize()!;
       const paneBox = (await pane.boundingBox())!;
       expect(paneBox.x).toBeLessThan(1);
@@ -388,7 +341,6 @@ for (const phone of [
       await expect(back).toHaveText('Inbox');
       expect(await smallTargets(page, '[data-phone-back], .ib-phead .ib-iconbtn, .ib-pfoot .ib-btn')).toEqual([]);
 
-      // A pick, then the reply box: 16 px text, above the foot's 44 px actions.
       await pane.getByText('Retry with the same idempotency key').click();
       await pane.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
       const box = pane.getByRole('textbox', { name: 'Reply to Claude Code' });
@@ -396,8 +348,6 @@ for (const phone of [
       expect(await box.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
       await shot(page, '5-reply');
       expect(await sideways(page)).toEqual([]);
-      // The box's Send is a round 36 px arrow that takes a 44 px tap (approval "inbox-phone-composer-picker"), still
-      // named "Send"; every other action in the foot is 44 px as drawn.
       expect(await smallTargets(page, '.ib-pfoot .ib-btn:not([data-reply-send])')).toEqual([]);
       const send = pane.locator('.ib-rbox [data-reply-send]');
       await expect(send).toHaveAccessibleName('Send');
@@ -407,14 +357,11 @@ for (const phone of [
       expect(sendHit.short).toEqual([]);
       await pane.locator('.ib-pfoot [data-reply-close]').click();
 
-      // Back: the list, and the address of the list (the history is the stack it looks like).
       await back.click();
       await expect(page.locator('.ib-listcol')).toBeVisible();
       await expect(pane).toHaveCount(0);
       expect(await page.evaluate(() => window.location.hash)).toBe('');
 
-      // The browser's own back (the iOS swipe, Android's back) does the same.
-      // (A thread with an open question: the ones read without one are folded under Quiet by now.)
       await page.locator(`.ib-mrow[data-thread-id="${world.threads.holding}"]`).click();
       await expect(page.locator('section.ib-pane')).toBeVisible();
       await page.goBack();
@@ -439,7 +386,6 @@ for (const phone of [
 
     test('a file opens over the thread, its comments are a sheet, and Back returns to the thread', async () => {
       const page = await open();
-      // Motion on: the thread slides in when it opens over the list, and not again when the file over it closes.
       await page.emulateMedia({ reducedMotion: 'no-preference' });
       await page.goto(world.url);
       await expect(page.locator('.ib-mrow').first()).toBeVisible();
@@ -458,8 +404,6 @@ for (const phone of [
       expect(viewBox.x).toBeLessThan(1);
       expect(viewBox.width).toBeGreaterThan(viewport.width - 2);
       await expect(pane).toBeHidden();
-      // Full screen, the one mode (approval "inbox-one-fullscreen"): no header, one toolbar led by Back to the thread;
-      // the comments wait behind its count.
       await expect(view.locator('.ib-vhead')).toHaveCount(0);
       await expect(view.getByRole('button', { name: 'Full screen' })).toHaveCount(0);
       await expect(view.locator('[data-full-view-bar]')).toBeVisible();
@@ -471,7 +415,6 @@ for (const phone of [
       await view.locator('[data-full-view-comments]').click();
       const sheet = view.getByRole('region', { name: 'Comments' });
       await expect(sheet).toBeVisible();
-      // A sheet up from the bottom edge, over the file.
       const sheetBox = (await sheet.boundingBox())!;
       const fileBox = (await view.locator(".ib-vbody").boundingBox())!;
       expect(Math.abs(sheetBox.y + sheetBox.height - (fileBox.y + fileBox.height))).toBeLessThan(2);
@@ -494,14 +437,12 @@ for (const phone of [
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await page.goto(world.url);
       await expect(page.locator('.ib-mrow').first()).toBeVisible();
-      // Opened from the list (a push), then a file (a push), then the next file (a replace).
       await page.evaluate((id) => (window.location.hash = `#thread=${id}`), world.threads.attach);
       const pane = page.locator('section.ib-pane');
       await expect(pane.getByRole('heading', { name: 'The retry policy, written down' })).toBeVisible();
       await pane.locator('.ib-att-t', { hasText: 'retry-policy.md' }).click();
       const view = page.locator('section.ib-view');
       await expect(view.getByText('Failed refunds are retried with exponential backoff')).toBeVisible();
-      // No stepper on a phone: the toolbar's pill opens every file of the thread, and a pick steps there (a replace, like a step).
       await view.locator('[data-full-view-bar] [data-full-view-position]').click();
       await page.getByRole('grid', { name: 'Files in this thread' }).getByRole('gridcell').nth(1).click();
       await expect(view.getByText('The on-call is paged once per refund')).toBeVisible();
@@ -525,7 +466,6 @@ for (const phone of [
       await shot(page, '11-long-tokens');
       expect(await sideways(page)).toEqual([]);
       expect(await cardFits(page)).toEqual([]);
-      // The iPhone SE's 320 px.
       await page.setViewportSize({ width: 320, height: 568 });
       await page.waitForTimeout(200);
       await shot(page, '12-long-tokens-se');
@@ -547,11 +487,9 @@ for (const phone of [
           await page.keyboard.press('Escape');
         }
         await page.waitForTimeout(600);
-        // Still the Inbox (one Back, not two out of it), on its list.
         expect(new URL(page.url()).origin, leave).toBe(inbox);
         await expect(page.locator('.ib-listcol')).toBeVisible();
         await expect(pane).toHaveCount(0);
-        // A second tap that lands after the list is back hits the list's menu button, which opens the navigation: close it.
         if (await page.getByRole('dialog').isVisible()) await page.keyboard.press('Escape');
         await expect(page.getByRole('dialog')).toHaveCount(0);
       }
@@ -573,7 +511,6 @@ for (const phone of [
         innerHeight: window.innerHeight,
       }));
       expect(state.scale).toBeCloseTo(2);
-      // Half the window is out of the zoomed view, which the keyboard rule once took for a keyboard.
       expect(state.covered).toBeGreaterThan(80);
       expect(state.vvh).toBe('');
       expect(state.height).toBe(state.innerHeight);
@@ -585,8 +522,6 @@ for (const phone of [
       await page.goto(`${world.url}#thread=${world.threads.stopped}`);
       const pane = page.locator('section.ib-pane');
       await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
-      // One of the two questions picked: on a phone the reply box's summary line ("1 question open", over its row) opens a
-      // sheet that offers Skip it for the other (approvals "inbox-explicit-skip", "inbox-reply-foot-phone", "inbox-reply-box").
       await pane.getByText('Retry with the same idempotency key').click();
       await pane.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
       const line = pane.locator('.ib-rbox [data-reply-line] [data-foot-summary]');
@@ -604,7 +539,6 @@ for (const phone of [
       await sheet.getByRole('button', { name: 'Close' }).click();
       await pane.locator('.ib-pfoot [data-reply-close]').click();
 
-      // An open file: ui's toolstrip and the viewer's Global comment and Copy file.
       await page.goto(`${world.url}#thread=${world.threads.attach}`);
       await pane.locator('.ib-att-t', { hasText: 'retry-policy.md' }).click();
       const view = page.locator('section.ib-view');
@@ -612,8 +546,6 @@ for (const phone of [
       const tools = await shortHitAreas(page, '.ib-phone .ib-toolstrip button, .ib-phone [data-sticky-actions] button');
       expect(tools.measured).toBeGreaterThanOrEqual(4);
       expect(tools.short).toEqual([]);
-      // The keyboard's focus ring on a toolstrip button lies inside its clip (4 px out at the sides, 8 above and
-      // below). Reached with Tab so the browser draws it; checked in Chromium (WebKit's Tab skips buttons by default).
       if (phone.browserName === 'chromium') {
         for (let i = 0; i < 60; i++) {
           if (await page.evaluate(() => !!document.activeElement?.closest('.ib-toolstrip'))) break;
@@ -640,9 +572,7 @@ for (const phone of [
       await page.goto(`${world.url}#thread=${world.threads.holding}`);
       const pane = page.locator('section.ib-pane');
       await expect(pane.getByRole('heading', { name: /Install page/ })).toBeVisible();
-      // A phone's Mark read leads the ⋯ sheet (approval "inbox-thread-header"); the bar has no read button.
       await expect(pane.locator('.ib-phead [data-mark-read]')).toHaveCount(0);
-      // Read is the body's read line (its Move back puts the thread back); the sheet has no pressed Read.
       const readLine = pane.locator('[data-read-line]');
       const markRead = async () => {
         await pane.locator('[data-thread-more]').click();
@@ -653,7 +583,6 @@ for (const phone of [
       const toast = page.locator('[data-inbox-toast]');
       await expect(toast).toBeVisible();
       await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
-      // A phone's short form: "Read", no Reply (the foot has it), no Z hint; Undo and the ×.
       await expect(toast.locator('.ib-tlead')).toHaveText('Read');
       await expect(toast.getByRole('button')).toHaveCount(2);
       await expect(toast.getByRole('button', { name: 'Dismiss' })).toBeVisible();
@@ -662,39 +591,32 @@ for (const phone of [
       const [toastBox, footBox, lines, undoTarget, closeTarget] = await Promise.all([
         toast.boundingBox(),
         pane.locator('.ib-pfoot').boundingBox(),
-        // The text's line boxes: the lead and the detail sit on one baseline, so their tops lie within a
-        // few pixels of each other (a wrapped second line would start a whole line lower).
         toast.locator('.ib-tsay').evaluate((el) => {
           const range = document.createRange();
           range.selectNodeContents(el);
           const tops = [...range.getClientRects()].map((r) => r.top);
           return Math.max(...tops) - Math.min(...tops) < 8 ? 1 : 2;
         }),
-        // Undo's hit area: the button grown by its ::after box.
         toast.locator('[data-toast-undo]').evaluate((el) => {
           const box = el.getBoundingClientRect();
           const after = getComputedStyle(el, '::after');
           return Math.min(box.height - parseFloat(after.top) - parseFloat(after.bottom), box.width - parseFloat(after.left) - parseFloat(after.right));
         }),
-        // The ×: 24 px drawn, a 44 px target.
         toast.locator('[data-toast-dismiss]').evaluate((el) => {
           const box = el.getBoundingClientRect();
           const after = getComputedStyle(el, '::after');
           return { drawn: Math.round(box.width), target: Math.min(box.height - parseFloat(after.top) - parseFloat(after.bottom), box.width - parseFloat(after.left) - parseFloat(after.right)) };
         }),
       ]);
-      // One line (44 px, not the 171 px of three wrapped lines), clear of the foot.
       expect(toastBox!.height).toBeLessThanOrEqual(48);
       expect(lines).toBe(1);
       expect(undoTarget).toBeGreaterThanOrEqual(44);
       expect(closeTarget).toEqual({ drawn: 24, target: 44 });
       expect(toastBox!.y + toastBox!.height).toBeLessThanOrEqual(footBox!.y);
-      // The thread's banner says the rest; Undo puts it back.
       await expect(pane.locator('[data-read-line]')).toBeVisible();
       await toast.getByRole('button', { name: 'Undo' }).click();
       await expect(readLine).toHaveCount(0);
 
-      // With the reply box open the foot is much taller: the toast still sits above it.
       await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).click();
       await expect(pane.locator('.ib-pfoot textarea')).toBeVisible();
       await markRead();
@@ -706,8 +628,6 @@ for (const phone of [
       await toast.getByRole('button', { name: 'Undo' }).click();
       await expect(readLine).toHaveCount(0);
 
-      // Undo and the × are 8 px apart and their 44 px targets meet in the middle: a tap 2 px past the Undo pill
-      // is still Undo (the thread moves back); one 6 px past it is the × (the toast goes, the thread stays read).
       const tapPast = async (px: number) => {
         await markRead();
         await expect(readLine).toBeVisible();
@@ -723,8 +643,6 @@ for (const phone of [
       await moveBack();
       await expect(readLine).toHaveCount(0);
 
-      // Swipe it away with a finger (touch pointer events): a short drag springs back, one past 40% of its
-      // width dismisses it, and its Undo goes with it (the thread stays read).
       const swipe = (distance: number) =>
         toast.evaluate(async (el, distance) => {
           const box = el.getBoundingClientRect();
@@ -754,14 +672,12 @@ for (const phone of [
       expect(short.translate).toBe('60px');
       await expect(toast).toBeVisible();
       await expect.poll(() => toast.evaluate((el) => el.style.translate)).toBe('');
-      // (The short drag ran under reduced motion, which snaps back; this one slides out.)
       await page.emulateMedia({ reducedMotion: 'no-preference' });
       const width = (await toast.boundingBox())!.width;
       await swipe(Math.round(width * 0.55));
       await expect(toast).toHaveCount(0);
       await expect(page.locator('[data-toast-ghost]')).toHaveCount(0);
       await expect(readLine).toBeVisible();
-      // Back for the tests after this one.
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await moveBack();
       await expect(readLine).toHaveCount(0);
@@ -785,7 +701,6 @@ for (const side of [
   test.describe(side.name, () => {
     const { defaultBrowserType: _browser, ...device } = side.device;
     test("an open file on its side: the toolbar's 44 px controls keep apart, and the comments sheet has the room", async () => {
-      // (WebKit launches without the config's Chromium flags, which Linux WebKit exits on.)
       const browser = side.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
       try {
         const page = await (await browser.newContext(device)).newPage();
@@ -794,7 +709,6 @@ for (const side of [
         await page.locator('section.ib-pane .ib-att-t', { hasText: 'retry-policy.md' }).click();
         const view = page.locator('section.ib-view');
         await expect(view.getByText('Failed refunds are retried with exponential backoff')).toBeVisible();
-        // Full screen: no bar under the file, the file takes the window's height.
         await expect(view.locator('[data-view-foot]')).toHaveCount(0);
         expect(await sideways(page)).toEqual([]);
         expect(await overlaps(page, '[data-full-view-bar]', '.ib-fvb')).toEqual([]);
@@ -803,7 +717,6 @@ for (const side of [
         const sheet = view.getByRole('region', { name: 'Comments' });
         await expect(sheet).toBeVisible();
         await page.screenshot({ path: join(proofDir, `${side.browserName}-15-landscape-comments.png`) });
-        // The sheet's list (under its own title bar) shows well over the 55 px it had.
         const [sheetBox, headBox] = await Promise.all([sheet.boundingBox(), sheet.locator('.ib-sheet-h').boundingBox()]);
         expect(sheetBox!.height - headBox!.height).toBeGreaterThan(140);
       } finally {
@@ -813,14 +726,6 @@ for (const side of [
   });
 }
 
-/**
- * Windows too narrow for the list beside the thread, but not phones: an iPad
- * in portrait (810 by 1080, touch) and a 900 px desktop window. The thread
- * covers the list (it would be squeezed to 200 to 290 px beside it), keeps
- * the desktop chrome, and leads with the way back to the list; an open file
- * covers the thread. Wide windows are the desktop layout as it was (the
- * desktop tests below, and a pixel comparison against main in the PR).
- */
 for (const narrow of [
   { name: 'iPad portrait (WebKit)', browserName: 'webkit' as const, options: { ...devices['iPad (gen 7)'], viewport: { width: 810, height: 1080 } } },
   { name: '900 px desktop window (Chromium)', browserName: 'chromium' as const, options: { viewport: { width: 900, height: 800 } } },
@@ -834,7 +739,6 @@ for (const narrow of [
         const page = await (await browser.newContext(options)).newPage();
         await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.goto(world.url);
-        // The desktop chrome: the docked sidebar and the wide rows (not a phone's).
         await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
         await expect(page.locator('.ib-mrow')).toHaveCount(0);
         await expect(page.getByRole('complementary', { name: 'Inbox navigation' })).toBeVisible();
@@ -846,14 +750,12 @@ for (const narrow of [
         await expect(page.locator('.ib-listcol')).toBeHidden();
         const [paneBox, mainBox] = await Promise.all([pane.boundingBox(), page.locator('.ib-main').boundingBox()]);
         expect(paneBox!.width).toBeGreaterThanOrEqual(480);
-        // The whole room the list had: .ib-main less its two 8 px gutters (the panes float on the ground).
         expect(Math.abs(paneBox!.width - (mainBox!.width - 16))).toBeLessThan(2);
         await page.screenshot({ path: join(proofDir, `${tag}-2-thread.png`) });
         expect(await sideways(page)).toEqual([]);
         expect(await overlaps(page, '.ib-fline.ib-is-open', '.ib-mk, .ib-fl-nm, .ib-fl-meta, .ib-fl-tm')).toEqual([]);
         expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-readbtn, .ib-phsubj, .ib-ptool')).toEqual([]);
         expect(await cardFits(page)).toEqual([]);
-        // A pick: the foot gains Send and "Draft · 1 pick", and wraps rather than running past the pane.
         await pane.getByText('Retry with the same idempotency key').click();
         await expect(pane.locator('.ib-pfoot [data-foot-status] [data-draft-foot]')).toBeVisible();
         const foot = await pane.locator('.ib-pfoot').evaluate((el) => {
@@ -861,7 +763,6 @@ for (const narrow of [
           return [...el.querySelectorAll('button, [data-foot-status]')].filter((b) => b.getBoundingClientRect().width > 0).map((b) => b.getBoundingClientRect().right - box.right).filter((past) => past > 1);
         });
         expect(foot).toEqual([]);
-        // The desktop header, led by the way back (no phone header, no close beside it).
         const back = pane.getByRole('button', { name: 'Back to Inbox' });
         await expect(back).toBeVisible();
         await expect(pane.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
@@ -869,13 +770,10 @@ for (const narrow of [
         await back.click();
         await expect(page.locator('.ib-listcol')).toBeVisible();
         await expect(pane).toHaveCount(0);
-        // The thread covered the list, so ‹ Inbox was the browser's Back (an iPad's swipe back agrees with it):
-        // Forward reopens the thread, and no entry was added.
         expect(await page.evaluate(() => window.location.hash)).toBe('');
         await page.goForward();
         await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
 
-        // A file covers the thread, full screen, its toolbar led by Back to the thread.
         await page.evaluate((hash) => (window.location.hash = hash), `#thread=${world.threads.attach}`);
         await pane.locator('.ib-att-t', { hasText: 'retry-policy.md' }).click();
         const view = page.locator('section.ib-view');
@@ -884,11 +782,8 @@ for (const narrow of [
         const viewBox = (await view.boundingBox())!;
         expect(viewBox.x).toBeLessThan(1);
         expect(viewBox.width).toBeGreaterThan(page.viewportSize()!.width - 2);
-        // Full screen is all the window can do here, so there is no Exit full screen: Back to the thread leads instead.
         await expect(view.getByRole('button', { name: /full screen/i })).toHaveCount(0);
         await expect(view.locator('[data-full-view-bar]')).toBeVisible();
-        // The comments panel floats over the page's right side (not a phone's sheet): the page keeps its width, and the
-        // panel sits inside the window, under the toolbar.
         await view.locator('[data-full-view-comments]').click();
         await expect(view.locator('.ib-apanel')).toBeVisible();
         const [drawerBox, docBox, barBox] = await Promise.all([view.locator('.ib-apanel').boundingBox(), view.locator('.ib-docarea').boundingBox(), view.locator('[data-full-view-bar]').boundingBox()]);
@@ -901,8 +796,6 @@ for (const narrow of [
         expect(await overlaps(page, '[data-full-view-bar]', '.ib-fvb')).toEqual([]);
         await view.locator('[data-full-view-comments]').click();
         await expect(view.locator('.ib-apanel')).toBeHidden();
-        // Closing the file reopens the docked sidebar on a spring: the thread covers the list from the first
-        // frame, never drawn squeezed beside it while the sidebar opens (motion on, so the spring runs).
         await page.emulateMedia({ reducedMotion: 'no-preference' });
         type Sampled = { listFrames: boolean[]; listFrameAt: number[] };
         await page.evaluate(() => {
@@ -921,10 +814,8 @@ for (const narrow of [
         await view.getByRole('button', { name: 'Back to the thread' }).click();
         await expect(view).toHaveCount(0);
         await expect(pane).toBeVisible();
-        // The sampling covered the whole 900 ms window (a loaded runner draws fewer frames in it, not a shorter window).
         await expect.poll(() => page.evaluate(() => (window as unknown as Sampled).listFrameAt.at(-1) ?? 0), { timeout: 10_000 }).toBeGreaterThanOrEqual(900);
         const frames = await page.evaluate(() => (window as unknown as Sampled).listFrames);
-        // Enough samples to land inside the ~540 ms spring itself.
         expect(frames.length).toBeGreaterThanOrEqual(5);
         expect(frames.filter(Boolean)).toEqual([]);
       } finally {
@@ -937,7 +828,6 @@ for (const narrow of [
 test.describe('a desktop window', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
   test('long URLs, keys, tokens and IDs never scroll the thread sideways at desktop widths either', async ({ page }) => {
-    // (Under about 1092 px the thread covers the list instead of being squeezed beside it: the narrow-window tests above.)
     for (const width of [1440, 1280, 1024, 900]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`${world.url}#thread=${world.threads.tokens}`);
@@ -964,14 +854,11 @@ test.describe('a desktop window', () => {
       await page.goto(`${world.url}#thread=${world.threads.stopped}`);
       const pane = page.locator('section.ib-pane');
       await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
-      // Beside the list, not stacked.
       await expect(page.locator('.ib-listcol.ib-narrow')).toBeVisible();
       await pane.getByText('Retry with the same idempotency key').click();
       const foot = pane.locator('.ib-pfoot');
       const send = foot.getByRole('button', { name: 'Send', exact: true });
       const questions = foot.locator('[data-open-questions]');
-      // The default (approval "inbox-explicit-skip"): the other question stays open; one count for it (approval
-      // "reply-bar-pairs"), and this Send's skip is the list's first row.
       await expect(send).toBeVisible();
       await expect(questions).toHaveAccessibleName('1 open question');
       await expect(foot.locator('[data-skip-chip]')).toHaveCount(0);
@@ -989,11 +876,9 @@ test.describe('a desktop window', () => {
           expect(box!.x + box!.width, `${name} at ${width}px`).toBeLessThanOrEqual(right);
           expect(box!.y + box!.height, `${name} at ${width}px`).toBeLessThanOrEqual(footBox!.y + footBox!.height);
         }
-        // "Draft · 1 pick" stays one line ("Not sent" was once squeezed to two).
         expect(notSent!.height, `at ${width}px`).toBeLessThan(24);
       };
       await fits();
-      // Skip it from the list: the button then says what the Send skips; the row offers Keep open.
       await questions.click();
       const row = page.locator('[data-open-questions-list] [data-open-questions-skip-row]');
       await row.getByRole('menuitem', { name: /^Skip it/ }).click();
@@ -1002,7 +887,6 @@ test.describe('a desktop window', () => {
       await expect(questions).toHaveText(/1 to skip/);
       await fits();
       await page.screenshot({ path: join(proofDir, `desktop-${width}-foot.png`) });
-      // Back to the default, for the next width.
       await questions.click();
       await row.getByRole('menuitem', { name: /^Keep open/ }).click();
       await expect(row).toHaveAttribute('data-open-questions-skip-row', 'keep');
@@ -1019,19 +903,15 @@ test.describe('a desktop window', () => {
     const pane = page.locator('section.ib-pane');
     await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
     await expect(page.locator('.ib-listcol')).toBeHidden();
-    // The row clicked is under the thread now: focus moves to the way back.
     const back = pane.locator('[data-stack-back]');
     await expect(back).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.locator('.ib-listcol')).toBeVisible();
     await expect(pane).toHaveCount(0);
-    // Back on the list, focus is on the row of the thread just closed.
     await expect(row).toBeFocused();
-    // ‹ Inbox went back in history (no new entry): Forward reopens the thread.
     expect(await page.evaluate(() => window.location.hash)).toBe('');
     await page.goForward();
     await expect(pane.getByRole('heading', { name: /Stripe 409/ })).toBeVisible();
-    // Escape is the same Back.
     await page.keyboard.press('Escape');
     await expect(page.locator('.ib-listcol')).toBeVisible();
     expect(await page.evaluate(() => window.location.hash)).toBe('');
@@ -1042,15 +922,12 @@ test.describe('a desktop window', () => {
   test('at 900 px, a window that shrinks into stacking with a list row focused never drops focus to the page', async ({ page }) => {
     const rowOf = (id: string) => page.locator(`.ib-lbody [data-thread-id="${id}"]`);
     const onPage = () => page.evaluate(() => document.activeElement === document.body);
-    // The list alone: the row stays where it is, and keeps the focus.
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.goto(world.url);
     await rowOf(world.threads.holding).focus();
     await page.setViewportSize({ width: 900, height: 800 });
     await expect(rowOf(world.threads.holding)).toBeFocused();
 
-    // A thread beside the list, focus on another row: shrinking puts the thread over the list and hides that
-    // row, so focus goes to ‹ Inbox, and Back returns it to the row that had it.
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.evaluate((hash) => (window.location.hash = hash), `#thread=${world.threads.stopped}`);
     const pane = page.locator('section.ib-pane');
@@ -1065,7 +942,6 @@ test.describe('a desktop window', () => {
     await expect(page.locator('.ib-listcol')).toBeVisible();
     await expect(rowOf(world.threads.holding)).toBeFocused();
 
-    // And back out: a stacked thread whose ‹ Inbox has focus, then a wider window, puts focus on its row beside it.
     await rowOf(world.threads.stopped).click();
     await expect(pane.locator('[data-stack-back]')).toBeFocused();
     await page.setViewportSize({ width: 1100, height: 800 });
@@ -1082,12 +958,10 @@ test.describe('a desktop window', () => {
     await expect(page.locator('.ib-listcol.ib-narrow')).toBeVisible();
     expect(Math.round((await pane.boundingBox())!.width)).toBe(1080 - 232 - 380 - 3 * 8);
     await expect(pane.getByRole('button', { name: 'Close the thread' })).toBeVisible();
-    // Neither the thread nor a file stacks there.
     expect(await page.evaluate(() => document.querySelector('.pn-inbox')!.getAttribute('data-stack') ?? '')).not.toMatch(/thread|file/);
   });
 
   test('a window just wide enough keeps the list beside the thread, which keeps 480 px', async ({ page }) => {
-    // 232 + 380 + 480 and the panes' three 8 px gutters.
     await page.setViewportSize({ width: 1116, height: 800 });
     await page.goto(`${world.url}#thread=${world.threads.stopped}`);
     const pane = page.locator('section.ib-pane');

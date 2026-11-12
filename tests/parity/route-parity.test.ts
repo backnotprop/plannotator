@@ -1,20 +1,9 @@
-/**
- * Route Parity Test
- *
- * Extracts all API routes from Bun and Pi server files and asserts
- * they are identical per server (plan, review, annotate) plus shared
- * delegated handlers (editor annotations, AI endpoints).
- */
-
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 const ROOT = join(import.meta.dir, "../..");
 
-// --- Route extraction ---
-
-/** Extract url.pathname === "/path" and url.pathname.startsWith("/path") */
 function extractInlineRoutes(filePath: string): string[] {
   const src = readFileSync(filePath, "utf-8");
   const routes: string[] = [];
@@ -26,7 +15,6 @@ function extractInlineRoutes(filePath: string): string[] {
   return routes;
 }
 
-/** Extract AI endpoint object keys: "/api/ai/foo": async ... */
 function extractAIEndpointKeys(filePath: string): string[] {
   const src = readFileSync(filePath, "utf-8");
   const routes: string[] = [];
@@ -41,8 +29,6 @@ function extractAIEndpointKeys(filePath: string): string[] {
 function unique(routes: string[]): string[] {
   return [...new Set(routes)].sort();
 }
-
-// --- File paths ---
 
 const bun = {
   plan: join(ROOT, "packages/server/index.ts"),
@@ -59,8 +45,6 @@ const pi = {
 };
 
 const aiEndpointsFile = join(ROOT, "packages/ai/endpoints.ts");
-
-// --- Tests ---
 
 describe("route parity: Bun ↔ Pi", () => {
   test("plan server routes match", () => {

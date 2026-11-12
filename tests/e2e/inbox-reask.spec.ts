@@ -1,25 +1,3 @@
-/**
- * Re-ask (approval "inbox-reask"), proved in a real browser against the
- * compiled binary. Nothing is mocked: the binary runs `plannotator inbox
- * --background` under a temp PLANNOTATOR_DATA_DIR and HOME, Claude Code
- * agents ask through `plannotator inbox mcp` (scripts/inbox-sim.ts), and the
- * agent connections are the bridge's real doors driven as a connection
- * drives them (the harness of inbox-ended-session.spec.ts).
- *
- * One session asks three questions over two messages; the person opens the
- * "N open questions" list and presses its last item, Re-ask (owner,
- * 2026-10-23: no Re-ask button in the foot); the note waits Queued (the session is working) with Send now, the
- * row is in Sent, the connection is handed the note with the Re-ask wake
- * line; delivered; the agent re-asks two with `Replaces:` lines and drops
- * one with `supersedes`, and the old cards read Replaced and No longer
- * applies. Then: a session that ended (the choice, "Who should ask again?"),
- * one open question (Re-ask in the singular), and the sheet on a phone in WebKit.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs (desktop 1440 and 1280, light and dark, and a phone) land in
- * .local/proof/reask/ (or PLANNOTATOR_E2E_PROOF_DIR/reask).
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -75,7 +53,6 @@ function registry(): { port: number; token: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** One agent session's connection: long-polls for what the person sent it, and acknowledges a delivery. */
 class Connection {
   readonly commands: InboxReplyCommand[] = [];
   private stopped = false;
@@ -133,7 +110,6 @@ async function shot(page: Page, name: string, schemes: readonly ('light' | 'dark
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Opens the thread's "N open questions" list and answers its Re-ask item (absent when Re-ask is not offered). */
 async function openReask(page: Page) {
   const trigger = page.locator('section.ib-pane .ib-pfoot [data-open-questions]');
   if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
@@ -142,7 +118,6 @@ async function openReask(page: Page) {
   return list.locator('[data-reask]');
 }
 
-/** Re-ask is not offered: the list (when there is one) has no Re-ask item. */
 async function expectNoReask(page: Page) {
   const foot = page.locator('section.ib-pane .ib-pfoot');
   await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
@@ -197,7 +172,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const second = await claude.send({ project_path: billing, reply_to: first.message_id as string, body: SECOND }, { wakes: true });
   world = { root, dataDir, env, url, billing, claude, context, page, errors, threadId: first.thread_id as string, second: second.message_id as string, asker: '', connections: [] };
   world.asker = (await threadMessages(world.threadId))[0]!.author.session!;
-  // The one-time notification line is not what these shots are about.
   await fetch(`http://127.0.0.1:${registry().port}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notifications: { dismissed: true } }) });
 });
 
@@ -220,7 +194,6 @@ test('Re-ask: the note waits Queued with Send now, the row is Sent, the agent ge
   const pane = page.locator('section.ib-pane');
   await expect(pane.getByRole('heading', { name: 'Billing migration: two calls before I cut over' })).toBeVisible();
   const foot = pane.locator('.ib-pfoot');
-  // No Re-ask button in the foot: it is the last item of the "3 open questions" list.
   await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
   await expect(foot.locator('[data-open-questions]')).toHaveText('3 open questions');
   const reask = await openReask(page);
@@ -253,7 +226,6 @@ test('Re-ask: the note waits Queued with Send now, the row is Sent, the agent ge
   await expect(note.locator('pre')).toContainText('`Replaces: <id>`');
   await shot(page, '2-note-open-1440', ['light']);
 
-  // The connection was handed the note with the Re-ask line, not the reply's.
   const command = await waitFor('the note handed to the asking session', () => asker.commands.find((c) => c.reask === true));
   const lines = inboxWakeText(command).split('\n');
   expect(lines[1]).toBe(INBOX_REASK_INSTRUCTION);
@@ -262,7 +234,6 @@ test('Re-ask: the note waits Queued with Send now, the row is Sent, the agent ge
   expect(await sectionOf(world.threadId)).toBe('sent');
   await shot(page, '2-delivered-1440', ['light']);
 
-  // The agent re-asks two (Replaces:) and drops the refunds one (supersedes).
   const [q1, q2, q3] = (await threadMessages(world.threadId)).find((m) => m.id === command.id)!.reask!;
   await world.claude.send(
     {
@@ -283,7 +254,6 @@ test('Re-ask: the note waits Queued with Send now, the row is Sent, the agent ge
   await expect.poll(() => sectionOf(world.threadId)).toBe('waiting');
   await expectNoReask(page);
   await shot(page, '3-reasked-1440', ['light']);
-  // Every message open (a thread opened before them folds the older ones).
   const expand = page.getByRole('button', { name: /Expand all/ });
   if ((await expand.count()) > 0) await expand.click();
   await pane.locator('.ib-pbody').evaluate((el) => el.scrollTo({ top: 0 }));
@@ -295,7 +265,6 @@ test('Re-ask: the note waits Queued with Send now, the row is Sent, the agent ge
 
 test('one open question, no pick: Re-ask shows, and the note and the wake read in the singular (owner, 2026-10-23)', async () => {
   const { page } = world;
-  // The asking session's connection from the test before (still polling), else a new one.
   let asker = world.connections.find((c) => c.session === world.asker);
   if (!asker) {
     asker = new Connection(world.asker, false);
@@ -308,12 +277,10 @@ test('one open question, no pick: Re-ask shows, and the note and the wake read i
   await page.goto(`${world.url}#thread=${one.thread_id}`);
   const pane = page.locator('section.ib-pane');
   await expect(pane.getByRole('heading', { name: 'Cache warmup: one call' })).toBeVisible();
-  // One open question in a short thread: the list's button shows, with Re-ask in the singular at its foot.
   await expect(pane.locator('.ib-pfoot [data-open-questions]')).toHaveText('1 open question');
   const reask = await openReask(page);
   await expect(reask).toHaveText('Re-ask in a new message');
   await expect(page.locator('[data-open-questions-list] .ib-oq-row')).toHaveCount(1);
-  // The list as it opens: the question, then Re-ask, no heading or foot line.
   await page.mouse.move(10, 10);
   await shot(page, '1b-one-question-list-1440');
   await reask.hover();
@@ -336,7 +303,6 @@ test('the session that asked ended: Re-ask asks who should ask again, and the pi
   const { page } = world;
   for (const c of world.connections) await c.stop();
   world.connections = [];
-  // A new session asks two questions and goes away; another session is live.
   const gone = await SimAgent.connect({ binary, env: world.env, name: 'Claude Code', host: 'claude-code' });
   const asked = await gone.send({ project_path: world.billing, subject: 'Search index rebuild: two settings', body: [q('How often should the index rebuild?', 'A full rebuild takes 14 minutes.', ['Nightly', 'Every 6 hours'], 'Nightly'), '', q('Should search stay up during a rebuild?', 'Staying up needs 2 GB more disk.', ['Stay up', 'Go read-only'], 'Stay up')].join('\n') }, { wakes: true });
   await gone.close();
@@ -344,7 +310,6 @@ test('the session that asked ended: Re-ask asks who should ask again, and the pi
   world.connections.push(taker);
   await page.goto(`${world.url}#thread=${asked.thread_id}`);
   const pane = page.locator('section.ib-pane');
-  // Ended means 60 s with no sign of the session (the grace), read on the window's refresh.
   await expect(pane.locator('[data-asker-ended="live"]')).toBeVisible({ timeout: 100_000 });
   await (await openReask(page)).click();
   const choice = pane.locator('[data-route-choice]');

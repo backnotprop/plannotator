@@ -1,18 +1,3 @@
-/**
- * Plan review with linked documents keeps every document's comments across a
- * reload (#1545), proved in Chromium against the compiled binary.
- *
- * The plan links two documents. The reviewer comments on the plan and on the
- * first document, then opens the second one, which has no comments, and
- * reloads. Draft Recovered offers both comments; after Restore the plan's
- * comment is on the plan and the document's comment is on that document, and
- * the feedback the agent receives says so. Before the fix, opening the empty
- * document deleted the plan's draft and the reload offered nothing.
- *
- * Every CLI runs under a temp PLANNOTATOR_DATA_DIR and HOME, opens no browser,
- * and is closed by this test. Build the binary first (see inbox.spec.ts), then
- * `bun run test:e2e:inbox`.
- */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,7 +31,6 @@ interface Session {
   close: () => Promise<void>;
 }
 
-/** Plan review (`plannotator` reading a PermissionRequest on stdin) in a scratch project. */
 async function startPlanReview(): Promise<Session> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-plan-linked-drafts-e2e-');
@@ -88,7 +72,6 @@ async function startPlanReview(): Promise<Session> {
   const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
   const close = async () => {
     if (child.exitCode === null) {
-      // A plan review ends with a decision; deny what is left so the CLI exits.
       await fetch(new URL('/api/deny', url), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -156,7 +139,6 @@ test('plan review: comments on the plan and a linked document survive opening an
     await addGlobalComment(page, DESIGN_NOTE);
     await backToPlan(page);
     await openLinked(page, 'the empty page', 'Empty page');
-    // Past both draft writers' 500ms debounce.
     await page.waitForTimeout(1_500);
 
     await page.reload();
@@ -164,14 +146,11 @@ test('plan review: comments on the plan and a linked document survive opening an
     await expect(page.getByText('Found 2 annotations (including comments on 1 linked document)')).toBeVisible();
     await page.getByRole('button', { name: 'Restore' }).click();
 
-    // The plan's comment is back on the plan.
     await expect(page.getByText(PLAN_NOTE).first()).toBeVisible();
-    // The design's comment is back on the design.
     await openLinked(page, 'the design', 'Design');
     await expect(page.getByText(DESIGN_NOTE).first()).toBeVisible();
     await backToPlan(page);
 
-    // The agent receives each comment under its own document.
     await page.getByRole('button', { name: 'Send Feedback', exact: true }).first().click();
     await expect.poll(session.stdout, { timeout: 15_000 }).toContain('Linked Document Feedback');
     const output = session.stdout();

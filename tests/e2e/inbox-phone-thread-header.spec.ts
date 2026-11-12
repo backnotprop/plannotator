@@ -1,22 +1,3 @@
-/**
- * A phone's thread header stays on one line with nothing cut (the owner,
- * 2026-10-29: "Mobile thread header needs to be better responsive"; his
- * iPhone read "‹ I…", Mark read, a stray glyph, then the icons). Since the
- * approval "inbox-thread-header" (2026-11-02) the bar is ‹ Inbox, its title,
- * Artifacts, Expand, ⋯ (the read actions and Snooze lead the ⋯ sheet), with
- * the room the read button left. The title is the thread's name (this thread
- * is named, so it shows at once; with no name, the subject once the heading
- * scrolls away). headFit.ts gives way so the title has room to be read:
- * tighter padding, the Artifacts count, and last the way back's label; the
- * title is never a sliver (the stray glyph was a few pixels of it).
- *
- * Proved against the compiled binary at 320, 360, 375, 390 and 430 px, at the
- * default text size and the largest (15), on a thread with 11 artifacts and a
- * waiting question, opened from the whole list ("‹ Inbox") and from a project
- * with a long name. Build the binary first (see inbox.spec.ts). PNGs land in
- * .local/proof/phone-thread-header/.
- */
-
 import { devices, expect, test, type Browser, type BrowserContext } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,7 +10,6 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'phone-thread-header');
 
-/** headFit.ts's floors, as the person sees them. */
 const BACK_LABEL_FLOOR = 56;
 const SUBJECT_FLOOR = 88;
 
@@ -54,7 +34,6 @@ test.beforeAll(async () => {
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
-  // A long project name: the way back reads it when the thread is opened from the project's list.
   const project = scratchProject(join(root, 'src'), 'checkout-redesign-storefront');
   mkdirSync(join(project, 'notes'), { recursive: true });
   const files = Array.from({ length: 11 }, (_, i) => {
@@ -64,7 +43,6 @@ test.beforeAll(async () => {
   });
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const long = Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1}: the drawer keeps the summary pinned while the line items scroll.`).join('\n\n');
-  // The subject starts with a V: a few pixels of it were the stray "\" on the owner's phone.
   const first = await claude.send({ project_path: project, subject: 'Visual QA for the checkout drawer redesign', thread: 'qa', body: `Starting.\n\n${long}`, attachments: files.slice(0, 4) });
   await claude.send({ project_path: project, thread: 'qa', body: `Second pass.\n\n${long}`, attachments: files.slice(4, 8) });
   await claude.send({ project_path: project, thread: 'qa', body: ['Last pass.', '', ':::question', 'Ship the drawer this week?', '', '- [ ] Yes', '- [ ] Wait', ':::', '', long].join('\n'), attachments: files.slice(8) });
@@ -106,7 +84,6 @@ for (const size of [14, 15]) {
           await expect(pane.locator('[data-phone-back]')).toBeVisible();
           await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
           await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--inbox-text-size').trim())).toBe(size === 14 ? '' : '15');
-          // A named thread's title is in the header from the start, scrolled or not.
           await expect(pane.locator('.ib-phead [data-header-subject][data-on]')).toHaveCount(1);
           await pane.locator('.ib-pbody').evaluate((body) => body.scrollBy(0, 900));
           await page.waitForTimeout(200);
@@ -134,7 +111,6 @@ for (const size of [14, 15]) {
               kbds,
             };
           });
-          // Every control is on the header's one line, inside its edge, none over another, each a 44 px target.
           for (const b of m.buttons) {
             expect(b.h, `${b.name} is ${Math.round(b.w)}x${Math.round(b.h)}`).toBeGreaterThanOrEqual(43.9);
             expect(b.w, `${b.name} is ${Math.round(b.w)}x${Math.round(b.h)}`).toBeGreaterThanOrEqual(43.9);
@@ -142,19 +118,14 @@ for (const size of [14, 15]) {
           for (let i = 1; i < m.buttons.length; i++) expect(m.buttons[i].left, `${m.buttons[i - 1].name} overlaps ${m.buttons[i].name}`).toBeGreaterThanOrEqual(m.buttons[i - 1].right - 0.5);
           expect(m.buttons.at(-1)!.right).toBeLessThanOrEqual(m.end + 0.5);
           expect(m.buttons.at(-1)!.name).toBe('More');
-          // The way back: "Inbox" whole; a long project name at least its floor; or the chevron alone.
           if (m.label) expect(m.label.shown, `the way back reads ${m.label.shown} of ${m.label.whole} px`).toBeGreaterThanOrEqual(Math.min(m.label.whole, BACK_LABEL_FLOOR) - 0.5);
           if (from === 'inbox') expect(m.label, '"Inbox" is drawn').not.toBeNull();
           if (from === 'inbox') expect(m.label!.shown).toBeGreaterThanOrEqual(m.label!.whole - 0.5);
           await expect(pane.locator('[data-phone-back]')).toHaveAccessibleName(from === 'inbox' ? 'Back to Inbox' : /^Back to checkout-redesign-storefront/);
-          // The title: drawn at every phone width, with room to read it (never a sliver).
           expect(m.subject, 'the title is drawn').not.toBeNull();
           expect(m.subject!).toBeGreaterThanOrEqual(SUBJECT_FLOOR - 0.5);
-          // No keyboard hints on a phone.
           expect(m.kbds).toBe(0);
-          // The read action and Snooze are in the ⋯ sheet, not the bar.
           await expect(head.locator('[data-mark-read], [data-mark-unread], [data-thread-snooze]')).toHaveCount(0);
-          // Whatever gave way keeps its name.
           await expect(pane.locator('[data-artifacts-button]')).toHaveAccessibleName('Artifacts, 11');
         } finally {
           await context.close();
@@ -173,7 +144,6 @@ test('the widest phone keeps every word: "‹ Inbox", the title and the count', 
     const pane = page.locator(`section.ib-pane[data-thread-id="${world.thread}"]`);
     await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
     await expect(pane.locator('[data-phone-back] .ib-pback-l')).toBeVisible();
-    // A named thread: the bar shows its name (the list's rule); the body's heading stays the subject.
     const title = pane.locator('.ib-phead [data-header-subject]');
     await expect(title).toHaveAttribute('data-header-name', '');
     await expect(title).toHaveText('qa');

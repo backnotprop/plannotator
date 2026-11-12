@@ -1,36 +1,3 @@
-/**
- * Compose's To stays one clean line (the owner, 2026-10-30: "Creating a new
- * thread needs to be a bit more responsive"). His phone showed
- * "To · Claude Code · main · workspaces/worktr" wrapped onto two lines and cut
- * mid-glyph: on a phone the session detail was a two-line clamp.
- *
- * A phone has no To line now (approval "inbox-phone-composer-picker"): To is a
- * pill in the foot's row that names the agent alone, and the project is in the
- * pill's accessible name and in the sheet the pill opens.
- *
- * Proved in Chromium against the compiled binary with worst-case sessions: a
- * long checkout name (a `feature/…` branch), deep worktree paths, two projects
- * whose folders share a name (so the Inbox names them with their parents), two
- * Claude Code sessions in one project, and a plain project with no checkout.
- * At 390 and 320 px, with the longest session in To:
- *  - the foot's row is as tall as it is for a short name (one line);
- *  - the pill's mark and the agent's name are whole (scrollWidth <= clientWidth),
- *    the chevron after them, inside the pill, and the pill inside the row,
- *    clear of Send;
- *  - the long project name is not in the pill, and is in its accessible name.
- * The phone's sheet shows each session's whole detail, never cut (it wraps
- * under the title), so two checkouts that differ only by their parent folders
- * read differently; every row stays inside the sheet and the window. On a desktop (1440 and 810 px) the To row is one line,
- * To's label on the agent name's baseline, and the cut detail opens a tooltip
- * with the whole name and folder.
- *
- * Nothing is mocked: `plannotator inbox --background` under a temp HOME and
- * PLANNOTATOR_DATA_DIR, agents write through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts), and the sessions are the bridge's real long-poll.
- * Build the binary first (see inbox.spec.ts). COMPOSE_TO_SHOTS_DIR: where to
- * write the full-window PNGs (none when unset).
- */
-
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -56,7 +23,6 @@ interface World {
 
 let world: World;
 
-/** One live session: the bridge's long-poll, as the mod, Pi and OpenCode run it. */
 class Poll {
   private stopped = false;
   private readonly loop: Promise<void>;
@@ -106,13 +72,10 @@ test.beforeAll(async () => {
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   world = { root, dataDir, url: started.stdout.trim(), agent, polls: [] };
 
-  // Two checkouts named `main` and two of one long `feature/…` branch: the Inbox names each with the parents
-  // that tell it apart ("main · workspaces/worktrees", "northwind-… · northwind/worktrees/feature").
   const main = scratchProject(join(root, 'workspaces/worktrees'), 'main');
   const otherMain = scratchProject(join(root, 'src/plannotator/worktrees'), 'main');
   const long = scratchProject(join(root, 'workspaces/projects/northwind/worktrees/feature'), BRANCH);
   const otherLong = scratchProject(join(root, 'workspaces/projects/ledger-service/worktrees/feature'), BRANCH);
-  // No checkout at all: a plain folder.
   const plain = scratchProject(join(root, 'src'), 'billing');
   for (const project of [main, otherMain, long, otherLong, plain]) {
     await agent.send({ project_path: project, subject: 'Run finished', body: 'The export streams rows now.' });
@@ -138,11 +101,9 @@ test.afterAll(async () => {
   }
 });
 
-/** Opens New message and puts `session` in To through the picker. */
 async function composeTo(page: Page, phone: boolean, session: string, onPicker?: () => Promise<void>): Promise<Locator> {
   await page.locator(phone ? '.ib-lhead [data-open-compose]' : '.ib-side [data-open-compose]').first().click();
   const dialog = page.locator('dialog[data-compose]');
-  // A phone's To is the pill in the foot's row; it opens the sheet.
   const to = dialog.locator(phone ? '.ib-cp-foot [data-compose-to]' : '.ib-cp-tobtn');
   await expect(to).not.toHaveAttribute('data-loading', /.*/, { timeout: 20_000 });
   await to.click();
@@ -150,7 +111,6 @@ async function composeTo(page: Page, phone: boolean, session: string, onPicker?:
   if (onPicker) await onPicker();
   await dialog.locator(`[data-compose-session="${session}"]`).click();
   await expect(to).toHaveAttribute('data-compose-to', session);
-  // The message field has focus now; a phone's keyboard does not count here.
   await dialog.getByRole('textbox', { name: 'Message' }).blur();
   return dialog;
 }
@@ -172,7 +132,6 @@ interface RowMeasure {
   labelBaseline: { to: number; agent: number };
 }
 
-/** The To row's geometry: every number the checks below need, in one read. */
 function measure(dialog: Locator): Promise<RowMeasure> {
   return dialog.evaluate((el) => {
     const rect = (node: Element) => {
@@ -189,7 +148,6 @@ function measure(dialog: Locator): Promise<RowMeasure> {
     const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
     const toLabel = row.querySelector('.ib-cp-tol')!;
     const threadLabel = el.querySelector('.ib-cp-thread .ib-cp-tol')!;
-    // The text's baseline: the bottom of an inline-block placed on it.
     const baseline = (node: Element) => {
       const probe = document.createElement('span');
       probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
@@ -198,7 +156,6 @@ function measure(dialog: Locator): Promise<RowMeasure> {
       probe.remove();
       return y;
     };
-    // The detail's own ellipsis boxes: each cut part (leaf, parents) is nowrap and ellipsis.
     const parts = [detail, ...detail.querySelectorAll<HTMLElement>('[data-cut]')];
     const cut = parts.some((part) => part.scrollWidth > part.clientWidth + 0.5);
     return {
@@ -235,7 +192,6 @@ interface PillMeasure {
   label: string;
 }
 
-/** A phone's To: the pill in the foot's row, every number the checks below need, in one read. */
 function measurePill(dialog: Locator): Promise<PillMeasure> {
   return dialog.evaluate((el) => {
     const rect = (node: Element) => {
@@ -266,16 +222,12 @@ function measurePill(dialog: Locator): Promise<PillMeasure> {
 }
 
 function expectOneCleanPill(m: PillMeasure, singleLineFoot: number, nameWhole = true): void {
-  // One line: the foot's row is as tall as with a short name, and the pill is its 36 px.
   expect(m.footHeight).toBeCloseTo(singleLineFoot, 0);
   expect(m.pill.height).toBeCloseTo(36, 0);
-  // The agent's mark and name are whole; a name that does not fit (the 320 px row, beside the paperclip, Skills, the
-  // mic and Send) is cut with an ellipsis, never wrapped.
   if (nameWhole) expect(m.nameCut).toBe(false);
   expect(m.markCut).toBe(false);
   expect(m.textOverflow).toBe('ellipsis');
   expect(m.whiteSpace).toBe('nowrap');
-  // The chevron follows the name, inside the pill; the pill stays in the row, clear of Send.
   expect(m.name.right).toBeLessThanOrEqual(m.chevron.left + 0.5);
   expect(m.chevron.right).toBeLessThanOrEqual(m.pill.right + 0.5);
   expect(m.pill.left).toBeGreaterThanOrEqual(m.foot.left);
@@ -292,9 +244,7 @@ for (const width of [390, 320]) {
     page.on('pageerror', (error) => errors.push(error.message));
     try {
       await page.goto(world.url);
-      // The single-line height: To naming a session in a short project with no parents.
       let dialog = await composeTo(page, true, 'ses-plain');
-      // No To line at the top: the head is the bar alone.
       await expect(dialog.locator('.ib-cp-to, .ib-cp-tod')).toHaveCount(0);
       const short = await measurePill(dialog);
       expect(short.nameCut).toBe(false);
@@ -302,7 +252,6 @@ for (const width of [390, 320]) {
       await expect(dialog).toHaveCount(0);
 
       dialog = await composeTo(page, true, 'ses-long-1', async () => {
-        // The sheet on a phone: every session's whole detail, never cut (it wraps under the title; a row grows for it).
         const sheet = dialog.locator('[data-compose-to-sheet]');
         const sheetBox = (await sheet.boundingBox())!;
         const options = sheet.locator('[role="listbox"] > [role="option"]');
@@ -317,7 +266,6 @@ for (const width of [390, 320]) {
             const detail = el.querySelector<HTMLElement>('.ib-sheet-d')!;
             const box = detail.getBoundingClientRect();
             return {
-              // The agent's name is whole; the detail is neither cut sideways nor clipped by its row.
               cut: title.scrollWidth > title.clientWidth + 0.5 || detail.scrollWidth > detail.clientWidth + 0.5,
               detailOverflow: getComputedStyle(detail).textOverflow,
               inRow: box.left >= row.left && box.right <= row.right + 0.5 && box.top >= row.top && box.bottom <= row.bottom + 0.5,
@@ -328,7 +276,6 @@ for (const width of [390, 320]) {
           expect(parts.cut, name).toBe(false);
           expect(parts.detailOverflow, name).not.toBe('ellipsis');
           expect(parts.inRow, name).toBe(true);
-          // The project, parents and all, is in the words on screen.
           expect(parts.detail, name).toContain(project);
           shown.push(parts.words.replace(/ · [^·]*$/, ''));
           details.set((await option.getAttribute('data-compose-session'))!, parts.detail.replace(/ · [^·]*$/, ''));
@@ -338,8 +285,6 @@ for (const width of [390, 320]) {
           expect(box.x).toBeGreaterThanOrEqual(0);
           expect(box.x + box.width).toBeLessThanOrEqual(width);
         }
-        // Checkouts that differ only by their parent folders read differently (start times aside): only the two
-        // sessions of one project share their words.
         expect(new Set(shown).size).toBe(5);
         expect(details.get('ses-long-1')).toBe(details.get('ses-long-2'));
         expect(details.get('ses-long-1')).not.toBe(details.get('ses-other-long'));
@@ -355,12 +300,9 @@ for (const width of [390, 320]) {
         await shot(page, 'phone-320-dark');
       }
       const long = await measurePill(dialog);
-      // At 320 px the row leaves the name about its own width: it may end in an ellipsis there.
       expectOneCleanPill(long, short.footHeight, width >= 360);
-      // The long project is not in the pill (the agent alone), and is in what a screen reader hears.
       expect(long.words).toBe('Claude Code');
       expect(long.label).toContain(BRANCH);
-      // The other worst cases: the `main` checkout named with its parents, and two sessions of one project.
       for (const session of ['ses-main', 'ses-long-2', 'ses-other-long']) {
         const to = dialog.locator('.ib-cp-foot [data-compose-to]');
         await to.click();
@@ -369,7 +311,6 @@ for (const width of [390, 320]) {
         await dialog.getByRole('textbox', { name: 'Message' }).blur();
         expectOneCleanPill(await measurePill(dialog), short.footHeight, width >= 360);
       }
-      // The Thread row keeps its own height under it.
       const thread = (await dialog.locator('.ib-cp-thread').boundingBox())!;
       expect(thread.width).toBeLessThanOrEqual(width);
       expect(errors).toEqual([]);
@@ -400,7 +341,6 @@ test('a desktop window: the To row is one line at 1440 and 810 px, and the whole
       expect(m.agentCut).toBe(false);
       expect(m.chevron.right).toBeLessThanOrEqual(m.row.right);
       expect(Math.abs(m.labelBaseline.to - m.labelBaseline.agent)).toBeLessThanOrEqual(1);
-      // The 680 px dialog cuts this one too: the whole name and its folder are a tooltip.
       expect(m.detailCut).toBe(true);
       await dialog.locator('.ib-cp-tod').hover();
       await expect(page.locator('[data-pn-tooltip]')).toContainText(`${BRANCH} · ledger-service/worktrees/feature`);

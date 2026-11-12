@@ -1,19 +1,3 @@
-/**
- * A real Inbox for the voice dictation spec, run from source as its own process, serving the built window. The
- * compiled binary can't be pointed at fake endpoints, on purpose: no environment variable moves them. So this script
- * passes the server's test option, with a fake `codex` on a scratch PATH (tests/helpers/fake-codex-app-server.ts) and a
- * fake of both OpenAI endpoints on loopback. No real Codex, no real `~/.codex`, no call to OpenAI.
- *
- *   bun tests/e2e/voice-inbox.ts <root> <JSON options>
- *
- * Prints one line `{ url, threads, filed, filedToo, upstream }` and runs until told to stop. A JSON line on stdin is a command:
- *  - `{ "upstream": [{ status?, text?, html?, hold? }] }`: the next answers, the last repeating. `hold` waits for
- *    `{ "release": true }`.
- *  - `{ "codex": { ... } }`: the fake Codex's new state.
- *  - `{ "stop": true }`: stop the Inbox and exit.
- * Each post upstream adds a line to `<root>/upstream.jsonl`: its size, whether it is a WAV, its User-Agent. Each fake
- * Codex start is in `<root>/bin/calls.jsonl`.
- */
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createAgentEnvironmentFor } from "../../packages/server/inbox-agents";
@@ -41,7 +25,6 @@ mkdirSync(home, { recursive: true });
 
 let answers: Answer[] = [{ text: "Rename the build step." }];
 let release: (() => void) | null = null;
-/** A release that came before the clip did: the spec can't see the post arrive. */
 let released = false;
 const upstream = Bun.serve({
   hostname: "127.0.0.1",

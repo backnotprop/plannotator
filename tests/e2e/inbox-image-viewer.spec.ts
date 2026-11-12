@@ -1,26 +1,3 @@
-/**
- * One viewer for a thread's images and files (approval "inbox-image-viewer",
- * 2026-10-15), proved in a real browser against the compiled binary under a
- * temp data dir: an agent sends three messages whose text shows images and
- * which attach files; the store captures the images at send; a click on an
- * image in a message opens it full screen in the file viewer; `]` `[` step
- * through everything in reading order (each message's images in text order,
- * then its attached files), keeping the frame and replacing the route (one
- * Back to the thread); the peek opens a picture list under full screen's
- * toolbar (above the bar beside the thread; one row per message, the open
- * file ringed) and owns the keys while open; an inline
- * image takes a comment and a markup and rides the Send under its path and
- * message; an image the agent overwrites says "Changed since Claude sent it"
- * and opens the version it sent; a typed comment asks before a step; on an
- * iPhone (WebKit) the toolbar's ⋯ opens the peek as a bottom sheet; and plan
- * review's annotate surface gets the light version (full screen, ← →, the
- * peek, no pen), whose Actual size shows an image at its real size.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-image-viewer.spec.ts`.
- * PNGs, light and dark, land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/image-viewer).
- */
-
 import { expect, test, webkit, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,7 +10,6 @@ const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/image-viewer'));
 
-/** A small checkout screen, drawn by the browser into a real PNG. */
 function screen(title: string, tag: string, accent: string, body: string): string {
   return `<!doctype html><meta charset="utf-8"><style>
 body{margin:0;font:15px system-ui,sans-serif;background:#f4f3ef;color:#18181b}
@@ -71,7 +47,6 @@ interface World {
   page: Page;
   errors: string[];
   threadId: string;
-  /** File name to its att_ id (inline images and attachments alike). */
   ids: Record<string, string>;
 }
 
@@ -96,10 +71,8 @@ async function png(browser: Browser, html: string, width: number, height: number
 }
 
 const pane = () => world.page.locator('[data-attachment-pane]');
-/** The position: the stepper's label beside the thread, the toolbar's N/M in full screen (both name it the same way). */
 const label = () => world.page.locator('[data-step-label], [data-full-view-position]');
 
-/** "2 of 7, checkout-b.png": the open file as the stepper (or full screen's N/M) names it. */
 async function expectAt(page: Page, position: number, name: string): Promise<void> {
   await expect(page.locator('[data-step-label], [data-full-view-position]')).toHaveAttribute('aria-label', `${position} of 7, ${name}. Show every file in this thread`);
   await expect(page.locator('[data-attachment-pane]')).toHaveAttribute('data-attachment-pane', world.ids[name]!);
@@ -115,7 +88,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const trap = join(root, 'trap');
   mkdirSync(home);
   mkdirSync(trap);
-  // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-image-viewer: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
   const env = { PATH: `${trap}:${process.env.PATH ?? ''}`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
@@ -203,12 +175,10 @@ test('a click on an image in a message opens it full screen in the file viewer; 
   const page = world.page;
   const inlineB = page.locator(`.ib-body img[data-inline-image="${world.ids['checkout-b-steps.png']}"]`);
   await expect(inlineB).toBeVisible();
-  // A captured image is a button for the keyboard too.
   await expect(inlineB).toHaveAttribute('role', 'button');
   await inlineB.click();
   await expect(pane()).toHaveClass(/ib-full/);
   await expectAt(page, 2, 'checkout-b-steps.png');
-  // Full screen: no header, one toolbar.
   await expect(pane().locator('[data-header-from]')).toHaveCount(0);
   await expect(page.locator('[data-full-view-bar]')).toBeVisible();
   await expect(pane().locator('.ib-imgstage img')).toBeVisible();
@@ -222,18 +192,15 @@ test('a click on an image in a message opens it full screen in the file viewer; 
   ] as const) {
     await page.keyboard.press(']');
     await expectAt(page, position, name);
-    // A step keeps the frame the person is in.
     await expect(pane()).toHaveClass(/ib-full/);
   }
   await page.keyboard.press(']');
   await expect(page.locator('[data-full-view-chip]')).toContainText('Last file in this thread');
   await page.keyboard.press('[');
   await expectAt(page, 6, 'checkout-mobile.png');
-  // Stepping replaced the route: one Back returns to the thread.
   await page.goBack();
   await expect(pane()).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}$`));
-  // Enter on a captured image opens it too.
   await page.locator(`.ib-body img[data-inline-image="${world.ids['checkout-a-single-page.png']}"]`).focus();
   await page.keyboard.press('Enter');
   await expectAt(page, 1, 'checkout-a-single-page.png');
@@ -248,11 +215,9 @@ test('the peek: a picture list above the pill, one row per message, the open fil
   await expect(peek.getByRole('row')).toHaveCount(3);
   await expect(peek.getByRole('gridcell')).toHaveCount(7);
   await expect(peek.locator('[aria-selected="true"]')).toHaveAttribute('data-peek-item', world.ids['checkout-a-single-page.png']!);
-  // Images show their picture; other files a type tile; attached files carry a paperclip.
   await expect(peek.locator(`[data-peek-item="${world.ids['checkout-b-steps.png']}"] img`)).toBeVisible();
   await expect(peek.locator(`[data-peek-item="${world.ids['empty-states.md']}"]`)).toContainText('MD');
   await expect(peek.locator('[data-peek-attached]')).toHaveCount(3);
-  // It floats under full screen's toolbar and moves nothing under it.
   const placement = await page.evaluate(() => {
     const grid = document.querySelector('[data-step-list]')!.getBoundingClientRect();
     const bar = document.querySelector('[data-full-view-bar]')!.getBoundingClientRect();
@@ -261,7 +226,6 @@ test('the peek: a picture list above the pill, one row per message, the open fil
   expect(placement.gridTop).toBeGreaterThanOrEqual(placement.barBottom);
   await page.keyboard.press('ArrowRight');
   await expect(peek.locator(`[data-peek-item="${world.ids['checkout-b-steps.png']}"]`)).toBeFocused();
-  // ] is not a step while the peek is open.
   await page.keyboard.press(']');
   await expectAt(page, 1, 'checkout-a-single-page.png');
   await page.keyboard.press('ArrowRight');
@@ -275,7 +239,6 @@ test('the peek: a picture list above the pill, one row per message, the open fil
   await expect(peek).toBeHidden();
   await expect(label()).toBeFocused();
   await expect(page.locator('[data-step-live]')).toHaveText(/^4 of 7, empty-orders\.png, PNG image, in Claude's .* message$/);
-  // Esc closes it and hands focus back.
   await page.keyboard.press('ArrowDown');
   await expect(peek).toBeVisible();
   await page.keyboard.press('Escape');
@@ -300,7 +263,6 @@ test('an image in a message takes a comment and a markup, like an attached image
   await page.mouse.move(at(0.5, 0.15).x, at(0.5, 0.15).y, { steps: 8 });
   await page.mouse.move(at(0.64, 0.19).x, at(0.64, 0.19).y, { steps: 8 });
   await page.mouse.up();
-  // Enter adds the drawing to the reply at once; the words after it are its note.
   await page.keyboard.press('Enter');
   await expect(pane().locator('[data-image-composer] [data-markup-kept] img')).toBeVisible();
   await pane().getByRole('textbox', { name: 'A note with your drawing on checkout-b-steps.png' }).fill('Make step 1 bold, and say which step you are on.');
@@ -313,11 +275,9 @@ test('an image in a message takes a comment and a markup, like an attached image
 test('an image the agent overwrites says it changed since it was sent, and opens the version it sent', async ({ browser }) => {
   const page = world.page;
   writeFileSync(join(world.project, 'design', 'checkout-c-drawer.png'), await png(browser, screen('Checkout', 'C · Drawer v2', '#7c3aed', '<h3>Your cart (v2)</h3>'), 1200, 760));
-  // Back to the window: the files are read again.
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await page.keyboard.press(']');
   await expectAt(page, 3, 'checkout-c-drawer.png');
-  // Full screen: the changed line is the chip at the top left; the whole sentence is its tooltip (ui's Tooltip, never a native title).
   const line = pane().locator('[data-full-view-changed]');
   await expect(line).toContainText('Changed since sent');
   await expect(line).not.toHaveAttribute('title', /./);
@@ -340,7 +300,6 @@ test('a typed comment on an image never stops a step, and waits in its box for t
   await page.keyboard.press('[');
   await expect(pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' })).toHaveValue('The drawer hides the total.');
   await shot(page, '06-kept');
-  // Cleared on the comment itself, then on: nothing waits for it.
   await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('');
   await pane().locator('.ib-imgstage').click();
   await page.keyboard.press(']');
@@ -384,7 +343,6 @@ test('on an iPhone (WebKit) an image in a message opens full screen and the tool
     const page = await context.newPage();
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(`${world.url}#thread=${world.threadId}`);
-    // After the reply the first message is folded to one line: open it.
     const folded = page.locator(`[data-message-article="${world.threadId}"][data-folded] [data-fold-head]`);
     await expect(page.locator(`[data-message-article="${world.threadId}"]`)).toBeVisible();
     if (await folded.count()) await folded.click();
@@ -394,11 +352,9 @@ test('on an iPhone (WebKit) an image in a message opens full screen and the tool
     await expect(page.locator('[data-attachment-pane]')).toHaveAttribute('data-attachment-pane', world.ids['checkout-b-steps.png']!);
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(shotsDir, '08-phone-inline-image-light.png') });
-    // One tap on the toolbar's pill.
     await page.locator('[data-full-view-bar] [data-full-view-position]').click();
     const sheet = page.locator('[data-image-peek-sheet]');
     await expect(sheet).toBeVisible();
-    // Three across.
     const columns = await sheet.locator('[role="row"]').first().evaluate((row) => getComputedStyle(row.querySelector('[role="presentation"]')!).gridTemplateColumns.split(' ').length);
     expect(columns).toBe(3);
     await page.waitForTimeout(300);
@@ -449,7 +405,6 @@ test('plan review and annotate get the light version: full screen, ← → acros
     await expect(box).toBeVisible();
     await expect(box.locator('[data-lightbox-count]')).toHaveText('2 of 4');
     await expect(box.locator('[data-lightbox-section]')).toHaveText('in “Options”');
-    // No pen, no comment box: annotate the document itself.
     await expect(box.getByRole('button', { name: 'Mark up' })).toHaveCount(0);
     await shot(page, '10-plan-light-version');
     await page.keyboard.press('ArrowRight');
@@ -467,7 +422,6 @@ test('plan review and annotate get the light version: full screen, ← → acros
     await page.keyboard.press('Enter');
     await expect(box.locator('[data-lightbox-count]')).toHaveText('1 of 4');
     await expect(box.locator('[data-lightbox-pill]')).toBeFocused();
-    // Esc closes the peek first, then the viewer.
     await box.locator('[data-lightbox-pill]').click();
     await page.keyboard.press('Escape');
     await expect(peek).toBeHidden();
@@ -524,7 +478,6 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
     const box = page.locator('[data-image-lightbox-stepping]');
     const stage = box.locator('[data-lightbox-stage]');
     const image = box.locator('[data-lightbox-image]');
-    // The image is moved with a transform (zoom, #2067), so its box on screen is what is measured.
     const measure = () =>
       image.evaluate((img: HTMLImageElement) => {
         const r = img.getBoundingClientRect();
@@ -542,11 +495,9 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
           stageHeight: s.height,
         };
       });
-    // Fit: the tall image fits inside the stage.
     await expect.poll(async () => (await measure()).naturalWidth).toBe(1640);
     await expect.poll(async () => { const m = await measure(); return m.height > 0 && m.height <= m.stageHeight; }).toBe(true);
     await shot(page, '12-actual-size-fit');
-    // Actual size: its own pixels, read from its top-left corner.
     await box.locator('[data-lightbox-fit]').click();
     await expect(stage).toHaveAttribute('data-lightbox-stage', 'actual');
     await expect.poll(async () => (await measure()).height).toBe(3470);
@@ -556,7 +507,6 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
     expect(Math.round(actual.left)).toBe(0);
     await expect(box.locator('[data-lightbox-zoom]')).toHaveText('Zoom 100%');
     await shot(page, '13-actual-size-tall');
-    // A plain wheel scrolls it to every edge, as a page scrolls, and never past one.
     const stageBox = (await stage.boundingBox())!;
     await page.mouse.move(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
     await page.mouse.wheel(0, 20_000);
@@ -565,7 +515,6 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
     const end = await measure();
     expect(Math.round(end.right)).toBe(0);
     expect(end.height).toBe(3470);
-    // A small image at Actual size sits in the middle of the stage, not in a corner.
     await page.keyboard.press('ArrowRight');
     await box.locator('[data-lightbox-fit]').click();
     await expect(stage).toHaveAttribute('data-lightbox-stage', 'actual');
@@ -635,7 +584,6 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
     await expect.poll(async () => Math.round((await rect()).width)).toBeLessThan(2400);
     const fit = await rect();
     const fitPct = await zoom.textContent();
-    // Ctrl + wheel near the image's top-left corner: the image pixel under the pointer stays under it.
     const px = Math.round(fit.left + fit.width * 0.2);
     const py = Math.round(fit.top + fit.height * 0.2);
     const imageX = ((px - fit.left) / fit.width) * 2400;
@@ -652,7 +600,6 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
     expect(await zoom.textContent()).not.toBe(fitPct);
     await expect(box.locator('[data-lightbox-fit]')).toHaveText('Fit');
     await shot(page, '15-zoom-ctrl-wheel');
-    // A drag pans.
     await page.mouse.move(700, 450);
     await page.mouse.down();
     await page.mouse.move(600, 400, { steps: 4 });
@@ -660,13 +607,11 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
     const panned = await rect();
     expect(Math.round(panned.left - zoomed.left)).toBe(-100);
     expect(Math.round(panned.top - zoomed.top)).toBe(-50);
-    // A double click on the image goes back to Fit, another zooms to twice Fit.
     await page.mouse.dblclick(720, 450);
     await expect(stage).toHaveAttribute('data-lightbox-stage', 'fit');
     await expect.poll(async () => Math.round((await rect()).width)).toBe(Math.round(fit.width));
     await page.mouse.dblclick(fit.left + fit.width / 2, fit.top + fit.height / 2);
     await expect.poll(async () => Math.round((await rect()).width)).toBe(Math.round(fit.width * 2));
-    // Fit resets it; stepping to the next image starts at Fit.
     await box.locator('[data-lightbox-fit]').click();
     await expect(stage).toHaveAttribute('data-lightbox-stage', 'fit');
     await expect.poll(async () => Math.round((await rect()).width)).toBe(Math.round(fit.width));
@@ -679,7 +624,6 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
     await expect(box.locator('[data-lightbox-count]')).toHaveText('2 of 2');
     await expect(stage).toHaveAttribute('data-lightbox-stage', 'fit');
     await expect(box.locator('[data-lightbox-fit]')).toHaveText('Actual size');
-    // Escape still closes it.
     await page.keyboard.press('Escape');
     await expect(box).toBeHidden();
     await context.close();
@@ -704,7 +648,6 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
   mkdirSync(root, { recursive: true });
   writeFileSync(join(root, 'small.png'), await png(browser, '<body style="margin:0;background:#2f6f5e"></body>', 160, 100));
   const doc = join(root, 'PLAN.md');
-  // A link high on the page, where the tap beside the image lands once the overlay is open.
   writeFileSync(doc, ['# Ghost tap', '', '[Go somewhere else](https://example.com/ghost) and [another link](https://example.com/ghost-2)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
   const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
@@ -733,7 +676,6 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
     const link = page.getByRole('link', { name: 'Go somewhere else' });
     await expect(link).toBeVisible();
     const target = (await link.boundingBox())!;
-    // Every click the page receives from here on, and whether it was on a link.
     await page.evaluate(() => {
       const w = window as unknown as { __clicks: string[] };
       w.__clicks = [];
@@ -745,7 +687,6 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
     await expect(page.locator('[data-image-lightbox-stepping]')).toHaveCount(0);
     await page.waitForTimeout(400);
     await page.evaluate(() => { (window as unknown as { __clicks: string[] }).__clicks = []; });
-    // The overlay covers the link; tap right where it was.
     await page.touchscreen.tap(target.x + target.width / 2, target.y + target.height / 2);
     await expect(overlay).toHaveCount(0);
     await page.waitForTimeout(800);
@@ -792,21 +733,18 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   }, thread);
   await page.locator(`.ib-body img[data-inline-image="${ids['summary.png']}"]`).click();
   await expect(pane()).toHaveAttribute('data-attachment-pane', ids['summary.png']!);
-  // Beside the thread: leave full screen.
   await page.locator('[data-full-view-exit="exit"]').click();
   await expect(pane()).not.toHaveClass(/ib-full/);
   const zoomStage = pane().locator('[data-image-zoom-stage]');
   const image = zoomStage.locator('img[data-lightbox-image]');
   await expect(zoomStage).toHaveAttribute('data-image-zoom-stage', 'fit');
   await expect(pane().locator('[data-image-zoom]')).toHaveText(/^Zoom \d+%$/);
-  // The image's box relative to the stage, so a stage that moves (a layout settling) is not read as a pan.
   const rect = () =>
     zoomStage.evaluate((stage) => {
       const r = stage.querySelector('img[data-lightbox-image]')!.getBoundingClientRect();
       const s = stage.getBoundingClientRect();
       return { left: r.left - s.left, top: r.top - s.top, width: r.width, height: r.height, stageWidth: s.width, stageHeight: s.height };
     });
-  // Leaving full screen gives the list (and maybe the sidebar) back with a spring: wait until the stage holds still.
   const stageBox = async () => JSON.stringify(await zoomStage.boundingBox());
   await expect
     .poll(async () => {
@@ -823,9 +761,7 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   for (let i = 0; i < 4; i += 1) await page.mouse.wheel(0, -100);
   await page.keyboard.up('Control');
   await expect(zoomStage).toHaveAttribute('data-image-zoom-stage', 'zoom');
-  // mouse.wheel returns before the page handles the event: let the notches land.
   await page.waitForTimeout(300);
-  // One more notch: the image pixel under the pointer stays under it, on both axes.
   const before = await rect();
   const u = (px - box.x - before.left) / before.width;
   const v = (py - box.y - before.top) / before.height;
@@ -837,10 +773,7 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   const after = await rect();
   expect(Math.abs(box.x + after.left + u * after.width - px)).toBeLessThan(1);
   expect(Math.abs(box.y + after.top + v * after.height - py)).toBeLessThan(1);
-  // The page itself never zoomed.
   expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
-  // A drag pans the image with the pointer. The image never leaves the stage (an edge stops the pan), so the
-  // drag stays within the room the image has on each side.
   const roomLeft = after.left + after.width - after.stageWidth;
   const roomUp = after.top + after.height - after.stageHeight;
   expect(roomLeft).toBeGreaterThan(60);
@@ -850,7 +783,6 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   await page.mouse.down();
   await page.mouse.move(px + dx, py + dy, { steps: 6 });
   await page.mouse.up();
-  // The last move can land a frame after mouse.up resolves on a slow machine.
   await expect.poll(async () => Math.round((await rect()).left - after.left)).toBe(dx);
   const panned = await rect();
   expect(panned.left - after.left).toBeCloseTo(dx, 0);
@@ -858,12 +790,10 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   await page.mouse.move(box.x + 10, box.y + box.height - 10);
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(zoomShots, 'zoomed-beside-thread-1280.png') });
-  // ← steps while zoomed (the image no longer keeps the arrows); the next file opens at Fit.
   await expect(zoomStage).toBeFocused();
   await page.keyboard.press('ArrowLeft');
   await expect(pane()).toHaveAttribute('data-attachment-pane', ids['wide.png']!);
   await expect(pane().locator('[data-image-zoom-stage]')).toHaveAttribute('data-image-zoom-stage', 'fit');
-  // A panorama at Actual size starts at its left edge and pans to its right.
   await pane().locator('.ib-imgbar').getByRole('button', { name: 'Actual size' }).click();
   await expect(pane().locator('[data-image-zoom-stage]')).toHaveAttribute('data-image-zoom-stage', 'actual');
   const edges = () =>
@@ -880,13 +810,11 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   await page.keyboard.press('ArrowRight');
   await expect(pane()).toHaveAttribute('data-attachment-pane', ids['summary.png']!);
 
-  // Full screen, a comment with a drawing selected, zoomed: the drawing lies on the image in its transform.
   await pane().locator('[data-full-screen-toggle]').click();
   await expect(pane()).toHaveClass(/ib-full/);
   await pane().getByRole('button', { name: 'Mark up' }).last().click();
   const canvas = page.locator('[data-pn-image-annotator-stage] canvas').first();
   await expect(canvas).toBeVisible();
-  // The canvas starts at the 300 × 150 default and takes the image's shape once the annotator's image has loaded: draw only then.
   await expect
     .poll(async () => {
       const b = await canvas.boundingBox();
@@ -895,7 +823,6 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
     .toBe(true);
   await expect.poll(() => page.locator('[data-pn-image-annotator-stage] img').first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
   const c = (await canvas.boundingBox())!;
-  // A circle around the "Total" field: the annotator centres it between the drag's ends.
   const target = { u: 0.5, v: 0.22 };
   const reach = 0.1;
   await page.locator('[data-pn-image-annotator-toolbar] button[title="Circle (3)"]').click();
@@ -914,7 +841,6 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   const overlay = pane().locator('[data-zoom-overlay] img[data-markup-overlay]');
   await expect(overlay).toBeVisible();
   await expect.poll(() => overlay.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
-  // The kept drawing: where its pixels differ from the image, in the image's own pixels.
   const ink = await pane().locator('[data-image-zoom-stage]').evaluate(async (el) => {
     const read = async (src: string) => {
       const bitmap = await createImageBitmap(await (await fetch(src)).blob());
@@ -938,22 +864,16 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
     return { width: base.width, height: base.height, minX, minY, maxX, maxY, color: [r / n, g / n, b / n] };
   });
   expect(ink.width).toBe(1200);
-  // The circle's centre is where it was drawn, to within 3 image pixels; its radius is the drag's half-length.
   expect(Math.abs((ink.minX + ink.maxX) / 2 - target.u * 1200)).toBeLessThan(3);
   expect(Math.abs((ink.minY + ink.maxY) / 2 - target.v * 760)).toBeLessThan(3);
   expect(Math.abs((ink.maxX - ink.minX) / 2 - reach * 1200)).toBeLessThan(8);
 
-  /**
-   * Where the drawing's colour is on the screen, inside the stage, in page pixels. The open comments panel floats
-   * over the stage's right side, and its card shows the drawing too: only the stage left of the panel is read.
-   */
   const inkOnScreen = async () => {
     const stageBox = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
     const panelBox = await pane().locator('[data-comments-drawer="open"]').boundingBox();
     const box = panelBox && panelBox.x < stageBox.x + stageBox.width ? { ...stageBox, width: panelBox.x - stageBox.x } : stageBox;
     const shotPng = await page.screenshot({ clip: box });
     const found = await page.evaluate(async ({ data, color }) => {
-      // The window's CSP lets images load data: URLs (connect-src does not).
       const pic = new Image();
       pic.src = `data:image/png;base64,${data}`;
       await pic.decode();
@@ -974,7 +894,6 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
     }, { data: shotPng.toString('base64'), color: ink.color });
     return { cx: box.x + (found.minX + found.maxX) / 2, cy: box.y + (found.minY + found.maxY) / 2, radius: (found.maxX - found.minX) / 2 };
   };
-  /** Where the target is on the screen now, from the image as it is placed on the stage. */
   const targetOnScreen = async () => {
     const r = await image.evaluate((img) => img.getBoundingClientRect());
     return { x: r.left + target.u * r.width, y: r.top + target.v * r.height, scale: r.width / 1200 };
@@ -983,7 +902,6 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   await page.mouse.move(full.x + 20, full.y + full.height - 20);
   for (const zoomed of [false, true]) {
     if (zoomed) {
-      // Zoom in about the circle: it grows on screen and stays on the field.
       const at = await targetOnScreen();
       await page.mouse.move(at.x, at.y);
       await page.keyboard.down('Control');
@@ -1012,7 +930,6 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   await page.screenshot({ path: join(zoomShots, 'full-screen-zoomed-with-drawing-1280.png') });
   await page.keyboard.press('Escape');
 
-  // On a phone: a double tap zooms, one finger pans it, the size bar says how far.
   const { defaultBrowserType: _ignored, ...device } = devices['iPhone 15'];
   const phoneBrowser = await webkit.launch({ args: [] });
   try {
@@ -1039,13 +956,8 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   expect(world.errors.filter((e) => !/HTTP 404 \/favicon/.test(e))).toEqual([]);
 });
 
-// #2127: after a plain wheel zooms an image past the screen, the wheel scrolls
-// it instead (#2067 keeps trackpad two-finger scrolling); the viewer now says
-// how to zoom ("Use ⌘ + scroll to zoom", Ctrl off macOS) the moment it starts
-// scrolling, once per viewer open.
 const wheelHintShots = resolve(process.env.PLANNOTATOR_WHEEL_HINT_SHOTS ?? join(shotsDir, 'wheel-hint'));
 
-/** A context whose navigator says macOS or Windows, so the hint names ⌘ or Ctrl. */
 async function platformContext(browser: Browser, platform: 'MacIntel' | 'Win32', viewport: { width: number; height: number }): Promise<BrowserContext> {
   const context = await browser.newContext({ viewport });
   await context.addInitScript((value) => {
@@ -1054,10 +966,8 @@ async function platformContext(browser: Browser, platform: 'MacIntel' | 'Win32',
   return context;
 }
 
-/** The image's scale, read from its transform. */
 const scaleOf = (image: ReturnType<Page['locator']>) => image.evaluate((img: HTMLElement) => Number(/scale\(([\d.]+)\)/.exec(img.style.transform)![1]));
 
-/** Five wheel notches about 60 ms apart (one wheel gesture), as the issue's steps send them. */
 async function notches(page: Page, deltaY: number): Promise<void> {
   for (let i = 0; i < 5; i += 1) {
     await page.mouse.wheel(0, deltaY);
@@ -1065,7 +975,6 @@ async function notches(page: Page, deltaY: number): Promise<void> {
   }
 }
 
-/** Light and dark, with the hint on screen (one more scroll keeps it there; a long one shows the top of the image). */
 async function hintShots(page: Page, name: string, deltaY: number): Promise<void> {
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
@@ -1081,7 +990,6 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
   mkdirSync(wheelHintShots, { recursive: true });
   const root = join(world.root, 'wheel-hint');
   mkdirSync(root, { recursive: true });
-  // The issue's image: 1640 × 1400 in a 1440 × 1000 window.
   writeFileSync(join(root, 'big.png'), await png(browser, screen('Checkout', 'Big', '#2f6f5e', FIELDS), 1640, 1400));
   const doc = join(root, 'NOTES.md');
   writeFileSync(doc, ['# Notes', '', '![Big](big.png)', ''].join('\n'));
@@ -1116,7 +1024,6 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
       await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1640);
       await expect(stage).toHaveAttribute('data-lightbox-stage', 'fit');
       const fit = await scaleOf(image);
-      // The pointer near the image's centre, away from the toolbar.
       await page.mouse.move(720, 500);
       await notches(page, -100);
       const zoomed = await scaleOf(image);
@@ -1124,17 +1031,14 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
       await expect(page.locator('[data-wheel-hint]')).toHaveCount(0);
       await page.waitForTimeout(400);
       await notches(page, 100);
-      // The wheel scrolls now (the issue's report): the scale stays, and the viewer says how to zoom.
       expect(await scaleOf(image)).toBe(zoomed);
       const hint = page.locator('[data-wheel-hint]');
       await expect(hint).toHaveAttribute('data-wheel-hint', 'shown');
       await expect(hint.locator('kbd')).toHaveText(key);
       await expect(hint).toHaveText(new RegExp(`Use\\s+${key === '⌘' ? '⌘' : 'Ctrl'}\\s+\\+ scroll to zoom`));
       await expect(page.locator('[data-wheel-hint-live]')).toHaveText(`Scrolling moves the image. To zoom, hold ${spoken} and scroll.`);
-      // It takes no pointer: a drag through it still pans.
       expect(await hint.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
       await hintShots(page, `annotate-${key === '⌘' ? 'mac-cmd' : 'ctrl'}`, -2000);
-      // Doing what it says zooms out and hides it.
       const before = await scaleOf(image);
       await page.keyboard.down(key === '⌘' ? 'Meta' : 'Control');
       await page.mouse.wheel(0, 100);
@@ -1142,13 +1046,11 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
       await expect.poll(() => scaleOf(image)).toBeLessThan(before);
       await expect(hint).toHaveAttribute('data-wheel-hint', 'hidden');
       await expect(page.locator('[data-wheel-hint-live]')).toHaveText('');
-      // The next time the wheel scrolls in this open viewer: no hint again.
       await page.waitForTimeout(400);
       await notches(page, 100);
       await expect(hint).toHaveAttribute('data-wheel-hint', 'hidden');
       await page.keyboard.press('Escape');
       await expect(overlay).toBeHidden();
-      // A new open says it once more.
       await page.locator('article img.cursor-zoom-in').first().click();
       await page.mouse.move(720, 500);
       await notches(page, -100);
@@ -1191,7 +1093,6 @@ test('#2127: the Inbox image view says it too, once while the file viewer is ope
     await expect(stage.locator('[data-wheel-hint]')).toHaveAttribute('data-wheel-hint', 'shown');
     await expect(stage.locator('[data-wheel-hint] kbd')).toHaveText(platform === 'MacIntel' ? '⌘' : 'Ctrl');
     await hintShots(page, `inbox-${platform === 'MacIntel' ? 'mac-cmd' : 'ctrl'}`, -2000);
-    // Another image of the same viewer: no second hint.
     await stage.focus();
     await page.keyboard.press(']');
     await expect(page.locator('[data-attachment-pane]')).toHaveAttribute('data-attachment-pane', world.ids['checkout-b-steps.png']!);

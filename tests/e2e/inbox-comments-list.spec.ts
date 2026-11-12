@@ -1,29 +1,3 @@
-/**
- * The list of comments, reached without opening the reply box (approval
- * "inbox-notes-count-list", 2026-11-01), proved in Chromium against the compiled
- * binary. Feedback: "I can't seem to find a button to display the notes or edit
- * them."
- *
- *  - the foot's "N comments" is a real button that opens the list; nothing
- *    behind it moves; Escape closes it, the thread stays, focus goes back;
- *  - a press on a highlight in a message opens the list at that comment;
- *  - the full-screen card's count does the same, and Escape takes the list
- *    first, from the window and from inside the page;
- *  - a highlight leaves the open file when its comment goes (Send, the list),
- *    in Markdown and on an HTML page; a sent one stays as an earlier comment;
- *  - words half written in the list come back however it closed;
- *  - the stale guard takes the foot: no list behind it, then or later;
- *  - the list stays on screen at 1000, 390 and 320 wide, with the keyboard up
- *    and over a tall card; its header stays;
- *  - on a phone the closed foot's Draft carries the comment count, 44 px to
- *    press, and its neighbours keep theirs (the pill's count as the button at
- *    step 4 is in inbox-thread-foot.spec.ts);
- *  - a thread with no comments gains nothing.
- *
- * An iPhone in WebKit: inbox-comments-list-webkit.spec.ts. Build the binary
- * first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { cardChip, countLink, fileHighlight, fileUrl, highlight, layout, onScreen, openThread, pane, pointerOffTheEdge, quietThread, rowOf, rowShown, seededThread, startWorld, stopWorld, theList, threadUrl, type ListThread, type ListWorld } from './inbox-comments-list-world';
 
@@ -44,7 +18,6 @@ const editBox = (page: Page) => page.getByRole('textbox', { name: 'Edit the comm
 const footSend = (page: Page) => pane(page).locator('.ib-footrow').getByRole('button', { name: 'Send' });
 const focused = (page: Page) => page.evaluate(() => `${document.activeElement?.tagName}.${document.activeElement?.className}`);
 
-/** Long enough for what must not happen (a list opening a frame later) to have happened. */
 const settle = (page: Page) => page.waitForTimeout(300);
 
 async function desk(browser: Browser, width = 1440, height = 900): Promise<Page> {
@@ -54,7 +27,6 @@ async function desk(browser: Browser, width = 1440, height = 900): Promise<Page>
 
 const phoneContext = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: 'light' as const };
 
-/** The iPhone keyboard the way the window sees it (inbox-fullscreen-keyboard.spec.ts): the visual viewport gives up its bottom. */
 async function keyboardUp(page: Page, keyboard = 336): Promise<number> {
   await page.evaluate((px) => {
     const vv = window.visualViewport!;
@@ -83,13 +55,11 @@ test('the foot count opens the list without the reply box: a real button, nothin
   expect(await layout(page)).toBe(before);
   await expect(rowOf(page, t.onMessage)).toContainText('Is that true when the first request times out?');
 
-  // Edit and Remove are today's.
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Edit' }).click();
   await page.getByRole('textbox', { name: 'Edit the comment' }).fill('Say what happens on a timeout.');
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Save' }).click();
   await expect(rowOf(page, t.onMessage)).toContainText('Say what happens on a timeout.');
 
-  // Escape takes the edit first, then the list; the thread stays and focus is back on the link.
   await rowOf(page, t.onPlan).getByRole('button', { name: 'Edit' }).click();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('textbox', { name: 'Edit the comment' })).toHaveCount(0);
@@ -99,13 +69,11 @@ test('the foot count opens the list without the reply box: a real button, nothin
   await expect(pane(page)).toBeVisible();
   await expect(link).toBeFocused();
 
-  // By the keyboard: Enter opens it, the link again closes it (a press on it is not a press outside).
   await page.keyboard.press('Enter');
   await expect(list).toBeVisible();
   await link.click();
   await expect(list).toHaveCount(0);
 
-  // The last comment removed: the list goes, and focus does not go with it.
   await link.click();
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Remove' }).click();
   await expect(rowOf(page, t.onMessage)).toHaveCount(0);
@@ -129,7 +97,6 @@ test('a press on a highlight opens the list at that comment, far down a long lis
   await rowShown(list, rowOf(page, t.onMessage));
   expect(await layout(page)).toBe(before);
 
-  // One press, then Escape: the highlight shows the comment selected only while the list is at it.
   await page.keyboard.press('Escape');
   await expect(list).toHaveCount(0);
   await settle(page);
@@ -137,12 +104,10 @@ test('a press on a highlight opens the list at that comment, far down a long lis
   await highlight(page, t).click();
   await expect(list).toBeVisible();
 
-  // Far down the list its header stays, with the count and Close.
   await onScreen(page, closeButton(list));
   const top = (await list.boundingBox())!.y;
   expect((await closeButton(list).boundingBox())!.y).toBeGreaterThanOrEqual(top);
 
-  // Scrolled away, one more press on the same highlight brings the comment back.
   await list.evaluate((el) => (el.scrollTop = 0));
   await highlight(page, t).click();
   await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
@@ -152,7 +117,6 @@ test('a press on a highlight opens the list at that comment, far down a long lis
   await expect(list).toHaveCount(0);
   await expect(countLink(page, t.count)).toBeFocused();
 
-  // A drag that ends on the highlight is a selection, not a press.
   const box = (await highlight(page, t).boundingBox())!;
   const drag = async () => {
     await page.mouse.move(box.x + 4, box.y + box.height / 2);
@@ -187,7 +151,6 @@ test('a press that selects words in a highlight is the toolbar\'s: a double clic
   await page.keyboard.press('Escape');
   await expect(toolbar).toHaveCount(0);
 
-  // Open already: the selection takes over, not both at once.
   await highlight(page, t).click();
   await expect(list).toBeVisible();
   const box = (await highlight(page, t).boundingBox())!;
@@ -220,7 +183,6 @@ test('the full-screen card count opens the list above the card; Escape takes the
   const page = await desk(browser);
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.page, 'full'));
-  // The card opens on Comment, as an image's does; the count is the Reply tab's (it says what rides the Send).
   await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
   const chip = cardChip(page);
   await expect(chip).toBeVisible();
@@ -235,13 +197,11 @@ test('the full-screen card count opens the list above the card; Escape takes the
   const drawn = (await list.boundingBox())!;
   expect(drawn.y + drawn.height).toBeLessThanOrEqual(card.y);
 
-  // From the window: the list goes, full screen stays, focus is back on the chip.
   await page.keyboard.press('Escape');
   await expect(list).toHaveCount(0);
   await expect(page.locator('[data-fcomp]')).toBeVisible();
   await expect(chip).toBeFocused();
 
-  // From inside the page: the bridge's Escape takes the list, and Annotate stays on.
   const pen = page.locator('[data-full-view-pen]');
   await expect(pen).toHaveAttribute('aria-pressed', 'true');
   await chip.click();
@@ -250,13 +210,11 @@ test('the full-screen card count opens the list above the card; Escape takes the
   await expect(list).toHaveCount(0);
   await expect(pen).toHaveAttribute('aria-pressed', 'true');
 
-  // A press inside the page reaches this window only as focus leaving for the frame.
   await chip.click();
   await expect(list).toBeVisible();
   await page.locator('iframe').first().contentFrame().locator('h1').click();
   await expect(list).toHaveCount(0);
 
-  // A comment on a message's text is in the thread: the row goes back there, to the passage.
   await chip.click();
   await rowOf(page, t.onMessage).getByRole('button', { name: /message/ }).click();
   await expect(page.locator('[data-fcomp]')).toHaveCount(0);
@@ -270,7 +228,6 @@ test('over a tall card in a short window the list stays on screen, with its Clos
   await page.goto(fileUrl(world, t, t.page, 'full'));
   await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
   await expect(cardChip(page)).toBeVisible();
-  // The reply's field: the page's comment row stays drawn, hidden, on the Reply tab.
   await page.locator('[data-fcomp] [data-fcomp-field] textarea').fill(Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n'));
   await cardChip(page).click();
   const list = theList(page, t.count);
@@ -301,27 +258,21 @@ test('a half-written edit comes back however the list closed, and it is still th
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Edit' }).click();
   await editBox(page).fill(words);
 
-  // A press outside.
   await pane(page).locator('.ib-pbody').click({ position: { x: 12, y: 12 } });
   await back();
-  // Its Close.
   await closeButton(list).click();
   await back();
-  // The count again.
   await link.click();
   await back();
-  // Another place for it: the reply box opening takes the list away, and its chip brings the words back.
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   await expect(list).toHaveCount(0);
   await page.locator('[data-annotations-chip]').click();
   await expect(editBox(page)).toHaveValue(words);
 
-  // Escape is the edit's first: the words go, as they always did, and the list stays.
   await page.keyboard.press('Escape');
   await expect(editBox(page)).toHaveCount(0);
   await expect(list).toBeVisible();
 
-  // Written again, closed, back, and saved.
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Edit' }).click();
   await editBox(page).fill(words);
   await page.locator('[data-annotations-chip]').click();
@@ -342,7 +293,6 @@ test('a comment gone from under an edit is no edit: the first Escape closes the 
   await editBox(page).fill('Words on a comment about to go.');
   await closeButton(theList(page, t.count)).click();
 
-  // Another window takes the comment; this window keeps the words of an edit with no row left.
   const other = await desk(browser);
   await openThread(other, world, t);
   await countLink(other, t.count).click();
@@ -370,7 +320,6 @@ test('the stale guard takes the foot: the list goes with it, a highlight opens n
   await world.agent.send({ project_path: world.project, reply_to: t.message, body: 'A new question.\n\n:::question\nShip it on Monday?\n\n- [ ] Yes\n- [ ] No\n:::', supersedes: [`${t.message}/${key}`] });
   await expect(pane(page).locator('[data-question-part="prompt"]', { hasText: 'Ship it on Monday?' })).toBeVisible();
 
-  // The list is open when the guard rises (Send by keyboard, so no press outside closes it first).
   await countLink(page, t.count).click();
   const list = theList(page, t.count);
   await expect(list).toBeVisible();
@@ -380,10 +329,8 @@ test('the stale guard takes the foot: the list goes with it, a highlight opens n
   await expect(guard).toBeVisible();
   await expect(list).toHaveCount(0);
 
-  // The comments keep their one word here too.
   await expect(guard.getByRole('button', { name: `Send ${t.count} comments only` })).toBeVisible();
 
-  // A press on a highlight: nothing to open, and it does not stay selected for a list that is not there.
   const look = () => highlight(page, t).evaluate((el) => `${el.className} ${getComputedStyle(el).backgroundColor}`);
   const before = await look();
   await highlight(page, t).click();
@@ -400,7 +347,6 @@ test('the stale guard takes the foot: the list goes with it, a highlight opens n
 });
 
 test('with no comment left, focus does not fall to the page; a Send that took them keeps its own place', async ({ browser }) => {
-  // From the reply box's chip: the chip is disabled by then, so the reply field takes it.
   const page = await desk(browser);
   const t = await seededThread(world);
   await openThread(page, world, t);
@@ -413,7 +359,6 @@ test('with no comment left, focus does not fall to the page; a Send that took th
   await expect(page.locator('.ib-rbox textarea')).toBeFocused();
   await page.context().close();
 
-  // Send by keyboard lands in the same place with the list open as without it.
   const sendFrom = async (open: boolean) => {
     const sender = await desk(browser);
     const sent = await seededThread(world);
@@ -439,9 +384,7 @@ test('on a phone, the last comment removed from the card leaves focus on the car
   const page = await context.newPage();
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.page, 'full'));
-  // An HTML page on a phone opens clear, the card folded to its pill (inbox-html-phone.spec.ts): the pill opens it.
   await page.locator('[data-fcomp-pill]').tap();
-  // It opens on Comment, as an image's card does: the count is the Reply tab's.
   await page.locator('[data-fcomp-mode="reply"]').tap();
   await cardChip(page).tap();
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Remove' }).tap();
@@ -452,7 +395,6 @@ test('on a phone, the last comment removed from the card leaves focus on the car
   await context.close();
 });
 
-/** A comment pinned on the page's heading, the way a person pins one. */
 async function pinOnPage(page: Page, t: ListThread): Promise<Locator> {
   await page.goto(fileUrl(world, t, t.page, 'side'));
   const frame = page.frameLocator('[data-attachment-pane] iframe').first();
@@ -474,7 +416,6 @@ test('an HTML page\'s pin leaves with its comment: after Send, after Remove in t
   const pin = await pinOnPage(page, sent);
   await footSend(page).click();
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
-  // What was sent stays as an earlier comment, read only; its pin does not.
   await expect(panel.locator('[data-earlier-row]')).toBeVisible();
   await expect(panel.locator('.ib-apanel [data-annotation-id]')).toHaveCount(0);
   await expect(pin).toHaveCount(0);
@@ -534,7 +475,6 @@ for (const size of [
     const page = await context.newPage();
     const t = await seededThread(world, 6);
     await page.goto(size.beside ? fileUrl(world, t, t.plan, 'side') : threadUrl(world, t));
-    // A phone's closed foot has no count link (approval "reply-bar-pairs": Edit draft carries the count): a highlight opens it.
     const link = size.phone ? highlight(page, t) : countLink(page, t.count);
     await expect(link).toBeVisible();
     const before = await layout(page);
@@ -563,16 +503,12 @@ test('the sheet ends at the keyboard, and the comment being edited shows above i
   await context.close();
 });
 
-// Where the foot has room only for the pill (step 4, a thread beside a file with picks and comments), its count is the button:
-// inbox-thread-foot.spec.ts, "step 4 keeps the comment count in the Draft pill".
-
 for (const [width, height] of [[390, 844], [320, 640]] as const) {
   test(`at ${width} wide the closed foot's Draft carries the comment count, 44 px to press, and every foot button keeps its own press`, async ({ browser }) => {
     const context = await browser.newContext({ ...phoneContext, viewport: { width, height } });
     const page = await context.newPage();
     const t = await seededThread(world);
     await openThread(page, world, t);
-    // No count link and no status in a phone's closed foot: Edit draft counts the comments (approval "reply-bar-pairs").
     await expect(pane(page).locator('.ib-pfoot [data-comments-link]')).toHaveCount(0);
     const draft = pane(page).locator('.ib-pfoot [data-edit-draft]');
     await expect(draft.locator('[data-draft-count]')).toHaveText(String(t.count));
@@ -581,7 +517,6 @@ for (const [width, height] of [[390, 844], [320, 640]] as const) {
     const box = (await draft.boundingBox())!;
     expect(box.width).toBeGreaterThanOrEqual(44);
     expect(box.height).toBeGreaterThanOrEqual(44);
-    // No button's press is taken by another (a hit area drawn over it), corner to corner.
     const taken = await page.evaluate(() => {
       const buttons = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-pfoot button')].filter((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible');
       return buttons.flatMap((el) => {
@@ -602,7 +537,6 @@ test('a thread with no comments gains no link', async ({ browser }) => {
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
   await expect(page.locator('[data-comments-link]')).toHaveCount(0);
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
-  // No comments, no chip in the reply box either (the owner, 2026-11-02: a "No comments" chip only takes space).
   await expect(pane(page).locator('.ib-rbox textarea')).toBeVisible();
   await expect(page.locator('[data-annotations-chip]')).toHaveCount(0);
   await page.context().close();

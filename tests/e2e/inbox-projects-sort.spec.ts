@@ -1,16 +1,3 @@
-/**
- * The order of the sidebar's Projects (packages/inbox/projectSort.ts), proved in
- * a real Chromium against the compiled binary under a temp HOME and data dir:
- * the default is the order the projects came in; the icon hides until the
- * header is hovered; the first press goes A to Z, then the icon goes between most
- * recent and A to Z, never back to the first order; each choice survives a real
- * reload; a new message moves its project up in most recent; a
- * phone's sheet always shows it as a 44 px target and a tap keeps the sheet open.
- *
- * Build the binary first (see inbox.spec.ts). The PNGs land in
- * .local/proof/projects-sort/ (PLANNOTATOR_E2E_PROOF_DIR names another parent).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -24,17 +11,14 @@ const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.l
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'projects-sort');
 
 const LONG = 'payments-platform-monorepo-checkout-service';
-// The order they first write in: today's order, oldest first.
 const ADDED = ['plannotator', 'acme-web', 'Zephyr', 'édition-api', 'infra', 'app2', 'app10', 'billing-svc', LONG];
 const AZ = ['acme-web', 'app2', 'app10', 'billing-svc', 'édition-api', 'infra', LONG, 'plannotator', 'Zephyr'];
-// acme-web, then infra, write again: the two newest. The rest by when they last wrote.
 const RECENT = ['infra', 'acme-web', LONG, 'billing-svc', 'app10', 'app2', 'édition-api', 'Zephyr', 'plannotator'];
 
 interface World {
   url: string;
   agent: SimAgent;
   paths: Map<string, string>;
-  /** Each project's first thread. */
   threads: Map<string, string>;
   context: BrowserContext;
   page: Page;
@@ -80,7 +64,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
-  // The Inbox runs on this run's own folders: its registry is under the temp data dir.
   const entry = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { pid: number };
   expect(entry.pid).toBeGreaterThan(0);
   const url = started.stdout.trim();
@@ -119,7 +102,6 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
   await expect(names(nav)).toHaveText(ADDED);
   expect(await cookie(page)).toBeUndefined();
 
-  // At rest it is not there to see; the header's hover shows it, and a press there is not the header's.
   await page.mouse.move(900, 450);
   await expect(toggle(nav)).toHaveCSS('opacity', '0');
   await shot(page, 'desktop-1-default-at-rest', clip);
@@ -127,7 +109,6 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
   await expect(toggle(nav)).toHaveCSS('opacity', '1');
   await shot(page, 'desktop-1-default-hover', clip);
 
-  // The row is exactly the header: the gap above it is not hover, and the header keeps its 12 px above.
   const headerBox = (await header(nav).boundingBox())!;
   const projectsRow = nav.locator('.ib-secrow', { has: page.locator('[data-sidebar-section="projects"]') });
   const rowBox = (await projectsRow.boundingBox())!;
@@ -156,25 +137,21 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
   await header(nav).hover();
   await shot(page, 'desktop-3-recent-hover', clip);
 
-  // The keyboard reaches it: focus shows it where the mouse is away.
   await page.mouse.move(900, 450);
   await header(nav).focus();
   await page.keyboard.press('Tab');
   await expect(toggle(nav)).toBeFocused();
   await expect(toggle(nav)).toHaveCSS('opacity', '1');
 
-  // Most recent is live: a new message moves its project to the top.
   await world.agent.send({ project_path: world.paths.get('Zephyr')!, subject: 'Another one on Zephyr', body: 'A later change.' });
   await expect(names(nav).first()).toHaveText('Zephyr');
 
-  // From most recent a press goes back to A to Z, never to the order they came in.
   await toggle(nav).click();
   await expect(names(nav)).toHaveText(AZ);
   expect(await cookie(page)).toBe('name');
   await page.reload();
   await expect(names(nav)).toHaveText(AZ);
 
-  // A closed section has no toggle.
   await header(nav).click();
   await expect(toggle(nav)).toHaveCount(0);
   await header(nav).click();
@@ -183,19 +160,15 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
 
 test("a phone: the sheet always shows it, a 44 px target beside the heading's fold area, and a tap keeps the sheet open", async () => {
   const { page, url } = world;
-  // A browser that has not chosen, as a phone decides on its own.
   await page.context().clearCookies({ name: SORT_COOKIE });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(url);
   await page.locator('.ib-lhead').getByRole('button', { name: 'Toggle Sidebar' }).click();
   const sheet = page.getByRole('dialog');
-  // Away from the row, as a finger is: nothing hovers on a phone.
   const away = () => page.mouse.move(100, 680);
   await expect(toggle(sheet)).toBeVisible();
   await expect(names(sheet)).toHaveText(ADDED);
   await expect(toggle(sheet)).toHaveCSS('opacity', '1');
-  // The sheet slides in 8 px on a spring. Two boxes read on different frames of that slide are not
-  // comparable (the later one sits further right), so wait for the sheet to rest, then read both at once.
   await expect.poll(async () => (await sheet.boundingBox())?.x).toBe(0);
   const [box, fold] = await sheet.evaluate((node) => {
     const rect = (selector: string) => {
@@ -205,7 +178,6 @@ test("a phone: the sheet always shows it, a 44 px target beside the heading's fo
     return [rect('[data-projects-sort]'), rect('[data-sidebar-section="projects"]')];
   });
   expect([box.width, box.height]).toEqual([44, 44]);
-  // Beside the heading, never over it (approval "inbox-phone-sidebar-sheet"): a tap on the heading only folds the section.
   expect(box.x).toBeGreaterThanOrEqual(fold.x + fold.width);
   await away();
   await shot(page, 'phone-1-default');
@@ -235,7 +207,6 @@ test('most recent: a row in view moving up leaves the sidebar scrolled where it 
   const nav = side(page);
   const scroller = nav.locator('.ib-sidescroll');
   await expect(names(nav)).toHaveCount(ADDED.length);
-  // Scrolled to the end: the first row fully in view is the one scroll anchoring would pick and follow.
   const { top, name } = await scroller.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
     const box = el.getBoundingClientRect();
@@ -256,7 +227,6 @@ test('most recent counts a snoozed thread, which is in the list but in no sectio
   await page.goto(url);
   const nav = side(page);
   await expect(names(nav)).toHaveCount(ADDED.length);
-  // Its project has this thread only, and newer ones than the last row: with no activity read from it, it would fall to the bottom.
   const before = await names(nav).allTextContents();
   expect(before.indexOf('app10')).toBeLessThan(before.length - 1);
   await page.evaluate(

@@ -1,24 +1,3 @@
-/**
- * A fake `qwen` for the installer tests. It acts like the parts of Qwen
- * Code's CLI the installers use, on $QWEN_HOME (default ~/.qwen), and logs
- * every call as "<cwd>|<args>" to $FAKE_QWEN_LOG. The tests start it through
- * a shim: a shell script on POSIX, a qwen.cmd on Windows (like npm's).
- *
- * What it models from Qwen's source (v0.26.2):
- * - `--version` prints the version ($FAKE_QWEN_VERSION, default 0.26.2).
- * - `extensions install <path> [--consent]` copies the folder into
- *   extensions/plannotator, records the source in .qwen-extension-install.json
- *   and writes a fresh "enabled" policy to extension-store/state.json. It
- *   refuses an installed extension, and without --consent reads y/n on stdin.
- * - `extensions uninstall plannotator` deletes the folder and the policy, as
- *   Qwen does (so a turned-off extension would come back on with an install).
- * - `extensions update plannotator` re-reads the recorded source and copies it
- *   when its version differs. It keeps the policy, refuses a linked extension,
- *   and exits 0 even when it fails (Qwen writes the error to stderr).
- *
- * FAKE_QWEN_HOME names the sandbox home (required). Failure knobs: FAKE_QWEN_HANG (any command waits 30 s), FAKE_QWEN_INSTALL_FAIL,
- * FAKE_QWEN_UNINSTALL_FAIL, FAKE_QWEN_UPDATE_FAIL.
- */
 import { createHash } from "node:crypto";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,9 +5,6 @@ import { join } from "node:path";
 const args = process.argv.slice(2);
 if (process.env.FAKE_QWEN_LOG) appendFileSync(process.env.FAKE_QWEN_LOG, `${process.cwd()}|${args.join(" ")}\n`);
 
-// The home folder Qwen would use. The tests name their sandbox home in
-// FAKE_QWEN_HOME; without it the fake refuses to run, so it can never act on
-// a real home folder.
 function sandboxHome(): string {
   const value = process.env.FAKE_QWEN_HOME;
   if (!value) fail("fake qwen: FAKE_QWEN_HOME is not set", 3);
@@ -73,7 +49,6 @@ function versionOf(dir: string): string | undefined {
   }
 }
 
-// Qwen derives the id from the name and the recorded source.
 const idFor = (source: string) => createHash("sha256").update(`plannotator\0${source}`).digest("hex").slice(0, 16);
 
 function out(line: string): void {
@@ -126,7 +101,6 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "update") {
-    // Qwen's `extensions update <name>` writes errors to stderr and exits 0.
     if (!existsSync(record)) {
       out('Extension "plannotator" not found.');
       return;

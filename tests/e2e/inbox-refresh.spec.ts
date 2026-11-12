@@ -1,24 +1,3 @@
-/**
- * Click Inbox to refresh (the owner, 2026-10-20: "Just click inbox, it
- * refreshes. That way I don't have to refresh the page"), proved in real
- * browsers against the compiled binary, with an agent writing through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *
- * - Desktop (Chromium, 1440 by 900, light and dark): an agent's message waits
- *   behind "1 new · Show"; hovering Inbox in the sidebar swaps its icon for ↻
- *   with the component tooltip "Refresh" (no native title); a click turns the
- *   icon once (a running animation, then gone), the live region says "Inbox
- *   refreshed", the message comes in and "1 new" goes, focus stays on Inbox.
- * - The project the list shows: the same ↻ after its name and "Refresh".
- * - A phone (the iPhone 15's screen, touch and mobile layout, in the config's Chromium): a tap on
- *   the list's title does the same. No browser is launched by hand.
- * - Reduced motion: the click still gives the signal, with nothing animated.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * Screenshots (hover ↻, the turn, before and after) land in
- * PLANNOTATOR_REFRESH_SHOTS, else .local/proof/inbox-refresh/.
- */
-
 import { devices, expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -73,14 +52,12 @@ const row = (page: Page, id: string) => page.locator(`.ib-listcol .ib-lbody [dat
 const notice = (page: Page) => page.locator('[data-inbox-notice]');
 const live = (page: Page) => page.locator('[data-inbox-live]');
 
-/** Which of the Inbox row's two icons shows. */
 const shownIcon = (page: Page) =>
   page.locator('.ib-side [data-inbox-nav]').evaluate((nav) => {
     const visible = (sel: string) => getComputedStyle(nav.querySelector(sel)!).visibility === 'visible';
     return visible('.ib-ic-refresh') ? 'refresh' : visible('.ib-ic-inbox') ? 'inbox' : 'none';
   });
 
-/** The turn's animation on the refresh icon, while it runs. */
 const turning = (page: Page, sel: string) =>
   page.locator(sel).evaluate((el) => el.getAnimations().some((a) => a.playState === 'running'));
 
@@ -107,7 +84,6 @@ for (const scheme of ['light', 'dark'] as const) {
     expect(await shownIcon(page)).toBe('refresh');
     const tip = page.locator('[data-pn-tooltip]');
     await expect(tip).toHaveText('Refresh');
-    // Component tooltips only: no native title anywhere in the window.
     expect(await page.locator('.pn-inbox [title]:not(iframe)').count()).toBe(0);
     await page.screenshot({ path: join(shotsDir, `desktop-${scheme}-2-hover.png`) });
 
@@ -122,7 +98,6 @@ for (const scheme of ['light', 'dark'] as const) {
     await expect(live(page)).toHaveText('Inbox refreshed');
     await expect(nav).not.toHaveAttribute('data-refreshing', '');
     await expect(nav).toBeFocused();
-    // The row it brought in lights up, as Show's do.
     await expect(row(page, id)).toHaveAttribute('data-lit', '');
     await page.mouse.move(1000, 600);
     await page.screenshot({ path: join(shotsDir, `desktop-${scheme}-4-after.png`) });
@@ -162,9 +137,6 @@ test('reduced motion: the click still gives the signal, with nothing animated', 
   await expect(live(page)).toHaveText('Inbox refreshed');
 });
 
-// The iPhone 15's screen, touch and mobile layout in the config's own browser: launching another
-// browser by hand from this Chromium project dies on the CI runner (the config's Chromium flags reach
-// it). inbox-mobile.spec.ts covers the window in WebKit itself.
 const { defaultBrowserType: _phoneBrowser, ...iPhone } = devices['iPhone 15'];
 test.describe('a phone (iPhone 15 screen)', () => {
   test.use(iPhone);

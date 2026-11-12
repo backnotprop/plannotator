@@ -1,40 +1,3 @@
-/**
- * Every Inbox tab of a browser shares ONE event-stream connection
- * (packages/inbox/sharedEvents.ts), proved in a real Chromium against the
- * compiled binary with real tabs in one browser context. See
- * inbox-shared-events-world.ts for the world and how a tab's records are
- * checked against the server's own log.
- *
- * What is proved, each with the server's count of open streams:
- * - 1, 3, 8 and 12 tabs: one stream; every tab handles every record once, in
- *   order; every tab loads promptly; notify_reach counts every tab;
- * - the code before this change stalls the seventh tab (Chrome's six
- *   connections per host), and the new one loads a ninth at once
- *   (PLANNOTATOR_E2E_BASELINE_BINARY names the old build);
- * - the leader closes, reloads, crashes (a renderer crash) or is frozen while
- *   an agent writes: another tab leads within a second, nothing missed or
- *   handled twice, one stream;
- * - the leader stalls (the debugger holds it, no freeze): the tab in front
- *   takes the lock within seconds, two streams at most, nothing missed or
- *   twice, and the old leader follows when it runs again;
- * - notifications once and the sound once across the tabs; a follower in
- *   front raises the notice itself and keeps the sound quiet; a question in
- *   the thread it has open raises nothing;
- * - notify_reach as tabs open, close and crash;
- * - an Inbox restart: every tab reconnects through one stream;
- * - two origins (localhost and a *.localhost name, as the tailnet address is
- *   another origin) never share: one stream each;
- * - no Web Locks: each tab its own stream, as before.
- * - a soak (PLANNOTATOR_E2E_SOAK_MS): tabs opening, closing, reloading,
- *   crashing, coming to the front and leaders stalling at random while an
- *   agent writes, for minutes.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-shared-events`.
- * Results (load times, takeover times, counts) land in
- * .local/proof/shared-events/results.json.
- */
-
 import { expect, test, type Browser, type CDPSession, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -86,7 +49,6 @@ async function world(browser: Browser, options: Parameters<typeof newWorld>[1] =
   return w;
 }
 
-/** One message so the list has a row to wait for. */
 async function seed(w: World): Promise<void> {
   const sim = await agent(w);
   await sim.send({ project_path: w.project, thread: WORK_THREAD, body: 'Starting on the billing work.' });
@@ -112,14 +74,12 @@ test('1, 3, 8 and 12 tabs: one stream, every record once, every tab loads prompt
     expect(await leaders(w.pages)).toHaveLength(1);
     steps.push({ tabs: target, streams: await streams(w), windows: (await health(w)).notify_reach.windows, lines: checked.total, perTab: checked.perTab });
   }
-  // Each tab loaded in a few seconds at most (with eleven others open).
   expect(Math.max(...loads)).toBeLessThan(5000);
   results.tabs = { loadsMs: loads, steps };
 });
 
 test('the code before this change stalls the seventh tab; the shared stream loads a ninth at once', async ({ browser }) => {
   test.skip(!baselineBinary, 'PLANNOTATOR_E2E_BASELINE_BINARY names the old build');
-  // The old build: six tabs, each holding its own stream, use Chrome's six connections to the host.
   const old = await world(browser, { binary: baselineBinary!, prefix: 'plannotator-inbox-shared-old-' });
   await seed(old);
   const oldLoads: number[] = [];
@@ -135,7 +95,6 @@ test('the code before this change stalls the seventh tab; the shared stream load
   }
   const stalledMs = Date.now() - started;
   expect(stalled, 'the old build loads a seventh tab: the stall did not reproduce').toBe(true);
-  // It is the connection limit: close one tab and the seventh loads.
   const freed = Date.now();
   await old.pages[0]!.close();
   forget(old, old.pages[0]!);
@@ -143,7 +102,6 @@ test('the code before this change stalls the seventh tab; the shared stream load
   const afterFreeMs = Date.now() - freed;
   await closeWorld(old);
 
-  // The new build: eight tabs open, a ninth loads at once.
   const now = await world(browser);
   await seed(now);
   const newLoads: number[] = [];
@@ -154,7 +112,6 @@ test('the code before this change stalls the seventh tab; the shared stream load
   results.stall = { oldLoadsMs: oldLoads, oldSeventhStalledForMs: stalledMs, oldSeventhLoadedAfterOneClosedMs: afterFreeMs, newLoadsMs: newLoads, newNinthMs: ninth.ms };
 });
 
-/** Hold even an idle page: Debugger.pause only schedules a pause at the next script. */
 async function holdMainThread(cdp: CDPSession): Promise<() => Promise<void>> {
   await cdp.send('Debugger.enable');
   const paused = new Promise<void>((resolve) => cdp.once('Debugger.paused', () => resolve()));
@@ -169,13 +126,6 @@ async function holdMainThread(cdp: CDPSession): Promise<() => Promise<void>> {
   };
 }
 
-/**
- * Close, reload, crash, freeze or stall the leader while an agent writes;
- * measure how fast another tab leads and the longest a tab in front went
- * without a record. A stalled leader is held by the debugger with no freeze
- * event (as a long script, or a phone's browser suspending a background tab,
- * holds it): it keeps its lock, and the follower in front takes it.
- */
 async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'freeze' | 'stall'): Promise<Record<string, unknown>> {
   const w = await world(browser);
   await seed(w);
@@ -183,7 +133,6 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
   const [leader] = await leaders(w.pages);
   expect(leader).toBeDefined();
   const others = w.pages.filter((p) => p !== leader);
-  // One follower is in front, as when the person reads the Inbox while the leader is a background tab.
   const front = others[0]!;
   await setFront(front, true, true);
   const sender = keepSending(w.agents[0]!, w.project, 40);
@@ -201,19 +150,13 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
     void cdp.send('Page.crash').catch(() => {});
     forget(w, leader!);
   } else if (how === 'stall') {
-    // No freeze event: the debugger holds the page's main thread while its stream keeps receiving frames.
     cdp = await w.context.newCDPSession(leader!);
     resumeMainThread = await holdMainThread(cdp);
   } else {
-    // Chrome freezes a page by dispatching `freeze`, running its microtasks, then running nothing more until
-    // `resume`. Headless pages are always visible, so CDP's Page.setWebLifecycleState does not freeze them
-    // (checked: no freeze event fires); the same sequence is played instead: the event, then the debugger
-    // holds the page's main thread (its stream's frames and the channel's messages queue up), then resume.
     cdp = await w.context.newCDPSession(leader!);
     await leader!.evaluate(() => document.dispatchEvent(new Event('freeze')));
     resumeMainThread = await holdMainThread(cdp);
   }
-  // Streams on the server, sampled until the leader runs again (never more than two: the stalled one and the new).
   const streamSamples: number[] = [];
   let sampling = true;
   const sampler = (async () => {
@@ -222,7 +165,6 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
       await new Promise((done) => setTimeout(done, 100));
     }
   })();
-  // Another tab leads: when its log says so.
   let takeoverHow: string | undefined;
   const takeover = await waitFor(
     async () => {
@@ -238,19 +180,16 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
     (v) => v !== null,
     10_000,
   );
-  // A stalled leader stays stopped for eight seconds in all (the reviewer's probe), the agent writing throughout.
   await new Promise((done) => setTimeout(done, how === 'stall' ? Math.max(1500, 8000 - (Date.now() - at)) : 1500));
   const sent = await sender.stop();
   const resumedAt = Date.now();
   if (how === 'freeze') {
     await expect.poll(() => streams(w)).toBe(1);
-    // It wakes: it fetches what it missed and follows.
     await resumeMainThread!();
     await leader!.evaluate(() => document.dispatchEvent(new Event('resume')));
   }
   if (how === 'stall') {
     await resumeMainThread!();
-    // It runs again: it learns the lock was taken, closes its stream and follows.
     const rejoin = await waitFor(
       async () => (await logOf(leader!)).filter((e) => e.at >= at).map((e) => e.type),
       (types) => types.includes('stolen') && types.includes('step-down'),
@@ -259,15 +198,12 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
     await expect.poll(() => streams(w)).toBe(1);
     expect((await leaders(w.pages)).includes(leader!)).toBe(false);
     results.stallRejoinMs = rejoin.ms;
-    // It learned only when the debugger let it run: it was stopped all along.
     results.stallOldLeaderLearnedAtMs = (await logOf(leader!)).find((e) => e.type === 'stolen' && e.at >= at)!.at - at;
     expect(results.stallOldLeaderLearnedAtMs as number).toBeGreaterThan(7000);
-    // It is a follower now: what is written next reaches it too.
     await sendSome(w, 3);
   }
   sampling = false;
   await sampler;
-  // The tab in front never waited long for a record: its longest gap from the stall on.
   const frontRecords = (await logOf(front)).filter((e) => e.type === 'record' && e.at >= at - 1000).map((e) => e.at);
   const frontGaps = frontRecords.slice(1).map((t, i) => t - frontRecords[i]!);
   const frontLongestGapMs = Math.max(0, frontRecords[0]! - at, ...frontGaps.filter((_, i) => frontRecords[i + 1]! <= resumedAt));
@@ -275,16 +211,10 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
   const checked = await expectEveryRecordOnce(w, w.pages, { exact: false });
   await expect.poll(() => streams(w)).toBe(1);
   expect(await leaders(w.pages)).toHaveLength(1);
-  // A leader that closes or reloads frees its lock at once: the next tab leads within a second. A frozen one steps
-  // down at its freeze event (2 s on a slow machine). A crashed one frees its lock when the browser notices the
-  // renderer died: at once on macOS (2 ms), about 3 s on GitHub's Linux runners; were it longer, the tab in front
-  // would take it first (its check every 3 s, no answer in 2 s). Either way within the takeover a stalled leader gets.
   const bound = how === 'stall' || how === 'crash' ? 7000 : how === 'freeze' ? 2000 : 1000;
   expect(takeover.value!).toBeLessThan(bound);
   expect(frontLongestGapMs).toBeLessThan(bound + 500);
-  // A crashed tab's connection can outlive its lock for a moment (the tab in front may lead first): two then.
   expect(Math.max(...streamSamples)).toBeLessThanOrEqual(how === 'stall' || how === 'crash' ? 2 : 1);
-  // A crashed target answers nothing more: never wait on it.
   if (cdp && how !== 'crash') await cdp.detach().catch(() => {});
   if (how === 'crash') void leader!.close().catch(() => {});
   return {
@@ -325,7 +255,6 @@ test('notifications once and the sound once across the tabs; a follower in front
   await seed(w);
   for (let i = 0; i < 4; i++) {
     const { page } = await openTab(w);
-    // A click arms the sound (Chrome's user activation).
     await page.locator('.ib-main h1').first().click();
     await setFront(page, true, true);
     await setFront(page, false, false);
@@ -337,7 +266,6 @@ test('notifications once and the sound once across the tabs; a follower in front
   const [leader] = await leaders(w.pages);
   const follower = w.pages.find((p) => p !== leader)!;
 
-  // (a) Every tab in the background: one notice and one ring between them.
   await new Promise((done) => setTimeout(done, 400));
   const n0 = await notices();
   const r0 = await rings();
@@ -349,7 +277,6 @@ test('notifications once and the sound once across the tabs; a follower in front
   expect(await notices()).toBe(n0 + 1);
   expect(await rings()).toBe(r0 + 1);
 
-  // (b) A follower in front (the leader in the background): it raises the notice itself; nothing rings.
   await setFront(follower, true, true);
   await new Promise((done) => setTimeout(done, 600));
   const n1 = await notices();
@@ -363,8 +290,6 @@ test('notifications once and the sound once across the tabs; a follower in front
   expect(await follower.evaluate(() => window.__notified.length)).toBe(frontBefore + 1);
   expect(await rings()).toBe(r1);
 
-  // (c) The front tab has that thread open: a question in it raises nothing anywhere.
-  // (Its row may wait behind "N new · Show": the thread's own link opens it, as an agent's link does.)
   await follower.evaluate((id) => {
     location.hash = `thread=${id}`;
   }, second.thread_id as string);
@@ -391,30 +316,24 @@ test('notify_reach follows the tabs: open, a follower closes, a follower crashes
   let [leader] = await leaders(w.pages);
   const followers = w.pages.filter((p) => p !== leader);
 
-  // A follower closes: its pagehide beacon (or the leader, which sees its lock go).
   await followers[0]!.close();
   forget(w, followers[0]!);
   timeline.followerClosedMs = (await waitFor(windows, (r) => r.windows === 3)).ms;
 
-  // A follower crashes: no pagehide; the leader sees its lock released.
   const cdp = await w.context.newCDPSession(followers[1]!);
   void cdp.send('Page.crash').catch(() => {});
   forget(w, followers[1]!);
   timeline.followerCrashedMs = (await waitFor(windows, (r) => r.windows === 2)).ms;
 
-  // The leader closes: it stops counting at once, its follower stays counted under the new leader.
   [leader] = await leaders(w.pages);
   await leader!.close();
   forget(w, leader!);
   timeline.leaderClosedMs = (await waitFor(windows, (r) => r.windows === 1)).ms;
-  // And it holds there (never drops to 0 while one tab is open).
   await new Promise((done) => setTimeout(done, 17_000));
   expect((await windows()).windows).toBe(1);
   expect(await streams(w)).toBe(1);
-  // A new tab joins.
   await openTab(w);
   timeline.tabOpenedMs = (await waitFor(windows, (r) => r.windows === 2)).ms;
-  // A crashed tab is seen when the browser frees its lock: at once on macOS, about 3 s later on GitHub's Linux runners.
   for (const [step, ms] of Object.entries(timeline)) expect(ms).toBeLessThan(step === 'followerCrashedMs' ? 8000 : 3000);
   results.reach = timeline;
 });
@@ -432,7 +351,6 @@ test('an Inbox restart: every tab reconnects through one stream and keeps gettin
   expect(new URL(url).port).toBe(port);
   const back = await waitFor(() => streams(w), (n) => n === 1, 15_000);
   await expect.poll(async () => (await health(w)).notify_reach.windows, { timeout: 15_000 }).toBe(4);
-  // A fresh agent (the old shim's Inbox is gone).
   const again = await agent(w, 'Claude Code', 'claude-code');
   for (let i = 0; i < 3; i++) await again.send({ project_path: w.project, body: `After the restart ${i}` });
   const checked = await expectEveryRecordOnce(w, w.pages, { exact: false });
@@ -451,7 +369,6 @@ test('two origins never share: localhost and another loopback name hold one stre
   await sendSome(w, 3);
   await expectEveryRecordOnce(w);
   await expect.poll(() => streams(w)).toBe(2);
-  // One leader per origin.
   const origins = await Promise.all((await leaders(w.pages)).map((p) => p.evaluate(() => location.origin)));
   expect(origins.sort()).toEqual([new URL(w.url).origin, other.origin].sort());
   results.origins = { streams: 2, leaders: origins };
@@ -462,7 +379,6 @@ test('without Web Locks each tab holds its own stream, as before, and still gets
   await seed(w);
   for (let i = 0; i < 3; i++) await openTab(w);
   await sendSome(w, 3);
-  // No subscribe entry is logged on the fallback path: check the list instead, and the streams.
   await expect.poll(() => streams(w)).toBe(3);
   for (const page of w.pages) await expect(page.locator('.ib-lbody [data-thread-id]')).not.toHaveCount(0);
   expect(await Promise.all(w.pages.map((p) => p.evaluate(() => typeof navigator.locks)))).toEqual(['undefined', 'undefined', 'undefined']);
@@ -480,9 +396,7 @@ test('soak: tabs open, close, reload, crash, come to the front and stall at rand
   const sender = keepSending(w.agents[0]!, w.project, 50);
   const actions: Record<string, number> = { open: 0, close: 0, reload: 0, crash: 0, front: 0, stall: 0, stallTakenOver: 0 };
   const streamSamples: number[] = [];
-  /** Samples taken while a leader was stalled: two streams then are expected (the stalled one and the new). */
   const stallSamples: number[] = [];
-  /** The tab in front (the others are in the background). */
   let front: Page | null = null;
   const bringToFront = async (page: Page | null) => {
     if (front && front !== page && w.pages.includes(front)) await setFront(front, false, false);
@@ -495,7 +409,6 @@ test('soak: tabs open, close, reload, crash, come to the front and stall at rand
     seed32 = (seed32 * 1103515245 + 12345) & 0x7fffffff;
     return seed32 / 0x7fffffff;
   };
-  /** A tab about to close, reload or crash: what it handled so far is in order, never twice, all real lines. */
   let checkedBeforeLeaving = 0;
   const sane = async (page: Page) => {
     const got = (await logOf(page)).filter((e) => e.type === 'record').map((e) => e.seq!);
@@ -512,7 +425,6 @@ test('soak: tabs open, close, reload, crash, come to the front and stall at rand
       await bringToFront(w.pages[Math.floor(random() * w.pages.length)]!);
       actions.front++;
     } else if (roll < 0.17 && w.pages.length > 1) {
-      // The leader stalls (the debugger holds it, no freeze) for 3 to 9 s with another tab in front.
       const [leader] = await leaders(w.pages);
       if (leader) {
         if (!front || front === leader) await bringToFront(w.pages.find((p) => p !== leader)!);
@@ -527,7 +439,6 @@ test('soak: tabs open, close, reload, crash, come to the front and stall at rand
         await cdp.detach().catch(() => {});
         actions.stall++;
         if ((await logOf(leader)).some((e) => e.type === 'stolen')) actions.stallTakenOver++;
-        // It runs again: one stream once it learns the lock was taken.
         await expect.poll(() => streams(w)).toBe(1);
       }
     } else if (roll < 0.4 && w.pages.length < 10) {
@@ -561,11 +472,9 @@ test('soak: tabs open, close, reload, crash, come to the front and stall at rand
   for (const page of crashed) void page.close().catch(() => {});
   const checked = await expectEveryRecordOnce(w, w.pages, { timeout: 30_000, exact: false });
   await expect.poll(() => streams(w)).toBe(1);
-  // A handover can overlap for an instant (the old stream closing as the new one opens); never more than that.
   const over = streamSamples.filter((n) => n > 1).length;
   expect(Math.max(...streamSamples)).toBeLessThanOrEqual(2);
   expect(over / streamSamples.length).toBeLessThan(0.05);
-  // While a leader is stalled: two streams at most (the stalled one, the new leader's).
   expect(Math.max(0, ...stallSamples)).toBeLessThanOrEqual(2);
   expect(actions.stall === 0 || actions.stallTakenOver > 0, 'a stall was taken over').toBe(true);
   results.soak = {

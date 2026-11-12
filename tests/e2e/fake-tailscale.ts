@@ -1,17 +1,9 @@
-/**
- * A scripted `tailscale` for the Inbox e2e specs, so no spec runs the real
- * one: `status --json` says Running (or NeedsLogin while `<dir>/mode` says
- * `signedout`), `serve status --json` reports the mapping kept in
- * `<dir>/proxy`, and `serve` records or removes it. The Inbox's door listener
- * is real, so a phone reaches it on 127.0.0.1 at that proxy's port.
- */
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const E2E_MAGIC = 'e2e-mac.tail0000.ts.net';
 const MAGIC = E2E_MAGIC;
 
-/** Write the script into `dir` and return `dir`, to put first on PATH. */
 export function fakeTailscale(dir: string): string {
   mkdirSync(dir, { recursive: true });
   const script = join(dir, 'tailscale');

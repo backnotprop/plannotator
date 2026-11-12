@@ -1,17 +1,3 @@
-/**
- * Fake `codex` and `claude` CLIs for AI-runtime tests that put `dir` on PATH.
- *
- * - `codex app-server` speaks just enough JSON-RPC for model discovery:
- *   `initialize` answers a userAgent carrying version 0.999.0, `model/list`
- *   answers one model, `FAKE_CODEX_MODEL`. Every start appends a line to
- *   `codexMarker`, so a test can tell whether codex was executed.
- * - `claude --version` prints 2.1.999; anything else exits 1, so Claude model
- *   discovery fails fast and the provider keeps its fallback list plus the
- *   version.
- *
- * The codex script runs under the current Bun (process.execPath), so the test
- * PATH does not need node.
- */
 import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 

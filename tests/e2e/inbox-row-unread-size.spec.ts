@@ -1,22 +1,3 @@
-/**
- * The unread thread name is bigger in the list (approval
- * "inbox-row-unread-bigger", 2026-10-30), now Settings → Rows' Unread
- * "Larger" (smaller names are the default since 2026-11-05, so the spec
- * saves every row option off first), proved in a real Chromium against
- * the compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR; agents write
- * through `plannotator inbox mcp` (scripts/inbox-sim.ts). Nothing is mocked.
- *
- *  - Beside an open thread (1440): an unread row's name is 15 px, weight 600;
- *    a read row's is 13.5 px, weight 400. Mark read from the row's menu drops
- *    the row to the read size.
- *  - A 390 px phone: unread 16 px, weight 600; read 14 px, weight 400.
- *  - The wide one-line view (1440, no thread open) keeps its 14.5 px name.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-row-unread-size.spec.ts`.
- * PNGs land in PLANNOTATOR_E2E_PROOF_DIR/row-unread-size, or .local/proof/row-unread-size/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -51,7 +32,6 @@ test.beforeAll(async () => {
   const project = scratchProject(join(root, 'src'), LONG_PROJECT);
   for (const [name, host] of [['Claude Code', 'claude-code'], ['Codex', 'codex'], ['Pi', 'pi']]) agents.push(await SimAgent.connect({ binary, env, name, host }));
   const [claude, codex, pi] = agents;
-  // Each its own named thread (an agent's unnamed messages join its last thread): the name is the row's title, the subject its preview.
   const say = async (agent: SimAgent, thread: string, subject: string, body = `${subject}.`) => (await agent.send({ project_path: project, thread, subject, body })).thread_id;
   threads.opened = await say(claude!, 'The release notes for 0.29 are drafted', 'Release notes');
   threads.fx = await say(claude!, 'FX revaluation job moved to the nightly queue', 'FX revaluation');
@@ -62,14 +42,11 @@ test.beforeAll(async () => {
   threads.calendar = await say(codex!, 'Close calendar synced with the payroll cutoff dates', 'Close calendar');
   threads.accrual = await say(codex!, 'Accrual reminders synced with the payroll cutoff', 'Accrual reminders', [':::question', 'Send the accrual reminders on Monday?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'));
   expect(new Set(Object.values(threads)).size, 'seven threads').toBe(7);
-  // Two read rows, through the window's own route.
   for (const id of [threads.matcher, threads.fx]) {
     const health = (await (await fetch(new URL('/api/inbox/health', url))).json()) as { serverSession: string };
     const res = await fetch(new URL(`/api/inbox/threads/${id}/read`, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: health.serverSession }) });
     expect(res.ok, `mark ${id} read`).toBe(true);
   }
-  // The bigger unread name is Settings → Rows' Unread "Larger" since smaller names became the default (2026-11-05):
-  // every option off, saved as the person's look.
   const health = (await (await fetch(new URL('/api/inbox/health', url))).json()) as { serverSession: string };
   const rows = await fetch(new URL('/api/inbox/settings', url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: health.serverSession, rows: [] }) });
   expect(rows.ok, 'every row option off').toBe(true);
@@ -86,7 +63,6 @@ test.afterAll(async () => {
 
 type Look = { unread: boolean; size: number; weight: number; spacing: number };
 
-/** The class `rowClass` row's title for thread `id`: is it marked unread, and its computed size, weight and tracking. */
 async function look(page: Page, rowClass: string, titleClass: string, id: string): Promise<Look> {
   return page.evaluate(
     ([rowClass, titleClass, id]) => {
@@ -127,13 +103,11 @@ test('beside an open thread: an unread name is 15 px 600, a read one 13.5 px 400
       expect(l.spacing, `read ${id}: tracking`).toBe(0);
     }
     await page.screenshot({ path: join(proofDir, 'beside-thread-light.png') });
-    // The theme change fades in; the shot waits for it to land (as inbox-row-badges.spec.ts does).
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.waitForTimeout(500);
     await page.screenshot({ path: join(proofDir, 'beside-thread-dark.png') });
     await page.emulateMedia({ colorScheme: 'light' });
 
-    // Mark read from the row's menu: the row (held in its place for now) drops to the read size.
     await page.locator(`.ib-lbody [data-thread-id="${threads.vendor}"]`).click({ button: 'right' });
     await page.locator('[data-row-action="read"]').click();
     await expect(page.locator('[data-inbox-toast]')).toContainText('Marked read');

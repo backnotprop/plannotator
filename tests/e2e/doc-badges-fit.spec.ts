@@ -1,25 +1,3 @@
-/**
- * The badges at the top of an annotated document use the room the card has
- * and stop where the document's buttons start. A single file shows its
- * repository and branch; a folder session's open file and a linked document
- * show their file name, with the whole path on hover.
- *
- * Before, each chip had a fixed cap: the repository 140px, the branch 120px,
- * the file name 220px (200px for a linked document). A repository like `acme-corp/payments-service` was cut
- * with most of the row empty beside it. Now the chips grow to the buttons. When
- * the repository and branch do not both fit, the branch gives way first, down
- * to its icon and a letter or two, and only then the repository. The cluster's
- * room is measured against the buttons' place, and it is measured again when
- * the card narrows after first paint. Without that, a page opened at 1100px
- * ran the chips 50px under the buttons.
- *
- * Annotate, a single file in a git repository with a remote (and a document it
- * links to) and a folder of files, at 1440 by 900 (room for everything) and
- * 1100 by 900 (not enough), and a folder file on a 390px phone (the buttons
- * on a row of their own; the badges still stop inside the card).
- * Run against the compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR,
- * headless. Build the binary first (see inbox.spec.ts).
- */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -31,13 +9,10 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 
 const BRANCH = 'fix/refund-partial-captures';
-// Longer than the old 220px cap (200px for a linked document), short enough for the row at 1440.
 const FOLDER_FILE = 'reconciling-refund-ledger-entries-design.md';
 const DOC = `# Refund flow: partial captures\n\nHow a refund is split when the payment was captured in parts.\n\nSee the [ledger design](design/${FOLDER_FILE}).\n`;
-// Too long for the row at 1100 by far.
 const FOLDER_FILE_LONG = 'design-reconciling-refund-ledger-entries-with-the-provider.md';
 
-// Every first-run dialog already seen, so the page opens on the document.
 const COOKIES: [string, string][] = [
   ['plannotator-plan-look-choice-resolved', 'true'],
   ['plannotator-plan-look-v2', 'resolved'],
@@ -64,7 +39,6 @@ function git(cwd: string, args: string[]) {
   if (result.status !== 0) throw new Error(result.stderr);
 }
 
-/** A repository with a GitHub remote, on BRANCH, holding one document. */
 function buildRepo(root: string, name: string, remote: string): string {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
@@ -81,7 +55,6 @@ function buildRepo(root: string, name: string, remote: string): string {
   return dir;
 }
 
-/** `plannotator annotate <target>` from `cwd` (the repository the chips name). */
 async function annotate(root: string, cwd: string, target: string, run: number): Promise<{ child: ChildProcess; url: string }> {
   const ready = join(root, `ready-${run}.jsonl`);
   const env: NodeJS.ProcessEnv = {
@@ -108,7 +81,6 @@ async function stop(session: { child: ChildProcess; url: string }): Promise<void
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
-/** The session in a new window. A folder session opens on its file list, with no document yet. */
 async function open(browser: Browser, url: string, view: { width: number; height: number }, folder = false): Promise<Page> {
   const context = await browser.newContext({ viewport: view, colorScheme: 'light' });
   await context.addCookies(COOKIES.map(([name, value]) => ({ name, value, url })));
@@ -121,16 +93,9 @@ async function open(browser: Browser, url: string, view: { width: number; height
 interface Chip { width: number; cut: boolean }
 interface Fit { chips: Record<string, Chip | null>; gapToActions: number | null }
 
-/**
- * Each chip named by its hover text: its width and whether its text is cut
- * (wider than its box: the same test as packages/ui/utils/textCut.ts). And how
- * far the badge cluster ends before the document's buttons, when they share a
- * row (negative: under them; null: the buttons sit on a row of their own).
- */
 async function fit(page: Page, titles: Record<string, string>): Promise<Fit> {
-  await page.waitForTimeout(500); // fonts and the actions lane settle
+  await page.waitForTimeout(500);
   return page.evaluate((titles) => {
-    // The document on screen (a folder session keeps others mounted, hidden).
     const article = Array.from(document.querySelectorAll<HTMLElement>('article[data-print-region="article"]'))
       .find((a) => a.getClientRects().length > 0)!;
     const cut = (el: HTMLElement) => {
@@ -145,7 +110,6 @@ async function fit(page: Page, titles: Record<string, string>): Promise<Fit> {
     let cluster: HTMLElement | null = null;
     for (const [key, title] of Object.entries(titles)) {
       const chip = Array.from(article.querySelectorAll<HTMLElement>('[title]')).find((el) => el.title === title) ?? null;
-      // The branch chip holds an icon and the name: the name's own span is what gets cut.
       const text = chip?.querySelector<HTMLElement>('span.truncate') ?? chip;
       chips[key] = chip && text ? { width: chip.getBoundingClientRect().width, cut: cut(text) } : null;
       cluster ??= chip?.closest<HTMLElement>('[data-print-hide]') ?? null;
@@ -159,7 +123,6 @@ async function fit(page: Page, titles: Record<string, string>): Promise<Fit> {
   }, titles);
 }
 
-/** The badge row on screen: its right edge, the card's, and each of its buttons' (the open-in button and its menu). */
 async function badgeRow(page: Page): Promise<{ right: number; cardRight: number; buttons: { label: string; right: number }[] }> {
   return page.evaluate(() => {
     const article = Array.from(document.querySelectorAll<HTMLElement>('article[data-print-region="article"]'))
@@ -187,7 +150,6 @@ test('annotate a file: the repository and branch show whole when there is room, 
     sessions.push(session);
     const titles = { repo: 'acme-corp/payments-service', branch: BRANCH };
 
-    // Room for both: neither is cut (the old caps cut both).
     let page = await open(browser, session.url, WIDE);
     let f = await fit(page, titles);
     expect(f.chips.repo, 'the repository chip').not.toBeNull();
@@ -196,9 +158,6 @@ test('annotate a file: the repository and branch show whole when there is room, 
     expect(f.chips.branch!.cut, `1440: the branch is whole (${f.chips.branch!.width}px)`).toBe(false);
     expect(f.gapToActions, '1440: the badges end before the buttons').toBeGreaterThanOrEqual(0);
 
-    // The card narrows with the window unchanged (as when the first-run look
-    // choice puts it on the grid): the buttons move left without changing
-    // size, and the badges are measured again and stop before them.
     await page.evaluate(() => {
       const article = Array.from(document.querySelectorAll<HTMLElement>('article[data-print-region="article"]'))
         .find((a) => a.getClientRects().length > 0)!;
@@ -209,9 +168,6 @@ test('annotate a file: the repository and branch show whole when there is room, 
     expect(f.chips.branch!.cut, 'a narrower card: the branch gives way').toBe(true);
     await page.context().close();
 
-    // A linked document: its file name, with the whole path on hover (the chip
-    // found by it). The name is cut only where the row ends at the buttons,
-    // never at a fixed width (the old cap was 200px).
     page = await open(browser, session.url, WIDE);
     await page.locator('main a', { hasText: 'ledger design' }).first().click();
     await expect(page.locator('article[data-print-region="article"]:visible h1')).toHaveText(/^Ledger design/);
@@ -224,7 +180,6 @@ test('annotate a file: the repository and branch show whole when there is room, 
     expect(f.gapToActions, '1440: the badges end before the buttons').toBeGreaterThanOrEqual(0);
     await page.context().close();
 
-    // Opened narrow: the branch is cut, the repository is not, and nothing runs under the buttons.
     page = await open(browser, session.url, NARROW);
     f = await fit(page, titles);
     expect(f.gapToActions, `1100: the badges end ${f.gapToActions}px before the buttons`).toBeGreaterThanOrEqual(0);
@@ -233,7 +188,6 @@ test('annotate a file: the repository and branch show whole when there is room, 
     await page.context().close();
     await stop(session);
 
-    // A repository too long for the row: it is cut too, and the branch keeps its icon and a letter or two.
     const ledger = buildRepo(root, 'ledger', 'acme-corp/payments-service-refund-reconciliation-ledger');
     const long = await annotate(root, ledger, join(ledger, 'refund-flow.md'), 2);
     sessions.push(long);
@@ -274,15 +228,12 @@ test('annotate a folder: the open file\'s name shows whole when there is room, a
     expect(f.chips.file!.cut, `1440: the file name is whole (${f.chips.file!.width}px; the old cap was 220px)`).toBe(false);
     expect(f.gapToActions, '1440: the badges end before the buttons').toBeGreaterThanOrEqual(0);
 
-    // A long name, narrowed in place: the name is cut where the buttons start.
     await pick(FOLDER_FILE_LONG, /^Design: reconciling/);
     await page.setViewportSize(NARROW);
     f = await fit(page, { file: join(folder, FOLDER_FILE_LONG) });
     expect(f.chips.file!.cut, '1100: the file name is cut').toBe(true);
     expect(f.gapToActions, `1100: the badges end ${f.gapToActions}px before the buttons`).toBeGreaterThanOrEqual(0);
 
-    // A phone: the buttons drop to a row of their own, and the badges still
-    // stop inside the card, so the name is cut and the open-in button stays on screen.
     await page.setViewportSize(PHONE);
     f = await fit(page, { file: join(folder, FOLDER_FILE_LONG) });
     expect(f.chips.file!.cut, '390: the file name is cut').toBe(true);

@@ -13,17 +13,9 @@ const JSON_VERSION_PATHS = [
   "apps/copilot/plugin.json",
   "packages/server/package.json",
 ];
-// Copilot CLI reads .github/plugin/marketplace.json before .claude-plugin/. Its
-// plugin reference marks an entry's `version` optional but doesn't say how
-// `/plugin` decides a newer version is available upstream, so the field stays
-// and must match the release (it sat at 0.17.0 from 0.17.0 to 0.28.32).
 const MARKETPLACE_ENTRIES = [
   { relativePath: ".github/plugin/marketplace.json", plugin: "plannotator-copilot" },
 ];
-// Exempt: apps/droid-plugin/.factory-plugin/plugin.json. Droid tracks a
-// relative-path plugin in a git marketplace by the marketplace commit hash and
-// treats the manifest `version` as metadata only, so its value can neither hold
-// back nor trigger an update (https://docs.factory.com/cli/configuration/plugins).
 const OPENPACKAGE_PATH = "openpackage.yml";
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 

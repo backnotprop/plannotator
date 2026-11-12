@@ -1,15 +1,3 @@
-/**
- * Tiny recordings for the Inbox's audio tests, built in the test (no binary is
- * committed). `wav` writes a real, playable PCM WAV (a quiet tone that swells,
- * so a waveform has a shape): every browser plays it, so the e2e proof uses it.
- * The others are the containers the Inbox's sniffing and length reading look
- * at, with frames that carry no decodable sound: MP3 (an ID3 tag, MPEG frames,
- * a Xing header or a constant bitrate), AAC (ADTS frames), Ogg (Opus or Vorbis
- * pages with a final granule), FLAC (STREAMINFO), and a WebM whose Tracks list
- * only audio (MediaRecorder's voice note). An M4A is video-fixtures' `mp4`
- * with an audio major brand or only a sound track.
- */
-
 function u32le(n: number): Buffer {
   const b = Buffer.alloc(4);
   b.writeUInt32LE(n >>> 0);
@@ -28,13 +16,11 @@ function u32be(n: number): Buffer {
   return b;
 }
 
-/** A playable PCM WAV: mono, 8-bit, `rate` Hz, `seconds` long (2 s at 8 kHz is 16 KB). */
 export function wav(options: { seconds?: number; rate?: number } = {}): Buffer {
   const { seconds = 2, rate = 8000 } = options;
   const count = Math.round(seconds * rate);
   const data = Buffer.alloc(count);
   for (let i = 0; i < count; i++) {
-    // A 440 Hz tone whose loudness rises and falls twice: a waveform with a visible shape.
     const envelope = 0.15 + 0.6 * Math.abs(Math.sin((Math.PI * 2 * i) / count));
     data[i] = Math.round(128 + 120 * envelope * Math.sin((2 * Math.PI * 440 * i) / rate));
   }
@@ -43,24 +29,17 @@ export function wav(options: { seconds?: number; rate?: number } = {}): Buffer {
   return Buffer.concat([Buffer.from("RIFF"), u32le(body.length), body]);
 }
 
-/** An ID3v2.4 tag of `bodyBytes` (the size syncsafe). */
 export function id3(bodyBytes = 100): Buffer {
   const size = Buffer.from([(bodyBytes >> 21) & 0x7f, (bodyBytes >> 14) & 0x7f, (bodyBytes >> 7) & 0x7f, bodyBytes & 0x7f]);
   return Buffer.concat([Buffer.from("ID3"), Buffer.from([4, 0, 0]), size, Buffer.alloc(bodyBytes)]);
 }
 
-/**
- * MPEG-1 Layer III frames at 128 kbps, 44.1 kHz, stereo (417 bytes each), after
- * an optional ID3 tag; the first frame carries a Xing header with the frame
- * count when `xingFrames` is given.
- */
 export function mp3(options: { frames?: number; tag?: boolean; xingFrames?: number } = {}): Buffer {
   const { frames = 8, tag = true, xingFrames } = options;
   const frame = (first: boolean) => {
     const b = Buffer.alloc(417);
     b.set([0xff, 0xfb, 0x90, 0x00]);
     if (first && xingFrames !== undefined) {
-      // Stereo MPEG-1: the side information is 32 bytes, then "Xing", its flags (frames present) and the count.
       b.write("Xing", 36, "latin1");
       b.set(u32be(1), 40);
       b.set(u32be(xingFrames), 44);
@@ -70,7 +49,6 @@ export function mp3(options: { frames?: number; tag?: boolean; xingFrames?: numb
   return Buffer.concat([...(tag ? [id3()] : []), ...Array.from({ length: frames }, (_, i) => frame(i === 0))]);
 }
 
-/** ADTS (AAC) frames of 200 bytes each at 44.1 kHz. */
 export function adts(frames = 6): Buffer {
   const length = 200;
   const frame = () => {
@@ -81,7 +59,6 @@ export function adts(frames = 6): Buffer {
   return Buffer.concat(Array.from({ length: frames }, frame));
 }
 
-/** One Ogg page holding `packet`, with this granule position and header type. */
 function oggPage(packet: Buffer, granule: number, type: number, sequence: number): Buffer {
   const segments: number[] = [];
   let left = packet.length;
@@ -102,7 +79,6 @@ function oggPage(packet: Buffer, granule: number, type: number, sequence: number
   return Buffer.concat([header, Buffer.from(segments), packet]);
 }
 
-/** An Ogg stream: its codec's first packet, a body of `bodyBytes`, and a last page at `seconds`. */
 export function ogg(codec: "opus" | "vorbis" | "theora", options: { seconds?: number; rate?: number; preSkip?: number; bodyBytes?: number } = {}): Buffer {
   const { seconds = 3.5, rate = 44100, preSkip = 312, bodyBytes = 2000 } = options;
   const first =
@@ -116,14 +92,12 @@ export function ogg(codec: "opus" | "vorbis" | "theora", options: { seconds?: nu
   return Buffer.concat([oggPage(first, 0, 2, 0), oggPage(Buffer.alloc(bodyBytes, 0x33), 1000, 0, 1), oggPage(Buffer.alloc(100, 0x44), last, 4, 2)]);
 }
 
-/** A FLAC with STREAMINFO: `samples` at `rate`, then a few bytes of frames. */
 export function flac(options: { seconds?: number; rate?: number } = {}): Buffer {
   const { seconds = 4.25, rate = 48000 } = options;
   const samples = Math.round(seconds * rate);
   const info = Buffer.alloc(34);
   info.writeUInt16BE(4096, 0);
   info.writeUInt16BE(4096, 2);
-  // Sample rate (20 bits), channels - 1 (3 bits: stereo), bits per sample - 1 (5 bits: 16), total samples (36 bits).
   info[10] = (rate >> 12) & 0xff;
   info[11] = (rate >> 4) & 0xff;
   info[12] = ((rate & 0xf) << 4) | (1 << 1) | 0;
@@ -132,13 +106,11 @@ export function flac(options: { seconds?: number; rate?: number } = {}): Buffer 
   return Buffer.concat([Buffer.from("fLaC"), Buffer.from([0x80, 0, 0, 34]), info, Buffer.alloc(256, 0x55)]);
 }
 
-/** An EBML element: its id bytes, a 1-byte (or 8-byte unknown) size, its body. */
 function element(id: number[], body: Buffer, unknownSize = false): Buffer {
   const size = unknownSize ? Buffer.from([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]) : body.length < 127 ? Buffer.from([0x80 | body.length]) : Buffer.from([0x40 | (body.length >> 8), body.length & 0xff]);
   return Buffer.concat([Buffer.from(id), size, body]);
 }
 
-/** A WebM with an Info and a Tracks element listing these tracks (1 video, 2 audio), then the start of a Cluster. */
 export function webm(tracks: ("video" | "audio")[]): Buffer {
   const doc = Buffer.from("webm", "latin1");
   const header = element([0x1a, 0x45, 0xdf, 0xa3], Buffer.concat([Buffer.from([0x42, 0x86, 0x81, 0x01]), Buffer.from([0x42, 0x82, 0x80 | doc.length]), doc]));

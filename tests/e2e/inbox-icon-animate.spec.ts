@@ -1,18 +1,3 @@
-/**
- * "Animate it" (agent icon dialog, "Your own…"), the critical path in a real browser against the compiled binary
- * (temp data dir and HOME, the test sandbox with a fake Claude Code on its launch PATH, a live session from the
- * bridge's real long-poll, no browser opened, nothing real asked):
- *
- *  click Animate it → New message opens filled in (the words with a request id, the picture attached, To open on the
- *  running agents and "New Claude Code session") → Send → the agent's command hands an animated SVG back while the
- *  window is offline and the dialog closed → back online, the agent's icon is the new picture with no reload →
- *  "Use the original" puts the old one back.
- *
- * PLANNOTATOR_ANIMATE_SHOTS: a folder for screenshots (light, dark, a phone). PLANNOTATOR_ANIMATE_PICTURE and
- * PLANNOTATOR_ANIMATE_RESULT: a picture and an animated result from outside the repo for those screenshots; the test
- * draws its own otherwise. PLANNOTATOR_ANIMATE_POOR_LINK=1: the window on a poor link (300 ms, 1 Mbit/s each way) and
- * the step's time printed. Build the binary first (see inbox.spec.ts).
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,7 +31,6 @@ interface World {
 }
 let world: World;
 
-/** A session that keeps polling the bridge, as a running agent's mod does: compose's To lists it. */
 function keepLive(dataDir: string, session: string, project: string): () => Promise<void> {
   let stopped = false;
   const started = Date.now();
@@ -97,8 +81,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const bin = join(root, 'bin');
   const data = join(root, 'data');
   for (const dir of [home, bin, data]) mkdirSync(dir, { recursive: true });
-  // Plannotator's Claude Code plugin is on in the sandbox's own agent home, and a fake `claude` on its launch PATH:
-  // New message offers "New Claude Code session". The sandbox finds no other agent CLI.
   mkdirSync(join(data, 'agents-home', '.claude'), { recursive: true });
   writeFileSync(join(data, 'agents-home', '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
   const fake = installFakeClaude({ bin, state: join(root, 'fake-claude') });
@@ -163,7 +145,6 @@ test('Animate it: a filled-in New message, the hand-back changes the icon by its
   await expect(page.locator('.ib-sbagent [data-agent-icon]').first()).toBeVisible({ timeout: 30_000 });
   const agentId = (await page.locator('.ib-sbagent [data-agent-icon]').first().getAttribute('data-agent-icon'))!;
 
-  // The person's own picture on the agent.
   await openYourOwn(page, agentId);
   const chooser = page.waitForEvent('filechooser');
   await dialog(page).locator('.am-own-up').click();
@@ -171,14 +152,12 @@ test('Animate it: a filled-in New message, the hand-back changes the icon by its
   await expect(mark(page, agentId)).toHaveAttribute('data-face', /^own:[0-9a-f]{64}$/);
   const original = (await mark(page, agentId).getAttribute('data-face'))!;
 
-  // Under it: the button and its one line.
   await openYourOwn(page, agentId);
   const row = dialog(page).locator('[data-animate-it]');
   await expect(row.getByRole('button', { name: 'Animate it' })).toBeVisible();
   await expect(row).toContainText('Asks an agent, in a new thread, to animate this picture.');
   await shot(page, '1-animate-it');
 
-  // One press: New message, filled in, To open on the agents.
   const pressed = Date.now();
   await row.getByRole('button', { name: 'Animate it' }).click();
   await expect(dialog(page)).toHaveCount(0, { timeout: 30_000 });
@@ -196,13 +175,11 @@ test('Animate it: a filled-in New message, the hand-back changes the icon by its
   await expect(picker.locator('[data-compose-start]').first()).toBeVisible({ timeout: 20_000 });
   await shot(page, '2-choose-agent');
 
-  // The running agent, then Send: the only step left.
   await picker.locator('[data-compose-session="ses-helper"]').click();
   await shot(page, '3-filled-in');
   await page.locator('[data-compose-send]').click();
   await expect(compose).toBeHidden({ timeout: 20_000 });
 
-  // The agent hands it back while the window is offline (dialog closed): nothing lost, no reload needed.
   await world.context.setOffline(true);
   const handed = spawnSync(binary, ['inbox', 'icon', 'set', world.result, '--request', request!], { env: world.env, encoding: 'utf8', timeout: 30_000 });
   expect([handed.status, handed.stdout.trim()], handed.stderr).toEqual([0, "Done: the agent's icon is now your picture, in every Inbox window."]);
@@ -212,14 +189,12 @@ test('Animate it: a filled-in New message, the hand-back changes the icon by its
   await expect(mark(page, agentId)).toHaveAttribute('data-face', /^own:[0-9a-f]{64}$/);
   await shot(page, '4-after-hand-back');
 
-  // One click back.
   await openYourOwn(page, agentId);
   await expect(dialog(page).locator('[data-animate-it]')).toContainText('An agent animated this picture.');
   await shot(page, '5-use-the-original');
   await dialog(page).getByRole('button', { name: 'Use the original' }).click();
   await expect(mark(page, agentId)).toHaveAttribute('data-face', original);
 
-  // A phone's width: the same row and the filled-in message (screenshots only; nothing is sent).
   if (shots) {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(world.url);

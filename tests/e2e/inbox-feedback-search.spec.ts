@@ -1,11 +1,3 @@
-/**
- * "These might help" under the Feedback box, on the compiled binary, where
- * layout is real. Under a temp PLANNOTATOR_DATA_DIR; anything off this computer
- * is answered here, and Send is never pressed.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-feedback-search.spec.ts`.
- */
 import { expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';

@@ -1,24 +1,3 @@
-/**
- * Video attachments (design record "inbox-video"), proved in a real browser
- * against the compiled binary. Nothing is mocked: `plannotator inbox
- * --background` runs under a temp PLANNOTATOR_DATA_DIR and HOME; the film is
- * made in the test by Playwright's own screen recorder (a VP8 WebM, which
- * every Chromium plays; no binary is committed); an agent attaches it through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts); Chromium drives the window.
- *
- * Proves: the film is kind `video` and its tile offers Play; it plays in the
- * pane's native `<video>` from the `video` route by HTTP Range (a 206 is
- * seen); typing pauses it and pins the moment; Comment keeps the paused
- * frame (a real JPEG in the Inbox's markups) and lists the comment with its
- * time; a dot on the rail and the panel's time pill seek back to it; Send
- * carries "At 0:02 (…)" and the frame's path, read back by read_thread;
- * and the pane on a phone (the comments under the rail, the row in full screen's composer).
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-video.spec.ts`.
- * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/video).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -31,7 +10,6 @@ const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/video'));
 
-/** A page that changes every frame, so a seek lands on a different picture. */
 const FILM_PAGE = `<!doctype html><meta charset="utf-8"><style>
 html,body{margin:0;height:100%;font:600 54px system-ui,sans-serif;color:#fff}
 body{display:flex;align-items:center;justify-content:center;background:#312e81}
@@ -65,7 +43,6 @@ async function shot(name: string, page: Page = world.page): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** The pane's video element, once it has its metadata. */
 async function videoReady(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const video = document.querySelector<HTMLVideoElement>('video[data-video-player]');
@@ -73,7 +50,6 @@ async function videoReady(page: Page): Promise<void> {
   }, undefined, { timeout: 30_000 });
 }
 
-/** Seek the pane's video and wait for the frame there. */
 async function seekTo(page: Page, time: number): Promise<void> {
   await page.evaluate(
     (t) =>
@@ -110,7 +86,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
 
-  // The film: Playwright records a page for about four seconds (VP8 WebM, with its length written at the end).
   const project = scratchProject(join(root, 'src'), 'launch-site');
   mkdirSync(join(project, 'film'));
   const recordings = join(root, 'recordings');
@@ -183,7 +158,6 @@ test('the film plays in the pane by HTTP Range; typing pauses it and pins the mo
   const pane = page.locator(`[data-attachment-pane="${world.filmId}"]`);
   await expect(pane.locator('video[data-video-player]')).toBeVisible();
   await videoReady(page);
-  // Chromium's media loader asked for byte ranges and got 206s.
   await expect.poll(() => world.ranges.some((r) => r.status === 206 && r.range !== null)).toBe(true);
   await shot('2-player-beside-the-thread');
 
@@ -192,7 +166,6 @@ test('the film plays in the pane by HTTP Range; typing pauses it and pins the mo
   await seekTo(page, 2.2);
   const box = pane.getByRole('textbox', { name: /^Comment on launch-cut-v3\.webm at / });
   await box.fill('The title holds too long here. Cut it to about a second.');
-  // Typing paused the film, and the moment is pinned.
   expect(await page.evaluate(() => document.querySelector<HTMLVideoElement>('video[data-video-player]')!.paused)).toBe(true);
   const chip = pane.locator('[data-video-composer] [data-video-time]');
   await expect(chip).toHaveAttribute('data-pinned', '');
@@ -205,7 +178,6 @@ test('the film plays in the pane by HTTP Range; typing pauses it and pins the mo
   await expect(pane.locator('.ib-apanel')).toContainText('The title holds too long here');
   await expect(pane.locator('.ib-apanel [data-video-card-time]')).toHaveText('0:02');
   await expect(pane.locator('[data-video-dot]')).toHaveCount(1);
-  // The comment row is clear and follows the film again.
   await expect(chip).not.toHaveAttribute('data-pinned', '');
   await shot('4-comment-listed-by-time');
 });
@@ -237,7 +209,6 @@ test('Mark up draws on the paused frame; the marked-up copy rides the comment, l
   await page.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.6, { steps: 8 });
   await page.mouse.up();
   await shot('6-mark-up-the-frame');
-  // Enter adds the marked-up frame to the reply at once, at the pinned moment; the words after it are its note.
   await page.keyboard.press('Enter');
   await expect(pane.locator('[data-video-composer] [data-markup-kept] img')).toBeVisible();
   await expect(pane.locator('[data-video-composer] [data-video-time]')).toHaveText('0:03');
@@ -261,10 +232,8 @@ test('Send carries the moment and the frame; the agent reads both', async () => 
   expect(body).toMatch(/Feedback on: "launch-cut-v3\.webm at 0:02"\nAt 0:02 \(2\.2 s\)\n> The title holds too long here/);
   const frame = /- \[launch-cut-v3 at 0:02\] `([^`]+)`/.exec(body);
   expect(frame).not.toBeNull();
-  // The agent can Read the frame: a real JPEG in the Inbox's markups.
   expect(frame![1]!.startsWith(join(world.dataDir, 'inbox', 'markups'))).toBe(true);
   expect([...readFileSync(frame![1]!).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
-  // The second comment, after the first by time, with the marked-up copy (a PNG).
   expect(body).toMatch(/### 2\. Feedback on: "launch-cut-v3\.webm at 0:03"\nAt 0:03 \(3\.4 s\)\n> The counter jumps here/);
   const marked = /- \[launch-cut-v3 at 0:03, marked up\] `([^`]+)`/.exec(body);
   expect(marked).not.toBeNull();
@@ -284,10 +253,8 @@ test('on a phone: the film on top, the comments under the rail, and the comment 
     await videoReady(page);
     await expect(pane.locator('[data-video-meta]')).toContainText('0 comments');
     await shot('8-phone-player', page);
-    // Full screen's composer (approval "inbox-fullscreen-composer") holds the row in its Comment tab: no "Comment at" step.
     await expect(pane.locator('[data-video-compose]')).toHaveCount(0);
     await expect(pane.locator('[data-fcomp] [role="radio"][data-fcomp-mode="comment"]')).toHaveAttribute('aria-checked', 'true');
-    // What "Comment at" did, kept: a tap in the comment field pauses the film and pins the moment it was at.
     await page.evaluate(() => document.querySelector<HTMLVideoElement>('video[data-video-player]')!.play());
     await page.waitForTimeout(300);
     await seekTo(page, 2.2);
@@ -298,7 +265,6 @@ test('on a phone: the film on top, the comments under the rail, and the comment 
     await expect(chip).toHaveAttribute('data-pinned', '');
     await expect(chip).toHaveText('0:02');
     expect(await page.evaluate(() => document.querySelector<HTMLVideoElement>('video[data-video-player]')!.paused)).toBe(true);
-    // And what its Cancel did: clearing the words lets go of the moment, so another can be picked.
     await field.fill('The counter jumps here.');
     await field.fill('');
     await expect(chip).not.toHaveAttribute('data-pinned', '');

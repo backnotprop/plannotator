@@ -1,23 +1,3 @@
-/**
- * The window controls hook, in a real browser against the compiled binary: a
- * desktop host that draws the window's buttons over the page sets
- * `--pn-window-controls-width` and `-height` on `:root` (health says
- * `window_controls: 2`), and reads `--pn-window-controls-center-y` to place them.
- *
- *  - Set: the sidebar's first row clears the height, a header against the
- *    window's left edge clears the width (sidebar collapsed, peeking, a phone's
- *    width), and a full-window layer clears the height.
- *  - Set: the toggle, the list's title and the thread toolbar share one line, the
- *    one `--pn-window-controls-center-y` names, whatever the sidebar does.
- *  - Blank header space drags and every control a pointer can reach does not.
- *    Headless Chromium does not report drag regions, so `dragAt` works them out
- *    the way Blink does: each visible box in layout order, a later one over an
- *    earlier one, modal dialogs last.
- *  - Unset: nothing moves and nothing drags.
- *
- * Pictures land in PLANNOTATOR_WINDOW_CONTROLS_SHOTS (default
- * .local/proof/window-controls). Build the binary first (see inbox.spec.ts).
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -38,7 +18,6 @@ let phone: Page;
 
 test.describe.configure({ mode: 'serial' });
 
-/** As a host injects it: a sheet added after the page has loaded. */
 async function setControls(on: Page): Promise<void> {
   await on.addStyleTag({ content: `:root { --pn-window-controls-width: ${W}px; --pn-window-controls-height: ${H}px; }` });
   await on.waitForTimeout(100);
@@ -52,20 +31,16 @@ const boxOf = (on: Page, selector: string) =>
     return { top, bottom, height, centre: top + height / 2 };
   });
 
-/** The line the page says its heads sit on: a host reads a number. */
 const centerY = (on: Page) => on.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--pn-window-controls-center-y'));
 
-/** The left edge of the first thing in a header that holds something: a control, a title. */
 const firstContentLeft = (on: Page, selector: string) =>
   on.locator(selector).first().evaluate((head) => {
     const lefts = [...head.children].map((c) => c.getBoundingClientRect()).filter((r) => r.width > 0).map((r) => r.left);
     return Math.min(...lefts);
   });
 
-/** How far in from the header's own edge its content starts. */
 const contentInset = async (on: Page, selector: string) => (await firstContentLeft(on, selector)) - (await on.locator(selector).first().evaluate((head) => head.getBoundingClientRect().left));
 
-/** Installs `dragAt(x, y)`: whether a press at that point would drag the window, as the page stands now. */
 async function installDragAt(on: Page): Promise<void> {
   await on.evaluate(() => {
     const regions: { left: number; top: number; right: number; bottom: number; drag: boolean }[] = [];
@@ -93,7 +68,6 @@ async function installDragAt(on: Page): Promise<void> {
   });
 }
 
-/** Every control a pointer reaches at its centre, and those that a press there would not click. */
 async function controlsThatDrag(on: Page): Promise<{ reached: number; dragging: string[] }> {
   await installDragAt(on);
   return on.evaluate(() => {
@@ -115,7 +89,6 @@ async function controlsThatDrag(on: Page): Promise<{ reached: number; dragging: 
   });
 }
 
-/** A press on the header's own blank space, found by walking across its middle. */
 async function headerBlankDrags(on: Page, selector: string): Promise<boolean> {
   await installDragAt(on);
   return on.locator(selector).first().evaluate((head) => {
@@ -130,19 +103,16 @@ async function headerBlankDrags(on: Page, selector: string): Promise<boolean> {
   });
 }
 
-/** Whether the band above a layer drags, right of the window's buttons. */
 async function bandDrags(on: Page): Promise<boolean> {
   await installDragAt(on);
   return on.evaluate(([x, y]) => (window as unknown as { dragAt: (x: number, y: number) => boolean }).dragAt(x!, y!), [W + 40, H / 2]);
 }
 
-/** Nothing in the page asks to drag, and the band does not exist. */
 async function nothingDrags(on: Page): Promise<void> {
   const found = await on.evaluate(() => [...document.querySelectorAll('*')].filter((el) => getComputedStyle(el).getPropertyValue('-webkit-app-region') !== 'none').length + (getComputedStyle(document.querySelector('.pn-inbox')!, '::before').content === 'none' ? 0 : 1));
   expect(found).toBe(0);
 }
 
-/** The window's buttons, drawn on the picture only: the host draws its own. */
 async function shot(on: Page, name: string): Promise<void> {
   await on.evaluate(([w, h]) => {
     const lights = document.createElement('div');
@@ -252,14 +222,12 @@ test('the sidebar collapsed: the header at the left edge clears the width and it
   await openRoute(page, world, '', 'collapsed');
   await setControls(page);
   expect(await firstContentLeft(page, '.ib-lhead')).toBeGreaterThanOrEqual(W);
-  // The hover strip starts under the buttons, so hovering them never brings the peek out.
   expect(await top(page, '.ib-peek-strip')).toBe(H);
   const { reached, dragging } = await controlsThatDrag(page);
   expect(reached).toBeGreaterThan(2);
   expect(dragging).toEqual([]);
   await shot(page, 'sidebar-collapsed');
 
-  // A real press on the toggle, where the buttons would have covered it without the hook.
   const toggle = page.locator('.ib-lhead .ib-sb-trigger');
   const box = (await toggle.boundingBox())!;
   const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('.ib-sb-trigger') !== null, [box.x + box.width / 2, box.y + box.height / 2]);
@@ -287,21 +255,18 @@ test('the peek: its first row clears the height and its controls click over the 
 test('a thread alone at the left edge: its header clears the width', async () => {
   await openRoute(page, world, `#thread=${world.picture}`, 'collapsed');
   await setControls(page);
-  // The list is first: it holds the edge, and the thread beside it stays where it was.
   expect(await firstContentLeft(page, '.ib-lhead')).toBeGreaterThanOrEqual(W);
   const beside = await page.locator('.ib-phead').evaluate((head) => parseFloat(getComputedStyle(head).paddingLeft));
   expect(beside).toBe(14);
   expect(await headerBlankDrags(page, '.ib-phead')).toBe(true);
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
 
-  // A narrow window stacks the thread over the list: then the thread holds the edge.
   await page.setViewportSize({ width: 800, height: 700 });
   await page.waitForTimeout(400);
   await page.locator('.pn-inbox[data-stack~="thread"]').waitFor();
   expect(await firstContentLeft(page, '.ib-phead')).toBeGreaterThanOrEqual(W);
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
 
-  // A file covers its thread there, as a layer: it clears the height.
   await page.locator('.ib-att-t').first().click();
   await page.locator('.pn-inbox[data-stack~="file"] .ib-view.ib-full').waitFor();
   expect(await top(page, '.ib-view.ib-full .ib-vbody')).toBeGreaterThanOrEqual(H);
@@ -312,7 +277,6 @@ test('a thread alone at the left edge: its header clears the width', async () =>
 test('a file beside its thread: the thread holds the edge, the file stays where it was', async () => {
   await openRoute(page, world, `#thread=${world.picture}`, 'collapsed');
   await page.locator('.ib-att-t').first().click();
-  // A picture opens in full screen; the thread comes back beside it with Side by side.
   await page.locator('.ib-view.ib-full').getByRole('button', { name: 'Side by side' }).click();
   await page.locator('.ib-view:not(.ib-full) .ib-vbody').waitFor();
   await page.waitForTimeout(400);
@@ -365,7 +329,6 @@ test('full-window layers clear the height, their controls click and their band d
       await shot(page, layer.name);
     });
   }
-  // The header of a layer drags on its own blank space too.
   await openRoute(page, world, `#thread=${world.thread}&guide=${world.guide}`);
   await setControls(page);
   expect(await headerBlankDrags(page, '.ib-viewer .ib-vhead')).toBe(true);
@@ -381,16 +344,13 @@ test('the fixed row: the toggle, the title and the toolbar sit on the line the p
     expect((await boxOf(page, '.ib-lhead .ib-sb-trigger')).centre, sidebar).toBe(line);
     expect((await boxOf(page, '.ib-lhead h1')).centre, sidebar).toBe(line);
     expect((await boxOf(page, '.ib-phead')).centre, sidebar).toBe(line);
-    // The sidebar's first row starts where the buttons' room ends.
     if (sidebar === 'open') expect((await boxOf(page, '.ib-brand')).top).toBe(H);
   }
-  // A page whose head is its own comes up to the same line, and its toggle clears the buttons.
   for (const [hash, head] of [['#board', '.ib-bhead'], ['#whats-new=', '.ib-wn-bar'], ['#drafts', '.ib-dh']] as const) {
     await openRoute(page, world, hash, 'collapsed');
     await setControls(page);
     const line = parseFloat(await centerY(page));
     expect((await boxOf(page, head)).centre, hash).toBe(line);
-    // A head's 1 px rule can take half a pixel off its content, as it does the thread toolbar's buttons.
     expect(Math.abs((await boxOf(page, `${head} .ib-sb-trigger`)).centre - line), hash).toBeLessThanOrEqual(0.5);
     expect(await page.locator(`${head} .ib-sb-trigger`).evaluate((el) => el.getBoundingClientRect().left), hash).toBeGreaterThanOrEqual(W);
   }
@@ -401,12 +361,10 @@ test('the tour bar and Decision mode, with the variables set: clear of the butto
   await page.locator('[data-tour-bar]').waitFor();
   await setControls(page);
   expect(await contentInset(page, '[data-tour-bar]')).toBeGreaterThanOrEqual(W);
-  // Its content on the line, and the sidebar below the bar, wherever the bar ends.
   const line = parseFloat(await centerY(page));
   expect((await boxOf(page, '[data-tour-bar] .ib-tour-tag')).centre).toBe(line);
   const barBottom = (await boxOf(page, '[data-tour-bar]')).bottom;
   expect((await boxOf(page, '.ib-sb-panel')).top).toBe(barBottom);
-  // What starts below the bar has nothing to clear: no empty room above the sidebar's first row or a file.
   expect((await boxOf(page, '.ib-brand')).top).toBe(barBottom + 14);
   await page.goto('about:blank');
   await page.goto(`${world.url}#tour=3`);
@@ -415,7 +373,6 @@ test('the tour bar and Decision mode, with the variables set: clear of the butto
   await page.locator('[data-tour-message="ask"] .ib-att-t').first().click({ force: true });
   await page.locator('.ib-view.ib-full').waitFor();
   expect(await page.locator('.ib-view.ib-full > *').first().evaluate((el) => el.getBoundingClientRect().top)).toBe((await boxOf(page, '[data-tour-bar]')).bottom);
-  // The viewer covers the bar, so it keeps its room under the buttons.
   await page.goto('about:blank');
   await page.goto(`${world.url}#tour=3`);
   await page.locator('[data-question-tiles]').first().waitFor();
@@ -438,7 +395,6 @@ test('the tour bar and Decision mode, with the variables set: clear of the butto
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
   await page.keyboard.press('Escape');
 
-  // At a phone's width it fills what the buttons leave, and its foot stays in the window.
   await phone.goto(`${world.url}#thread=${world.questions}`);
   await phone.locator('section.ib-pane [data-open-questions]').waitFor();
   await setControls(phone);
@@ -475,10 +431,6 @@ test('a phone-width window: the header holds the edge and the layer clears the h
   expect(await top(phone, '.ib-view.ib-full .ib-vbody')).toBeGreaterThanOrEqual(H);
 });
 
-/**
- * A float the shared parts render into body, outside the page, moved over the band: its buttons' middle at y 4, above
- * the panes' gutter, where nothing of the page lies over the band. Its entrance (a rise) settles first.
- */
 async function floatOverBand(float: ReturnType<Page['locator']>): Promise<void> {
   await float.waitFor();
   expect(await float.evaluate((el) => el.closest('.pn-inbox'))).toBeNull();
@@ -498,7 +450,6 @@ async function floatOverBand(float: ReturnType<Page['locator']>): Promise<void> 
       .map((button) => button.getBoundingClientRect())
       .filter((r) => r.width > 0)
       .map((r) => [r.left + r.width / 2, r.top + r.height / 2] as const);
-    // Just left of it, at the same height, the band drags: the float is what stops it.
     const beside = dragAt(el.getBoundingClientRect().left - 6, middles[0]![1]);
     return { buttons: middles.length, middle: middles[0]![1], beside, dragging: middles.filter(([x, y]) => dragAt(x, y)).length };
   });
@@ -521,7 +472,6 @@ test('the selection and table toolbars over the band: their buttons click, thoug
   await floatOverBand(page.locator('.annotation-toolbar'));
   await page.keyboard.press('Escape');
 
-  // A table's toolbar shows while the pointer is on the table.
   await openRoute(page, world, `#thread=${world.table}`, 'collapsed');
   await setControls(page);
   await page.locator('section.ib-pane [data-message-id] table').first().hover();
@@ -539,7 +489,6 @@ test('a control added later clicks: a button over the band, and anything inside 
   });
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
 
-  // A host's own control, outside the page, is the host's to mark.
   const hostControls = await page.evaluate(() => {
     const button = document.createElement('button');
     const role = document.createElement('div');

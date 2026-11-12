@@ -1,6 +1,5 @@
 import { expect, type Locator } from '@playwright/test';
 
-/** The files on screen in this scroller with no diff line drawn (the lines live in the renderer's shadow root). */
 export const blankOnScreen = (scroller: Locator): Promise<string[]> =>
   scroller.evaluate((el) => {
     const drawsLines = (root: ParentNode): boolean =>
@@ -15,7 +14,6 @@ export const blankOnScreen = (scroller: Locator): Promise<string[]> =>
       .map((shell) => shell.dataset.guideFileShell ?? '');
   });
 
-/** Down the whole scroll in steps of `step` px: at every stop, whatever is on screen draws. */
 export async function expectNoBlankFiles(scroller: Locator, step = 300): Promise<void> {
   const { scrollHeight, clientHeight } = await scroller.evaluate((el) => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
   expect(scrollHeight, 'the review must be taller than its window for this to prove anything').toBeGreaterThan(clientHeight);

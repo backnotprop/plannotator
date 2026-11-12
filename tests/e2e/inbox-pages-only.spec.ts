@@ -1,35 +1,3 @@
-/**
- * "Pages only" (owner, 2026-11-05), proved on the network in a real browser
- * against the compiled binary: an attached HTML page shows its web pictures,
- * and the Inbox window itself never asks the web for one. Nothing is mocked:
- * `plannotator inbox --background` runs under a temp PLANNOTATOR_DATA_DIR and
- * HOME, an agent sends through `plannotator inbox mcp` (scripts/inbox-sim.ts),
- * and two local stand-ins for "the web" (one https with a throwaway
- * certificate, one http) log every request they get.
- *
- * - The attached page is its own document (packages/server/inbox-pages.ts):
- *   its `https:` and plain `http:` pictures are fetched and drawn,
- *   and its picture from another folder on this computer still loads.
- * - Its own video plays: a `<video src="data:video/mp4;base64,…">` loads and
- *   the page reports no CSP violation (the page's policy and the window's
- *   name `media-src 'self' data: blob:`; without it media fell back to
- *   `default-src 'self'` and was blocked).
- * - A message whose text names web pictures (three Mermaid ways: an image
- *   node, an `<img>` in a label, a background in a label's style; a markdown
- *   image; a raw `<img>`; a protocol-relative one) makes zero requests: the
- *   window's CSP is `img-src 'self' data: blob:` (the review of #2722 found a
- *   Mermaid diagram reaching the web while that policy was widened).
- * - Annotation still works in the served page: a click pins its paragraph, the
- *   comment saves, and the page draws its highlight.
- * - Only the window can keep a page: a POST to /api/inbox/pages from another
- *   origin (`https://evil.example`, or `null`) is refused 403.
- *
- * Screenshots go to PLANNOTATOR_PAGES_ONLY_SHOTS when it is set.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-pages-only.spec.ts`.
- */
-
 import { expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { createServer as createHttpServer, type Server } from 'node:http';
@@ -45,12 +13,9 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = process.env.PLANNOTATOR_PAGES_ONLY_SHOTS ?? '';
 
-// A 2×2 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwnwEKGAA9yAH/2Y2kfwAAAABJRU5ErkJggg==', 'base64');
-// One black 16×16 H.264 frame (ffmpeg, no audio, no metadata): 808 bytes.
 const MP4 = 'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAALqbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAACgAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAjl0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAACgAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAAoAAAAAAABAAAAAAGxbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAyAAAAAgBVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABXG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAARxzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABDExhdmMgbGlieDI2NAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMAyDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAArwAAAAAAAAABhzdHRzAAAAAAAAAAEAAAABAAACAAAAABxzdHNjAAAAAAAAAAEAAAABAAAAAQAAAAEAAAAUc3RzegAAAAAAAAAOAAAAAQAAABRzdGNvAAAAAAAAAAEAAAMaAAAAPXVkdGEAAAA1bWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAIaWxzdAAAAAhmcmVlAAAAFm1kYXQAAAAKZYiECvJigACnvg==';
 
-/** A stand-in for the web: answers every request with the PNG and remembers its path. */
 async function webServer(root: string, tls: boolean): Promise<{ origin: string; hits: string[]; server: Server }> {
   const hits: string[] = [];
   const answer = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
@@ -162,31 +127,25 @@ test('an attached page shows its web pictures; the window asks the web for none,
     try {
       const tab = await context.newPage();
 
-      // The window's own policy, as served.
       const window = await context.request.get(url);
       expect(window.headers()['content-security-policy']).toContain("img-src 'self' data: blob:;");
 
-      // Only the window may keep a page: the listener's cross-origin guard runs before the route.
-      // Another site (or an opaque-origin page, `Origin: null`) cannot get HTML served from the Inbox.
       const pagesUrl = new URL('/api/inbox/pages', url).href;
       for (const origin of ['https://evil.example', 'null']) {
         const refused = await context.request.post(pagesUrl, { headers: { Origin: origin }, data: { html: '<p>from elsewhere</p>' } });
         expect(refused.status(), `Origin: ${origin}`).toBe(403);
       }
 
-      // (b) The message: every diagram draws, and the web hears nothing.
       await tab.goto(`${url}#thread=${text.thread_id}`);
       await expect(tab.getByText('Web pictures in the text of this message.').first()).toBeVisible();
       await expect(tab.locator('svg').filter({ hasText: 'styled span' }).first()).toBeVisible();
       await expect(tab.locator('svg').filter({ hasText: 'label img' }).first()).toBeVisible();
-      // Mermaid measures an image node's picture before it draws: refused, it says so in place of the diagram.
       await expect(tab.locator('svg').filter({ hasText: 'img shape' }).or(tab.getByText('The source image cannot be decoded')).first()).toBeVisible();
       await tab.waitForTimeout(2_000);
       expect(secure.hits).toEqual([]);
       expect(plain.hits).toEqual([]);
       await shot(tab, 'pages-only-2-message-web-picture-blocked');
 
-      // (a) The attached page: its https and http pictures are fetched and drawn, and its far one loads.
       await tab.goto(`${url}#thread=${page.thread_id}`);
       await tab.locator(`button[data-attachment-id="${pageId}"]`).first().click();
       const frameEl = tab.locator('.ib-htmlframe iframe');
@@ -200,7 +159,6 @@ test('an attached page shows its web pictures; the window asks the web for none,
       await expect.poll(() => width('plain')).toBe(2);
       expect(secure.hits).toEqual(['/page-web.png']);
       expect(plain.hits).toEqual(['/page-http.png']);
-      // Its own data: video loads, and nothing on the page broke its policy.
       const clip = frame.locator('#clip');
       if (await clip.evaluate((v: HTMLVideoElement) => v.canPlayType('video/mp4; codecs="avc1.42E01E"') !== '')) {
         await expect.poll(() => clip.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
@@ -209,7 +167,6 @@ test('an attached page shows its web pictures; the window asks the web for none,
       expect(await frame.locator('body').evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations)).toEqual([]);
       await shot(tab, 'pages-only-1-attached-page-web-picture');
 
-      // (c) Annotation in the served page: a click pins the paragraph, the comment saves, the page marks it.
       const interact = tab.locator('[data-full-view-pen][aria-pressed="false"]');
       if (await interact.isVisible()) await interact.click();
       await frame.locator('#target').click();
@@ -224,11 +181,9 @@ test('an attached page shows its web pictures; the window asks the web for none,
         return answer.annotations.map((a) => a.annotation.text);
       };
       await expect.poll(saved).toEqual(['This paragraph reads well.']);
-      // The page draws the comment's marker: the bridge got the annotation back from the window.
       await expect(frame.locator('[data-plannotator-marker]')).toHaveCount(1);
       await shot(tab, 'pages-only-3-attached-page-comment-pinned');
 
-      // Still nothing from the window itself.
       expect(secure.hits).toEqual(['/page-web.png']);
       expect(plain.hits).toEqual(['/page-http.png']);
     } finally {

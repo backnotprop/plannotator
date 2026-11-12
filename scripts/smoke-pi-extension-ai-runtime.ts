@@ -119,8 +119,6 @@ setInterval(() => {}, 1000);
 
 		try {
 			const response = await runtime.endpoints["/api/ai/capabilities"](
-				// Pi model discovery is deferred until the provider is activated
-				// (#1692), so ask for it the way the client does when Pi is picked.
 				new Request("http://localhost/api/ai/capabilities?activate=pi-sdk"),
 			);
 			if (!response.ok) {

@@ -1,30 +1,3 @@
-/**
- * Live HTML in a message (approval "inbox-inline-html", 2026-10-28), proved
- * in a real browser against the compiled binary: `plannotator inbox
- * --background` under a temp PLANNOTATOR_DATA_DIR and HOME, an agent writing
- * through `plannotator inbox mcp` (scripts/inbox-sim.ts), the browser opening
- * the thread. No real network: the web the page loads from is stubbed with
- * `context.route`. Chromium and WebKit.
- *
- * What regresses if this fails:
- * - an agent's ```html fence no longer draws as a page (or ```mermaid stops
- *   drawing), or the page loses its sandbox (an opaque origin);
- * - the page's requests reach the Inbox: any request from the embed's frame
- *   to the Inbox that leaves the browser, other than its own document (an
- *   absolute URL, a relative one, an image; counted in Chromium);
- * - the page can no longer load from the web over https (the owner's choice:
- *   "anything, like t3code's pages");
- * - a link the person clicks in the page does not open, or a page opens one
- *   on its own (T3 Code's rule: only while the frame has focus and the
- *   person's activation);
- * - the page paints its own background or the window's theme does not reach
- *   it (it would not look embedded), or it does not size to its content;
- * - Code, Full screen or Escape stop working; on a phone the page spills
- *   past the column.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test, type BrowserContext, type Frame, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
@@ -36,13 +9,8 @@ import { NO_BROWSER } from '../helpers/no-browser';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 
-/** A stand-in for the web: never resolved, every request answered by `stubWeb`. */
 const CDN = 'https://cdn.example.test';
 
-/**
- * The agent's page: it loads a script and data from the web, then tries the
- * Inbox every way a page could, and writes what happened into itself.
- */
 const PAGE = [
   '<style>p{margin:0 0 6px} #chart{height:160px;border-radius:6px;background:var(--chart-1)}</style>',
   `<script src="${CDN}/lib.js"></script>`,
@@ -53,7 +21,6 @@ const PAGE = [
   "const say = (id, text) => { document.getElementById(id).textContent = id + ': ' + text; };",
   "say('lib', typeof window.LIB === 'string' ? window.LIB : 'missing');",
   `fetch('${CDN}/data.json').then((r) => r.json()).then((d) => say('cdn', d.ok ? 'ok' : 'bad'), () => say('cdn', 'blocked'));`,
-  // The page's own address is on the Inbox: try it absolutely and relatively.
   "const inbox = new URL('/api/inbox/threads', location.href).href;",
   "fetch(inbox).then(() => say('inbox', 'reached'), () => say('inbox', 'blocked'));",
   "fetch('/api/inbox/health', { credentials: 'include' }).then(() => say('relative', 'reached'), () => say('relative', 'blocked'));",
@@ -77,7 +44,6 @@ const fence = (html: string) => ['```html', html, '```'].join('\n');
 
 interface World {
   url: string;
-  /** The window's origin, which serves its embeds too. */
   windowOrigin: string;
   agent: SimAgent;
   project: string;
@@ -119,7 +85,6 @@ async function startWorld(prefix: string): Promise<World> {
   }
 }
 
-/** The embed's frame in `scope`, once its page has run (`ready`: an element the page writes). */
 async function embedFrame(page: Page, scope = page.locator('body'), ready = '#img', pending = 'img: pending'): Promise<Frame> {
   const handle = await scope.locator('iframe[data-html-embed-frame="inline"]').first().elementHandle();
   const frame = (await handle!.contentFrame())!;
@@ -128,7 +93,6 @@ async function embedFrame(page: Page, scope = page.locator('body'), ready = '#im
 }
 
 test('an html fence draws as a live, sandboxed page that loads from the web and never reaches the Inbox', async ({ browser, browserName }) => {
-  // The request accounting reads Chromium's failure reasons; the rest runs in both engines.
   const accounting = browserName === 'chromium';
   const world = await startWorld('plannotator-inbox-inline-html-e2e-');
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -142,8 +106,6 @@ test('an html fence draws as a live, sandboxed page that loads from the web and 
       body: ['The index adds 40 seconds to each build:', '', fence(PAGE), '', '```mermaid', 'flowchart LR', '  A --> B', '```'].join('\n'),
     });
     const page = await context.newPage();
-    // Every request the page's frame sent to the Inbox (at either loopback name). Chromium reports a
-    // load its policy stopped (reason `csp`) as a request that failed; that one never left the browser.
     const toInbox: string[] = [];
     const stoppedByPolicy: string[] = [];
     const inboxOrigins = [world.windowOrigin, world.windowOrigin.replace('localhost', '127.0.0.1')];
@@ -158,7 +120,6 @@ test('an html fence draws as a live, sandboxed page that loads from the web and 
     await page.goto(`${world.url}#thread=${sent.thread_id}`);
     const message = page.locator(`[data-message-id="${sent.message_id as string}"]`);
 
-    // Diagrams still draw (Stage 0: agents are now told).
     await expect(message.locator('[data-block-id] svg').first()).toBeVisible();
 
     const iframe = message.locator('iframe[data-html-embed-frame="inline"]');
@@ -167,11 +128,9 @@ test('an html fence draws as a live, sandboxed page that loads from the web and 
     const documentUrl = frame.url();
     expect(documentUrl.startsWith(`${world.windowOrigin}/api/inbox/embeds/`)).toBe(true);
 
-    // The web over https: allowed.
     await expect(frame.locator('#lib')).toHaveText('lib: loaded');
     await expect(frame.locator('#cdn')).toHaveText('cdn: ok');
     expect(web.some((asked) => asked.endsWith('/data.json'))).toBe(true);
-    // The Inbox: never, however the page asks.
     await expect(frame.locator('#inbox')).toHaveText('inbox: blocked');
     await expect(frame.locator('#relative')).toHaveText('relative: blocked');
     await expect(frame.locator('#img')).toHaveText('img: blocked');
@@ -179,10 +138,8 @@ test('an html fence draws as a live, sandboxed page that loads from the web and 
       const leftTheBrowser = toInbox.filter((asked) => !stoppedByPolicy.includes(asked));
       expect(leftTheBrowser.map((asked) => asked.split('#')[0])).toEqual([documentUrl.split('#')[0]]);
     }
-    // An opaque origin.
     expect(await frame.evaluate(() => self.origin)).toBe('null');
 
-    // It looks embedded: no background of its own, the window's theme and color-scheme, sized to its content.
     const look = await frame.evaluate(() => ({
       background: getComputedStyle(document.body).backgroundColor,
       htmlBackground: getComputedStyle(document.documentElement).backgroundColor,
@@ -197,20 +154,17 @@ test('an html fence draws as a live, sandboxed page that loads from the web and 
     expect(await iframe.evaluate((el: HTMLIFrameElement) => el.style.colorScheme)).toBe(look.scheme);
     await expect.poll(() => iframe.evaluate((el: HTMLIFrameElement) => el.getBoundingClientRect().height)).toBe(look.height);
 
-    // A link the person clicks opens in a new tab.
     const embed = message.locator('[data-html-embed]');
     const opened = context.waitForEvent('page');
     await frame.locator('#docs').click();
     expect((await opened).url()).toBe(`${CDN}/docs`);
 
-    // Code shows the source; again, the page.
     await embed.locator('[data-html-embed-code]').click();
     await expect(iframe).toHaveCount(0);
     await expect(embed).toContainText('cdn.example.test/lib.js');
     await embed.locator('[data-html-embed-code]').click();
     await expect(iframe).toHaveCount(1);
 
-    // Full screen: the same page, large; Escape closes it and the thread stays open.
     await embed.locator('[data-html-embed-full]').click();
     const popout = page.locator('[data-html-embed-popout]');
     await expect(popout.locator('iframe[data-html-embed-frame="full"]')).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
@@ -218,7 +172,6 @@ test('an html fence draws as a live, sandboxed page that loads from the web and 
     await expect(popout).toHaveCount(0);
     await expect(message).toBeVisible();
 
-    // A phone: the page fits the column.
     const small = await phone.newPage();
     await small.goto(`${world.url}#thread=${sent.thread_id}`);
     const smallFrame = small.locator('iframe[data-html-embed-frame="inline"]');
@@ -234,8 +187,6 @@ test('an html fence draws as a live, sandboxed page that loads from the web and 
   }
 });
 
-
-/** A page that tries to open a link on its own, every 300 ms (no one clicked it). */
 const OPENER = `<p id="at">ready</p><a id="go" href="${CDN}/phish">go</a><script>setInterval(() => document.getElementById('go').click(), 300);</script>`;
 
 test('a page cannot open a link on its own: only a click in it while it has focus opens one', async ({ browser }) => {

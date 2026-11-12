@@ -1,23 +1,3 @@
-/**
- * How a packed page (#1618) paints while it loads, and what it does when one
- * of its own two requests fails. The page's stylesheet lands before its entry
- * script has run, so for that long the browser shows the empty page.
- *
- * Proved against the built apps (apps/hook/dist: run
- * `bun run --cwd apps/review build && bun run build:hook` first), served by a
- * current server, in headless Chromium:
- *  - with the OS dark and no saved theme (the app default is dark), no frame
- *    before the entry script runs is white: the page's head sets the dark
- *    scheme before anything can paint;
- *  - the first text's fonts (Inter, Geist Mono) load while the entry script
- *    is still on its way, so text never paints in the fallback font first;
- *  - a saved light theme keeps the light canvas;
- *  - the stylesheet or the entry script failing twice shows "Plannotator
- *    couldn't finish loading." with Reload, and only that (the app root is
- *    hidden), instead of an unstyled or blank page forever;
- *  - failing once is retried, and the app loads with no line.
- */
-
 import { expect, test, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
@@ -53,7 +33,6 @@ async function serve(bundle: string): Promise<{ server: Server; url: string; ent
   };
 }
 
-/** The RGB of one screen pixel. A 1x1 PNG has one scanline, which every PNG filter leaves as is. */
 async function pixel(page: Page, x: number, y: number): Promise<[number, number, number]> {
   const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 }, animations: 'allow' });
   const idat: Buffer[] = [];
@@ -84,14 +63,12 @@ for (const file of builds) {
       });
       const page = await context.newPage();
       const cssLoaded = page.waitForResponse(css);
-      // The first text's fonts are preloaded from the head, so they do not wait for the app to render text.
       const fontsLoaded = ['inter-latin-wght-normal-', 'geist-mono-latin-wght-normal-'].map((font) =>
         page.waitForResponse((r) => r.url().includes(`/assets/${font}`) && r.url().endsWith('.woff2') && r.ok()),
       );
       await page.goto(url, { waitUntil: 'commit' });
       await cssLoaded;
       await Promise.all(fontsLoaded);
-      // The stylesheet is in and the app has not run: what the user sees for as long as the entry takes.
       const samples: number[] = [];
       for (let i = 0; i < 6; i++) {
         samples.push(luminance(await pixel(page, 400, 300)));
@@ -141,7 +118,6 @@ for (const file of builds) {
       try {
         let aborted = 0;
         await context.route(which === 'stylesheet' ? css : entry, async (route) => {
-          // GETs only: the pages' HEAD checks of the entry (is this an old server?) are not loads.
           if (route.request().method() === 'GET') aborted++;
           await route.abort('connectionreset');
         });
@@ -153,7 +129,6 @@ for (const file of builds) {
         const reload = line.getByRole('button', { name: 'Reload', exact: true });
         await expect(reload).toBeVisible();
         expect((await reload.boundingBox())!.height).toBeGreaterThanOrEqual(24);
-        // Only the line: an app that ran without its stylesheet is hidden, not drawn unstyled under it.
         await expect(page.locator('#root')).toBeHidden();
         expect(aborted).toBe(2);
         await expect(page.locator('#plannotator-updated')).toHaveCount(0);
@@ -177,11 +152,9 @@ for (const file of builds) {
         const page = await context.newPage();
         await page.goto(url);
         await expect(page.locator('#root > *').first()).toBeAttached();
-        // Styled: the app's stylesheet applied (Tailwind's `h-full` on #root).
         await expect.poll(() => page.evaluate(() => getComputedStyle(document.getElementById('root')!).height)).toBe(`${page.viewportSize()!.height}px`);
         await page.waitForTimeout(300);
         await expect(page.locator('#plannotator-load-failed')).toHaveCount(0);
-        // Two loads, no third: a retry under another URL would make the lazy chunks load a second copy of the app.
         expect(requests).toBe(2);
       } finally {
         await context.close();
