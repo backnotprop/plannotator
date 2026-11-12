@@ -14,13 +14,11 @@ import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHo
 import { createOpenCodePermissions, OPENCODE, OPENCODE_NAME, type OpenCodePermissionAsked } from "./inbox-launch-opencode-permission";
 
 export { OPENCODE, OPENCODE_NAME };
-/** The first OpenCode 2 whose session API takes a folder and a model (checked on 2.0.19 and 2.2.7). */
 export const OPENCODE_LAUNCH_MIN_VERSION = "2.0.19";
 export const OPENCODE_STOPPED_NOTE = "The Inbox restarted, which ended it. Your reply continues it.";
 export const OPENCODE_PLUGIN_UPDATE = "opencode2 plugin update @plannotator/opencode";
 
 const READY_MS = 30_000;
-/** OpenCode installs and loads its plugins after it answers; the first load after an update can take a while. */
 const PLUGIN_MS = 60_000;
 const REQUEST_MS = 15_000;
 const STOP_MS = 5_000;
@@ -32,7 +30,6 @@ export function openCodeCause(text: string): string {
   return !line ? "" : /[.!?]$/.test(line) ? line : `${line}.`;
 }
 
-/** `opencode2 --version` prints `opencode v2.2.7`. */
 export function parseOpenCodeVersion(stdout: string): string | null {
   return /(\d+\.\d+\.\d+)/.exec(stdout)?.[1] ?? null;
 }
@@ -67,7 +64,6 @@ export function installedOpenCodePlugin(cacheHome: string): { version: string; l
   return best;
 }
 
-/** The server's env: the login env through the launch filter, the Inbox tool on, what its plugin should watch, and the server's own password. */
 export function openCodeSpawnEnv(login: Readonly<LaunchEnv>, dataDir: string | null, session: string | null, password: string): LaunchEnv {
   const env = Object.fromEntries(Object.entries(launchSpawnEnv(login)).filter(([name]) => name !== "OPENCODE" && !name.startsWith("OPENCODE_SERVER_")));
   return {
@@ -81,7 +77,6 @@ export function openCodeSpawnEnv(login: Readonly<LaunchEnv>, dataDir: string | n
   };
 }
 
-/** OpenCode in a terminal on the session: a private server whose plugin watches it and takes the replies. */
 function openCodeTerminalRun(bin: string, session: string, dataDir: string | null): string {
   return `PLANNOTATOR_INBOX_TOOL=1 ${OPENCODE_LAUNCH_SESSION_ENV}=${shellQuote(session)} ${dataDir ? `PLANNOTATOR_DATA_DIR=${shellQuote(dataDir)} ` : ""}${bin} --standalone --session ${shellQuote(session)}`;
 }
@@ -142,7 +137,6 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
   const pluginMs = options.pluginMs ?? PLUGIN_MS;
   const dataDirArg = () => (resolve(ctx.dataDir) === resolve(getDefaultPlannotatorDataDir(ctx.homeDir)) ? null : ctx.dataDir);
   const cacheHome = () => ctx.shell()?.XDG_CACHE_HOME ?? ctx.ownEnv().XDG_CACHE_HOME ?? join(ctx.homeDir, ".cache");
-  /** OpenCode 2's own name for it; `opencode` alone only where the person's config is OpenCode 2's. */
   const binOf = (e: AgentEnvironment): string | null => e.which("opencode2") ?? (openCodeGeneration(e) === "2" ? e.which("opencode") : null);
 
   const procs = new Map<string, OpenCodeServer>();
@@ -239,7 +233,6 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
           }
         }
       } catch {
-        // The server ended, or Stop.
       }
     })();
   };
@@ -350,7 +343,6 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     name: OPENCODE_NAME,
     shellNames: ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "OPENCODE_CONFIG_DIR"],
 
-    /** OpenCode 2 on the plain env's PATH and new enough, and Plannotator's plugin in its config, new enough when OpenCode's cache says. */
     async available(): Promise<LaunchAvailability> {
       const e = await ctx.environment();
       const path = binOf(e);
@@ -368,7 +360,6 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     choices: () => choiceLists(choiceKey),
 
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
-    /** OpenCode has no folder trust: it never refuses a folder. */
     trusts: () => true,
 
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }) {
@@ -404,7 +395,6 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       };
     },
 
-    /** The plugin's bridge poll, as any OpenCode session's; busy from this server's own events while it runs. */
     live(session: string): LaunchLive | null {
       const polled = ctx.bridge.runStateOf(session);
       const s = running(session);
@@ -412,7 +402,6 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       return { ...polled, busy: s.busySince !== null, busySince: s.busySince };
     },
 
-    /** A new server whose plugin watches the session from the start; the waiting reply goes in through it. */
     async resume(launch: InboxLaunchRecord): Promise<ResumeResult> {
       const session = launch.session_ref!;
       if (spawning.has(session)) return nothing("starting already");
@@ -451,7 +440,6 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       if (!s) return { exitCode: 0, text: "not running in this Inbox" };
       return { exitCode: code ?? 1, text: code === null ? "did not end; killed" : `ended ${code}` };
     },
-    /** OpenCode keeps its sessions (its own history and `--session`): nothing to remove. */
     remove: async (): Promise<LaunchHostResult> => ({ exitCode: 0, text: "OpenCode keeps its own sessions" }),
     purge: async (): Promise<LaunchHostResult & { skipped?: string }> => ({ exitCode: 0, text: "", skipped: "OpenCode keeps its sessions in its own database" }),
 

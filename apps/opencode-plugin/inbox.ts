@@ -408,7 +408,6 @@ class OpenCode2Wakes {
     private readonly resolveRoot: (sessionID: string) => Promise<{ root: string }>,
     /** What this service loaded and what is on disk now (`plugin` on each poll). */
     private readonly pluginReport: () => InboxLoadedPluginReport | null = () => null,
-    /** A server the Inbox started: its sessions have no turn yet, and the Inbox's first message waits for this wake. */
     private readonly launch: { created: boolean; session: string | null } = { created: false, session: null },
   ) {
     if (launch.session) this.watch(launch.session);

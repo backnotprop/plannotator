@@ -1,26 +1,11 @@
-/**
- * A fake `opencode2` for launch (packages/server/inbox-launch-opencode.ts): `--version`, `--standalone api GET
- * /api/model`, and `serve --hostname --port`, an HTTP server with the subset of OpenCode 2.2.7's API a launch uses
- * (info, plugin list, sessions, prompt, interrupt, permission replies, forms, the event stream), behind the server
- * password. It also plays Plannotator's OpenCode plugin: with the Inbox tool on and `PLANNOTATOR_INBOX_LAUNCHED`, it
- * polls the bridge as host `opencode` for each session created here and for `PLANNOTATOR_INBOX_LAUNCHED_SESSION`,
- * and a command becomes a turn that answers through the Inbox's MCP. A turn whose text holds `APPROVE` asks a shell
- * permission first; one holding `ASK` opens a form. Every start, request and stop goes to `calls.jsonl`. Never the
- * real OpenCode.
- */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface FakeOpenCodeLaunchState {
-  /** `opencode2 --version`'s version (default 2.2.7). */
   version?: string;
-  /** The plugin `/api/plugin` lists (default active); null: none. */
   plugin?: { version: string; status?: "active" | "failed"; error?: string } | null;
-  /** `GET /api/model`'s models (default: two with variants). */
   models?: { providerID: string; id: string; variants: string[] }[];
-  /** Every turn fails with this error. */
   failTurn?: string | null;
-  /** How long a turn works (ms). */
   turnMs?: number;
 }
 
@@ -77,7 +62,6 @@ const stop = (why) => { if (stopped) return; stopped = true; log({ event: "stop"
 process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
-// ── The plugin: the bridge poll per watched session ──
 const on = (v) => ["1", "true", "on"].includes(String(v || "").toLowerCase());
 const launched = on(process.env.PLANNOTATOR_INBOX_LAUNCHED);
 const registryOf = () => { try { return JSON.parse(fs.readFileSync(path.join(process.env.PLANNOTATOR_DATA_DIR, "inbox", "inbox.json"), "utf8")); } catch { return null; } };

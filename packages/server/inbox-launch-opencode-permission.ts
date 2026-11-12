@@ -7,10 +7,8 @@ import { createLaunchQuestions, openPermissionQuestions } from "./inbox-launch-p
 export const OPENCODE = "opencode" as const;
 export const OPENCODE_NAME = "OpenCode";
 
-/** OpenCode's "always" saves a rule past this session, so the card offers Allow once and Deny only. */
 export const OPENCODE_PERMISSION_TERMS: InboxPermissionOptions = { modes: false, full: false, fullPermissions: false, allowHere: true, terminal: false, note: null, handoff: null };
 
-/** `permission.asked`'s data (OpenCode 2.2.7). */
 export interface OpenCodePermissionAsked {
   id: string;
   sessionID: string;
@@ -22,7 +20,6 @@ export function openCodePermissionKey(sessionID: string, requestID: string): str
   return `opencode-${createHash("sha256").update(JSON.stringify([sessionID, requestID])).digest("hex")}`;
 }
 
-/** As the card's event (Claude Code's tool vocabulary, which the card draws): a known action as its tool, any other as itself with the resources as JSON. */
 export function openCodePermissionEvent(asked: OpenCodePermissionAsked, cwd: string | null): InboxPermissionEvent {
   const base = { session_id: asked.sessionID, cwd, permission_mode: null, permission_suggestions: [] };
   const one = asked.resources.length === 1 ? asked.resources[0]! : null;
@@ -34,7 +31,6 @@ export function openCodePermissionEvent(asked: OpenCodePermissionAsked, cwd: str
   return { ...base, tool_name: asked.action, tool_input: { resources: asked.resources } };
 }
 
-/** OpenCode's reply: "once" or "reject" ("reject" ends the turn). */
 export function openCodeDecision(choice: InboxPermissionChoice): "once" | "reject" {
   return choice === "deny" ? "reject" : "once";
 }
@@ -58,7 +54,6 @@ interface Pending {
 export function createOpenCodePermissions(
   options: LaunchPermissionContext & {
     respond: (target: OpenCodeTarget, requestID: string, decision: "once" | "reject") => Promise<boolean>;
-    /** The person's reason after a Deny, as the session's next prompt. */
     tell: (target: OpenCodeTarget, text: string) => void;
   },
 ): LaunchHostPermissions & {
@@ -86,7 +81,6 @@ export function createOpenCodePermissions(
       const event = openCodePermissionEvent(asked, target.folder);
       const question = questions.questionFor(root, event, terms);
       const messageId = questions.ask(root, event, key, question);
-      // Not askable here (a detail the card can't show whole): OpenCode keeps waiting, as for a terminal of its own.
       if (!messageId) return;
       pending.set(key, { key, target, requestID: asked.id, event, messageId, question });
       options.onChange();

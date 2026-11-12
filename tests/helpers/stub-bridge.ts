@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
-/** The bridge the fake's extension calls: each session's polls, the root and the waiting replies handed to the session they are for (again a second later while not delivered, as a lost poll's claim lapses), their delivery. */
 export function stubBridge(dataDir: string, store: InboxStore) {
   const polls = new Map<string, { count: number; last: number }>();
   const busy = new Map<string, boolean>();
@@ -13,7 +12,6 @@ export function stubBridge(dataDir: string, store: InboxStore) {
     hostname: "127.0.0.1",
     async fetch(req) {
       const pathname = new URL(req.url).pathname;
-      // The extension's "delivered" event, recorded as the Inbox's bridge records it.
       if (pathname === "/api/inbox/bridge/event") {
         const event = (await req.json()) as { session: string; host: string; type: string; id?: string; busy?: boolean };
         if (event.type === "delivered" && event.id) store.recordDelivery(event.id, { host: event.host, session: event.session });

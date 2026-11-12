@@ -137,7 +137,6 @@ export function codexThreadChoice(choice: InboxLaunchChoice): { model?: string; 
   };
 }
 
-/** OpenCode's session model (`POST /api/session` `model`): the provider ends at the first "/". */
 export function openCodeSessionModel(model: string | undefined, variant: string | undefined): { providerID: string; id: string; variant?: string } | null {
   if (!inboxLaunchTokenOk(model)) return null;
   const at = model.indexOf("/");
