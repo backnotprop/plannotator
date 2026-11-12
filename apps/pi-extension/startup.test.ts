@@ -67,12 +67,6 @@ describe("Pi extension startup boundary", () => {
 	});
 
 	test("ships the plannotator knowledge skill without a static manifest entry", () => {
-		// #1377 install reach: Pi users got the extension but none of the CLI
-		// reference every other host installs as a skill. vendor.sh must make
-		// the copy and `files` must ship it and the module that offers it.
-		// #1642: it must NOT be declared in `pi.skills` — a static entry always
-		// loads, so it collides with the CLI installer's ~/.agents/skills copy.
-		// bundled-skill.ts offers it from resources_discover instead.
 		const manifest = JSON.parse(
 			readFileSync(join(extensionDirectory, "package.json"), "utf-8"),
 		) as { files?: unknown; pi?: { skills?: unknown } };
@@ -81,8 +75,6 @@ describe("Pi extension startup boundary", () => {
 		expect(manifest.files).toContain("bundled-skill.ts");
 		expect(manifest.pi?.skills).toBeUndefined();
 
-		// Assert the vendor step rather than the vendored file: a fresh checkout
-		// has not run vendor.sh yet, and this must not depend on build order.
 		const vendorScript = readFileSync(
 			join(extensionDirectory, "vendor.sh"),
 			"utf-8",
@@ -100,8 +92,6 @@ describe("Pi extension startup boundary", () => {
 			devDependencies?: Record<string, string>;
 		};
 
-		// Deliberate security/API floor: lowering it re-admits the four Pi
-		// advisories and removes the project-trust context API this extension uses.
 		expect(manifest.peerDependencies?.["@earendil-works/pi-coding-agent"]).toBe(">=0.79.1");
 		for (const packageName of [
 			"@earendil-works/pi-coding-agent",

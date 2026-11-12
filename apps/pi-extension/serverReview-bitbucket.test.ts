@@ -1,9 +1,3 @@
-/**
- * Pi parity for Bitbucket Cloud PR review: the vendored provider
- * (generated/pr-bitbucket.ts via pr-provider.ts) fetches the PR from the
- * local fake Bitbucket API, and the Pi review server serves its context and
- * posts a review back through it — the same chain the Bun CLI test covers.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

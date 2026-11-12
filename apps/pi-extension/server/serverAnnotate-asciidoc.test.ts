@@ -1,11 +1,3 @@
-/**
- * Annotate server (Pi/Node): AsciiDoc sources (.adoc/.asciidoc).
- *
- * Node mirror of packages/server/annotate.asciidoc.test.ts. Both runtimes must
- * name AsciiDoc in `renderAs` and serve the file's raw text, or the same .adoc
- * renders as AsciiDoc under Claude Code and as broken markdown under Pi.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

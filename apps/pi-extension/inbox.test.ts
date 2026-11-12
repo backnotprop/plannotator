@@ -1,18 +1,3 @@
-/**
- * The Pi connection to the Plannotator Inbox, proved on the REAL Pi: the
- * installed `@earendil-works/pi-coding-agent` CLI in RPC mode, driven by Pi's
- * own `RpcClient`, loading this extension from source with `-e`, against a
- * real Inbox (`plannotator inbox --background` under a temp data dir; the
- * compiled binary when PLANNOTATOR_INBOX_TEST_BINARY names one). The model is
- * a scripted OpenAI-compatible endpoint (tests/helpers/scripted-model.ts): Pi
- * sends it exactly what it would send a provider, so the proofs read the tool
- * list and the wake turn from those requests. The person's Send goes through
- * the window's route. No mocks of Pi, the extension or the Inbox.
- *
- * PI_TEST_OLD_CLI=<path to dist/cli.js of Pi 0.79.1> adds the floor: a Pi
- * without `agent_settled` still settles and delivers once.
- * INBOX_PROOF_DIR=<dir> keeps a transcript per proof under <dir>/pi/.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -41,10 +26,6 @@ import {
 import { expectMeasuredCost } from "../../tests/helpers/inbox-tool-cost.ts";
 import { messageText, startScriptedModel, type ScriptedModel, type ScriptedRequest, type ScriptedTurn } from "../../tests/helpers/scripted-model.ts";
 
-/**
- * The last message of a request that is not the Inbox reminder: Pi appends the
- * reminder after the session's first prompt, and the scripts answer the prompt.
- */
 function lastMessage(request: ScriptedRequest): { role: string; text: string } {
 	for (let i = request.messages.length - 1; i >= 0; i--) {
 		const message = request.messages[i]!;
@@ -56,7 +37,6 @@ function lastMessage(request: ScriptedRequest): { role: string; text: string } {
 }
 
 const piPackage = join(import.meta.dir, "node_modules", "@earendil-works", "pi-coding-agent");
-/** Pi runs on Node 22.19+ (its engines field); where no such node is on PATH there is no Pi to prove against. The world's `plannotator` wrapper is a /bin/sh script. */
 const nodeVersion = /^v(\d+)\.(\d+)/.exec(Bun.which("node") ? Bun.spawnSync(["node", "--version"]).stdout.toString() : "");
 const piRuns = process.platform !== "win32" && !!nodeVersion && (Number(nodeVersion[1]) > 22 || (Number(nodeVersion[1]) === 22 && Number(nodeVersion[2]) >= 19));
 const piCli = join(piPackage, "dist", "cli.js");
@@ -97,7 +77,6 @@ function world(name: string): InboxWorld {
 	return w;
 }
 
-/** The person's `inboxTool` switch for Pi, in the data dir's config.json (what the Inbox's Settings writes). */
 function knob(w: InboxWorld, on: boolean): void {
 	mkdirSync(w.dataDir, { recursive: true });
 	writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: on } }));
@@ -160,7 +139,6 @@ async function openPi(w: InboxWorld, m: ScriptedModel, options: { cli?: string; 
 	return { client, events, sessionId: state.sessionId, sessionFile: state.sessionFile };
 }
 
-/** Pi finished what it was doing: the run ended, nothing is streaming or queued. Works on Pi without `agent_settled`. */
 async function settled(pi: PiSession, from: number): Promise<void> {
 	await waitFor("the run to end", () => pi.events.slice(from).some((event) => event.type === "agent_end"), 60_000);
 	await waitFor("Pi to be idle", async () => {
@@ -169,14 +147,12 @@ async function settled(pi: PiSession, from: number): Promise<void> {
 	}, 60_000);
 }
 
-/** The person types a prompt at idle and Pi finishes the run it starts. */
 async function ask(pi: PiSession, text: string): Promise<void> {
 	const from = pi.events.length;
 	await pi.client.prompt(text);
 	await settled(pi, from);
 }
 
-/** User messages Pi started in the session whose first line is an Inbox wake. */
 function wakes(pi: PiSession): string[] {
 	return pi.events
 		.filter((event) => event.type === "message_start" && event.message?.role === "user")
@@ -184,7 +160,6 @@ function wakes(pi: PiSession): string[] {
 		.filter((text) => text.startsWith("Plannotator Inbox: "));
 }
 
-/** The script every proof shares: a prompt that says "ask" sends the question; a wake is answered in its thread. */
 function askingScript(extra: (request: ScriptedRequest) => ScriptedTurn | null = () => null) {
 	return (request: ScriptedRequest): ScriptedTurn => {
 		const own = extra(request);
@@ -202,7 +177,6 @@ function askingScript(extra: (request: ScriptedRequest) => ScriptedTurn | null =
 	};
 }
 
-/** The structured answer of the tool's send_message, as the model got it back. */
 function sentFrom(m: ScriptedModel): { message_id: string; thread_id: string } {
 	const result = m.requests.map((request) => lastMessage(request)).find((last) => last.role === "tool" && last.text.includes('"message_id"'));
 	if (!result) throw new Error("no send_message result reached the model");
@@ -219,7 +193,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		await ask(silent, "hello");
 		expect(m.requests.at(-1)?.tools).not.toContain("plannotator_inbox");
 		expect(existsSync(join(w.dataDir, "inbox"))).toBe(false);
-		// The Inbox says nothing; the runtime TLS warning (runtime-tls.ts) is not the Inbox's and depends on the Node running the test.
 		const isRuntimeWarning = (event: { message?: unknown }) => typeof event.message === "string" && event.message.includes("TLS fixes");
 		expect(silent.events.filter((event) => event.type === "extension_ui_request" && event.method === "notify" && !isRuntimeWarning(event))).toEqual([]);
 		w.proof(`switch on, no inbox/inbox.json: tools sent to the model = ${JSON.stringify(m.requests.at(-1)?.tools)}; no inbox folder, no notice`);
@@ -251,7 +224,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		for (const action of actions) expect(offered).toContain(action);
 		const properties = Object.keys((tool.parameters as { properties: object }).properties);
 		for (const filled of ["agent_session", "agent_host", "agent_name"]) expect(properties).not.toContain(filled);
-		// The one filled argument the agent may set, optionally.
 		expect(properties).toContain("project_path");
 		expect((tool.parameters as { required?: string[] }).required).toEqual(["action"]);
 		w.proof(`Inbox running, switch on for pi: plannotator_inbox sent to the model with actions ${JSON.stringify(actions)}\n\n${tool.description}`);
@@ -270,7 +242,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		);
 		startInbox(w);
 		knob(w, true);
-		// Seed 20 rounds as another agent would, over the Inbox's /mcp; the person answers each through the window's route.
 		const mcp = async (name: string, args: Record<string, unknown>) => {
 			const response = await fetch(`http://127.0.0.1:${registry(w).port}/mcp`, {
 				method: "POST",
@@ -323,7 +294,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		expect(withTool.tools).toContain("plannotator_inbox");
 		const added = withTool.bodyBytes - without.bodyBytes;
 		const entry = withTool.toolBytes.plannotator_inbox!;
-		// The request grows by the tool's entry and the comma before it, nothing else.
 		expect(added).toBe(entry + 1);
 		expectMeasuredCost("pi", withTool.toolJson.plannotator_inbox!);
 		w.proof(`Pi request without the tool: ${without.bodyBytes} bytes; with it: ${withTool.bodyBytes} bytes; the plannotator_inbox entry: ${entry} bytes`);
@@ -350,9 +320,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		expect(first.tools).toContain("plannotator_inbox");
 		expect(carrying(first)).toHaveLength(1);
 		expect(carrying(second)).toHaveLength(1);
-		// Cache-safe: the second request starts with every message the first one sent, the reminder where it was.
 		expect(second.messages.slice(0, first.messages.length)).toEqual(first.messages);
-		// A conversation message, never the system prompt.
 		expect(messageText(first.messages.find((message) => message.role === "system")?.content)).not.toContain(INBOX_REMINDER_TEXT);
 		w.proof(`first prompt: ${first.messages.length} messages, one carries the reminder; second prompt keeps it in place and adds none`);
 		await on.client.stop();
@@ -371,15 +339,11 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		w.proof("inboxReminder.pi false: the tool, no reminder");
 	}, 180_000);
 
-	// The misfiled-thread AAR (2026-10-27): after a compaction the thread ids must come from the Inbox,
-	// not from the summary. The failure this catches: the reminder Pi sends again after a compaction
-	// without the session's open threads, or with them but read as a look (no project made, no read).
 	test("after a compaction that summarized the reminder away, the reminder comes back with the session's open threads", async () => {
 		const w = world("01c-threads-after-compaction");
 		const m = model(askingScript());
 		startInbox(w);
 		knob(w, true);
-		// Keep nothing but the newest turn, so the compaction summarizes the reminder away.
 		mkdirSync(join(w.root, "pi-agent"), { recursive: true });
 		writeFileSync(join(w.root, "pi-agent", "settings.json"), JSON.stringify({ compaction: { keepRecentTokens: 1 } }));
 		const pi = await openPi(w, m);
@@ -397,7 +361,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		w.proof(`after the compaction, the reminder message reads:\n\n${reminders[0]}`);
 	}, 180_000);
 
-	// #2194: what the model reads at the session's first prompt, on the real Pi.
 	test("prompts.inbox: with none, the reminder message is the built-in text byte for byte; with Pi's own text, that text replaces it, once, in the same place", async () => {
 		const w = world("01c-reminder-custom");
 		const m = model(askingScript());
@@ -405,7 +368,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const reminderOf = (request: ScriptedRequest, text: string) => request.messages.filter((message) => messageText(message.content) === text);
 		const MAIN = INBOX_REMINDER_TEXT;
 
-		// Other prompts set, but no usable prompts.inbox: the very same message.
 		writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: true }, prompts: { review: { denied: "Check." }, inbox: { reminder: "  " } } }));
 		const plain = await openPi(w, m);
 		await ask(plain, "hello");
@@ -424,7 +386,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		expect(reminderOf(a, own)).toHaveLength(1);
 		expect(a.messages.filter((message) => messageText(message.content).includes(INBOX_REMINDER_TEXT))).toEqual([]);
 		expect(a.messages.filter((message) => messageText(message.content).includes("Shared."))).toEqual([]);
-		// The same place as the built-in line: the message the first request carried, kept in place.
 		expect(a.messages.findIndex((message) => messageText(message.content) === own)).toBe(first.messages.findIndex((message) => messageText(message.content) === MAIN));
 		expect(b.messages.slice(0, a.messages.length)).toEqual(a.messages);
 		expect(reminderOf(b, own)).toHaveLength(1);
@@ -436,7 +397,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const w = world("02-send-wakes-the-session");
 		knob(w, true);
 		startInbox(w);
-		// The wake's turn is held until the thread's "Delivered" is read, then answers in the thread.
 		const wakeTurn = gate();
 		const m = model(
 			askingScript((request) => {
@@ -461,11 +421,9 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const replyId = await personSends(w, asked.message_id, words);
 		const wake = await waitFor("the wake turn", () => wakes(pi)[0]);
 		const lines = wake.split("\n");
-		// A plain reply in a thread with no short name: the subject stays out of the wake (#2464).
 		expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
 		expect(wake).not.toContain(SUBJECT);
 		expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
-		// The details line names the thread; the closing line ends the wake.
 		expect(lines[2]).toStartWith(`[Thread ${asked.thread_id}: 2 messages, `);
 		expect(lines.at(-1)).toBe(INBOX_WAKE_CLOSING_LINE);
 		expect(wake).toContain(words);
@@ -495,7 +453,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const w = world("02b-compose-new-thread");
 		knob(w, true);
 		startInbox(w);
-		// The scripted model does what the wake asks: when it says to name the thread, its reply passes `thread`.
 		const m = model(
 			askingScript((request) => {
 				const last = lastMessage(request);
@@ -532,7 +489,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 			return last?.author.kind === "agent" ? last : null;
 		});
 		expect(answered.author.session).toBe(pi.sessionId);
-		// The name round-trips: the thread's chip is the name the agent passed.
 		const named = await waitFor("the thread named", async () => (await thread(w, message.thread_id)).thread_name ?? null);
 		expect(named).toBe("Relay retry budget");
 		w.proof(`the wake:\n${wake}\n\nthe answer landed in ${message.thread_id}, named "${named}"`);
@@ -620,7 +576,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const b = await openPi(w, m, { session: a.sessionFile });
 		expect(b.sessionId).toBe(a.sessionId);
 
-		// The person works in B (its turn held at the model); A sits idle.
 		const bFrom = b.events.length;
 		await b.client.prompt("Refactor the webhook handler.");
 		await waitFor("B's turn at the model", () => m.requests.some((request) => lastMessage(request).text === "Refactor the webhook handler."));
@@ -640,7 +595,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		expect(delivered).toMatchObject({ state: "delivered", host: "pi", session: a.sessionId });
 		w.proof(`B's turn ended: the reply was delivered in B, once (wakes A 0, B 1; one claim ${replyId}; delivered at ${delivered?.at})`);
 
-		// The person goes back to A and asks there: the next reply lands in A.
 		await ask(a, "Ask the person what to do on a 409.");
 		const again = m.requests
 			.map((request) => lastMessage(request))
@@ -708,9 +662,6 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 	}, 120_000);
 });
 
-// The reminder's latch reads the session path: the failure is a resumed
-// session repeating it, or a compaction that summarized it away leaving the
-// session without it.
 describe("the reminder's latch", () => {
 	const reminder = (id: string) => ({ id, type: "custom_message", customType: PI_INBOX_REMINDER_CUSTOM_TYPE });
 	test("a path that holds it carries it; a compaction that kept it still does; one that summarized it away does not", () => {

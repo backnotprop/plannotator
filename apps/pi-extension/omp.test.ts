@@ -1,23 +1,3 @@
-/**
- * "Ask this session" in Oh My Pi (#1814), proved on the REAL `omp` binary:
- * OMP loads this extension from source with `-e` (it loads Pi extensions
- * through its legacy-Pi compat layer), runs in RPC mode, and talks to a
- * scripted OpenAI-compatible model (tests/helpers/scripted-model.ts), so no
- * provider is called. The review opens through the extension's own slash
- * command, and Ask AI is driven over the review server's HTTP API exactly as
- * the browser drives it.
- *
- * Opt-in: set PLANNOTATOR_OMP_BIN to an `omp` executable (for example after
- * `bun add @oh-my-pi/pi-coding-agent` in a temp dir:
- * `<dir>/node_modules/.bin/omp`). Everything runs under a temp HOME and a temp
- * OMP agent dir; the person's own ~/.omp and ~/.plannotator are never read.
- * Checked with OMP 18.8.9 and 18.10.2.
- *
- * The same run proves the `plannotator` tool's Oh My Pi default (on, with
- * PLANNOTATOR_AGENT_TOOL and config.json unset): OMP lists it as one line of
- * the system prompt (`xd://plannotator`), and the review window's Settings
- * row reads the Oh My Pi host with the tool on.
- */
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +14,6 @@ afterAll(() => {
 	for (const path of stubbed) rmSync(path, { force: true });
 });
 
-/** The extension refuses to open without its built HTML; a stub is enough for the API proof. */
 function stubHtml(): void {
 	for (const name of ["plannotator.html", "review-editor.html"]) {
 		const path = join(extensionDir, name);
@@ -115,7 +94,6 @@ describe.skipIf(!ompBin || process.platform === "win32")("Oh My Pi: Ask this ses
 					try {
 						events.push(JSON.parse(line));
 					} catch {
-						// a non-JSON line is not a protocol frame
 					}
 				}
 			}
@@ -156,15 +134,10 @@ describe.skipIf(!ompBin || process.platform === "win32")("Oh My Pi: Ask this ses
 					body: JSON.stringify({ sessionId: session.sessionId, prompt: "What number does the doc mention?" }),
 				})
 			).text();
-			// The answer streamed back is the OMP session's own turn: the scripted
-			// model only says it to a request that carries Plannotator's question.
 			expect(answer).toContain(ANSWER);
 			expect(answer).toContain('"success":true');
-			// The question entered the OMP session as Plannotator's custom message.
 			expect(events.some((event) => event.type === "message_start" && event.message?.customType === "plannotator-ask")).toBe(true);
 
-			// The agent tool, on by default in Oh My Pi: one line of OMP's system
-			// prompt, never a full definition in the request's tool list.
 			const systemText = (request: (typeof model.requests)[number]) =>
 				request.messages.filter((message) => message.role === "system" || message.role === "developer").map((message) => messageText(message.content)).join("\n");
 			expect(model.requests.length).toBeGreaterThan(0);

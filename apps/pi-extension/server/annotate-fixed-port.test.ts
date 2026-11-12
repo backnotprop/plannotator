@@ -4,15 +4,6 @@ import { closeServer, occupyConsecutivePorts } from "../../../tests/helpers/port
 import { startServerWithSelfPreemption } from "../plannotator-browser.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 
-// A local Pi with PLANNOTATOR_PORT set binds every review on ONE port, and an
-// annotate session also attaches the agent terminal's WebSocket server to its
-// http server. That WebSocket server re-emits every http server "error" as
-// its own, so attaching it BEFORE listen turned the first EADDRINUSE of a
-// second annotate session into an unhandled "error" event that killed the
-// whole Pi process, before the port-in-use retry and the self-preemption that
-// takes the port over could run. (Remote mode never crashed: the agent
-// terminal is off there.)
-
 const envKeys = [
 	"PLANNOTATOR_PORT",
 	"PLANNOTATOR_REMOTE",
@@ -49,14 +40,12 @@ describe("Pi annotate on a fixed local port", () => {
 		const first = await startAnnotateServer(annotateOptions("first"));
 		try {
 			const plan = await fetch(`${first.url}/api/plan`).then((res) => res.json());
-			// The agent terminal (the WebSocket server) is what used to crash.
 			expect(plan.agentTerminal.enabled).toBe(true);
 
 			await expect(startAnnotateServer(annotateOptions("second"))).rejects.toThrow(
 				`Port ${process.env.PLANNOTATOR_PORT} in use`,
 			);
 
-			// The open session is untouched by the failed start.
 			const again = await fetch(`${first.url}/api/plan`).then((res) => res.json());
 			expect(again.plan).toBe("# first");
 		} finally {

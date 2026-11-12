@@ -1,12 +1,3 @@
-/**
- * Annotate server (Pi/Node): diagram sources (.mmd/.mermaid/.dot/.gv)
- *
- * Node mirror of packages/server/annotate.diagram.test.ts. Both runtimes must
- * name the engine in `renderAs` and serve the file's RAW text as the document
- * body, on /api/plan and on /api/doc, or the same .mmd renders as a diagram
- * under Claude Code and as plain text under Pi.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

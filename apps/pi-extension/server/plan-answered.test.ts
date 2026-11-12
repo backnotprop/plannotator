@@ -1,11 +1,3 @@
-/**
- * Pi mirror of packages/server/plan-answered.test.ts: the Pi plan server
- * carries `answersOnly` from /api/deny to the decision, and the vendored
- * prompts pick `plan.answered` for it.
- *
- * What regresses if this fails: on Pi, Send answers reaches the agent as
- * "YOUR PLAN WAS NOT APPROVED", or an ordinary deny changes wording.
- */
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,8 +38,6 @@ afterEach(() => {
 });
 
 afterAll(() => {
-	// Plan version history goes through generated/storage.ts, whose data dir is
-	// fixed at import time; remove the slugs these tests created there.
 	const project = detectProjectName();
 	for (const plan of createdPlans) {
 		const versionPath = getPlanVersionPath(project, generateSlug(plan), 1);
@@ -72,7 +62,6 @@ async function denyWith(body: Record<string, unknown>) {
 	}
 }
 
-// Exactly what apps/pi-extension/index.ts sends back to the agent on deny.
 const piMessage = (decision: { feedback?: string; answersOnly?: boolean }) =>
 	composePlanDeniedMessage("pi", {}, {
 		toolName: getPlanToolName("pi"),

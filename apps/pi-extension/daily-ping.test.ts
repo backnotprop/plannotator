@@ -1,12 +1,3 @@
-/**
- * Pi parity for the daily ping (server/daily-ping.ts over the vendored
- * generated/daily-ping.ts), in a temp data dir against a loopback receiver:
- * each Pi server (plan review, code review, annotate, annotate-last) runs the
- * same check as the CLI and sends the same bytes, naming its tool; Pi and the
- * Bun side share ping.json, so each tool sends once a day whichever runs
- * first; a Pi run from this checkout sends nothing; NO_ANON_PING and the
- * do-not-track convention stop it.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +16,6 @@ let receiver: ReturnType<typeof Bun.serve>;
 let bodies: string[];
 
 const today = () => new Date().toISOString().slice(0, 10);
-/** A computer that first used Plannotator long ago (age_week 4). */
 const used = () => writeFileSync(join(dataDir, "ping.json"), JSON.stringify({ firstWeek: "2026-01-05" }));
 const sent = (): string[] => {
 	try {

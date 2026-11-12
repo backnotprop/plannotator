@@ -1,14 +1,3 @@
-/**
- * OpenCode's agent switch in ~/.plannotator/config.json (#1390), through the
- * Pi (node:http) plan, review and annotate servers:
- *  - POST /api/config saves `agentSwitch` (an agent name, "disabled", or the
- *    Custom field's `{ switchTo: "custom", customName }`), refuses an invalid
- *    value with 400 and saves nothing of that request;
- *  - the serverConfig of /api/plan and /api/diff sends it back, so a webview
- *    with no cookies (Glimpse) still gets the choice;
- *  - a hand-edited value that does not parse is not advertised.
- * The Bun mirror is packages/server/agent-switch-config.test.ts.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

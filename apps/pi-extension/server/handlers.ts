@@ -1,8 +1,3 @@
-/**
- * Shared request handlers reused across plan, review, and annotate servers.
- * handleImageRequest, handleUploadRequest, handleDraftRequest, handleFavicon
- */
-
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
@@ -93,9 +88,6 @@ function validateUploadExtension(fileName: string): {
 	return { valid: true, ext };
 }
 
-// Every /api/image answer carries the sandbox CSP, nosniff and CORP (see
-// generated/local-image.ts): an SVG opened directly must not run script on the
-// session origin.
 const TEXT_HEADERS = localImageResponseHeaders("text/plain; charset=utf-8");
 
 export function handleImageRequest(res: Res, url: URL): void {
@@ -209,11 +201,6 @@ export function handleDraftRequest(
 	}
 }
 
-/**
- * Code-review /api/draft (#1590). Mirrors the Bun review route: unsupported
- * surfaces carry only the patch hash and every call degrades to the
- * plain draft functions, byte-identical to handleDraftRequest.
- */
 export function handleReviewDraftRequest(
 	req: IncomingMessage,
 	res: Res,
@@ -225,8 +212,6 @@ export function handleReviewDraftRequest(
 		return parseBody(req)
 			.then((body) => {
 				const saved = drafts.save(keys, body, clientId);
-				// Target-backed drafts report stale saves; unsupported surfaces
-				// retain the historical always-ok response.
 				if (!saved && keys.targetKey) {
 					json(res, { ok: false, error: "stale draft generation", ...drafts.state(keys) }, 409);
 					return;
@@ -271,13 +256,6 @@ export function readDraftGenerationFromBody(body: unknown): number | undefined {
 
 export { readDraftGenerationFromUrl };
 
-/**
- * Serve the app favicon. Mirrors packages/server/shared-handlers.ts
- * handleFavicon() exactly: the persisted style decides the payload, the response
- * declares its real type, and it is not cached because one URL has three
- * possible bodies, for `/favicon.ico` and `/favicon.png`. See that file for
- * the full reasoning.
- */
 export function handleFavicon(res: Res, pathname = "/favicon.png"): void {
 	const style = getServerConfig(null).favicon;
 	const { body, contentType } = pathname === "/favicon.ico" ? faviconIcoBody(style) : faviconBody(style);
@@ -287,11 +265,6 @@ export function handleFavicon(res: Res, pathname = "/favicon.png"): void {
 	});
 }
 
-/**
- * List global agent skills for comment skill references. Used by plan +
- * annotate servers. Takes no client input (fixed roots only) and degrades to an
- * empty catalog on any failure so the composer never breaks.
- */
 export function handleReferenceSkillsRequest(res: Res): void {
 	try {
 		json(res, { skills: listReferenceSkills() });
@@ -303,12 +276,6 @@ export function handleReferenceSkillsRequest(res: Res): void {
 	}
 }
 
-/**
- * Serve a referenced skill's SKILL.md contents for feedback injection
- * (`?name=<skill>`). Used by plan + annotate servers. The name is matched
- * against discovered skills only — it is never used as a path — so traversal
- * and absolute-path inputs answer 404, never a file outside the skill roots.
- */
 export function handleReferenceSkillContentRequest(res: Res, url: URL): void {
 	try {
 		const name = url.searchParams.get("name") ?? "";
@@ -326,12 +293,6 @@ export function handleReferenceSkillContentRequest(res: Res, url: URL): void {
 	}
 }
 
-/**
- * Save to external note apps (Obsidian, Bear, Octarine, Notion). Used by plan + annotate servers.
- * Mirrors packages/server/shared-handlers.ts handleSaveNotes: another site's
- * page is refused (403) and a stale tab's `serverSession` (409) before
- * anything is written or opened.
- */
 export async function handleSaveNotesRequest(
 	req: IncomingMessage,
 	res: Res,
@@ -399,12 +360,6 @@ export async function handleSaveNotesRequest(
 	json(res, { ok: true, results });
 }
 
-/**
- * The "Star the repo" ask on the done screen (generated/star-ask.ts, the Bun servers' `handleStarAsk`):
- * `POST /api/star-ask/claim`, `/shown` and `/answer`. False for any other path. A release is the published package
- * (release CI's `release.json`, as for the daily ping). In remote mode it never shows: gh there is the server
- * machine's login, not the person's own.
- */
 export async function handleStarAskRequest(
 	req: IncomingMessage,
 	res: import("node:http").ServerResponse,

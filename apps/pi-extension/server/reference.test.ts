@@ -1,7 +1,3 @@
-/**
- * /api/doc containment on the Node transport. Each runtime resolves and gates
- * paths in its own handler, so both carry the full set of escape vectors.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";

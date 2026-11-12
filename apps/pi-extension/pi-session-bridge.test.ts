@@ -1,8 +1,3 @@
-/**
- * "Ask this session" on Pi: the bridge that turns an Ask AI question into a
- * real turn of the Pi session that opened the browser, driven here by a fake
- * Pi host that emits the same extension events a live session does.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +20,6 @@ interface SentMessage {
 	options?: { triggerTurn?: boolean; deliverAs?: string };
 }
 
-/** A Pi host: one listener table, one session that is idle or streaming. */
 function fakePi() {
 	const handlers = new Map<string, Handler[]>();
 	const sent: SentMessage[] = [];
@@ -64,7 +58,6 @@ function fakePi() {
 		setIdle: (next: boolean) => { idle = next; },
 		setPending: (next: boolean) => { pending = next; },
 		kill: () => { alive = false; },
-		/** Play the turn Pi runs for a delivered question. */
 		startTurn(askId: string) {
 			idle = false;
 			emit("agent_start", { type: "agent_start" });
@@ -84,12 +77,10 @@ function fakePi() {
 				});
 			}
 		},
-		/** The loop finishes one assistant turn (tool results in) and starts the next. */
 		nextTurn() {
 			emit("turn_end", { type: "turn_end" });
 			emit("turn_start", { type: "turn_start" });
 		},
-		/** One agent run ends; Pi may still retry it before the prompt settles. */
 		endRun(stopReason = "stop", errorMessage?: string) {
 			emit("agent_end", { type: "agent_end", messages: [{ role: "assistant", stopReason, errorMessage, content: [] }] });
 		},
@@ -144,7 +135,6 @@ describe("Pi session bridge", () => {
 		expect(host.sent[0].message.details?.askId).toBe("ask-1");
 		expect(host.sent[0].options).toEqual({ triggerTurn: true });
 
-		// Text from another turn before ours started is not ours.
 		host.assistantText("unrelated");
 		host.startTurn("ask-1");
 		host.assistantText("Because ", "of X.");
@@ -203,7 +193,6 @@ describe("Pi session bridge", () => {
 		const out = sink();
 		bridge.ask({ askId: "a", text: "t", mode: "turn" }, out.sink, new AbortController().signal);
 		host.startTurn("a");
-		// The first attempt fails (overloaded) and Pi auto-retries inside the same prompt.
 		host.assistantText();
 		host.endRun("error", "overloaded");
 		expect(out.calls).toEqual([]);
@@ -237,12 +226,10 @@ describe("Pi session bridge", () => {
 		const hub = createPiSessionBridgeHub(host.pi, { startWatchdogMs: 20 });
 		const bridge = hub.createBridge(host.ctx as never, {});
 		const out = sink();
-		// Pi is busy (the question was steered into a running turn) past the first check.
 		host.setIdle(false);
 		bridge.ask({ askId: "a", text: "t", mode: "turn" }, out.sink, new AbortController().signal);
 		await new Promise((resolve) => setTimeout(resolve, 60));
 		expect(out.calls).toEqual([]);
-		// The turn ends without ever reading it (e.g. the user aborted it in Pi).
 		host.setIdle(true);
 		for (let i = 0; i < 40 && out.calls.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(out.calls.map((call) => call.slice(0, 2))).toEqual([["error", "failed"]]);
@@ -264,9 +251,6 @@ describe("Pi session bridge", () => {
 		expect(first.calls.at(-1)?.slice(0, 2)).toEqual(["error", "gone"]);
 	});
 
-	// The failure these guard: the person typed into Pi while it answered the
-	// reviewer's question, and the reply to THEIR prompt streamed into
-	// Plannotator as the answer, and a Plannotator Stop aborted their work.
 	test("a message the person steers into our run takes it over: streaming stops, Stop and interrupt leave the run alone", () => {
 		const host = fakePi();
 		const bridge = createPiSessionBridgeHub(host.pi).createBridge(host.ctx as never, {});
@@ -275,7 +259,6 @@ describe("Pi session bridge", () => {
 		bridge.ask({ askId: "ask-1", text: "Question text", mode: "turn" }, out.sink, controller.signal);
 		host.startTurn("ask-1");
 		host.assistantText("Because ");
-		// The person steers; the loop delivers it right after the next turn_start.
 		host.nextTurn();
 		host.emit("message_start", { type: "message_start", message: { role: "user", content: "also fix the tests" } });
 		host.assistantText("Fixed the tests.");
@@ -289,7 +272,6 @@ describe("Pi session bridge", () => {
 		expect(() => bridge.interrupt?.()).toThrow(SESSION_ASK_TAKEN_OVER_INTERRUPT_TEXT);
 		expect(host.aborts).toHaveLength(0);
 
-		// Once that run ends, interrupting the session works again.
 		host.endTurn();
 		host.setIdle(false);
 		void bridge.interrupt?.();
@@ -308,9 +290,6 @@ describe("Pi session bridge", () => {
 		expect(out.calls.at(-1)).toEqual(["error", "taken_over", undefined]);
 	});
 
-	// The failure this guards: Plannotator's own decision follow-up (or any
-	// follow-up) arriving after the answer had finished turned a complete
-	// answer into a "taken over" one.
 	test("a follow-up arriving after the answer finished settles the answer as done", () => {
 		const host = fakePi();
 		const bridge = createPiSessionBridgeHub(host.pi).createBridge(host.ctx as never, {});
@@ -318,7 +297,6 @@ describe("Pi session bridge", () => {
 		bridge.ask({ askId: "ask-1", text: "Question text", mode: "turn" }, out.sink, new AbortController().signal);
 		host.startTurn("ask-1");
 		host.assistantText("Done.");
-		// The answer's last turn: a stop with no tool call. The loop then pulls a follow-up.
 		host.emit("turn_end", { type: "turn_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text" }] }, toolResults: [] });
 		host.emit("turn_start", { type: "turn_start" });
 		host.emit("message_start", { type: "message_start", message: { role: "user", content: "plan approved" } });
@@ -350,7 +328,6 @@ describe("Pi session bridge", () => {
 		host.assistantText("Because ");
 		host.nextTurn();
 		host.emit("message_start", { type: "message_start", message: { role: "user", content: "also fix the tests" } });
-		// The person's run errors; Pi retries it (agent.continue) before settling.
 		host.endRun("error", "overloaded");
 		expect(() => bridge.interrupt?.()).toThrow(SESSION_ASK_TAKEN_OVER_INTERRUPT_TEXT);
 		host.emit("agent_start", { type: "agent_start" });
@@ -369,8 +346,6 @@ describe("Pi session bridge", () => {
 		bridge.ask({ askId: "ask-1", text: "Question text", mode: "turn" }, out.sink, new AbortController().signal);
 		host.startTurn("ask-1");
 		host.assistantText("Because ");
-		// Pi appends a non-triggering custom message (e.g. plannotator-handoff)
-		// while handling turn_end, before the next turn_start.
 		host.emit("turn_end", { type: "turn_end" });
 		host.emit("message_start", { type: "message_start", message: { role: "custom", customType: "plannotator-handoff", details: {} } });
 		host.emit("turn_start", { type: "turn_start" });
@@ -383,10 +358,6 @@ describe("Pi session bridge", () => {
 		]);
 	});
 
-	// The failure this guards: the Inbox's session-start reminder rides the
-	// session's first run, which can be the run answering our question; read
-	// as a take-over it would cut the answer off before it started.
-	// /plannotator-inbox's hidden briefing rides the next prompt the same way.
 	for (const [name, customType] of [
 		["the Inbox's session-start reminder", PI_INBOX_REMINDER_CUSTOM_TYPE],
 		["/plannotator-inbox's Inbox briefing", PI_INBOX_BRIEFING_CUSTOM_TYPE],
@@ -535,7 +506,7 @@ describe("Pi annotate server with Ask this session", () => {
 			host.startTurn(host.sent[1].message.details!.askId!);
 			host.assistantText("Working on the second correction.");
 			await post("abort", { sessionId, reason: "supersede" });
-			while (!(await reader.read()).done) { /* Drain the superseded answer. */ }
+			while (!(await reader.read()).done) { }
 			expect(host.aborts).toHaveLength(0);
 
 			const interrupting = await post("query", { sessionId, prompt: "Do this instead", busyPolicy: "interrupt" });
@@ -549,11 +520,10 @@ describe("Pi annotate server with Ask this session", () => {
 			host.startTurn(host.sent[2].message.details!.askId!);
 			host.assistantText("Replacement answer.");
 
-			// The Stop button still cancels the question that is now running.
 			await post("abort", { sessionId });
 			expect(host.aborts).toHaveLength(2);
 			host.endTurn("aborted");
-			while (!(await interruptedReader.read()).done) { /* Drain the stopped answer. */ }
+			while (!(await interruptedReader.read()).done) { }
 		} finally {
 			host.endTurn();
 			server.stop();
@@ -587,10 +557,6 @@ describe("Pi annotate server with Ask this session", () => {
 				}),
 			})).json() as { sessionId: string };
 
-			// Same socket, foreign Host header. Refused before the question
-			// reaches the session: by the server-wide Host allowlist for a
-			// foreign name, and by the bridge's own loopback-and-port check for
-			// a loopback name carrying another port.
 			const port = Number(new URL(server.url).port);
 			const askWithHost = (hostHeader: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
 				const req = httpRequest(
@@ -612,7 +578,6 @@ describe("Pi annotate server with Ask this session", () => {
 			expect(otherPort.body).toContain("session_bridge_forbidden_host");
 			expect(host.sent).toHaveLength(0);
 
-			// Node flushes SSE headers with the first chunk, so drive the turn before awaiting.
 			const response = fetch(`${server.url}/api/ai/query`, {
 				method: "POST",
 				body: JSON.stringify({ sessionId, prompt: "Is the title right?" }),
@@ -626,8 +591,6 @@ describe("Pi annotate server with Ask this session", () => {
 			expect(body).toContain('"delta":"Yes."');
 			expect(body).toContain('"type":"result"');
 
-			// A second question still running when the reviewer decides: the
-			// server goes away, but the session's turn is not killed.
 			const pending = fetch(`${server.url}/api/ai/query`, {
 				method: "POST",
 				body: JSON.stringify({ sessionId, prompt: "And the rest?" }),

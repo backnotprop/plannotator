@@ -1,20 +1,3 @@
-/**
- * Non-blocking Pi plan review: plannotator_submit_plan returns once the
- * review is open, and the reviewer's decision arrives later as a session
- * message. Driven through the real extension with a fake review session.
- *
- * What regresses if this fails:
- *  - the tool blocks again until the reviewer decides (Ask this session and
- *    ordinary chat stall for the whole review);
- *  - the agent gains write access before approval (planning restrictions
- *    lifted on submit instead of on approval);
- *  - an approval / deny / answers-only decision never reaches the agent, or
- *    reaches it with the wrong prompt;
- *  - a revision submitted while the review is open opens a second tab
- *    instead of updating the open one;
- *  - leaving plan mode leaves the review open, and its decision later yanks
- *    the session back into execution.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,7 +24,6 @@ interface FakeReview {
 	stopped: boolean;
 	pushes: string[];
 	decided: boolean;
-	/** The server accepted a decision and is still recording it (updatePlan refuses). */
 	claimed: boolean;
 }
 
@@ -55,7 +37,6 @@ function createHarness(cwd: string, options: { host?: "pi" | "oh-my-pi"; idle?: 
 	const state = { activeTools: ["read", "bash", "edit", "write"] };
 
 	const pi = {
-		// What tells Oh My Pi's ExtensionAPI from Pi's (pi-host.ts).
 		...(options.host === "oh-my-pi" ? { arktype: () => undefined, pi: {} } : {}),
 		events: { on: () => undefined, emit: () => undefined },
 		on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
@@ -221,7 +202,6 @@ describe("non-blocking plan review", () => {
 		expect(harness.sentUserMessages[0]!.options).toEqual({ deliverAs: "followUp" });
 		expect(harness.lastPhase()).toBe("executing");
 		expect(harness.entries).toContainEqual({ type: "plannotator-execute", data: { lastSubmittedPath: "PLAN.md", approvedPlan: PLAN } });
-		// The file still holds the approved text: no unreviewed-edit warning.
 		expect(harness.sentUserMessages[0]!.text).not.toContain("has changed since the reviewer saw it");
 		expect(await harness.writeAttempt("src/app.ts")).toBeUndefined();
 	});
@@ -247,7 +227,6 @@ describe("non-blocking plan review", () => {
 		expect(harness.sentUserMessages[0]!.text).toContain("Split step one.");
 		expect(harness.lastPhase()).toBe("planning");
 
-		// The resubmission opens a new review: the first one is decided.
 		await harness.submit("PLAN.md");
 		expect(harness.reviews).toHaveLength(2);
 		harness.reviews[1]!.decide({ approved: false, feedback: "## Answers", answersOnly: true });
@@ -267,7 +246,6 @@ describe("non-blocking plan review", () => {
 		expect(harness.reviews).toHaveLength(1);
 		expect(harness.reviews[0]!.pushes).toEqual([revised]);
 
-		// The approval executes the revised checklist.
 		harness.reviews[0]!.decide({ approved: true });
 		await harness.settle(() => harness.sentUserMessages.length > 0);
 		expect(harness.sentUserMessages[0]!.text).toContain("plannotator_mark_done");
@@ -277,14 +255,12 @@ describe("non-blocking plan review", () => {
 	test("a revision submitted while a decision is being recorded keeps that decision", async () => {
 		const { cwd, harness } = await plannedSession();
 		await harness.submit("PLAN.md");
-		// The reviewer denied; the server is still recording it (note integrations).
 		harness.reviews[0]!.claimed = true;
 		writeFileSync(join(cwd, "PLAN.md"), `${PLAN}- [ ] Add a test\n`);
 
 		const result = await harness.submit("PLAN.md");
 		expect(result.details).toMatchObject({ pending: true, decisionInFlight: true });
 		expect(result.terminate).toBe(true);
-		// No second review, and the first one is not stopped (that would drop the deny).
 		expect(harness.reviews).toHaveLength(1);
 		expect(harness.reviews[0]!.stopped).toBe(false);
 
@@ -297,8 +273,6 @@ describe("non-blocking plan review", () => {
 	test("approval carries the approved text; unreviewed file edits are flagged and never executed", async () => {
 		const { cwd, harness } = await plannedSession();
 		await harness.submit("PLAN.md");
-		// The agent edits the file after submitting; the reviewer approves the
-		// version on screen (the server names it on the decision).
 		const unreviewed = `${PLAN}- [ ] Drop the production database\n`;
 		writeFileSync(join(cwd, "PLAN.md"), unreviewed);
 		harness.reviews[0]!.decide({ approved: true, plan: PLAN });
@@ -311,12 +285,10 @@ describe("non-blocking plan review", () => {
 		expect(message).not.toContain("Drop the production database");
 		expect(harness.entries).toContainEqual({ type: "plannotator-execute", data: { lastSubmittedPath: "PLAN.md", approvedPlan: PLAN } });
 
-		// The execution turn's framing lists the approved steps, not the file's.
 		const framing = (await harness.beforeAgentStart()).map((result) => result?.message?.content ?? "").join("\n");
 		expect(framing).toContain("Implement the change");
 		expect(framing).not.toContain("Drop the production database");
 
-		// Progress is never written onto the unreviewed file's boxes.
 		const done = await harness.markDone(1);
 		expect(done.details).toMatchObject({ completed: true, step: 1 });
 		expect(readFileSync(join(cwd, "PLAN.md"), "utf-8")).toBe(unreviewed);
@@ -328,7 +300,6 @@ describe("non-blocking plan review", () => {
 		harness.reviews[0]!.decide({ approved: true });
 		await harness.settle(() => harness.sentUserMessages.length > 0);
 		expect(harness.sentUserMessages[0]!.text).toContain("- [ ] Implement the change");
-		// Progress persists into the file while it still holds the approved checklist.
 		await harness.markDone(1);
 		expect(readFileSync(join(harness.ctx.cwd, "PLAN.md"), "utf-8")).toContain("- [x] Implement the change");
 	});

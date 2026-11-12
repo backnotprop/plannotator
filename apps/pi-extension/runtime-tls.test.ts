@@ -1,22 +1,14 @@
-/**
- * The runtime warning that replaced the package's Node engines floor (#902):
- * which runtimes lack the October 2026 TLS fixes, Bun judged as Bun, and at
- * most one warning per Pi start.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { EMSIGN_ECC_G3_PEM } from "../../scripts/check-bun-runtime-trust.ts";
 import { runtimeTlsWarning, warnRuntimeTlsOnce } from "./runtime-tls.ts";
 
-/** Any other root, as Bun's store lists it (64-column PEM). */
 const OTHER_ROOT = `-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ2xlYW4tcm9vdC1mb3ItdGVzdHMwCgYIKoZIzj0EAwIw\n-----END CERTIFICATE-----\n`;
-/** Bun's store as it was before the fix (still holds emSign ECC Root CA - G3), wrapped at 64 columns like Bun lists it. */
 const G3_WRAPPED = EMSIGN_ECC_G3_PEM.replace(/\s/g, "")
 	.replace("-----BEGINCERTIFICATE-----", "")
 	.replace("-----ENDCERTIFICATE-----", "")
 	.match(/.{1,64}/g)!
 	.join("\n");
 const UNFIXED_ROOTS = [OTHER_ROOT, `-----BEGIN CERTIFICATE-----\n${G3_WRAPPED}\n-----END CERTIFICATE-----\n`];
-/** A store with the fix (NSS 3.131.1): G3 is gone. */
 const FIXED_ROOTS = [OTHER_ROOT];
 
 const WARNED = Symbol.for("plannotator.pi.runtimeTlsWarned");

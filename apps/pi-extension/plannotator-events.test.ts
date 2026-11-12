@@ -1,20 +1,3 @@
-/**
- * The shared `plannotator:request` event API across a session replacement
- * (#1864). A `plan-review` opened through it used to keep its server after
- * /reload; a decision from that tab ran the replaced runtime's listener,
- * whose `pi.events.emit` threw Pi's stale-ctx error inside the HTTP handler
- * and ended the Pi process.
- *
- * Driven with the real Pi plan server behind a fake Pi whose bus throws the
- * stale-ctx error once the runtime is replaced.
- *
- * What regresses if this fails:
- *  - a decision arriving after the runtime went stale crashes Pi, or is not
- *    recorded for `review-status`;
- *  - a tab left open across /reload stops recording its decision for
- *    `review-status` (the README's recovery promise), or its decision is
- *    emitted onto the replaced runtime's dead bus.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,7 +55,6 @@ function createHarness(dir: string) {
 		on: (event: string, handler: Handler) => sessionHandlers.set(event, [...(sessionHandlers.get(event) ?? []), handler]),
 		events: {
 			on: (channel: string, handler: Handler) => busHandlers.set(channel, [...(busHandlers.get(channel) ?? []), handler]),
-			// Pi's guard: a replaced runtime's bus throws synchronously.
 			emit: (channel: string, data: unknown) => {
 				if (stale) throw new Error(STALE_MESSAGE);
 				if (channel === PLANNOTATOR_REVIEW_RESULT_CHANNEL) results.push(data);
@@ -99,7 +81,6 @@ function createHarness(dir: string) {
 		},
 	});
 
-	/** Send a request straight to the listener (the bus may be stale) and wait for its answer. */
 	const request = (action: string, payload: unknown) =>
 		new Promise<any>((resolve) => {
 			for (const handler of busHandlers.get(PLANNOTATOR_REQUEST_CHANNEL) ?? []) {
@@ -118,7 +99,6 @@ function createHarness(dir: string) {
 			for (const handler of sessionHandlers.get("session_shutdown") ?? []) await handler({ type: "session_shutdown", reason: "reload" });
 			stale = true;
 		},
-		/** A teardown that never reaches our session_shutdown handler. */
 		goStale() {
 			stale = true;
 		},
@@ -175,7 +155,6 @@ describe("plannotator:request plan-review across a session replacement", () => {
 		await harness.startSession();
 		const { reviewId, url } = await openPlanReview(harness, "Stale emit");
 
-		// The issue's path: the runtime was replaced and its bus now throws.
 		harness.goStale();
 		const { logged } = await captureErrors(async () => {
 			const fatal = await trapFatal(async () => {
@@ -184,7 +163,6 @@ describe("plannotator:request plan-review across a session replacement", () => {
 			});
 			expect(fatal).toEqual([]);
 		});
-		// The emit's own guard caught it (not only publishDecision's backstop).
 		expect(logged.some((line) => line.includes(`could not emit the review result for ${reviewId}`))).toBe(true);
 		expect(await harness.reviewStatus(reviewId)).toMatchObject({ status: "completed", reviewId, approved: true, feedback: "ship it" });
 	});
@@ -199,9 +177,6 @@ describe("plannotator:request plan-review across a session replacement", () => {
 		expect(harness.results).toEqual([expect.objectContaining({ reviewId, approved: false, feedback: "rework" })]);
 	});
 
-	// The README promises `review-status` lets a caller recover across session
-	// restarts, so the tab stays usable after /reload: its decision is recorded
-	// for the replacement to read, and nothing is emitted onto the dead bus.
 	test("after session end the tab still decides: recorded for review-status, never emitted", async () => {
 		const dir = sandbox();
 		const harness = createHarness(dir);
@@ -212,7 +187,7 @@ describe("plannotator:request plan-review across a session replacement", () => {
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(harness.results).toHaveLength(1);
 
-		await harness.shutdown(); // /reload: shutdown, then the runtime goes stale
+		await harness.shutdown();
 		const { logged } = await captureErrors(async () => {
 			const fatal = await trapFatal(async () => {
 				const res = await postJson(`${open.url}/api/approve`, { feedback: "after reload" });
@@ -220,7 +195,6 @@ describe("plannotator:request plan-review across a session replacement", () => {
 			});
 			expect(fatal).toEqual([]);
 		});
-		// Not attempted at all (a stale emit would have been logged).
 		expect(logged.filter((line) => line.includes("could not emit"))).toEqual([]);
 		expect(harness.results).toHaveLength(1);
 		expect(await harness.reviewStatus(open.reviewId)).toMatchObject({ status: "completed", approved: true, feedback: "after reload" });
@@ -228,7 +202,6 @@ describe("plannotator:request plan-review across a session replacement", () => {
 	});
 });
 
-// #1589: a review a plannotator:request opened is announced like every other.
 describe("plannotator:request plan-review session events", () => {
 	test("opened with the request's ids, closed once with the outcome", async () => {
 		const dir = sandbox();
@@ -259,7 +232,6 @@ describe("plannotator:request plan-review session events", () => {
 		const { logged } = await captureErrors(async () => {
 			const fatal = await trapFatal(async () => {
 				expect((await postJson(`${url}/api/approve`, {})).status).toBe(200);
-				// The server stops 1.5 s after a decision; the close follows it.
 				await new Promise((resolve) => setTimeout(resolve, 1700));
 			});
 			expect(fatal).toEqual([]);
@@ -269,8 +241,6 @@ describe("plannotator:request plan-review session events", () => {
 	});
 });
 
-// review-status is the recovery path across restarts, so its file must never
-// be torn by a crash mid-write, nor wiped when it cannot be read.
 describe("review-status file", () => {
 	test("a decision is written through a temp file and rename, leaving no temp behind", async () => {
 		const dir = sandbox();
@@ -286,7 +256,6 @@ describe("review-status file", () => {
 
 	test("a failed write removes its temp file and leaves the old file", () => {
 		const dir = sandbox();
-		// A non-empty directory where the file should be: the rename fails.
 		const target = join(dir, "status.json");
 		mkdirSync(target);
 		writeFileSync(join(target, "keep"), "x");

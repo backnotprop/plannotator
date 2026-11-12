@@ -1,20 +1,3 @@
-/**
- * An update that lands while a review is open must not lose the reviewer's
- * decision.
- *
- * The extension imports the module its decision messages are written with
- * (generated/prompts.ts) lazily, through `importFresh`, which refuses any
- * import once the package on disk is a different version (#2085). Loaded only
- * when the decision arrived, it was refused whenever `pi install` / `pi update`
- * replaced the package while the reviewer worked: the session showed
- * "Plannotator was updated from … Type /reload" and the feedback never reached
- * it (5 of 5 times on a real Pi 0.84.4). The module now loads when the review
- * opens, from the version the session runs.
- *
- * The test runs a copy of the extension from a scratch folder, so its
- * package.json can change on disk the way an update changes it, without
- * touching this checkout.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,10 +27,6 @@ afterAll(() => {
 	if (root) rmSync(root, { recursive: true, force: true });
 });
 
-/**
- * A copy of the extension of its own (one module graph per copy, as one Pi
- * process loads one): the extension's files, its dependencies through links.
- */
 function freshCopy(name: string): string {
 	const copy = join(root, name);
 	cpSync(here, copy, { recursive: true, filter: (src) => !src.startsWith(join(here, "node_modules")) && !src.endsWith(".test.ts") });
@@ -55,14 +34,12 @@ function freshCopy(name: string): string {
 	return copy;
 }
 
-/** What `pi install` / `pi update` does under a running Pi: a new version of the package on disk. */
 function updateOnDisk(copy: string): void {
 	const path = join(copy, "package.json");
 	const pkg = JSON.parse(readFileSync(path, "utf8")) as { version: string };
 	writeFileSync(path, JSON.stringify({ ...pkg, version: `${pkg.version}-next` }, null, 2));
 }
 
-/** The copied extension over a fake Pi, with browser sessions whose decisions the test makes. */
 async function loadExtension(copy: string) {
 	const cwd = join(root, "project");
 	mkdirSync(cwd, { recursive: true });
@@ -145,7 +122,6 @@ describe("an update while a review is open", () => {
 	test("annotate: the reviewer's feedback still reaches the session", async () => {
 		const pi = await loadExtension(freshCopy("annotate"));
 		await pi.command("plannotator-annotate", "notes.md");
-		// The package is replaced while the reviewer works.
 		pi.update();
 		await pi.decide({ feedback: "Rename the heading." });
 		expect(pi.notices.filter((text) => /Plannotator was updated from/.test(text))).toEqual([]);

@@ -1,46 +1,3 @@
-/**
- * "Ask this session" for Pi: answers Plannotator's Ask AI from the Pi session
- * that opened the review / annotate / last-message / plan review browser, as a real turn in
- * that session (streamed, with tools, kept in the transcript).
- *
- * The question goes in as a custom message (`customType: "plannotator-ask"`)
- * so Pi shows it in its own labelled box and the model receives it as a user
- * message whose first line says it comes from the Plannotator reviewer. The
- * answer is read back from the session's own events.
- *
- * Pi API notes (checked against Pi 0.84 / 0.85 and the 1.0 source):
- * - `pi.on(...)` returns void before 1.0, so listeners cannot be removed. The
- *   hub therefore registers ONE set of listeners at extension load and routes
- *   events to the single active question.
- * - `pi.sendMessage(..., { triggerTurn: true })` starts a turn when the agent
- *   is idle and steers it into the running turn otherwise. The bridge only
- *   sends when idle (the provider holds the question until then), so steering
- *   happens only when the user types into Pi in the same instant.
- * - `pi.sendMessage` returns void and reports async failures to Pi's own error
- *   channel, so a question that never starts is failed by a watchdog.
- * - `agent_end` fires once per agent run, and Pi may run again inside the same
- *   prompt: an auto-retry after a retryable error (overloaded, rate limited) or
- *   a continuation after an overflow compaction. An error end therefore waits
- *   for `agent_settled` (Pi >= 0.80.4), or for the session to go idle on older
- *   Pi, before it is reported; a retry that starts answering clears it.
- * - Take-over: a message we did not send that enters the run answering our
- *   question makes the rest of that run someone else's. Pi emits such a
- *   message's `message_start` from the agent loop right after a `turn_start`,
- *   before the next assistant message: a `user` message (the person steering
- *   or following up, or `sendUserMessage`) or a triggering custom message
- *   (steered). A NON-triggering custom message sent while the run streams
- *   (display-only, e.g. `plannotator-handoff`) is appended at `turn_end`
- *   instead, outside that window, and takes nothing over. On a take-over the
- *   question settles at once: `done` when the turn before it ended the answer
- *   (stop, no tool call; e.g. Plannotator's own decision follow-up arriving
- *   after the answer finished), `taken_over` otherwise (the deltas already
- *   sent stand). From then on until the run settles (`agent_settled`, or idle
- *   on older Pi, so an error retry stays covered), neither a Stop nor
- *   "Interrupt and ask now" aborts that run: it answers someone else.
- *
- * Only type imports here: this module is loaded eagerly by index.ts.
- */
-
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SessionBridge, SessionBridgeSink, SessionBridgeStatus } from "./generated/ai/session-bridge.ts";
 import {
@@ -51,17 +8,9 @@ import {
 
 export const PLANNOTATOR_ASK_CUSTOM_TYPE = "plannotator-ask";
 
-/**
- * The Inbox's session-start reminder (inbox.ts): a hidden custom message
- * `before_agent_start` adds to the first run of a session, which may be the
- * run answering our question. It is no one's prompt, so it never takes the
- * question over.
- */
 export const PI_INBOX_REMINDER_CUSTOM_TYPE = "plannotator-inbox-reminder";
-/** `/plannotator-inbox`'s hidden Inbox briefing (index.ts), sent with the next prompt: like the reminder, never someone else's prompt. */
 export const PI_INBOX_BRIEFING_CUSTOM_TYPE = "plannotator-inbox-briefing";
 
-/** How long a sent question may take to show up in the session before it is reported as failed. */
 const START_WATCHDOG_MS = 15_000;
 
 type BridgeCtx = Pick<ExtensionContext, "mode" | "isIdle" | "hasPendingMessages" | "abort">;
@@ -74,25 +23,18 @@ type HubPi = {
 interface ActiveAsk {
 	askId: string;
 	sink: SessionBridgeSink;
-	/** Our custom message has been delivered into the session. */
 	started: boolean;
-	/** The reviewer stopped this question. */
 	cancelled: boolean;
 	answer: string;
-	/** A new assistant message began after some answer text: separate with a blank line. */
 	needsSeparator: boolean;
 	watchdog: ReturnType<typeof setTimeout> | null;
-	/** An agent run ended in an error that Pi may still retry: reported once the session settles. */
 	pendingError: string | null;
-	/** Fallback for Pi without `agent_settled`: polls idleness while an error is pending. */
 	settlePoll: ReturnType<typeof setInterval> | null;
 	isIdle: () => boolean;
 }
 
 export interface PiSessionBridgeHub {
-	/** Build a bridge bound to the session that ran a command. */
 	createBridge(ctx: BridgeCtx, origin: PiSessionIdentity): SessionBridge;
-	/** @internal test hook */
 	readonly hasActiveAsk: boolean;
 }
 
@@ -106,7 +48,6 @@ function clearSettlePoll(ask: ActiveAsk): void {
 	ask.settlePoll = null;
 }
 
-/** How often an older Pi (no `agent_settled`) is checked for idleness after an error end. */
 const SETTLE_POLL_MS = 250;
 
 function lastAssistant(messages: unknown): { stopReason?: string; errorMessage?: string } | undefined {
@@ -124,14 +65,10 @@ export function createPiSessionBridgeHub(
 ): PiSessionBridgeHub {
 	const startWatchdogMs = options.startWatchdogMs ?? START_WATCHDOG_MS;
 	let active: ActiveAsk | null = null;
-	/** Between a `turn_start` and that turn's assistant message: where the loop delivers queued messages. */
 	let turnPrelude = false;
-	/** The run that answered our question was taken over: never aborted from Plannotator until it settles. */
 	let takenOverRun = false;
-	/** Older Pi (no `agent_settled`): polls idleness after the taken-over run ends. */
 	let takenOverPoll: ReturnType<typeof setInterval> | null = null;
 	let takenOverIsIdle: (() => boolean) | null = null;
-	/** The last turn of the run ended the answer: a stop with no tool call. */
 	let lastTurnFinal = false;
 
 	const clearTakenOver = () => {
@@ -185,8 +122,6 @@ export function createPiSessionBridgeHub(
 		}
 		if (message.role === "custom" && (message.customType === PI_INBOX_REMINDER_CUSTOM_TYPE || message.customType === PI_INBOX_BRIEFING_CUSTOM_TYPE)) return;
 		if (ask.started && (message.role === "user" || (message.role === "custom" && inPrelude))) {
-			// Someone else's prompt entered the run answering our question: the
-			// rest of it answers them. Settle now and leave the run alone.
 			clearTakenOver();
 			takenOverRun = true;
 			takenOverIsIdle = ask.isIdle;
@@ -197,7 +132,6 @@ export function createPiSessionBridgeHub(
 		}
 		if (message.role === "custom" && message.customType === PLANNOTATOR_ASK_CUSTOM_TYPE) return;
 		if (ask.started && message.role === "assistant") {
-			// Pi retried (or continued after compaction): the run is still answering.
 			ask.pendingError = null;
 			clearSettlePoll(ask);
 			if (ask.answer.length > 0) ask.needsSeparator = true;
@@ -228,8 +162,6 @@ export function createPiSessionBridgeHub(
 		turnPrelude = false;
 		lastTurnFinal = false;
 		if (takenOverRun && !takenOverPoll) {
-			// Pi may retry this run (agent.continue): the taken-over flag holds
-			// until it settles. Without `agent_settled` (older Pi), until idle.
 			const isIdle = takenOverIsIdle;
 			takenOverPoll = setInterval(() => {
 				let idle = true;
@@ -251,7 +183,6 @@ export function createPiSessionBridgeHub(
 		}
 		const last = lastAssistant(event?.messages);
 		if (last?.stopReason === "error") {
-			// Pi may retry this run: report the error only once the session settles.
 			ask.pendingError = last.errorMessage || "The session hit an error while answering.";
 			clearSettlePoll(ask);
 			ask.settlePoll = setInterval(() => {
@@ -329,11 +260,9 @@ export function createPiSessionBridgeHub(
 							if (active !== ask) return;
 							ask.cancelled = true;
 							if (!ask.started) {
-								// Not in the session yet: nothing of ours is running.
 								finish(ask);
 								return;
 							}
-							// Our turn is running: stop it. agent_end then clears `active`.
 							try {
 								if (!ctx.isIdle()) ctx.abort();
 								else finish(ask);
@@ -353,10 +282,6 @@ export function createPiSessionBridgeHub(
 						} catch {
 							idle = true;
 						}
-						// Busy (steered into a running turn, or Pi still preparing the run):
-						// check again later, so a question Pi drops without ever starting it
-						// (e.g. the user aborts the turn it was steered into) still fails
-						// instead of waiting forever.
 						if (!idle) {
 							ask.watchdog = setTimeout(watchdog, startWatchdogMs);
 							return;
@@ -383,7 +308,6 @@ export function createPiSessionBridgeHub(
 				},
 				interrupt() {
 					if (takenOverRun) {
-						// Same text as SESSION_ASK_TAKEN_OVER_INTERRUPT_TEXT (type-only imports here).
 						throw new Error("The session is now answering another message, so Plannotator will not stop it. Ask when it finishes instead.");
 					}
 					ctx.abort();

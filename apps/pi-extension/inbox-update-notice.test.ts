@@ -1,10 +1,3 @@
-/**
- * The Inbox poll's "Plannotator was updated … Type /reload" note (inbox.ts
- * inboxUpdateNotice), with the claim index.ts passes it: auto-reload.ts's
- * claimNotice. While Pi will reload by itself, the Inbox stays quiet, so the
- * note never shows right before the reload. No Inbox is started: the decision
- * is called the way the poll calls it.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +20,6 @@ afterAll(() => {
 	for (const key of STORE_KEYS) delete (globalThis as Record<string, unknown>)[key];
 });
 
-/** A Pi session with auto-reload on (or off), the update already on disk. */
 async function session(enabled: boolean) {
 	for (const key of STORE_KEYS) delete (globalThis as Record<string, unknown>)[key];
 	let t = 0;
@@ -69,7 +61,6 @@ async function session(enabled: boolean) {
 	for (const h of handlers.get("session_start") ?? []) h({ reason: "startup" }, ctx);
 	await controller.ready;
 	return {
-		/** What the Inbox poll would show the session now. */
 		inboxNote: (told: string | null = null) => inboxUpdateNotice("1.0.0", "1.1.0", told, (v) => controller.claimNotice(v), "pi"),
 		advance(ms: number) {
 			t += ms;
@@ -90,7 +81,6 @@ describe("inboxUpdateNotice: the Inbox's /reload note", () => {
 		expect(s.sent).toHaveLength(1);
 		expect(s.inboxNote()).toBeNull();
 		await s.runCommand();
-		// Pi refused the reload: auto-reload gave the note itself; the Inbox does not repeat it.
 		expect(s.notes).toHaveLength(1);
 		expect(s.inboxNote()).toBeNull();
 	});

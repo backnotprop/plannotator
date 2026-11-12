@@ -1,11 +1,3 @@
-/**
- * External annotations (Pi/Node): PATCH ingest of `inReplyTo`.
- *
- * Node mirror of the PATCH describe in packages/server/external-annotations.test.ts:
- * PATCH merges arbitrary fields, so it was the one way to create an inReplyTo
- * self-reference or cycle; the invalid state is refused at ingest on both
- * runtimes.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
@@ -92,12 +84,6 @@ describe("pi external annotations: PATCH inReplyTo", () => {
 	});
 });
 
-/**
- * Node mirror of the PATCH body-validation describe in
- * packages/server/external-annotations.test.ts (#1560 follow-up): PATCH used
- * to merge its body verbatim, so `{"diagramAnchor": null}` was answered 200
- * and then blanked the page when the renderer read `.family` off it.
- */
 describe("pi external annotations: PATCH body validation", () => {
 	const handler = createExternalAnnotationHandler("plan");
 	const reviewHandler = createExternalAnnotationHandler("review");

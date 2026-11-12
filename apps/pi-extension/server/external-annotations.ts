@@ -1,11 +1,3 @@
-/**
- * External Annotations — Pi (node:http) server handler.
- *
- * Thin HTTP adapter over the shared annotation store. Mirrors the Bun
- * handler at packages/server/external-annotations.ts but uses node:http
- * IncomingMessage/ServerResponse + res.write() for SSE.
- */
-
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
 	createAnnotationStore,
@@ -21,16 +13,8 @@ import {
 } from "../generated/external-annotation.ts";
 import { json, parseBody } from "./helpers.ts";
 
-// ---------------------------------------------------------------------------
-// Route prefix
-// ---------------------------------------------------------------------------
-
 const BASE = "/api/external-annotations";
 const STREAM = `${BASE}/stream`;
-
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
 
 export function createExternalAnnotationHandler(mode: "plan" | "review") {
 	const store = createAnnotationStore<StorableAnnotation>();
@@ -43,37 +27,26 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 			try {
 				res.write(data);
 			} catch {
-				// Response closed — clean up
 				subscribers.delete(res);
 			}
 		}
 	};
 
-	// Wire store mutations → SSE broadcast
 	store.onMutation(broadcast);
 
 	return {
-		/** Send an event that is not a store mutation (session-closed) to every open stream. */
 		broadcast,
 
-		/**
-		 * End every open stream. A server's stop() calls this before
-		 * closeAllConnections(): that destroys the sockets, and on Node (and Bun
-		 * >= 1.4) a destroy drops what was just written, so the tab never got the
-		 * session-closed sent right before stop(). Ending first sends it.
-		 */
 		endStreams() {
 			for (const res of subscribers) {
 				try {
 					res.end();
 				} catch {
-					// Already closed.
 				}
 			}
 			subscribers.clear();
 		},
 
-		/** Push annotations directly into the store (bypasses HTTP, reuses same validation). */
 		addAnnotations(body: unknown): { ids: string[] } | { error: string } {
 			const parsed = transform(body);
 			if ("error" in parsed) return { error: parsed.error };
@@ -86,7 +59,6 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 			res: ServerResponse,
 			url: URL,
 		): Promise<boolean> {
-			// --- SSE stream ---
 			if (url.pathname === STREAM && req.method === "GET") {
 				res.writeHead(200, {
 					"Content-Type": "text/event-stream",
@@ -94,10 +66,8 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 					Connection: "keep-alive",
 				});
 
-				// Disable idle timeout for SSE connections
 				res.setTimeout(0);
 
-				// Send current state as snapshot
 				const snapshot: ExternalAnnotationEvent<StorableAnnotation> = {
 					type: "snapshot",
 					annotations: store.getAll(),
@@ -106,7 +76,6 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 
 				subscribers.add(res);
 
-				// Heartbeat to keep connection alive
 				const heartbeatTimer = setInterval(() => {
 					try {
 						res.write(HEARTBEAT_COMMENT);
@@ -116,17 +85,14 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 					}
 				}, HEARTBEAT_INTERVAL_MS);
 
-				// Clean up on disconnect
 				res.on("close", () => {
 					clearInterval(heartbeatTimer);
 					subscribers.delete(res);
 				});
 
-				// Don't end the response — SSE stays open
 				return true;
 			}
 
-			// --- GET snapshot (polling fallback) ---
 			if (url.pathname === BASE && req.method === "GET") {
 				const since = url.searchParams.get("since");
 				if (since !== null) {
@@ -144,7 +110,6 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 				return true;
 			}
 
-			// --- POST (add single or batch) ---
 			if (url.pathname === BASE && req.method === "POST") {
 				try {
 					const body = await parseBody(req);
@@ -163,7 +128,6 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 				return true;
 			}
 
-			// --- PATCH (update fields on a single annotation) ---
 			if (url.pathname === BASE && req.method === "PATCH") {
 				const id = url.searchParams.get("id");
 				if (!id) {
@@ -177,20 +141,11 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 					json(res, { error: "Invalid JSON" }, 400);
 					return true;
 				}
-				// Field-level validation with the same validators POST applies:
-				// unknown keys are dropped and a malformed structured value is a
-				// 400, never a stored one the renderer then reads a property off
-				// (`{"diagramAnchor": null}` used to blank the page).
-				// Mirrors packages/server/external-annotations.ts.
 				const patch = validateAnnotationPatch(mode, body);
 				if ("error" in patch) {
 					json(res, { error: patch.error }, 400);
 					return true;
 				}
-				// A reply must point at an existing, different annotation and must
-				// not close a cycle: the export and the panel treat cycle members as
-				// roots, but the invalid state should not be creatable in the first
-				// place. (POST never carries inReplyTo, so PATCH is the only ingest.)
 				if ("inReplyTo" in patch.fields) {
 					const problem = validateReplyTarget(store.getAll(), id, patch.fields.inReplyTo);
 					if (problem) {
@@ -207,7 +162,6 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 				return true;
 			}
 
-			// --- DELETE (by id, by source, or clear all) ---
 			if (url.pathname === BASE && req.method === "DELETE") {
 				const id = url.searchParams.get("id");
 				const source = url.searchParams.get("source");
@@ -229,7 +183,6 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 				return true;
 			}
 
-			// Not handled — pass through
 			return false;
 		},
 	};

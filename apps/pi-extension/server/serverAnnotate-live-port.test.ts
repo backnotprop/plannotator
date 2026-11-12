@@ -1,12 +1,3 @@
-/**
- * Pi annotate server with PLANNOTATOR_LIVE_PORT (#2145): the vendored Node
- * live proxy honors the variable inside a live session, and a proxy that
- * cannot bind fails the start without leaving the editor's listener (or the
- * proxy's) open. Mirrors the Bun annotate case in
- * packages/server/live-proxy-port.test.ts; the Node transport itself is
- * covered in a real node process by packages/shared/live-proxy-node-port.test.ts.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
 	accepts,
@@ -64,8 +55,6 @@ function startLiveServer() {
 
 describe("pi annotate server: PLANNOTATOR_LIVE_PORT", () => {
 	test("a range whose first port is busy puts the proxy on the next", async () => {
-		// The editor gets a port of its own: on an OS that hands out ports in
-		// order, a random editor port would be the range's freed second port.
 		const editorPort = await reserveFreePort();
 		const range = await partlyBusyRange(2, 1);
 		try {
@@ -102,7 +91,6 @@ describe("pi annotate server: PLANNOTATOR_LIVE_PORT", () => {
 			expect((thrown as Error).message).toContain(
 				`every port in PLANNOTATOR_LIVE_PORT ${start}-${start + 1} is already in use`,
 			);
-			// Give the closing listener a moment, then nothing may answer there.
 			await Bun.sleep(50);
 			expect(await accepts("127.0.0.1", editorPort)).toBe(false);
 			expect(await canBind(editorPort)).toBe(true);

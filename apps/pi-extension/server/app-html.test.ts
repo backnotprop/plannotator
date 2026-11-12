@@ -1,9 +1,3 @@
-/**
- * #1617, Pi mirror: the node:http app-HTML routes serve the page compressed
- * to remote sessions and unchanged to local ones, through the same vendored
- * helper as the Bun servers. Nothing else changes shape (API JSON, the
- * framed-embed 404 from #1561).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

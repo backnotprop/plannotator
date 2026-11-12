@@ -1,12 +1,3 @@
-/**
- * Pi (Node) mirror of the Bun "OpenCode runs in the review's cwd" launch test
- * (packages/server/agent-jobs-launch.test.ts, #1609).
- *
- * OpenCode v2's `run` rejects `--dir`, so the review directory reaches OpenCode
- * ONLY as the spawned process's cwd. A fake `opencode` on PATH prints its
- * physical working directory and argv; the job must run in the review cwd (not
- * the server's) and receive no `--dir`.
- */
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -18,7 +9,7 @@ import { requestUrl } from "./helpers.ts";
 
 describe("pi agent jobs: OpenCode runs in the review's cwd (#1609)", () => {
 	test("the opencode job spawns with the build result's cwd and no --dir", async () => {
-		if (process.platform === "win32") return; // the fake binary relies on a shebang
+		if (process.platform === "win32") return;
 
 		const root = mkdtempSync(join(tmpdir(), "plannotator-pi-opencode-cwd-"));
 		const binDir = join(root, "bin");
@@ -26,8 +17,6 @@ describe("pi agent jobs: OpenCode runs in the review's cwd (#1609)", () => {
 		const serverCwd = join(root, "server-cwd");
 		for (const dir of [binDir, reviewCwd, serverCwd]) mkdirSync(dir);
 		const fake = join(binDir, "opencode");
-		// A bun script, not /bin/sh: a POSIX shell rewrites an inherited PWD that does
-		// not name its real directory, which would hide exactly the leak this guards.
 		writeFileSync(
 			fake,
 			[
@@ -42,11 +31,7 @@ describe("pi agent jobs: OpenCode runs in the review's cwd (#1609)", () => {
 		const realPath = process.env.PATH;
 
 		const realPwd = process.env.PWD;
-		// Capability detection (`which opencode`) runs when the handler is
-		// created, so PATH must already carry the fake binary.
 		process.env.PATH = `${binDir}:${realPath ?? ""}`;
-		// The server's own PWD deliberately differs from the review cwd: OpenCode 1.x
-		// reads PWD before process.cwd(), so an inherited PWD would win.
 		process.env.PWD = serverCwd;
 		const server = createServer();
 		try {
@@ -60,7 +45,6 @@ describe("pi agent jobs: OpenCode runs in the review's cwd (#1609)", () => {
 				getServerUrl: () => "http://localhost:1234",
 				getCwd: () => serverCwd,
 				async buildCommand() {
-					// The shape serverReview.ts's marker-engine branch returns.
 					const { command } = buildMarkerCommand(MARKER_ENGINES.opencode, "review this", undefined, reviewCwd);
 					return { command, prompt: "review this", cwd: reviewCwd, captureStdout: true };
 				},

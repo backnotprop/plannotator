@@ -1,9 +1,3 @@
-/**
- * The Pi mirror of packages/server/update-advert.test.ts: Pi's review windows
- * get `updateAvailable` from the shared cache, compared with this package's
- * version, with Pi's own command (`pi update --extensions`), never the install
- * script; nothing while update checks are off or for another origin.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +20,6 @@ beforeEach(() => {
 	process.env.PLANNOTATOR_REMOTE = "0";
 	delete process.env.PLANNOTATOR_PORT;
 	delete process.env.PLANNOTATOR_UPDATE_CHECK;
-	// A fresh cache: the scheduled release check answers from it, so no request is made.
 	writeUpdateState({ latestRelease: { tag: "99.0.0", fetchedAt: Date.now() } }, dataDir);
 });
 

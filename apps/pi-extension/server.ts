@@ -1,11 +1,3 @@
-/**
- * Node-compatible servers for Plannotator Pi extension.
- *
- * Pi loads extensions via jiti (Node.js), so we can't use Bun.serve().
- * These are lightweight node:http servers implementing just the routes
- * each UI needs — plan review, code review, and markdown annotation.
- */
-
 export type {
 	DiffOption,
 	DiffType,

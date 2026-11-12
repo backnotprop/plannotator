@@ -1,13 +1,7 @@
-/**
- * Core HTTP helpers for Pi extension servers.
- * parseBody, parseJsonBody, json, handleApiNotFound, serveApp, send, toWebRequest
- */
-
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import type { PackedApp } from "../generated/packed-app.ts";
 
-/** The raw request body as text (for endpoints where an empty body is meaningful, e.g. all-optional JSON). */
 export function readBody(req: IncomingMessage): Promise<string> {
 	return new Promise((resolve, reject) => {
 		let data = "";
@@ -27,13 +21,6 @@ export async function parseBody(
 	}
 }
 
-/**
- * Decode a request body as JSON and reject malformed input.
- *
- * Use this for endpoints where an empty object is a valid command and parse
- * failure must remain distinguishable from that command. Legacy endpoints
- * continue to use {@link parseBody}, which deliberately falls back to `{}`.
- */
 export async function parseJsonBody(req: IncomingMessage): Promise<unknown> {
 	return JSON.parse(await readBody(req));
 }
@@ -47,7 +34,6 @@ export function json(
 	res.end(JSON.stringify(data));
 }
 
-/** Return the shared JSON response for an unmatched API route. */
 export function handleApiNotFound(
 	res: import("node:http").ServerResponse,
 	path: string,
@@ -55,13 +41,6 @@ export function handleApiNotFound(
 	json(res, { error: "Not found", path }, 404);
 }
 
-/**
- * Serve the built app to every route no other handler claimed: a chunk or
- * asset packed into it under `/assets/`, else the page itself (SPA). Remote
- * sessions get the page and text chunks compressed when the client accepts
- * br/gzip (#1617); local sessions get them unchanged. Mirrors the Bun servers'
- * `packedAppResponse` (generated/packed-app.ts, shared with them).
- */
 export async function serveApp(
 	app: PackedApp,
 	req: IncomingMessage,

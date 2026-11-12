@@ -16,14 +16,7 @@ import {
 } from "../generated/repo-files.ts";
 import { getGitMetadataWatchPaths } from "../generated/workspace-status.ts";
 
-// The code-review tree's live All files (`GET /api/repo-files/stream`).
-// Mirrors packages/server/review-repo-watch.ts with the node:http transport:
-// `watch` never descends into what git ignores, `poll` for very large
-// repositories and multi-repo workspaces, and a page hears `changed` only
-// when the working tree's signature moved.
-
 const HEARTBEAT_MS = 30_000;
-/** Live updates are debounced so a burst of writes lists the tree once. */
 const REPO_WATCH_DEBOUNCE_MS = 500;
 
 interface Subscriber {
@@ -41,12 +34,9 @@ export interface RepoLiveOptions {
 }
 
 export interface ReviewRepoWatch {
-	/** Answer one page's SSE request: `ready` once, then `changed` after each real change. */
 	stream(res: ServerResponse, root: string, options: RepoLiveOptions): Promise<void>;
 	closeAll(): void;
-	/** Tests only: what is attached right now. */
 	stats(): { lives: number; subscribers: number; heartbeats: number };
-	/** Tests only. */
 	configureForTests: FileBrowserWatchRegistry<Subscriber>["configureForTests"];
 }
 
@@ -57,7 +47,6 @@ function serialize(event: Pick<FileBrowserChangeEvent, "type" | "reason" | "time
 interface Live {
 	gate: RepoChangeGate;
 	subscribers: Set<Subscriber>;
-	/** Each subscriber's release (heartbeat, watcher, poll), for closeAll. */
 	releases: Set<() => void>;
 	poll: ReturnType<typeof setTimeout> | null;
 }
@@ -76,15 +65,10 @@ export function createReviewRepoWatch(): ReviewRepoWatch {
 
 	return {
 		async stream(res, root, options) {
-			// Registered before anything is awaited: a page that goes away while
-			// git lists what it ignores attaches nothing.
 			let closed = false;
 			let release: () => void = () => {
 				closed = true;
 			};
-			// The request's `close` is the one that fires when the page goes under
-			// Bun's node:http (Oh My Pi, the tests); the response's fires in Node.
-			// `release` runs once, so both firing is harmless (serverAnnotate does the same).
 			res.req?.on("close", () => release());
 			res.on("close", () => release());
 			const ignoredSet = options.mode === "watch" && options.ignored
@@ -141,8 +125,6 @@ export function createReviewRepoWatch(): ReviewRepoWatch {
 					if (shared.poll) clearTimeout(shared.poll);
 					shared.poll = null;
 					if (lives.get(root) === shared) lives.delete(root);
-					// Nothing watches the disk any more, so the cached listing could go
-					// stale unseen (a hidden tree, a closed page): the next list reads again.
 					options.onChange();
 				}
 			};
@@ -161,7 +143,6 @@ export function createReviewRepoWatch(): ReviewRepoWatch {
 				});
 				registry.attach(handle, subscriber, root);
 			} else if (!shared.poll) {
-				// A poll that keeps finding nothing backs off (to 30 s); a change brings it back.
 				const start = options.pollMs ?? REPO_LIVE_POLL_MS;
 				let delay = start;
 				const tick = () => {

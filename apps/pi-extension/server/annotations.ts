@@ -1,8 +1,3 @@
-/**
- * Editor annotation handler (in-memory store for VS Code integration).
- * EditorAnnotation type, createEditorAnnotationHandler
- */
-
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { json, parseBody } from "./helpers.ts";

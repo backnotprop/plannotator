@@ -72,9 +72,6 @@ describe("current Pi session feedback routing", () => {
 });
 
 describe("a message sent after a reload, while the agent is idle", () => {
-	// Oh My Pi only queues a message that names `deliverAs`, even when idle, so
-	// there the message must go without it to start a turn. Pi starts a turn
-	// either way and keeps its options exactly as before.
 	const cases = [
 		{ host: "oh-my-pi", idle: true, expected: undefined },
 		{ host: "oh-my-pi", idle: false, expected: { deliverAs: "followUp" } },

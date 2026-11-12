@@ -1,26 +1,3 @@
-/**
- * The `plannotator` agent tool on Pi (contract: packages/shared/plannotator-tool.ts),
- * and the decision delivery it shares with the /plannotator-* commands.
- *
- * Driven through the real extension with a fake Pi host. Annotate, last and
- * code review sessions run REAL in-process servers (only the browser launch is
- * skipped), so close, unsent counts and decisions go through the servers' own
- * host control and decision endpoints.
- *
- * What regresses if this fails:
- *  - Pi's tool validator refuses the shared plain JSON Schema, so every call fails;
- *  - the tool forks the contract (name, schema, description) instead of using it;
- *  - opening blocks the turn, or opens without the Ask-this-session bridge;
- *  - the reviewer's decision (tool or slash command) never reaches the agent, or
- *    arrives without the `Plannotator: <subject> (pn-…) — <outcome>.` heading;
- *  - a gated session the agent opened swallows a bare approval it was told to wait for;
- *  - the tool's `last` opens the agent's own tool-calling message instead of its answer;
- *  - list/close reach another Pi session's reviews, lose the session's own reviews
- *    after a reload (new extension instance), close deletes the reviewer's draft
- *    or delivers a message, or a plan review can be closed;
- *  - on one fixed port a second open silently stops the open review;
- *  - a list of files, `reply`, or a session without UI opens anything.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,7 +32,6 @@ beforeEach(() => {
 	process.env.PLANNOTATOR_REMOTE = "0";
 	process.env.PLANNOTATOR_FEEDBACK_HISTORY = "0";
 	process.env.PLANNOTATOR_ANNOTATE_HISTORY = "0";
-	// The tool is off by default on Pi; these tests are about the tool itself.
 	process.env.PLANNOTATOR_AGENT_TOOL = "1";
 	delete process.env.PLANNOTATOR_PORT;
 });
@@ -80,13 +56,11 @@ interface Launch {
 	bundle?: string[];
 	recent?: Array<{ messageId: string; text: string }>;
 	gate: boolean | undefined;
-	/** The `clientLease` argument (annotate and last only). */
 	clientLease?: boolean;
 	sessionBridge: unknown;
 	url: string;
 }
 
-/** The registry is process-wide, so every harness gets its own Pi session id unless a test shares one. */
 let sessionCounter = 0;
 const freshSessionId = () => `pi-session-${process.pid}-${(sessionCounter += 1)}`;
 
@@ -153,7 +127,6 @@ function createHarness(options: { sessionId?: string; hasUI?: boolean; branch?: 
 	});
 	const ctx = makeCtx(sessionId);
 
-	// Real servers; only the browser launch is skipped.
 	const startAnnotation: NonNullable<PlannotatorExtensionDeps["startAnnotation"]> = async (
 		_ctx, filePath, markdown, mode, folderPath, _sourceInfo, _converted, gate, _rawHtml, _renderHtml, _convertHtml, _recent, _live, sessionBridge, bundleFiles, _announced, clientLease,
 	) => {
@@ -224,7 +197,6 @@ function createHarness(options: { sessionId?: string; hasUI?: boolean; branch?: 
 		goStale() {
 			stale = true;
 		},
-		/** Pi replaced this session (/new, /resume): its `session_shutdown` runs. */
 		async shutdown() {
 			for (const handler of handlers.get("session_shutdown") ?? []) await handler({ reason: "new" }, ctx);
 		},
@@ -269,9 +241,6 @@ describe("plannotator tool on Pi", () => {
 		expect(() => validate({ action: "explode" })).toThrow();
 	});
 
-	// #2292: on GitHub Copilot's Responses models every property is required,
-	// and the model sends the ones it means to omit empty. The failure: Pi
-	// passes the call and the tool refuses it ("takes no target") on every try.
 	test("a Copilot strict-schema call with every optional field empty passes Pi's validator and lists", async () => {
 		const harness = createHarness();
 		const tool = harness.tool();
@@ -334,7 +303,6 @@ describe("plannotator tool on Pi", () => {
 		expect(harness.sent[0]!.text).toContain(spec);
 		expect(harness.sent[0]!.text).toContain(notes);
 
-		// Closing a bundle the agent opened works like any other review.
 		const again = await harness.call({ action: "annotate", target: ["spec.md", "notes.md"] });
 		const againId = sessionIdIn(again.content[0]!.text)!;
 		expect((await harness.call({ action: "close", session: againId })).content[0]!.text).toContain(`Closed 2 files: spec.md, notes.md (${againId})`);
@@ -361,8 +329,6 @@ describe("plannotator tool on Pi", () => {
 		expect(firstLine(harness.sent[0]!.text)).toBe(`Plannotator: spec.md (${id}) — Approved.`);
 	});
 
-	// A real report: two QUESTIONS.md in different folders, and a bare approval
-	// headed only "QUESTIONS.md", so the agent acted on the other file.
 	test("two same-named files: subjects are told apart and each decision names its own full path", async () => {
 		const harness = createHarness();
 		const { mkdirSync } = await import("node:fs");
@@ -397,14 +363,12 @@ describe("plannotator tool on Pi", () => {
 		expect(listed).toContain(`${id} · annotate · notes.md · ${launch.url}`);
 		expect(listed).toContain("unsent: 2");
 
-		// Another Pi session in this process sees none of it and cannot close it.
 		const other = harness.makeCtx(freshSessionId());
 		expect((await harness.call({ action: "list" }, other)).content[0]!.text).toContain("No open Plannotator reviews");
 		await expect(harness.call({ action: "close", session: id }, other)).rejects.toThrow(`No open Plannotator review ${id}`);
 
 		const closed = (await harness.call({ action: "close", session: id.toUpperCase() })).content[0]!.text;
 		expect(closed).toContain(`Closed notes.md (${id}): 2 unsent comments saved as a draft.`);
-		// The draft is still on the server, and nothing reaches the agent.
 		const draft = await (await fetch(`${launch.url}/api/draft`)).json();
 		expect(draft.annotations).toHaveLength(2);
 		await until(() => harness.notices.some((notice) => notice.message.includes("the agent closed")));
@@ -503,10 +467,6 @@ describe("plannotator tool on Pi", () => {
 		}
 	}
 
-	// A host whose replaced `pi` never throws after /new (the stale guard came
-	// late, #2553): the opener's session_shutdown is the signal, so feedback
-	// still reaches the replacement with the switched-session header instead
-	// of the dead session.
 	for (const action of ["annotate", "last"] as const) {
 		test(`${action} feedback goes to the replacement when the opener shut down, even if its pi never throws`, async () => {
 			const origin = createHarness({ branch: [assistant("a1", [{ type: "text", text: "Original answer." }])] });
@@ -527,15 +487,11 @@ describe("plannotator tool on Pi", () => {
 		});
 	}
 
-	// The tool and the slash commands return at once, so a gated review they
-	// open must survive tab loss: no client lease. The event bus keeps it (it
-	// awaits the decision; see plannotator-browser.test.ts).
 	test("the tool and the slash commands open gated annotate and last sessions without the client lease", async () => {
 		const harness = createHarness({ branch: [assistant("a1", [{ type: "text", text: "Original answer." }])] });
 		harness.writeFile("notes.md", "# Notes\n");
 		await harness.startSession();
 		await harness.call({ action: "annotate", target: "notes.md", gate: true });
-		// The tool's `last` takes no gate; it still opens without the lease.
 		await harness.call({ action: "last" });
 		await harness.command("plannotator-annotate", "notes.md --gate");
 		await harness.command("plannotator-last", "--gate");
@@ -556,7 +512,6 @@ describe("plannotator tool on Pi", () => {
 		const message = harness.sent[0]!.text;
 		expect(firstLine(message)).toBe(`Plannotator: local changes (${id}) — Changes requested.`);
 		expect(message).toContain("Say why, not what.");
-		// Real feedback gets the verification suffix even with no annotations.
 		expect(message).toContain("Treat the findings above as unverified review input.");
 	});
 
@@ -571,7 +526,6 @@ describe("plannotator tool on Pi", () => {
 			platform: true,
 		});
 		await until(() => harness.sent.length > 0);
-		// The shared outcome, so every host names the platform post the same way.
 		expect(firstLine(harness.sent[0]!.text).endsWith(`— ${PLANNOTATOR_OUTCOME_REVIEW_POSTED}.`)).toBe(true);
 		expect(harness.sent[0]!.text).not.toContain("Treat the findings above as unverified review input.");
 	});
@@ -638,10 +592,8 @@ describe("plannotator tool on Pi", () => {
 		harness.writeFile("notes.md", "# Notes\n");
 		harness.writeFile("spec.md", "# Spec\n");
 		const id = sessionIdIn((await harness.call({ action: "annotate", target: "notes.md" })).content[0]!.text)!;
-		// Set after the first server bound a random port: no fixed-port bind happens here.
 		process.env.PLANNOTATOR_PORT = "19999";
 		await expect(harness.call({ action: "annotate", target: "spec.md" })).rejects.toThrow(`notes.md (${id}) is open`);
-		// Another Pi session cannot close it, so it is told to ask the user.
 		const other = harness.makeCtx(freshSessionId());
 		await expect(harness.call({ action: "annotate", target: "spec.md" }, other)).rejects.toThrow(
 			"ask the user to finish or close that review in its browser tab",
@@ -673,7 +625,6 @@ describe("plannotator tool on Pi", () => {
 		await expect(harness.call({ action: "list", target: "x.md" })).rejects.toThrow('action "list" takes no target');
 		await expect(harness.call({ action: "reply", session: "pn-abcdef", comment: "c1", text: "done" })).rejects.toThrow("Invalid plannotator call");
 		await expect(harness.call({ action: "annotate", target: "missing.md" })).rejects.toThrow("Plannotator did not open: File not found");
-		// One target is one argument: words are never split into a tolerant search.
 		harness.writeFile("notes.md", "# Notes\n");
 		await expect(harness.call({ action: "annotate", target: "look at notes.md" })).rejects.toThrow("File not found");
 

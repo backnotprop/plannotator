@@ -12,28 +12,6 @@ import {
 } from "./pi-todos.ts";
 import { resolveTodoProvider } from "./index.ts";
 
-/**
- * ── Format oracle ────────────────────────────────────────────────────────────
- *
- * pi-todos exposes no importable API, so to prove we write files it can read we
- * re-derive its reader here and parse our own output with it.
- *
- * This is an INDEPENDENT implementation written from the format documented in
- * mitsuhiko/agent-stuff `extensions/todos.ts` @ a3f8ab11 — deliberately not a
- * copy, both to keep this repo's `MIT OR Apache-2.0` grant clean (agent-stuff
- * is Apache-2.0) and because a different strategy makes it a real cross-check
- * instead of the same code twice. Upstream scans braces to find the end of the
- * leading JSON object (`findJsonObjectEnd`, todos.ts:840-880); this walks
- * candidate `}` positions and takes the first that parses.
- *
- * Contract being pinned, per todos.ts:
- *   - leading JSON object, optional blank line, markdown body (header, :1-19)
- *   - `["closed", "done"]` count as closed (`isTodoClosed`, :179-181)
- *   - sort: closed last, then assigned-first, then `created_at` ascending
- *     (`sortTodos`, :189-199)
- *
- * If upstream changes any of that, these tests fail — that failure is the point.
- */
 interface OracleFrontMatter {
 	id: string;
 	title: string;
@@ -43,7 +21,6 @@ interface OracleFrontMatter {
 	assigned_to_session?: string;
 }
 
-/** Take the leading JSON object as the first `}`-terminated prefix that parses. */
 function oracleSplit(content: string): { frontMatter: unknown; body: string } {
 	if (!content.startsWith("{")) return { frontMatter: null, body: content };
 	for (let i = content.indexOf("}"); i !== -1; i = content.indexOf("}", i + 1)) {
@@ -53,8 +30,6 @@ function oracleSplit(content: string): { frontMatter: unknown; body: string } {
 				body: content.slice(i + 1).replace(/^\r?\n+/, ""),
 			};
 		} catch {
-			// Not a complete object yet — a brace inside a string or a nested
-			// object. Try the next candidate.
 		}
 	}
 	return { frontMatter: null, body: content };
@@ -90,7 +65,6 @@ function oracleSortTodos(todos: OracleFrontMatter[]): OracleFrontMatter[] {
 	);
 }
 
-/** Read every todo in a dir through the oracle. */
 async function readViaOracle(todosDir: string): Promise<OracleFrontMatter[]> {
 	const entries = await fs.readdir(todosDir);
 	const todos: OracleFrontMatter[] = [];
@@ -101,8 +75,6 @@ async function readViaOracle(todosDir: string): Promise<OracleFrontMatter[]> {
 	}
 	return todos;
 }
-
-// ── Fixture ──────────────────────────────────────────────────────────────────
 
 const PLAN_ID = "PLAN.md";
 
@@ -119,16 +91,12 @@ let todosDir: string;
 let originalPiTodoPath: string | undefined;
 let originalTodoProviderEnv: string | undefined;
 
-/** Restore an env var to its pre-test value instead of deleting ambient state. */
 function restoreEnv(name: string, value: string | undefined): void {
 	if (value === undefined) delete process.env[name];
 	else process.env[name] = value;
 }
 
 beforeEach(async () => {
-	// Snapshot and clear so an ambient PI_TODO_PATH / PLANNOTATOR_TODO_PROVIDER
-	// on the host — or leaked from another test file sharing this process —
-	// can never redirect detection or writes outside the temp dir below.
 	originalPiTodoPath = process.env.PI_TODO_PATH;
 	originalTodoProviderEnv = process.env.PLANNOTATOR_TODO_PROVIDER;
 	delete process.env.PI_TODO_PATH;
@@ -148,11 +116,6 @@ describe("pi-todos provider", () => {
 	test("writes files the upstream parser reads back intact", async () => {
 		await createPiTodosProvider({ cwd, sessionId: "session-1" }).sync(checklist(), PLAN_ID);
 
-		// Upstream's directory scan derives a todo's id from its FILENAME, not
-		// from any "id" field inside the JSON front matter — check the actual
-		// on-disk names directly instead of routing through the oracle's id
-		// fallback, which would accept a mismatched filename as long as the
-		// JSON carried a matching "id".
 		const filenames = (await fs.readdir(todosDir)).filter((entry) => entry.endsWith(".md"));
 		expect(filenames).toHaveLength(3);
 		for (const filename of filenames) expect(filename).toMatch(/^[a-f0-9]{8}\.md$/);
@@ -161,8 +124,6 @@ describe("pi-todos provider", () => {
 		const todos = await readViaOracle(todosDir);
 		expect(todos).toHaveLength(3);
 		for (const todo of todos) {
-			// A format break shows up here: the oracle falls back to defaults
-			// (empty title, empty created_at) when it cannot parse our JSON.
 			expect(todo.title).not.toBe("");
 			expect(todo.created_at).not.toBe("");
 			expect(todo.tags).toContain("plannotator");
@@ -197,12 +158,6 @@ describe("pi-todos provider", () => {
 
 	test("serializes overlapping syncs so a race can't duplicate todos", async () => {
 		const provider = createPiTodosProvider({ cwd });
-		// Neither call is awaited before the other starts. Without per-instance
-		// serialization both would read the same empty `readOwnedTodos()`
-		// snapshot and each mint a fresh random id per step, duplicating every
-		// todo. Asserting on the converged final state (not which call "wins")
-		// keeps this deterministic instead of racy: it only holds if the
-		// second call is queued fully behind the first.
 		const first = provider.sync(checklist(), PLAN_ID);
 		const second = provider.sync(checklist(1, 2, 3), PLAN_ID);
 		await Promise.all([first, second]);
@@ -221,8 +176,6 @@ describe("pi-todos provider", () => {
 		expect(oracleIsTodoClosed(byTitle.get("1. Add the provider interface")!.status)).toBe(true);
 		expect(oracleIsTodoClosed(byTitle.get("2. Implement pi-todos")!.status)).toBe(true);
 		expect(oracleIsTodoClosed(byTitle.get("3. Wire the extension")!.status)).toBe(false);
-		// Closed todos drop their assignment, matching upstream, so they sort
-		// below live work instead of above it.
 		expect(byTitle.get("1. Add the provider interface")!.assigned_to_session).toBeUndefined();
 		expect(byTitle.get("3. Wire the extension")!.assigned_to_session).toBe("session-1");
 	});
@@ -273,9 +226,7 @@ describe("pi-todos provider", () => {
 		await provider.sync(checklist(2), PLAN_ID);
 
 		const after = (await readViaOracle(todosDir)).find((todo) => todo.id === target.id)!;
-		// Locked, so the DONE reflection is deferred rather than applied.
 		expect(oracleIsTodoClosed(after.status)).toBe(false);
-		// The foreign lock survives untouched.
 		expect(existsSync(lockPath)).toBe(true);
 	});
 
@@ -295,9 +246,6 @@ describe("pi-todos provider", () => {
 		await provider.sync(checklist(), PLAN_ID);
 		await provider.sync([], PLAN_ID);
 
-		// Reconciliation, not deletion: the now-ownerless todos stay on disk,
-		// closed, so pi-todos' own GC reaps them instead of this provider
-		// unlinking work a user might still want to read.
 		const todos = await readViaOracle(todosDir);
 		expect(todos).toHaveLength(3);
 		for (const todo of todos) expect(oracleIsTodoClosed(todo.status)).toBe(true);
@@ -334,22 +282,9 @@ describe("pi-todos detection", () => {
 	});
 });
 
-/**
- * ── Containment ──────────────────────────────────────────────────────────────
- *
- * `<cwd>/.pi/todos` is implied by whatever repository is checked out, so a
- * hostile repo can commit it as a symlink and turn the mirror into a
- * write-anywhere primitive on the first plan approval. These tests pin the trust
- * split: the repo-implied path must stay inside the project, an explicit
- * `$PI_TODO_PATH` (the user's own choice) must not be second-guessed, and the
- * check must be a realpath comparison rather than a symlink ban — otherwise
- * every temp-dir test here would false-negative, since `/tmp` and `/var` are
- * themselves symlinks on macOS.
- */
 describe("pi-todos containment", () => {
 	const scratch: string[] = [];
 
-	/** A fresh project dir plus an outside dir no write may ever reach. */
 	async function makeEscapeFixture(): Promise<{ project: string; outside: string }> {
 		const project = await fs.mkdtemp(path.join(os.tmpdir(), "plannotator-project-"));
 		const outside = await fs.mkdtemp(path.join(os.tmpdir(), "plannotator-outside-"));
@@ -371,17 +306,12 @@ describe("pi-todos containment", () => {
 		expect(detectPiTodos(project)).toBe(false);
 		expect(resolveTodoProvider({}, { cwd: project })).toBeUndefined();
 
-		// Even constructed directly — the provider must fail closed, not trust
-		// that detection already ran.
 		await createPiTodosProvider({ cwd: project, sessionId: "s" }).sync(checklist(), PLAN_ID);
 		expect(await fs.readdir(outside)).toEqual([]);
 	});
 
 	test("reads absent when .pi is a symlink out of the project and todos does not exist yet", async () => {
 		const { project, outside } = await makeEscapeFixture();
-		// The nastier shape: nothing to realpath at the leaf, so a lexical
-		// fallback would pass the check and mkdir -p would create the directory
-		// (and its todo files) inside `outside`.
 		await fs.symlink(outside, path.join(project, ".pi"), "dir");
 
 		expect(detectPiTodos(project)).toBe(false);
@@ -405,9 +335,6 @@ describe("pi-todos containment", () => {
 
 	test("does not false-negative when the project root is reached through a symlink", async () => {
 		const { project } = await makeEscapeFixture();
-		// macOS `/tmp` -> `/private/tmp` and `/var` -> `/private/var` make this the
-		// ambient case for every test in this file: realpath ONE side only and the
-		// whole suite breaks.
 		const real = path.join(project, "real");
 		const viaLink = path.join(project, "link");
 		await fs.mkdir(path.join(real, ".pi", "todos"), { recursive: true });
@@ -422,8 +349,6 @@ describe("pi-todos containment", () => {
 
 	test("trusts an explicit PI_TODO_PATH pointing outside the project", async () => {
 		const { project, outside } = await makeEscapeFixture();
-		// The attack is a symlink committed into a REPO, not an env var the user
-		// exported. pi-todos honours PI_TODO_PATH verbatim, so we do too.
 		process.env.PI_TODO_PATH = outside;
 
 		expect(detectPiTodos(project)).toBe(true);
@@ -446,13 +371,10 @@ describe("pi-todos containment", () => {
 		const { project } = await makeEscapeFixture();
 		const missingRoot = path.join(project, "gone", "deeper");
 
-		// Neither the todo dir nor its whole ancestor chain exists: the
-		// containment check has to absorb ENOENT rather than propagate it.
 		expect(() => detectPiTodos(missingRoot)).not.toThrow();
 		expect(detectPiTodos(missingRoot)).toBe(false);
 		expect(() => resolveContainedTodoDir(missingRoot)).not.toThrow();
 
-		// A removed project root is the same story.
 		const removed = await fs.mkdtemp(path.join(os.tmpdir(), "plannotator-removed-"));
 		await fs.rm(removed, { recursive: true, force: true });
 		expect(() => detectPiTodos(removed)).not.toThrow();
@@ -462,8 +384,6 @@ describe("pi-todos containment", () => {
 	test("keeps the contained path identical to the raw upstream resolution", async () => {
 		const { project } = await makeEscapeFixture();
 		await fs.mkdir(path.join(project, ".pi", "todos"), { recursive: true });
-		// Containment gates the path, it never rewrites it — the provider must
-		// keep writing exactly where pi-todos looks.
 		expect(resolveContainedTodoDir(project)).toBe(resolveTodoDir(project));
 	});
 });

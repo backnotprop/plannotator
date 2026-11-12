@@ -19,11 +19,6 @@ afterEach(() => {
 	}
 });
 
-/**
- * Minimal Pi host stub: enough surface for a `--plan` session to boot, submit a
- * plan, and finish a turn, while recording every side effect the extension is
- * expected to produce (events, session entries, tool scope, model, thinking).
- */
 function createHarness(cwd: string) {
 	const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
@@ -110,7 +105,6 @@ function createHarness(cwd: string) {
 			for (const handler of handlers.get("agent_end") ?? []) {
 				await handler({ messages: [] }, ctx);
 			}
-			// The automatic-execution continuation is scheduled on a macrotask.
 			await new Promise((resolve) => setTimeout(resolve, 0));
 		},
 	};

@@ -1,7 +1,3 @@
-/**
- * Pi servers: the POST /api/open-in guards. Same scenarios as the Bun servers
- * (packages/server/open-in.scenarios.ts), so the mirror cannot drift.
- */
 import { defineOpenInScenarios } from "../../../packages/server/open-in.scenarios.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 import { startReviewServer } from "./serverReview.ts";

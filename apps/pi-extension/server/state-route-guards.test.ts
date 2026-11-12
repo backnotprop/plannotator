@@ -1,8 +1,3 @@
-/**
- * Pi servers: the cross-origin and stale-tab guards on state-changing routes.
- * Same scenarios as the Bun servers
- * (packages/server/state-route-guards.scenarios.ts), so the mirror cannot drift.
- */
 import { defineStateRouteScenarios } from "../../../packages/server/state-route-guards.scenarios.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 import { startPlanReviewServer } from "./serverPlan.ts";

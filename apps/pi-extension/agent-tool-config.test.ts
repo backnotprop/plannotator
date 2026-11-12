@@ -1,11 +1,3 @@
-/**
- * The `agentTool` setting through the Pi (node:http) servers, the mirror of
- * packages/server/agent-tool-config.test.ts: POST /api/config refuses a
- * cross-origin write on every server and accepts `agentTool` as a boolean
- * only, and /api/plan's serverConfig reports the Pi host's view (off by
- * default on Pi). Pi's servers always run inside the Pi extension, which is
- * the tool's host, so they always advertise it.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -88,8 +80,6 @@ describe("the agent tool advert on the Pi servers", () => {
 		}
 	});
 
-	// In Oh My Pi the tool is on by default: Settings shows it on, and the
-	// one-time "turn it on" offer (which needs an off, unconfigured host) never applies.
 	test("the Oh My Pi view: on by default, still overridable both ways", async () => {
 		setPiHost("oh-my-pi");
 		const servers = [

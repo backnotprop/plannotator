@@ -1,8 +1,3 @@
-/**
- * Telling Oh My Pi from Pi by the ExtensionAPI object (pi-host.ts). Getting it
- * wrong flips the `plannotator` tool's default: on in plain Pi (a full tool
- * definition in every request) or off in Oh My Pi.
- */
 import { describe, expect, test } from "bun:test";
 import { detectPiHost } from "./pi-host.ts";
 

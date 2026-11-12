@@ -1,9 +1,3 @@
-/**
- * Pi (Node) mirror of packages/server/agent-jobs-cursor.test.ts: Cursor agent
- * jobs never start another program named `agent` (Grok Build's, for one).
- * PATH holds only a scratch folder of fake programs plus /usr/bin:/bin; the
- * real Cursor and Grok CLIs are never run.
- */
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";

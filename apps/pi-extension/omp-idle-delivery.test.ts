@@ -1,14 +1,3 @@
-/**
- * Feedback must start a turn on an idle Oh My Pi (#1423).
- *
- * Oh My Pi's `sendUserMessage` only queues a message that names `deliverAs`,
- * even when the agent is idle, and drains that queue only when the transcript
- * ends in an assistant reply. In a new session, or after a `!command`, the
- * reviewer's feedback then never reaches the agent: the browser says
- * "Feedback Sent" and nothing happens. Driven through the real extension
- * (/plannotator-annotate and /plannotator-review) over a fake host whose
- * ExtensionAPI looks like Oh My Pi's or like Pi's.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -78,7 +67,6 @@ async function loadExtension(host: "pi" | "oh-my-pi", idle: boolean) {
 		return Promise.resolve({ url: "http://localhost:4399", waitForDecision: () => decision, stop: () => undefined });
 	};
 	const pi = {
-		// What tells Oh My Pi's ExtensionAPI from Pi's (pi-host.ts).
 		...(host === "oh-my-pi" ? { arktype: () => undefined, pi: {} } : {}),
 		events: { on: () => () => undefined, emit: () => undefined },
 		on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),

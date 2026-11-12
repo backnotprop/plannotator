@@ -27,63 +27,54 @@ import {
 
 type PlannotatorBrowserModule = typeof import("./plannotator-browser.ts");
 
-/** Start a plan-review browser session after loading the browser/server graph on demand. */
 export function startPlanReviewBrowserSession(
 	...args: Parameters<PlannotatorBrowserModule["startPlanReviewBrowserSession"]>
 ): ReturnType<PlannotatorBrowserModule["startPlanReviewBrowserSession"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.startPlanReviewBrowserSession(...args));
 }
 
-/** Open a plan review after loading the browser/server graph on demand. */
 export function openPlanReviewBrowser(
 	...args: Parameters<PlannotatorBrowserModule["openPlanReviewBrowser"]>
 ): ReturnType<PlannotatorBrowserModule["openPlanReviewBrowser"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.openPlanReviewBrowser(...args));
 }
 
-/** Start a code-review browser session after loading the browser/server graph on demand. */
 export function startCodeReviewBrowserSession(
 	...args: Parameters<PlannotatorBrowserModule["startCodeReviewBrowserSession"]>
 ): ReturnType<PlannotatorBrowserModule["startCodeReviewBrowserSession"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.startCodeReviewBrowserSession(...args));
 }
 
-/** Open a code review after loading the browser/server graph on demand. */
 export function openCodeReview(
 	...args: Parameters<PlannotatorBrowserModule["openCodeReview"]>
 ): ReturnType<PlannotatorBrowserModule["openCodeReview"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.openCodeReview(...args));
 }
 
-/** Start a markdown-annotation session after loading the browser/server graph on demand. */
 export function startMarkdownAnnotationSession(
 	...args: Parameters<PlannotatorBrowserModule["startMarkdownAnnotationSession"]>
 ): ReturnType<PlannotatorBrowserModule["startMarkdownAnnotationSession"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.startMarkdownAnnotationSession(...args));
 }
 
-/** Open a markdown annotation after loading the browser/server graph on demand. */
 export function openMarkdownAnnotation(
 	...args: Parameters<PlannotatorBrowserModule["openMarkdownAnnotation"]>
 ): ReturnType<PlannotatorBrowserModule["openMarkdownAnnotation"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.openMarkdownAnnotation(...args));
 }
 
-/** Start a last-message annotation session after loading the browser/server graph on demand. */
 export function startLastMessageAnnotationSession(
 	...args: Parameters<PlannotatorBrowserModule["startLastMessageAnnotationSession"]>
 ): ReturnType<PlannotatorBrowserModule["startLastMessageAnnotationSession"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.startLastMessageAnnotationSession(...args));
 }
 
-/** Open a last-message annotation after loading the browser/server graph on demand. */
 export function openLastMessageAnnotation(
 	...args: Parameters<PlannotatorBrowserModule["openLastMessageAnnotation"]>
 ): ReturnType<PlannotatorBrowserModule["openLastMessageAnnotation"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.openLastMessageAnnotation(...args));
 }
 
-/** Open the plan archive after loading the browser/server graph on demand. */
 export function openArchiveBrowserAction(
 	...args: Parameters<PlannotatorBrowserModule["openArchiveBrowserAction"]>
 ): ReturnType<PlannotatorBrowserModule["openArchiveBrowserAction"]> {
@@ -157,8 +148,6 @@ export interface PlannotatorReviewResultEvent {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
-	/** Not approved, and the reviewer's only feedback was answers to the plan's
-	 *  questions: compose the reply with `composePlanDeniedMessage`. */
 	answersOnly?: boolean;
 }
 
@@ -185,9 +174,6 @@ export interface PlannotatorCodeReviewPayload {
 	useLocal?: boolean;
 	cwd?: string;
 	prUrl?: string;
-	/** Path to a unified-diff file — static patch mode (no repo required).
-	 * Mutually exclusive with `prUrl`. Read by the host at request time,
-	 * resolved against payload.cwd (or the session cwd). */
 	patchFile?: string;
 }
 
@@ -196,12 +182,6 @@ export interface PlannotatorCodeReviewResult {
 	feedback?: string;
 	annotations?: unknown[];
 	agentSwitch?: string;
-	/**
-	 * Present (true) only when the reviewer posted the review to the PR
-	 * platform; `feedback` is then just the status line. Use this, never an
-	 * empty `annotations`, to tell it apart: PR description, PR comment and
-	 * editor comments ride only in `feedback`.
-	 */
 	platform?: true;
 }
 
@@ -210,15 +190,12 @@ export interface PlannotatorAnnotatePayload {
 	markdown?: string;
 	mode?: "annotate" | "annotate-folder" | "annotate-last";
 	folderPath?: string;
-	/** Enable review-gate UX (Approve / Annotate / Close). */
 	gate?: boolean;
 }
 
 export interface PlannotatorAnnotationResult {
 	feedback: string;
-	/** True when the reviewer closed the session without providing feedback. */
 	exit?: boolean;
-	/** True when the reviewer clicked Approve in review-gate mode. */
 	approved?: boolean;
 }
 
@@ -269,7 +246,6 @@ type StoredReviewStatus = Record<string, PlannotatorReviewStatusResult>;
 
 type StoredReviewStatusRead =
 	| { ok: true; statuses: StoredReviewStatus }
-	/** The file exists but cannot be read or parsed (torn, hand-edited). */
 	| { ok: false; error: string };
 
 function readStoredReviewStatuses(path: string): StoredReviewStatusRead {
@@ -291,11 +267,6 @@ function readStoredReviewStatuses(path: string): StoredReviewStatusRead {
 	}
 }
 
-/**
- * Replace the status file atomically: a same-directory temp file, then a
- * rename, so a reader (or a crash mid-write) never sees a torn file. The temp
- * file is removed when either step fails. Exported for tests.
- */
 export function writeReviewStatusesAtomically(path: string, statuses: StoredReviewStatus): void {
 	mkdirSync(dirname(path), { recursive: true });
 	const temp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
@@ -311,8 +282,6 @@ export function writeReviewStatusesAtomically(path: string, statuses: StoredRevi
 function setStoredReviewStatus(path: string, reviewId: string, status: PlannotatorReviewStatusResult): void {
 	const read = readStoredReviewStatuses(path);
 	if (!read.ok) {
-		// Never start over from {}: that would wipe every other review's
-		// recovery data. Leave the file for a person to look at.
 		console.error(
 			`Plannotator: ${path} could not be read (${read.error}); left it as it is and did not record review ${reviewId}.`,
 		);
@@ -352,9 +321,7 @@ export interface PlannotatorEventListenerOptions {
 		mode: NonNullable<PlannotatorPlanModePayload["mode"]>,
 		ctx: ExtensionContext,
 	) => Promise<PlannotatorPlanModeResult> | PlannotatorPlanModeResult;
-	/** Test seam: where `review-status` is kept (default `~/.pi/plannotator-review-status.json`). */
 	reviewStatusPath?: string;
-	/** Test seam: starts the `plan-review` browser session (default: the real plan server). */
 	startPlanReviewSession?: typeof startPlanReviewBrowserSession;
 }
 
@@ -365,20 +332,8 @@ export function registerPlannotatorEventListeners(
 	const activeSessionContext = createActiveSessionContext();
 	const reviewStatusPath = options.reviewStatusPath ?? defaultReviewStatusPath();
 	const startPlanReview = options.startPlanReviewSession ?? startPlanReviewBrowserSession;
-	/**
-	 * Cleared when this extension instance's session ends. Pi builds a new
-	 * instance (with its own listeners) for the replacement session, and this
-	 * instance's `pi` and `ctx` go stale: every use throws. Event-API reviews
-	 * deliberately outlive it: a decision made in a tab left open across
-	 * /reload is still recorded, and the replacement asks `review-status`.
-	 */
 	let sessionLive = true;
 
-	// Results go to whoever asked, through Pi's event bus or the request's own
-	// callback. Both run code another extension instance owns, which throws
-	// once that instance was replaced (/reload, a session switch: Pi's
-	// stale-ctx guard). Nothing here may let that escape: these run from HTTP
-	// handlers and timers, where an uncaught throw ends the Pi process (#1864).
 	const emitReviewResult = (result: PlannotatorReviewResultEvent): void => {
 		try {
 			pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, result);
@@ -393,11 +348,6 @@ export function registerPlannotatorEventListeners(
 			console.error(`Plannotator: could not answer a ${PLANNOTATOR_REQUEST_CHANNEL} request: ${describeError(err)}`);
 		}
 	};
-	/**
-	 * `plannotator:session-opened` for a review this request opened (#1589).
-	 * The bus only, on a microtask, guarded against a stale runtime: see
-	 * session-events.ts.
-	 */
 	const announceSessionOpened = (
 		ctx: ExtensionContext,
 		action: PlannotatorSessionAction,
@@ -411,8 +361,6 @@ export function registerPlannotatorEventListeners(
 			piSessionId = undefined;
 		}
 		return openSessionEvent(pi, () => sessionLive, {
-			// Unique among the open reviews: the ones announced, and the ones
-			// the `plannotator` tool lists (the process registry).
 			id: newSessionEventId((id) => getProcessPiReviewRegistry().openAll().some((review) => review.id === id)),
 			action,
 			url,
@@ -421,7 +369,6 @@ export function registerPlannotatorEventListeners(
 			...(ids.reviewId ? { reviewId: ids.reviewId } : {}),
 		});
 	};
-	/** Wait for a review's decision, announcing its open and close on the bus. */
 	const awaitAnnounced = async <T extends { approved?: boolean; exit?: boolean; closedBy?: string }>(
 		ctx: ExtensionContext,
 		action: PlannotatorSessionAction,
@@ -446,8 +393,6 @@ export function registerPlannotatorEventListeners(
 		}
 	};
 
-	// Plannotator event requests are handled against the latest active session.
-	// The active context is intentionally session-scoped and replaced on each session_start.
 	pi.on("session_start", async (_event, ctx) => {
 		sessionLive = true;
 		activeSessionContext.set(ctx);
@@ -507,8 +452,6 @@ export function registerPlannotatorEventListeners(
 						requestId: request.requestId,
 						reviewId: session.reviewId,
 					});
-					// Only to learn when it ends (its decision, or its server stopped):
-					// the decision itself is delivered by onDecision below.
 					void session.waitForDecision().then(
 						(result) => events.close(sessionEndOf(result)),
 						(err: unknown) => events.close(sessionEndOfError(isBrowserSessionStoppedError(err))),
@@ -523,9 +466,7 @@ export function registerPlannotatorEventListeners(
 							permissionMode: result.permissionMode,
 							...(result.answersOnly ? { answersOnly: true } : {}),
 						} satisfies PlannotatorReviewResultEvent;
-						// Recorded first, so `review-status` reports it whatever happens next.
 						storeReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
-						// A replaced session's bus is gone; its replacement asks `review-status`.
 						if (!sessionLive) return;
 						emitReviewResult(reviewResult);
 					});

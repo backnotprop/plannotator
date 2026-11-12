@@ -8,8 +8,6 @@ import { LOCAL_IMAGE_CSP } from "../generated/local-image.ts";
 import { handleImageRequest } from "./handlers.ts";
 import { requestUrl } from "./helpers.ts";
 
-// The Pi mirror of packages/server/local-image-route.test.ts: every /api/image
-// answer keeps an SVG opened directly sandboxed.
 function expectProtected(res: Response): void {
 	expect(res.headers.get("content-security-policy")).toBe(LOCAL_IMAGE_CSP);
 	expect(res.headers.get("x-content-type-options")).toBe("nosniff");

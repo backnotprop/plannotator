@@ -116,10 +116,6 @@ describe("plannotator config", () => {
   });
 
   test("accepts every thinking level Pi supports, including max", () => {
-    // #1304: the whitelist was frozen at pi's Apr-2026 level set, so "max"
-    // (added to pi's ThinkingLevel in 0.84) resolved to nothing at all. The
-    // loop covers the whole list so a level cannot quietly fall out of it; the
-    // compile-time guard in config.ts covers the other direction.
     for (const level of THINKING_LEVELS) {
       const homeDir = makeTempDir("plannotator-config-home-thinking-");
       const cwdDir = makeTempDir("plannotator-config-cwd-thinking-");
@@ -159,12 +155,10 @@ describe("plannotator config", () => {
     const loaded = loadPlannotatorConfig(cwdDir, { projectTrusted: true });
 
     expect(loaded.warnings).toHaveLength(1);
-    // The value, the JSON path and the file are what make the warning actionable.
     expect(loaded.warnings[0]).toContain('"maximum"');
     expect(loaded.warnings[0]).toContain("phases.planning");
     expect(loaded.warnings[0]).toContain(join(projectConfigDir, "plannotator.json"));
     expect(loaded.warnings[0]).toContain('"max"');
-    // Rejected value keeps the inherited level rather than clearing it.
     expect(resolvePhaseProfile(loaded.config, "planning").thinking).toBe("low");
   });
 
@@ -323,12 +317,8 @@ describe("plannotator config", () => {
 
     expect(loaded.warnings).toEqual([]);
     expect(planning.instructions).toContain("[PLANNOTATOR - PLANNING PHASE]");
-    // The framing is a conversation message, never a system prompt, so the
-    // retired composition variable must not appear anywhere.
     expect(planning.instructions).not.toContain("${baseSystemPrompt}");
     expect(executing.instructions).not.toContain("${baseSystemPrompt}");
-    // Executing framing supersedes the stale planning rules in history and
-    // carries an entry-time todo snapshot.
     expect(executing.instructions).toContain("planning phase is over");
     expect(executing.instructions).toContain("${planFilePath}");
     expect(executing.instructions).toContain("${todoList}");
@@ -353,7 +343,6 @@ describe("plannotator config", () => {
     const loaded = loadPlannotatorConfig(cwdDir, { projectTrusted: true });
     const executing = resolvePhaseProfile(loaded.config, "executing");
 
-    // The obsolete key is ignored: the shipped instructions still apply.
     expect(executing.instructions).toContain("[PLANNOTATOR - EXECUTING PLAN]");
     expect(executing.instructions).not.toContain("OLD EXECUTING");
     expect(loaded.warnings).toHaveLength(1);

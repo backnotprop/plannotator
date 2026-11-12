@@ -1,14 +1,3 @@
-/**
- * Annotate server (Pi/Node): embedded local documents
- *
- * Node mirror of `annotate embedded local documents` in
- * packages/server/annotate-html-assets.test.ts. The decision logic is shared
- * (`resolveHtmlAssetRoute` in packages/shared/html-assets.ts, vendored here),
- * so what this pins is the Node transport over it: the sandbox CSP and nosniff
- * reach the wire, a framed miss renders an HTML document rather than the app,
- * and the traversal guard still holds.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,8 +30,6 @@ describe("pi annotate server: embedded local documents", () => {
 		else process.env.PLANNOTATOR_ANNOTATE_HISTORY = savedHistoryFlag;
 	});
 
-	// realpath: containment realpaths the root but keeps a missing target's
-	// lexical path, which on macOS's symlinked tmpdir would never match.
 	const siteDir = (label: string) =>
 		realpathSync(mkdtempSync(join(tmpdir(), `plannotator-pi-embed-${label}-`)));
 
@@ -52,8 +39,6 @@ describe("pi annotate server: embedded local documents", () => {
 	): Promise<void> {
 		const dir = siteDir(label);
 		const pagePath = join(dir, "page.html");
-		// The src is assigned by script from data-src, the shape a serve-time
-		// attribute rewrite cannot reach and the <base href> covers.
 		const html =
 			'<!doctype html><html><head></head><body><iframe data-src="embed.html"></iframe></body></html>';
 		writeFileSync(pagePath, html, "utf-8");
@@ -91,8 +76,6 @@ describe("pi annotate server: embedded local documents", () => {
 		});
 	});
 
-	// An SVG opened directly is a scriptable document on the session's origin;
-	// every non-HTML asset gets the sandbox, the PNG too (an <img> load ignores it).
 	test("serves an SVG asset and a PNG with the sandbox CSP and nosniff", async () => {
 		await withSession("svg", async ({ url, base }) => {
 			const svg = await fetch(`${url}${base}chart.svg`);
@@ -137,8 +120,6 @@ describe("pi annotate server: embedded local documents", () => {
 		}
 	});
 
-	// The bug: the catch-all answering a nested-document request with the
-	// editor app, so every embed rendered a second Plannotator.
 	test("a framed request for an unknown path gets a 404 document, never the app", async () => {
 		await withSession("framed", async ({ url }) => {
 			const response = await fetch(`${url}/prototype-slash.html`, {
@@ -152,8 +133,6 @@ describe("pi annotate server: embedded local documents", () => {
 		});
 	});
 
-	// The #1561 regression: the guard keyed on Sec-Fetch-Dest alone, so the app
-	// document 404'd too — and the VS Code extension frames the session URL.
 	test("a framed request for the app document still gets the app shell", async () => {
 		await withSession("framed-root", async ({ url }) => {
 			for (const path of ["/", "/?x=1"]) {

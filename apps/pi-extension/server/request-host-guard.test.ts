@@ -1,8 +1,3 @@
-/**
- * The Pi guard's WebSocket half: node:http hands an upgrade to every
- * `upgrade` listener (the annotate agent terminal attaches one), so the guard
- * intercepts the event. A refused Host must never reach the listener.
- */
 import { afterEach, expect, test } from "bun:test";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -20,10 +15,6 @@ afterEach(async () => {
 	server = undefined;
 });
 
-// Real Node answers the refused upgrade with the guard's 403 and completes
-// the allowed one; Bun's node:http emulation (which runs this suite) does not
-// relay raw bytes written to an upgrade socket, so both read as a closed
-// socket there. What must hold in both is who reached the listener.
 function upgrade(port: number, host: string): Promise<number | "upgraded" | "closed"> {
 	return new Promise((resolve) => {
 		const req = request({

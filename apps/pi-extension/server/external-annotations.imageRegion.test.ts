@@ -1,8 +1,3 @@
-/**
- * Node mirror of packages/server/external-annotations.imageRegion.test.ts
- * (#2100): POST and PATCH validate `imageRegion` with the same fail-closed
- * parser on the Pi server.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";

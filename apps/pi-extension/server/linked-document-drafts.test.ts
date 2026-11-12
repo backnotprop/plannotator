@@ -1,10 +1,3 @@
-/**
- * Pi servers: linked documents' drafts in plan review and in annotate
- * sessions without a file (#1545). Same scenarios as the Bun servers
- * (packages/server/linked-document-drafts.scenarios.ts), so the mirror cannot
- * drift. Pi's plan server serves only project files, so the Bun-only
- * plan-file allowance scenario is left out (`planFileDocuments`).
- */
 import { defineLinkedDocumentDraftScenarios } from "../../../packages/server/linked-document-drafts.scenarios.ts";
 import { startPlanReviewServer } from "./serverPlan.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";

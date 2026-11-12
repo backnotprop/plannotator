@@ -1,14 +1,3 @@
-/**
- * Annotate's live app mode never proxies a Plannotator server (Pi side; the
- * Bun mirror is packages/server/live-proxy-plannotator.test.ts).
- *
- * Over the vendored modules the Pi extension runs: the Pi servers mark their
- * responses and refuse a request the live proxy forwarded; the probe refuses
- * a target by port (the data dir's registries) and by the Plannotator server
- * header, and `--app` says so; the node:http proxy refuses the editor's own
- * port and never lets a proxied same-origin write reach a scratch Inbox or a
- * Pi annotate server.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer as createNetServer } from "node:net";
@@ -122,7 +111,6 @@ describe("pi: annotate's live app mode never proxies a Plannotator server", () =
 		expect(portProbe).toMatchObject({ liveEligible: false, plannotator: true });
 		expect(requests).toBe(0);
 
-		// A Pi server is in no registry: its header decides.
 		const pi = await piAnnotate();
 		const headerProbe = await probeLiveAppTarget(`${pi.url}/`, new URL(`${pi.url}/`));
 		expect(headerProbe).toMatchObject({ liveEligible: false, plannotator: true, probeError: null });
@@ -158,11 +146,6 @@ describe("pi: annotate's live app mode never proxies a Plannotator server", () =
 	});
 });
 
-/**
- * The node proxy in a REAL node process: under Bun's node:http shim, writes
- * to an 'upgrade' socket never reach the wire (see
- * packages/shared/live-proxy-node.child.ts), so WebSocket cases run there.
- */
 async function nodeProxyTo(targetUrl: string): Promise<number> {
 	const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-live-ws-"));
 	cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
@@ -197,7 +180,6 @@ async function nodeProxyTo(targetUrl: string): Promise<number> {
 	return (JSON.parse(banner.split("\n")[0]!) as { port: number }).port;
 }
 
-/** A raw WebSocket handshake to `port`; resolves with the response head. */
 function rawUpgrade(port: number, extra: Record<string, string> = {}): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const socket = connect(port, "127.0.0.1", () => {

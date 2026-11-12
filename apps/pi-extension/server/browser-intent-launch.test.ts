@@ -1,15 +1,3 @@
-/**
- * PLANNOTATOR_BROWSER=none opens nothing on Pi, proved on a real process.
- *
- * Each case runs a child process with an explicit environment (nothing
- * inherited) whose PATH holds only stand-in `open`, `xdg-open` and `glimpseui`
- * scripts that append to a log, plus a scratch data dir. Every way Pi's
- * openBrowser can launch something leaves a trace here, and a mistake can
- * never open a real browser: the real openers are not on PATH.
- *
- * The control case (BROWSER=true, #756) shows the stand-ins are reached when
- * the default chain runs.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -84,7 +72,6 @@ async function run(
 	return { result: JSON.parse(stdout), stderr };
 }
 
-/** Pi launches detached: wait for the stand-in's line, or give it time to show up. */
 async function settledLaunches(wanted?: string): Promise<string> {
 	const deadline = Date.now() + (wanted ? 3000 : 400);
 	while (Date.now() < deadline) {
@@ -110,7 +97,6 @@ describe.if(posix)("PLANNOTATOR_BROWSER=none on the Pi runtime", () => { // no-b
 		}, 30_000);
 	}
 
-	// #756 stays: BROWSER=true is read as unset, so the default chain runs.
 	test("BROWSER=true still launches the default opener locally", async () => {
 		const opener = process.platform === "darwin" ? "open" : "xdg-open";
 		const { result } = await run(false, { BROWSER: "true" });

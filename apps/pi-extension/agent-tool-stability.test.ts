@@ -1,26 +1,3 @@
-/**
- * The `plannotator` tool must not move under a running Pi session.
- *
- * Pi sends the active tool list with every model request, ahead of the
- * conversation, so adding or removing a tool mid-session changes the prompt
- * prefix and throws away the provider's prompt cache for the rest of the
- * session. Plan mode is the risky part: it adds and releases tools at every
- * phase change (planning, executing, idle, /tree, reload).
- *
- * Driven through the real extension over a fake Pi that records every
- * registerTool and setActiveTools call and models both activation rules the
- * peer range spans: Pi before 0.99 activates every registered tool, Pi 0.99+
- * honors `defaultActive: false`.
- *
- * What regresses if this fails:
- *  - a phase change drops or re-adds `plannotator` (cache miss mid-session);
- *  - the tool is activated (or deactivated) after the first request;
- *  - a print/JSON session sees a tool that can never deliver its decision;
- *  - the tool's definition drifts from the shared contract, or a
- *    plannotator tool starts adding promptSnippet/promptGuidelines (which Pi
- *    folds into the system prompt);
- *  - the agent tool switch stops keeping the tool out (off is Pi's default).
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,7 +27,6 @@ function restore(name: string, value: string | undefined): void {
 	else process.env[name] = value;
 }
 beforeEach(() => {
-	// Off by default on Pi; the lifecycle tests are about the tool once on.
 	process.env.PLANNOTATOR_AGENT_TOOL = "1";
 });
 afterEach(() => {
@@ -68,25 +44,20 @@ function makeTempDir(prefix: string): string {
 	return dir;
 }
 
-/** Pi's rule for which registered tools a (re)build activates. */
 type PiActivation = "pre-0.99" | "0.99+";
 
 type ToolDefinition = Record<string, unknown> & { name: string; execute: (...args: unknown[]) => Promise<any> };
 
 function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: boolean }) {
 	const cwd = makeTempDir("plannotator-tool-stability-");
-	// Isolate Pi-side config lookup (never the developer's ~/.pi).
 	const home = makeTempDir("plannotator-tool-stability-home-");
 	process.env.HOME = home;
 	process.env.PI_CODING_AGENT_DIR = join(home, ".pi", "agent");
 	writeFileSync(join(cwd, "PLAN.md"), PLAN);
 
 	const state = { activeTools: [...PI_DEFAULT_TOOLS] };
-	/** Every registerTool call, across reloads. */
 	const registrations: ToolDefinition[] = [];
-	/** Every setActiveTools call, in order, with what it changed for `plannotator`. */
 	const setLog: Array<{ step: string; before: boolean; after: boolean }> = [];
-	/** `plannotator` active at each model request. */
 	const requests: Array<{ step: string; active: boolean }> = [];
 	const beforeAgentStartResults: unknown[] = [];
 	const entries: Array<{ type: string; customType: string; data: unknown }> = [];
@@ -105,7 +76,6 @@ function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: 
 		model: undefined,
 		modelRegistry: { find: () => undefined },
 		sessionManager: {
-			// The path /tree and resume re-derive phase state from.
 			getBranch: () => entries,
 			getEntries: () => entries,
 			getSessionId: () => "stability-session",
@@ -144,15 +114,12 @@ function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: 
 	let tools = new Map<string, ToolDefinition>();
 	let commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
 
-	/** One extension instance, as Pi builds it on startup and on every /reload. */
 	function load(previousActive: string[] | null): void {
 		handlers = new Map();
 		tools = new Map();
 		commands = new Map();
 		const loaded: ToolDefinition[] = [];
 		const pi = {
-			// Oh My Pi's ExtensionAPI also carries its schema builder and SDK module
-			// (what apps/pi-extension/pi-host.ts reads); Pi's never does.
 			...(options.ohMyPi ? { arktype: () => undefined, pi: {} } : {}),
 			events: { on: () => () => undefined, emit: () => undefined },
 			on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
@@ -181,9 +148,6 @@ function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: 
 			sendUserMessage: (text: string) => sentUserMessages.push(text),
 		};
 		plannotator(pi as never, { startPlanReview, hasPlanBrowserHtml: () => true });
-		// Pi's _refreshToolRegistry after the extensions load: the previous
-		// active list (on reload) or the defaults, plus the registered tools its
-		// version activates on registration.
 		const activated = loaded
 			.filter((tool) => options.activation === "pre-0.99" || tool.defaultActive !== false)
 			.map((tool) => tool.name);
@@ -220,7 +184,6 @@ function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: 
 			load(state.activeTools);
 			await emit("session_start", { reason: "reload" });
 		},
-		/** One model request: before_agent_start, then the tool list Pi sends. */
 		async request(label: string) {
 			step = `request:${label}`;
 			const results = await emit("before_agent_start", { prompt: label, systemPrompt: "BASE" });
@@ -257,7 +220,6 @@ function createPi(options: { activation: PiActivation; hasUI: boolean; ohMyPi?: 
 
 type Harness = ReturnType<typeof createPi>;
 
-/** The whole plan-mode lifecycle, with a model request wherever a turn would run. */
 async function runLifecycle(pi: Harness): Promise<void> {
 	await pi.start();
 	await pi.request("idle");
@@ -270,21 +232,17 @@ async function runLifecycle(pi: Harness): Promise<void> {
 	await pi.request("execution turn");
 	await pi.markDone(1);
 	await pi.request("after mark_done");
-	// The approval turn ends (Pi then continues the plan), then the turn that
-	// completed the last step ends: the plan is complete and Plannotator idles.
 	await pi.agentEnd("agent_end after approval");
 	await pi.agentEnd("agent_end complete");
 	expect(pi.lastPhase()).toBe("idle");
 	await pi.request("idle after completion");
 
-	// Plan mode off mid-plan.
 	await pi.togglePlanMode("plan mode on again");
 	await pi.request("second planning turn");
 	await pi.togglePlanMode("plan mode off mid-plan");
 	expect(pi.lastPhase()).toBe("idle");
 	await pi.request("idle after leaving plan mode");
 
-	// /tree back onto a path that is planning, then a reload.
 	await pi.togglePlanMode("plan mode on for tree");
 	await pi.tree();
 	await pi.request("after tree");
@@ -292,7 +250,6 @@ async function runLifecycle(pi: Harness): Promise<void> {
 	await pi.request("after reload");
 }
 
-/** setActiveTools calls that added or removed `plannotator`. */
 function toolFlips(pi: Harness) {
 	return pi.setLog.filter((call) => call.before !== call.after);
 }
@@ -305,13 +262,9 @@ describe("the plannotator tool stays put for the whole session", () => {
 
 			expect(pi.requests.length).toBeGreaterThan(8);
 			expect(pi.requests.filter((request) => !request.active)).toEqual([]);
-			// The only change Plannotator may make is the one activation at the
-			// first session_start (Pi 0.99+ leaves it inactive on registration),
-			// before any request was sent.
 			expect(toolFlips(pi)).toEqual(
 				activation === "0.99+" ? [{ step: "session_start", before: false, after: true }] : [],
 			);
-			// Phase changes did run (the log is not trivially empty).
 			expect(pi.setLog.length).toBeGreaterThan(4);
 		});
 
@@ -327,9 +280,6 @@ describe("the plannotator tool stays put for the whole session", () => {
 			await pi.request("after reload");
 
 			expect(pi.requests.filter((request) => request.active)).toEqual([]);
-			// Pi before 0.99 activates it on registration, on startup and again on
-			// /reload; each new instance takes it out at its session_start, before
-			// that session's first request. Nothing else ever touches it.
 			expect(toolFlips(pi)).toEqual(
 				activation === "pre-0.99"
 					? [
@@ -345,7 +295,6 @@ describe("the plannotator tool stays put for the whole session", () => {
 		const pi = createPi({ activation: "0.99+", hasUI: true });
 		await runLifecycle(pi);
 
-		// Two instances: startup and the reload.
 		const mine = pi.registrations.filter((tool) => tool.name === TOOL);
 		expect(mine).toHaveLength(2);
 		for (const tool of mine) {
@@ -353,8 +302,6 @@ describe("the plannotator tool stays put for the whole session", () => {
 			expect(tool.parameters).toBe(PLANNOTATOR_TOOL_INPUT_SCHEMA);
 			expect(tool.defaultActive).toBe(false);
 		}
-		// Pi folds promptSnippet/promptGuidelines into the system prompt; no
-		// Plannotator tool may add to it.
 		for (const tool of pi.registrations) {
 			expect([tool.name, "promptSnippet" in tool, "promptGuidelines" in tool]).toEqual([tool.name, false, false]);
 		}
@@ -364,13 +311,10 @@ describe("the plannotator tool stays put for the whole session", () => {
 		const pi = createPi({ activation: "pre-0.99", hasUI: true });
 		await runLifecycle(pi);
 		const results = pi.beforeAgentStartResults.filter((result) => result !== undefined);
-		// Framing messages were delivered, so the handler did return something.
 		expect(results.length).toBeGreaterThan(0);
 		for (const result of results) expect(Object.keys(result as object)).not.toContain("systemPrompt");
 	});
 
-	// Off is the default on Pi (owner's call), and the env var turns it off
-	// over a config.json that turned it on.
 	for (const [label, env] of [["unset (the Pi default)", undefined], ["PLANNOTATOR_AGENT_TOOL=0", "0"]] as const) {
 		test(`the agent tool off, ${label}: never registered, never active, plan mode unaffected`, async () => {
 			if (env === undefined) delete process.env.PLANNOTATOR_AGENT_TOOL;
@@ -384,8 +328,6 @@ describe("the plannotator tool stays put for the whole session", () => {
 		});
 	}
 
-	// Oh My Pi lists an extension tool as one short line, so the tool is on by
-	// default there (owner's call 2026-10-12), with the same lifecycle as Pi.
 	test("Oh My Pi, nothing set: registered and active at every request, never moved after the start", async () => {
 		delete process.env.PLANNOTATOR_AGENT_TOOL;
 		const pi = createPi({ activation: "0.99+", hasUI: true, ohMyPi: true });

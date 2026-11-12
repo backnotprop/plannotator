@@ -1,15 +1,3 @@
-/**
- * jj runtime (Pi/Node): stdout ceiling
- *
- * Node mirror of the "jj runtime output ceiling" block in
- * packages/server/jj.test.ts. Snapshot materialization asks jj for a whole
- * repository tree, so the runtime has to stop READING at the ceiling; measuring
- * the output after buffering it bounds nothing, because the memory is already
- * spent by the time the check runs. Pi spawns through node:child_process rather
- * than Bun.spawn, so the two implementations can drift independently.
- *
- * Skipped when `jj` is not installed (CI runners do not ship it).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

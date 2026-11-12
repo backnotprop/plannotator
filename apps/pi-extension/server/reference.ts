@@ -1,9 +1,3 @@
-/**
- * Document and reference handlers (Node.js equivalents of packages/server/reference-handlers.ts).
- * VaultNode, buildFileTree, walkMarkdownFiles, handleDocRequest,
- * detectObsidianVaults, handleObsidian*, handleFileBrowserRequest
- */
-
 import {
 	existsSync,
 	readdirSync,
@@ -70,61 +64,21 @@ import {
 import type { AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { preloadFile } from "@pierre/diffs/ssr";
 
-/**
- * Subset of AnnotateHistoryResult the folder /api/doc path actually needs.
- * `diffCurrent` is omitted: it always equals the request's own `content` and
- * the client never reads it off this response (the single-file /api/plan
- * payload still returns the full AnnotateHistoryResult, `diffCurrent`
- * included, for legacy shape parity — see serverAnnotate.ts). Mirrors
- * packages/server/reference-handlers.ts.
- */
 export type FolderAnnotateHistory = Omit<AnnotateHistoryResult, "diffCurrent" | "isNew">;
 
 type Res = ServerResponse;
-
-// History eligibility for folder /api/doc documents is `isAnnotatableTextPath`
-// (ANNOTATABLE_TEXT_REGEX in @plannotator/core/annotatable) — the exact set the
-// single-file pipeline snapshots (.md/.mdx/.txt plus the plain-text config
-// formats; no HTML, no .env). Reusing the canonical predicate keeps cross-mode
-// slug continuity: a .yaml with single-file history must diff when opened via
-// its folder too. Mirrors packages/server/reference-handlers.ts.
 
 export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
 	sourceSaveFilePath?: string;
 	sourceSaveFolderPath?: string;
-	/** A review of several files: the real paths of its own files that source save may write
-	 *  (`resolveBundleSourceSavePaths`). Every other document stays read-only. */
 	sourceSaveBundlePaths?: ReadonlySet<string>;
 	onSourceDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
-	/** A reader on this machine (`isThisMachineReader`, this-machine-reader.ts): documents are served from anywhere, code files keep the roots (`isDocServeAllowed`). */
 	anyPath?: boolean;
-	/**
-	 * When set, /api/doc runs annotate's per-file version-history pipeline for
-	 * eligible markdown-branch documents (local file under an allowed root,
-	 * any annotatable plain-text extension per `isAnnotatableTextPath`, not
-	 * HTML, not a converted doc, under the annotatable size cap already
-	 * enforced above) and merges `previousPlan`/`versionInfo` into the
-	 * response — the same field names the single-file /api/plan payload uses
-	 * (which additionally returns `diffCurrent`; the folder path omits it
-	 * since it always equals the document's own content and the client never
-	 * reads it). `compute` is expected to memoize per resolved path itself
-	 * (the annotate server keys its cache by path in its own closure); this
-	 * module only decides *whether* to call it.
-	 */
 	annotateHistory?: {
 		compute: (resolvedFilePath: string, content: string) => FolderAnnotateHistory | null;
 	};
-	/**
-	 * Single-file rendered-HTML sessions: when /api/doc serves the session's
-	 * ROOT document (`path` equals the resolved root path) as raw HTML, merge
-	 * the version-diff fields `compute` derives from the bytes just read
-	 * (`previousPlan`/`versionInfo`/`diffHtml`, the same names /api/plan
-	 * uses) into the response. This is what lets the in-app Refresh keep the
-	 * version diff. Every other document is untouched. Mirrors the Bun
-	 * handler in packages/server/reference-handlers.ts.
-	 */
 	rootHtmlVersionDiff?: {
 		path: string;
 		compute: (currentHtml: string) => Record<string, unknown>;
@@ -136,7 +90,6 @@ interface HandleDocExistsOptions {
 	rootPaths?: string[];
 }
 
-// Re-exported for the annotate version endpoints, which import it from here.
 export { resolveAllowedDocPath, type ResolveAllowedDocPathResult };
 
 function sendDocError(res: Res, payload: DocErrorPayload): void {
@@ -155,9 +108,6 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	sourceSnapshot?: SourceFileSnapshot,
 ): DocOptionsResult<T> {
 	const next: Record<string, unknown> = { ...data };
-	// Root-document version diff (see HandleDocOptions.rootHtmlVersionDiff):
-	// computed on the raw bytes, before the asset rewrite below, because the
-	// diff renderer rewrites its own output the same way.
 	if (
 		options.rootHtmlVersionDiff &&
 		data.renderAs === "html" &&
@@ -173,18 +123,9 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	) {
 		next.rawHtml = options.rewriteHtml(next.rawHtml, next.filepath);
 	}
-	// Annotate version history (folder mode only — see HandleDocOptions.annotateHistory).
-	// Independent of the sourceSave branching below: only markdown-branch
-	// documents (not HTML, not converted) with an annotatable plain-text
-	// extension are eligible — the same set the single-file pipeline
-	// snapshots. The 2MB annotatable-file size cap is already enforced by the
-	// caller before any of these responses are built, so no separate check is
-	// needed here. Mirrors packages/server/reference-handlers.ts.
 	if (
 		options.annotateHistory &&
 		typeof data.filepath === "string" &&
-		// Diagram and AsciiDoc sources take the markdown branch's raw text, so
-		// they keep per-file version history exactly like a .txt.
 		(data.renderAs === "markdown" || isDocumentRenderKind(data.renderAs)) &&
 		data.isConverted !== true &&
 		typeof data.markdown === "string" &&
@@ -245,11 +186,6 @@ function jsonDoc(
 	json(res, applyDocOptions(data, options, sourceSnapshot), status);
 }
 
-/**
- * Recursively walk a directory collecting files by extension, skipping ignored
- * dirs. The default matcher is resolved per call, not captured at module load:
- * it includes the user's configured extra markdown extensions (#1307).
- */
 function walkMarkdownFiles(dir: string, root: string, results: string[], extensions: RegExp = getAnnotatableDocRegex()): void {
 	let entries: Dirent[];
 	try {
@@ -275,7 +211,6 @@ function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange
 	return getAnnotatableDocRegex().test(relativePath) && !isFileBrowserExcludedPath(relativePath);
 }
 
-/** The render decision is a pure function of resolved path plus `?convert=1`. */
 function readDocument(res: Res, path: string, convert: boolean, options: HandleDocOptions): void {
 	try {
 		if (statSync(path).size > MAX_ANNOTATABLE_FILE_BYTES) {
@@ -291,10 +226,6 @@ function readDocument(res: Res, path: string, convert: boolean, options: HandleD
 			}
 			return;
 		}
-		// A diagram or AsciiDoc source is served as its raw text with the engine
-		// named in `renderAs`; the editor renders a diagram through the same
-		// DiagramBlock a ```mermaid fence uses, and AsciiDoc through its own
-		// block parser, instead of the markdown pipeline.
 		const renderKind = documentRenderKindForPath(path);
 		jsonDoc(res, { markdown: snapshot.text, filepath: path, renderAs: renderKind ?? "markdown" }, options, undefined, snapshot);
 	} catch {
@@ -318,7 +249,6 @@ async function readCodeFile(res: Res, path: string, input: string, parsed: Parse
 			});
 			prerenderedHTML = result.prerenderedHTML;
 		} catch {
-			// Fall back to client-side rendering
 		}
 		json(res, { codeFile: true, contents, filepath: path, prerenderedHTML, line: parsed.line, lineEnd: parsed.lineEnd });
 	} catch {
@@ -326,7 +256,6 @@ async function readCodeFile(res: Res, path: string, input: string, parsed: Parse
 	}
 }
 
-/** Uses the shared doc resolver for parity with the Bun server. */
 export async function handleDocRequest(res: Res, url: URL, options: HandleDocOptions = {}): Promise<void> {
 	const requestedPath = url.searchParams.get("path");
 	if (!requestedPath) {
@@ -335,19 +264,13 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	}
 
 	const allowedRoots = getAllowedRootPaths(options);
-	// Side-channel: warm the code-file walk so /api/doc/exists POSTs land warm.
 	for (const root of allowedRoots) {
 		void warmFileListCache(root, "code");
 	}
 
-	// A base is only honored when it is itself inside an allowed root.
 	const anyPath = options.anyPath === true;
 	const resolvedBase = getTrustedBaseDir(url.searchParams.get("base"), allowedRoots, anyPath);
 	const convert = url.searchParams.get("convert") === "1";
-	// `?doc=1` (set by the file browser) forces annotatable plain-text rendering
-	// for extensions that overlap CODE_FILE_REGEX (.yaml, .json, .toml, .ini,
-	// .xml). Without it, those paths keep the syntax-highlighted code-file
-	// popout response, so code-file links inside documents are unaffected.
 	const forceDoc = url.searchParams.get("doc") === "1";
 
 	const resolution = await resolveDocTarget(requestedPath, {
@@ -356,8 +279,6 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 		roots: allowedRoots,
 		anyPath,
 	});
-	// The one authorization site. A named path is gated whether or not it
-	// exists, so an escaping name is denied rather than reported absent.
 	const named = resolution.kind === "file" || resolution.kind === "not_found" ? resolution.path : undefined;
 	if (named !== undefined && !isDocServeAllowed(named, resolution.kind === "file" ? resolution.render : null, allowedRoots, anyPath)) {
 		sendDocError(res, DOC_ACCESS_DENIED);
@@ -374,10 +295,6 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	readDocument(res, resolution.path, convert, options);
 }
 
-/**
- * Batch existence check for code-file paths the renderer wants to linkify.
- * POST /api/doc/exists with { paths: string[] }.
- */
 export async function handleDocExistsRequest(res: Res, req: IncomingMessage, options?: HandleDocExistsOptions): Promise<void> {
 	const body = await parseBody(req);
 	const paths = (body as { paths?: unknown }).paths;
@@ -425,11 +342,6 @@ export async function handleDocExistsRequest(res: Res, req: IncomingMessage, opt
 	json(res, { results });
 }
 
-/**
- * The Files sidebar and Obsidian routes (`isReferenceReadPath`): refused for
- * another site, and for a reader off this machine outside the session's roots
- * and Obsidian's own vaults (`referenceReadRefusal`). True when it answered.
- */
 export function refuseReferenceRead(req: IncomingMessage, res: Res, url: URL, roots: () => string[]): boolean {
 	if (!isReferenceReadPath(url.pathname)) return false;
 	if (!isSameOriginRequest(req)) {
@@ -467,7 +379,6 @@ export function handleObsidianFilesRequest(res: Res, url: URL): void {
 	}
 }
 
-/** `thisMachine`: the reader is a page on this machine (`vaultDocRefusal`). */
 export function handleObsidianDocRequest(res: Res, url: URL, thisMachine = false): void {
 	const vaultPath = url.searchParams.get("vaultPath");
 	const filePath = url.searchParams.get("path");
@@ -482,7 +393,6 @@ export function handleObsidianDocRequest(res: Res, url: URL, thisMachine = false
 	const resolvedVault = resolveUserPath(vaultPath);
 	let resolvedFile = resolvePath(resolvedVault, filePath);
 
-	// Bare filename search within vault
 	if (!existsSync(resolvedFile) && !filePath.includes("/")) {
 		const files: string[] = [];
 		walkMarkdownFiles(resolvedVault, resolvedVault, files, /\.mdx?$/i);
@@ -504,7 +414,6 @@ export function handleObsidianDocRequest(res: Res, url: URL, thisMachine = false
 		}
 	}
 
-	// Inside the vault (after symlinks too, off this machine), a regular Markdown file, within 2MB.
 	const refusal = vaultDocRefusal(resolvedFile, resolvedVault, thisMachine);
 	if (refusal) {
 		json(res, { error: refusal.error }, refusal.status);
@@ -536,8 +445,6 @@ export async function handleFileBrowserRequest(res: Res, url: URL): Promise<void
 	}
 	try {
 		const workspaceStatus = filterWorkspaceStatusForDirectory(await getWorkspaceStatusForDirectory(resolvedDir), resolvedDir, includeWorkspaceFile);
-		// Pi's file browser had no cap: it applies one only when
-		// PLANNOTATOR_FILE_BROWSER_MAX_FILES is set, and lists every file otherwise.
 		const listing = await listFileBrowserFiles(resolvedDir, {
 			seed: getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile),
 			limit: explicitFileBrowserMaxFiles(),

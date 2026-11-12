@@ -15,11 +15,6 @@ import { resolveUserPath } from "../generated/resolve-file.ts";
 import { getGitMetadataWatchPaths } from "../generated/workspace-status.ts";
 import { json } from "./helpers.ts";
 
-// The watcher engine (deferred warmup, reconnect grace, native recursive
-// backend) lives in the vendored file-browser-watch-core (#1313). This module
-// keeps only the Pi transport: request parsing, the node:http SSE response,
-// and heartbeats.
-
 const HEARTBEAT_MS = 30_000;
 
 function serialize(event: FileBrowserChangeEvent): string {
@@ -40,12 +35,10 @@ const registry: FileBrowserWatchRegistry<ServerResponse> = createFileBrowserWatc
 
 export { createExactFileWatchListener };
 
-/** Immediate teardown of every live watcher. Server stop and tests. */
 export function closeAllFileBrowserWatchers(): void {
 	registry.closeAll();
 }
 
-/** Tests only. See FileBrowserWatchRegistry.diagnostics/configureForTests. */
 export const __fileBrowserWatchTestHooks = {
 	diagnostics: () => registry.diagnostics(),
 	configure: (overrides: Parameters<FileBrowserWatchRegistry<ServerResponse>["configureForTests"]>[0]) =>

@@ -4,8 +4,6 @@ export interface PiAnnotateDecision {
 	approved?: boolean;
 	selectedMessageId?: string;
 	feedbackScope?: "message" | "messages";
-	/** The editor's Done with nothing to send: `feedback` still carries the
-	 *  legacy zero-state sentence, but there is nothing for the agent. */
 	nothingToSend?: boolean;
 }
 
@@ -28,8 +26,6 @@ export function classifyAnnotateOutcome(
 			promptKind: result.feedback ? "approved-with-notes" : null,
 		};
 	}
-	// A Done with nothing to send closes quietly ("Annotation closed (no
-	// feedback)."), like empty feedback: no follow-up turn.
 	const feedback = result.nothingToSend === true ? "" : result.feedback;
 	return {
 		feedback: feedback || null,

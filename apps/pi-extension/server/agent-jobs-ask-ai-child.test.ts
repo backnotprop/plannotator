@@ -1,15 +1,3 @@
-/**
- * Pi (Node) mirror of packages/server/agent-jobs-ask-ai-child.test.ts: every
- * agent job the Pi review server starts (code review, Code Tour, Guided
- * Review; Claude, Codex and the marker engines) runs with Plannotator's own
- * integration off: PLANNOTATOR_ASK_AI_CHILD=1 with the Inbox tool and agent
- * tool switches at 0 in its env, the Codex `-c` override that turns the Inbox
- * MCP server off, and the Claude disallow of `mcp__plannotator-inbox`.
- *
- * Each job is built by its real (vendored) command builder and spawned through
- * the real POST /api/agents/jobs handler. Fake `claude`, `codex` and
- * `opencode` on PATH (never a real CLI) record the env and argv they get.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -47,14 +35,12 @@ beforeEach(() => {
 		chmodSync(fake, 0o755);
 	}
 	saved = Object.fromEntries(SANDBOX_KEYS.map((key) => [key, process.env[key]]));
-	// Only the fakes and the system tools: no real agent CLI is reachable.
 	process.env.PATH = `${bin}:/usr/bin:/bin`;
 	process.env.HOME = join(root, "home");
 	process.env.CODEX_HOME = join(root, "codex-home");
 	process.env.PLANNOTATOR_DATA_DIR = join(root, "data");
 	process.env.PLANNOTATOR_INBOX_CONNECT = "0";
 	process.env.NO_BROWSER = NO_BROWSER;
-	// The person's own switches, which a job must override, not inherit.
 	process.env.PLANNOTATOR_INBOX_TOOL = "1";
 	process.env.PLANNOTATOR_AGENT_TOOL = "1";
 	delete process.env.PLANNOTATOR_ASK_AI_CHILD;
@@ -68,7 +54,6 @@ afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
 });
 
-/** Launch one job through the real handler; resolve with what the fake recorded. */
 async function runJob(provider: string, build: (cwd: string) => Promise<Built>, engine?: string): Promise<JobRecord> {
 	let done: (() => void) | undefined;
 	const completed = new Promise<void>((resolve) => {
@@ -123,16 +108,13 @@ const JOBS: Array<{ name: string; provider: string; engine?: string; build: (cwd
 describe("pi agent jobs never load Plannotator's own integration", () => {
 	for (const job of JOBS) {
 		test(`${job.name}: the agent gets the marker and both switches off`, async () => {
-			if (process.platform === "win32") return; // the fakes rely on a shebang
+			if (process.platform === "win32") return;
 			const { env, argv } = await runJob(job.provider, job.build, job.engine);
 			expect(env).toEqual({ PLANNOTATOR_ASK_AI_CHILD: "1", PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0" });
-			// Only the job's env changed: the server's (the person's session) did not.
 			expect(process.env.PLANNOTATOR_ASK_AI_CHILD).toBeUndefined();
 			expect(process.env.PLANNOTATOR_INBOX_TOOL).toBe("1");
 
 			if (job.name.endsWith("Codex")) {
-				// Codex starts a stdio MCP server with none of this env, so the
-				// Inbox server is turned off by a global `-c`, before `exec`.
 				const at = argv.findIndex((arg) => arg.startsWith("mcp_servers.plannotator-inbox="));
 				expect(at).toBeGreaterThan(0);
 				expect(argv[at - 1]).toBe("-c");
