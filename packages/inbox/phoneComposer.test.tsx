@@ -330,7 +330,7 @@ test.skipIf(!hasDom)('a phone: To is a pill in the foot\'s row with no To line a
   expect(row.querySelector('.ib-sheet-t')!.textContent).toBe('Claude Code');
   expect(row.querySelector('.ib-sheet-d')!.textContent).toContain('acme-web');
   // The running sessions, then the start rows.
-  expect(q('[data-compose-start-caption]')!.textContent).toContain('Start a new session in');
+  expect([...document.querySelectorAll('[data-compose-to-sheet] [data-compose-cap]')].map((cap) => cap.textContent)).toEqual(['Running', 'Start new']);
   await click(row);
   expect(q('[data-compose-to-sheet][data-shown]')).toBeNull();
   expect(to().getAttribute('data-compose-to')).toBe('ses_claude');

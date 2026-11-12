@@ -31,12 +31,13 @@
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAuthor, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
-import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
+import { InboxApiError, InboxHeldError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import type { ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
-import { SessionDetail, ToPicker, startKey } from './ToPicker';
+import { SessionDetail, ToPicker } from './ToPicker';
+import { HERE, toStartKey, type ToMachine } from './toMachines';
 import { PhoneToSheet } from './PhoneToSheet';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
 import { useLaunchChoice } from './useLaunchChoice';
@@ -44,7 +45,8 @@ import { unpluggedDrive } from './homeFolders';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
 import { TrustDetails } from './TrustDetails';
 import { isLongPaste } from './pastedText';
-import { useComposeSessions, type ComposeSessionsLoader } from './useComposeSessions';
+import { useComposeSessions, withGivenSessionNames, type ComposeSessionsLoader } from './useComposeSessions';
+import { useAgentNames } from '../agents/agentNames';
 import { useMachineLaunches } from './useMachineLaunches';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
 import { ARM_MS } from '../components/PermissionCard';
@@ -92,6 +94,7 @@ import {
   cloneOfUrl,
   defaultStartProject,
   launchGroups,
+  machineLaunchNotice,
   projectWithAgent,
   type LaunchHistory,
   type MachineLaunchProject,
@@ -434,15 +437,38 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Linked machines (remote launch): each one's launch block, read through the forward while launch is on here.
   const there = useMachineLaunches(!transport && !!model?.launch, trustPick?.machine ? { agent: trustPick.agent, project: trustPick.projectId, machine: trustPick.machine } : null);
   const load = async () => {
-    await Promise.all([loadHere(), startPick?.machine ? there.readOne(startPick.machine) : null]);
+    const machine = startPick?.machine ?? targetOn;
+    await Promise.all([loadHere(), machine ? there.readOne(machine) : null]);
   };
   const voice = useVoiceSession();
   const onlyProjects = pulls?.projects ?? (linkOnly && linkOnly.projects.length > 0 ? linkOnly.projects : null);
   // A link's PR in no project: nowhere is wrong, and a new scratch folder is the default where launching can.
   const linkScratch = !!linkOnly && linkOnly.projects.length === 0;
   const projects = useMemo(() => (model?.projects ?? []).filter((g) => !onlyProjects || (g.project.id !== null && onlyProjects.includes(g.project.id))), [model, onlyProjects?.join()]);
-  const target = findTarget(projects, chosen);
-  const anyLive = composeTargets(projects).length > 0;
+  // To's machine switch (approval "inbox-launcher-machine-switch"): each linked machine's live sessions, from its last
+  // read. Not for New review or a pull request's message: those go to an agent on this computer, in their projects.
+  const otherMachines = !transport && !box && !onlyProjects;
+  const agentNames = useAgentNames();
+  const linkedSessions = useMemo(() => {
+    const out = new Map<string, ComposeSessionsModel['projects']>();
+    if (!otherMachines) return out;
+    for (const [id, read] of there.reads) out.set(id, withGivenSessionNames({ serverSession: '', home: read.home ?? '', projects: read.projects ?? [] }, agentNames)?.projects ?? []);
+    return out;
+  }, [otherMachines, there.reads, agentNames]);
+  // The session To names: on this computer, else on a linked machine (`targetOn`, its id), whose Inbox it is sent through.
+  const hereTarget = findTarget(projects, chosen);
+  const linkedTarget = useMemo(() => {
+    if (hereTarget || !chosen) return null;
+    for (const m of there.machines) {
+      const found = !m.self && m.state !== 'revoked' ? findTarget(linkedSessions.get(m.id) ?? [], chosen) : null;
+      if (found) return { target: found, machine: m };
+    }
+    return null;
+  }, [hereTarget, chosen, linkedSessions, there.machines]);
+  const target = hereTarget ?? linkedTarget?.target ?? null;
+  const targetOn = linkedTarget?.machine.id ?? null;
+  const targetMachineName = linkedTarget?.machine.name ?? null;
+  const anyLive = composeTargets(projects).length > 0 || [...linkedSessions.values()].some((p) => composeTargets(p).length > 0);
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
   // Launch: a new session To names instead of a live one (the agent, and the project it starts in).
   // For a pull request (`pulls`): only its projects and no scratch folder, so the default start is where its agent works and nothing else is offered.
@@ -911,7 +937,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
       const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE);
-      const machine = start?.machine ?? null;
+      const machine = start ? start.machine : targetOn;
       const input: StartThreadInput = {
         to: start
           ? {
@@ -944,7 +970,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       };
-      // Another machine's project (remote launch): through the forward, so that machine's Inbox starts the agent there.
+      // Another machine's project (remote launch) or running agent: through the forward, so that machine's Inbox takes it.
       const result = transport ? await transport.startThread(input) : await inboxApi.startThread(input, machine);
       // Drafts stay on this computer (the forward drops `draft_id`): the one this was sent from is done here.
       if (machine && draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
@@ -958,22 +984,22 @@ export function ComposeDialog(props: ComposeDialogProps) {
             // Another machine's project reads as the list's row does: "infra · Mac mini".
             projectName: startMachineName ? `${start.project.name} · ${startMachineName}` : start.project.name,
           }
-        : { session: target!.session, host: target!.host, projectName: target!.project.name };
+        : { session: target!.session, host: target!.host, projectName: targetMachineName ? `${target!.project.name} · ${targetMachineName}` : target!.project.name };
       if (box) forgetUnsentReview();
-      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: start?.machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(start?.machine ? { machine: start.machine } : {}) });
+      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) });
     } catch (cause) {
-      if (cause instanceof InboxHeldError && start?.machine && props.onHeld) {
+      if (cause instanceof InboxHeldError && (start?.machine || targetOn) && props.onHeld) {
         // That machine's Inbox could not take it now (asleep, or slow): it waits in this Inbox's outbox and starts there
         // when it is back. Compose closes; the window's toast offers Cancel while it has not left.
         if (draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
         props.onHeld({
           key: cause.outbox.key,
           queued: cause.outbox.state === 'queued',
-          machineName: cause.machine?.name ?? startMachineName ?? 'the other machine',
+          machineName: cause.machine?.name ?? startMachineName ?? targetMachineName ?? 'the other machine',
           asleep: cause.machine ? cause.machine.state === 'offline' : startAsleep,
-          agentName: start.name,
+          agentName: start ? start.name : hostLabel(target!.host),
           // E9: what that machine does first when it's back.
-          ...(start.clone ? { first: `clones ${start.clone.slug}` } : start.create ? { first: `makes ${start.project.name}` } : {}),
+          ...(start?.clone ? { first: `clones ${start.clone.slug}` } : start?.create ? { first: `makes ${start.project.name}` } : {}),
           draftId: draft?.id ?? null,
           words: { body, ...(threadName ? { thread_name: threadName } : {}), ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) },
         });
@@ -1301,7 +1327,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const noAgent = !!model && !anyLive && !canStart && !endedNote;
   const toValue = target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose';
   const toName = target
-    ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change`
+    ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}${targetMachineName ? `, on ${targetMachineName}` : ''}. Change`
     : start
       ? `To: a new ${start.name} session. Change`
       : endedNote
@@ -1346,7 +1372,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <>
               <HostMark host={target.host} agent={target.session} />
               <b>{hostLabel(target.host)}</b>
-              <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
+              {/* Another machine's agent names its machine, as a start there does ("· kiln-render · Atlas"). */}
+              <SessionDetail name={target.project.name} root={target.project.root} label={target.label} suffix={targetMachineName ?? undefined} />
             </>
           ) : endedNote ? (
             <>
@@ -1462,7 +1489,40 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (target) afterPicker();
     else (toRef.current ?? textRef.current)?.focus();
   };
-  const toSelected = target?.session ?? (start ? startKey(start.agent) : null);
+  const toSelected = target?.session ?? (start ? toStartKey(start.machine, start.agent, start.project.id) : null);
+  // The switch's machines: this computer, then each linked one with its live sessions and what can start there.
+  const toMachines = useMemo<ToMachine[]>(() => {
+    const here: ToMachine = { key: HERE, machine: null, name: selfView?.name ?? 'This computer', self: true, asleep: false, since: null, home, groups, launch: toStart ? toStart.launch : null, notice: null };
+    if (!otherMachines || !there.machines.some((m) => !m.self && m.state !== 'revoked')) return [here];
+    // A fresh Inbox's scratch folder stands in as its one project, as `startLaunch` does.
+    const withScratch = (block: NonNullable<typeof model>['launch'], machine: { id: string; name: string } | null): ToMachine['launch'] => {
+      if (!block || block.agents.length === 0) return null;
+      const on = (p: MachineLaunchProject): MachineLaunchProject => (machine ? { ...p, machine: machine.id, machine_name: machine.name } : p);
+      const projects = block.projects.length === 0 && block.scratch ? [scratchProject(block.scratch.root)] : block.projects;
+      return projects.length ? { agents: block.agents, projects: projects.map(on) } : null;
+    };
+    const linked = there.machines
+      .filter((m) => !m.self && m.state !== 'revoked')
+      .map((m): ToMachine => {
+        const read = there.reads.get(m.id);
+        const notice = machineLaunchNotice(m, read);
+        return {
+          key: m.id,
+          machine: m.id,
+          name: m.name,
+          self: false,
+          asleep: m.state === 'offline',
+          since: m.since,
+          home: read?.home ?? null,
+          groups: composeGroups(linkedSessions.get(m.id) ?? [], null, lastSent),
+          launch: notice ? null : withScratch(read?.launch, m),
+          notice,
+        };
+      });
+    return [{ ...here, launch: withScratch(model?.launch, null) }, ...linked];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherMachines, there.machines, there.reads, linkedSessions, selfView?.name, home, groups, toStart?.launch, model?.launch, lastSent]);
+  const toOpensOn = targetOn ?? start?.machine ?? HERE;
 
   const reviewRows = box && (
     <ReviewRows
@@ -1774,9 +1834,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       )}
       {/* The one place To's list splits: a phone's is a bottom sheet (kept mounted, for its way out), a computer's the list under To. */}
       {phone ? (
-        <PhoneToSheet open={picker} host={dialogRef.current} groups={groups} selected={toSelected} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} />
+        <PhoneToSheet open={picker} host={dialogRef.current} groups={groups} selected={toSelected} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} machines={toMachines} opensOn={toOpensOn} />
       ) : (
-        picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} />
+        picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} machines={toMachines} opensOn={toOpensOn} />
       )}
       {launchChoice.menu()}
       {folderMenu && start && launch && (

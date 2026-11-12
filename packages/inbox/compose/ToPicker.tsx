@@ -3,11 +3,10 @@ import { HostMark, Icon } from '../icons';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { tildePath } from '../format';
 import { splitPath } from '../agents';
-import type { InboxComposeLaunch, InboxLaunchAgent } from '@plannotator/core/inbox-types';
-import { filterGroups, hostLabel, pickerRows, splitProjectName, startBlock, type ComposeGroup, type ComposeStart, type ComposeTarget, type MachineLaunchProject } from './model';
-
-/** One row of the listbox: a live session, or (launch on) "<agent> New session". Keyed so a re-read never moves the highlight. */
-type PickerOption = { key: string; target: ComposeTarget; started: string | null; start?: undefined } | { key: string; start: ComposeStart; target?: undefined };
+import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
+import { busyWord, hostLabel, splitProjectName, type ComposeGroup, type ComposeStart, type ComposeTarget } from './model';
+import { MachineSwitch } from './MachineSwitch';
+import { asleepSince, HERE, inParts, pickable, toItemOn, toItems, type ToItem, type ToMachine } from './toMachines';
 
 /**
  * The To picker (compose; approval "inbox-compose-to-picker"): a filter field
@@ -25,10 +24,9 @@ type PickerOption = { key: string; target: ComposeTarget; started: string | null
  * the auto-fill compose dropped); typing or an arrow key highlights the first row.
  * Focus stays in the filter (`aria-activedescendant`).
  *
- * Launch on (`start`): after the live sessions, under a hairline, one caption
- * "Start a new session in <project>" and one row per available agent (UX
- * screen 01). They join the arrow and Enter order; a filter word that names a
- * project moves the caption to it.
+ * Launch on (`start`), or `machines` (approval "inbox-launcher-machine-switch", `toMachines.ts`): "Running" then
+ * "Start new", one row per agent kind ("+ Claude Code in kiln-render"); with two or more machines a switch on top
+ * shows one machine at a time, each running row ends in its state, and typing looks across every machine.
  */
 export function ToPicker({
   groups,
@@ -39,53 +37,64 @@ export function ToPicker({
   onClose,
   start,
   onStart,
+  machines,
+  opensOn,
 }: {
   groups: readonly ComposeGroup[];
-  /** The session To names, or `start:<agent>` for a start. */
+  /** The session To names, or a start row's key (`toStartKey`). */
   selected: string | null;
   home: string | null;
   phone: boolean;
-  onPick: (target: ComposeTarget) => void;
+  /** `machine`: the linked machine the session is on; null for this computer. */
+  onPick: (target: ComposeTarget, machine: string | null) => void;
   onClose: () => void;
   /** Launch on: the agents To offers to start and where (`GET /api/inbox/sessions` `launch`). Absent: sessions only, as always. */
   start?: { launch: InboxComposeLaunch; current: { id: string | null; root: string | null } | null } | null;
   onStart?: (start: ComposeStart) => void;
+  /** Every machine To can reach (compose): `groups` and `start` then only give the current project. Absent: this computer's `groups` and `start`. */
+  machines?: readonly ToMachine[];
+  /** The machine the switch opens on (the one To's pick is on). */
+  opensOn?: string;
 }) {
   const [query, setQuery] = useState('');
-  const shown = useMemo(() => filterGroups(groups, query), [groups, query]);
-  const rows = useMemo(() => pickerRows(shown, groups), [shown, groups]);
-  const block = useMemo(() => (start ? startBlock(start.launch, start.current, query) : null), [start, query]);
-  const options = useMemo<PickerOption[]>(
-    () => [
-      ...rows.map((row) => ({ key: row.target.session, target: row.target, started: row.started })),
-      ...(block ? block.agents.map((a) => ({ key: startKey(a.agent), start: { agent: a.agent, name: a.name, project: block.project } })) : []),
-    ],
-    [rows, block],
+  const all = useMemo<readonly ToMachine[]>(
+    () => machines ?? [{ key: HERE, machine: null, name: '', self: true, asleep: false, since: null, home, groups, launch: start ? { agents: start.launch.agents, projects: start.launch.projects } : null, notice: null }],
+    [machines, groups, start, home],
   );
+  const [chosen, setChosen] = useState(opensOn ?? HERE);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const typing = query.trim() !== '';
+  const many = all.length > 1;
+  const items = useMemo(() => toItems({ machines: all, chosen, query, expanded, current: start?.current ?? null }), [all, chosen, query, expanded, start?.current]);
+  const options = useMemo(() => items.filter(pickable), [items]);
+  // Parts and states at the row's end only where something can start or there is a switch: the Board's New card keeps its plain rows.
+  const parts = inParts(all);
   // The highlight follows a row's key, not its number: the list is read again
   // every 5 s, and a re-read that moves rows must not move the highlight.
   // `null`: no row highlighted (-1), only while To is empty and nothing was typed or arrowed.
-  const [hlSession, setHlSession] = useState<string | null>(null);
-  const found = options.findIndex((o) => o.key === hlSession);
-  const hl = hlSession === null ? -1 : found >= 0 ? found : 0;
-  const setHl = (index: number) => setHlSession(options[index]?.key ?? null);
-  const pick = (option: PickerOption | undefined) => {
-    if (option?.start) onStart?.(option.start);
-    else if (option?.target) onPick(option.target);
+  const [hlKey, setHlKey] = useState<string | null>(null);
+  const found = options.findIndex((o) => o.key === hlKey);
+  const hl = hlKey === null ? -1 : found >= 0 ? found : 0;
+  const setHl = (index: number) => setHlKey(options[index]?.key ?? null);
+  const pick = (option: ToItem | undefined) => {
+    if (option?.type === 'start') onStart?.(option.start);
+    else if (option?.type === 'session') onPick(option.row.target, option.machine.machine);
+    else if (option?.type === 'more') setExpanded((had) => new Set([...had, option.machine.key]));
   };
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const optionId = (i: number) => `ib-cp-o-${uid}-${i}`;
   const inputRef = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
 
-  // The highlight starts on the session To names, else on no row (To empty); a filter snaps it to the first row.
+  // The highlight starts on the row To names, else on no row (To empty); a filter snaps it to the first row, and
+  // another machine starts with none.
   useLayoutEffect(() => {
-    const at = options.findIndex((o) => o.key === selected);
-    if (query === '') setHlSession(at >= 0 ? options[at]!.key : null);
+    const at = options.find((o) => toItemOn(o, selected, typing));
+    if (query === '') setHlKey(at ? at.key : null);
     else setHl(0);
-    // Only the filter moves it; the re-read keeps the session it is on.
+    // Only the filter and the switch move it; the re-read keeps the row it is on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, chosen]);
   useEffect(() => inputRef.current?.focus(), []);
   useLayoutEffect(() => {
     document.getElementById(optionId(hl))?.scrollIntoView?.({ block: 'nearest' });
@@ -129,6 +138,20 @@ export function ToPicker({
     }
   };
 
+  const optionIndex = new Map(options.map((o, i) => [o.key, i]));
+  const rowProps = (item: ToItem) => {
+    const i = optionIndex.get(item.key) ?? -1;
+    return {
+      id: i >= 0 ? optionId(i) : undefined,
+      role: 'option' as const,
+      'aria-selected': i >= 0 && i === hl,
+      onPointerMove: () => i >= 0 && i !== hl && setHl(i),
+      onMouseDown: (event: { preventDefault: () => void }) => event.preventDefault(),
+      onClick: () => pick(item),
+      hl: i >= 0 && i === hl,
+    };
+  };
+
   return (
     <div className="ib-cp-picker" ref={ref} data-compose-picker="" data-phone={phone ? '' : undefined} onKeyDown={onKey}>
       {phone && (
@@ -158,62 +181,105 @@ export function ToPicker({
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
+      {/* Typing looks across every machine: the switch steps aside. */}
+      {many && !typing && <MachineSwitch machines={all} chosen={chosen} onChoose={setChosen} />}
       <div
         className="ib-cp-list"
         role="listbox"
         id={`ib-cp-list-${uid}`}
         aria-label="Live agent sessions"
-        data-session-labels={rows.some((row) => row.target.label) ? '' : undefined}
+        data-session-labels={items.some((item) => item.type === 'session' && item.row.target.label) ? '' : undefined}
       >
-        {options.length === 0 && <div className="ib-cp-none">No live session matches.</div>}
-        {options.map((option, i) => {
-          if (option.start) {
-            const s = option.start;
+        {items.length === 0 && <div className="ib-cp-none">{typing && parts ? `Nothing matches “${query.trim()}”` : 'No live session matches.'}</div>}
+        {items.map((item) => {
+          if (item.type === 'cap') {
             return (
-              <Fragment key={option.key}>
-                {i === rows.length && (
-                  <div className={`ib-cp-cap${rows.length ? ' ib-cp-cap-line' : ''}`} aria-hidden="true" data-compose-start-caption="">
-                    Start a new session in <b dir="auto">{s.project.name}</b>
-                    {/* Another machine's project (remote launch) names its machine, as the list's rows do. */}
-                    {(s.project as MachineLaunchProject).machine_name ? <> · {(s.project as MachineLaunchProject).machine_name}</> : null}
-                  </div>
-                )}
-                <div
-                  id={optionId(i)}
-                  role="option"
-                  aria-selected={i === hl}
-                  aria-label={`New ${s.name} session in ${s.project.name}${(s.project as MachineLaunchProject).machine_name ? `, on ${(s.project as MachineLaunchProject).machine_name}` : `, ${tildePath(s.project.root, home)}`}`}
-                  className={`ib-cp-opt ib-cp-start${i === hl ? ' ib-hl' : ''}`}
-                  data-compose-start={s.agent}
-                  onPointerMove={() => i !== hl && setHl(i)}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => pick(option)}
-                >
-                  <HostMark host={s.agent} />
-                  <b className="ib-cp-oa">{s.name}</b>
-                  <span className="ib-cp-ons">New session</span>
-                  <span className="ib-cp-check" aria-hidden="true">
-                    {option.key === selected && <Icon name="check" size={15} />}
-                  </span>
-                </div>
-              </Fragment>
+              <div key={item.key} className="ib-cp-cap" aria-hidden="true" data-compose-cap={item.key.split(':')[1]}>
+                {item.words}
+              </div>
             );
           }
-          const { target, started } = option;
-          const folder = tildePath(target.project.root, home);
+          if (item.type === 'head') {
+            const m = item.machine;
+            return (
+              <div key={item.key} className="ib-cp-mhd" aria-hidden="true" data-compose-machine-head={m.key}>
+                <Icon name={m.asleep ? 'moon' : 'laptop'} size={14} />
+                <bdi>{m.name}</bdi>
+                {(m.self || m.asleep) && <span>· {m.self ? 'this computer' : asleepSince(m)}</span>}
+              </div>
+            );
+          }
+          if (item.type === 'notice') {
+            return (
+              <div key={item.key} className="ib-cp-opt ib-cp-fnotice" aria-disabled="true" data-compose-start-notice="">
+                <Icon name="info" size={15} />
+                <span className="ib-cp-op">{item.words}</span>
+              </div>
+            );
+          }
+          if (item.type === 'missing') {
+            return (
+              <div key={item.key} className="ib-cp-opt ib-cp-st" role="option" aria-selected={false} aria-disabled="true" data-compose-start-missing={item.agent}>
+                <span className="ib-cp-plus" aria-hidden="true">
+                  <Icon name="plus" size={12} />
+                </span>
+                <span className="ib-cp-stk">{item.name}</span>
+                <span className="ib-cp-stend">Not on {item.machine.name}</span>
+              </div>
+            );
+          }
+          if (item.type === 'more') {
+            const { hl: on, ...props } = rowProps(item);
+            return (
+              <div key={item.key} {...props} className={`ib-cp-opt ib-cp-st ib-cp-more${on ? ' ib-hl' : ''}`} data-compose-more-running={item.machine.key}>
+                {item.count} more running
+              </div>
+            );
+          }
+          if (item.type === 'start') {
+            const s = item.start;
+            const { hl: on, ...props } = rowProps(item);
+            const m = item.machine;
+            return (
+              <div
+                key={item.key}
+                {...props}
+                aria-label={`New ${s.name} session in ${s.project.name}${m.machine ? `, on ${m.name}` : `, ${tildePath(s.project.root, m.home)}`}`}
+                className={`ib-cp-opt ib-cp-st ib-cp-start${on ? ' ib-hl' : ''}`}
+                data-compose-start={s.agent}
+                data-compose-start-machine={m.key}
+                data-compose-start-project={s.project.name}
+              >
+                <span className="ib-cp-plus" aria-hidden="true">
+                  <Icon name="plus" size={12} />
+                </span>
+                <HostMark host={s.agent} />
+                <span className="ib-cp-stk">{s.name}</span>
+                <span className="ib-cp-stin" dir="auto">
+                  in {s.project.name}
+                </span>
+                {m.asleep && !toItemOn(item, selected, typing) && <span className="ib-cp-stend">starts when it's back</span>}
+                <span className="ib-cp-check" aria-hidden="true">
+                  {toItemOn(item, selected, typing) && <Icon name="check" size={15} />}
+                </span>
+              </div>
+            );
+          }
+          const { target, started } = item.row;
+          const folder = tildePath(target.project.root, item.machine.home);
+          const { hl: on, ...props } = rowProps(item);
+          const chosenRow = toItemOn(item, selected, typing);
+          // An asleep machine's agents can't take a message now: shown, as the sidebar shows them, not picked.
+          const asleep = item.machine.asleep;
           return (
             <div
-              key={target.session}
-              id={optionId(i)}
-              role="option"
-              aria-selected={i === hl}
+              key={item.key}
+              {...(asleep ? { role: 'option' as const, 'aria-selected': false, 'aria-disabled': 'true' as const } : props)}
               aria-label={`${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}, ${folder}${started ? `, started ${started}` : ''}`}
-              className={`ib-cp-opt${i === hl ? ' ib-hl' : ''}`}
+              className={`ib-cp-opt${on ? ' ib-hl' : ''}`}
               data-compose-session={target.session}
               data-compose-project={target.project.name}
-              onPointerMove={() => i !== hl && setHl(i)}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => pick(option)}
+              data-compose-session-machine={item.machine.key}
             >
               <HostMark host={target.host} agent={target.session} />
               <b className="ib-cp-oa">{hostLabel(target.host)}</b>
@@ -235,8 +301,8 @@ export function ToPicker({
                   {started ? `· ${started}` : null}
                 </span>
               </Tip>
-              <span className="ib-cp-check" aria-hidden="true">
-                {target.session === selected && <Icon name="check" size={15} />}
+              <span className="ib-cp-check" aria-hidden="true" data-compose-state={parts && !chosenRow ? '' : undefined}>
+                {chosenRow ? <Icon name="check" size={15} /> : parts ? (asleep ? 'asleep' : busyWord(target)) : null}
               </span>
             </div>
           );
@@ -245,9 +311,6 @@ export function ToPicker({
     </div>
   );
 }
-
-/** The picker key of a start row (`selected` uses it too). */
-export const startKey = (agent: InboxLaunchAgent): string => `start:${agent}`;
 
 /**
  * To's detail after the agent's name, always one line: "· main · workspaces/worktrees".

@@ -4,8 +4,8 @@ import { COMPOSE_SESSIONS_REFRESH_MS } from './useComposeSessions';
 import type { MachineLaunchRead } from './model';
 
 /**
- * Each linked machine's last good sessions read (its launch block and home), kept for the page's life: an asleep
- * machine's projects still show in the folder menu, and a Send to it waits in the outbox.
+ * Each linked machine's last good sessions read (its launch block, home and live sessions), kept for the page's life:
+ * an asleep machine's projects still show in the folder menu, and a Send to it waits in the outbox.
  */
 const kept = new Map<string, MachineLaunchRead>();
 
@@ -45,7 +45,7 @@ export function useMachineLaunches(active: boolean, trust: (ComposeTrustPick & {
       const now = trustNow.current?.machine === machine ? trustNow.current : null;
       // Asked for another folder than the one To names now: a newer read is on its way.
       if (asked?.agent !== now?.agent || asked?.project !== now?.project) return;
-      kept.set(machine, { launch: got.launch, home: typeof got.home === 'string' ? got.home : null });
+      kept.set(machine, { launch: got.launch, home: typeof got.home === 'string' ? got.home : null, projects: Array.isArray(got.projects) ? got.projects : [] });
       setReads(new Map(kept));
     } catch {
       // Unreachable or refused: its last good read stays.

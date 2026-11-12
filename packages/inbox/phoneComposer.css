@@ -88,6 +88,13 @@
 .ib-sheet-cap { padding: 8px 10px 4px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-sheet-cap b { color: var(--foreground); font-weight: 500; }
 .ib-sheet-none { padding: 14px 10px; color: var(--muted-foreground); }
+/* To's machine switch on a phone: chips that wrap, two to a line at most, the chosen one filled. */
+.ib-cp-mchips { display: flex; flex-wrap: wrap; gap: 6px; flex: none; padding: 2px 8px 6px; }
+.ib-cp-mchip { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: calc(50% - 3px); height: 36px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--muted); color: var(--foreground); font: inherit; font-size: var(--ib-fs-15, 15px); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ib-cp-mchip[data-on] { background: var(--ib-sel); font-weight: 600; }
+.ib-cp-mchip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-cp-mchip > svg.ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-sheet-cap.ib-cp-mhd { display: flex; align-items: center; gap: 6px; padding-top: 12px; font-weight: 600; color: var(--foreground); }
 .ib-sheet-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 12px; flex: none; min-height: 56px; padding: 8px 10px; border-radius: 12px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .ib-sheet-row[aria-disabled] { opacity: 0.5; cursor: default; }
 /* The chosen row is a fill, never a border. */

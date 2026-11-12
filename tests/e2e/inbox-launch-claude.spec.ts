@@ -296,14 +296,14 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await openCompose(page);
   const d = dialog(page);
   await d.locator('[data-compose-to]').click();
-  // 01: the live session first, then under one caption, one row per available agent.
-  await expect(d.locator('[data-compose-start-caption]')).toHaveText('Start a new session in plannotator');
-  await expect(d.locator('[data-compose-start="claude-code"]')).toContainText('Claude CodeNew session');
+  // 01: "Running" and the live session, then "Start new" and one row per available agent, in the project looked at.
+  await expect(d.locator('[data-compose-cap]')).toHaveText(['Running', 'Start new']);
+  await expect(d.locator('[data-compose-start="claude-code"]')).toContainText('in plannotator');
   const order = await d.locator('[role="option"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-compose-session') ?? `start:${el.getAttribute('data-compose-start')}`));
   expect(order).toEqual(['ses-ws-live', 'start:claude-code']);
-  // A filter word naming another project moves the caption there.
+  // A filter word naming another project offers the start rows there.
   await d.getByRole('combobox', { name: 'Find an agent or project' }).fill('billing');
-  await expect(d.locator('[data-compose-start-caption]')).toHaveText('Start a new session in billing-svc');
+  await expect(d.locator('[data-compose-start="claude-code"]')).toHaveAttribute('data-compose-start-project', 'billing-svc');
   await d.getByRole('combobox', { name: 'Find an agent or project' }).fill('');
   await shot(page, '01-new-thread-to-picker');
   // The start row is in the arrow and Enter order: ↓ ↓ Enter picks it.

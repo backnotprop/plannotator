@@ -74,12 +74,12 @@ export function composeGroups(
   return [{ ...lead, sessions }, ...ordered.filter((_, i) => i !== at)];
 }
 
-/** The groups narrowed by the picker's filter: host, label, project name or path, and the last thread's subject. */
-export function filterGroups(groups: readonly ComposeGroup[], query: string): ComposeGroup[] {
+/** The groups narrowed by the picker's filter: host, label, project name or path, the last thread's subject, and `machine` (its name, in To's switch). */
+export function filterGroups(groups: readonly ComposeGroup[], query: string, machine = ''): ComposeGroup[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...groups];
   const matches = (target: ComposeTarget) => {
-    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? ''].join(' ').toLowerCase();
+    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? '', machine].join(' ').toLowerCase();
     return words.every((word) => hay.includes(word));
   };
   return groups.map((group) => ({ ...group, sessions: group.sessions.filter(matches) })).filter((group) => group.sessions.length > 0);
@@ -457,30 +457,6 @@ export function defaultStartProject(launch: InboxComposeLaunch | undefined, curr
 }
 
 /**
- * The picker's "Start a new session in <project>" block for a filter: the
- * project the caption names and the agents to offer. Words naming an agent
- * ("claude") narrow the rows; the other words pick the project ("billing"
- * moves the caption to billing-svc). No match: no block.
- */
-export function startBlock(
-  launch: InboxComposeLaunch | undefined,
-  current: { id: string | null; root: string | null } | null,
-  query: string,
-): { project: LaunchProject; agents: InboxComposeLaunch['agents'] } | null {
-  const fallback = defaultStartProject(launch, current);
-  if (!launch || !fallback || launch.agents.length === 0) return null;
-  const all = queryWords(query);
-  const agentHay = (name: string) => `${name} new session`.toLowerCase();
-  const namesAgent = (word: string) => launch.agents.some((a) => agentHay(a.name).includes(word));
-  const projectWords = all.filter((word) => !namesAgent(word));
-  const project = projectWords.length === 0 ? fallback : launch.projects.find((p) => projectWords.every((w) => `${p.name} ${p.root}`.toLowerCase().includes(w)));
-  if (!project) return null;
-  const agentWords = all.filter(namesAgent);
-  const agents = launch.agents.filter((a) => agentWords.every((w) => agentHay(a.name).includes(w)));
-  return agents.length ? { project, agents } : null;
-}
-
-/**
  * To's "<agent> New session" when the caption's project is on a machine without that agent (To offers every
  * machine's agents): the project it starts in instead, from `groups` (the folder menu's for that agent). An awake
  * machine's first, as the default start; the same folder, else a project of the same name, first of all. Null: no
@@ -517,10 +493,12 @@ export interface LaunchMachine {
   launch?: boolean | null;
 }
 
-/** A linked machine's last good sessions read (its launch block and home), kept while it sleeps. */
+/** A linked machine's last good sessions read (its launch block, home and live sessions), kept while it sleeps. */
 export interface MachineLaunchRead {
   launch?: InboxComposeLaunch;
   home: string | null;
+  /** Its live sessions by project, for To's machine switch; absent from a read made before it kept them. */
+  projects?: InboxComposeProject[];
 }
 
 /** A folder-menu project with the machine it is on: absent for this computer's. */
@@ -607,6 +585,15 @@ export function launchHistory(rows: readonly { machine?: string; project: { id: 
   return out;
 }
 
+/** Why nothing starts on a linked machine from here, in its words: launch is off there, or its Inbox is too old to say. Null: it can. */
+export function machineLaunchNotice(m: LaunchMachine, read: MachineLaunchRead | undefined): string | null {
+  // Its health says whether launch is on there, but only as of the link's last connect; the machine's own switch
+  // (Settings → Agents) is live, so its last sessions read, which carries a launch block only while on, decides.
+  const off = m.launch === true || m.launch === false ? (read ? read.launch === undefined : m.launch === false) : false;
+  if (off) return inboxMachineLaunchWords(m.name, 'off');
+  return m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
+}
+
 /**
  * The folder menu's groups for `agent`. No linked machine (or none with anything to offer): one group, this
  * computer's, and `grouped` false, so the menu is exactly what it was. Otherwise one group per machine with a caption,
@@ -647,11 +634,7 @@ export function launchGroups(input: {
   const theirs = linked.map((m, i) => {
     const asleep = m.state === 'offline';
     const read = reads.get(m.id);
-    // Its health says whether launch is on there, but only as of the link's last connect; the machine's own switch
-    // (Settings → Agents) is live, so its last sessions read, which carries a launch block only while on, decides.
-    const off = m.launch === true || m.launch === false ? (read ? read.launch === undefined : m.launch === false) : false;
-    const words = off ? inboxMachineLaunchWords(m.name, 'off') : m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
-    return { group: groupOf(m.id, m.name, false, asleep, read?.launch, read?.home ?? null, words), order: i + 1, id: m.id };
+    return { group: groupOf(m.id, m.name, false, asleep, read?.launch, read?.home ?? null, machineLaunchNotice(m, read)), order: i + 1, id: m.id };
   });
   const all = [{ group: mine, order: 0, id: self.id ?? '' }, ...theirs].filter((g): g is { group: LaunchGroup; order: number; id: string } => {
     const group = g.group;

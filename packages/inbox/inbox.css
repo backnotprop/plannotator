@@ -4719,7 +4719,7 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-filter { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--ib-line); color: var(--muted-foreground); flex: none; }
 .pn-inbox .ib-cp-filter input { flex: 1; min-width: 0; height: 40px; border: 0; outline: none; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
 /* One line per live session; the rows share the list's columns (subgrid), so agent, project and folder line up. */
-.ib-cp-list { overflow-y: auto; overscroll-behavior: contain; padding: 4px 6px 6px; display: grid; grid-template-columns: auto max-content minmax(0, max-content) minmax(min(12ch, 30%), 1fr) max-content 16px; column-gap: 10px; align-content: start; }
+.ib-cp-list { overflow-y: auto; overscroll-behavior: contain; padding: 4px 6px 6px; display: grid; grid-template-columns: auto max-content minmax(0, max-content) minmax(min(12ch, 30%), 1fr) max-content minmax(16px, max-content); column-gap: 10px; align-content: start; }
 .ib-cp-opt { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; min-height: 36px; padding: 0 8px; border-radius: 7px; font-size: var(--ib-fs-13-5, 13.5px); cursor: default; user-select: none; }
 .ib-cp-opt.ib-hl { background: color-mix(in oklch, var(--muted) 80%, transparent); }
 :root.light .ib-cp-opt.ib-hl { background: var(--muted); }
@@ -4739,6 +4739,40 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-cap-line { margin-top: 4px; border-top: 1px solid var(--ib-line); }
 .ib-cp-ons { grid-column: 3 / -2; color: var(--muted-foreground); white-space: nowrap; }
 .ib-cp-start .ib-cp-check { grid-column: -2; }
+/* To's machine switch (approval "inbox-launcher-machine-switch"): Settings' segmented control, one button per machine
+   with its running agents; buttons too narrow to read go under "N more", whose list opens under it. */
+.ib-cp-msw { position: relative; flex: none; padding: 8px 10px 2px; }
+.ib-cp-mswrow { display: flex; width: 100%; box-sizing: border-box; }
+.ib-cp-mswrow .ib-cp-mswb { flex: 1 1 auto; justify-content: center; min-width: 0; height: 30px; border: 0; background: transparent; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-cp-mswrow .ib-cp-mswb[data-on] { background: var(--card); }
+.ib-cp-mswrow[data-squeeze] .ib-cp-mswb:not(.ib-cp-mswmore) { flex: 1 1 0; }
+.ib-cp-mswb > svg.ib-ic { flex: none; }
+.ib-cp-mswn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cp-mswc { flex: none; color: var(--muted-foreground); font-weight: 450; font-variant-numeric: tabular-nums; }
+.ib-cp-mswmorewrap { position: relative; display: flex; flex: none; }
+.ib-cp-mswrow .ib-cp-mswmore { flex: none; gap: 4px; }
+.ib-cp-mswmeasure { position: absolute; top: 0; left: -9999px; width: max-content; visibility: hidden; pointer-events: none; }
+.ib-cp-mswmeasure .ib-cp-mswb { flex: none; }
+.ib-cp-mswpanel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 3; display: flex; flex-direction: column; min-width: 250px; padding: 4px; border-radius: 10px; border: 1px solid var(--border); background: var(--popover); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22); }
+.pn-inbox .ib-cp-mswpo { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); text-align: start; cursor: pointer; }
+.pn-inbox .ib-cp-mswpo:hover { background: color-mix(in oklch, var(--muted) 80%, transparent); }
+:root.light .pn-inbox .ib-cp-mswpo:hover { background: var(--muted); }
+.ib-cp-mswpo > svg.ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-cp-mswpw { display: flex; flex-direction: column; min-width: 0; }
+.ib-cp-mswps { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+/* While typing, each machine's matches under its name ("Atlas · asleep since 9:10 AM"). */
+.ib-cp-mhd { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; padding: 12px 8px 0; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); }
+.ib-cp-mhd > span, .ib-cp-mhd > svg.ib-ic { font-weight: 400; color: var(--muted-foreground); }
+/* "Start new" rows: a small "+", the agent's mark and name, "in <project>"; a kind that machine lacks says why at the end. */
+.ib-cp-opt.ib-cp-st { display: flex; align-items: center; gap: 10px; }
+.ib-cp-plus { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 5px; background: var(--ib-fill); color: var(--muted-foreground); }
+.ib-cp-stk { flex: none; color: var(--foreground); white-space: nowrap; }
+.ib-cp-stin { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.ib-cp-stend { flex: none; margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
+.ib-cp-opt.ib-cp-more { color: var(--muted-foreground); padding-inline-start: 36px; }
+.ib-cp-opt[aria-disabled="true"]:not(.ib-cp-fnotice) { opacity: 0.55; }
+/* A running agent's state where the check goes. */
+.ib-cp-check[data-compose-state] { width: auto; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 /* To as a sentence: "New Claude Code session ▾ in <project> ▾". */
 .ib-cp-startin { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .ib-cp-in { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
@@ -4778,7 +4812,7 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 /* Under an untrusted scratch row: what the first start asks (the root is the folder to trust). */
 .ib-cp-scratch-hint { grid-column: 2 / -1; padding: 0 8px 6px 0; margin-top: -4px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
 /* A list with a session label caps the column it shares with the project, so one long label cannot take the folder's room from every row. */
-.ib-cp-list[data-session-labels] { grid-template-columns: auto max-content fit-content(24ch) minmax(min(12ch, 30%), 1fr) max-content 16px; }
+.ib-cp-list[data-session-labels] { grid-template-columns: auto max-content fit-content(24ch) minmax(min(12ch, 30%), 1fr) max-content minmax(16px, max-content); }
 .ib-cp-ol { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Notes under To: no agent running, or the session a draft was for has ended. */
