@@ -12,7 +12,7 @@ import { act, useMemo, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxInitiative, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { INBOX_SIDEBAR_DEFAULT } from '@plannotator/core/inbox-sidebar';
-import { filterTagRows, tagListSummary, tagsSectionShown, tagWaitingCounts, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
+import { canTagThread, filterTagRows, rowTagsHere, tagListSummary, tagsSectionShown, tagWaitingCounts, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
 import { drawnSidebarItems } from './sidebarItems';
 import { sidebarMenuItems } from './components/SidebarMenu';
 
@@ -317,6 +317,26 @@ test('a tag’s list keeps every group with only the tag’s rows; the count is 
   expect([...tagWaitingCounts(sections)]).toEqual([[RELEASE.id, 1]]);
   expect(tagListSummary(listed.flatMap((s) => s.threads))).toBe('2 threads · 2 projects');
   expect(tagListSummary([row('a')])).toBe('1 thread · 1 project');
+});
+
+test('another machine’s thread is never offered Add tag and never listed in a tag, whatever tags its row carries', () => {
+  const self = 'ibx_self';
+  const mine = row('a', [RELEASE.id], { machine: self } as Partial<InboxListRow>);
+  const plain = row('b', [RELEASE.id]);
+  // A newer linked Inbox sends its own rows' tags: never this Inbox's tags, even naming the same id.
+  const theirs = row('c', [RELEASE.id], { machine: 'ibx_other' } as Partial<InboxListRow>);
+  const rows = [mine, plain, theirs];
+  const patches = new Map([['c', [RELEASE.id]]]);
+  expect(canTagThread('a', rows, self, null)).toBe(true);
+  expect(canTagThread('b', rows, self, null)).toBe(true);
+  expect(canTagThread('c', rows, self, null)).toBe(false);
+  // A thread opened from a link or search with no row here, which a linked machine owns (the thread's ⋯).
+  expect(canTagThread('d', rows, self, 'ibx_other')).toBe(false);
+  expect(canTagThread('d', rows, self, null)).toBe(true);
+  expect(rowTagsHere(theirs, self, patches)).toEqual([]);
+  const sections = [{ id: 'new', label: 'New', threads: rows }] as unknown as InboxListSection[];
+  const tagsOf = (r: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(r, self, patches);
+  expect(filterTagRows(sections, RELEASE.id, tagsOf).flatMap((s) => s.threads.map((r) => r.thread_id))).toEqual(['a', 'b']);
 });
 
 test('Tags is in the sidebar’s menu and Customize only while the section is drawn, just above Agents', () => {

@@ -30,8 +30,27 @@ export const ThreadTagsContext = createContext<ThreadTagsHost | null>(null);
 export const useThreadTags = () => useContext(ThreadTagsContext);
 
 /** A row's tags: `row.tags`, or what the window just set on it (App's patches). */
-export type RowTags = (row: Pick<InboxListRow, 'thread_id' | 'tags'>) => readonly string[];
+export type RowTags = (row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => readonly string[];
 const ownTags: RowTags = (row) => row.tags ?? [];
+
+/**
+ * A row's tags in this window: what it just set, else `row.tags`; none on another machine's row (its tags name that
+ * machine's initiatives, and step 1 sends no tag there), so a tag's list never shows it.
+ */
+export function rowTagsHere(row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>, self: string | null, patches: ReadonlyMap<string, readonly string[]>): readonly string[] {
+  if (row.machine && row.machine !== self) return [];
+  return patches.get(row.thread_id) ?? row.tags ?? [];
+}
+
+/**
+ * Whether Add tag is offered on a thread: only one this Inbox owns. Another machine's (its id claimed by a linked
+ * machine, `owner`, or its row named for one) gets no Add tag, as it gets no Star thread.
+ */
+export function canTagThread(threadId: string, rows: readonly Pick<InboxListRow, 'thread_id' | 'machine'>[], self: string | null, owner: string | null): boolean {
+  if (owner) return false;
+  const row = rows.find((r) => r.thread_id === threadId);
+  return !row?.machine || row.machine === self;
+}
 
 /** The sections with only the rows in `tag` (each section kept, as a project's list keeps them). */
 export function filterTagRows(sections: readonly InboxListSection[], tag: string | null, tagsOf: RowTags = ownTags): InboxListSection[] {

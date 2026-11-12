@@ -238,7 +238,7 @@ import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, initiativeDeletedToast, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { restoreInitiatives } from './board/initiativeUndo';
-import { filterTagRows, tagHref, tagListSummary, tagsSectionShown, tagThreadCounts, tagWaitingCounts, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
+import { canTagThread, filterTagRows, rowTagsHere, tagHref, tagListSummary, tagsSectionShown, tagThreadCounts, tagWaitingCounts, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
 import { TagIcon } from './components/InitiativePeek';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { useComposerOpener } from './compose/openComposer';
@@ -5262,7 +5262,7 @@ function Inbox() {
    * the sidebar's Tags; and Add tag's host (threadTags.ts), each write said in the toast with Undo.
    */
   const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
-  const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags'>) => tagPatches.get(row.thread_id) ?? row.tags ?? [], [tagPatches]);
+  const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines.self, tagPatches), [tagPatches, machines.self]);
   const filterTag = route.page === 'inbox' && route.tag ? (listTags?.find((tag) => tag.id === route.tag) ?? null) : null;
   const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
@@ -5308,12 +5308,12 @@ function Inbox() {
         ? null
         : {
             tags: listTags,
-            tagsOf: (threadId) => tagPatches.get(threadId) ?? windowRows.find((row) => row.thread_id === threadId)?.tags ?? [],
-            counts: tagCounts,
-            can: (threadId) => {
+            tagsOf: (threadId) => {
               const row = windowRows.find((r) => r.thread_id === threadId);
-              return !row?.machine || row.machine === machines.self;
+              return row ? rowTagsHere(row, machines.self, tagPatches) : (tagPatches.get(threadId) ?? []);
             },
+            counts: tagCounts,
+            can: (threadId) => canTagThread(threadId, windowRows, machines.self, machineOf(threadId)),
             set: (threadId, tag, on) => void setThreadTagRef.current(threadId, tag, on),
             createAndSet: (threadId, name) =>
               void createTagRef.current(name).then((tag) => {
