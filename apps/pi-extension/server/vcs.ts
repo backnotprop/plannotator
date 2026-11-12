@@ -34,16 +34,6 @@ import {
 	resolveInitialDiffType,
 } from "../generated/vcs-core.ts";
 
-/**
- * Process-group leaders of commands started with `interaction: "forbid"`
- * (#1553). Mirrors packages/server/git.ts: those run detached so a timeout can
- * kill the whole transport tree, but a server exiting mid-flight left the
- * git/ssh pair orphaned — the parent-side timer dies with the parent, so
- * nothing was ever going to reap them.
- *
- * POSIX only: the negative-pid group signal has no Windows equivalent, and the
- * timeout path already special-cases win32 with taskkill.
- */
 const isolatedProcessGroups = new Set<number>();
 let isolatedExitHookInstalled = false;
 
@@ -52,7 +42,6 @@ function reapIsolatedProcessGroups(): void {
 		try {
 			process.kill(-pid, "SIGKILL");
 		} catch {
-			// Already gone, or the leader exited between the last read and here.
 		}
 	}
 	isolatedProcessGroups.clear();
@@ -62,8 +51,6 @@ function trackIsolatedProcessGroup(pid: number): () => void {
 	if (process.platform === "win32") return () => {};
 	if (!isolatedExitHookInstalled) {
 		isolatedExitHookInstalled = true;
-		// "exit" only: it runs on every process.exit(), and the callback must be
-		// synchronous — process.kill is.
 		process.on("exit", reapIsolatedProcessGroups);
 	}
 	isolatedProcessGroups.add(pid);
@@ -94,10 +81,6 @@ async function runCommand(
 	};
 }
 
-/**
- * The shared spawn: stdout comes back undecoded, so binary blobs (image
- * previews) survive intact; `runCommand` decodes it for every text caller.
- */
 function runCommandBytes(
 	command: string,
 	args: string[],
@@ -128,7 +111,6 @@ function runCommandBytes(
 						process.kill(-proc.pid, "SIGKILL");
 						return;
 					} catch {
-						// Fall through when the process exited between the timer and signal.
 					}
 				}
 				if (isolateProcessGroup && proc.pid && process.platform === "win32") {
@@ -145,9 +127,6 @@ function runCommandBytes(
 
 		const stdoutChunks: Buffer[] = [];
 		const stderrChunks: Buffer[] = [];
-		// Stop buffering AND kill at `maxOutputBytes`, so a command that can emit
-		// an entire repository tree bounds real memory growth instead of being
-		// measured and rejected after it is already held in full.
 		let stdoutBytes = 0;
 		let truncated = false;
 		proc.stdout!.on("data", (chunk: Buffer) => {
@@ -165,8 +144,6 @@ function runCommandBytes(
 		});
 		proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
 		if (options?.stdin !== undefined) {
-			// A timeout-killed process can reject the stdin write while close is
-			// already being handled. Do not let that secondary EPIPE escape.
 			proc.stdin!.on("error", () => {});
 			proc.stdin!.end(options.stdin);
 		}
@@ -190,12 +167,6 @@ function runCommandBytes(
 	});
 }
 
-/**
- * `reviewRuntime` with `extraEnv` added to every git child's environment
- * (after the process env, so it wins). A GitHub PR checkout uses it to run
- * its fetches as the gh account chosen for that PR (#2157), so git through
- * gh's credential helper gets that account's token; nothing else does.
- */
 export function reviewRuntimeWithEnv(extraEnv: Record<string, string>): ReviewGitRuntime {
 	const run = (args: string[], options?: GitCommandOptions): Promise<GitCommandResult> => {
 		const environment = { ...process.env, ...extraEnv };
@@ -223,8 +194,6 @@ export const reviewRuntime: ReviewGitRuntime = {
 	},
 
 	async readTextFile(path: string): Promise<string | null> {
-		// Capped and non-blocking (repo-file.ts): a FIFO swapped in after the
-		// caller's lstat cannot block Pi's event loop.
 		const read = await readFileCapped(path);
 		return read.ok ? read.content : null;
 	},
@@ -298,7 +267,6 @@ export const jjRuntime: ReviewJjRuntime = {
 	},
 };
 
-/** Node Git + GitButler runtime used by the Pi review server. */
 export const gitButlerRuntime: ReviewGitButlerRuntime = {
 	...reviewRuntime,
 	runBut(

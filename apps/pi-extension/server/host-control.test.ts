@@ -1,12 +1,3 @@
-/**
- * Pi mirror of packages/server/host-control.test.ts: host-only session
- * control on the node:http servers (`/api/host/status`, `/api/host/close`,
- * and the in-process `hostControl` Pi itself calls).
- *
- * What regresses if this fails: closing a Pi-hosted review deletes the
- * reviewer's unsent comments or reports it as the reviewer's own close, the
- * endpoints answer without the launch token, or a plan review can be closed.
- */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -78,14 +69,11 @@ describe("Pi host control", () => {
 			try {
 				const off = await fetch(`${server.url}/api/host/close`, { method: "POST", headers: auth });
 				expect(off.status).toBe(404);
-				// Coded, so a host does not mistake it for an older CLI and TERM it.
 				expect((await off.json()).code).toBe("host_control_disabled");
 				await saveDraft(server.url, { annotations: [], codeAnnotations: [{ id: "c1" }], globalAttachments: [] });
 				expect(server.hostControl.close?.()).toEqual({ closed: true, unsentAnnotations: 1 });
 				expect(await server.waitForDecision()).toMatchObject({ exit: true, closedBy: "agent" });
 
-				// The tab still open after the close: its late decision is refused
-				// rather than answered ok, and must not delete the kept draft.
 				const feedback = await fetch(`${server.url}/api/feedback`, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
@@ -99,8 +87,6 @@ describe("Pi host control", () => {
 			}
 		}));
 
-	// The failure: a remote session (reachable beyond loopback) answers host
-	// control with the caller's token.
 	test("remote mode turns the endpoints off even with a token", () =>
 		sandboxed(async () => {
 			process.env.PLANNOTATOR_REMOTE = "1";

@@ -73,7 +73,6 @@ function collectSSE(response: Response): SSECollector {
 				}
 			}
 		} catch {
-			// Reader cancellation closes the collector.
 		}
 	};
 	void pump();
@@ -303,7 +302,6 @@ describe("Pi file browser watcher", () => {
 		});
 		const hostileName = { toString: () => { throw new Error("unreadable filename"); } } as unknown as string;
 
-		// Bun on Linux reports undefined (not null) for events on the watched directory.
 		expect(() => listener("rename", undefined)).not.toThrow();
 		expect(() => listener("change", null)).not.toThrow();
 		expect(() => listener("rename", hostileName)).not.toThrow();
@@ -328,7 +326,6 @@ describe("Pi file browser watcher", () => {
 			expect(await collector.next()).toMatchObject({ type: "ready", dirPath: root });
 			await waitForWatcher();
 
-			// Metadata churn on the parent directory (tar -x, rsync -a, cp -a).
 			chmodSync(root, statSync(root).mode);
 			utimesSync(root, new Date(), new Date());
 			await waitForWatcher();

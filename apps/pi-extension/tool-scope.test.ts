@@ -97,21 +97,16 @@ describe("plannotator submit device path gate", () => {
 	});
 
 	test("rejects lookalikes: suffix, subpath, or wrong case", () => {
-		// Suffix
 		expect(isPlannotatorSubmitDevicePath("xd://plannotator_submit_plan2")).toBe(false);
 		expect(isPlannotatorSubmitDevicePath("xd://plannotator_submit_plans")).toBe(false);
 		expect(isPlannotatorSubmitDevicePath("xd://plannotator_submit_plan_extra")).toBe(false);
-		// Subpath
 		expect(isPlannotatorSubmitDevicePath("xd://plannotator_submit_plan/")).toBe(false);
 		expect(isPlannotatorSubmitDevicePath("xd://plannotator_submit_plan/extra")).toBe(false);
 		expect(isPlannotatorSubmitDevicePath("xd://plannotator_submit_plan/sub/path")).toBe(false);
-		// Wrong scheme case
 		expect(isPlannotatorSubmitDevicePath("XD://plannotator_submit_plan")).toBe(false);
 		expect(isPlannotatorSubmitDevicePath("Xd://plannotator_submit_plan")).toBe(false);
-		// Wrong tool name case
 		expect(isPlannotatorSubmitDevicePath("xd://PLANNOTATOR_SUBMIT_PLAN")).toBe(false);
 		expect(isPlannotatorSubmitDevicePath("xd://Plannotator_Submit_Plan")).toBe(false);
-		// Surrounding whitespace
 		expect(isPlannotatorSubmitDevicePath(" xd://plannotator_submit_plan")).toBe(false);
 		expect(isPlannotatorSubmitDevicePath("xd://plannotator_submit_plan ")).toBe(false);
 	});

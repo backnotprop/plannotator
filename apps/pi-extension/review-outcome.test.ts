@@ -1,17 +1,3 @@
-/**
- * Pi `/plannotator-review` delivery through the real Pi review server: what
- * the browser posts to /api/feedback, what the decision carries, and whether
- * the agent message gets the verification suffix.
- *
- * Guards the 0.28.0 regression where "zero code annotations" was read as the
- * PR-platform status post: feedback made only of PR description, PR comment
- * or editor comments rides only in `feedback`, so it has an empty
- * `annotations` array and must still be delivered as feedback. Only the
- * server-carried `platform: true` (sent by the platform path's status post)
- * marks the status post.
- *
- * Temp PLANNOTATOR_DATA_DIR per test; AI off; no browser.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

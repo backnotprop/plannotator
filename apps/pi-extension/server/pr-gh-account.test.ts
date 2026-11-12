@@ -1,9 +1,3 @@
-/**
- * The Pi PR runtime (node:child_process) runs `gh` as another signed-in
- * account for one repo (#2157). The runtime runs in a child process (tests/
- * helpers/gh-account-runtime-probe.ts) whose PATH starts with a fake `gh`,
- * with a scratch HOME and gh config dir: the real gh is never reachable.
- */
 import { afterEach, expect, test } from "bun:test";
 import { probeGhAccountRuntime, type FakeGh } from "../../../tests/helpers/fake-gh.ts";
 

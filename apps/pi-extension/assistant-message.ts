@@ -25,9 +25,6 @@ export type RecentAssistantMessage = {
 	timestamp?: string;
 };
 
-// Pi's SDK currently types `SessionEntryBase.timestamp` as `string`, but the
-// picker contract everywhere else is ISO and we don't want a silent drift if
-// that ever changes. Accept string/number(ms)/Date; drop anything else.
 function normalizeTimestamp(value: unknown): string | undefined {
 	if (value instanceof Date) {
 		return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
@@ -70,13 +67,6 @@ function getCurrentBranch(ctx: ExtensionContext): SessionEntryLike[] {
 	return ctx.sessionManager.getBranch() as SessionEntryLike[];
 }
 
-/**
- * True for the assistant message that holds the tool call `toolCallId`. Pi
- * saves an assistant message at message_end, BEFORE its tool calls run, so
- * while the `plannotator` tool runs `last`, the newest assistant message is the
- * one calling it ("Opening it in Plannotator now."), not the answer the user
- * means; the tool skips it.
- */
 export function isAssistantEntryForToolCall(entry: { message?: unknown }, toolCallId: string): boolean {
 	const message = entry.message;
 	if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content)) return false;
@@ -85,12 +75,9 @@ export function isAssistantEntryForToolCall(entry: { message?: unknown }, toolCa
 	);
 }
 
-/** Entries the last-message lookups skip (see `isAssistantEntryForToolCall`). */
 export type AssistantEntryFilter = (entry: { id: string; message?: unknown }) => boolean;
 
 export function getLastAssistantMessageSnapshot(ctx: ExtensionContext, skip?: AssistantEntryFilter): LastAssistantMessageSnapshot | null {
-	// "Last" means the active conversation branch, not the newest message anywhere
-	// in the append-only session file.
 	const branch = getCurrentBranch(ctx);
 	for (let i = branch.length - 1; i >= 0; i--) {
 		const entry = branch[i];

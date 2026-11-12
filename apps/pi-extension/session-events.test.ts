@@ -1,27 +1,3 @@
-/**
- * `plannotator:session-opened` / `plannotator:session-closed` (#1589) and the
- * scrolling checklist widget (#1412), driven through the real extension over
- * a fake Pi.
- *
- * The fake Pi models what matters here:
- *  - one event bus shared by every extension instance, as Pi's resource
- *    loader shares it; a replaced instance's `pi.events.emit` throws Pi's
- *    stale-ctx error synchronously (#1864), as do its other action methods;
- *  - every model request: the active tools with their definitions, what
- *    `before_agent_start` returned, and every message or entry the extension
- *    put into the conversation. That is the request prefix the provider
- *    caches.
- *
- * What regresses if this fails:
- *  - a session event (or the widget) changes the model's request: a new
- *    message, a system prompt, a tool list change (prompt cache miss);
- *  - a review opened by a slash command, the tool or plan mode emits no
- *    session-opened / session-closed pair, or emits it twice;
- *  - a review that ends after /reload throws out of a handler (the #1864
- *    crash) or never tells listeners it closed;
- *  - the checklist widget sends more than Pi's 10 lines, or loses the next
- *    open item.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,7 +39,6 @@ beforeEach(() => {
 	process.env.HOME = home;
 	process.env.PI_CODING_AGENT_DIR = join(home, ".pi", "agent");
 	process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-session-events-data-");
-	// The tool on, so the request prefix holds a Plannotator tool definition too.
 	process.env.PLANNOTATOR_AGENT_TOOL = "1";
 	process.env.PLANNOTATOR_INBOX_TOOL = "0";
 });
@@ -81,7 +56,6 @@ afterEach(() => {
 type Decide<T> = (result: T) => void;
 type ToolDefinition = Record<string, unknown> & { name: string; execute: (...args: unknown[]) => Promise<any> };
 
-/** A browser session whose decision the test makes. */
 function fakeSession<T>(url: string): { session: BrowserDecisionSession<T>; decide: Decide<T>; stop: () => void } {
 	let decide!: Decide<T>;
 	let fail!: (err: Error) => void;
@@ -103,16 +77,13 @@ function createPi(options: { busWorks?: boolean } = {}) {
 	writeFileSync(join(cwd, "notes.md"), "# Notes\n\nSome text.\n");
 	const state = { activeTools: [...PI_DEFAULT_TOOLS] };
 
-	// The shared bus and a listener standing in for Herdr.
 	const busListeners = new Map<string, Array<(data: unknown) => void>>();
 	const received: Array<{ channel: string; data: any }> = [];
 	for (const channel of [PLANNOTATOR_SESSION_OPENED_CHANNEL, PLANNOTATOR_SESSION_CLOSED_CHANNEL]) {
 		busListeners.set(channel, [(data) => received.push({ channel, data })]);
 	}
 
-	/** What the model would be sent: one snapshot per request. */
 	const requests: string[] = [];
-	/** Every message the extension put into the conversation (what the model reads), in order. */
 	const conversation: unknown[] = [];
 	const widgets: Array<string[] | undefined> = [];
 	const reviews: Array<{ kind: string; decide: Decide<any>; stop: () => void }> = [];
@@ -226,7 +197,6 @@ function createPi(options: { busWorks?: boolean } = {}) {
 			getCommands: () => [],
 			appendEntry: (customType: string, data: unknown) => {
 				guard();
-				// Session state only: Pi never sends a custom entry to the model.
 				entries.push({ type: "custom", customType, data });
 			},
 			sendMessage: (message: unknown, sendOptions: unknown) => {
@@ -240,7 +210,6 @@ function createPi(options: { busWorks?: boolean } = {}) {
 		};
 		pis.push(pi);
 		plannotator(pi as never, deps);
-		// Pi 0.99+: tools registered `defaultActive: false` wait for the extension.
 	}
 
 	async function emit(event: string, payload: unknown = {}): Promise<unknown[]> {
@@ -264,14 +233,12 @@ function createPi(options: { busWorks?: boolean } = {}) {
 			load();
 			await emit("session_start", { reason: "startup" });
 		},
-		/** /reload: the old instance shuts down and goes stale; a new one loads on the same bus. */
 		async reload() {
 			await emit("session_shutdown", { reason: "reload" });
 			goStale();
 			load();
 			await emit("session_start", { reason: "reload" });
 		},
-		/** One model request, recorded as the bytes that shape the provider's cached prefix. */
 		async request() {
 			const results = await emit("before_agent_start", { prompt: "next", systemPrompt: "BASE" });
 			const toolDefinitions = state.activeTools.map((name) => {
@@ -295,7 +262,6 @@ function createPi(options: { busWorks?: boolean } = {}) {
 		},
 		async decide(index: number, result: unknown) {
 			reviews[index]!.decide(result);
-			// The decision promise, then the microtask emit.
 			await flush();
 		},
 		flush,
@@ -322,11 +288,6 @@ const opened = (pi: { received: Array<{ channel: string; data: any }> }) =>
 const closed = (pi: { received: Array<{ channel: string; data: any }> }) =>
 	pi.received.filter((event) => event.channel === PLANNOTATOR_SESSION_CLOSED_CHANNEL).map((event) => event.data as PlannotatorSessionClosedEvent);
 
-/**
- * Reviews open and close only through the events: the reviewer's Close sends
- * the agent nothing (as before), so every request below must carry the same
- * bytes, before, during and after each review, and across /reload.
- */
 async function eventOnlyLifecycle(pi: ReturnType<typeof createPi>): Promise<void> {
 	await pi.start();
 	await pi.request();
@@ -336,7 +297,6 @@ async function eventOnlyLifecycle(pi: ReturnType<typeof createPi>): Promise<void
 	await pi.request();
 	await pi.command("plannotator-annotate", "notes.md");
 	await pi.request();
-	// /reload while the annotation is open: its opener goes stale.
 	await pi.reload();
 	await pi.request();
 	await pi.decide(1, { feedback: "", exit: true });
@@ -349,13 +309,11 @@ describe("session events never change the model's request (prompt cache)", () =>
 		const fatal = await trapFatal(() => eventOnlyLifecycle(pi));
 		expect(fatal).toEqual([]);
 
-		// The events did go out (so the comparison below is not trivially empty).
 		expect(opened(pi).map((event) => event.action)).toEqual(["code-review", "annotate"]);
 		expect(closed(pi).map((event) => [event.action, event.outcome, event.closedBy])).toEqual([
 			["code-review", "closed", "reviewer"],
 			["annotate", "closed", "reviewer"],
 		]);
-		// And nothing else: no message, entry, system prompt or tool change.
 		expect(pi.conversation).toEqual([]);
 		expect(pi.requests).toHaveLength(6);
 		for (const request of pi.requests) expect(request).toBe(pi.requests[0]!);
@@ -393,7 +351,6 @@ describe("plannotator:session-opened / session-closed", () => {
 
 		await pi.decide(0, { approved: true });
 		expect(closed(pi)).toEqual([{ ...open!, outcome: "approved", closedAt: expect.any(Number) }]);
-		// Opened is delivered before closed, each once.
 		expect(pi.received.map((event) => event.channel)).toEqual([PLANNOTATOR_SESSION_OPENED_CHANNEL, PLANNOTATOR_SESSION_CLOSED_CHANNEL]);
 	});
 
@@ -513,7 +470,6 @@ describe("where an event goes when its opener is gone", () => {
 		}
 		expect(logged).toEqual([]);
 		expect(opener.got).toEqual([]);
-		// Forgotten: a live claimant gets the next one.
 		const live = fakeBus("works");
 		claimSessionEventBus(live.pi);
 		openSessionEvent(opener.pi, () => false, { id: "pn-000002", action: "annotate", url: "http://localhost:2" });
@@ -544,7 +500,6 @@ describe("pn- ids are unique among the open reviews", () => {
 		const sink = { events: { emit: () => undefined } };
 		pis.push(sink);
 		const held = openSessionEvent(sink, () => true, { id: "pn-00000a", action: "annotate", url: "http://localhost:1" });
-		// Open in the registry (the caller's predicate) and announced: both skipped.
 		const registryIds = new Set(["pn-00000b"]);
 		expect(newSessionEventId((id) => registryIds.has(id), () => "00000a")).toBe("pn-00000c");
 		held.close({ outcome: "submitted" });
@@ -610,7 +565,6 @@ describe("the checklist widget keeps the next open item in view (#1412)", () => 
 		expect(lines).toHaveLength(10);
 		expect(lines[0]).toContain("Item 04");
 		expect(lines.at(-1)).toContain("☐ Item 13");
-		// The widget's lines go to setWidget only: none reached the conversation.
 		const sent = JSON.stringify(pi.conversation.slice(sentBefore));
 		expect(sent).not.toContain("☐");
 		expect(sent).not.toContain("☑");

@@ -1,10 +1,3 @@
-/**
- * Session labels on Pi (approval "inbox-session-label"): "only if someone named
- * the session". Driven through the real extension over a fake host, with an
- * Inbox that records polls. The failures this catches: an unnamed session
- * sending a made-up name, a rename not reaching the next poll, and a read that
- * cannot tell (a throw, a stale ctx) blanking a named session's row.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,7 +42,6 @@ async function until(what: string, check: () => boolean): Promise<void> {
 	throw new Error(`timed out waiting for ${what}`);
 }
 
-/** The real extension on a fake Pi whose session manager the test controls, polling a recorder. `isStale`: reading the ctx throws, as a stale Pi ctx does. */
 async function startPi(sessionManager: Record<string, unknown>, isStale: () => boolean = () => false) {
 	const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
 	mkdirSync(join(dataDir, "inbox"), { recursive: true });
@@ -154,7 +146,6 @@ describe("Pi's session name", () => {
 
 	test("a stale ctx cannot tell either: the name stands on the next polls", async () => {
 		let stale = false;
-		// A stale ctx's session manager answers nothing, which must not read as a name taken away.
 		const { bodies } = await startPi({ getSessionName: () => (stale ? undefined : "Fix login redirect") }, () => stale);
 		await until("a poll with the name", () => bodies.at(-1)?.label === "Fix login redirect");
 		stale = true;

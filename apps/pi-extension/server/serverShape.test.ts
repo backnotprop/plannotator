@@ -1,10 +1,3 @@
-/**
- * Shape's routes on both runtimes: the same requests on the same store answer
- * the same on Pi (node:http, serverShape.ts) and on Bun
- * (packages/server/shape-routes.ts), so the mirror cannot drift. Also: a
- * cross-site read is refused, an image is served with a sandbox, and the event
- * feed names a shape when an agent picks up its waiting change.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -70,7 +63,6 @@ function seed(dataDir: string) {
 	return { store, id: made.id, file: store.read(made.id)!.refs![0]!.target.replace(/^files\//, "") };
 }
 
-/** Status and JSON (ids and times blanked: the two stores write their own notes). */
 async function call(base: string, method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
 	const res = await fetch(base + path, { method, headers: { "Content-Type": "application/json", ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
 	const type = res.headers.get("content-type") ?? "";
@@ -100,7 +92,6 @@ test("Pi answers every Shape route as Bun does", async () => {
 		answers.push(out);
 	}
 	expect(answers[0]).toEqual(answers[1]!);
-	// The answers themselves (so "both equally wrong" fails too).
 	const [pi] = answers;
 	expect(pi![4]).toStartWith("200 ");
 	expect(pi![5]).toStartWith("400 ");
@@ -137,7 +128,6 @@ test("both feeds name the shape when an agent picks up its waiting change", asyn
 			}
 		})();
 		await Bun.sleep(60);
-		// The agent's `shape read --notes`: another process on the same folder.
 		const agent = createShapeStore({ dataDir });
 		agent.markDelivered(id, agent.waiting(id).map((n) => n.id));
 		await Promise.race([read, Bun.sleep(1500)]);

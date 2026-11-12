@@ -1,13 +1,3 @@
-/**
- * PLANNOTATOR_SESSION_PROJECT on Pi: before each bash call the extension
- * names the session's project (`pi:<session id>:<ctx.cwd>`) in the
- * environment Pi gives that call, so `cd sub && plannotator inbox call …`
- * files where the session's `plannotator_inbox` tool does (ctx.cwd), not in
- * the folder the command cd'd to. Driven through the real extension over a
- * fake Pi, then the real `inbox call` command against a real Inbox in a temp
- * data dir. What can regress: no value, a value naming the session Pi had
- * before a switch, or the command filing in the cd'd folder.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,7 +40,6 @@ afterAll(() => {
 	rmSync(root, { recursive: true, force: true });
 });
 
-/** The real extension on a fake Pi in `cwd`, its Inbox a recorder; returns a bash tool_call as Pi raises it. */
 async function startPi(cwd: string, sessionId: () => string) {
 	const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
 	mkdirSync(join(dataDir, "inbox"), { recursive: true });
@@ -123,12 +112,10 @@ describe("Pi: the session's project in its bash calls", () => {
 		const pi = await startPi(top, () => session);
 		await pi.bash();
 		expect(process.env.PLANNOTATOR_SESSION_PROJECT).toBe(`pi:ses-pi-one:${top}`);
-		// /new or /resume: the next bash call names the session Pi has now.
 		session = "ses-pi-two";
 		await pi.bash();
 		expect(process.env.PLANNOTATOR_SESSION_PROJECT).toBe(`pi:ses-pi-two:${top}`);
 
-		// `cd repo && plannotator inbox call send_message …`: Pi's bash environment is this process's plus PI_SESSION_ID.
 		const server = await startInboxServer({ dataDir: join(root, "inbox-data"), phones: false });
 		stops.push(() => server.stop());
 		let out = "";

@@ -1,7 +1,3 @@
-/**
- * Pi servers: the Host-header allowlist. Same scenarios as the Bun servers
- * (packages/server/request-host.scenarios.ts), so the mirror cannot drift.
- */
 import { defineRequestHostScenarios } from "../../../packages/server/request-host.scenarios.ts";
 import { startPlanReviewServer } from "./serverPlan.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";

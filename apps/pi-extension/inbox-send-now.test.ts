@@ -1,12 +1,3 @@
-/**
- * Pi's Send now: the person pressed Send now on a reply while a Pi run goes.
- * The extension's own Inbox code (setupPiInbox) against a real Inbox under a
- * temp data dir, with a stand-in for Pi's ExtensionAPI that records
- * `sendUserMessage` and raises `message_start` the way Pi does when it starts
- * the user message. The failure this catches: Send now that waits for idle
- * anyway, that delivers as a follow-up, or that counts as delivered before Pi
- * started the message. The real Pi proofs are inbox.test.ts.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -48,7 +39,6 @@ afterEach(async () => {
 	for (const w of worlds.splice(0)) await destroyInboxWorld(w);
 });
 
-/** A stand-in for Pi's ExtensionAPI and one session's context. */
 function fakePi(project: string) {
 	const handlers = new Map<string, ((event: any, ctx?: any) => unknown)[]>();
 	const sent: { text: string; deliverAs: string | undefined }[] = [];
@@ -105,7 +95,6 @@ describe.skipIf(process.platform === "win32")("Pi: Send now", () => {
 		await setupPiInbox(fake.pi as never, { isAskActive: () => false });
 		fake.emit("session_start", {});
 		ends.push(() => fake.emit("session_shutdown", {}));
-		// A run goes (Pi is not idle) when the agent sends and the person answers.
 		fake.emit("agent_start", {});
 		const result = await fake.tool().execute("call-1", { action: "send_message", body: QUESTION }, undefined, undefined, fake.ctx);
 		const text = result.content[0]!.text;
@@ -122,7 +111,6 @@ describe.skipIf(process.platform === "win32")("Pi: Send now", () => {
 		const deliveryOf = async () =>
 			((await (await fetch(`http://127.0.0.1:${registry(w).port}/api/inbox/threads/${asked.thread_id}`)).json()) as { thread: { messages: { id: string; delivery?: unknown }[] } }).thread.messages.find((m) => m.id === replyId)?.delivery;
 		await Bun.sleep(800);
-		// Not delivered until Pi starts the message.
 		expect(await deliveryOf()).toBeUndefined();
 		fake.emit("message_start", { message: { role: "user", content: steer.text } });
 		expect(await waitFor("the delivery record", deliveryOf)).toMatchObject({ host: "pi", session: "pi-session-now" });
@@ -150,7 +138,6 @@ describe.skipIf(process.platform === "win32")("Pi: Send now", () => {
 		const asked = JSON.parse(text.slice(text.indexOf("{"))) as { message_id: string; thread_id: string };
 		const replyId = await personSends(w, asked.message_id, "Retry with the same key.");
 		await sendNowOffered(w, asked.thread_id, "pi-session-now");
-		// An "Ask this session" question starts: its turn's answer streams to Plannotator.
 		asking = true;
 		await waitFor("Send now no longer offered", async () => {
 			const model = (await (await fetch(`http://127.0.0.1:${registry(w).port}/api/inbox/threads/${asked.thread_id}/sessions?asker=pi-session-now`)).json()) as {
@@ -161,7 +148,6 @@ describe.skipIf(process.platform === "win32")("Pi: Send now", () => {
 		await expect(pressSendNow(w, replyId)).rejects.toThrow(/send_now_unavailable/);
 		await Bun.sleep(2_000);
 		expect(fake.sent).toEqual([]);
-		// The Ask ends and the session goes idle: the reply goes in as its own turn.
 		asking = false;
 		fake.setIdle(true);
 		const followUp = await waitFor("the follow-up", () => fake.sent[0]);
@@ -182,7 +168,6 @@ describe.skipIf(process.platform === "win32")("Oh My Pi: the wake", () => {
 		process.env.PLANNOTATOR_BIN = join(w.bin, "plannotator");
 
 		const fake = fakePi(w.project);
-		// What index.ts records when Oh My Pi loads the extension.
 		setPiHost("oh-my-pi");
 		await setupPiInbox(fake.pi as never, { isAskActive: () => false });
 		fake.emit("session_start", {});
@@ -205,7 +190,6 @@ describe("Pi: a steer Esc moved into the editor (editorWithout)", () => {
 		expect(editorWithout(`${reply}\n\nmy draft`, reply)).toBe("my draft");
 		expect(editorWithout(`queued first\n\n${reply}\n\nmy draft`, reply)).toBe("queued first\n\nmy draft");
 		expect(editorWithout(`queued first\n\n${reply}`, reply)).toBe("queued first");
-		// The person edited it: nothing is taken out.
 		expect(editorWithout(reply.replace("Retry.", "Retry twice."), reply)).toBeNull();
 	});
 });

@@ -1,8 +1,3 @@
-/**
- * Pi servers: `GET /api/ref` (the issue / PR / MR hover cards). Same scenarios
- * as the Bun servers (packages/server/ref-card-route.scenarios.ts), so the
- * mirror cannot drift. Pi has no `--tailscale`.
- */
 import { defineRefCardRouteScenarios } from "../../../packages/server/ref-card-route.scenarios.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 import { startPlanReviewServer } from "./serverPlan.ts";

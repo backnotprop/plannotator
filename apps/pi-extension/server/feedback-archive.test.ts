@@ -1,20 +1,3 @@
-/**
- * Durable feedback archive — Pi (Node) runtime parity.
- *
- * Node mirror of packages/server/feedback-archive.test.ts. Plannotator has two
- * server implementations with the same API surface; a feature wired into only
- * one of them silently drops every Pi user's feedback on the floor. These
- * tests pin that the three Pi handlers (plan deny/approve, review
- * /api/feedback and /api/exit, annotate submit) write the SAME record shape
- * under the same gates.
- *
- * The archive is sandboxed under a temp PLANNOTATOR_DATA_DIR set inside the
- * tests — the vendored module resolves its data dir per call. Plan version
- * history goes through generated/storage.ts, which caches its data directory
- * at import time, so the plan test uses a unique heading (unique slug) and
- * removes only that slug directory afterwards.
- */
-
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,10 +13,6 @@ import { getPlannotatorDataDir } from "../generated/data-dir.ts";
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const PATCH = "diff --git a/src/parse.ts b/src/parse.ts\n@@ -1 +1 @@\n-a\n+b\n";
 
-// Annotate version history goes through generated/storage.ts, whose data dir is
-// fixed at import time, so these sessions snapshot into the REAL data dir no
-// matter what PLANNOTATOR_DATA_DIR says here. Distinctive, test-owned project
-// names keep that out of any real project's bucket and let afterAll remove it.
 const PI_FILE_ANNOTATE_PROJECT = "_pi_feedback_archive_test_file";
 const PI_STATELESS_ANNOTATE_PROJECT = "_pi_feedback_archive_test_stateless";
 
@@ -95,9 +74,6 @@ afterEach(() => {
 });
 
 afterAll(() => {
-	// Remove the annotate history these tests deposited in the real data dir.
-	// Runs with the env already restored, so this resolves the same directory
-	// generated/storage.ts wrote to.
 	const historyDir = join(getPlannotatorDataDir(), "history");
 	for (const project of [PI_FILE_ANNOTATE_PROJECT, PI_STATELESS_ANNOTATE_PROJECT]) {
 		rmSync(join(historyDir, project), { recursive: true, force: true });
@@ -141,7 +117,6 @@ describe("pi feedback archive: code review", () => {
 			expect(records[0].annotations?.[0].file).toBe("src/parse.ts");
 			expect(records[0].target?.review?.gitRef).toBe("HEAD");
 			expect(records[0].target?.review?.changedFiles).toBe(1);
-			// Identity only, never the patch bytes.
 			expect(JSON.stringify(records[0])).not.toContain("diff --git");
 			expect(sidecarBody(dataDir, records[0])).toContain("parse() still drops the null case.");
 
@@ -165,12 +140,7 @@ describe("pi feedback archive: code review", () => {
 	});
 
 	test("a failed archive write keeps the draft and still answers the reviewer with 200", async () => {
-		// The one invariant the Pi handler copies by hand rather than inheriting
-		// from the shared module: archive first, and only delete the draft when
-		// the record actually landed.
 		const dataDir = useTempDataDir();
-		// The review project is derived from the review cwd; block exactly that
-		// archive directory by planting a FILE where the directory must go.
 		const repoDir = join(makeTempDir("plannotator-pi-feedback-repo-"), "widgets");
 		mkdirSync(repoDir, { recursive: true });
 		mkdirSync(feedbackDir(dataDir), { recursive: true });
@@ -194,9 +164,7 @@ describe("pi feedback archive: code review", () => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ feedback: "Do not lose this.", annotations: [{ id: "a1" }] }),
 			});
-			// The submit succeeds for the user...
 			expect(response.status).toBe(200);
-			// ...and the draft survives as the recovery copy.
 			const draft = await fetch(`${server.url}/api/draft`);
 			expect(draft.status).toBe(200);
 			expect(JSON.stringify(await draft.json())).toContain("a1");
@@ -206,9 +174,6 @@ describe("pi feedback archive: code review", () => {
 	});
 
 	test("a PR-mode session buckets under the project, not the pool checkout", async () => {
-		// PR mode never sets gitContext and `--local` points agentCwd at
-		// <sessionDir>/pool/pr-<n>; the caller's detected project must win, or
-		// every PR review files under `pr-123`.
 		const dataDir = useTempDataDir();
 		const poolCwd = join(makeTempDir("plannotator-pi-feedback-pool-"), "pool", "pr-123");
 		mkdirSync(poolCwd, { recursive: true });

@@ -1,18 +1,3 @@
-/**
- * Revised plans pushed into an open Pi plan review (non-blocking
- * plannotator_submit_plan).
- *
- * What regresses if this fails:
- *  - a revision the agent pushes never reaches the open tab (no new
- *    /api/plan text, no revision bump, no version diff), so the reviewer
- *    keeps reading a plan the agent has replaced;
- *  - a decision made on the older revision is accepted, approving or
- *    denying text the reviewer never saw;
- *  - the approved snapshot records the plan the server started with instead
- *    of the one that was approved;
- *  - a push after the decision silently mutates a settled review instead of
- *    telling the caller to open a new one.
- */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,11 +9,6 @@ import { generateSlug, getPlanVersionPath } from "../generated/storage.ts";
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const ENV_KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_AI", "PLANNOTATOR_PORT", "PLANNOTATOR_REMOTE", "PLANNOTATOR_FEEDBACK_HISTORY"] as const;
 
-/**
- * Run one test against a temp PLANNOTATOR_DATA_DIR (version history, drafts
- * and plan snapshots all land there), restoring the environment in finally.
- * Never touches the real data dir (Testing Rules).
- */
 async function sandboxed(run: (dataDir: string) => Promise<void>): Promise<void> {
 	const saved: Record<string, string | undefined> = {};
 	for (const key of ENV_KEYS) saved[key] = process.env[key];
@@ -77,7 +57,6 @@ describe("pi plan server revisions", () => {
 			const before = await getJson(`${server.url}/api/plan`);
 			expect(before.planRevision).toBe(0);
 			expect(before.plan).toBe(v1);
-			// #1001: the history file holding the plan on screen, so Ask AI names it by path.
 			expect(before.planPath.startsWith(dataDir)).toBe(true);
 			expect(readFileSync(before.planPath, "utf8")).toBe(v1);
 
@@ -92,7 +71,6 @@ describe("pi plan server revisions", () => {
 			expect(after.versionInfo.version).toBe(2);
 			expect(after.planPath).not.toBe(before.planPath);
 			expect(readFileSync(after.planPath, "utf8")).toBe(v2);
-			// History went to the sandbox, never the real data dir.
 			expect(getPlanVersionPath(detectProjectName(), generateSlug(v2), 2)?.startsWith(dataDir)).toBe(true);
 		} finally {
 			server.stop();
@@ -129,10 +107,8 @@ describe("pi plan server revisions", () => {
 			const { savedPath } = (await ok.json()) as { savedPath?: string };
 			expect(savedPath).toBeTruthy();
 			expect(readFileSync(savedPath!, "utf-8")).toContain("Second step.");
-			// The decision names the text approved: the revision on screen.
 			expect(await server.waitForDecision()).toMatchObject({ approved: true, plan: v2 });
 
-			// Settled: a later push is the caller's cue to open a new review.
 			expect(server.updatePlan(`${v2}\nMore.\n`)).toBeNull();
 		} finally {
 			server.stop();

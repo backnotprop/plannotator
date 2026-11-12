@@ -1,16 +1,3 @@
-/**
- * #1864: a decision reaches code another extension instance owns (the
- * event API's review-result emit). After /reload or a session switch that
- * code throws Pi's stale-ctx error SYNCHRONOUSLY. The decision is published
- * from inside the HTTP handler, so a throw that escapes there is an uncaught
- * error that ends the whole Pi process.
- *
- * What regresses if this fails:
- *  - a throwing decision listener crashes Pi (or fails the reviewer's POST);
- *  - a plan review closed because its session ended leaves the open tab
- *    offering a decision nobody can receive (no `session-closed` event, or a
- *    late decision accepted).
- */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,7 +31,6 @@ async function sandboxed(run: () => Promise<void>): Promise<void> {
 	}
 }
 
-/** Collect anything the host would see as a fatal process error while `run` executes. */
 async function trapFatal(run: () => Promise<void>): Promise<unknown[]> {
 	const fatal: unknown[] = [];
 	const onFatal = (err: unknown) => fatal.push(err);
@@ -52,7 +38,6 @@ async function trapFatal(run: () => Promise<void>): Promise<unknown[]> {
 	process.on("unhandledRejection", onFatal);
 	try {
 		await run();
-		// Let any escaped microtask or timer surface before the hooks come off.
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	} finally {
 		process.off("uncaughtException", onFatal);
@@ -84,7 +69,6 @@ async function readEvent(url: string, want: (event: Record<string, unknown>) => 
 				const event = JSON.parse(chunk.slice(6)) as Record<string, unknown>;
 				if (want(event)) return event;
 			}
-			// The first chunk (the snapshot) proves the stream is subscribed.
 			if (!acted) {
 				acted = true;
 				await act();
@@ -139,9 +123,6 @@ describe("a decision consumer that throws synchronously never escapes the HTTP h
 			}
 		}));
 
-	// Review and annotate settle a promise instead of calling listeners, so a
-	// consumer's synchronous throw lands in the consumer's own chain. Pinned so
-	// a synchronous fan-out added to either server cannot reintroduce #1864.
 	test("review: POST /api/feedback answers normally when the decision's consumer throws", () =>
 		sandboxed(async () => {
 			const server = await startReviewServer({ rawPatch: "diff --git a/a b/a\n@@ -1 +1 @@\n-a\n+b\n", gitRef: "HEAD", htmlContent: MINIMAL_HTML });
@@ -202,7 +183,6 @@ describe("plan: closeKeepingDraft (the session that opened the review ended)", (
 				const event = await readEvent(server.url, (e) => e.type === "session-closed", () => {
 					expect(server.closeKeepingDraft()).toEqual({ closed: true, unsentAnnotations: 2 });
 				});
-				// "session", not "agent": plan mode or the Pi session ended; nobody asked to close it.
 				expect(event).toEqual({ type: "session-closed", by: "session", unsentAnnotations: 2 });
 
 				const late = await postJson(`${server.url}/api/approve`, {});

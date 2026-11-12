@@ -1,9 +1,3 @@
-/**
- * Pi mirror of packages/server/vscode-proxy-writes.test.ts: the write
- * endpoints' same-origin guard accepts the VS Code cookie proxy's shape
- * (Origin = proxy, Host = server, Sec-Fetch-Site: same-origin) and still
- * refuses other sites.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as http from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";

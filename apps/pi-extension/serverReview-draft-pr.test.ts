@@ -1,12 +1,3 @@
-/**
- * Pi mirror of packages/server/review-draft-pr.test.ts: /api/draft in PR mode survives a changed PR diff (#1590), and every
- * decision clears it under both keys. Local reviews keep the content-hash key.
- *
- * Temp PLANNOTATOR_DATA_DIR per test. The server's PR commands (the platform
- * user, viewed files, PR context) go to a fake runtime, never the real `gh`
- * (emptying PATH is no guard: in the Bun mirror a spawn without `env` resolves
- * on the PATH the process started with).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -153,8 +144,6 @@ describe('PR review drafts across a push', () => {
       await withSession(PATCH_AFTER_PUSH, prMetadata, async (fresh) => {
         await fetch(`${fresh}/api/draft?generation=4`, { method: 'DELETE' });
       });
-      // The stale tab's debounced save lands after the delete, same generation:
-      // refused (409), and nothing is written.
       const late = await fetch(`${staleTab}/api/draft`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,13 +181,6 @@ describe('reviews without a Git identity', () => {
     });
   });
 });
-
-
-// ---------------------------------------------------------------------------
-// In-place switches (#1590 review items 1 and 2). /api/pr-switch fetches the
-// target PR through the server's `prFetcher` test seam, so no platform CLI or
-// network is involved; the PRs live on an unresolvable host.
-// ---------------------------------------------------------------------------
 
 const PATCH_PR_43 = 'diff --git a/src/b.ts b/src/b.ts\n--- a/src/b.ts\n+++ b/src/b.ts\n@@ -1 +1 @@\n-x\n+y\n';
 const pr43: PRMetadata = { ...prMetadata, number: 43, url: 'https://github.invalid/acme/widgets/pull/43' };
@@ -240,9 +222,9 @@ describe('in-place PR switches', () => {
   test('submitting after switching A→B clears A too, so its comments do not come back after a push', async () => {
     sandbox();
     await withSwitchableSession(PATCH_BEFORE_PUSH, prMetadata, async (url) => {
-      await saveDraft(url, 3); // saved on A (#42)
+      await saveDraft(url, 3);
       await switchTo43(url);
-      await saveDraft(url, 4); // saved on B (#43)
+      await saveDraft(url, 4);
       const res = await fetch(`${url}/api/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,7 +232,6 @@ describe('in-place PR switches', () => {
       });
       expect(res.status).toBe(200);
     });
-    // A teammate pushes to #42; reopening it must not offer the submitted comments.
     await withSession(PATCH_AFTER_PUSH, prMetadata, async (url) => {
       expect((await fetch(`${url}/api/draft`)).status).toBe(404);
     });
@@ -261,7 +242,6 @@ describe('in-place PR switches', () => {
 
   test('switching onto a PR submitted in an earlier session reports its generation floor, and a stale save is refused, not swallowed', async () => {
     sandbox();
-    // Earlier session on #43: saved at 39, closed at 40.
     await withSession(PATCH_PR_43, pr43, async (url) => {
       await saveDraft(url, 39);
       await fetch(`${url}/api/exit?draftGeneration=40`, { method: 'POST' });
@@ -276,7 +256,6 @@ describe('in-place PR switches', () => {
       });
       expect(stale.status).toBe(409);
       expect((await stale.json()).ok).toBe(false);
-      // A client that adopted the floor saves normally.
       await saveDraft(url, 41);
     });
   });
@@ -293,10 +272,6 @@ describe('in-place PR switches', () => {
   });
 });
 
-
-// The decision names its target as the server shows it at decision time
-// (#1729 review): feedback written after an in-place switch to PR #43 must
-// say "PR #43", never the PR the session opened on.
 describe('decision target after an in-place PR switch', () => {
   test('the decision carries the ACTIVE PR url, not the one the session opened on', async () => {
     sandbox();

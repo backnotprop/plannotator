@@ -1,29 +1,3 @@
-/**
- * The reload line for Pi and Oh My Pi (owner approval "reload-hosts"),
- * proved on the REAL hosts in their interactive mode, in a pseudo-terminal,
- * the way a person types `/reload` or `/restart`: the extension installed as
- * people install it (`pi install npm:@plannotator/pi-extension`,
- * `omp plugin install @plannotator/pi-extension`) from the packed tarball
- * through a throwaway registry (its dependencies proxied from npm), under a
- * scratch HOME and agent dir, against a real Inbox started in this process at
- * 0.28.99 (its release check stubbed: it never reaches GitHub). The model is
- * a scripted OpenAI-compatible endpoint (tests/helpers/scripted-model.ts).
- *
- * What is proved, each with the time it took:
- *  - Pi: the extension on disk equal to what the session loaded and behind
- *    this Inbox: `pi update --extensions`, then `/reload`. The person updates:
- *    within seconds the Inbox says `/reload` alone, and the session says the
- *    package changed under it; `/reload` typed in the session: the session
- *    reports the new version and the line goes.
- *  - Oh My Pi (PLANNOTATOR_OMP_BIN): the same with
- *    `omp plugin upgrade @plannotator/pi-extension` and `/restart`.
- *
- * Opt-in (it installs the extension's dependencies from npm):
- * PLANNOTATOR_RELOAD_PROOF=1 and PI_EXTENSION_TARBALL=<npm pack of this
- * package>. INBOX_PROOF_DIR=<dir> keeps a transcript (and the terminal's
- * text) under <dir>/pi-reload/. RELOAD_PROOF_SHOTS=<dir> adds screenshots of
- * Settings → Agents while the line shows (tests/helpers/reload-proof-shots.ts).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -61,7 +35,6 @@ function repack(source: string, version: string, into: string): string {
 	return out;
 }
 
-/** A throwaway registry: this package's versions published so far; every other package proxied from npm. */
 function npmRegistry() {
 	const published = new Map<string, { file: string; manifest: Record<string, unknown> }>();
 	let latest = "";
@@ -119,7 +92,6 @@ async function piSessions(server: InboxServer): Promise<InboxOpenSession[]> {
 	return model.sessions?.pi?.sessions ?? [];
 }
 
-/** The only live Pi session the Inbox sees (each proof runs one session until its restart). */
 async function onlySession(server: InboxServer): Promise<InboxOpenSession | null> {
 	const sessions = await piSessions(server);
 	return sessions.length === 1 ? sessions[0]! : null;
@@ -132,7 +104,6 @@ const strip = (text: string) =>
 		.replace(/\x1b[()][A-Za-z0-9]/g, "")
 		.replace(/\x1b[=>78DEHM]/g, "");
 
-/** A host in a pseudo-terminal, as a person runs it. */
 function terminal(command: string[], cwd: string, env: Record<string, string>) {
 	let screen = "";
 	const proc = Bun.spawn(command, {
@@ -151,7 +122,6 @@ function terminal(command: string[], cwd: string, env: Record<string, string>) {
 		text: () => strip(screen),
 		mark: () => strip(screen).length,
 		since: (mark: number) => strip(screen).slice(mark),
-		/** Raw keys (Escape, Enter), one at a time. */
 		async keys(keys: string[]) {
 			for (const key of keys) {
 				write(key);
@@ -186,12 +156,10 @@ function scriptedModel(): ScriptedModel {
 
 interface HostCase {
 	name: string;
-	/** The world, the registry and the model are ready: install the extension, return the host's command line. */
 	setup(w: InboxWorld, env: Record<string, string>, m: ScriptedModel): { command: string[]; install: string[]; update: string[] };
 	updateCommand: string;
 	reload: string;
 	host: "pi" | "oh-my-pi";
-	/** Keys before the first prompt: Oh My Pi's first run opens its setup (Enter skips the splash, Escape the steps). */
 	prelude?: string[];
 }
 
@@ -287,12 +255,10 @@ async function prove(c: HostCase): Promise<void> {
 		npm_config_cache: join(w.root, "npm-cache"),
 		BUN_INSTALL_CACHE_DIR: join(w.root, "bun-cache"),
 		PLANNOTATOR_GLIMPSE: "0",
-		// This proof is the person typing the reload; Pi's own reload (auto-reload.ts) would get there first.
 		PLANNOTATOR_AUTO_RELOAD: "0",
 		TERM: "xterm-256color",
 	};
 	const { command, install, update } = c.setup(w, env, m);
-	// Async: the registry answers from this process, so a synchronous spawn would wait on itself.
 	const run = async (args: string[]) => {
 		const t0 = Date.now();
 		const proc = Bun.spawn(args, { cwd: w.project, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
@@ -344,7 +310,6 @@ async function prove(c: HostCase): Promise<void> {
 		await term.type(c.reload);
 		const after = await waitFor(`a session to report 0.28.99 after ${c.reload}`, async () => (await piSessions(server)).find((row) => row.plugin === "0.28.99" && row.outdated === null), 120_000);
 		w.proof(`3. typed ${c.reload}: session ${after.session} reported ${after.plugin} with no line ${Date.now() - t0} ms later`);
-		// Oh My Pi's /restart is a new process: the old one's connection is gone, and the Inbox lets it go once it stops polling.
 		await waitFor("no session left on the old version", async () => (await piSessions(server)).every((row) => row.outdated === null), 60_000);
 		w.proof(`   no session left on 0.28.98 (no line anywhere) ${Date.now() - t0} ms after ${c.reload}`);
 	} finally {

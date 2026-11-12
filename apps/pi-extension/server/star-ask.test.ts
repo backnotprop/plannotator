@@ -1,8 +1,3 @@
-/**
- * The done screen's star ask route on the Pi plan, review and annotate servers (`handleStarAskRequest`, handlers.ts),
- * the Bun servers' mirror (packages/server/star-ask-route.test.ts). What regresses: Pi's route missing (claim at load,
- * shown at the decision), the claim using the ask up, recording the wrong surface, or checking or stamping in remote mode.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";

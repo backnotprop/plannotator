@@ -44,9 +44,6 @@ export function releasePhaseTools(
 	return activeTools.filter((tool) => !additions.has(tool));
 }
 
-// Used by both the planning-phase write gate and plannotator_submit_plan.
-// Path must resolve inside cwd (no traversal, no absolute escape) and end
-// in a permitted markdown extension.
 export function isPlanWritePathAllowed(inputPath: string, cwd: string): boolean {
 	if (!inputPath) return false;
 	const targetAbs = resolve(cwd, inputPath);

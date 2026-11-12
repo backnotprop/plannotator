@@ -49,8 +49,6 @@ describe("Pi annotate outcomes", () => {
     });
   });
 
-  // #1701: the editor's bare Done posts the zero-state sentence, marked
-  // nothingToSend; Pi must close quietly instead of sending a follow-up turn.
   test("a Done with nothing to send delivers nothing", () => {
     for (const sentence of [
       "User reviewed the document and has no feedback.",

@@ -4,15 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plannotator from "./index.ts";
 
-/**
- * Extension-level coverage for the todo-provider mirror: proves the plan
- * lifecycle actually drives a provider, which the provider's own unit tests
- * (todo-providers/pi-todos.test.ts) cannot show.
- *
- * The Pi host stub mirrors the one in external-execution.test.ts, trimmed to
- * what a `--plan` session needs to boot, auto-approve (hasUI: false), finish a
- * turn, and toggle back to idle.
- */
 const tempDirs: string[] = [];
 let originalPiTodoPath: string | undefined;
 let originalTodoProviderEnv: string | undefined;
@@ -23,18 +14,12 @@ function makeTempDir(prefix: string): string {
 	return dir;
 }
 
-/** Restore an env var to its pre-test value instead of deleting ambient state. */
 function restoreEnv(name: string, value: string | undefined): void {
 	if (value === undefined) delete process.env[name];
 	else process.env[name] = value;
 }
 
 beforeEach(() => {
-	// The extension resolves a real provider through the real env-sensitive
-	// detection code (resolveTodoProvider / detectPiTodos). Snapshot and clear
-	// PI_TODO_PATH and PLANNOTATOR_TODO_PROVIDER so an ambient value on the
-	// host — or leaked from another test file sharing this process — can
-	// never redirect detection or writes outside the temp dirs below.
 	originalPiTodoPath = process.env.PI_TODO_PATH;
 	originalTodoProviderEnv = process.env.PLANNOTATOR_TODO_PROVIDER;
 	delete process.env.PI_TODO_PATH;
@@ -138,7 +123,6 @@ function createHarness(cwd: string) {
 				await handler({ message: { role: "assistant", content: [{ type: "text", text }] } }, ctx);
 			}
 		},
-		/** The `/plannotator-plan-mode` toggle is the shared exit back to idle. */
 		async toggle(): Promise<void> {
 			await commands.get("plannotator-plan-mode")?.handler("", ctx);
 		},
@@ -181,9 +165,6 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		for (const todo of todos) {
 			expect(todo.status).toBe("open");
 			expect(todo.tags).toContain("plannotator:plan:PLAN.md");
-			// TodoProviderEnv carries the session id (ctx.sessionManager.getSessionId()),
-			// never the session file path — the harness mock returns a different
-			// string for each, so this fails if the wiring regresses.
 			expect(todo.assigned_to_session).toBe("test-session");
 		}
 	});
@@ -236,12 +217,9 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		await harness.startSession();
 		await harness.submitPlan("PLAN.md");
 
-		// The mirror is additive: the tracker still renders both steps...
 		const rendered = harness.widgets.filter((content): content is string[] => Array.isArray(content));
 		expect(rendered.at(-1)).toHaveLength(2);
 
-		// ...and the provider actually received the same two steps, not just
-		// an empty or partial mirror running alongside an unaffected widget.
 		const todos = readTodos(todosDir);
 		expect(todos.map((todo) => todo.title).sort()).toEqual(["1. First step", "2. Second step"]);
 		for (const todo of todos) expect(todo.status).toBe("open");
@@ -256,7 +234,6 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		await harness.submitPlan("PLAN.md");
 		await harness.endTurn("Done with one. [DONE:1]");
 
-		// No .pi/todos to detect, so nothing is created and nothing warns.
 		expect(existsSync(join(cwd, ".pi", "todos"))).toBe(false);
 		expect(harness.notifications.filter((note) => note.includes("sync failed"))).toEqual([]);
 		const rendered = harness.widgets.filter((content): content is string[] => Array.isArray(content));
@@ -271,11 +248,9 @@ describe("plan execution mirrors into a detected todo provider", () => {
 
 		const harness = createHarness(cwd);
 		await harness.startSession();
-		// First plan runs with no provider installed.
 		await harness.submitPlan("PLAN.md");
 		expect(readTodos(todosDir)).toEqual([]);
 
-		// Back to idle, provider installed, second plan approved.
 		await harness.toggle();
 		mkdirSync(todosDir, { recursive: true });
 		await harness.toggle();
@@ -293,13 +268,8 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		const harness = createHarness(cwd);
 		await harness.startSession();
 		await harness.submitPlan("PLAN.md");
-		// The provider is healthy for the initial sync: a real directory.
 		expect(readTodos(todosDir)).toHaveLength(2);
 
-		// Break the provider without chmod: replace the todos directory with a
-		// plain file, so the next sync's `fs.mkdir(todosDir, { recursive: true })`
-		// throws ENOTDIR/EEXIST instead of silently no-oping or needing
-		// permissions this process might not even be able to drop.
 		rmSync(todosDir, { recursive: true, force: true });
 		writeFileSync(todosDir, "not a directory anymore");
 
@@ -309,8 +279,6 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		const failureNotices = harness.notifications.filter((note) => note.includes("sync failed"));
 		expect(failureNotices).toHaveLength(1);
 
-		// The widget is wired independently of provider health: execution
-		// keeps rendering progress after the provider latches disabled.
 		const rendered = harness.widgets.filter((content): content is string[] => Array.isArray(content));
 		expect(rendered.at(-1)).toHaveLength(2);
 	});

@@ -1,20 +1,3 @@
-/**
- * Annotate server (Pi/Node): folder annotate version history
- *
- * Node mirror of packages/server/annotate.test.ts's "folder annotate history"
- * describe block — exercises the same lazy, memoized per-file history
- * pipeline wired into apps/pi-extension/server/serverAnnotate.ts's /api/doc
- * route, and the path-parameterized /api/plan/version(s) endpoints.
- *
- * History writes go to the real ~/.plannotator data dir (or PLANNOTATOR_DATA_DIR
- * if the environment already had it set before this process's first import of
- * generated/storage.js): that module caches its data directory in a
- * module-level constant at import time, so a per-test PLANNOTATOR_DATA_DIR
- * override taken here would silently no-op once another test file has already
- * imported it. Each test uses its own unique project namespace instead (same
- * approach as the Bun-side suite) so runs never collide.
- */
-
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -35,9 +18,6 @@ describe("pi annotate server: folder annotate history", () => {
 		savedHistoryFlag = process.env.PLANNOTATOR_ANNOTATE_HISTORY;
 		delete process.env.PLANNOTATOR_PORT;
 		process.env.PLANNOTATOR_REMOTE = "0";
-		// Force the toggle on for every test but the one that explicitly flips it
-		// off — a real ~/.plannotator/config.json on the machine running these
-		// tests must never change the outcome.
 		process.env.PLANNOTATOR_ANNOTATE_HISTORY = "1";
 	});
 
@@ -50,11 +30,6 @@ describe("pi annotate server: folder annotate history", () => {
 		else process.env.PLANNOTATOR_ANNOTATE_HISTORY = savedHistoryFlag;
 	});
 
-	// Every minted name is tracked and its history directory removed in
-	// afterAll below — this suite must never leave residue in the real data
-	// dir (including the stray non-directory file the "unwritable data dir"
-	// test deliberately plants inside its own project's history dir; removing
-	// the project dir recursively takes that with it).
 	const mintedProjects: string[] = [];
 	function uniqueProject(label: string): string {
 		const project = `_pi_annotate_history_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -118,13 +93,8 @@ describe("pi annotate server: folder annotate history", () => {
 			expect(firstJson.markdown).toBe("V1\n");
 			expect(firstJson.previousPlan).toBeNull();
 			expect(firstJson.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
-			// diffCurrent is intentionally not propagated on the folder /api/doc
-			// path — it always equals the doc's own markdown and the client never
-			// reads it (unlike single-file /api/plan, which keeps it for shape parity).
 			expect("diffCurrent" in firstJson).toBe(false);
 
-			// Change the file on disk between opens — a re-run of the pipeline
-			// would mint version 2. Memoization must prevent that.
 			writeFileSync(docPath, "V2\n", "utf-8");
 
 			const second = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
@@ -133,9 +103,7 @@ describe("pi annotate server: folder annotate history", () => {
 				previousPlan?: string | null;
 				versionInfo?: { version: number; totalVersions: number; project: string };
 			};
-			// The live document content is always read fresh from disk...
 			expect(secondJson.markdown).toBe("V2\n");
-			// ...but the history snapshot/diff fields stay exactly what first-open computed.
 			expect(secondJson.previousPlan).toBeNull();
 			expect(secondJson.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
 
@@ -152,7 +120,6 @@ describe("pi annotate server: folder annotate history", () => {
 		const docPath = join(folderPath, "note.md");
 		const project = uniqueProject("cross-mode");
 
-		// Single-file session saves "V1" as version 1 for this exact resolved path.
 		const seedServer = await startAnnotateServer({
 			markdown: "V1\n",
 			filePath: docPath,
@@ -162,7 +129,6 @@ describe("pi annotate server: folder annotate history", () => {
 		});
 		seedServer.stop();
 
-		// The folder session reads different content off disk, so it mints version 2.
 		writeFileSync(docPath, "V2\n", "utf-8");
 
 		const server = await startAnnotateServer({
@@ -289,7 +255,6 @@ describe("pi annotate server: folder annotate history", () => {
 		const docPath = join(folderPath, "config.yaml");
 		const project = uniqueProject("yaml");
 
-		// Single-file session saves "a: 1" as version 1 for this exact path.
 		const seedServer = await startAnnotateServer({
 			markdown: "a: 1\n",
 			filePath: docPath,
@@ -299,7 +264,6 @@ describe("pi annotate server: folder annotate history", () => {
 		});
 		seedServer.stop();
 
-		// The folder session reads different content off disk, so it mints version 2.
 		writeFileSync(docPath, "a: 2\n", "utf-8");
 
 		const server = await startAnnotateServer({
@@ -312,8 +276,6 @@ describe("pi annotate server: folder annotate history", () => {
 		});
 
 		try {
-			// `doc=1` mirrors the file browser: it forces annotatable plain-text
-			// rendering for extensions that overlap CODE_FILE_REGEX (.yaml, .json…).
 			const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
 			const json = (await response.json()) as {
 				previousPlan?: string | null;
@@ -344,9 +306,6 @@ describe("pi annotate server: folder annotate history", () => {
 		try {
 			const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
 			const json = (await response.json()) as Record<string, unknown>;
-			// Whatever shape /api/doc answers with (.env is not annotatable, so it
-			// is never served as a document), no history fields may appear and no
-			// snapshot may be written.
 			expect("previousPlan" in json).toBe(false);
 			expect("versionInfo" in json).toBe(false);
 
@@ -364,9 +323,6 @@ describe("pi annotate server: folder annotate history", () => {
 		writeFileSync(docPath, "Content\n", "utf-8");
 		const project = uniqueProject("unwritable");
 
-		// Block the exact history directory the pipeline will try to mkdir by
-		// pre-creating a plain FILE at that path — mkdirSync(recursive) throws
-		// when a target segment exists and is not a directory, on every platform.
 		const slug = deriveAnnotateHistorySlug(docPath);
 		const historyProjectDir = join(getPlannotatorDataDir(), "history", project);
 		mkdirSync(historyProjectDir, { recursive: true });
@@ -410,14 +366,12 @@ describe("pi annotate server: folder annotate history", () => {
 		});
 
 		try {
-			// No history yet for this path: version endpoints report empty, not an error.
 			const versionsBefore = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
 			expect(await versionsBefore.json()).toEqual({ project, slug: null, versions: [] });
 			const versionBefore = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(docPath)}&v=1`);
 			expect(versionBefore.status).toBe(404);
 			expect(await versionBefore.json()).toEqual({ error: "No version history" });
 
-			// Open the file so history is initialized this session.
 			await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
 
 			const versionsAfter = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
@@ -429,8 +383,6 @@ describe("pi annotate server: folder annotate history", () => {
 			expect(versionAfter.status).toBe(200);
 			expect(await versionAfter.json()).toEqual({ plan: "V1\n", version: 1 });
 
-			// A path outside the folder root resolves the way /api/doc resolves it:
-			// a tab on this machine reaches it (#2291), a forwarded reader does not.
 			const outsidePath = join(realpathSync(tmpdir()), "outside.md");
 			const outsideVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`);
 			expect(outsideVersions.status).toBe(200);
@@ -441,9 +393,6 @@ describe("pi annotate server: folder annotate history", () => {
 			const deniedVersion = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(outsidePath)}&v=1`, forwarded);
 			expect(deniedVersion.status).toBe(403);
 
-			// Without a path param at all, behavior is exactly today's: this
-			// session has no single-file annotateHistory binding (it's a folder
-			// session), so both endpoints report "no history" as before.
 			const noPathVersions = await fetch(`${server.url}/api/plan/versions`);
 			expect(await noPathVersions.json()).toEqual({ project, slug: null, versions: [] });
 			const noPathVersion = await fetch(`${server.url}/api/plan/version?v=1`);

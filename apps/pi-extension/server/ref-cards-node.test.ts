@@ -1,11 +1,3 @@
-/**
- * Pi's hover-card runner (generated/ref-cards-node.ts, from
- * packages/shared/ref-cards-node.ts) against a scripted `gh` / `glab` that is
- * the only thing on PATH: never the real CLIs. What it must keep: the
- * arguments reach the program as they are (no shell), no prompt and no color,
- * a per-call token only for that child, exit 127 for a CLI that is not
- * installed, and the time limit even when the CLI never ends.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,7 +40,6 @@ describe.if(posix)("Pi's gh / glab runner", () => {
 		root = "";
 	});
 
-	/** A scratch PATH holding only the scripted CLIs; returns where they log. */
 	function scratch(): { bin: string; args: string; env: string } {
 		root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-ref-node-")));
 		const bin = join(root, "bin");
@@ -84,7 +75,6 @@ describe.if(posix)("Pi's gh / glab runner", () => {
 		expect(readFileSync(log.args, "utf8").split("\n").slice(0, 6)).toEqual(["api", "graphql", "-f", "q=$(touch pwned) a b", "--hostname", "github.com"]);
 		expect(existsSync(join(root, "pwned"))).toBe(false);
 		expect(readFileSync(log.env, "utf8").trim()).toBe("prompt=1 color=1 token=per-call");
-		// A failing CLI's stderr and code come back as they are.
 		const refused = await nodeRefCliRunner("gh", ["auth", "status"]);
 		expect(refused.exitCode).toBe(1);
 		expect(refused.stderr).toContain("not logged into");

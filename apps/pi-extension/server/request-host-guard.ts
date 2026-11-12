@@ -1,13 +1,3 @@
-/**
- * node:http adapter for the Host-header allowlist
- * (packages/shared/request-host.ts, vendored to generated/request-host.ts).
- * Mirrors packages/server/request-host-guard.ts: every Pi server (plan,
- * review, annotate) builds one guard at start, refuses a disallowed Host
- * before any route, and guards WebSocket upgrades too (the annotate agent
- * terminal attaches its own `upgrade` listener, which never sees a refused
- * request). Pi has no `--tailscale`, so there are no served hostnames here.
- */
-
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import os from "node:os";
@@ -39,11 +29,9 @@ function remoteExtraHosts(): string[] {
 		const urlHost = resolveUrlHost(config);
 		const resolved = urlHost && isAutoUrlHost(urlHost) ? resolveAutoHostCached() : urlHost;
 		if (resolved) hosts.push(resolved);
-		// A reverse proxy in front of PLANNOTATOR_PUBLIC_URL may forward the browser's Host.
 		const publicUrl = resolvePublicUrl(config);
 		if (publicUrl) hosts.push(new URL(publicUrl).hostname);
 	} catch {
-		// A broken config never widens the allowlist.
 	}
 	return hosts;
 }
@@ -54,25 +42,14 @@ function hostHeader(req: IncomingMessage): string | undefined {
 }
 
 export interface PiRequestHostGuard {
-	/**
-	 * Answers 403 and returns true when the request's Host is not allowed.
-	 * Also marks the response as a Plannotator server's (every Pi handler calls
-	 * this first), and refuses a request annotate's live app proxy forwarded,
-	 * so the live proxy never fronts this server.
-	 */
 	refuse(req: IncomingMessage, res: ServerResponse): boolean;
-	/** Refuse disallowed WebSocket upgrades on `server` (call before it listens). */
 	attach(server: Server): void;
 }
 
-/** Build the guard for one server. Env and config are read once, here. */
 export function createRequestHostGuard(): PiRequestHostGuard {
 	const remote = isRemoteSession();
 	const allowed = parseAllowedHosts(process.env[ALLOWED_HOSTS_ENV]);
-	// A browser IDE's port proxy (code-server, Coder) forwards its own Host.
 	const portHostPatterns = forwardedPortHostPatterns(process.env.VSCODE_PROXY_URI);
-	// Remote-mode names are resolved on the first request that needs them, so
-	// loopback and IP-literal requests never read config or ask Tailscale.
 	let remoteHosts: string[] | null = null;
 	const allows = (req: IncomingMessage): boolean => {
 		const host = hostHeader(req);
@@ -85,8 +62,6 @@ export function createRequestHostGuard(): PiRequestHostGuard {
 
 	return {
 		attach(server) {
-			// node:http hands an upgrade to EVERY `upgrade` listener, so a
-			// prepended listener cannot stop the others. Intercept the event.
 			const emit = server.emit.bind(server) as (event: string | symbol, ...args: unknown[]) => boolean;
 			server.emit = ((event: string | symbol, ...args: unknown[]) => {
 				if (event === "upgrade") {

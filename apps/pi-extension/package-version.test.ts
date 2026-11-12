@@ -1,8 +1,3 @@
-/**
- * The package updated under a running host (#2085): the lazy imports must
- * stop with "restart" instead of linking new files against old ones.
- */
-
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,8 +25,6 @@ describe("checkPackageVersion", () => {
 		expect(checkPackageVersion("0.28.26", null, "pi")).toBeNull();
 	});
 
-	// The wording is pinned on purpose: it is the one instruction the person
-	// gets when an upgrade under a running host breaks a launch (#2085).
 	test("a different version names both versions and the host", () => {
 		expect(checkPackageVersion("0.28.25", "0.28.26", "oh-my-pi")).toBe(
 			"Plannotator was updated from 0.28.25 to 0.28.26 while Oh My Pi was running. Type /restart to load the new version.",
@@ -110,7 +103,6 @@ describe("importFresh", () => {
 			caught = error;
 		}
 		expect(isPlannotatorUpdatedError(caught)).toBe(true);
-		// Restart is still the advice, and Bun's own error is kept: it may be a packaging bug.
 		expect((caught as Error).message).toContain("Type /reload");
 		expect((caught as Error).message).toContain(LINK_ERROR);
 		expect((caught as Error).cause).toBeInstanceOf(SyntaxError);
@@ -128,14 +120,9 @@ describe("importFresh", () => {
 	});
 
 	test("a real Bun link failure: new file on disk imports a name its cached dependency lacks", async () => {
-		// The #2085 shape: the dependency was loaded at startup and stays in the
-		// registry; the lazily imported module on disk is newer and asks for a
-		// name the cached one never had.
 		const dir = mkdtempSync(join(tmpdir(), "pn-pkgver-link-"));
 		try {
 			writeFileSync(join(dir, "config.ts"), "export const loadConfig = () => ({});\n");
-			// Both files exist before the first import, as in an installed package
-			// (Bun keeps the folder listing it read then).
 			writeFileSync(join(dir, "browser.ts"), "export const value = 0;\n");
 			const config = await import(join(dir, "config.ts"));
 			expect(typeof config.loadConfig).toBe("function");

@@ -3,14 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startServerWithSelfPreemption } from "./plannotator-browser.ts";
 
-// #1159: a fixed-port (remote mode) session whose tab was closed without a
-// decision keeps its server listening in this long-lived pi process, so the
-// next command's bind fails with "Port N in use after 5 retries". Starting a
-// server self-preempts: on a port-in-use failure it stops every tracked
-// browser session and retries once. These tests drive the injectable
-// stopPrevious seam (the default consults the module's live session registry)
-// so they stay hermetic and ordering-independent from the registry-backed
-// tests in plannotator-browser.test.ts.
 describe("startServerWithSelfPreemption", () => {
 	const portInUse = () => new Error("Port 19432 in use after 5 retries");
 
@@ -97,9 +89,6 @@ describe("startServerWithSelfPreemption", () => {
 	});
 });
 
-// Every fixed-port server start in plannotator-browser.ts must go through the
-// self-preemption wrapper; an unwrapped call site would wedge that surface
-// forever once a session is abandoned (#1159). Source scan pins all four.
 describe("self-preemption call sites", () => {
 	test("all four server starts in plannotator-browser.ts are wrapped", () => {
 		const src = readFileSync(join(import.meta.dir, "plannotator-browser.ts"), "utf-8");
@@ -110,9 +99,6 @@ describe("self-preemption call sites", () => {
 	});
 });
 
-// The Node servers must also drain browser keep-alive sockets on stop so a
-// stopped session's connections die immediately instead of at the browser's
-// whim (parity with Bun's server.stop(), which closes idle connections).
 describe("pi server stop() drains connections", () => {
 	const serverFiles = ["serverAnnotate.ts", "serverPlan.ts", "serverReview.ts"];
 

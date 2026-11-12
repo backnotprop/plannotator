@@ -1,10 +1,3 @@
-/**
- * "Open Plannotator at plannotator.localhost" (#2184) through the Pi (node:http)
- * servers, the mirror of packages/server/cookie-host-config.test.ts: POST
- * /api/config `{ cookieHost }` writes or removes `urlHost:
- * "plannotator.localhost"`, never replaces another `urlHost`, is refused and
- * not advertised in remote mode, and a live app session stays on localhost.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

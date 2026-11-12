@@ -1,8 +1,3 @@
-/**
- * Pi plan and annotate servers: who may list and read through the Files
- * sidebar and Obsidian routes. Same scenarios as the Bun servers
- * (packages/server/reference-readers.scenarios.ts), so the mirror cannot drift.
- */
 import { defineReferenceReaderScenarios } from "../../../packages/server/reference-readers.scenarios.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 import { startPlanReviewServer } from "./serverPlan.ts";

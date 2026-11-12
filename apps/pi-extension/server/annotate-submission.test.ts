@@ -1,20 +1,3 @@
-/**
- * Annotate server (Pi/Node): durable submit records (#678)
- *
- * Node mirror of packages/server/annotate.test.ts's "durable submit records"
- * describe block. The decision promise's consumer (the invoking agent) can
- * time out before the reviewer submits; the submit then settled the promise
- * with nobody listening, deleted the draft, and the feedback existed nowhere.
- * These tests pin the fix in serverAnnotate.ts: a durable record is written
- * to history/{project}/{slug}/submissions/ BEFORE the draft is deleted, and
- * the annotate-history opt-out suppresses the record while keeping the
- * legacy submit behavior.
- *
- * History writes go to the real ~/.plannotator data dir (generated/storage
- * caches its data directory at import time — see annotate-history.test.ts),
- * so each test uses a unique project namespace cleaned up in afterAll.
- */
-
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,8 +17,6 @@ describe("pi annotate server: durable submit records (#678)", () => {
 		savedHistoryFlag = process.env.PLANNOTATOR_ANNOTATE_HISTORY;
 		delete process.env.PLANNOTATOR_PORT;
 		process.env.PLANNOTATOR_REMOTE = "0";
-		// Force the toggle on unless a test explicitly flips it off — a real
-		// ~/.plannotator/config.json must never change the outcome.
 		process.env.PLANNOTATOR_ANNOTATE_HISTORY = "1";
 	});
 
@@ -72,9 +53,6 @@ describe("pi annotate server: durable submit records (#678)", () => {
 		);
 	}
 
-	// The project name is baked into the markdown so every test gets a unique
-	// content-hashed draft key — drafts live in the real data dir and identical
-	// markdown across tests would collide on one draft file.
 	async function startServer(project: string, docPath: string) {
 		const markdown = `# Doc ${project}\n\nBody\n`;
 		writeFileSync(docPath, markdown, "utf-8");
@@ -93,7 +71,6 @@ describe("pi annotate server: durable submit records (#678)", () => {
 		const server = await startServer(project, docPath);
 
 		try {
-			// Auto-saved draft exists before submit (the recovery copy).
 			const saved = await fetch(`${server.url}/api/draft`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -112,7 +89,6 @@ describe("pi annotate server: durable submit records (#678)", () => {
 			expect(response.status).toBe(200);
 			expect(await response.json()).toEqual({ ok: true });
 
-			// Durable record: one markdown file next to the file's version history.
 			const recordDir = submissionsDir(project, docPath);
 			const records = readdirSync(recordDir).filter((f) => f.endsWith(".md"));
 			expect(records.length).toBe(1);
@@ -121,7 +97,6 @@ describe("pi annotate server: durable submit records (#678)", () => {
 			expect(content).toContain("- Decision: feedback");
 			expect(content).toContain(`- Source: ${resolve(docPath)}`);
 
-			// Draft is gone AFTER the record exists.
 			const draft = await fetch(`${server.url}/api/draft`);
 			expect(draft.status).toBe(404);
 		} finally {
@@ -156,8 +131,6 @@ describe("pi annotate server: durable submit records (#678)", () => {
 	});
 
 	test("previously-stateless modes stay stateless: annotate-last and URL sessions write no record", async () => {
-		// Before #678 these modes never touched the data dir; the durable record
-		// must not widen the documented annotateHistory contract to them.
 		const lastProject = uniqueProject("last-message");
 		const lastServer = await startAnnotateServer({
 			markdown: `# Agent message ${lastProject}\n\nQuoted agent output.\n`,
@@ -217,7 +190,6 @@ describe("pi annotate server: durable submit records (#678)", () => {
 				body: JSON.stringify({ feedback: 42, annotations: [] }),
 			});
 			expect(response.status).toBe(200);
-			// Legacy behavior: draft deleted, no record (nothing persistable).
 			const draft = await fetch(`${server.url}/api/draft`);
 			expect(draft.status).toBe(404);
 			expect(existsSync(submissionsDir(project, docPath))).toBe(false);
@@ -248,10 +220,7 @@ describe("pi annotate server: durable submit records (#678)", () => {
 			});
 			expect(response.status).toBe(200);
 
-			// The opt-out means "no annotate content in the data dir": no version
-			// snapshot AND no submission record — the project dir never appears.
 			expect(existsSync(join(getPlannotatorDataDir(), "history", project))).toBe(false);
-			// Legacy behavior preserved: the draft is still deleted on submit.
 			const draft = await fetch(`${server.url}/api/draft`);
 			expect(draft.status).toBe(404);
 		} finally {

@@ -1,14 +1,3 @@
-/**
- * Pi twin of packages/server/plan-history-span.test.ts: a Pi plan review that
- * spans midnight keeps its version chain (#1679).
- *
- * What regresses if this fails: the Pi reviewer annotates a plan, the agent
- * revises it the next day, and the review opens with no Versions tab and no
- * diff, because history was keyed by today's dated slug and the revision
- * landed in a second directory numbered from 001 again. Or, the other way,
- * a generic heading ("Implementation Plan") merges unrelated plans days apart
- * into one chain.
- */
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,7 +30,6 @@ async function sandboxed(run: (dataDir: string) => Promise<void>): Promise<void>
 	}
 }
 
-/** The slug today's review would mint, with its date replaced by an earlier one. */
 function slugDatedDaysAgo(plan: string, days: number): string {
 	const date = new Date();
 	date.setUTCDate(date.getUTCDate() - days);

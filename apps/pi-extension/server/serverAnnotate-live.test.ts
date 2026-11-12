@@ -1,14 +1,3 @@
-/**
- * Annotate server (Pi/Node): live app mode (annotate-app)
- *
- * Node mirror of packages/server/annotate.test.ts's "live app mode" describe
- * block — the same session contract (live /api/plan payload, composed bridge
- * served by the loopback proxy, per-target draft identity, no version
- * history, guarded shutdown) over apps/pi-extension/server/serverAnnotate.ts
- * and the vendored Node live-proxy transport, plus the remote hard-off that
- * Pi enforces server-side.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -78,22 +67,14 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 			expect(plan.liveToken).toMatch(/^[0-9a-f]{32}$/);
 			expect(plan.sharingEnabled).toBe(false);
 			expect(plan.convertHtml).toBe(false);
-			// appUrl is the live loopback proxy under its LOCALHOST spelling (so
-			// the framed app is same-site with the editor and shares the dev
-			// app's host-only localhost cookies), never an advertised-host URL.
 			expect(plan.appUrl).toMatch(/^http:\/\/localhost:\d+\/$/);
-			// No srcdoc payloads, no version fields.
 			expect(plan.rawHtml).toBeUndefined();
 			expect(plan.renderAs).toBeUndefined();
 			expect(plan.previousPlan).toBeUndefined();
 			expect(plan.versionInfo).toBeUndefined();
 			expect(plan.diffCurrent).toBeUndefined();
-			// Agent terminal stays unavailable for live sessions.
 			expect((plan.agentTerminal as { enabled: boolean }).enabled).toBe(false);
 
-			// The proxy serves the composed bridge body: config prelude with the
-			// session token and both editor origin forms (localhost first), then
-			// bootstrap, then bridge.
 			const appUrl = plan.appUrl as string;
 			const bridge = await (await fetch(`${appUrl}__plannotator__/bridge.js`)).text();
 			expect(bridge).toContain(String(plan.liveToken));
@@ -104,7 +85,6 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 			expect(bridge).toContain(".pn-live {}");
 			expect(bridge.indexOf("/* bootstrap body */")).toBeLessThan(bridge.indexOf("/* bridge body */"));
 
-			// The proxied page carries the injected bridge script tag.
 			const page = await (await fetch(appUrl)).text();
 			expect(page).toContain('<script src="/__plannotator__/bridge.js"></script>');
 		} finally {
@@ -114,16 +94,12 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 	});
 
 	test("a pathful target URL keeps its path and query in appUrl", async () => {
-		// Annotating http://localhost:5173/admin/settings must open that page,
-		// not the app root.
 		const app = startFakeApp();
 		const targetUrl = `http://127.0.0.1:${app.port}/admin/settings?tab=2`;
 		const server = await startLiveServer(targetUrl);
 		try {
 			const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { appUrl: string };
 			expect(plan.appUrl).toMatch(/^http:\/\/localhost:\d+\/admin\/settings\?tab=2$/);
-			// The advertised page is reachable through the proxy under the
-			// localhost Host spelling.
 			const res = await fetch(plan.appUrl);
 			expect(res.status).toBe(200);
 		} finally {
@@ -154,7 +130,6 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 		const app = startFakeApp();
 		const server = await startLiveServer(`http://127.0.0.1:${app.port}`);
 		const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { appUrl: string };
-		// Reachable while running.
 		expect((await fetch(plan.appUrl)).status).toBe(200);
 		server.stop();
 		await Bun.sleep(50);
@@ -169,9 +144,6 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 	});
 
 	test("remote sessions refuse live app mode outright", async () => {
-		// Defense in depth behind the command-side check: a live proxy relays
-		// the user's authenticated dev app, and a remote Pi session is
-		// reachable beyond loopback. No override env var exists on purpose.
 		const app = startFakeApp();
 		process.env.PLANNOTATOR_REMOTE = "1";
 		try {
@@ -185,10 +157,6 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 	});
 
 	describe("draft isolation between live sessions", () => {
-		// A live session holds no document text (markdown is "" by
-		// construction), so keying its draft by content would give every live
-		// session on the machine the one hash of the empty string. The target
-		// is the identity, shared with the Bun server via liveAppDraftIdentity.
 		const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
 		let draftDataDir: string;
 
@@ -228,7 +196,6 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 				await saveDraft(serverX, "notes for X");
 				await saveDraft(serverY, "notes for Y");
 
-				// Neither session sees the other's text, in either direction.
 				expect((await loadDraft(serverX))?.feedback).toBe("notes for X");
 				expect((await loadDraft(serverY))?.feedback).toBe("notes for Y");
 				expect(readdirSync(join(draftDataDir, "drafts")).length).toBe(2);
@@ -249,8 +216,6 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 			} finally {
 				first.stop();
 			}
-			// Same target, spelled with a trailing slash the way a browser would
-			// hand it back: the draft is the point of the key, so it must survive.
 			const second = await startLiveServer(`${targetUrl}/`);
 			try {
 				expect((await loadDraft(second))?.feedback).toBe("survives the crash");

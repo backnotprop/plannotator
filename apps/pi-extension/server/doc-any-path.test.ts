@@ -1,8 +1,3 @@
-/**
- * Pi plan and annotate servers: `/api/doc` outside the project (#2291). Same
- * scenarios as the Bun servers (packages/server/doc-any-path.scenarios.ts),
- * so the mirror cannot drift.
- */
 import { defineDocAnyPathScenarios } from "../../../packages/server/doc-any-path.scenarios.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 import { startPlanReviewServer } from "./serverPlan.ts";

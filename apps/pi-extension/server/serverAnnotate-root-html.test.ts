@@ -1,16 +1,3 @@
-/**
- * Annotate server (Pi/Node): local rendered-HTML root freshness
- *
- * Node mirror of the Bun describe of the same name in
- * packages/server/annotate.test.ts: a local rendered-HTML root is served from
- * its current bytes by both /api/plan (tab reload) and /api/share-html (share
- * after Refresh), with the startup snapshot only as the deleted-file fallback,
- * and the version diff is recomputed against the served bytes once they differ.
- *
- * History lives in the real data dir (storage resolves it at import time), so
- * every test uses its own project namespace, removed in afterAll.
- */
-
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -58,9 +45,6 @@ describe("pi annotate server: local rendered-HTML root freshness", () => {
 	});
 
 	const page = (marker: string) => `<html><body>${marker}</body></html>`;
-	// realpath so the deleted-file fallback is reachable: containment realpaths
-	// the root but keeps a missing target's lexical path, which on a symlinked
-	// tmpdir (macOS) would never match.
 	const freshDocDir = (label: string) =>
 		realpathSync(mkdtempSync(join(tmpdir(), `plannotator-pi-root-html-${label}-`)));
 
@@ -93,9 +77,6 @@ describe("pi annotate server: local rendered-HTML root freshness", () => {
 		}
 	});
 
-	// A tab reload after an agent edit keeps the version diff: the saved
-	// baseline is still the previous version, so the diff is recomputed
-	// against the served bytes rather than dropped. Reads never write history.
 	test("/api/plan serves the root document's current bytes and recomputes the version diff against them", async () => {
 		const pagePath = join(freshDocDir("plan"), "page.html");
 		const project = uniqueProject("plan");
@@ -140,17 +121,13 @@ describe("pi annotate server: local rendered-HTML root freshness", () => {
 			const reloaded = await plan();
 			expect(reloaded.rawHtml).toContain("V3");
 			expect(reloaded.rawHtml).not.toContain("V2");
-			// The baseline still names the saved previous version...
 			expect(reloaded.previousPlan).toBe(page("V1"));
 			expect(reloaded.versionInfo?.version).toBe(2);
-			// ...and the diff describes V1 -> V3, the page actually on screen.
 			expect(reloaded.diffCurrent).toBe(page("V3"));
 			expect(reloaded.diffHtml).toContain("<ins");
 			expect(reloaded.diffHtml).toContain("V3");
 			expect(reloaded.diffHtml).not.toContain("V2");
 
-			// The in-app Refresh reads the root through /api/doc: the same
-			// recomputed diff rides along for the ROOT document only.
 			const refreshed = (await (
 				await fetch(`${server.url}/api/doc?path=${encodeURIComponent(pagePath)}`)
 			).json()) as PlanPayload & { renderAs?: string };
@@ -160,7 +137,6 @@ describe("pi annotate server: local rendered-HTML root freshness", () => {
 			expect(refreshed.versionInfo?.version).toBe(2);
 			expect(refreshed.diffHtml).toBe(reloaded.diffHtml);
 
-			// A sibling document served through /api/doc carries no version fields.
 			const siblingPath = join(dirname(pagePath), "sibling.html");
 			writeFileSync(siblingPath, page("SIBLING"), "utf-8");
 			const sibling = (await (
@@ -183,10 +159,6 @@ describe("pi annotate server: local rendered-HTML root freshness", () => {
 		}
 	});
 
-	// A root that exists but cannot be read (the path replaced by a directory,
-	// or permissions revoked) used to throw out of the request handler as an
-	// unhandled rejection: /api/plan never answered and the tab hung. It is
-	// the missing-file fallback: the startup snapshot, with its version diff.
 	async function seedTwoVersions(label: string): Promise<{ pagePath: string; project: string }> {
 		const pagePath = join(freshDocDir(label), "page.html");
 		const project = uniqueProject(label);
@@ -206,7 +178,6 @@ describe("pi annotate server: local rendered-HTML root freshness", () => {
 
 	type FallbackPayload = { rawHtml?: string; previousPlan?: string | null; versionInfo?: { version: number }; diffHtml?: string };
 
-	// The old behavior hung forever, so the request is raced against a timeout.
 	const withTimeout = <T,>(p: Promise<T>, ms = 5000): Promise<T> =>
 		Promise.race([
 			p,
@@ -240,8 +211,6 @@ describe("pi annotate server: local rendered-HTML root freshness", () => {
 			const share = await withTimeout(fetch(`${server.url}/api/share-html`));
 			expect(share.status).toBe(200);
 			expect(((await share.json()) as { shareHtml: string }).shareHtml).toContain("V2");
-			// The fallback is silent to the reviewer, so the reason is logged once
-			// per process (path and error), not once per read.
 			const rootWarnings = warnings.filter((w) => w.includes("could not read the HTML root"));
 			expect(rootWarnings).toHaveLength(1);
 			expect(rootWarnings[0]).toContain(pagePath);
@@ -251,7 +220,6 @@ describe("pi annotate server: local rendered-HTML root freshness", () => {
 		}
 	});
 
-	// chmod 000 is not a restriction for root, so the check is skipped there.
 	const canRevokeRead = process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() !== 0;
 	test.skipIf(!canRevokeRead)("/api/plan falls back to the startup snapshot when the root file is unreadable", async () => {
 		const { pagePath, project } = await seedTwoVersions("perm");

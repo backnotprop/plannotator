@@ -1,10 +1,3 @@
-/**
- * Pi reloads itself for an updated Plannotator (auto-reload.ts), over a fake
- * Pi: every gate that holds the reload, the Pi version gate, the re-check in
- * the command, one try per version, and the one note per version otherwise.
- * The real-host runs (Pi 0.84.4, Oh My Pi) are the spike's and the PR's
- * captures; this guards the decisions.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +23,6 @@ const MARKER_KEY = "__plannotatorAutoReload_v1";
 const NOTICED_KEY = "__plannotatorUpdateNoticed_v1";
 const TRIED_KEY = "__plannotatorAutoReloadTried_v1";
 
-/** A fresh Pi process: what one instance leaves for the next (marker, notes, tries) is gone. */
 function freshProcess() {
 	const store = globalThis as unknown as Record<string, unknown>;
 	delete store[MARKER_KEY];
@@ -110,7 +102,6 @@ describe("resolveAutoReload", () => {
 		for (const on of ["1", "true", "on"]) {
 			expect(resolveAutoReload({ autoReload: false }, { PLANNOTATOR_AUTO_RELOAD: on })).toBe(true);
 		}
-		// Empty or unrecognized: unset, so config.json decides.
 		expect(resolveAutoReload({ autoReload: false }, { PLANNOTATOR_AUTO_RELOAD: "" })).toBe(false);
 		expect(resolveAutoReload({ autoReload: false }, { PLANNOTATOR_AUTO_RELOAD: "maybe" })).toBe(false);
 	});
@@ -127,7 +118,6 @@ function fakePi() {
 	const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
 	const sent: Array<{ text: string; options: unknown }> = [];
 	let sendThrows = false;
-	/** What Pi's getCommands() returns; undefined: a Pi without it. */
 	let listed: Array<{ name: string; source: string }> | undefined;
 	const pi = {
 		on(event: string, handler: Handler) {
@@ -148,7 +138,6 @@ function fakePi() {
 	const emit = (event: string, payload: any = {}, ctx?: any) => {
 		for (const h of handlers.get(event) ?? []) h(payload, ctx);
 	};
-	/** Pi's `input` step: the first handler that returns `handled` ends it; otherwise the text goes to the model. */
 	const emitInput = (text: string, ctx?: any): "handled" | "to the model" => {
 		for (const h of handlers.get("input") ?? []) {
 			const result = h({ type: "input", text, source: "extension" }, ctx) as { action?: string } | undefined;
@@ -176,13 +165,11 @@ function fakeCtx(opts: { hasUI?: boolean } = {}) {
 	let keyHandler: (() => unknown) | null = null;
 	const ctx = {
 		hasUI: opts.hasUI ?? true,
-		/** Pi makes the old instance's context throw once a reload went through. */
 		stale: false,
 		idle: true,
 		pending: false,
 		editor: "",
 		reloads: 0,
-		/** What Pi's reload does to the old instance: nothing here; a test plays the new instance. */
 		onReload: null as null | (() => void),
 		isIdle() {
 			return ctx.idle;
@@ -253,7 +240,6 @@ async function world(opts: WorldOptions = {}) {
 		get now() {
 			return t;
 		},
-		/** Time passes, then one poll. */
 		advance(ms: number) {
 			t += ms;
 			controller.check();
@@ -261,11 +247,9 @@ async function world(opts: WorldOptions = {}) {
 		install(version: string | null) {
 			onDisk = version;
 		},
-		/** npm still writing (its retired copy beside the package, a dependency missing), or done. */
 		installing(still: boolean) {
 			settled = !still;
 		},
-		/** The new version lands and stays on disk long enough. */
 		landStable(version = "1.1.0") {
 			onDisk = version;
 			w.advance(0);
@@ -289,7 +273,6 @@ describe("setupAutoReload: when it reloads", () => {
 		w.advance(STABLE_MS - 1);
 		expect(w.sent).toEqual([]);
 		w.advance(1);
-		// expandPromptTemplates is what makes Pi run the command instead of sending the text to the model.
 		expect(w.sent).toEqual([{ text: `/${AUTO_RELOAD_COMMAND} auto`, options: { expandPromptTemplates: true } }]);
 		await w.runCommand();
 		expect(w.ctx.reloads).toBe(1);
@@ -615,13 +598,11 @@ describe("setupAutoReload: two loaded copies (Pi renames the command plannotator
 		const w = await world();
 		w.landStable();
 		expect(w.sent).toHaveLength(1);
-		// Pi found no command by that name, so it passes the text to the `input` handlers.
 		expect(w.emitInput(w.sent[0]!.text, w.ctx)).toBe("handled");
 		expect(w.ctx.reloads).toBe(0);
 		expect(w.texts()).toHaveLength(1);
 		expect(w.texts()[0]).toContain("1.1.0");
 		expect(w.texts()[0]).toContain("/reload");
-		// One try: no second send, no second note.
 		w.advance(STABLE_MS * 5);
 		expect(w.sent).toHaveLength(1);
 		expect(w.texts()).toHaveLength(1);
@@ -651,7 +632,6 @@ describe("setupAutoReload: two loaded copies (Pi renames the command plannotator
 	});
 });
 
-/** Pi's reload: the old context goes stale and the instance Pi loads starts (same process). */
 function reloadInto(w: Awaited<ReturnType<typeof world>>, loaded: string, onDisk = loaded) {
 	const next = fakePi();
 	const { ctx, notes } = fakeCtx();
@@ -686,14 +666,12 @@ describe("setupAutoReload: what the person sees", () => {
 		w.landStable();
 		const n = reloadInto(w, "1.1.0");
 		await w.runCommand();
-		// Pi writes "Reloaded …" after session_start, and that status would replace a line sent there.
 		expect(n.notes).toEqual([]);
 		await n.controller.ready;
 		n.controller.check();
 		expect(n.notes).toEqual([{ message: autoReloadedText("1.1.0"), kind: "info" }]);
 		n.controller.check();
 		expect(n.notes).toHaveLength(1);
-		// The new instance never announces the version it loaded, and the old one says nothing.
 		expect(n.controller.claimNotice("1.1.0")).toBe(false);
 		expect(w.notes).toEqual([]);
 	});
@@ -708,7 +686,6 @@ describe("setupAutoReload: what the person sees", () => {
 		expect(n.notes).toHaveLength(1);
 		expect(n.notes[0]!.kind).toBe("warning");
 		expect(n.notes[0]!.message).toContain("/reload");
-		// One try per version per process: the new instance does not reload again (no loop).
 		for (let i = 0; i < 10; i++) {
 			w.advance(STABLE_MS);
 			n.controller.check();
@@ -791,7 +768,6 @@ describe("setupAutoReload: what the person sees", () => {
 			expect(w.sent).toEqual([]);
 			expect(w.texts()).toHaveLength(1);
 			expect(w.texts()[0]).toContain(command);
-			// The next version gets its own note.
 			w.landStable("1.2.0");
 			expect(w.texts()).toHaveLength(2);
 		});
@@ -809,7 +785,6 @@ describe("claimNotice (the Inbox's update note)", () => {
 		expect(w.controller.claimNotice("1.1.0")).toBe(false);
 		w.landStable();
 		await w.runCommand();
-		// The reload loaded nothing new: the controller already said it; the Inbox does not repeat it.
 		expect(w.controller.claimNotice("1.1.0")).toBe(false);
 		expect(w.notes).toHaveLength(1);
 	});
@@ -850,7 +825,6 @@ describe("claimNotice (the Inbox's update note)", () => {
 });
 
 describe("packageInstallSettled (npm finished writing the package)", () => {
-	/** `<prefix>/node_modules/@plannotator/pi-extension`, installed whole. */
 	function installed() {
 		const prefix = mkdtempSync(join(tmpdir(), "plannotator-install-settled-"));
 		const scope = join(prefix, "node_modules", "@plannotator");

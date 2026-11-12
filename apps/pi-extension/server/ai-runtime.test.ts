@@ -156,8 +156,6 @@ describe("createPiAIRuntime Codex discovery", () => {
 });
 
 describe("createPiAIRuntime Pi discovery", () => {
-	// Pi's model discovery spawns `pi` and waits up to 10s; it must not hold a
-	// plain capabilities answer, only an explicit ?activate= (or a session).
 	test("plain capabilities answers at once without spawning a slow pi; ?activate= spawns it", async () => {
 		if (process.platform === "win32") return;
 
@@ -221,11 +219,6 @@ describe("createPiAIRuntime Pi discovery", () => {
 });
 
 describe("createPiAIRuntime with a session bridge", () => {
-	// The Pi session that opened Plannotator answers Ask AI and nothing else:
-	// with a bridge no SDK provider is listed or reachable by id, even with
-	// Codex installed. The agent-job launchers still get the discovered Claude
-	// / Codex catalogs from ?activate=<id> (under `catalogProviders`). Without
-	// a bridge, Codex is offered as before.
 	test("serves only the bridge for Ask AI, keeps launcher catalogs, and refuses other providers", async () => {
 		if (process.platform === "win32") return;
 
@@ -313,9 +306,6 @@ describe("createPiAIRuntime with a session bridge", () => {
 });
 
 describe("createPiAIRuntime Qwen Code", () => {
-	// `qwen` on PATH registers the qwen-sdk provider. Its models come from
-	// $QWEN_HOME/settings.json (no qwen runs for that), and a question is
-	// answered by one qwen run (tests/test-fixtures/fake-qwen-cli.ts).
 	test("registers qwen-sdk, lists the settings models without running qwen, and answers a question", async () => {
 		if (process.platform === "win32") return;
 

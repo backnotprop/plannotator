@@ -35,10 +35,6 @@ function makeTempDir(prefix: string): string {
 	return dir;
 }
 
-/**
- * Isolates config lookup so only the extension's shipped plannotator.json (plus
- * an optional project config) is loaded — never the developer's own global one.
- */
 function makeWorkspace(projectConfig?: unknown): string {
 	const home = makeTempDir("plannotator-phase-home-");
 	const cwd = makeTempDir("plannotator-phase-cwd-");
@@ -134,10 +130,6 @@ function createRuntime(initialTools: string[]) {
 }
 
 describe("Plannotator phase tool ownership", () => {
-	// Deliberate pin (#1622): pi's agent loop runs a batch sequentially only when
-	// some tool in it declares executionMode "sequential". Without it, an
-	// "edit plan + plannotator_submit_plan" batch runs in parallel and the submit
-	// reads the plan file before pi's queued edit lands, reviewing a stale plan.
 	test("the submit tool forces pi to run its tool batch sequentially", () => {
 		const runtime = createRuntime([]);
 		expect(runtime.tools.get("plannotator_submit_plan")?.executionMode).toBe("sequential");
@@ -300,8 +292,6 @@ describe("Plannotator phase tool ownership", () => {
 		});
 
 		await runtime.run("session_start", context);
-		// The executing phase unions the mark-done tool in beside the user's
-		// configured tools, exactly like planning unions the submit tool.
 		expect(runtime.getActiveTools()).toEqual([
 			"read",
 			"bash",
@@ -326,11 +316,6 @@ describe("Plannotator phase tool ownership", () => {
 
 type ModelRef = { provider: string; id: string };
 
-/**
- * A host whose model and thinking level are real state: `setModel` changes the
- * model the context reports and every call is recorded, so a test can tell a
- * model Plannotator set apart from one the user picked.
- */
 function createModelHost(options: { cwd: string; initialModel: ModelRef; entries: SessionEntry[] }) {
 	const handlers = new Map<string, Handler[]>();
 	const host = {
@@ -386,7 +371,6 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; entries
 	return {
 		host,
 		tools,
-		/** The user picks a model in the host's own UI, not through Plannotator. */
 		userPicks: (model: ModelRef, thinking?: string) => {
 			host.model = model;
 			if (thinking) host.thinking = thinking;
@@ -428,15 +412,12 @@ describe("Plannotator keeps the user's model across /tree (#1722)", () => {
 		await runtime.run("session_start");
 
 		runtime.userPicks(LUNA, "high");
-		// Re-answering an earlier Ask lands on another node of the same
-		// executing path.
 		await runtime.run("session_tree");
 
 		expect(runtime.host.model).toEqual(LUNA);
 		expect(runtime.host.thinking).toBe("high");
 		expect(runtime.host.modelCalls).toEqual([]);
 		expect(runtime.host.thinkingCalls).toEqual([]);
-		// Tools are still re-derived from the path.
 		expect(runtime.tools.active).toContain("plannotator_mark_done");
 	});
 
@@ -479,7 +460,6 @@ describe("Plannotator keeps the user's model across /tree (#1722)", () => {
 		await runtime.run("session_start");
 
 		runtime.userPicks(LUNA);
-		// A path from before plan mode: no plannotator state at all.
 		runtime.host.entries.length = 0;
 		await runtime.run("session_tree");
 

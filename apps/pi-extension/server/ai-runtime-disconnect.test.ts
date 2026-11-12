@@ -11,8 +11,6 @@ afterEach(() => {
 });
 
 describe("handlePiAIRequest client disconnect", () => {
-	// Pi runs this server under Node, and Bun's node:http shim does not report
-	// a client disconnect on the response, so the check runs in a real Node.
 	const node = Bun.which("node");
 
 	test.skipIf(!node)("cancels the endpoint's stream when the browser goes away mid-answer", async () => {

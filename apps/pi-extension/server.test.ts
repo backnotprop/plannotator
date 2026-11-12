@@ -232,11 +232,6 @@ function reservePort(): Promise<number> {
   });
 }
 
-// Sandbox every test's data dir so a contributor's ~/.plannotator/config.json
-// (e.g. reviewAnalysis.semanticDiff: false) can never change server behavior.
-// The root bunfig preload does this too, but not when bun runs from this
-// package directory (its own `bun test` script). Tests that need a specific
-// dir still override it; afterEach restores the original value.
 beforeEach(() => {
   process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-pi-server-data-");
 });
@@ -390,8 +385,6 @@ describe("pi annotate approval notes", () => {
     }
   });
 
-  // Pi resolves the anchor message from selectedMessageId/feedbackScope, so
-  // approve-with-notes has to carry them exactly like /api/feedback does.
   test("forwards the message scope on approval", async () => {
     delete process.env.PLANNOTATOR_PORT;
     const server = await startAnnotateServer({
@@ -484,14 +477,6 @@ describe("pi annotate approval notes", () => {
 });
 
 describe("pi annotate client lease", () => {
-  /**
-   * Connect to the client-lease SSE stream and wait for the ready comment.
-   * Returns a `disconnect()` that aborts the underlying request — a plain
-   * `reader.cancel()` only stops local reads and does not close the
-   * connection the server observes, whereas aborting the fetch closes the
-   * socket the way an abandoned browser tab actually would (triggering the
-   * node:http response's "close" event).
-   */
   async function connectClientLease(url: string): Promise<{ disconnect: () => Promise<void> }> {
     const controller = new AbortController();
     const response = await fetch(`${url}/api/annotate/client-lease`, { signal: controller.signal });
@@ -512,7 +497,6 @@ describe("pi annotate client lease", () => {
     };
   }
 
-  /** Track whether a promise has settled, without racing it against a timer. */
   function trackSettled<T>(promise: Promise<T>): () => boolean {
     let settled = false;
     promise.then(() => {
@@ -583,7 +567,6 @@ describe("pi annotate client lease", () => {
       const isSettled = trackSettled(decision);
       const client = await connectClientLease(server.url);
 
-      // Still connected — no expiry.
       await Bun.sleep(20);
       expect(isSettled()).toBe(false);
 
@@ -615,15 +598,12 @@ describe("pi annotate client lease", () => {
       const firstClient = await connectClientLease(server.url);
       await firstClient.disconnect();
 
-      // Reconnect well before the 80ms grace deadline.
       await Bun.sleep(20);
       const secondClient = await connectClientLease(server.url);
 
-      // Even past the original deadline, the reconnect cancelled the pending expiry.
       await Bun.sleep(100);
       expect(isSettled()).toBe(false);
 
-      // A fresh disconnect starts its own full grace window.
       await secondClient.disconnect();
       expect(await decision).toEqual({ feedback: "", annotations: [], exit: true });
     } finally {
@@ -659,8 +639,6 @@ describe("pi annotate client lease", () => {
         annotations: [],
       });
 
-      // Disconnecting after the explicit decision must not overwrite it once
-      // the grace period elapses — the approval already cancelled tracking.
       await client.disconnect();
       await Bun.sleep(120);
       expect(await server.waitForDecision()).toEqual({
@@ -1317,8 +1295,6 @@ describe("pi review server", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(generatedDraft),
       });
-      // Local Git now has a stable draft target: stale writes are explicitly
-      // rejected, and must still leave the submitted draft tombstoned.
       expect(lateDraftSave.status).toBe(409);
       expect(await lateDraftSave.json()).toMatchObject({ ok: false, draftGeneration: 5 });
       const lateDraftLoad = await fetch(`${server.url}/api/draft`);
@@ -1531,7 +1507,6 @@ describe("pi review server", () => {
         )
       ));
       expect(concurrentExpansions.every((response) => response.status === 200)).toBe(true);
-      // All six expansion requests share one probe after the switch capture.
       expect(fingerprintCalls).toBe(1);
 
       const fileContentResponse = await fetch(`${server.url}/api/file-content?path=api/tracked.txt`);
@@ -1569,8 +1544,6 @@ describe("pi review server", () => {
     process.chdir(repoDir);
     process.env.PLANNOTATOR_PORT = String(await reservePort());
 
-    // Create a second branch the picker can switch to, then branch off it so
-    // currentBranch !== defaultBranch and the branch/merge-base options appear.
     git(repoDir, ["checkout", "-b", "develop"]);
     writeFileSync(join(repoDir, "develop-file.txt"), "develop\n", "utf-8");
     git(repoDir, ["add", "develop-file.txt"]);
@@ -1594,7 +1567,6 @@ describe("pi review server", () => {
     });
 
     try {
-      // Initial load: server echoes the detected default as the active base.
       const initial = await fetch(`${server.url}/api/diff`).then((r) => r.json()) as {
         base?: string;
         gitContext?: { defaultBranch: string };
@@ -1602,7 +1574,6 @@ describe("pi review server", () => {
       expect(initial.base).toBe(gitContext.defaultBranch);
       expect(initial.base).toBe(initial.gitContext?.defaultBranch);
 
-      // Switch to a custom base — response must echo the resolved base.
       const switchResponse = await fetch(`${server.url}/api/diff/switch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1621,16 +1592,11 @@ describe("pi review server", () => {
       expect(stageWhileOnBranch.status).toBe(400);
       expect(await stageWhileOnBranch.json()).toEqual({ error: "Staging not available" });
 
-      // Subsequent /api/diff load reflects the switched base — this is what
-      // survives a page refresh / reconnect.
       const rehydrate = await fetch(`${server.url}/api/diff`).then((r) => r.json()) as {
         base?: string;
       };
       expect(rehydrate.base).toBe("develop");
 
-      // Unknown refs pass through verbatim — the resolver trusts callers so
-      // unusual-but-valid refs (tags, SHAs, non-origin remotes) work. Truly
-      // invalid refs surface via the diff error, not via a silent swap.
       const unknownResponse = await fetch(`${server.url}/api/diff/switch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1640,7 +1606,6 @@ describe("pi review server", () => {
       expect(unknown.base).toBe("nope-does-not-exist");
       expect(unknown.error).toBeTruthy();
 
-      // Feedback to clean up the waitForDecision promise.
       await fetch(`${server.url}/api/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1653,10 +1618,6 @@ describe("pi review server", () => {
   }, 15_000);
 
   test("initialBase overrides gitContext.defaultBranch in server state", async () => {
-    // Simulates a programmatic caller (Pi event bus, other extensions) that
-    // opens a review against a non-default base. The server's currentBase —
-    // which drives /api/diff, agent prompts, and file-content fetches — must
-    // honor that override instead of falling back to the detected default.
     const homeDir = makeTempDir("plannotator-pi-home-");
     const repoDir = initRepo();
     process.env.HOME = homeDir;
@@ -1670,7 +1631,6 @@ describe("pi review server", () => {
     git(repoDir, ["checkout", "-b", "feature/x"]);
 
     const gitContext = await getGitContext();
-    // Detected default is "main"; caller explicitly wants "develop".
     expect(gitContext.defaultBranch).toBe("main");
     const diff = await runGitDiff("branch", "develop");
 
@@ -1690,7 +1650,6 @@ describe("pi review server", () => {
         base?: string;
         gitContext?: { defaultBranch: string };
       };
-      // The server must echo the caller's override, not the detected default.
       expect(payload.base).toBe("develop");
       expect(payload.gitContext?.defaultBranch).toBe("main");
 
@@ -1814,8 +1773,6 @@ describe("pi review server", () => {
         gitContext?: { diffFallback?: { requestedDiffType: string; effectiveDiffType: string } };
       };
       expect(automaticLine.diffType).toBe("jj-current");
-      // Deliberate copy pin: the sentence is the only discriminator between
-      // the root-fork and ambiguous-fork fallback branches on the wire.
       expect(automaticLine.gitContext?.diffFallback).toEqual({
         requestedDiffType: "jj-line",
         effectiveDiffType: "jj-current",

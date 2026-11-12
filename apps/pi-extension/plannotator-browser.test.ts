@@ -1,9 +1,3 @@
-// Remote mode suppresses the browser launch so these tests never spawn the
-// developer's browser or read their ~/.plannotator config. BROWSER overrides
-// bypass the remote-mode suppression, so they are cleared too. (env reads
-// happen at call time, so setting these before the tests run is sufficient.)
-// Restored in afterAll: bun test shares one process across files, and other
-// suites assert non-remote behavior.
 const savedEnv = {
 	PLANNOTATOR_REMOTE: process.env.PLANNOTATOR_REMOTE,
 	PLANNOTATOR_BROWSER: process.env.PLANNOTATOR_BROWSER,
@@ -49,7 +43,6 @@ describe("shouldUseLocalPrCheckout", () => {
 });
 
 describe("browser URL notification", () => {
-	/** Run one session start with a launcher that opens nothing and collect what it notifies. */
 	async function notificationsFor(options: { mode?: string; announcedInTurn?: boolean; plannotatorBrowser?: string }): Promise<string[]> {
 		const previousRemote = process.env.PLANNOTATOR_REMOTE;
 		const previousPlannotatorBrowser = process.env.PLANNOTATOR_BROWSER;
@@ -57,7 +50,6 @@ describe("browser URL notification", () => {
 		const notifications: string[] = [];
 
 		process.env.PLANNOTATOR_REMOTE = "0";
-		// A program that exits at once: the launch "succeeds" and opens nothing.
 		process.env.PLANNOTATOR_BROWSER = options.plannotatorBrowser ?? NO_BROWSER;
 		delete process.env.BROWSER;
 
@@ -79,7 +71,6 @@ describe("browser URL notification", () => {
 				{ announcedInTurn: options.announcedInTurn },
 			);
 
-			// The launch is fire-and-forget; give the spawn its tick.
 			await new Promise((resolve) => setTimeout(resolve, 50));
 			session.stop();
 			return notifications;
@@ -93,23 +84,16 @@ describe("browser URL notification", () => {
 		}
 	}
 
-	// The archive and the event API have no in-turn message, so the URL comes
-	// after the turn, RPC sessions included (#1407), even when the launch worked.
 	test("a caller with no in-turn message gets the URL after the turn", async () => {
 		expect(await notificationsFor({ mode: "rpc" })).toEqual(["Plannotator session ready: http://localhost:4321"]);
 		expect(await notificationsFor({})).toEqual(["Plannotator session ready: http://localhost:4321"]);
 	});
 
-	// Slash commands, the tool and plan review already showed the URL in their
-	// in-turn message: a launch that worked adds nothing (remote used to show
-	// the URL twice).
 	test("a caller that showed the URL in its own message gets no second notice", async () => {
 		expect(await notificationsFor({ mode: "rpc", announcedInTurn: true })).toEqual([]);
 		expect(await notificationsFor({ announcedInTurn: true })).toEqual([]);
 	});
 
-	// PLANNOTATOR_BROWSER=none is a choice, not a failed launch. openBrowser
-	// returns before launching anything, so this stays in process.
 	test("PLANNOTATOR_BROWSER=none: the after-turn notice says why, and a failure notice never shows", async () => {
 		// no-browser-guard: sentinel under test (openBrowser returns before any launch)
 		expect(await notificationsFor({ plannotatorBrowser: "none" })).toEqual([
@@ -122,7 +106,6 @@ describe("browser URL notification", () => {
 
 describe("gated annotation client lease (#2553)", () => {
 	type Session = Awaited<ReturnType<typeof startMarkdownAnnotationSession>>;
-	/** Start a real gated local session, run `check` on it, and clean up. */
 	async function withGatedSession(clientLease: boolean | undefined, check: (session: Session) => Promise<void>): Promise<void> {
 		const keys = ["PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT", "PLANNOTATOR_DATA_DIR", "PLANNOTATOR_BROWSER"] as const;
 		const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -137,7 +120,6 @@ describe("gated annotation client lease (#2553)", () => {
 		try {
 			const path = join(dir, "notes.md");
 			session = clientLease === undefined
-				// The event bus's argument list (plannotator-events.ts).
 				? await startMarkdownAnnotationSession(ctx, path, "# Notes", "annotate", undefined, undefined, undefined, true)
 				: await startMarkdownAnnotationSession(ctx, path, "# Notes", "annotate", undefined, undefined, undefined, true,
 					undefined, undefined, undefined, undefined, undefined, undefined, undefined, true, clientLease);
@@ -153,8 +135,6 @@ describe("gated annotation client lease (#2553)", () => {
 		}
 	}
 
-	// The tool and the slash commands return at once: a closed tab must not
-	// settle the review as dismissed, so it waits for an explicit decision.
 	test("off for the tool and commands: no lease route, and the review waits for an explicit decision", async () => {
 		await withGatedSession(false, async (session) => {
 			const plan = await (await fetch(`${session.url}/api/plan`)).json();
@@ -170,9 +150,6 @@ describe("gated annotation client lease (#2553)", () => {
 		});
 	});
 
-	// An event-bus caller (and openMarkdownAnnotation) awaits the decision, so
-	// a closed tab must still settle it after 30 s (#1143) instead of hanging
-	// the caller until Pi exits.
 	test("kept for callers that await the decision (the event bus's arguments)", async () => {
 		await withGatedSession(undefined, async (session) => {
 			const plan = await (await fetch(`${session.url}/api/plan`)).json();
@@ -195,8 +172,6 @@ describe("sessionOpenedMessage", () => {
 		}
 	}
 
-	// Regression (#1134): a local session whose browser opened printed no URL,
-	// so a closed tab had no way back.
 	test("carries the URL for a local session", () => {
 		const message = withRemote("0", () => sessionOpenedMessage("Code review opened", url));
 		expect(message.split(url).length - 1).toBe(1);
@@ -309,8 +284,6 @@ describe("browser session cleanup", () => {
 	});
 
 	test("negative: host shutdown is a no-op when no browser sessions are active", () => {
-		// Every prior test stopped its sessions, so the registry must be empty;
-		// a leaked entry here would make the no-op claim vacuous.
 		expect(getActiveBrowserSessionCount()).toBe(0);
 		expect(() => stopAllBrowserDecisionSessions()).not.toThrow();
 		expect(getActiveBrowserSessionCount()).toBe(0);
@@ -325,16 +298,12 @@ describe("browser session cleanup", () => {
 			ctx,
 			() => never,
 		);
-		// Date.now() has millisecond resolution; make the stale session strictly
-		// older than the failing start.
 		await new Promise((resolve) => setTimeout(resolve, 5));
 
 		let attempts = 0;
 		const result = await startServerWithSelfPreemption(async () => {
 			attempts++;
 			if (attempts === 1) {
-				// A concurrent sibling command binds while this start is failing;
-				// its fresh session must survive the sweep.
 				startBrowserDecisionSession(
 					{ url: "http://localhost:2", stop: () => freshStops++ },
 					ctx,

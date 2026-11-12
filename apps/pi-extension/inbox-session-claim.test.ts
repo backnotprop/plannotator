@@ -1,10 +1,3 @@
-/**
- * The Pi extension's session claim (`inbox/pi-sessions/`, packages/shared/inbox/pi-session-claim.ts): Pi sets
- * `process.title = "pi"`, so the Inbox's process list never shows which session a Pi runs, and the Inbox's Pi
- * launch host reads these claims instead to start no second writer on a session. The failures this catches: a
- * Pi that claims nothing with the Inbox tool off, a claim that outlives `/new`, and a `/reload` whose old
- * instance removes the new one's claim.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +15,6 @@ afterEach(() => {
 	}
 });
 
-/** A stand-in for Pi's ExtensionAPI: one extension instance, whose session id the test sets. */
 function fakePi() {
 	const handlers = new Map<string, ((event: unknown, ctx?: unknown) => unknown)[]>();
 	let sessionId = "";

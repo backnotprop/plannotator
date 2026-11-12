@@ -1,91 +1,19 @@
-/**
- * Pi reloads itself to load an updated Plannotator.
- *
- * An update (the installer's `pi update`, `pi update --extensions`) replaces
- * this package's files under a running Pi, which keeps the old code until the
- * person types `/reload` (package-version.ts). Here Pi reloads by itself,
- * through its own command path: `pi.sendUserMessage("/plannotator-reload
- * auto", { expandPromptTemplates: true })` runs this extension's command,
- * whose context has `reload()` (Pi's `/reload`: it refuses while a response
- * is streaming or a compaction runs). Pi 0.84.2 added `expandPromptTemplates`;
- * before it the same call would send the text to the model, so an older Pi
- * gets only the one-line note.
- *
- * It reloads only when nothing can be lost. Each gate was added because a
- * real-host probe lost something without it (auto-reload spike, Pi 0.84.4):
- *   - the same new version has been on disk for STABLE_MS, counted from when
- *     the install looks finished (npm's retired copy of the package is gone,
- *     the entry and every dependency are on disk): an install that is still
- *     writing files is never loaded half-way;
- *   - no run: agent_start .. agent_settled, ctx.isIdle(), no queued message;
- *   - no submitted prompt on its way to a run: Pi runs its `input` handlers
- *     before the run starts, and a reload in that gap dropped the prompt;
- *   - no compaction and no /tree branch summary (Pi refuses the reload, with
- *     a warning, during either);
- *   - no dialog of any extension open (ui_prompt_start .. ui_prompt_end): a
- *     reload closed it without an answer;
- *   - no Plannotator review, plan review or Ask question open;
- *   - nothing typed for QUIET_MS, and an empty editor (Pi swaps the editor
- *     for its "Reloading..." box for a moment; keys typed then are lost).
- * All of it is checked on every poll and again inside the command, the last
- * moment before the reload. One try per version per process (it outlives
- * the reload): a reload that loads no new Plannotator leaves Pi's own line
- * ("Reload failed", "Failed to load extension"), and the note with `/reload`
- * is shown instead of a second try.
- *
- * The line after a reload waits for the first poll of the new instance. Pi
- * writes its own "Reloaded …" status after the extensions' session_start, and
- * a status line written right after another one replaces it, so a line sent
- * from session_start was gone from the screen a moment later (real host,
- * Pi 0.84.4). After the reload, the old instance's context is stale (Pi
- * throws on any use), so only the new instance can speak.
- *
- * Two loaded copies of Plannotator (a dev checkout beside the npm package)
- * make Pi rename the command to `plannotator-reload:1` and `:2`. Then the send
- * is skipped for the note, and the `input` handler takes any
- * `/plannotator-reload` text Pi found no command for, so it never reaches the
- * model.
- *
- * Oh My Pi has no reload for extension code (its `/restart` restarts the
- * process and stops a running turn, and is not reachable from an extension),
- * so there it is the note only, once per version, when the session is free.
- * Nothing is ever typed into the editor for the person (no pre-fill): in Oh My
- * Pi, what they typed next would be appended to it.
- */
-
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadedPackageVersion, packageInstallSettled, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
 import type { PiAgentToolHost } from "./pi-host.ts";
 
 export const AUTO_RELOAD_COMMAND = "plannotator-reload";
-/** The same version on disk this long before it is loaded. */
 export const STABLE_MS = 10_000;
-/**
- * An install that still looks unfinished this long after its version appeared (npm crashed and left
- * its retired copy, a dependency never came) is not loaded: the note says `/reload` instead.
- */
 export const INSTALL_STUCK_MS = 5 * 60_000;
-/** Nothing typed this long before a reload. */
 export const QUIET_MS = 15_000;
-/** A submitted prompt that never started a run stops holding the reload after this long. */
 export const INPUT_GRACE_MS = 30_000;
-/** How often the version on disk and the session are looked at. */
 export const POLL_MS = 2_000;
-/**
- * A /tree branch summary holds the reload from session_before_tree until session_tree. Pi sends no
- * event when the summary fails, so after this long it stops holding (its abort ends it sooner).
- */
 export const TREE_HOLD_MAX_MS = 5 * 60_000;
-/** A marker older than this is not the reload that is loading now. */
 const MARKER_MAX_AGE_MS = 60_000;
-/** Pi added `expandPromptTemplates` to `sendUserMessage` in 0.84.2. */
 export const MIN_PI_FOR_AUTO_RELOAD = "0.84.2";
 
-/** Carried from the instance that reloads to the one that loads (same process). */
 const MARKER_KEY = "__plannotatorAutoReload_v1";
-/** Versions already announced in this process, so a reload's new instance does not repeat it. */
 const NOTICED_KEY = "__plannotatorUpdateNoticed_v1";
-/** Versions Pi already reloaded for in this process: one try each, across reloads. */
 const TRIED_KEY = "__plannotatorAutoReloadTried_v1";
 
 interface ReloadMarker {
@@ -120,12 +48,10 @@ function clearMarker(): void {
 	delete store()[MARKER_KEY];
 }
 
-/** The line after an automatic reload. */
 export function autoReloadedText(to: string): string {
 	return `Plannotator updated to ${to}. Pi reloaded while idle.`;
 }
 
-/** "0.84.2" >= "0.84.2"; anything unparseable counts as too old. */
 export function piSupportsAutoReload(version: string | null | undefined): boolean {
 	if (typeof version !== "string" || !version) return false;
 	const parse = (v: string) => v.trim().replace(/^v/, "").split(/[-+]/)[0]!.split(".");
@@ -140,7 +66,6 @@ export function piSupportsAutoReload(version: string | null | undefined): boolea
 	return true;
 }
 
-/** Everything the decision reads, at one moment. */
 export interface QuietState {
 	now: number;
 	running: boolean;
@@ -154,7 +79,6 @@ export interface QuietState {
 	plannotatorBusy: string | null;
 }
 
-/** Why a reload must wait now, or null when nothing can be lost. */
 export function reloadBlockedBy(s: QuietState): string | null {
 	if (s.running || !s.idle) return "a run";
 	if (s.pendingMessages) return "a queued message";
@@ -167,43 +91,28 @@ export function reloadBlockedBy(s: QuietState): string | null {
 	return null;
 }
 
-/** The slice of Pi's ExtensionAPI this module uses (a fake in the tests). */
 export type AutoReloadPi = Pick<ExtensionAPI, "sendUserMessage" | "registerCommand"> & {
 	on(event: string, handler: (event: any, ctx: any) => unknown): unknown;
-	/** The commands as Pi invokes them (a name two extensions register is renamed `name:1`, `name:2`). */
 	getCommands?: () => ReadonlyArray<{ name: string; source?: string }>;
 };
 
-/** `/plannotator-reload` text, which reaches the `input` handlers only when Pi found no command by that name. */
 const COMMAND_TEXT = new RegExp(`^/${AUTO_RELOAD_COMMAND}(?:\\s|$)`);
 
 export interface AutoReloadOptions {
 	host: PiAgentToolHost;
-	/** resolveAutoReload(config, env), read once per extension instance. */
 	enabled: boolean;
-	/** Plannotator's own open work: a review, a plan review, an Ask question; null when none. */
 	plannotatorBusy: () => string | null;
-	/** Pi's version, or null when unknown (then: the note only). */
 	piVersion: () => Promise<string | null>;
-	/** Overridable for tests. */
 	readOnDisk?: () => string | null;
-	/** Whether the install on disk looks finished (package-version.ts packageInstallSettled). */
 	installSettled?: () => boolean;
 	loaded?: string | null;
 	now?: () => number;
-	/** Tests drive `check()` themselves. */
 	poll?: boolean;
 }
 
 export interface AutoReloadController {
-	/**
-	 * Whether another part (the Inbox's poll) may announce `version` now: once
-	 * per version per process, and never while Pi will reload by itself.
-	 */
 	claimNotice(version: string): boolean;
-	/** One poll now (the timer runs it every POLL_MS). */
 	check(): void;
-	/** Settles once the Pi version gate is decided. */
 	ready: Promise<void>;
 }
 
@@ -213,22 +122,18 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 	const installSettled = options.installSettled ?? (() => packageInstallSettled());
 	const loaded = options.loaded !== undefined ? options.loaded : loadedPackageVersion();
 	const mayAuto = options.host === "pi" && options.enabled;
-	/** Decided by the Pi version gate; until then nothing is reloaded and the note waits. */
 	let auto = false;
 	let decided = !mayAuto;
 	let ctx: ExtensionContext | null = null;
 	let running = false;
 	let sawSettled = false;
 	let compacting = false;
-	/** When a /tree branch summary started (session_before_tree), until session_tree. */
 	let treeAt: number | null = null;
 	let openPrompts = 0;
 	let inputAt: number | null = null;
 	let lastKeyAt: number | null = null;
-	/** The new version on disk: when it was first seen, and since when the install looks finished. */
 	let candidate: { version: string; seen: number; since: number } | null = null;
 	const attempted = processSet(TRIED_KEY);
-	/** Shown at the first poll after a reload, below Pi's own "Reloaded …" line. */
 	let afterReload: { message: string; kind: "info" | "warning" } | null = null;
 	let timer: ReturnType<typeof setInterval> | null = null;
 	let stopKeys: (() => void) | null = null;
@@ -257,7 +162,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 		}
 	};
 
-	/** Pi will reload for `version` by itself (or may, once the gate is decided). */
 	const autoWillHandle = (version: string): boolean => mayAuto && (!decided || auto) && !attempted.has(version) && hasUI(ctx);
 
 	const state = (c: ExtensionContext): QuietState => {
@@ -270,7 +174,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 			const text = (c.ui as { getEditorText?: () => string }).getEditorText?.();
 			editorText = typeof text === "string" ? text : "";
 		} catch {
-			// A replaced or closed session: never quiet.
 			idle = false;
 		}
 		return {
@@ -291,7 +194,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 		try {
 			target?.ui.notify(message, kind);
 		} catch {
-			// The session is gone.
 		}
 	};
 
@@ -304,11 +206,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 		}
 	};
 
-	/**
-	 * Pi runs `/plannotator-reload` as a command: false when Pi says it has none by that name (two
-	 * loaded copies rename it `:1`, `:2`). Unknown (an older Pi, a throw): true, and the `input`
-	 * handler keeps the text from the model if Pi does not run it.
-	 */
 	const commandReachable = (): boolean => {
 		try {
 			const commands = pi.getCommands?.();
@@ -336,13 +233,11 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 			candidate = { version: onDisk, seen: now(), since: now() };
 			return;
 		}
-		// The stable time counts from when the install looks finished: npm writes package.json first.
 		const settled = installSettled();
 		if (!settled) candidate.since = now();
 		const stuck = !settled && now() - candidate.seen >= INSTALL_STUCK_MS;
 		if (!stuck && now() - candidate.since < STABLE_MS) return;
 		if (!auto || attempted.has(onDisk) || stuck) {
-			// Off, an older Pi, Oh My Pi, the one try is spent, or an install that never finished: the note, once per version.
 			if (sessionFree(c) && !noticed().has(onDisk)) {
 				noticed().add(onDisk);
 				notify(c, packageUpdatedMessage(loaded, onDisk, options.host), "warning");
@@ -365,27 +260,19 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 		}
 	};
 
-	// Pi only: Oh My Pi's command context has no reload().
 	if (options.host === "pi") pi.registerCommand(AUTO_RELOAD_COMMAND, {
 		description: "Reload Pi to load the updated Plannotator (the same as /reload)",
 		handler: async (args, cmdCtx) => {
 			const automatic = args.trim() === "auto";
 			if (automatic) {
-				// Checked again here, in the command: the last moment before the reload.
 				const marker = readMarker();
 				if (!marker || reloadBlockedBy(state(cmdCtx)) !== null) {
 					clearMarker();
-					// Not a spent try: the next quiet moment tries again.
 					if (marker) attempted.delete(marker.to);
 					return;
 				}
 			}
 			await cmdCtx.reload();
-			// A new instance takes the marker in its session_start, before reload() returns.
-			// Still here with the marker: no Plannotator loaded. Either Pi refused the reload (its
-			// warning says why; this context still works, so the note follows it), or Pi reloaded
-			// and the update failed to load (Pi's "Failed to load extension" line; this context is
-			// stale and notify() drops the note).
 			const left = readMarker();
 			if (automatic && left) {
 				clearMarker();
@@ -405,8 +292,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 		if (marker && now() - marker.at >= MARKER_MAX_AGE_MS) clearMarker();
 		else if (marker && (event as { reason?: string } | undefined)?.reason === "reload") {
 			clearMarker();
-			// The new version loaded: say so. Another one loaded (Pi read the package from
-			// elsewhere, or the files changed again): the note, since this was the one try.
 			if (marker.to === loaded) afterReload = { message: autoReloadedText(marker.to), kind: "info" };
 			else {
 				afterReload = { message: packageUpdatedMessage(loaded, marker.to, options.host), kind: "warning" };
@@ -441,8 +326,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 	pi.on("input", (event, c: ExtensionContext) => {
 		const text = typeof event?.text === "string" ? event.text.trim() : "";
 		if (COMMAND_TEXT.test(text)) {
-			// Pi found no command by this name (it renamed it, two copies are loaded): this text must
-			// never reach the model. The automatic one gets the note instead of the reload.
 			const marker = readMarker();
 			if (marker && text.slice(AUTO_RELOAD_COMMAND.length + 1).trim() === "auto") {
 				clearMarker();
@@ -457,7 +340,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 		running = true;
 		inputAt = null;
 	});
-	// Pi 0.80.4+ ends a run with agent_settled (after its follow-ups); before it, agent_end.
 	pi.on("agent_end", () => {
 		if (!sawSettled) running = false;
 	});
@@ -475,7 +357,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 	pi.on("session_compact_failed", () => {
 		compacting = false;
 	});
-	// A /tree branch summary: Pi counts it as a compaction and refuses a reload during it.
 	pi.on("session_before_tree", (event) => {
 		const started = now();
 		treeAt = started;
@@ -489,7 +370,6 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 				{ once: true },
 			);
 		} catch {
-			// No signal: session_tree or the time limit ends it.
 		}
 		return undefined;
 	});

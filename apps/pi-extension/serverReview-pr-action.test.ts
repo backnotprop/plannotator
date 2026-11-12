@@ -179,8 +179,6 @@ describe('Pi /api/pr-action submission contract', () => {
     expect(received).toEqual([{ path: 'src/failing.ts', body: 'Split this file.' }]);
   });
 
-  // #1611: the review event reaches the submitter, and a malformed one is
-  // refused instead of silently posting a neutral comment.
   test('passes request_changes through to the submitter', async () => {
     let received: unknown;
     await withReviewServer(

@@ -4,15 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plannotator from "./index.ts";
 
-/**
- * Regression coverage for issue #1140.
- *
- * Pi invalidates a captured `ctx` (and the `pi` object it came from) when the
- * session is replaced or disposed. Every accessor then throws the message
- * below. The post-approval continuation in `agent_end` polls `ctx.isIdle()`
- * from a `setTimeout`, so a teardown mid-poll used to throw inside a timer
- * callback — uncatchable by the host, fatal to the process.
- */
 const STALE_MESSAGE =
 	"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
 
@@ -32,12 +23,6 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-/**
- * Pi host stub trimmed to what the plan lifecycle needs, plus a `goStale()`
- * switch that makes every guarded surface behave exactly like a torn-down
- * session: `ctx.mode`, `ctx.isIdle()` and `pi.sendUserMessage()` all throw the
- * real staleness error.
- */
 function createHarness(cwd: string) {
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
 	const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
@@ -133,7 +118,6 @@ function createHarness(cwd: string) {
 				await handler({}, ctx);
 			}
 		},
-		/** Reproduce a real teardown: shutdown event first, then invalidation. */
 		async teardown({ emitShutdown = true } = {}): Promise<void> {
 			if (emitShutdown) {
 				for (const handler of handlers.get("session_shutdown") ?? []) {
@@ -145,7 +129,6 @@ function createHarness(cwd: string) {
 	};
 }
 
-/** Fail the test on anything the host would have seen as a fatal process error. */
 async function withFatalErrorTrap<T>(run: () => Promise<T>): Promise<{ result: T; fatal: unknown[] }> {
 	const fatal: unknown[] = [];
 	const onUncaught = (err: unknown) => fatal.push(err);
@@ -154,7 +137,6 @@ async function withFatalErrorTrap<T>(run: () => Promise<T>): Promise<{ result: T
 	process.on("unhandledRejection", onUnhandled);
 	try {
 		const result = await run();
-		// Let any pending 50ms poll tick land inside the trap.
 		await sleep(300);
 		return { result, fatal };
 	} finally {
@@ -169,9 +151,7 @@ async function approveAndScheduleContinuation(cwd: string) {
 	writeFileSync(join(cwd, "PLAN.md"), PLAN_CONTENT);
 	const harness = createHarness(cwd);
 	await harness.startSession();
-	// hasUI:false auto-approves, which arms the post-approval continuation.
 	await harness.submitPlan("PLAN.md");
-	// The agent is still winding down, so the first poll re-arms the timer.
 	harness.setIdle(false);
 	await harness.agentEnd();
 	return harness;
@@ -182,7 +162,7 @@ describe("post-approval continuation survives session teardown", () => {
 		const cwd = makeTempDir();
 		const { result: harness, fatal } = await withFatalErrorTrap(async () => {
 			const h = await approveAndScheduleContinuation(cwd);
-			await sleep(60); // at least one poll tick has run against a live ctx
+			await sleep(60);
 			await h.teardown();
 			return h;
 		});
