@@ -1,49 +1,22 @@
-/**
- * Product feedback: the one client that sends what a person types about
- * Plannotator to the owner's feedback Worker (apps/feedback-service). The
- * Inbox's server (`POST /api/inbox/feedback`, packages/server/inbox-feedback.ts)
- * and `plannotator feedback` (apps/hook/server/feedback-command.ts) both send
- * through `sendProductFeedback`, so the backend is swapped in one place: the
- * URL constant below, or `PLANNOTATOR_FEEDBACK_URL` (tests point it at a
- * local fake).
- *
- * Nothing is sent without a person's click or an explicit CLI command. A
- * submission carries the message, the optional category and contact the
- * person typed, the Plannotator version, the OS name, where it was sent
- * from and, from the Inbox, the names of the agents the person has used
- * ("Claude Code", "Codex"; `feedbackAgentNames`); nothing else (no thread
- * content, no session ids, no paths, no machine id).
- *
- * Browser-safe: no Node or Bun imports. The limits mirror the Worker's
- * (apps/feedback-service/core/validation.ts; its test/limits.test.ts keeps
- * them in step).
- */
-
-/** The feedback Worker's one route. The owner's deploy; swap the backend here. */
 export const PRODUCT_FEEDBACK_URL = "https://plannotator-feedback.plannotator.workers.dev/feedback";
-/** Overrides PRODUCT_FEEDBACK_URL (an http or https URL). Tests point it at a local server. */
 export const PRODUCT_FEEDBACK_URL_ENV = "PLANNOTATOR_FEEDBACK_URL";
 
 export const FEEDBACK_MESSAGE_MAX = 4000;
 export const FEEDBACK_CONTACT_MAX = 200;
 export const FEEDBACK_CATEGORIES = ["bug", "idea", "other"] as const;
 export const FEEDBACK_SURFACES = ["inbox", "plan-review", "code-review", "annotate", "cli"] as const;
-/** At most this many agent names ride one submission. */
 export const FEEDBACK_AGENTS_MAX = 8;
-/** Each agent name is a short label of at most this many characters. */
 export const FEEDBACK_AGENT_NAME_MAX = 40;
 
 export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
 export type FeedbackSurface = (typeof FEEDBACK_SURFACES)[number];
 
-/** What a person typed (the message, and optionally a category and a way to reach them). */
 export interface ProductFeedbackInput {
   message: string;
   category?: FeedbackCategory | null;
   contact?: string | null;
 }
 
-/** The wire body: the input plus the version, the OS, the surface and the agent names. Exactly these keys. */
 export interface ProductFeedbackPayload {
   message: string;
   category?: FeedbackCategory;
@@ -51,44 +24,19 @@ export interface ProductFeedbackPayload {
   version: string;
   os: string;
   surface: FeedbackSurface;
-  /** Agent names only ("Claude Code", "Codex"), deduplicated and capped (`feedbackAgentNames`). Absent when there are none. */
   agents?: string[];
 }
 
-/**
- * What the person reads when the feedback service cannot take the message:
- * unreachable, not deployed, too slow, or failing (a 5xx, a 404/405, an answer
- * that is not the Worker's JSON). One plain line, the same in the dialog and
- * the CLI, never a stack or a status code.
- */
 export const FEEDBACK_UNAVAILABLE = "Couldn't send feedback right now; nothing was saved.";
 
-/**
- * The end word of the quoted heredoc that carries the message to
- * `plannotator feedback --stdin` in the copied prompt, the CLI help, the skill
- * and the README. Not `EOF`: feedback about shells can quote a line that is
- * exactly `EOF`, which would end the heredoc early and run the rest as commands.
- */
 export const FEEDBACK_HEREDOC_END = "PLANNOTATOR_FEEDBACK_END";
 
-/**
- * How long a send waits for the Worker, in all: the resend without agent names
- * (`sendProductFeedback`) included. Under 10 s, so the window (which goes
- * through its Inbox) has its answer by then.
- */
 export const FEEDBACK_TIMEOUT_MS = 8_000;
 
-/**
- * The resend without agent names goes only when at least this much of the
- * deadline is left. With less, a slow Worker could store it after the wait has
- * given up, and the person would read "nothing was saved" for feedback that was.
- */
 export const FEEDBACK_RESEND_MIN_MS = 1_000;
 
-/** `unavailable`: the service could not take it (reason is FEEDBACK_UNAVAILABLE); otherwise the Worker refused it and `reason` is its words. */
 export type ProductFeedbackResult = { ok: true } | { ok: false; reason: string; status?: number; unavailable: boolean };
 
-/** The URL to send to: a valid http(s) override from the env, else the constant. */
 export function productFeedbackUrl(env: Record<string, string | undefined> = {}): string {
   const override = env[PRODUCT_FEEDBACK_URL_ENV]?.trim();
   if (override) {
@@ -96,13 +44,11 @@ export function productFeedbackUrl(env: Record<string, string | undefined> = {})
       const url = new URL(override);
       if (url.protocol === "http:" || url.protocol === "https:") return url.toString();
     } catch {
-      // Not a URL: fall back to the constant.
     }
   }
   return PRODUCT_FEEDBACK_URL;
 }
 
-/** A plain OS name from `process.platform` (or `navigator`'s platform string): macOS, Windows, Linux, else the raw word. */
 export function feedbackOsName(platform: string): string {
   const p = platform.toLowerCase();
   if (p === "darwin" || p.startsWith("mac")) return "macOS";
@@ -118,7 +64,6 @@ function lengthOf(value: string): number {
   return n;
 }
 
-/** Checks a person's input the way the Worker will: an error to show, or null. */
 export function feedbackInputError(input: ProductFeedbackInput): string | null {
   const message = typeof input.message === "string" ? input.message.trim() : "";
   if (!message) return "Write your feedback first.";
@@ -131,17 +76,8 @@ export function feedbackInputError(input: ProductFeedbackInput): string | null {
   return null;
 }
 
-// An agent name is a short label: words of letters, digits and `+ _ ( ) -`, one space or " / " between them
-// ("Claude Code", "OpenCode 2", "Windsurf / Devin"). No dot, no comma and no bare slash, so no path of any kind
-// (absolute, relative or `~`) and no list can pass as a name. The Worker's rule too.
 const AGENT_NAME_RE = /^[0-9A-Za-z][0-9A-Za-z+_()-]*(?:(?: | \/ )[0-9A-Za-z+_()-]+)*$/;
 
-/**
- * The agent names a submission may carry: each one trimmed, a short label (at
- * most FEEDBACK_AGENT_NAME_MAX characters, nothing else dropped in), the first
- * of any repeat kept (case aside), at most FEEDBACK_AGENTS_MAX in the order
- * given. Anything that is not such a name is left out, never sent.
- */
 export function feedbackAgentNames(names: Iterable<unknown>): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -158,7 +94,6 @@ export function feedbackAgentNames(names: Iterable<unknown>): string[] {
   return out;
 }
 
-/** The exact body sent: the input's words, the version, the OS, the surface and the agent names, if any. */
 export function productFeedbackPayload(
   input: ProductFeedbackInput,
   meta: { version: string; os: string; surface: FeedbackSurface; agents?: Iterable<unknown> },
@@ -169,7 +104,6 @@ export function productFeedbackPayload(
     message: input.message.trim(),
     ...(input.category ? { category: input.category } : {}),
     ...(contact ? { contact } : {}),
-    // The Worker accepts a short label; `dev` (a source run) is one.
     version: meta.version.slice(0, 40),
     os: meta.os.slice(0, 40),
     surface: meta.surface,
@@ -177,7 +111,6 @@ export function productFeedbackPayload(
   };
 }
 
-/** A Worker deployed before `agents` existed refuses the field by name (its strict validation). */
 function refusedAgentsField(status: number, error: unknown): boolean {
   return status === 400 && typeof error === "string" && error.startsWith("Unknown field: agents");
 }
@@ -188,15 +121,11 @@ export interface SendProductFeedbackOptions {
   timeoutMs?: number;
 }
 
-/** POSTs one submission. No cookies, no credentials, no redirects; the answer's body is never read beyond its error. */
 export async function sendProductFeedback(payload: ProductFeedbackPayload, options: SendProductFeedbackOptions): Promise<ProductFeedbackResult> {
-  // One deadline for the whole exchange: the resend gets only the time the first try left.
   const deadline = Date.now() + (options.timeoutMs ?? FEEDBACK_TIMEOUT_MS);
   const result = await sendOnce(payload, options);
-  // Fails open: a Worker older than the agent names refuses them, and the feedback goes again without them.
   if ("reason" in result && payload.agents && refusedAgentsField(result.status ?? 0, result.reason)) {
     const left = deadline - Date.now();
-    // Too little time to resend: nothing was saved (the refusal wrote nothing), and the person reads exactly that.
     if (left < FEEDBACK_RESEND_MIN_MS) return { ok: false, reason: FEEDBACK_UNAVAILABLE, status: result.status, unavailable: true };
     const { agents: _agents, ...without } = payload;
     return sendOnce(without, { ...options, timeoutMs: left });
@@ -218,19 +147,15 @@ async function sendOnce(payload: ProductFeedbackPayload, options: SendProductFee
       signal: controller.signal,
     });
     if (res.ok) return { ok: true };
-    // A refusal is the Worker's 4xx with its JSON error (bad input, too big, too many). A 404 or 405 is
-    // a URL with no Worker on it (not deployed); a 5xx or anything else is the service failing.
     if (res.status >= 400 && res.status < 500 && res.status !== 404 && res.status !== 405) {
       try {
         const body = (await res.json()) as { error?: unknown };
         if (typeof body.error === "string" && body.error) return { ok: false, reason: body.error.slice(0, 200), status: res.status, unavailable: false };
       } catch {
-        // Not the Worker's JSON: unavailable, below.
       }
     }
     return { ok: false, reason: FEEDBACK_UNAVAILABLE, status: res.status, unavailable: true };
   } catch {
-    // Unreachable (DNS, refused, TLS), a redirect, or past the time limit: one plain line, no detail.
     return { ok: false, reason: FEEDBACK_UNAVAILABLE, unavailable: true };
   } finally {
     clearTimeout(timer);

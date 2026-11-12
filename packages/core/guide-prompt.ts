@@ -1,14 +1,3 @@
-/**
- * Guided Review generation, the pure half: the organizer prompt, its JSON
- * output schema, the user message that frames the changeset, and the
- * validator that holds model output to the coverage rule. Browser-safe and
- * zero-dependency, so any host (the Plannotator servers, Pi, or an external
- * app such as Workspaces) generates guides with Plannotator's exact prompt.
- * Moved verbatim from packages/server/guide/guide-review.ts, which
- * re-exports every name; the engine plumbing (commands, output parsing,
- * sessions) stays there.
- */
-
 import type { CodeGuideOutput, GuideDiffRef, GuideSection } from "./guide";
 import type { DiffType } from "./diff-type";
 import {
@@ -17,21 +6,12 @@ import {
   type WorkspaceReviewPromptContext,
 } from "./review-prompt";
 
-/** The PR fields buildGuideUserMessage reads. Structural, so the server's
- *  full `PRMetadata` (GitHub or GitLab) is accepted as-is. */
 export interface GuidePromptPRMetadata {
   url: string;
   baseBranch: string;
-  /** Carry the diff inline when there is no local checkout: set for platforms
-   *  no agent-allowed CLI can read (Bitbucket), where the URL alone is not
-   *  enough. Absent keeps the URL-only message. */
   inlineDiff?: boolean;
 }
 
-/** Generic structural validation failure (no sections / blank overviews).
- *  onJobComplete deliberately does NOT surface this string on the job card —
- *  the caller substitutes GUIDE_EMPTY_OUTPUT_ERROR — whereas the informative
- *  outside-changeset validation error passes through verbatim. */
 export const GUIDE_NO_SECTIONS_ERROR = "No sections survived validation";
 
 export const GUIDE_SCHEMA_JSON = JSON.stringify({
@@ -72,14 +52,6 @@ export const GUIDE_SCHEMA_JSON = JSON.stringify({
   additionalProperties: false,
 });
 
-/**
- * The Guided Review methodology. MIRRORED VERBATIM into the standalone
- * `guided-review` agent skill (github.com/plannotator/guides,
- * skills/guided-review/SKILL.md, section "2. Write the guide"), where only
- * the mechanics differ (the diff is guide.patch, the output is guide.json).
- * When this text changes, update the skill in the same change: a guide made by
- * an agent must follow the same rules as one made in-app.
- */
 export const GUIDE_REVIEW_PROMPT = `# Guided Review Organizer
 
 ## Identity
@@ -396,23 +368,11 @@ function buildWorkspaceGuideUserMessage(
   ].join("\n");
 }
 
-/**
- * Coerces one raw (untrusted) section from model output into a well-typed
- * `GuideSection`, or drops it entirely. The validator downstream dereferences
- * `section.diffs.length` / `section.overview.trim()` unchecked — a malformed
- * section (wrong field types, missing fields) would otherwise throw there,
- * and for the guide provider that throw is swallowed upstream, leaving a
- * done-looking job that 404s on `/api/guide/:jobId`. Returns null for a
- * section with nothing of value (no title, no overview, no diffs).
- */
 export function sanitizeGuideSection(raw: unknown): GuideSection | null {
   if (!raw || typeof raw !== "object") return null;
   const s = raw as Record<string, unknown>;
   const title = typeof s.title === "string" ? s.title : "";
   const overview = typeof s.overview === "string" ? s.overview : "";
-  // Map to `{ file, summary? }` only — stray model-emitted fields never reach
-  // the client. A missing/non-string/blank summary is simply omitted (the UI
-  // renders nothing for it), never a reason to drop the ref or fail the guide.
   const diffs: GuideDiffRef[] = Array.isArray(s.diffs)
     ? s.diffs
         .filter((d): d is Record<string, unknown> & { file: string } => !!d && typeof d === "object" && typeof (d as Record<string, unknown>).file === "string")
@@ -422,19 +382,9 @@ export function sanitizeGuideSection(raw: unknown): GuideSection | null {
         })
     : [];
   if (title.trim().length === 0 && overview.trim().length === 0 && diffs.length === 0) return null;
-  // Every surviving section gets a non-empty title: a diffs-only section
-  // (blank title AND overview) used to render as a blank chapter with a
-  // "Guide Generated" job around it — no parse failure, so no recovery flow.
-  // Keeping the section (titled) beats dropping it: its files were PLACED by
-  // the model, so they're not in unplacedFiles and dropping would silently
-  // orphan them from the guide's coverage story.
   return { title: title.trim() ? title : "Untitled section", overview, diffs };
 }
 
-/** Sanitizes a raw sections array (see `sanitizeGuideSection`). Shared by the
- *  stream (Claude) and file (Codex) output paths and by onJobComplete's
- *  validation, so a malformed section from either engine never reaches an
- *  unchecked `.length` / `.trim()` call. */
 export function sanitizeGuideSections(raw: unknown): GuideSection[] {
   if (!Array.isArray(raw)) return [];
   const out: GuideSection[] = [];
@@ -445,21 +395,10 @@ export function sanitizeGuideSections(raw: unknown): GuideSection[] {
   return out;
 }
 
-/** Sanitizes the model-provided `unplacedFiles` array to a plain string[]. */
 export function sanitizeUnplacedFiles(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((f): f is string => typeof f === "string") : [];
 }
 
-/**
- * Shared validation core for guide output: sanitize the raw sections /
- * unplacedFiles, enforce the coverage rule against the CURRENT changed-file
- * set (fail-closed — a ref to a file that isn't part of the changeset is
- * dropped, not rendered as a dangling reference; a file placed twice keeps
- * only its first placement), and coerce title/intent to strings. Pure — used
- * by both onJobComplete (automatic ingestion) and submitManualOutput (manual
- * repair paste), so a malformed model or human-pasted payload is held to
- * exactly the same bar either way.
- */
 export function validateGuideOutput(raw: unknown, changedFiles: string[]): { guide: CodeGuideOutput } | { error: string } {
   if (!raw || typeof raw !== "object") {
     return { error: "Malformed guide output (not an object)" };
@@ -470,9 +409,6 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
   const placed = new Set<string>();
   const validatedSections: GuideSection[] = [];
   const sanitizedSections = sanitizeGuideSections(output.sections);
-  // Files the model referenced that are not part of the changeset — tracked
-  // so a fully-invalidated guide can explain WHY nothing survived (typically
-  // the model guided a different commit than the one under review).
   const outsideChangeset = new Set<string>();
 
   for (const section of sanitizedSections) {
@@ -480,20 +416,15 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
     const diffs: GuideDiffRef[] = [];
     for (const ref of section.diffs) {
       if (!changedSet.has(ref.file)) {
-        // not a real changed file
         outsideChangeset.add(ref.file);
         continue;
       }
-      if (placed.has(ref.file)) continue; // duplicate — first placement wins
+      if (placed.has(ref.file)) continue;
       placed.add(ref.file);
       diffs.push(ref);
     }
 
     if (diffs.length === 0) {
-      // Keep a zero-diff section ONLY if it was already zero-diff in the
-      // model's output (a deliberate prose-only context section) AND has
-      // real overview text. A section that LOST all its diffs to
-      // validation above is dropped, not kept empty.
       if (originalDiffCount === 0 && section.overview.trim().length > 0) {
         validatedSections.push({ ...section, diffs });
       }
@@ -504,13 +435,6 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
   }
 
   if (validatedSections.length === 0) {
-    // Nothing survived validation — a guide screen with zero sections is
-    // useless (it would just be a single "Everything else" bucket for the
-    // whole diff). Fail closed, same as an unparseable output. When the
-    // sections died because their refs named files outside the changeset,
-    // say so — that failure is actionable (guide the right commit), unlike
-    // genuinely structural emptiness (no sections / blank overviews), which
-    // keeps the generic message.
     if (outsideChangeset.size > 0) {
       const examples = [...outsideChangeset].slice(0, 3).join(", ");
       return {
@@ -522,10 +446,6 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
     return { error: GUIDE_NO_SECTIONS_ERROR };
   }
 
-  // unplacedFiles = every changed file that never landed in a section,
-  // merged with any model-provided unplacedFiles that are real changed files
-  // AND not already placed (a file the model lists in both a section and
-  // unplacedFiles must not render twice).
   const modelUnplaced = sanitizeUnplacedFiles(output.unplacedFiles).filter((f) => changedSet.has(f) && !placed.has(f));
   const unplacedSet = new Set<string>(modelUnplaced);
   for (const file of changedFiles) {
@@ -534,10 +454,6 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
   const unplacedFiles = [...unplacedSet];
 
   const guide: CodeGuideOutput = {
-    // Marker engines are prompt-enforced only (no schema flag) — a non-string
-    // title/intent would otherwise reach the client verbatim and crash
-    // GuideView (React child error, or renderInlineMarkdown's .split on a
-    // non-string).
     title: typeof output.title === "string" && output.title.trim().length > 0 ? output.title : "Guided review",
     intent: typeof output.intent === "string" ? output.intent : "",
     sections: validatedSections,

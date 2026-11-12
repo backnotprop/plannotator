@@ -1,25 +1,3 @@
-/**
- * A scene: a picture the agent draws itself, whose pieces move over time. The
- * board's own player plays it (play, drag through time, speed, step from beat
- * to beat), so the agent writes data, never a script.
- *
- *   drawing  the agent's own SVG, inside the slot `<div data-scene="id">…</div>`
- *            in a drawn view; each piece that moves or changes carries
- *            `data-part="name"`. The store checks it like any drawing.
- *   tracks   for each piece, keyframes: where it is (`x y`, `to` another piece,
- *            or `along` a path at `p`), and how it looks (`color`, `opacity`,
- *            `scale`, `scaleX`, `scaleY`, `rotate`, `text`, `draw`, `lit`). The player tweens
- *            between keyframes; each value holds until its next key.
- *   beats    the moments worth a sentence, in time order: the caption shows the
- *            latest beat, Back and Next jump between beats, and reduced motion
- *            shows only beats, one at a time, with nothing moving between them.
- *   unit     the clock for every `at` and `end`: "step" (default) or a time
- *            unit ("ms", "s", "µs", "ns") when the timing is the point.
- *
- * Colours are names of the board's variables, so light and dark both work.
- * 2D only for now: a 3D scene would add `space: "3d"` and its own parts, and
- * keep these tracks and beats. Browser-safe, no DOM.
- */
 import type { ShapeCheck } from './shape';
 
 export const SHAPE_SCENE_VERSION = 1;
@@ -35,55 +13,38 @@ export type ShapeSceneUnit = (typeof SHAPE_SCENE_UNITS)[number];
 
 export interface ShapeSceneKey {
   at: number;
-  /** Where its centre is, in the SVG's own coordinates (its viewBox). A missing axis keeps its last value. */
   x?: number;
   y?: number;
-  /** Centre on another piece (where that piece is drawn). */
   to?: string;
-  /** On a path: a data-part that is (or holds) a path, line, polyline, polygon, circle, ellipse or rect; `p` from 0 (start) to 1 (end). */
   along?: string;
   p?: number;
-  /** Size, about its centre (1 as drawn). */
   scale?: number;
-  /** Width or height alone, about its centre (1 as drawn); each multiplies `scale`. A level that fills, a bar that grows. */
   scaleX?: number;
   scaleY?: number;
-  /** Degrees, about its centre. */
   rotate?: number;
   opacity?: number;
-  /** A board colour: it sets the piece's `currentColor`, so paint what should change with `fill="currentColor"` or `stroke="currentColor"`. */
   color?: ShapeSceneColor;
-  /** New words for the piece (its text). Words change at the key; they do not tween. */
   text?: string;
-  /** How much of its lines are drawn, 0 to 1 (a wire filling, an edge being drawn). */
   draw?: number;
-  /** Lit: picked out in the mark colour (a glow, or a thin outline in the technical look). */
   lit?: boolean;
-  /** How it gets here from the key before: "smooth" (default), "linear", or "jump" (it holds, then jumps at `at`). */
   ease?: 'smooth' | 'linear' | 'jump';
 }
 
 export interface ShapeSceneBeat {
   at: number;
-  /** One sentence: what happens at this moment and why. */
   say: string;
-  /** The code line running, from 1 (when the scene has code). */
   line?: number;
 }
 
 export interface ShapeScene {
   scene: 1;
   title: string;
-  /** Where it came from: "recorded: go run ./trace" or "scenario, written from pool.go". */
   source?: string;
   unit?: ShapeSceneUnit;
-  /** The length of the timeline, in `unit`. */
   end: number;
-  /** How long it plays at 1×, in seconds. Default: 1.2 s a step, or 10 s for a clock. */
   seconds?: number;
   code?: { lang?: string; lines: string[] };
   beats: ShapeSceneBeat[];
-  /** A key under the picture: what each colour means. */
   legend?: { color: ShapeSceneColor; label: string }[];
   tracks: Record<string, ShapeSceneKey[]>;
 }
@@ -98,7 +59,6 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const RESERVED = '__proto__';
 
-/** Validate a scene. Every problem names its field, the way `checkShapeBoard` does. */
 export function checkShapeScene(input: unknown, field = 'scene'): ShapeCheck<ShapeScene> {
   const errors: string[] = [];
   const fail = (at: string, why: string) => {
@@ -123,7 +83,6 @@ export function checkShapeScene(input: unknown, field = 'scene'): ShapeCheck<Sha
   };
   const color = (v: unknown, at: string): ShapeSceneColor | undefined => {
     if (v === undefined) return undefined;
-    // `var(--mark)` is read as `mark`: the name is what counts.
     const name = typeof v === 'string' ? v.trim().replace(/^var\(--(.*)\)$/, '$1') : '';
     if ((SHAPE_SCENE_COLORS as readonly string[]).includes(name)) return name as ShapeSceneColor;
     fail(at, `must be a board colour: ${SHAPE_SCENE_COLORS.join(', ')}`);
@@ -145,7 +104,6 @@ export function checkShapeScene(input: unknown, field = 'scene'): ShapeCheck<Sha
   const end = isNum(input.end) && input.end > 0 ? input.end : (fail(`${field}.end`, 'must be a number above 0: the length of the timeline'), 1);
   const seconds = num(input.seconds, `${field}.seconds`, 1, 120);
 
-  // The code.
   let code: ShapeScene['code'];
   if (input.code !== undefined) {
     if (!isRecord(input.code) || !Array.isArray(input.code.lines) || !input.code.lines.length) fail(`${field}.code`, 'must be { lang?, lines: ["…", …] }');
@@ -162,7 +120,6 @@ export function checkShapeScene(input: unknown, field = 'scene'): ShapeCheck<Sha
     }
   }
 
-  // The beats.
   const beats: ShapeSceneBeat[] = [];
   if (!Array.isArray(input.beats) || !input.beats.length) fail(`${field}.beats`, 'must be a list of moments, at least one: [{ at, say }]');
   else {
@@ -202,7 +159,6 @@ export function checkShapeScene(input: unknown, field = 'scene'): ShapeCheck<Sha
     }
   }
 
-  // The tracks.
   const tracks: Record<string, ShapeSceneKey[]> = {};
   if (!isRecord(input.tracks)) fail(`${field}.tracks`, 'must be { pieceName: [{ at, … }, …] }: keyframes for each piece that moves or changes');
   else {
@@ -278,7 +234,6 @@ export function checkShapeScene(input: unknown, field = 'scene'): ShapeCheck<Sha
           if (k.ease === 'smooth' || k.ease === 'linear' || k.ease === 'jump') out.ease = k.ease;
           else fail(`${at}.ease`, 'must be "smooth", "linear" or "jump"');
         }
-        // Only a key that names nothing it could change (a refused value is named by its own field).
         if (!Object.keys(k).some((key) => key !== 'at' && key !== 'ease' && KEY_KEYS.includes(key))) fail(at, 'changes nothing: give a place (x/y, to, along) or a look (color, opacity, scale, scaleX, scaleY, rotate, text, draw, lit)');
         keys.push(out);
       });
@@ -305,7 +260,6 @@ export function checkShapeScene(input: unknown, field = 'scene'): ShapeCheck<Sha
   };
 }
 
-/** The values of one attribute on a drawn view's tags (never in a comment or in text). No DOM. */
 function htmlAttr(html: string, attr: string): string[] {
   const out: string[] = [];
   const re = new RegExp(`<[A-Za-z][^>]*?\\s${attr}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'gi');
@@ -313,12 +267,10 @@ function htmlAttr(html: string, attr: string): string[] {
   return out;
 }
 
-/** The scene ids a drawn view's HTML plays (`data-scene="id"`). No DOM. */
 export function shapeHtmlScenes(html: string): string[] {
   return htmlAttr(html, 'data-scene');
 }
 
-/** Each `data-scene` slot in a drawn view's HTML, with the tag it sits on (only a `<div>` can play). No DOM. */
 export function shapeHtmlSceneSlots(html: string): { id: string; tag: string }[] {
   const out: { id: string; tag: string }[] = [];
   const re = /<([A-Za-z][\w:-]*)\b[^>]*?\sdata-scene\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
@@ -326,12 +278,10 @@ export function shapeHtmlSceneSlots(html: string): { id: string; tag: string }[]
   return out;
 }
 
-/** The piece names a drawn view's HTML gives (`data-part="name"`). No DOM. */
 export function shapeHtmlParts(html: string): string[] {
   return htmlAttr(html, 'data-part');
 }
 
-/** The pieces a scene names (its tracks, and every `to` and `along`), each with the field that names it. */
 export function shapeScenePieceRefs(scene: ShapeScene, field: string): { id: string; at: string }[] {
   const out: { id: string; at: string }[] = [];
   for (const [id, keys] of Object.entries(scene.tracks)) {

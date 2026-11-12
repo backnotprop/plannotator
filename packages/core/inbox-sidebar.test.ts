@@ -1,7 +1,3 @@
-/**
- * The sidebar's layout model (approval "inbox-sidebar-customize"): what a saved layout reads as, what hides, what
- * moves, and the presets. The window's menu and panel are proved in packages/inbox/sidebarCustomize.test.tsx.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   INBOX_SIDEBAR_DEFAULT,
@@ -24,7 +20,6 @@ const layout = (top: InboxSidebarItem[], bottom: InboxSidebarItem[], hidden: Inb
 
 test('the default is today\'s sidebar: Search to Drafts at the top, Copy prompt to Settings at the bottom, nothing hidden', () => {
   expect(D).toEqual(layout(['search', 'new-message', 'inbox', 'board', 'shape', 'artifacts', 'reviews', 'drafts'], ['copy-prompt', 'feedback', 'usage', 'settings']));
-  // Every stack item is in it once; the logo and the Settings row's buttons are not stack items.
   const stackItems = INBOX_SIDEBAR_ITEMS.filter((spec) => spec.place === 'stack').map((spec) => spec.id);
   expect([...D.top, ...D.bottom].sort()).toEqual([...stackItems].sort());
 });
@@ -175,7 +170,6 @@ describe('moving', () => {
   }
   test('an item turned off by a capability keeps its place through other moves, and is there when it comes back', () => {
     const noReviews = (item: InboxSidebarItem) => item !== 'reviews' && item !== 'artifacts';
-    // Artifacts and Reviews are off: Drafts moves up past Shape (the row drawn above it), and they stay where they were.
     const next = inboxSidebarStep(D, 'drafts', -1, noReviews);
     expect(next.top).toEqual(['search', 'new-message', 'inbox', 'board', 'drafts', 'shape', 'artifacts', 'reviews']);
     expect(inboxSidebarRead(next)).toEqual(next);

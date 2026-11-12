@@ -1,48 +1,26 @@
-/**
- * Notes a guided review's author pins to lines of a file it places
- * (`sections[].diffs[].notes`, guide snapshot version 4; approval
- * "inbox-context-notes"): the note's shape, its read and its hunk check.
- * Browser-safe and free of the Inbox, so the guide format (and the Pi
- * extension, which vendors it) can read version 4.
- */
-
 import { isLineRangeInPatch, parseDiffToFiles } from "./diff-files";
 
-/** A side of a diff a note sits on: added and unchanged lines are `new`, removed lines `old`. */
 export type InboxNoteSide = "new" | "old";
 
-/** One note the guided review's author pins to lines of a file it places (`sections[].diffs[].notes`). */
 export interface GuideDiffNote {
-  /** First and last line, numbered as the patch's hunk headers number that side. */
   lineStart: number;
   lineEnd: number;
-  /** Absent: `new`. */
   side?: InboxNoteSide;
-  /** One or two plain sentences. */
   text: string;
 }
 
-/** The longest note a guide or a message may carry, in characters. */
 export const INBOX_NOTE_TEXT_MAX = 1000;
-/** The most notes one file of a guide may carry. */
 export const GUIDE_NOTES_PER_FILE_MAX = 20;
 
-/** Whether lines `start`–`end` of one side sit inside one hunk of a file's patch. */
 export function inboxLinesInOneHunk(filePatch: string, side: InboxNoteSide, start: number, end: number): boolean {
   return isLineRangeInPatch(filePatch, start, end, side);
 }
 
-/** "line 5", "lines 16–18", "removed lines 4–6": how a note's place reads in a refusal or a link. */
 export function inboxNoteLinesWord(side: InboxNoteSide, start: number, end: number): string {
   const range = start === end ? `line ${start}` : `lines ${start}–${end}`;
   return side === "old" ? `removed ${range}` : range;
 }
 
-/**
- * Reads one diff reference's `notes` as an agent sent them. Problems are
- * returned in words that name the note (`sections[1].diffs[0].notes[2]`);
- * a note is kept only when it has none.
- */
 export function readGuideDiffNotes(input: unknown, path: string): { notes: GuideDiffNote[]; problems: string[] } {
   const problems: string[] = [];
   const notes: GuideDiffNote[] = [];
@@ -72,16 +50,10 @@ export function readGuideDiffNotes(input: unknown, path: string): { notes: Guide
   return { notes, problems };
 }
 
-/** The parts of a guide `checkGuideNotes` reads. */
 export interface GuideNotesInput {
   sections: readonly { diffs: readonly { file: string; notes?: readonly GuideDiffNote[] }[] }[];
 }
 
-/**
- * What is wrong with a guide's notes against its patch: each note must sit
- * inside one hunk of its file, on the side it names. Empty when nothing is.
- * Each problem names the note and its lines.
- */
 export function checkGuideNotes(guide: GuideNotesInput, rawPatch: string): string[] {
   const files = new Map(parseDiffToFiles(rawPatch).map((file) => [file.path, file.patch] as const));
   const problems: string[] = [];
@@ -101,7 +73,6 @@ export function checkGuideNotes(guide: GuideNotesInput, rawPatch: string): strin
   return problems;
 }
 
-/** Whether a guide carries any note (it is then snapshot version 4). */
 export function guideHasNotes(guide: GuideNotesInput): boolean {
   return guide.sections.some((section) => section.diffs.some((ref) => (ref.notes?.length ?? 0) > 0));
 }

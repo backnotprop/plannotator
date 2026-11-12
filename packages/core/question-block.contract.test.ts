@@ -1,13 +1,3 @@
-/**
- * The optional contract lines (`Stakes:`, `Shows:`, `Why:`, `Reversible:`)
- * and picture choices (approval "inbox-decision-mode", agent contract lines).
- *
- * What regresses if this fails: a contract line shows up as context (or as
- * the prompt), changes a question's key so a stored answer stops matching, a
- * picture choice keeps raw markdown in its label (the agent gets
- * `![B](b.png) B` back), or an answer stored against an older label stops
- * selecting its choice.
- */
 import { describe, expect, test } from "bun:test";
 import {
   canonicalQuestionAnswer,
@@ -87,7 +77,6 @@ describe("contract lines", () => {
     const indented = parseQuestionBlock("question", ["Pick?", "  Why: indented under nothing", "- [ ] A"].join("\n"))!;
     expect(indented.why).toBeUndefined();
     expect(indented.context).toBe("Why: indented under nothing");
-    // A question inside a list item: every line carries the item's indent.
     const nested = parseQuestionBlock("question", ["  Pick?", "  Stakes: the release.", "  - [ ] A", "    Why: A's own reason", "  - [ ] B"].join("\n"))!;
     expect(nested.stakes).toBe("the release.");
     expect(nested.why).toBeUndefined();
@@ -126,7 +115,6 @@ describe("contract lines", () => {
     expect(plain.key).toBe(read.key);
     expect(plain.prompt).toBe(read.prompt);
     expect(plain.choices).toEqual(read.choices);
-    // Picture choices are grammar, read either way.
     const pictures = parseQuestionBlock("question", ["Pick?", "- [ ] A — ![A](a.png)"].join("\n"), { contractLines: false })!;
     expect(pictures.choices[0]!.image).toEqual({ alt: "A", src: "a.png" });
   });
@@ -163,7 +151,6 @@ describe("contract lines", () => {
     expect(yes.context).toBe("");
     expect(parseQuestionBlock("question", ["Pick?", "Reversible: no", "- [ ] A"].join("\n"))!.reversible).toEqual({ value: false });
     expect(parseQuestionBlock("question", ["Pick?", "Reversible: no - it deletes", "- [ ] A"].join("\n"))!.reversible).toEqual({ value: false, why: "it deletes" });
-    // "not easily" is not "no".
     const notEasily = parseQuestionBlock("question", ["Pick?", "Reversible: not easily", "- [ ] A"].join("\n"))!;
     expect(notEasily.reversible).toBeUndefined();
     expect(notEasily.context).toBe("Reversible: not easily");
@@ -180,7 +167,6 @@ describe("contract lines", () => {
     expect(task.why).toBe("A is cheaper");
     const plain = parseQuestionBlock("question", ["Pick?", "- Yes", "- No", "Why: no wrapping"].join("\n"))!;
     expect(plain.choices.map((c) => c.label)).toEqual(["Yes", "No"]);
-    // An older build joined the line onto the bullet: kept as a name a stored answer may quote.
     expect(plain.choices[1].aliases).toContain("No Why: no wrapping");
     const rec = parseQuestionBlock("question", ["Pick?", "- [ ] A", "- [ ] B", "Recommended: B because", "why: it wraps"].join("\n"))!;
     expect(rec.recommendation).toBe("B because");

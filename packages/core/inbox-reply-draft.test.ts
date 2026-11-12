@@ -37,7 +37,6 @@ describe('diffReplyDraftFiles and composeReplyDraftFileOps: what a box changed, 
     const first = ops([f('c')], ['a']);
     const then = ops([f('a')], ['c']);
     expect(composeReplyDraftFileOps(first, then)).toEqual(ops([f('a')], ['c']));
-    // The same files either way (their order is not part of the draft's meaning).
     const together = ids(applyReplyDraftFileOps([f('a'), f('b')], composeReplyDraftFileOps(first, then))).sort();
     expect(together).toEqual(ids(applyReplyDraftFileOps(applyReplyDraftFileOps([f('a'), f('b')], first), then)).sort());
   });
@@ -55,7 +54,6 @@ describe("rewordReplyDraftFileOps: a save's changes for other words", () => {
     expect(after.add).toEqual([f('p', 15), f('img')]);
     expect(after.remove).toEqual(['gone']);
     expect(after.place.map((entry) => entry.pasted.at)).toEqual([10]);
-    // Shorter words: the place past their end goes to the end.
     expect(rewordReplyDraftFileOps(ops([f('p', 40)]), 'Here is a longer sentence before the log', 'Hi').add).toEqual([f('p', 2)]);
   });
 });

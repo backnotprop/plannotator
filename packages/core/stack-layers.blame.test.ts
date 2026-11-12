@@ -1,12 +1,3 @@
-// Fuzz test: random stacks built with real git in temp repos, each layer one
-// or more commits. Every label the map gives must name the layer that wrote
-// the line, as defined in stack-layers.ts: the layer whose own (squashed)
-// diff shows it added, with no layer above changing it. The module may say
-// less, never something false.
-//
-// Two oracles: a plain walk down the layers' own diffs (the definition), and
-// `git blame` over the stack with each layer squashed to one commit.
-
 import { afterAll, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -16,8 +7,6 @@ import { dirname, join } from "node:path";
 import { diffHunkLines, parseDiffToFiles, type DiffFile } from "./diff-files";
 import { lineOrigin, mapStackLines, type StackLineMap } from "./stack-layers";
 
-// Git must see only the temp repo: no GIT_DIR or GIT_INDEX_FILE from a hook
-// that runs these tests, and no user or system config.
 const GIT_ENV = {
   ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
   GIT_CONFIG_GLOBAL: "/dev/null",
@@ -34,7 +23,6 @@ function git(cwd: string, ...args: string[]): string {
   return result.stdout;
 }
 
-/** mulberry32: a small deterministic random source, so a failure replays from its seed. */
 function random(seed: number) {
   let state = seed >>> 0;
   const next = () => {
@@ -48,7 +36,6 @@ function random(seed: number) {
 }
 type Random = ReturnType<typeof random>;
 
-/** Repeated lines (braces, blanks) make diffs ambiguous, the hard case for following lines. */
 const REPEATED = ["}", "", "  return null;", "{"];
 
 function readLines(dir: string, path: string): string[] | null {
@@ -65,7 +52,6 @@ function writeLines(dir: string, path: string, lines: readonly string[]): void {
   writeFileSync(join(dir, path), lines.map((line) => `${line}\n`).join(""));
 }
 
-/** One commit's random edits: insert, delete, rewrite, re-indent, rename or delete a file, or add one back. */
 function editCommit(dir: string, files: string[], layer: number, rnd: Random): void {
   const text = () => (rnd.next() < 0.4 ? rnd.pick(REPEATED) : `x${rnd.int(1e6)} by L${layer}`);
   for (let op = 1 + rnd.int(4); op > 0; op--) {
@@ -93,7 +79,6 @@ function editCommit(dir: string, files: string[], layer: number, rnd: Random): v
   }
 }
 
-/** The layer (0-based) a top line belongs to by the definition: walk down the layers' own diffs. -1 for base, null when a binary step hides it. */
 function definedWriter(layers: readonly DiffFile[][], path: string, line: number): number | null {
   let p = path;
   let n = line;
@@ -122,7 +107,6 @@ function definedWriter(layers: readonly DiffFile[][], path: string, line: number
   return -1;
 }
 
-/** Layer index (0-based) of the squashed commit that wrote each line of a file at the top, by `git blame`; -1 for base. */
 function squashedBlame(dir: string, commits: readonly string[], path: string): number[] {
   const out: number[] = [];
   for (const row of git(dir, "blame", "--porcelain", commits.at(-1)!, "--", path).split("\n")) {
@@ -136,11 +120,9 @@ interface Audit {
   added: number;
   labelled: number;
   wrong: string[];
-  /** Labels squashed blame disagrees with (it places some blocks other than the diffs do). */
   blameDisagrees: string[];
 }
 
-/** Every label checked against the definition and against squashed blame. */
 function audit(dir: string, squashed: readonly string[], layers: readonly string[], map: StackLineMap, review: string): Audit {
   const result: Audit = { added: 0, labelled: 0, wrong: [], blameDisagrees: [] };
   const layerFiles = layers.map((patch) => parseDiffToFiles(patch));
@@ -167,7 +149,6 @@ function audit(dir: string, squashed: readonly string[], layers: readonly string
   return result;
 }
 
-/** A random stack in a fresh repo: each layer 1–4 commits, its diff squashed; sometimes a layer's diff lacks its `index` lines. */
 function randomStack(root: string, seed: number) {
   const rnd = random(seed);
   const dir = mkdtempSync(join(root, `s${seed}-`));
@@ -186,7 +167,6 @@ function randomStack(root: string, seed: number) {
     }
     heads.push(git(dir, "rev-parse", "HEAD").trim());
   }
-  // The same trees, one commit per layer, for blame.
   const squashed = [heads[0]];
   for (const head of heads.slice(1)) squashed.push(git(dir, "commit-tree", `${head}^{tree}`, "-p", squashed.at(-1)!, "-m", "layer").trim());
   const stripped = rnd.next() < 0.2 ? rnd.int(layerCount) : -1;
@@ -197,7 +177,6 @@ function randomStack(root: string, seed: number) {
   return { dir, squashed, layers, review: git(dir, "diff", heads[0], heads.at(-1)!) };
 }
 
-// Eight stacks keep this under 5 s. Set STACK_LAYERS_FUZZ_SEEDS for a longer run.
 const SEEDS = Number(process.env.STACK_LAYERS_FUZZ_SEEDS ?? 8);
 
 describe("labels against the definition and squashed blame", () => {
@@ -219,12 +198,7 @@ describe("labels against the definition and squashed blame", () => {
       total.blameDisagrees.push(...result.blameDisagrees.map((label) => `seed ${seed}: ${label}`));
     }
     expect(total.wrong).toEqual([]);
-    // Blame agrees on these stacks. On real code it can differ at a block's
-    // edge: blame diffs with no context and may place an inserted block a line
-    // or two from where the `-U3` diff a forge shows places it. The diff is the
-    // definition; a disagreement here is a reason to look, not proof of a bug.
     expect(total.blameDisagrees).toEqual([]);
-    // Saying nothing would pass too: most changed lines must get a label.
     expect(total.labelled / total.added).toBeGreaterThan(0.6);
   }, 600_000);
 });

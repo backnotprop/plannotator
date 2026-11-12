@@ -27,7 +27,6 @@ describe("getAgentAIProviderTypes", () => {
 
 describe("pi vs oh-my-pi are distinct origins", () => {
   test("both keys exist in AGENT_CONFIG with different names", () => {
-    // Guards against conflating the Pi coding agent with the oh-my-pi harness.
     expect("pi" in AGENT_CONFIG).toBe(true);
     expect("oh-my-pi" in AGENT_CONFIG).toBe(true);
     expect(AGENT_CONFIG.pi.name).not.toBe(AGENT_CONFIG["oh-my-pi"].name);

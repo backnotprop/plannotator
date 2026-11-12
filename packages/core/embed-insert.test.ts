@@ -1,6 +1,3 @@
-// These tests pin the splice planner's own-paragraph guarantee. A regression
-// would leave an otherwise valid host-built embed line inline with prose,
-// indented as code, or with the caret trapped on the embed line.
 import { describe, expect, it } from 'bun:test';
 
 import { planEmbedInsert } from './embed-insert';
@@ -8,7 +5,6 @@ import { planEmbedInsert } from './embed-insert';
 describe('planEmbedInsert - the own-paragraph guarantee', () => {
   const EMBED_LINE = '[Report](report.html#embed)';
 
-  /** Apply a splice plan the way CodeMirror would. */
   function applied(body: string, from: number, to: number): string {
     const plan = planEmbedInsert(body, from, to, EMBED_LINE);
     return body.slice(0, plan.from) + plan.insert + body.slice(plan.to);

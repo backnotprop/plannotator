@@ -1,13 +1,3 @@
-/**
- * Historical snapshot fixtures. One entry per shipped snapshot version, plus
- * one per `source.kind`. `guide-format.test.ts` parses every fixture with the
- * CURRENT parser — that test is the compatibility promise behind pinned
- * exports (decision record D8/D10): a viewer released today must still open
- * every document ever exported.
- *
- * Add fixtures; never edit or delete one that shipped.
- */
-
 import type { GuideSnapshot, GuideSnapshotV1, GuideSnapshotV2 } from "./guide-format";
 
 export const FIXTURE_PATCH_TS_JSON = `diff --git a/src/auth.ts b/src/auth.ts
@@ -33,7 +23,6 @@ index 3333333..4444444 100644
  }
 `;
 
-/** v1, local since-base guide — the canonical minimal document. */
 export const FIXTURE_V1_LOCAL: GuideSnapshotV1 = {
   kind: "plannotator-guided-review",
   version: 1,
@@ -57,7 +46,6 @@ export const FIXTURE_V1_LOCAL: GuideSnapshotV1 = {
   generator: { engine: "claude", model: "sonnet", generatedAt: "2026-08-15T19:58:00.000Z" },
 };
 
-/** v1, PR guide with generator provenance including custom instructions and a theme hint. */
 export const FIXTURE_V1_PR: GuideSnapshotV1 = {
   ...FIXTURE_V1_LOCAL,
   guide: { ...FIXTURE_V1_LOCAL.guide, title: "PR: auth token refresh" },
@@ -72,14 +60,12 @@ export const FIXTURE_V1_PR: GuideSnapshotV1 = {
   theme: { palette: "plannotator" },
 };
 
-/** v1, single-commit guide. */
 export const FIXTURE_V1_COMMIT: GuideSnapshotV1 = {
   ...FIXTURE_V1_LOCAL,
   review: { rawPatch: FIXTURE_PATCH_TS_JSON, gitRef: "Commit 0123456 — Auth token refresh", diffType: "commit:0123456789abcdef0123456789abcdef01234567" },
   source: { kind: "commit", repo: "acme/demo", commitSha: "0123456789abcdef0123456789abcdef01234567" },
 };
 
-/** v1, multi-repo workspace guide (folder-prefixed paths). */
 export const FIXTURE_V1_WORKSPACE: GuideSnapshotV1 = {
   ...FIXTURE_V1_LOCAL,
   guide: {
@@ -91,7 +77,6 @@ export const FIXTURE_V1_WORKSPACE: GuideSnapshotV1 = {
     reviewed: [false, false],
   },
   review: {
-    // Folder-prefixed paths, as multi-repo workspace reviews emit them.
     rawPatch: FIXTURE_PATCH_TS_JSON.replaceAll("/src/auth.ts", "/api/src/auth.ts").replaceAll("/package.json", "/web/package.json"),
     gitRef: "api | web",
     diffType: "workspace-current",
@@ -100,7 +85,6 @@ export const FIXTURE_V1_WORKSPACE: GuideSnapshotV1 = {
   generator: undefined,
 };
 
-/** v2, local guide with an overview: prose with guide links and a Mermaid diagram with `click` links. */
 export const FIXTURE_V2_OVERVIEW: GuideSnapshotV2 = {
   ...FIXTURE_V1_LOCAL,
   version: 2,
@@ -120,7 +104,6 @@ export const FIXTURE_V2_OVERVIEW: GuideSnapshotV2 = {
   },
 };
 
-/** v2, PR guide whose overview is prose only (no diagram). */
 export const FIXTURE_V2_PR_TEXT: GuideSnapshotV2 = {
   ...FIXTURE_V1_PR,
   version: 2,
@@ -134,7 +117,6 @@ export const FIXTURE_V2_PR_TEXT: GuideSnapshotV2 = {
   },
 };
 
-/** v2, overview with a sanitized HTML picture (accepted by the format; no viewer draws it yet). */
 export const FIXTURE_V2_HTML: GuideSnapshotV2 = {
   ...FIXTURE_V1_LOCAL,
   version: 2,

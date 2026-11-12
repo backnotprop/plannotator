@@ -26,7 +26,6 @@ import {
 
 describe("production favicon", () => {
   test("the tab icon is the studio's web/favicon.ico exactly: 16, 32 and 48 frames", () => {
-    // The same file plannotator.ai serves (apps/marketing/public/favicon.ico).
     expect(createHash("sha256").update(FAVICON_ICO_BYTES).digest("hex")).toBe(
       "7402e8509ac4ab49194fa387ab0722766cfab5ab94230c798facfd0e97771c59",
     );
@@ -87,17 +86,12 @@ describe("production favicon", () => {
 
 describe("favicon style switcher", () => {
   test("embeds the historical pre-Totman SVG exactly", () => {
-    // Pinned on purpose: the classic style is an archival asset, byte-identical
-    // to the FAVICON_SVG that shipped at 5b91c543^. A "harmless" reformat of the
-    // template literal would silently ship a different icon under the same name.
     expect(createHash("sha256").update(CLASSIC_FAVICON_SVG).digest("hex")).toBe(
       "27d33cff3d4515801f48e1cbaceec777ba802a7d341b22b2c0444d82b303cb49",
     );
   });
 
   test("the Face icon is PR 2975's replaced favicon, byte for byte", () => {
-    // The 64px goggles face that FAVICON_PNG_BASE64 held at eede4aecf^1. Pinned
-    // so the stored id 'totman' keeps showing exactly what people picked.
     expect(createHash("sha256").update(FACE_FAVICON_PNG_BYTES).digest("hex")).toBe(
       "8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073",
     );
@@ -113,19 +107,15 @@ describe("favicon style switcher", () => {
     expect(faviconBody("glass")).toEqual({ body: FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconBody("totman")).toEqual({ body: FACE_FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconBody("yellow")).toEqual({ body: YELLOW_FAVICON_PNG_BYTES, contentType: "image/png" });
-    // Nothing stored, or a value from somewhere else: the default, Glass.
     expect(faviconBody(undefined).body).toBe(FAVICON_PNG_BYTES);
     expect(faviconBody("navy").body).toBe(FAVICON_PNG_BYTES);
-    // 0.28.57's P, still in some config.json files: the default, Glass, on both URLs.
     expect(faviconBody("classic")).toEqual({ body: FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconIcoBody("classic")).toEqual({ body: FAVICON_ICO_BYTES, contentType: "image/x-icon" });
     expect(DEFAULT_FAVICON_STYLE).toBe("glass");
-    // /favicon.ico: Glass's and Yellow's .ico; Face has none, so its PNG.
     expect(faviconIcoBody("glass")).toEqual({ body: FAVICON_ICO_BYTES, contentType: "image/x-icon" });
     expect(faviconIcoBody(undefined).body).toBe(FAVICON_ICO_BYTES);
     expect(faviconIcoBody("totman")).toEqual({ body: FACE_FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconIcoBody("yellow")).toEqual({ body: YELLOW_FAVICON_ICO_BYTES, contentType: "image/x-icon" });
-    // The badge base is each style's one PNG.
     expect(faviconPngDataUrl("glass")).toBe(FAVICON_PNG_DATA_URL);
     expect(faviconPngDataUrl("totman")).toBe(FACE_FAVICON_PNG_DATA_URL);
     expect(faviconPngDataUrl("yellow")).toBe(YELLOW_FAVICON_PNG_DATA_URL);
@@ -147,7 +137,6 @@ describe("favicon style switcher", () => {
     expect(isFaviconStyle("glass")).toBe(true);
     expect(isFaviconStyle("totman")).toBe(true);
     expect(isFaviconStyle("yellow")).toBe(true);
-    // The P icon was removed after 0.28.57: a stored 'classic' reads as nothing stored.
     expect(isFaviconStyle("classic")).toBe(false);
     expect(isFaviconStyle("")).toBe(false);
     expect(isFaviconStyle("unknown")).toBe(false);

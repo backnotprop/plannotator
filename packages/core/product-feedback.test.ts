@@ -1,9 +1,3 @@
-/**
- * The agent names a feedback submission carries: names only, deduplicated and
- * capped, absent when there are none; and a Worker older than the field (it
- * refuses unknown fields by name) still gets the feedback, without them. The
- * network is a fake `fetch`; nothing leaves the process.
- */
 import { describe, expect, test } from "bun:test";
 import {
   FEEDBACK_AGENTS_MAX,
@@ -64,7 +58,6 @@ describe("productFeedbackPayload", () => {
 });
 
 describe("sendProductFeedback against a Worker that predates agents", () => {
-  /** A fake Worker: records each body, refuses `agents` like the strict validation before the field existed. */
   function oldWorker(refusal = "Unknown field: agents") {
     const bodies: Record<string, unknown>[] = [];
     const fake = (async (_url: string | URL | Request, init?: RequestInit) => {
@@ -97,7 +90,6 @@ describe("sendProductFeedback against a Worker that predates agents", () => {
     const budget = FEEDBACK_RESEND_MIN_MS + 300;
     const slow = (async (_url: string | URL | Request, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)));
-      // The old Worker answers after most of the budget is gone.
       await new Promise((r) => setTimeout(r, 400));
       return Response.json({ error: "Unknown field: agents" }, { status: 400 });
     }) as typeof fetch;
@@ -117,7 +109,6 @@ describe("sendProductFeedback against a Worker that predates agents", () => {
         await new Promise((r) => setTimeout(r, 200));
         return Response.json({ error: "Unknown field: agents" }, { status: 400 });
       }
-      // The resend never answers: only its share of the deadline stops it.
       return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
     }) as typeof fetch;
     const started = Date.now();
@@ -125,7 +116,6 @@ describe("sendProductFeedback against a Worker that predates agents", () => {
     const took = Date.now() - started;
     expect(calls).toBe(2);
     expect(result).toMatchObject({ ok: false, unavailable: true });
-    // A fresh full timeout for the resend would take 200 + budget.
     expect(took).toBeLessThan(budget + 100);
   });
 

@@ -1,11 +1,3 @@
-/**
- * Portable deflate-raw + base64url compression.
- *
- * Uses only Web APIs (CompressionStream, TextEncoder, btoa) so it works
- * in browsers, Bun, and edge runtimes.  Both @plannotator/server and
- * @plannotator/ui import from here — single source of truth.
- */
-
 export async function compress(data: unknown): Promise<string> {
   const json = JSON.stringify(data);
   const byteArray = new TextEncoder().encode(json);
@@ -18,8 +10,6 @@ export async function compress(data: unknown): Promise<string> {
   const buffer = await new Response(stream.readable).arrayBuffer();
   const compressed = new Uint8Array(buffer);
 
-  // Loop instead of spread to avoid RangeError on large payloads
-  // (String.fromCharCode(...arr) has a ~65K argument limit)
   let binary = '';
   for (let i = 0; i < compressed.length; i++) {
     binary += String.fromCharCode(compressed[i]);

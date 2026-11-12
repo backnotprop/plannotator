@@ -1,49 +1,9 @@
-/**
- * The subject of a thread the person starts in the Inbox (compose): a short
- * name, never the whole dictated paragraph. Agents' subjects keep
- * `deriveInboxSubject` (./inbox-questions, which re-exports this module).
- *
- * Pure and browser-safe: the store writes it and the compose dialog previews
- * it, so the two never differ. Never throws.
- */
-
 import { findQuestionBlocks, parseQuestionBlock } from "./question-block";
 
-/**
- * How wide a subject the person's own thread gets, in columns: a CJK or emoji
- * character counts two, so a Japanese subject is about as wide on screen as
- * an English one. The ellipsis counts one.
- */
 export const PERSON_THREAD_SUBJECT_COLUMNS = 60;
 
-/** Bidi controls: never in a subject, where they could reorder what the list shows. */
 const BIDI_CONTROLS = /[؜‎‏‪-‮⁦-⁩]/gu;
 
-/**
- * The subject of a thread the person starts:
- *
- *  1. The first line with words, as plain text: markdown marks, links (their
- *     text), images, HTML and list, quote or heading marks dropped; fenced
- *     code and `:::` blocks skipped.
- *  2. A greeting or filler at its start dropped ("Hey Claude,", "So,", "Okay
- *     so", "Um,"), and the next letter capitalized.
- *  3. A URL shortened to its host and last path part, a long path to its last
- *     two parts.
- *  4. The first sentence when it fits `PERSON_THREAD_SUBJECT_COLUMNS`, whole
- *     and without "…" (a final "." dropped; "?" and "!" kept).
- *  5. Else its first clause, up to the last comma, semicolon, colon or dash
- *     that fits and leaves at least 24 columns, plus "…".
- *  6. Else cut after the last word that fits (a dangling "and", "the"… dropped),
- *     plus "…"; text without spaces (CJK) is cut between two characters.
- *  7. A body with no words: the first image's alt text or file name, else the
- *     first attached file's name (`files`), else "Image", else the first line
- *     of code, else the first question's prompt (a body that is only a
- *     `:::question` block), else the first line with anything on it (an
- *     unclosed directive).
- *
- * Bidi controls never reach the subject. Null only for a body with nothing on
- * any line.
- */
 export function derivePersonThreadSubject(input: string, options: { files?: readonly string[] } = {}): string | null {
   const body = typeof input === "string" ? input.replace(BIDI_CONTROLS, "") : "";
   const { images, code, words } = scanPersonBody(body);
@@ -70,11 +30,6 @@ export function derivePersonThreadSubject(input: string, options: { files?: read
   return firstLineSubject(body);
 }
 
-/**
- * The first line with words (as plain text), the images on lines before it
- * and on it, and the first line of fenced code: fenced code and `:::` blocks
- * are skipped.
- */
 function scanPersonBody(body: string): { images: { alt: string; src: string }[]; code: string | null; words: string | null } {
   const images: { alt: string; src: string }[] = [];
   let code: string | null = null;
@@ -107,7 +62,6 @@ function scanPersonBody(body: string): { images: { alt: string; src: string }[];
   return { images, code, words: null };
 }
 
-/** The prompt of the body's first `:::question` block, as plain words. */
 function firstQuestionPrompt(body: string): string | null {
   if (!body.includes(":::question")) return null;
   for (const location of findQuestionBlocks(body, { frontmatter: false })) {
@@ -120,7 +74,6 @@ function firstQuestionPrompt(body: string): string | null {
   return null;
 }
 
-/** The first line with anything on it: its words when it has some (directive and fence marks skipped), else the line itself. */
 function firstLineSubject(body: string): string | null {
   let first: string | null = null;
   for (const raw of body.split("\n")) {
@@ -134,17 +87,9 @@ function firstLineSubject(body: string): string | null {
   return first === null ? null : cutColumns(first.replace(/\s+/g, " "), PERSON_THREAD_SUBJECT_COLUMNS);
 }
 
-/**
- * How much of a line the markdown rules read: a subject or a name comes from
- * its start, and the link and tag patterns below backtrack on a long
- * unclosed `[x](y`, `<a ` or `![a](b`, so a 1 MB dictated line must never
- * reach them whole.
- */
 const PLAIN_LINE_MAX = 4096;
 
-/** One markdown line as plain words; the images on it are added to `images`. */
 function plainSubjectLine(input: string, images: { alt: string; src: string }[]): string {
-  // Cut, and never leave half of a surrogate pair at the end.
   const line = input.length > PLAIN_LINE_MAX ? input.slice(0, PLAIN_LINE_MAX).replace(/[\uD800-\uDBFF]$/, "") : input;
   let text = line
     .replace(/^(?:>\s*)+/, "")
@@ -174,35 +119,20 @@ function plainSubjectLine(input: string, images: { alt: string; src: string }[])
 }
 
 const FILLER_WORD = "(?:so|ok|okay|alright|all right|well|right|anyway|anyways|yeah|basically)";
-/** An agent's name: "Hey Claude can you…" needs no comma after it. */
 const AGENT_NAME = "(?:claude|codex|pi|opencode|amp|gemini|qwen|cursor|droid)";
-/** A word that is an addressee only before punctuation: "Hey there, …", never "Hey there is a bug". */
 const ADDRESSEE_WORD = "(?:there|team|buddy|friend|folks|all|everyone)";
-/**
- * What ends a greeting or filler: punctuation followed by a space or the end,
- * or a dash with spaces around it. A dash inside a word ("Right-click",
- * "Hi-DPI", "Well-known", "So-called") never does.
- */
 const SEPARATOR = "(?:\\s*[,.!:;]+(?=\\s|$)\\s*|\\s+[—–-]+\\s+)";
-/**
- * A filler counts only before a separator, before another filler, or before
- * words that start a request ("So I want…", not "So many tests…").
- */
 const FILLER_LEAD = new RegExp(
   `^${FILLER_WORD}(?:${SEPARATOR}|\\s+(?=(?:${FILLER_WORD.slice(3, -1)}|um+|uh+|i|i'm|i've|i'd|i'll|we|we're|we've|let's|can|could|would|will|please|quick|just|here|what|how|why|is|are|do|does|the|this)\\b))`,
   "iu",
 );
-/** "Hey Claude can you…": a greeting needs no comma. */
 const GREETING = new RegExp(
   `^(?:hey|hi|hello|yo)(?:\\s+${AGENT_NAME}(?:${SEPARATOR}|\\s+)|\\s+${ADDRESSEE_WORD}${SEPARATOR}|${SEPARATOR}|\\s+)`,
   "iu",
 );
-/** A hesitation never starts what the person means. */
 const HESITATION = new RegExp(`^(?:um+|uh+|erm+|hmm+|ah+)(?:${SEPARATOR}|\\s+)`, "iu");
-/** What is left when the greeting was the whole message: a name, or nothing. */
 const ONLY_A_NAME = new RegExp(`^(?:${AGENT_NAME}|${ADDRESSEE_WORD})?[\\s,.!:;—–-]*$`, "iu");
 
-/** "Hey Claude, so I want to…" → "I want to…"; "Hey Claude" alone stays as it is. */
 function dropFiller(text: string): string {
   let out = text;
   for (let i = 0; i < 6; i += 1) {
@@ -214,7 +144,6 @@ function dropFiller(text: string): string {
   return out.replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase());
 }
 
-/** A URL to its host and last path part; a long path to its last two parts. */
 function compactLinks(text: string): string {
   return text
     .replace(/\bhttps?:\/\/(?:www\.)?([^\s/?#]+)(\S*)/gi, (_match, host: string, rest: string) => {
@@ -238,7 +167,6 @@ const ABBREVIATIONS = new Set(["e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr
 const SMALL_TAIL_WORD =
   /\s+(?:and|or|but|so|the|a|an|to|of|for|with|that|which|in|on|at|by|from|as|is|are|be|it|its|my|our|your|their|this|these|those|if|then|than|like|about|into|over|what|how)$/iu;
 
-/** Steps 4 to 6 of `derivePersonThreadSubject`. */
 function shortenSubject(text: string): string {
   const max = PERSON_THREAD_SUBJECT_COLUMNS;
   const sentence = firstSentence(text);
@@ -263,7 +191,6 @@ function shortenSubject(text: string): string {
   return `${cut}…`;
 }
 
-/** The first sentence of a line, its final "." or "…" dropped and "?" or "!" kept. The whole line when no sentence ends in it. */
 function firstSentence(text: string): string {
   let end = text.length;
   for (let i = 2; i < text.length; i += 1) {
@@ -282,7 +209,6 @@ function firstSentence(text: string): string {
     }
     if (ch === "." && !ellipsis) {
       const word = /(\S+)$/.exec(text.slice(0, i))?.[1]?.toLowerCase() ?? "";
-      // "e.g", "Dr", a lone initial, or single letters with dots ("U.S", "a.m").
       if (ABBREVIATIONS.has(word) || /^(?:\p{L}\.)*\p{L}$/u.test(word)) continue;
     }
     end = after;
@@ -314,7 +240,6 @@ function graphemesOf(text: string): string[] {
   return graphemes ? Array.from(graphemes.segment(text), (part) => part.segment) : Array.from(text);
 }
 
-/** Two columns for CJK, Hangul, full-width forms and emoji, else one. */
 function graphemeColumns(grapheme: string): number {
   const cp = grapheme.codePointAt(0) ?? 0;
   const wide =
@@ -336,7 +261,6 @@ function columnsOf(text: string): number {
   return columns;
 }
 
-/** The longest start of `text` at most `max` columns wide, ending between two characters. */
 function sliceColumns(text: string, max: number): string {
   let columns = 0;
   let out = "";
@@ -349,48 +273,14 @@ function sliceColumns(text: string, max: number): string {
   return out;
 }
 
-/** `text` when it fits `max` columns, else its start and "…", together at most `max`. */
 function cutColumns(text: string, max: number): string {
   if (columnsOf(text) <= max) return text;
   return `${sliceColumns(text, max - 1).trimEnd()}…`;
 }
 
-// ── The thread name compose suggests ─────────────────────────────────────────
-
-/** The longest name compose suggests for a thread the person starts, in columns (CJK counts two). */
 export const PERSON_THREAD_NAME_COLUMNS = 24;
-/** The most words compose suggests for a thread's name. */
 export const PERSON_THREAD_NAME_WORDS = 3;
 
-/**
- * The name compose fills the thread's chip with while the person has not
- * typed one: one to three words naming the topic ("Kanban board", "Paste
- * bug", "PR 1934"), at most `PERSON_THREAD_NAME_COLUMNS` columns, never cut
- * in a word, no punctuation at its end. "" when nothing good comes out (a
- * bare question, filler, code), so the chip shows its placeholder instead of
- * a made-up name.
- *
- *  1. The first line with words (as for the subject), greeting and filler
- *     dropped, links replaced by a name ("PR 1934", "Issue 12", a page's last
- *     path part).
- *  2. Its first sentence, as words: function words, request verbs ("can you",
- *     "fix", "explore"), vague nouns ("thing", "problem") and adverbs are
- *     dropped; what is left in a row is a candidate ("paste bug", "reply
- *     box"). A comma or semicolon ends a candidate; "of", "or", "vs" and
- *     their Romance forms ("de") join two words of one.
- *  3. The first candidate of two or more words, else the first one. One of
- *     more than three words keeps its first two. Words come off the end until
- *     it fits the columns; a single word too wide gives nothing.
- *  4. "X specifically" (or "especially", "in particular") right after a name
- *     of one or two words puts X in front: "Board" → "Kanban board".
- *  5. Text written without spaces (Japanese, Chinese) is split at particles
- *     and common verbs: Japanese takes the first part, Chinese the longest.
- *  6. A body with no words, or none worth a name: the first image's alt text
- *     or file name, then the first attached file's name, as words.
- *
- * The first word is capitalized when it is a plain lowercase word (never an
- * identifier like `inbox_tool`, `e2e` or `pnpm`). Pure; never throws.
- */
 export function suggestPersonThreadName(input: string, options: { files?: readonly string[] } = {}): string {
   const body = typeof input === "string" ? input.replace(BIDI_CONTROLS, "") : "";
   const { images, words } = scanPersonBody(body);
@@ -414,7 +304,6 @@ export function suggestPersonThreadName(input: string, options: { files?: readon
   return "";
 }
 
-/** A file's name as words: "board-mock.png" → "Board mock". Generic names ("image", "pasted-image-2026-10-16-1405") give nothing. */
 function nameFromFile(file: string): string {
   const stem = file
     .trim()
@@ -430,36 +319,29 @@ const KANA = /[぀-ヿ]/u;
 const HAN = /\p{Script=Han}/u;
 
 function nameFromLine(text: string): string {
-  // Zero-width and other invisible characters never reach a name (nor split a word).
   const line = replaceLinks(text.replace(/\p{Default_Ignorable_Code_Point}/gu, "")).replace(/\s+/g, " ").trim();
   if (!line) return "";
   const sentences = line.split(/(?<=[.!?。！？])\s*/u).map((part) => part.trim()).filter(Boolean);
   const first = sentences[0] ?? line;
   if (!/\s/.test(first.trim()) && (KANA.test(first) || HAN.test(first))) {
-    // Text without spaces: the sentence that asks for something ("…を追加したい") over a plain statement before it.
     const asking = sentences.find((sentence) => CJK_REQUEST.test(sentence)) ?? first;
     return capped(nameFromUnspaced(asking));
   }
-  // First pass: the topic words. Second, when nothing is left ("make the thing work better"): every
-  // word but function words, two at least, so a lone verb ("think") never names a thread.
   return nameFromRuns(contentRuns(first), sentences, 1) || nameFromRuns(contentRuns(first, NAME_FUNCTION), sentences, 2);
 }
 
-/** A request in text written without spaces: Japanese "…たい", "…ください", "…ほしい"; Chinese "想", "要", "请", "帮". */
 const CJK_REQUEST = /たい|ください|下さい|ほしい|欲しい|しよう|ましょう|てくれ|想|要|请|帮|吗/u;
 
 function nameFromRuns(runs: string[][], sentences: string[], minWords: number): string {
   const ordered = [...runs.filter((run) => run.length >= 2), ...runs.filter((run) => run.length < 2)].filter((run) => run.length >= minWords);
   for (const run of ordered) {
     let words = run.length > PERSON_THREAD_NAME_WORDS ? run.slice(0, 2) : run;
-    // "Board. Kanban specifically." → "Kanban board".
     const qualifier = sentences.length > 1 ? qualifierOf(sentences[1]!) : null;
     if (qualifier && words.length < PERSON_THREAD_NAME_WORDS && !words.some((word) => word.toLowerCase() === qualifier.toLowerCase())) {
       const joined = [qualifier, ...words];
       if (columnsOf(joined.join(" ")) <= PERSON_THREAD_NAME_COLUMNS) words = joined;
     }
     while (words.length > 1 && columnsOf(words.join(" ")) > PERSON_THREAD_NAME_COLUMNS) words = words.slice(0, -1);
-    // A connector never ends a name ("error de" → "error").
     while (words.length > 1 && NAME_CONNECTORS.has(words[words.length - 1]!.toLowerCase())) words = words.slice(0, -1);
     if (words.length < minWords) continue;
     const name = capped(words.join(" ").replaceAll(LINK_JOIN, " "));
@@ -468,7 +350,6 @@ function nameFromRuns(runs: string[][], sentences: string[], minWords: number): 
   return "";
 }
 
-/** The name when it fits the columns, else "" (never cut in a word). */
 function capped(name: string): string {
   const trimmed = name.replace(NAME_TRAILING, "").trim();
   return trimmed && columnsOf(trimmed) <= PERSON_THREAD_NAME_COLUMNS ? trimmed : "";
@@ -484,7 +365,6 @@ function capitalizeName(name: string): string {
   return [head.replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase()), ...rest].join(" ");
 }
 
-/** "Kanban specifically." → "Kanban"; "specifically kanban" → "kanban". */
 function qualifierOf(sentence: string): string | null {
   const plain = sentence.replace(NAME_TRAILING, "").trim();
   const after = /^([\p{L}\p{N}][\p{L}\p{N}'’_-]*)\s+(?:specifically|especially|in particular|particularly|ideally|mainly)$/iu.exec(plain);
@@ -493,10 +373,8 @@ function qualifierOf(sentence: string): string | null {
   return word && !NAME_STOP.has(normalizeWord(word)) ? word : null;
 }
 
-/** Joins the words a link is named by into one word, so no rule splits them; a space again in the name. */
 const LINK_JOIN = "\u2060";
 
-/** Links named for a thread: "PR 1934", "Issue 12", a repository, else a page's last path part as words, else its host. */
 function replaceLinks(text: string): string {
   return text.replace(/\bhttps?:\/\/(?:www\.)?([^\s/?#]+)([^\s]*)/gi, (_match, host: string, rest: string) => {
     const path = rest.replace(/[?#].*$/, "").replace(/[.,!?:;)]+$/, "");
@@ -523,16 +401,10 @@ function replaceLinks(text: string): string {
   });
 }
 
-/** A word as the lists compare it: lowercase, curly apostrophe made straight. */
 function normalizeWord(word: string): string {
   return word.toLowerCase().replace(/’/g, "'");
 }
 
-/**
- * The runs of words worth naming in one sentence: everything in NAME_STOP
- * (and anything without a letter or digit) breaks a run, and so does a
- * comma, semicolon, colon or dash after a word.
- */
 function contentRuns(sentence: string, stop: ReadonlySet<string> = NAME_STOP): string[][] {
   const tokens = sentence.split(/\s+/).filter(Boolean);
   const runs: string[][] = [];
@@ -544,7 +416,6 @@ function contentRuns(sentence: string, stop: ReadonlySet<string> = NAME_STOP): s
   const wordOf = (token: string): { word: string; breaks: boolean } => {
     const breaks = /[,;:)\]}—–]$/u.test(token) || /[.!?]$/.test(token);
     let word = token.replace(/^[\s"'“”‘’(\[{¿¡*_~`<]+/u, "").replace(/[\s"'“”‘’)\]}.,;:!?…*_~`>]+$/u, "");
-    // A path names its file: "packages/inbox/compose.tsx" → "compose.tsx".
     if (/\/./.test(word) && !/^\//.test(word.slice(-1))) word = word.split("/").filter(Boolean).pop() ?? word;
     if (!(/\p{Script=Hangul}/u.test(word) && KOREAN_VERB.test(word))) word = stripKoreanParticle(word);
     return { word, breaks };
@@ -558,12 +429,10 @@ function contentRuns(sentence: string, stop: ReadonlySet<string> = NAME_STOP): s
       if (breaks) end();
       continue;
     }
-    // "the build is failing" → "build failing": the auxiliary drops out.
     if (run.length > 0 && AUX_BEFORE_ING.has(key) && !breaks && i + 1 < tokens.length) {
       const next = wordOf(tokens[i + 1]!);
       if (/ing$/i.test(next.word) && isContentWord(next.word, normalizeWord(next.word), stop)) continue;
     }
-    // "error de pegado", "Postgres or SQLite": a connector between two words of a run joins them.
     if (run.length > 0 && NAME_CONNECTORS.has(key) && !breaks && i + 1 < tokens.length) {
       const next = wordOf(tokens[i + 1]!);
       if (isContentWord(next.word, normalizeWord(next.word), stop)) {
@@ -581,10 +450,8 @@ function isContentWord(word: string, key: string, stop: ReadonlySet<string> = NA
   if (!word || !/[\p{L}\p{N}]/u.test(word)) return false;
   if (word.startsWith("@")) return false;
   if (/^\p{L}$/u.test(word)) return false;
-  // Code, not a topic: "alert(1)", "a=b", "<div>".
   if (/[()[\]{}<>=;]/.test(word)) return false;
   if (stop.has(key)) return false;
-  // A Korean verb or ending: "추가하고", "싶어요", "주세요".
   if (/\p{Script=Hangul}/u.test(word) && KOREAN_VERB.test(word)) return false;
   return true;
 }
@@ -595,7 +462,6 @@ function stripKoreanParticle(word: string): string {
   return word.length > 2 && KOREAN_PARTICLE.test(word) ? word.replace(KOREAN_PARTICLE, "") : word;
 }
 
-/** Text written without spaces: Japanese is split at particles and takes its first part; Chinese at function words and common verbs, and takes its longest. */
 function nameFromUnspaced(sentence: string): string {
   const text = sentence.replace(/[。！？、，；：「」『』（）()"'“”]/gu, " ");
   if (KANA.test(text)) {
@@ -618,19 +484,12 @@ function nameFromUnspaced(sentence: string): string {
 
 const AUX_BEFORE_ING = new Set(["is", "are", "was", "were", "keeps", "kept", "keep", "been", "isn't", "aren't"]);
 
-/** Words that join two words of one name: "error de pegado", "Postgres or SQLite", "state of the art" (not across "the"). */
 const NAME_CONNECTORS = new Set(["of", "or", "vs", "versus", "de", "del", "di", "du", "des", "da", "do", "von", "der"]);
 
 const words = (text: string): string[] => text.split(/\s+/).filter(Boolean);
 
-/**
- * Words that carry no topic in any sentence: function words, greetings, the
- * wish itself ("want", "need") and every listed language's function words.
- * The second pass (`nameFromLine`) drops only these.
- */
 const NAME_FUNCTION = new Set(
   words(
-    // English: articles, pronouns, auxiliaries, prepositions, conjunctions, question words.
     "a an the this that these those it its it's i i'm i've i'd i'll me my mine we we're we've we'd we'll us our ours you you're you've you'd you'll your yours " +
     "he she they them their his her him who whom whose which what what's whats where where's when when's why why's how how's whether if then than so " +
     "is are was were be been being am do does did done doing don't doesn't didn't have has had having can can't cannot could couldn't would wouldn't " +
@@ -638,21 +497,14 @@ const NAME_FUNCTION = new Set(
     "and but nor yet also too either neither both not no yes yeah yep ok okay sure " +
     "to in on at by for with from into onto about above below over under up down out off through across after before between during " +
     "around against along among within without via per like as until till since because while though although " +
-    // Request words, greetings and politeness.
     "please pls plz thanks thank thx hey hi hello yo hmm um uh lets let's let gonna wanna gotta claude codex opencode " +
     "want wants wanted need needs needed like liked love would-like wish hope think thinking thought thoughts ok okay",
   ),
 );
 
-/**
- * What never names a thread in the first pass: NAME_FUNCTION, request verbs,
- * vague nouns and adverbs, in English and (the commonest) in Spanish,
- * French, German, Portuguese and Italian.
- */
 const NAME_STOP = new Set([
   ...NAME_FUNCTION,
   ...words(
-    // Request verbs (and their -ing forms): what the person asks for, never the topic.
     "explore exploring look looks looking see seeing check checking fix fixing add adding make making create creating try trying " +
     "think thinking know tell telling show showing help helping find finding figure figuring get getting got give go going went " +
     "start starting review reviewing investigate investigating debug debugging update updating change changing improve improving " +
@@ -666,7 +518,6 @@ const NAME_STOP = new Set([
     "currently quickly quick briefly real very much many more most less least some any all every each other another such same own " +
     "lot lots bit little few several enough else instead together anyway anyways though perhaps probably possibly somehow kind sort " +
     "new better good great nice best whole entire certain different " +
-    // Vague nouns.
     "thing things stuff something anything everything nothing someone anyone way ways idea ideas thought thoughts question questions " +
     "problem problems issue issue's part point case matter situation concern approach option options status update-on progress " +
     "one ones time times today tomorrow yesterday morning afternoon tonight week day minute second",
@@ -674,20 +525,16 @@ const NAME_STOP = new Set([
 ]);
 
 for (const word of words(
-    // Spanish.
     "el la los las un una unos unas lo al y o e u pero que qué en con por para sin sobre como cómo cuando dónde donde se su sus mi mis tu tus " +
     "yo tú nos es son está están estar ser hay muy más puedes podrías puede quiero quisiera necesito querría arreglar revisar mirar ver hacer " +
     "agregar añadir crear cambiar probar explorar este esta estos estas eso esa ese " +
-    // French.
     "le les une des et ou mais dans avec pour sur sans par au aux ce cette ces je tu il elle nous vous ils elles mon ma mes ton ta tes son sa ses " +
     "est sont être avoir peux pourrais peut veux voudrais voudrait faut faire regarder corriger ajouter voir changer essayer explorer qui quoi " +
     "comment pourquoi quand très plus aussi bien " +
-    // German.
     "die das ein eine einen einem einer und oder aber mit für auf im ins am vom zum zur bei aus nach über unter ich du er sie es wir ihr dir mir " +
     "mich dich uns euch mein meine dein deine ist sind war bin hast hat haben kannst kann können könntest könnte möchte möchtest will willst " +
     "sollen soll bitte mal mir doch noch auch schon sehr nur wie was wo warum wann den dem des nicht kein keine ansehen anschauen beheben " +
     "machen hinzufügen ändern prüfen schauen " +
-    // Portuguese and Italian.
     "os as um uma ao em no na nos nas com por para sem você podes pode podia quero preciso il lo gli un uno una e o ma che per con su " +
     "puoi potresti voglio vorrei sistemare aggiungere guardare",
 )) {

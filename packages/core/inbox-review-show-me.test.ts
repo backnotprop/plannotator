@@ -1,8 +1,3 @@
-/**
- * Show me's words and checks (approval "shape-in-code-review", ac2). The
- * request is pinned to AGENT-TEXT §1's own example; the drawing check to the
- * field names an agent writes (`source`, `tall.source`), never Shape's.
- */
 import { describe, expect, test } from "bun:test";
 import {
   checkInboxDrawing,
@@ -31,7 +26,6 @@ describe("the Show me request", () => {
     expect(lines[0]).toBe('The reviewer pressed Show me on lines 16–18 of src/jobs/retry-worker.ts in your review "Retry failed charges on a schedule" (msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F): "after the third failure".');
     expect(lines.join("\n")).toContain("`plannotator shape --help`");
     expect(lines.join("\n")).toContain(`--thread ${THREAD} --through ${target.review}`);
-    // A request stays short: the format and the rules live in the help.
     expect(lines.length).toBeLessThanOrEqual(5);
     expect(lines.join("\n")).not.toContain("review draw");
   });
@@ -96,15 +90,12 @@ describe("checkInboxDrawing", () => {
 
   test("a code the board would draw is checked wherever it is written: the delta-4 review's payloads", () => {
     for (const source of [
-      // noscript: the sanitizer parses with scripting off, so this div is markup and stays.
       '<noscript><div data-mark="a" data-code="src/zzz.ts#L1">part</div></noscript>',
-      // An end tag the browser ignores inside foreignObject's HTML, then a text element or CDATA.
       '<svg><foreignObject><div></svg></div></foreignObject><textarea><b data-code="src/zzz.ts#L1">x</b></textarea></svg>',
       '<svg><foreignObject><div></svg></div></foreignObject><xmp><b data-code="src/zzz.ts#L1">x</b></xmp></svg>',
       '<svg><foreignObject><span></svg></span></foreignObject><noframes><b data-code="src/zzz.ts#L1">x</b></noframes></svg>',
       '<svg><foreignObject><div></foreignObject><![CDATA[x><b data-code="src/zzz.ts#L1">x</b>]]></div></foreignObject></svg>',
       '<math><annotation-xml><svg><foreignObject><section><![CDATA[x><b data-code="src/zzz.ts#L1">x</b>]]></section></foreignObject></svg></annotation-xml></math>',
-      // The delta-3 ones: odd comment ends, `<!--` in a text element, a tag inside another's attribute.
       '<!--><div data-mark="a" data-code="src/zzz.ts#L1">x</div>',
       '<textarea><a title="</textarea><div data-code=src/zzz.ts#L1>">',
     ]) {
@@ -143,7 +134,6 @@ describe("the review skills offer a chapter's diagram either way, and Shape's wo
     for (const name of Object.keys(INBOX_REVIEW_SKILL_TEXTS)) {
       const off = INBOX_REVIEW_SKILL_TEXTS[name]!.body;
       for (const word of ["overview.diagram", "drawing", "Shape", "shape --help", "data-mark", "html", "preferred"]) expect([name, off.includes(word)]).toEqual([name, false]);
-      // Only the curate line differs: its Shape-off wording in place of the Shape-on one.
       const on = INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE[name]!.body;
       expect(off).toBe(on.replace(INBOX_REVIEW_CURATE_DRAWING_LINE, INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE));
     }
@@ -163,7 +153,6 @@ describe("the Show me request from a board", () => {
     expect(lines[0]).toBe(`The reviewer pressed Show me on "The next attempt" (src/s.ts#L3-L6) in your Shape shp_a, from your review "T" (${review}): "how it adds up".`);
     expect(lines[1]).toContain("Make a new Shape of that part");
     expect(lines[1]).toContain("leave shp_a as it is");
-    // The rest is a review's Show me, as it was: stored through the review, opening over it, a click landing in the diff.
     const fromLines = inboxShowMeRequest({ target: { review, file: "src/s.ts", lines: [3, 6], round: 1 }, title: "T", threadId: THREAD }).split("\n");
     expect(lines.slice(2)).toEqual(fromLines.slice(2));
   });
@@ -174,7 +163,6 @@ describe("the Show me request from a board", () => {
     expect(text).toContain(`\`--thread ${THREAD}\`: it opens by itself`);
     expect(text).not.toContain("--through");
     expect(text).not.toMatch(/\breview\b/);
-    // No diff for a click to land in: no line about where code lands.
     expect(text).not.toContain("data-code");
   });
 

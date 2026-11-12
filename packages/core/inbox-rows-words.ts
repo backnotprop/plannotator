@@ -1,23 +1,8 @@
-/**
- * "Tell your agent" for Settings → Rows (approval "inbox-rows-settings-page"): the one place for every word an agent
- * reads about the Inbox list's rows. The instruction block a Rows ask carries, the setting names and values an agent
- * can use, what `plannotator inbox rows` / `rows set` / `rows undo` print, and their help text all live here, so an
- * edit of the owner's is one line in this file. The record of the approved words is
- * `.product/approved/inbox-rows-settings-page/`; they change only with the owner.
- *
- * The rules are core's own: a value is a change over the stored option names (`INBOX_ROWS_OPTIONS`), settled by
- * `inboxRowsCanonical`, exactly as a click on the page (packages/inbox/rowsControls.ts; rowsWords.test.ts holds the
- * two together).
- */
-// inbox-types.ts re-exports this file (core adds no export of its own for it: a new one needs a published core), so the
-// two import each other: nothing of inbox-types is read while this file loads, only inside functions.
 import { inboxRowsCanonical, type InboxRowsOption } from "./inbox-types";
 
-/** The markers around what an agent receives with an ask from Settings → Rows, each on its own line. */
 export const INBOX_ROWS_ASK_OPEN = "<plannotator-rows-ask>";
 export const INBOX_ROWS_ASK_CLOSE = "</plannotator-rows-ask>";
 
-/** What the agent receives after the person's words when they ask from Settings → Rows. Goes out only with that ask. */
 export const INBOX_ROWS_ASK_BLOCK = [
   INBOX_ROWS_ASK_OPEN,
   "The person asked this from Settings > Rows in the Inbox. They want the rows of their thread list to look different. Do only that.",
@@ -34,17 +19,11 @@ type On = ReadonlySet<InboxRowsOption>;
 type Change = Partial<Record<InboxRowsOption, boolean>>;
 
 export interface InboxRowsSetting {
-  /** The name an agent writes: `spacing`. */
   name: string;
-  /** The page's label: "Spacing". */
   label: string;
-  /** Each value an agent can write, with the page's word for it. */
   values: readonly { value: string; label: string }[];
-  /** What it changes, for the listing. */
   changes: string;
-  /** The value now; null for a choice with none picked (Badge shape while badges are off). */
   get: (on: On) => string | null;
-  /** The options a value turns on and off. */
   set: (value: string, on: On) => Change;
 }
 
@@ -52,13 +31,10 @@ const ON_OFF = [
   { value: "on", label: "on" },
   { value: "off", label: "off" },
 ] as const;
-/** A switch that is on while its option is. */
 const onSetting = (name: string, key: InboxRowsOption, label: string, changes: string): InboxRowsSetting => ({ name, label, values: ON_OFF, changes, get: (on) => (on.has(key) ? "on" : "off"), set: (value) => ({ [key]: value === "on" }) });
-/** A switch that shows a part: on while its `hide…` option is off. */
 const showSetting = (name: string, key: InboxRowsOption, label: string, changes: string): InboxRowsSetting => ({ name, label, values: ON_OFF, changes, get: (on) => (on.has(key) ? "off" : "on"), set: (value) => ({ [key]: value !== "on" }) });
 const badges = (on: On) => (on.has("marksThreads") ? (on.has("marksProjects") ? "both" : "threads") : on.has("marksProjects") ? "projects" : "off");
 
-/** Every row option an agent can set, in the page's order. */
 export const INBOX_ROWS_SETTINGS: readonly InboxRowsSetting[] = [
   {
     name: "spacing",
@@ -175,9 +151,7 @@ export const INBOX_ROWS_SETTINGS: readonly InboxRowsSetting[] = [
   onSetting("github-pictures", "githubPictures", "GitHub pictures on project badges", "The GitHub owner's picture on project badges. Turns project badges on."),
 ];
 
-/** The whole looks (`look=`): the page's "Start from". */
 export const INBOX_ROWS_LOOKS: readonly { value: string; label: string; rows: readonly InboxRowsOption[] }[] = [
-  // The defaults (`INBOX_ROWS_DEFAULT`), written out for the reason above; rowsWords.test.ts holds them equal.
   { value: "balanced", label: "Balanced", rows: ["smallNames"] },
   { value: "dense", label: "Dense", rows: ["compact", "smallNames", "relativeTime", "dividers", "statusMark"] },
   { value: "minimal", label: "Minimal", rows: ["smallNames", "hidePreview", "titleFirst"] },
@@ -186,7 +160,6 @@ export const INBOX_ROWS_LOOKS: readonly { value: string; label: string; rows: re
 export const INBOX_ROWS_LOOK_NAME = "look";
 const LOOK_CHANGES = "A whole look: sets every option above at once.";
 
-/** A change on top of a look, the option just turned on winning over its rival (the page's `lookWithChange`). */
 export function inboxRowsWithChange(rows: readonly InboxRowsOption[], change: Change): InboxRowsOption[] {
   const on = new Set(rows);
   for (const [key, value] of Object.entries(change) as [InboxRowsOption, boolean][]) {
@@ -205,7 +178,6 @@ export function inboxRowsWithChange(rows: readonly InboxRowsOption[], change: Ch
   return inboxRowsCanonical([...on]);
 }
 
-/** The look's name for a list of options, or null when it matches none. */
 export function inboxRowsLookOf(rows: readonly InboxRowsOption[]): string | null {
   const key = inboxRowsCanonical(rows).join();
   return INBOX_ROWS_LOOKS.find((look) => inboxRowsCanonical(look.rows).join() === key)?.value ?? null;
@@ -216,10 +188,6 @@ const quoted = (values: readonly { value: string }[]) => {
   return names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : (names[0] ?? "");
 };
 
-/**
- * `rows set`'s pairs applied to a look: `look=` first, then each option in the order given, one result for one save.
- * Any pair refused refuses them all.
- */
 export function inboxRowsApply(rows: readonly InboxRowsOption[], pairs: readonly string[]): { rows: InboxRowsOption[] } | { error: string } {
   const seen = new Set<string>();
   const parsed: { name: string; value: string }[] = [];
@@ -249,14 +217,12 @@ const wordOf = (setting: InboxRowsSetting, on: On) => {
   return setting.values.find((entry) => entry.value === value)?.label ?? "off";
 };
 
-/** A change as lines, one per option that moved, in the page's words: "Spacing: Comfortable -> Compact". */
 export function inboxRowsChangeLines(before: readonly InboxRowsOption[], after: readonly InboxRowsOption[]): string[] {
   const was = new Set(inboxRowsCanonical(before));
   const now = new Set(inboxRowsCanonical(after));
   return INBOX_ROWS_SETTINGS.filter((setting) => setting.get(was) !== setting.get(now)).map((setting) => `${setting.label}: ${wordOf(setting, was)} -> ${wordOf(setting, now)}`);
 }
 
-/** Every fixed line the commands print. Functions take the parts that vary. */
 export const INBOX_ROWS_WORDS = {
   listHead: "Your Inbox rows now. Change them with: plannotator inbox rows set <name>=<value> ...",
   listFoot: "Not row options: text size and theme (Settings > General), colours, fonts, columns, sorting.",
@@ -271,7 +237,6 @@ export const INBOX_ROWS_WORDS = {
   setNeedsPairs: "inbox rows set needs at least one <name>=<value>.",
 } as const;
 
-/** `plannotator inbox rows`: every option with its value now, its choices and what it changes. */
 export function inboxRowsListing(rows: readonly InboxRowsOption[]): string {
   const on = new Set(inboxRowsCanonical(rows));
   const line = (name: string, value: string, values: readonly { value: string }[], changes: string) => `${`${name}=${value}`.padEnd(24)} ${values.map((entry) => entry.value).join(" | ").padEnd(35)} ${changes}`;
@@ -287,7 +252,6 @@ export function inboxRowsListing(rows: readonly InboxRowsOption[]): string {
   ].join("\n");
 }
 
-/** The listing as data (`--json`). */
 export function inboxRowsListingJson(rows: readonly InboxRowsOption[]) {
   const on = new Set(inboxRowsCanonical(rows));
   return {
@@ -296,7 +260,6 @@ export function inboxRowsListingJson(rows: readonly InboxRowsOption[]) {
   };
 }
 
-/** `plannotator inbox rows --help`. */
 export const INBOX_ROWS_USAGE = [
   "Usage:",
   "  plannotator inbox rows [--json]",
@@ -310,23 +273,19 @@ export const INBOX_ROWS_USAGE = [
   "It changes row options only: no other setting.",
 ].join("\n");
 
-/** The line in `plannotator inbox --help`'s usage. */
 export const INBOX_ROWS_USAGE_LINE = "  plannotator inbox rows [set <name>=<value>... | undo] [--json]";
 
-/** The section in `plannotator inbox --help`'s agent help. */
 export const INBOX_ROWS_HELP_SECTION = [
   "## When the person asks you to change how their Inbox list looks",
   "",
   "Run `plannotator inbox rows`: it prints every row option, what it changes and its value now. Change what they asked with `plannotator inbox rows set <name>=<value> ...`; every open window shows it at once. `plannotator inbox rows undo` puts the last change back. Tell them what changed, in the words the command printed. An ask with no row option (a colour, a font, text size) stays as it is: say so.",
 ];
 
-/** Who made a rows save, when an agent's command did (the window's own saves carry none). */
 export interface InboxRowsBy {
   host: string;
   session: string;
 }
 
-/** A save's `rows_by` as sent: a host and a session, short strings; anything else is no one. */
 export function inboxRowsBy(value: unknown): InboxRowsBy | null {
   if (!value || typeof value !== "object") return null;
   const { host, session } = value as Record<string, unknown>;

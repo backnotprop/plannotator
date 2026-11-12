@@ -48,7 +48,6 @@ describe("inboxRunOf", () => {
       state: "waiting_answer",
       since: new Date(asked).toISOString(),
     });
-    // Withdrawn (no open question): the host's word decides again.
     expect(inboxRunOf(evidence({ live: busy, seenLive: true, host: waiting, waitingSince: T0, permissionSince: null }))?.state).toBe("waiting_terminal");
   });
 
@@ -63,11 +62,9 @@ describe("inboxRunOf", () => {
     const waits = { seenLive: true, turnWaiting: true };
     expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "It did not connect after starting again." }))).toMatchObject({ state: "failed", cause: "It did not connect after starting again." });
     expect(inboxRunOf(evidence({ ...waits, now: T0 + 1, respawnFailed: "exit 1" }))?.state).toBe("failed");
-    // A restart Claude refused for an untrusted folder offers Open in Terminal, as a refused start does.
     expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "x isn't trusted", respawnUntrusted: true }))).toMatchObject({ state: "failed", untrusted: true, again: true });
     expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "exit 1" }))?.untrusted).toBe(false);
     expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "exit 1", cliAvailable: false }))?.state).toBe("missing");
-    // The reply went to another session: nothing waits here, so no failure is shown.
     expect(inboxRunOf(evidence({ seenLive: true, now: later, respawnFailed: "exit 1", host: "absent" }))?.state).toBe("stopped");
   });
 
@@ -107,7 +104,6 @@ describe("inboxRunOf", () => {
 
   test("the CLI gone from PATH while the session is not live is missing", () => {
     expect(inboxRunOf(evidence({ cliAvailable: false, turnWaiting: true }))?.state).toBe("missing");
-    // Nothing waits for it (the reply went to another session): no line.
     expect(inboxRunOf(evidence({ cliAvailable: false, turnWaiting: false, seenLive: true }))).toBeNull();
   });
 });

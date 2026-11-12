@@ -17,8 +17,6 @@ import {
 
 const ALL = ["low", "medium", "high", "xhigh", "max"];
 
-// supportedModels() as returned by an installed claude 2.1.280 (captured
-// verbatim, fields the catalog does not read omitted).
 const SDK_MODELS: ClaudeSdkModelInfo[] = [
   { value: "default", resolvedModel: "claude-opus-5-5[1m]", displayName: "Default (recommended)", description: "Opus 5.5 with 1M context · Best for everyday, complex tasks", supportsEffort: true, supportedEffortLevels: ALL, supportsFastMode: true },
   { value: "opus[1m]", resolvedModel: "claude-opus-5-5[1m]", displayName: "Opus (1M context)", description: "Opus 5.5 with 1M context · Best for everyday, complex tasks", supportsEffort: true, supportedEffortLevels: ALL, supportsFastMode: true },
@@ -37,9 +35,6 @@ describe("claudeCatalogFromSdk", () => {
   });
 
   test("every family the tool offers has its bare alias, carrying that family's support", () => {
-    // The launchers default to `opus` / `sonnet`; the CLI resolves them to the
-    // latest model, so they must be pickable even when the tool lists only
-    // `opus[1m]` or a pinned Fable id.
     expect(byId("opus")).toMatchObject({ label: "Opus 5.5 (latest)", fastMode: true });
     expect(byId("opus")?.reasoningEfforts?.map((e) => e.id)).toEqual(ALL);
     expect(byId("opus")?.resolvedId).toBeUndefined();
@@ -47,8 +42,6 @@ describe("claudeCatalogFromSdk", () => {
   });
 
   test("aliases name the version they resolve to today, taken from the tool's own data", () => {
-    // Owner requirement: people want to see version numbers. The versions come
-    // from supportedModels()' resolvedModel, never from a hand list.
     for (const [id, label] of [
       ["opus", "Opus 5.5 (latest)"],
       ["opus[1m]", "Opus 5.5 1M (latest)"],
@@ -78,9 +71,6 @@ describe("claudeCatalogFromSdk", () => {
   });
 
   test("a CLI that names Opus only through the default row still offers opus (Claude Code 2.1.141)", () => {
-    // Captured from Claude Code 2.1.141: the default row carries no
-    // resolvedModel and is the only place Opus appears. Without the alias a
-    // saved or default `opus` pick resolved to sonnet and ran Sonnet.
     const old = claudeCatalogFromSdk([
       { value: "default", displayName: "Default (recommended)", description: "Use the default model (currently Opus 4.7 (1M context))" },
       { value: "sonnet", resolvedModel: "claude-sonnet-4-6", description: "Sonnet 4.6 · Best for everyday tasks", supportsEffort: true, supportedEffortLevels: ALL },
@@ -105,14 +95,10 @@ describe("claudeCatalogFromSdk", () => {
     const models = claudeCatalogFromSdk([{ value: "sonnet", resolvedModel: "claude-sonnet-5" }]);
     expect(models.map((m) => m.id).sort()).toEqual(["haiku", "opus", "sonnet"]);
     expect(models.find((m) => m.id === "opus")?.label).toBe("Opus (latest)");
-    // The 2.1.280 shape already offers every family; nothing extra is added.
     expect(catalog.map((m) => m.id).sort()).toEqual(["claude-fable-5-1[1m]", "fable", "haiku", "opus", "opus[1m]", "sonnet"]);
   });
 
   test("names pinned models from displayName when the description is only a tagline (Claude Code 2.1.282)", () => {
-    // 2.1.282 moved the model name from `description` ("Fable 5.1 · …") into
-    // `displayName` and left `description` as a tagline; the tagline must not
-    // become the label, or several rows read identically.
     const rows = claudeCatalogFromSdk([
       { value: "claude-fable-5-1", displayName: "Fable 5.1", description: "For your toughest challenges" },
       { value: "claude-opus-4-8", displayName: "Opus 4.8", description: "Best for everyday, complex tasks" },
@@ -145,8 +131,6 @@ describe("resolveModelChoice", () => {
   });
 
   test("a stale pinned id keeps its family instead of taking the surface default", () => {
-    // Tour/guide default to sonnet, review to opus: neither may win over the
-    // family the user picked.
     expect(resolveModelChoice("claude-opus-5-5", catalog, "sonnet")).toBe("opus");
     expect(resolveModelChoice("claude-opus-5", catalog, "sonnet")).toBe("opus");
     expect(resolveModelChoice("claude-sonnet-4-6", catalog, "opus")).toBe("sonnet");
@@ -154,8 +138,6 @@ describe("resolveModelChoice", () => {
   });
 
   test("never moves a pick across the 1M-context boundary", () => {
-    // claude-fable-5-1 is covered by claude-fable-5-1[1m] via resolvedId, but
-    // that is a different context window (and bill): land on the plain alias.
     expect(resolveModelChoice("claude-fable-5-1", catalog, "sonnet")).toBe("fable");
     expect(resolveModelChoice("claude-opus-4-8[1m]", catalog, "sonnet")).toBe("opus[1m]");
     expect(resolveModelChoice("claude-sonnet-4-6[1m]", catalog, "opus")).toBe("sonnet");
@@ -203,7 +185,6 @@ test("fallbacks: one default each, and every default effort is one the model lis
       if (m.defaultReasoningEffort) expect(m.reasoningEfforts?.map((e) => e.id)).toContain(m.defaultReasoningEffort);
     }
   }
-  // The launchers' Claude surface defaults must exist even without discovery.
   for (const alias of ["opus", "sonnet"]) expect(CLAUDE_FALLBACK_MODELS.some((m) => m.id === alias)).toBe(true);
 });
 
@@ -232,7 +213,6 @@ test("cliVersionFrom reads the version from claude --version and the codex userA
 test("cliVersionFrom prefers the line naming the tool, else the first line", () => {
   const noisy = "node 18.2.0 warning: something\n2.1.282 (Claude Code)\n";
   expect(cliVersionFrom(noisy, /claude code/i)).toBe("2.1.282");
-  // No line names the tool: the first line's version, never a later line's.
   expect(cliVersionFrom("2.1.282\nnode 18.2.0", /claude code/i)).toBe("2.1.282");
   expect(cliVersionFrom("no version here\n1.2.3")).toBeUndefined();
 });
@@ -243,17 +223,12 @@ test("cliVersionFrom refuses an unbounded prerelease suffix", () => {
 });
 
 describe("piCatalogFromRpc", () => {
-  // get_available_models rows shaped like pi 0.85's (fields not read omitted).
   const ROWS = [
-    // A map that nulls `off` and names xhigh and max: no Off, both extras offered.
     { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true,
       thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh", max: "max" } },
-    // No map: pi's rule gives off..high and never xhigh/max.
     { provider: "openrouter", id: "anthropic/claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true },
-    // xhigh mapped, max nulled.
     { provider: "openai", id: "gpt-6-sol", name: "GPT-6-Sol", reasoning: true,
       thinkingLevelMap: { xhigh: "xhigh", max: null } },
-    // Not a reasoning model: no picker at all.
     { provider: "groq", id: "llama", name: "Llama", reasoning: false },
   ];
   const levelsOf = (models: CatalogModel[], id: string) =>
@@ -265,7 +240,6 @@ describe("piCatalogFromRpc", () => {
     expect(levelsOf(models, "openrouter/anthropic/claude-opus-5-5")).toEqual(["off", "minimal", "low", "medium", "high"]);
     expect(levelsOf(models, "openai/gpt-6-sol")).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
     expect(levelsOf(models, "groq/llama")).toBeUndefined();
-    // pi reports no default level, so nothing claims one (the bar reads Auto).
     expect(models.some((m) => m.defaultReasoningEffort)).toBe(false);
     expect(models.filter((m) => m.default).map((m) => m.id)).toEqual(["anthropic/claude-opus-5-5"]);
   });
@@ -312,7 +286,6 @@ describe("qwenCatalogFromSettings", () => {
       { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus" },
       { id: "gpt-local", label: "gpt-local", default: true },
     ]);
-    // `qwen -m` resolves against the selected type only, so another type's models are not offered.
     expect(
       qwenCatalogFromSettings({ security: { auth: { selectedType: "anthropic" } }, modelProviders: PROVIDERS }),
     ).toEqual([{ id: "claude-via-qwen", label: "Claude", default: true }]);

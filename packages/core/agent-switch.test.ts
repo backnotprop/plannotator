@@ -21,7 +21,6 @@ describe("agent switch config values (#1390)", () => {
     for (const value of ["disabled", "build", "custom", { switchTo: "custom", customName: "reviewer" }]) {
       expect(agentSwitchConfigValue(parseAgentSwitchConfig(value)!)).toEqual(value as never);
     }
-    // A plain choice that remembers an old Custom name writes the plain choice.
     expect(agentSwitchConfigValue({ switchTo: "build", customName: "reviewer" })).toBe("build");
     expect(agentSwitchConfigValue({ switchTo: "custom" })).toBe("custom");
     expect(agentSwitchConfigValue({ switchTo: "" })).toBeUndefined();

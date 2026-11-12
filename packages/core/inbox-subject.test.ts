@@ -1,17 +1,9 @@
-/**
- * Thread subjects are one line of plain text. An agent's malformed tool call
- * once leaked its own markup and a line break into send_message's `subject`
- * (msg_01M5DBNXYNG5TA0DZV6C42PYRQ showed `…in one place</subject>\n<parameter
- * name="idempotency_key">…` as its title). The send-side check refuses that
- * text; the display side cuts it out of subjects an older Inbox kept.
- */
 import { describe, expect, test } from "bun:test";
 import { checkInboxSubject, displayInboxSubject } from "./inbox-types";
 
 const LEAKED =
   'Everything of mine waiting on you or ready to look at, in one place</subject>\n<parameter name="idempotency_key">ws-rollup-2026-10-20-a';
 const SHOWN = "Everything of mine waiting on you or ready to look at, in one place";
-/** A namespaced tool-call tag, spelled in pieces so this file never holds one whole. */
 const NAMESPACED_CLOSE = "<" + "/" + "antml" + ":parameter>";
 
 const refusal = (value: unknown) => {

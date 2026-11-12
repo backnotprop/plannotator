@@ -1,13 +1,3 @@
-/**
- * Pull requests in the Inbox: stacks and whose move it is. What regresses:
- *  - a stack drawn as separate rows (or two stacks joined), or its layers out of landing order;
- *  - a fork's branch of the same name taken as a layer of someone else's stack;
- *  - a merged layer lost from under its stack, or a merged PR under no stack shown on its own;
- *  - two PRs whose bases point at each other looping forever or vanishing;
- *  - a teammate's review request left out of On you, or the person's agent's PR not on them;
- *  - a draft, or a PR whose checks still run, put on the person; an approved one not ready to land;
- *  - a stack placed by its top layer instead of by the layer that is on the person.
- */
 import { describe, expect, test } from "bun:test";
 import {
   inboxPullAncestors,
@@ -86,7 +76,6 @@ describe("inboxPullStacks", () => {
     expect(keys(stack!.layers)).toEqual([51]);
     expect(stack!.base).toBe("develop");
 
-    // A merged branch two separate open PRs are based on is shared ground, not a layer of either.
     const shared = pr({ number: 60, head: "platform-v2", base: "main", state: "merged" });
     const a = pr({ number: 61, head: "a", base: "platform-v2" });
     const b = pr({ number: 62, head: "b", base: "platform-v2" });
@@ -124,14 +113,12 @@ describe("inboxPullStacks", () => {
     const alerts = pr({ number: 48153, head: "fx-cache-alerts", base: "fx-cache-metrics" });
     const stacks = inboxPullStacks([alerts, metrics, ttl, fx]);
     expect(stacks.map((s) => keys(s.layers))).toEqual([[48150, 48151, 48152, 48153]]);
-    // What lands next is the open PR at the bottom, not the layer above the merged one.
     expect(inboxPullLandsNext(stacks[0]!)?.number).toBe(48150);
     expect(stacks[0]!.base).toBe("main");
     expect(stacks[0]!.open_base).toBe("main");
   });
 
   test("two open PRs from one branch (a backport): the layer based on that branch sits on the one into the trunk, whatever the numbers and order", () => {
-    // The backport has the lower number: the rank is the trunk, not the number.
     const backport = pr({ number: 320, head: "fix-rounding", base: "release/2026.10" });
     const main = pr({ number: 321, head: "fix-rounding", base: "main" });
     const tests = pr({ number: 322, head: "fix-rounding-tests", base: "fix-rounding" });
@@ -143,12 +130,10 @@ describe("inboxPullStacks", () => {
       const stacks = inboxPullStacks(order);
       expect(stacks.map((s) => keys(s.layers)).sort()).toEqual([[320], [321, 322]]);
     }
-    // The forge's default branch is the trunk, whatever its name: into `next` beats into `release/…`.
     const intoRelease = pr({ number: 39, head: "shared-next", base: "release/1", default_branch: "next" });
     const intoNext = pr({ number: 40, head: "shared-next", base: "next", default_branch: "next" });
     const onShared = pr({ number: 41, head: "on-shared", base: "shared-next", default_branch: "next" });
     expect(inboxPullStacks([intoRelease, intoNext, onShared]).find((s) => s.layers.some((l) => l.number === 41))!.layers.map((l) => l.number)).toEqual([40, 41]);
-    // Into a feature branch and into main: main's PR takes the layers above it.
     const feature = pr({ number: 30, head: "shared", base: "feature/epic" });
     const intoMain = pr({ number: 31, head: "shared", base: "main" });
     const above = pr({ number: 32, head: "above", base: "shared" });
@@ -163,7 +148,6 @@ describe("inboxPullStacks", () => {
   });
 
   test("each layer's parent is the layer it sits on, never its neighbour in the list (a fork, merged layers under and between)", () => {
-    // A on main; B and C on A (a fork); D on B. In the list D comes after C, but D sits on B.
     const a = pr({ number: 1, head: "a", base: "main" });
     const b = pr({ number: 2, head: "b", base: "a" });
     const c = pr({ number: 3, head: "c", base: "a" });
@@ -174,7 +158,6 @@ describe("inboxPullStacks", () => {
     expect([a, b, c, d].map(parentNumber)).toEqual([null, 1, 1, 2]);
     expect(keys(inboxPullAncestors(fork!, d.key))).toEqual([2, 1]);
     expect(keys(inboxPullAncestors(fork!, c.key))).toEqual([1]);
-    // Merged under the root, and merged in the middle: each sits on the one below it.
     const old = pr({ number: 50, head: "fx-base", base: "main", state: "merged" });
     const fx = pr({ number: 51, head: "fx-cache", base: "fx-base" });
     const ttl = pr({ number: 52, head: "fx-cache-ttl", base: "fx-cache", state: "merged" });
@@ -201,7 +184,6 @@ describe("whose move", () => {
 
   test("a teammate's PR assigned to the person is on them; the person's own assigned PR goes by its own rules", () => {
     expect(inboxPullMove(pr({ number: 11, head: "k", mine: false, assigned: true, author: "jun" }), false)).toEqual({ move: "on_you", reason: "assigned" });
-    // Asked for a review too: the request says why.
     expect(inboxPullMove(pr({ number: 12, head: "l", mine: false, requested: true, assigned: true, author: "jun" }), false)).toEqual({ move: "on_you", reason: "requested" });
     expect(inboxPullMove(pr({ number: 13, head: "m", assigned: true, reviewers: ["jun"] }), false)).toEqual({ move: "waiting", reason: "review" });
     expect(inboxPullMove(pr({ number: 14, head: "n", mine: false, assigned: true, state: "draft" }), false)).toEqual({ move: "waiting", reason: "draft" });
@@ -226,7 +208,6 @@ describe("whose move", () => {
     const items = inboxPullItems(inboxPullStacks([stackTop, teammate, stackMid, ready, waiting, stackLow, running]), (p) => linked.has(p.key));
     const groups = inboxPullGroups(items);
     expect(groups.on_you.map((i) => keys(i.stack.layers))).toEqual([[880], [412, 413, 414]]);
-    // The stack's link (on its draft top) makes every open layer the agent's: the row speaks of the lowest one on the person.
     const stack = groups.on_you[1]!;
     expect(stack.focus.number).toBe(412);
     expect(stack.reason).toBe("agent_ready");

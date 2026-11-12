@@ -50,8 +50,6 @@ describe("isContentlessBinaryPatch", () => {
   });
 
   test("does not flag a text patch whose content mentions the binary marker", () => {
-    // Content lines always carry a +/-/space prefix, and the scan stops at the
-    // first hunk header, so quoted marker text cannot be mistaken for a header.
     expect(isContentlessBinaryPatch([
       "diff --git a/notes.md b/notes.md",
       "--- a/notes.md",
@@ -65,8 +63,6 @@ describe("isContentlessBinaryPatch", () => {
   });
 
   test("does not flag a metadata-only chunk with no binary marker", () => {
-    // A pure mode change has no body either, but git says nothing about
-    // content there, so it keeps its existing rendering.
     expect(isContentlessBinaryPatch([
       "diff --git a/run.sh b/run.sh",
       "old mode 100644",
@@ -78,21 +74,14 @@ describe("isContentlessBinaryPatch", () => {
 
 describe("diff path parsing", () => {
   test("unquoteGitPath decodes octal (UTF-8 byte) escapes", () => {
-    // git C-quotes non-ASCII names as raw UTF-8 bytes in octal — the exact
-    // form ls-files/status/diff emit for "café.txt" with core.quotePath on.
     expect(unquoteGitPath('"caf\\303\\251.txt"')).toBe("café.txt");
     expect(unquoteGitPath('"\\346\\227\\245\\346\\234\\254.md"')).toBe("日本.md");
     expect(unquoteGitPath('"tab\\there"')).toBe("tab\there");
     expect(unquoteGitPath('"quote\\"in name"')).toBe('quote"in name');
-    // Our own quoteGitPath (JSON.stringify) leaves unicode LITERAL inside
-    // quotes — synthesized workspace headers round-trip through here too.
     expect(unquoteGitPath('"café file.txt"')).toBe("café file.txt");
     expect(unquoteGitPath('"emoji 🎉.txt"')).toBe("emoji 🎉.txt");
-    // …and emits \uXXXX for control chars without a short JSON escape.
     expect(unquoteGitPath('"a\\u000bb.txt"')).toBe("a\u000bb.txt");
-    // Malformed \u (too few hex digits) keeps the backslash literally.
     expect(unquoteGitPath('"a\\u0b.txt"')).toBe("a\\u0b.txt");
-    // Unquoted input passes through untouched.
     expect(unquoteGitPath("plain space.txt")).toBe("plain space.txt");
   });
 

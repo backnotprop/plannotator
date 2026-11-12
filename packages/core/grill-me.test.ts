@@ -1,7 +1,3 @@
-// Which skills picked in the Inbox get the grill-me note. The failure this
-// guards: a common spelling of someone's grill-me (or Matt Pocock's `grilling`)
-// stops getting it, or an unrelated skill whose name merely starts with
-// "grill" starts getting it.
 import { describe, expect, test } from 'bun:test'
 import { isGrillMeSkill } from './grill-me'
 

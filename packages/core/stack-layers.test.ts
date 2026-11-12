@@ -2,9 +2,6 @@ import { describe, expect, it } from "bun:test";
 
 import { lineOrigin, mapStackLines, type StackLayer, type StackLineMap } from "./stack-layers";
 
-// Every patch below is real `git diff` output (git 2.50, default context and
-// rename detection) from scratch repos with one commit per layer: "L1 diff" is
-// base..L1, "L2 diff" is L1..L2, and "whole" is base..top.
 const patch = (...rows: string[]) => `${rows.join("\n")}\n`;
 
 const at = (map: StackLineMap, path: string, start: number, end = start) => lineOrigin(map, { path, start, end });
@@ -77,7 +74,6 @@ describe("two layers, one line changed by both", () => {
 
   it("gives a lower layer's line, moved down by the layer above", () => {
     expect(map.status).toBe("ok");
-    // "line 15 by L1" is line 16 at the top: L2 added a line above it.
     expect(at(map, "app.ts", 16)).toEqual({ kind: "layer", id: "pr-1" });
     expect(at(map, "app.ts", 15)).toEqual({ kind: "unknown" });
   });
@@ -92,7 +88,6 @@ describe("two layers, one line changed by both", () => {
 });
 
 describe("three layers", () => {
-  // Top file: 1 "b by L2", 11-12 "a1/a2 by L1", 27 "line 25 by L2", 33 "c by L3".
   const whole = patch(
     "diff --git a/app.ts b/app.ts",
     "index ac9837c..39cc5ef 100644",
@@ -296,7 +291,6 @@ describe("renames", () => {
   });
 
   it("labels a renamed file the review shows as added, leaving its base lines unlabelled", () => {
-    // The whole-stack diff without rename detection: final.ts is new, every line `+`.
     const asAdded = patch(
       "diff --git a/final.ts b/final.ts",
       "new file mode 100644",
@@ -317,8 +311,6 @@ describe("renames", () => {
 });
 
 describe("reverts", () => {
-  // L1 adds "temp" after line 2 and rewrites lines 10 and 18 of f.ts, and line
-  // 3 of r.ts. L2 removes "temp", puts line 10 back, and puts r.ts back whole.
   const l1 = patch(
     "diff --git a/f.ts b/f.ts",
     "index c4352f8..3bedaa9 100644",
@@ -514,7 +506,6 @@ describe("check", () => {
     " line 7",
     " line 8",
   );
-  // The review was made before L2 was force-pushed: its line 6 differs.
   const staleReview = patch(
     "diff --git a/a.ts b/a.ts",
     "index c8b13a5..afcbc4e 100644",
@@ -555,7 +546,6 @@ describe("check", () => {
   });
 
   it("takes every run from a file whose reviewed content is not the top layer's, even when its lines line up", () => {
-    // A review of L1's head: a.ts's `+` line matches L1's, but L2 changed a.ts since.
     const map = mapStackLines(layers, { reviewPatch: l1 });
     expect(at(map, "a.ts", 2)).toEqual({ kind: "unknown" });
     expect(at(map, "b.ts", 2)).toEqual({ kind: "layer", id: "L1" });
@@ -573,8 +563,6 @@ describe("layers that do not chain into one stack", () => {
     expect(map).toMatchObject({ status: "unavailable", reason, runs: {} });
   };
 
-  // L1 gained a commit after L2 branched from it, and L2 is not rebased.
-  // L1 = base...L1 (new head), L2 = L1...L2 (three-dot, so from L1's old head).
   const l1Stale = patch(
       "diff --git a/a.ts b/a.ts",
       "index 624b469..4b5ce0b 100644",
@@ -655,14 +643,12 @@ describe("layers that do not chain into one stack", () => {
       { id: "L1", patch: l1Stale },
       { id: "L2", patch: rewrite(l2Stale) },
     ];
-    // Only a.ts breaks the chain: it keeps only L2's own line, b.ts keeps L1's.
     const map = mapStackLines(stack((p) => p), { reviewPatch: reviewStale });
     expect(map).toMatchObject({ status: "partial", reason: "stale" });
     expect(at(map, "a.ts", 9)).toEqual({ kind: "layer", id: "L2" });
     expect(at(map, "a.ts", 1, 8)).toEqual({ kind: "unknown" });
     expect(at(map, "a.ts", 10, 13)).toEqual({ kind: "unknown" });
     expect(at(map, "b.ts", 3)).toEqual({ kind: "layer", id: "L1" });
-    // An index line that claims the chain holds is not believed over the lines L2 deletes.
     const lying = mapStackLines(stack((p) => p.replace("index 624b469..06f2de4", "index 4b5ce0b..06f2de4")), {
       reviewPatch: reviewStale,
     });
@@ -671,7 +657,6 @@ describe("layers that do not chain into one stack", () => {
   });
 
   it("follows no changed file whose diff lacks its index line", () => {
-    // The same stale stack, as a patch rebuilt without `index` lines would carry it.
     const noIndex = (p: string) => p.replace(/^index .*\n/gm, "");
     const map = mapStackLines(
       [
@@ -684,7 +669,6 @@ describe("layers that do not chain into one stack", () => {
   });
 
   it("follows the layers above a diff that lacks its index line, and does not call them stale", () => {
-    // L1 without `index` lines, then L2 with them, on the same file.
     const map = mapStackLines(
       [
         { id: "L1", patch: l1Stale.replace(/^index .*\n/gm, "") },
@@ -749,7 +733,6 @@ describe("layers that do not chain into one stack", () => {
       " line 11",
       " line 12",
     );
-    // Three-dot from the force-pushed L1: the merge base is the stack base.
     const l2 = patch(
       "diff --git a/a.ts b/a.ts",
       "index 624b469..bb39f27 100644",
@@ -779,7 +762,6 @@ describe("layers that do not chain into one stack", () => {
       { reviewPatch: l2 },
     );
     expect(map).toMatchObject({ status: "partial", reason: "stale" });
-    // Both `+` lines are in L2's own diff, which starts below the force-pushed L1.
     expect(at(map, "a.ts", 4)).toEqual({ kind: "layer", id: "L2" });
     expect(at(map, "a.ts", 10)).toEqual({ kind: "layer", id: "L2" });
     expect(map.runs["a.ts"]).toEqual([
@@ -789,9 +771,6 @@ describe("layers that do not chain into one stack", () => {
   });
 
   it("labels only the top layer's own lines when it is based on a layer lower than the one below it", () => {
-    // L3 is based on L1, so L2's "}" is not in the reviewed tree, while
-    // L1's identical "}" is: the texts alone cannot tell them apart, so the
-    // "}" gets no label, and only L3's own line does.
     const l1 = patch(
       "diff --git a/a.ts b/a.ts",
       "index 624b469..7ce8701 100644",
@@ -866,7 +845,6 @@ describe("layers that do not chain into one stack", () => {
   });
 
   it("calls the stack unreadable, not stale, when it is both", () => {
-    // a.ts is stale (as above); b.ts lacks its index line in L1, which updating the stack cannot fix.
     const map = mapStackLines(
       [
         { id: "L1", patch: l1Stale.replace("index f985857..0759b20 100644\n", "") },
@@ -880,7 +858,6 @@ describe("layers that do not chain into one stack", () => {
   });
 
   it("labels a stale layer's own line in a file the lower layer changed again (git output)", () => {
-    // L1 gains a commit (line 10) after L2 branched from it, and L2 is not rebased.
     const l1 = patch(
       "diff --git a/a.txt b/a.txt",
       "index 8e399c4..07ebaed 100644",
@@ -950,7 +927,6 @@ describe("layers that do not chain into one stack", () => {
     );
     expect(map).toMatchObject({ status: "partial", reason: "stale" });
     expect(at(map, "a.txt", 30)).toEqual({ kind: "layer", id: "L2" });
-    // L1's line comes from the L1 that L2 is based on, not the L1 diffed: no label.
     expect(at(map, "a.txt", 5)).toEqual({ kind: "unknown" });
   });
 
@@ -1004,7 +980,6 @@ describe("layers that do not chain into one stack", () => {
 });
 
 describe("a file turned into a symlink", () => {
-  // git shows the type change as a delete and an add of the same path in one diff.
   const l1 = patch(
     "diff --git a/f.txt b/f.txt",
     "index 8d3cb57..a0b591a 100644",
@@ -1085,7 +1060,6 @@ describe("a file turned into a symlink", () => {
 });
 
 describe("a file that turns binary and back", () => {
-  // t.dat: L1 edits line 2, L2 makes it binary, L3 writes L1's text back.
   const l1 = patch(
     "diff --git a/a.ts b/a.ts",
     "index f985857..44c0f44 100644",
@@ -1153,8 +1127,6 @@ describe("a file that turns binary and back", () => {
 });
 
 describe("a layer that renames two files", () => {
-  // b.ts and c.ts start identical. L2's diff pairs b.ts→b2.ts and c.ts→c2.ts;
-  // the whole-stack diff of the same commits pairs c.ts→b2.ts and b.ts→c2.ts.
   const l1 = patch(
     "diff --git a/b.ts b/b.ts",
     "index c8b13a5..f7ca596 100644",
@@ -1376,7 +1348,6 @@ describe("rewrites and moves", () => {
   });
 
   it("keeps a lower layer on lines a higher one replaced when they were all that layer's", () => {
-    // L2 rewrites exactly the one line L1 wrote (the first fixture's line 2).
     const map = mapStackLines(
       [
         { id: "L1", patch: reindentL1 },
@@ -1413,8 +1384,6 @@ describe("rewrites and moves", () => {
   });
 
   it("gives a file moved without rename detection to the layer whose diff shows it added", () => {
-    // `git diff --no-renames`: L2's own diff shows every line of x.ts as added,
-    // L1's edit among them, so that is what L2's diff says it wrote.
     const map = mapStackLines(
       [
         {
@@ -1471,7 +1440,6 @@ describe("rewrites and moves", () => {
   });
 
   it("follows no file whose diff changes its blob without showing the lines", () => {
-    // A file the forge left out of the diff (too large): `index` changes, no hunks.
     const hidden = reindentL1.split("@@")[0];
     const map = mapStackLines([{ id: "L1", patch: hidden }], { reviewPatch: reindentL1 });
     expect(map).toEqual({ status: "unavailable", reason: "unreadable", ids: ["L1"], runs: {} });

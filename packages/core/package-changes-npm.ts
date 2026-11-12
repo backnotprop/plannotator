@@ -1,8 +1,3 @@
-/**
- * npm's side of package changes: `package.json`, and the lockfiles of npm,
- * Bun, pnpm and Yarn. Pure text parsing, no network, no dependencies; each
- * reader returns a short reason string instead of throwing.
- */
 import type {
   PackageDepEntry,
   PackageDepTable,
@@ -14,7 +9,6 @@ import type {
 export const NPM_SECTIONS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] as const;
 
 const NPM_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-]*$/;
-/** npm's own name rules, enough to refuse anything that is not a package name. */
 export function isValidNpmName(name: string): boolean {
   return name.length > 0 && name.length <= 214 && NPM_NAME.test(name);
 }
@@ -29,7 +23,6 @@ function addEntry(table: PackageDepTable, name: string, section: string, entry: 
   sections.set(section, entry);
 }
 
-/** The dependency sections of a parsed `package.json`-shaped object. */
 function depTableOf(json: Record<string, unknown>, versionOf?: (name: string) => string | null): PackageDepTable {
   const table: PackageDepTable = new Map();
   for (const section of NPM_SECTIONS) {
@@ -54,7 +47,6 @@ export function readPackageJson(text: string): PackageDepTable | string {
   return depTableOf(json);
 }
 
-/** Where a spec points, and the registry name behind an alias. */
 export function classifyNpmSpec(name: string, spec: string): PackageSpecInfo {
   const s = spec.trim();
   if (s.startsWith("npm:")) {
@@ -77,7 +69,6 @@ export function classifyNpmSpec(name: string, spec: string): PackageSpecInfo {
 
 const VERSION_TOKEN = /(\d+)(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?(?:-([0-9A-Za-z.-]+))?/;
 
-/** The floor of a range, as written: `^8.16.3` → `8.16.3`, `>=18 <20` → `18`. */
 export function rangeFloor(range: string): string | null {
   const m = VERSION_TOKEN.exec(range);
   if (!m) return null;
@@ -117,7 +108,6 @@ function comparePre(a: string, b: string): number {
   return 0;
 }
 
-/** -1, 0, 1 under semver precedence. */
 export function compareSemver(a: string, b: string): number {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
@@ -130,7 +120,6 @@ export function compareSemver(a: string, b: string): number {
   return comparePre(pa.pre, pb.pre);
 }
 
-/** A breaking step under semver's caret rules: the major, the minor under 0.x, the patch under 0.0.x. */
 export function isSemverBreakingStep(a: string, b: string): boolean {
   const x = parseVersion(a).nums;
   const y = parseVersion(b).nums;
@@ -140,7 +129,6 @@ export function isSemverBreakingStep(a: string, b: string): boolean {
   return false;
 }
 
-/** `name@version` with a scoped name kept whole. */
 function splitNameAtVersion(s: string): { name: string; version: string } | null {
   const at = s.indexOf("@", 1);
   if (at <= 0) return null;
@@ -155,7 +143,6 @@ function addPackage(packages: Map<string, Set<string>>, name: string, version: s
 
 const NPM_REGISTRY_HOSTS = new Set(["registry.npmjs.org", "registry.yarnpkg.com"]);
 
-/** Whether a lockfile's `resolved` or `tarball` URL is npm's own registry. Anything else (another host, git, a file) is private. */
 export function isNpmRegistryUrl(url: string): boolean {
   try {
     const u = new URL(url.trim());
@@ -165,14 +152,11 @@ export function isNpmRegistryUrl(url: string): boolean {
   }
 }
 
-/** A version a lockfile records for a registry package (not a link, a path or a workspace). */
 function registryVersion(v: string | null | undefined): string | null {
   if (!v) return null;
   if (/^(link|file|workspace|portal):/.test(v)) return null;
   return v;
 }
-
-// --- package-lock.json / npm-shrinkwrap.json ---------------------------------
 
 export function readPackageLock(text: string): PackageLockIndex | string {
   let json: unknown;
@@ -188,7 +172,6 @@ export function readPackageLock(text: string): PackageLockIndex | string {
   const privateNames = new Set<string>();
   const entries = json.packages;
   if (isObject(entries)) {
-    // lockfileVersion 2 and 3: a flat map of install paths.
     for (const [key, raw] of Object.entries(entries)) {
       if (!isObject(raw)) continue;
       const nm = key.lastIndexOf("node_modules/");
@@ -221,7 +204,6 @@ export function readPackageLock(text: string): PackageLockIndex | string {
     }
     return { importers, packages, localNames, privateNames };
   }
-  // lockfileVersion 1: a nested tree, no importer specs.
   const deps = json.dependencies;
   if (!isObject(deps)) return { importers, packages };
   const walk = (tree: Record<string, unknown>) => {
@@ -245,9 +227,6 @@ export function readPackageLock(text: string): PackageLockIndex | string {
   };
 }
 
-// --- bun.lock ------------------------------------------------------------------
-
-/** bun.lock is JSON with trailing commas. Strings are copied whole, so a comma inside one is safe. */
 function parseJsonWithTrailingCommas(text: string): unknown {
   let out = "";
   let i = 0;
@@ -298,8 +277,6 @@ export function readBunLock(text: string): PackageLockIndex | string {
     const version = split && registryVersion(split.version);
     if (split && version) addPackage(packages, split.name, version);
     else if (split && /^(workspace|link|file):/.test(split.version)) localNames.add(split.name);
-    // The second slot names the registry when it is not the default one; a
-    // git or tarball install writes its URL into the version.
     if (split && version) {
       const registry = typeof raw[1] === "string" ? raw[1] : "";
       if ((registry && !isNpmRegistryUrl(registry)) || /^(git|github|https?|ssh):|:\/\//.test(version)) privateNames.add(split.name);
@@ -312,7 +289,6 @@ export function readBunLock(text: string): PackageLockIndex | string {
     const wsName = typeof raw.name === "string" ? raw.name : null;
     if (wsName && dir !== "") localNames.add(wsName);
     importers.set(dir, depTableOf(raw, (dep) => {
-      // A workspace's own copy is keyed under its name; otherwise the hoisted one.
       const own = wsName && dir !== "" ? versionAt(`${wsName}/${dep}`) : undefined;
       return own !== undefined ? own : versionAt(dep) ?? null;
     }));
@@ -320,25 +296,18 @@ export function readBunLock(text: string): PackageLockIndex | string {
   return { importers, packages, localNames, privateNames };
 }
 
-// --- pnpm-lock.yaml ---------------------------------------------------------------
-
 function unquoteYaml(s: string): string {
   const t = s.trim();
   if ((t.startsWith("'") && t.endsWith("'")) || (t.startsWith('"') && t.endsWith('"'))) return t.slice(1, -1);
   return t;
 }
 
-/** `19.1.0(react@19.1.0)` → `19.1.0`; `link:../x` → null. */
 function pnpmVersion(v: string): string | null {
   return registryVersion(unquoteYaml(v).replace(/\(.*$/, ""));
 }
 
 const PNPM_SECTIONS = new Set<string>(NPM_SECTIONS);
 
-/**
- * pnpm's lockfile, v6 and later, read line by line: the subset it writes
- * (two-space nesting, one key per line) is all the table needs.
- */
 export function readPnpmLock(text: string): PackageLockIndex | string {
   const lines = text.split(/\r?\n/);
   const version = /^lockfileVersion:\s*['"]?(\d+)/m.exec(text);
@@ -372,7 +341,6 @@ export function readPnpmLock(text: string): PackageLockIndex | string {
       importer = "";
       section = "";
       dep = "";
-      // v6 single-project lockfiles keep the root's sections at the top level.
       if (PNPM_SECTIONS.has(top)) section = top;
       continue;
     }
@@ -383,7 +351,6 @@ export function readPnpmLock(text: string): PackageLockIndex | string {
         const v = split && registryVersion(split.version);
         if (split && v) addPackage(packages, split.name, v);
         pkgName = split?.name ?? null;
-        // A git or tarball install keys the package by its URL.
         if (split && /^(git|github|https?|ssh|file):|:\/\//.test(split.version)) privateNames.add(split.name);
       } else if (indent > 2 && pkgName) {
         const tarball = /(?:^|[{,\s])tarball:\s*['"]?([^'",}\s]+)/.exec(body);
@@ -414,7 +381,6 @@ export function readPnpmLock(text: string): PackageLockIndex | string {
       const colon = body.lastIndexOf(":");
       dep = unquoteYaml(body.slice(0, colon));
       const inline = body.slice(colon + 1).trim();
-      // v5-style `name: version` lines carry the version inline.
       entry = inline ? { spec: null, version: pnpmVersion(inline) } : { spec: null, version: null };
       if (inline && /^link:/.test(unquoteYaml(inline))) localNames.add(dep);
       continue;
@@ -431,8 +397,6 @@ export function readPnpmLock(text: string): PackageLockIndex | string {
   flush();
   return { importers, packages, localNames, privateNames };
 }
-
-// --- yarn.lock (classic and Berry) -----------------------------------------------
 
 export function readYarnLock(text: string): PackageLockIndex | string {
   const lines = text.split(/\r?\n/);
@@ -469,7 +433,6 @@ export function readYarnLock(text: string): PackageLockIndex | string {
     for (const d of descriptors) {
       const split = splitNameAtVersion(d);
       if (!split) continue;
-      // Berry writes `name@npm:range`; workspaces and patches are not installs from the registry.
       if (/^(workspace|portal|link|file):/.test(split.version) || version === "0.0.0-use.local") {
         localNames.add(split.name);
         continue;

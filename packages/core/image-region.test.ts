@@ -1,12 +1,3 @@
-/**
- * The image-region codec (#2100). `parseImageRegion` is the one validator
- * every ingest runs (the external-annotation POST and PATCH, the feedback
- * archive, the export), so what it lets through is what can be stored and
- * what an agent is told. The failures guarded: a box outside the image, or
- * not whole pixels, reaching the agent as coordinates it cannot crop; a src
- * with a line break splitting the export's location line; unknown keys
- * riding through into storage.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   imageRegionFileName,

@@ -1,12 +1,3 @@
-/**
- * `views.changed` in the Shape format: once What's changed, now accepted but never shown (approval
- * "shape-whats-changed-removed"). What regresses if these fail:
- * - a board that still sends it is refused, or stored differently from what the agent wrote;
- * - a wrong field is stored instead of named;
- * - it becomes parts again, so a change in it lights a dot or `shape update` reports it, or a saved version's old
- *   `changed` parts still count;
- * - a board without it checks or parts differently than before.
- */
 import { describe, expect, test } from 'bun:test';
 import { checkShapeBoard, diffShapeVersions, shapeCitedRefs, shapeParts, summarizeShapeDiff, type ShapeBoard } from './shape';
 import { KETTLE_CHANGED, KETTLE_OLD_BOARD, kettleBoard } from '../../tests/fixtures/shape-whats-changed';
@@ -38,11 +29,9 @@ describe('views.changed: accepted, never shown', () => {
     expect(errorsOf(bad({ kind: 'moved', was: undefined, now: undefined }))).toEqual(['views.changed.items[0]: a moved change needs from and to']);
     expect(errorsOf(bad({ kind: 'removed', was: undefined }))).toEqual(['views.changed.items[0].was: a removed change needs was: what is gone']);
     expect(errorsOf(bad({ was: [] }))).toEqual(['views.changed.items[0].was: is empty']);
-    // A removed change with a wrong was hears about the was once, not also that it has none.
     expect(errorsOf(bad({ kind: 'removed', was: [], now: undefined }))).toEqual(['views.changed.items[0].was: is empty']);
     expect(errorsOf(bad({ kind: 'removed', was: Array(13).fill('x'), now: undefined }))).toEqual(['views.changed.items[0].was: has 13 entries; at most 12']);
     expect(errorsOf(kettleBoard({ items: [] }))).toEqual(['views.changed.items: is empty: name at least one change']);
-    // An id names a part: a change and a call path cannot share one.
     const twice = kettleBoard({ flows: [{ ...KETTLE_CHANGED.flows![0]!, id: KETTLE_CHANGED.items[0]!.id }] });
     expect(errorsOf(twice)).toEqual([`views.changed.flows[0].id: "${KETTLE_CHANGED.items[0]!.id}" is used twice`]);
     const step = kettleBoard({ flows: [{ ...KETTLE_CHANGED.flows![0]!, steps: [{ call: 'boil()', is: 'louder' }] }] });

@@ -32,7 +32,6 @@ describe("AsciiDoc in the annotatable seam", () => {
 		expect(annotateDocumentRenderKind({ filePath: "https://x.dev/guide.adoc" })).toBeNull();
 		expect(annotateDocumentRenderKind({ filePath: "/docs/guide.adoc", sourceConverted: true })).toBeNull();
 		expect(annotateDocumentRenderKind({ filePath: "/docs", mode: "annotate-folder" })).toBeNull();
-		// The diagram-only predicate is unchanged for AsciiDoc.
 		expect(annotateDiagramRenderKind({ filePath: "/docs/guide.adoc" })).toBeNull();
 	});
 

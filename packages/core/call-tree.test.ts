@@ -1,20 +1,3 @@
-/**
- * The Call tree document: re-rooting at the function around a hunk, and the
- * rows the view draws.
- *
- * Regressions guarded:
- *  - a hunk opening the tree at the wrong function (a same-file neighbour, a
- *    deeper copy of the call, the wrong side for a removed call);
- *  - the "every row green" look the owner rejected (2026-10-30): only the top
- *    row of a wholly new subtree is banded;
- *  - a repeated call expanded again instead of marked "↑ above";
- *  - Changes only dropping the root or keeping unchanged branches;
- *  - fold defaults hiding a changed path, or a folded row losing its count;
- *  - a deep or large tree overflowing the stack or taking seconds;
- *  - search: a match hidden in a folded branch, a lost caller on the way to
- *    a match, unmatched rows left in, Changes only ignored, matching that
- *    differs from the Paths view's rule (label or file, trimmed, any case).
- */
 import { describe, expect, test } from "bun:test";
 import {
   buildCallTreeRows,
@@ -38,10 +21,6 @@ function n(
   return { key, label, status, ...(file ? { file } : {}), ...(line ? { line } : {}), children };
 }
 
-// onBeforeCreate (note.ts:520) -> getNoteSizeAdjustments (written :582)
-//   -> getLabelSize (written :600, body 610-640 in note.ts)
-//        -> measure (written :612) -> elm.getBoundingClientRect (removed, text.ts old :263), parley.layout (added, text.ts :263)
-//   -> helper (written :590, body 700-720) -> log (written :705)
 const label = n("getLabelSize", "this.getLabelSize(shape)", "note.ts", 600, [
   n("measure", "textMeasure.measureHtml(html)", "note.ts", 612, [
     n("rect", "elm.getBoundingClientRect()", "text.ts", 263, [], "removed"),
@@ -68,12 +47,10 @@ describe("findCallTreeRoot", () => {
     expect(doc.root).toBe(label);
     expect(doc.title).toBe("getLabelSize");
     expect(doc.trail).toEqual(["onBeforeCreate", "getNoteSizeAdjustments"]);
-    // Same path format as the Call flow tab's rows, so comments carry comparable targets.
     expect(doc.rootPath).toBe("onBeforeCreate:0/adjust:0/getLabelSize:0");
   });
 
   test("never picks a same-file neighbour whose name does not match", () => {
-    // The range covers helper's body (705) too, but helper is not getLabelSize.
     const location = findCallTreeRoot([entry], hunk, { name: "getLabelSize", newStart: 605, newEnd: 720 });
     expect(callTreeAt([entry], location!).root).toBe(label);
   });
@@ -114,8 +91,6 @@ describe("findCallTreeRoot", () => {
   });
 
   test("without sem, a change inside another call's arguments roots at the function making that call", () => {
-    // The shape CallDiff gave for this repo's #1663 change: the new call sits in
-    // the options object passed to runCommand(...), so it is nested under it.
     const tree: CallTreeSourceTree = {
       entry: "install",
       tree: n("install", "install()", "cf.ts", 846, [
@@ -172,7 +147,6 @@ describe("buildCallTreeRows", () => {
     const rows = buildCallTreeRows(callTreeFromEntry(tree, 0), { folds });
     const shared = rows.filter((row) => row.node.label === "util.shared()");
     expect(shared.map((row) => row.repeat)).toEqual([false, true]);
-    // The first copy shows its two calls; the repeat shows none.
     expect(rows.filter((row) => row.parentId === shared[0]!.id)).toHaveLength(2);
     expect(rows.filter((row) => row.parentId === shared[1]!.id)).toHaveLength(0);
   });
@@ -207,7 +181,6 @@ describe("buildCallTreeRows", () => {
     expect(byKey.get("measure")).toMatchObject({ branch: "elbow", guides: ["blank", "pipe"] });
     expect(byKey.get("helper")).toMatchObject({ branch: "elbow", guides: ["blank"] });
     expect(byKey.get("log")).toMatchObject({ branch: "elbow", guides: ["blank", "blank"] });
-    // The caller's file decides whether the location shows only ":line".
     expect(byKey.get("measure")?.callerFile).toBe("note.ts");
     expect(byKey.get("rect")?.callerFile).toBe("note.ts");
   });
@@ -239,7 +212,6 @@ describe("search rows", () => {
   const doc = callTreeFromEntry(entry, 0);
 
   test("keeps matches and their callers, all open, even inside a branch folded by default", () => {
-    // helper -> log() is folded by default (no change below it).
     expect(buildCallTreeRows(doc).some((row) => row.node.key === "log")).toBe(false);
     const rows = buildCallTreeRows(doc, { query: "LOG(" });
     expect(rows.map((row) => row.node.key)).toEqual(["root", "adjust", "helper", "log"]);
