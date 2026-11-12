@@ -16,8 +16,9 @@
  * stands). The memory is per store, in this process: an Inbox restart forgets
  * it, so a session may hear a hint once more after one.
  *
- * The older "choices have no pictures" advice keeps its own rule and words;
- * it uses the same memory (`picture_choices`), so a session hears it once.
+ * The older "choices have no pictures" advice is not one of these: it keeps
+ * its own rule and words (inbox-picture-choices.ts) and is said on every send
+ * it holds for.
  */
 
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
@@ -25,7 +26,7 @@ import { INBOX_THREAD_PULLS_REMOVED_MS, inboxPullUrlsIn, inboxThreadPullText, pa
 import { blankCode } from "@plannotator/shared/inbox/message-images";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
-export type InboxHintKind = "attach_pull" | "question_options" | "picture_choices";
+export type InboxHintKind = "attach_pull" | "question_options";
 
 /** At most this many (session, hint) marks kept per store; the oldest go first. */
 const MAX_SAID = 20_000;
