@@ -128,7 +128,7 @@ plannotator inbox call send_message '{"reply_to":"<their latest message id>","bo
 - To start a new thread yourself: `send_message` with `"subject"` and `"body"` and no `reply_to`.
 - Files: `"attachments": ["report.md", "shot.png"]`, paths on your computer; they are sent as bytes and show below your message.
 - If `send_message` prints `"queued": true`, the person's computer is asleep. It is posted once when the computer is back. Do not send it again.
-- `computer_asleep` on a read: end quietly; the next change wakes you again.
+- `computer_asleep` on a read, or `too_many_waiting` on a send (many of your messages already wait for the person's computer): end quietly and send nothing more; the next change wakes you again.
 - `pairing_removed` or `invalid_pairing` at any time: disable the `plannotator-inbox` hook or delete the "Plannotator Inbox" task, and tell the person once in this chat that you were unpaired and they can make a new pairing in Plannotator's Settings.
 - You can never answer the person's own questions, approve anything for them, or see threads they did not give you. That is by design.
 - `plannotator inbox call --help` lists everything you can do.
