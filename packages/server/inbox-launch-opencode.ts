@@ -248,7 +248,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     const port = await freePort();
     let proc: ReturnType<typeof Bun.spawn>;
     try {
-      proc = Bun.spawn([path, "serve", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: launch.folder, env, stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+      proc = Bun.spawn([path, "serve", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: launch.folder, env, stdin: "ignore", stdout: "ignore", stderr: "pipe", windowsHide: true });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       return { ok: false, cancelled: false, missing: false, text: openCodeCause(text), output: text };

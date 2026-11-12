@@ -250,7 +250,7 @@ export function codexTrustRoot(folder: string): string | null {
 export async function listCodexModels(codex: string, env: Readonly<Record<string, string>>, cwd: string, ms: number): Promise<LaunchChoiceLists | null> {
   let proc: ReturnType<typeof Bun.spawn>;
   try {
-    proc = Bun.spawn([codex, "app-server"], { cwd, env, stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+    proc = Bun.spawn([codex, "app-server"], { cwd, env, stdin: "pipe", stdout: "pipe", stderr: "ignore", windowsHide: true });
   } catch {
     return null;
   }
