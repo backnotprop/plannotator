@@ -21,8 +21,6 @@ const AGENT_COOKIE = 'plannotator-annotate-agent-terminal-default';
 
 describe('agentTerminalSide setting', () => {
   test('keeps the pre-registry cookie key so an upgrade preserves the placement', () => {
-    // The cookie name is the contract with releases that stored a side before
-    // this setting joined the registry; renaming it silently resets users.
     const values = installBackend();
     values.set(SIDE_COOKIE, 'right');
     expect(SETTINGS.agentTerminalSide.fromCookie()).toBe('right');
@@ -47,9 +45,8 @@ describe('agentTerminalSide setting', () => {
   });
 
   test('syncs both directions with ~/.plannotator/config.json', () => {
-    // The durability fix: annotate runs on a fresh random port each time, so a
-    // cookie-only preference is effectively per-session. Without the server
-    // leg the placement silently resets on the next annotate.
+    // The durability fix: annotate runs on a fresh random port each time, so a cookie-only
+    // preference is effectively per-session.
     expect(SETTINGS.agentTerminalSide.serverKey).toBe('agentTerminalSide');
     expect(SETTINGS.agentTerminalSide.toServer('hidden')).toEqual({ agentTerminalSide: 'hidden' });
     expect(SETTINGS.agentTerminalSide.fromServer({ agentTerminalSide: 'right' })).toBe('right');

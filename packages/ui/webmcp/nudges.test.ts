@@ -1,9 +1,3 @@
-/**
- * Nudge table, no DOM: each of the twelve codes fires for exactly its
- * condition and carries the ids/path/section/action the flows rely on; a
- * quiet snapshot yields nothing; no message ever embeds document or comment
- * text.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationChangeTracker, BROWSER_AGENT_SOURCE } from './changes';
 import { MAX_NUDGE_IDS, buildNudges, type NudgeSnapshot } from './nudges';
@@ -65,9 +59,9 @@ describe('buildNudges', () => {
     const nudges = buildNudges(quiet({ annotations: [{ id: 'h1' }], annotationCount: 1, since: tracker.watermark }), tracker, toolName);
     const removed = nudges.find((n) => n.code === 'annotations_removed');
     expect(removed?.ids).toEqual(['g1']);
-    // Deliberate pin: "your comments" is the phrase that tells the agent the
-    // removal was of ITS OWN comment (the resolution signal), as opposed to the
-    // neutral wording for someone else's; the two branches must stay distinct.
+    // Deliberate pin: "your comments" is the phrase that tells the agent the removal was of ITS
+    // OWN comment (the resolution signal), as opposed to the neutral wording for someone else's;
+    // the two branches must stay distinct.
     expect(removed?.message).toContain('your comments');
   });
 
@@ -108,7 +102,6 @@ describe('buildNudges', () => {
       path: 'docs/0.md',
       action: { tool: 'plannotator.read_document', args: { path: 'docs/0.md' } },
     });
-    // A quiet sibling (nothing new, no composer, not just opened) is silent.
     expect(codes(buildNudges(quiet({ otherDocuments: [{ ...docs[0]!, newSinceLastRead: 0 }] }), new AnnotationChangeTracker(), toolName))).toEqual([]);
   });
 
@@ -117,9 +110,6 @@ describe('buildNudges', () => {
     expect(nudges[0]?.action).toEqual({ tool: 'plannotator.read_document', args: { section: 'goal', offset: 16000 } });
   });
 
-  // A 10,000-annotation burst produced an 89 KB annotations_new nudge: the
-  // id list had no cap. The first MAX_NUDGE_IDS are listed and the message
-  // says how many more there are.
   test('a burst of new or removed comments lists at most MAX_NUDGE_IDS ids and says how many more', () => {
     const tracker = new AnnotationChangeTracker();
     const burst = Array.from({ length: MAX_NUDGE_IDS + 250 }, (_, i) => ({ id: `x-${i}`, text: 't' }));
@@ -135,7 +125,6 @@ describe('buildNudges', () => {
     expect(removed?.ids?.length).toBe(MAX_NUDGE_IDS);
     expect(removed?.message).toContain('250 more');
 
-    // Under the cap nothing changes: every id, no suffix.
     const small = new AnnotationChangeTracker();
     small.observe([{ id: 'a', text: 't' }, { id: 'b', text: 't' }]);
     const few = buildNudges(quiet({ annotations: [{ id: 'a' }, { id: 'b' }], annotationCount: 2 }), small, toolName)

@@ -1,15 +1,4 @@
-/**
- * Lazy-resolution contract for ConfigStore.
- *
- * Tested on a FRESH instance (ConfigStoreForTest) rather than the module
- * singleton: whether the singleton has already resolved depends on which test
- * files ran first in the process, which made a singleton-based version of this
- * test flaky in CI. The contract under test is the mechanism itself:
- * construction resolves NOTHING — a host StorageBackend installed before the
- * first settings access receives the initial resolution reads and the
- * default-seeding writes. A configured host therefore never gets
- * plannotator-* cookies written to its origin.
- */
+/** A configured host therefore never gets plannotator-* cookies written to its origin. */
 import { describe, test, expect, afterAll, beforeEach } from 'bun:test';
 import { setStorageBackend, resetStorageBackend, type StorageBackend } from '../utils/storage';
 import { ConfigStoreForTest } from './configStore';
@@ -43,8 +32,6 @@ describe('configStore lazy resolution', () => {
   });
 
   test('construction resolves nothing; first access resolves through the live backend', () => {
-    // Install the host backend, THEN construct. If the constructor resolved
-    // eagerly, the reads would happen here; the lazy contract says none do.
     setStorageBackend(hostBackend);
     const store = new ConfigStoreForTest();
     expect(reads.length).toBe(0);
@@ -53,10 +40,7 @@ describe('configStore lazy resolution', () => {
     const identity = store.get('displayName');
 
     expect(identity.length).toBeGreaterThan(0);
-    // Resolution happened lazily, through the live (host) backend:
     expect(reads.length).toBeGreaterThan(0);
-    // Missing defaults were seeded into the host backend — including the
-    // generated identity — not into document.cookie:
     expect(writes).toContain('plannotator-identity');
     expect(stored.has('plannotator-identity')).toBe(true);
   });

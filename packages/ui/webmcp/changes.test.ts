@@ -1,12 +1,3 @@
-/**
- * Change tracker contract, no DOM.
- *
- * Regressions guarded: new id -> new seq; edited text -> new seq; removal ->
- * tombstone flagged agent-authored or not; the agent's own creations are
- * never new to it while a human edit of them is; an explicit `since`
- * overrides the implicit watermark; `advance` never runs backwards; the
- * per-path set keeps independent watermarks and activity times.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationChangeTracker, BROWSER_AGENT_SOURCE, ChangeTrackerSet, MAX_TOMBSTONES, type TrackedAnnotation } from './changes';
 
@@ -110,7 +101,6 @@ describe('AnnotationChangeTracker', () => {
     }
     const removed = tracker.removedSince(0);
     expect(removed.length).toBe(MAX_TOMBSTONES);
-    // The oldest 500 are gone, the newest MAX_TOMBSTONES remain, in order.
     expect(removed[0].id).toBe('a-500');
     expect(removed[removed.length - 1].id).toBe(`a-${total - 1}`);
     expect(tracker.knows('a-0')).toBe(false);

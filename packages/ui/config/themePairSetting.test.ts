@@ -55,7 +55,6 @@ describe('theme pair setting', () => {
       dark: 'kanagawa-wave',
     });
 
-    // A palette that renders both modes migrates into the whole pair.
     installStorage({ 'plannotator-theme': 'light', 'plannotator-color-theme': 'rose-pine' });
     expect(SETTINGS.themePair.fromCookie()).toEqual({
       mode: 'light',
@@ -63,7 +62,6 @@ describe('theme pair setting', () => {
       dark: 'rose-pine',
     });
 
-    // One half already assigned: the other still comes from the legacy key.
     installStorage({
       'plannotator-theme': 'system',
       'plannotator-color-theme': 'rose-pine',
@@ -103,14 +101,12 @@ describe('theme pair setting', () => {
       dark: 'vesper',
     });
 
-    // A hand-edited config.json is repaired, not trusted.
     expect(SETTINGS.themePair.fromServer({ theme: { mode: 'sepia', light: 'vesper' } })).toEqual({
       mode: 'dark',
       light: DEFAULT_COLOR_THEME,
       dark: DEFAULT_COLOR_THEME,
     });
 
-    // Nothing to say about the theme leaves the cookie/default alone.
     expect(SETTINGS.themePair.fromServer({})).toBeUndefined();
     expect(SETTINGS.themePair.fromServer({ theme: {} })).toBeUndefined();
     expect(SETTINGS.themePair.fromServer({ diffOptions: { diffStyle: 'unified' } })).toBeUndefined();
@@ -155,7 +151,6 @@ describe('config store seeding', () => {
     store.init({ theme: { mode: 'system', light: 'rose-pine', dark: 'vesper' } });
     await new Promise<void>(resolve => setTimeout(resolve, 350));
 
-    // The theme write is gone; the untouched setting still syncs.
     const merged = Object.assign({}, ...synced) as Record<string, unknown>;
     expect(merged.theme).toBeUndefined();
     expect(merged.diffOptions).toEqual({ diffStyle: 'unified' });
