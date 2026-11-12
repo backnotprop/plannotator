@@ -6,8 +6,6 @@ import type { Block, EditorMode, InputMethod } from '../types';
 
 const hasDom = typeof document !== 'undefined';
 const viewerModule = hasDom ? await import('./Viewer') : null;
-// SAFETY: The suite is skipped without a DOM; every executed test therefore
-// has the real module loaded before it renders Viewer.
 const Viewer = viewerModule?.Viewer as typeof import('./Viewer')['Viewer'];
 
 class FakeResizeObserver implements ResizeObserver {
@@ -231,9 +229,8 @@ describe.if(hasDom)('Viewer annotationHeader', () => {
     expect(legacyActions?.classList.contains('mt-6')).toBe(true);
   });
 
-  // Firefox lays float-avoiding siblings (the overflow-x-auto table wrapper)
-  // out around a sticky float's stuck position, collapsing long tables while
-  // annotating them. Guards against re-floating the sticky legacy bar.
+  // Firefox lays float-avoiding siblings (the overflow-x-auto table wrapper) out around a sticky
+  // float's stuck position, collapsing long tables while annotating them.
   test('pins the sticky legacy action bar without making a sticky float', async () => {
     await mount(
       <Viewer

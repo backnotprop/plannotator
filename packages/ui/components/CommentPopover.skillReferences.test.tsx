@@ -1,21 +1,7 @@
 /**
- * Skill-reference keyboard state machine, against the REAL CommentPopover.
- *
- * The load-bearing invariant here is NO PRESELECTION: the menu opens on a
- * bare `/` or `$` (full catalog), but with NOTHING active — and while nothing
- * is active, every key behaves exactly as if the menu were not open. An
- * adversarial review PROVED the failure this prevents: "This costs $" + Enter
- * inserted a skill instead of a newline, "cd /" + Tab inserted a skill
- * instead of blurring. A row activates ONLY via arrow keys (never hover) —
- * and on a BARE trigger with zero query characters even the arrows pass
- * through to the textarea and dismiss the menu ("cost: $" + ArrowUp is caret
- * navigation, another proven regression); arrows engage the menu only once a
- * query character was typed. A click inserts directly without ever arming
- * Enter. Also covers: IME
- * composition, disarm-on-typing, Escape semantics, the highlight overlay, and
- * skillReferences={false} inertness.
- *
- * DOM-gated (DOM_TESTS=1), same harness as Viewer.consumer.test.tsx.
+ * The load-bearing invariant here is NO PRESELECTION: the menu opens on a bare `/` or `$` (full
+ * catalog), but with NOTHING active — and while nothing is active, every key behaves exactly as
+ * if the menu were not open.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React from 'react';
@@ -32,8 +18,6 @@ import type { SkillCatalogEntry } from '../utils/skillReferences';
 
 const hasDom = typeof document !== 'undefined';
 
-// CommentPopover imports DOM-reading modules; load lazily so this file stays
-// inert in the DOM-less default `bun test` run.
 const popoverMod = hasDom ? await import('./CommentPopover') : null;
 const CommentPopover =
   popoverMod?.CommentPopover as typeof import('./CommentPopover')['CommentPopover'];
@@ -69,7 +53,6 @@ async function mountPopover(props: Partial<React.ComponentProps<typeof CommentPo
       />,
     );
   });
-  // Flush the catalog fetch effect.
   await act(async () => {});
 }
 
@@ -109,10 +92,8 @@ async function type(el: HTMLTextAreaElement, value: string): Promise<void> {
     else el.value = value;
     el.selectionStart = el.selectionEnd = value.length;
     el.dispatchEvent(new Event('input', { bubbles: true }));
-    // Real typing ends with a keyup; React's select plugin records the caret
-    // from it (and fires onSelect). Without this, the NEXT keydown sees a
-    // "changed" selection and re-fires onSelect with the stale DOM caret,
-    // which no real keyboard sequence produces.
+    // Real typing ends with a keyup; React's select plugin records the caret from it (and fires
+    // onSelect).
     el.dispatchEvent(
       new KeyboardEvent('keyup', { key: value.slice(-1) || 'a', bubbles: true }),
     );
@@ -247,7 +228,6 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
     async () => {
       await mountPopover();
       const el = textarea();
-      // prefix: animate, annotate-helper; substring: humanizer, plannotator-review
       await type(el, '$a');
       await press(el, 'ArrowUp');
       expect(activeRow()?.getAttribute('data-skill-item')).toBe('plannotator-review');
@@ -257,9 +237,9 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
   test.skipIf(!hasDom)(
     'bare-trigger menu: ArrowUp passes through to the textarea and dismisses the menu',
     async () => {
-      // The reproduced regression: in a multi-line composer, "cost: $" opens
-      // the full catalog and ArrowUp was consumed — activating the LAST row so
-      // the next Enter inserted a skill instead of a newline.
+      // The reproduced regression: in a multi-line composer, "cost: $" opens the full catalog and
+      // ArrowUp was consumed — activating the LAST row so the next Enter inserted a skill instead
+      // of a newline.
       await mountPopover();
       const el = textarea();
       await type(el, 'first line\ncost: $');
@@ -398,7 +378,6 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
       expect(closed).toBe(0);
       expect(document.querySelector('[data-comment-popover]')).not.toBeNull();
 
-      // With the menu dismissed, Escape closes the composer as before.
       await press(el, 'Escape');
       expect(closed).toBe(1);
     },
@@ -425,10 +404,6 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
   test.skipIf(!hasDom)(
     'human-only skills render identically to every other row: no badge, no disclosure, no ARIA note',
     async () => {
-      // The menu no longer surfaces humanOnly at pick time (the instructions
-      // ride along with the exported feedback automatically). The old
-      // hover-disclosed footer changed the bottom-anchored menu's height under
-      // the pointer and oscillated the hovered row every frame.
       await mountPopover();
       const el = textarea();
       await type(el, '$a'); // animate, annotate-helper, humanizer, plannotator-review
@@ -459,9 +434,9 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
           row.dispatchEvent(new Event('pointerover', { bubbles: true }));
           row.dispatchEvent(new Event('pointerenter', { bubbles: true }));
         });
-        // Hover must not change ANY rendered output — no class flip, no new
-        // element, no style change — so the menu cannot grow, re-measure, or
-        // shift the row out from under the pointer.
+        // Hover must not change ANY rendered output — no class flip, no new element, no style
+        // change — so the menu cannot grow, re-measure, or shift the row out from under the
+        // pointer.
         expect((menu() as HTMLElement).outerHTML).toBe(before);
         expect(activeRow()).toBeNull(); // and it still never arms Enter
         await act(async () => {
@@ -487,7 +462,6 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
     expect(token).not.toBeNull();
     expect(token!.getAttribute('data-skill-ref-token')).toBe('humanizer');
     expect(token!.textContent).toBe('$humanizer');
-    // Model-invocable tokens carry no human-only marker.
     expect(token!.hasAttribute('data-skill-ref-human-only')).toBe(false);
     // The overlay is presentation-only and must never intercept the pointer.
     const overlay = document.querySelector('[data-skill-ref-overlay]');
@@ -522,17 +496,13 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
       await mountPopover({ initialText: 'use $plannotator-review please' });
       const notice = document.querySelector('[data-skill-human-only-notice]');
       expect(notice).not.toBeNull();
-      // A native <details> disclosure: reachable by pointer, keyboard, and AT
-      // alike, collapsed to a single quiet summary line at rest.
       expect(notice!.tagName.toLowerCase()).toBe('details');
       const summary = notice!.querySelector('summary');
       expect(summary).not.toBeNull();
       expect(summary!.textContent).toContain('Includes skill instructions');
-      // The accurate full sentence is the disclosed content.
       expect(notice!.textContent).toContain('plannotator-review');
       expect(notice!.textContent).toContain('cannot be invoked by a model');
       expect(notice!.textContent).toContain('included with your feedback');
-      // The token itself carries the quiet inline marker.
       const token = document.querySelector('[data-skill-ref-token="plannotator-review"]');
       expect(token).not.toBeNull();
       expect(token!.getAttribute('data-skill-ref-human-only')).toBe('true');

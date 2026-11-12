@@ -1,15 +1,3 @@
-/**
- * Published HtmlSurfaceControls (DOM-gated): the pen/eye/refresh markup
- * hosts share with Plannotator's header.
- *
- * Failures to catch: a control rendering without its handler (a read-only
- * document must show no pen), the pen losing its pressed state or its
- * pixel-stable border, the refresh going inert or dropping focus while in
- * flight, the compact shell rendering chrome, the label overrides not
- * reaching the DOM, a control losing its accessible name now that `title`
- * is gone, and a tooltip that names the wrong key (or hardcodes "Cmd").
- * The default strings are pinned on purpose (see below).
- */
 import React, { act } from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createRoot, type Root } from 'react-dom/client';
@@ -36,8 +24,6 @@ function render(props: Partial<React.ComponentProps<typeof HtmlSurfaceControls>>
   root = createRoot(container);
   act(() => {
     root?.render(
-      // delayDuration 0: the hover test asserts what a dwell produces, not
-      // how long the app's provider makes people wait for it.
       <TooltipProvider delayDuration={0}>
         <HtmlSurfaceControls
           armed
@@ -55,7 +41,6 @@ function render(props: Partial<React.ComponentProps<typeof HtmlSurfaceControls>>
   return container;
 }
 
-/** Base UI opens on pointer dwell; the portal lands outside `container`. */
 async function hover(button: HTMLButtonElement): Promise<void> {
   await act(async () => {
     button.dispatchEvent(new MouseEvent('mouseenter'));
@@ -73,10 +58,11 @@ async function focusTrigger(button: HTMLButtonElement): Promise<void> {
   });
 }
 
-/** The open popup's text, or null. Base UI portals the popup out of the
- *  container and this build tags neither it nor the trigger with anything
- *  ARIA-visible — which is exactly why the shortcut is ALSO attached to the
- *  button as an aria-describedby span rather than left to the tooltip. */
+/**
+ * Base UI portals the popup out of the container and this build tags neither it nor the trigger
+ * with anything ARIA-visible — which is exactly why the shortcut is ALSO attached to the button
+ * as an aria-describedby span rather than left to the tooltip.
+ */
 function openTooltipText(): string | null {
   const portal = document.querySelector<HTMLElement>('[data-base-ui-portal]');
   return portal ? portal.textContent : null;
@@ -93,7 +79,6 @@ describe.if(hasDom)('HtmlSurfaceControls', () => {
     expect(pen(full)).not.toBeNull();
     expect(eye(full)).not.toBeNull();
     expect(refresh(full)).not.toBeNull();
-    // Order: eye group (refresh, eye) then the pen.
     const buttons = Array.from(full.querySelectorAll('button')).map((b) => b.dataset);
     expect(buttons.map((d) => Object.keys(d)[0])).toEqual(['htmlRefresh', 'htmlToolsToggle', 'htmlAnnotateToggle']);
 
@@ -146,7 +131,6 @@ describe.if(hasDom)('HtmlSurfaceControls', () => {
     const interact = render({ armed: false });
     const interactPen = pen(interact)!;
     expect(interactPen.getAttribute('aria-pressed')).toBe('false');
-    // Transparent border, same width: the box is pixel-identical.
     expect(interactPen.className).toContain('border-transparent');
     expect(interactPen.className).toContain(' border ');
     expect(armedPen.className).toContain(' border ');
@@ -166,13 +150,9 @@ describe.if(hasDom)('HtmlSurfaceControls', () => {
   });
 
   test('default strings are Plannotator\'s (deliberate pin) and every control keeps an accessible name without `title`', () => {
-    // DELIBERATE PIN: these strings are the package defaults every host
-    // inherits, and Plannotator's own header renders them verbatim. A drift
-    // here changes shipped UI in two products; change it on purpose, with
-    // the maintainer, and update this test in the same commit.
+    // DELIBERATE PIN: these strings are the package defaults every host inherits, and
+    // Plannotator's own header renders them verbatim.
     const armed = render({ armed: true, toolsHidden: false, isRefreshing: false });
-    // `title` is gone (the Tooltip replaced it); the name it used to supply
-    // has to still be there, or these become unnamed icon buttons.
     expect(pen(armed)!.title).toBe('');
     expect(eye(armed)!.title).toBe('');
     expect(refresh(armed)!.title).toBe('');
@@ -193,13 +173,11 @@ describe.if(hasDom)('HtmlSurfaceControls', () => {
   test('a label override applies to its key only, and reaches the tooltip and the accessible name', async () => {
     const labels = { hideTools: 'Hide viewer controls', annotateLabel: 'Annotate mode' };
     const el = render({ armed: true, toolsHidden: false, isRefreshing: true, labels });
-    // The overridden key reaches the screen-reader text and the tooltip.
     expect(eye(el)!.querySelector('.sr-only')!.textContent).toBe('Hide viewer controls');
     await hover(eye(el)!);
     expect(openTooltipText()).toContain('Hide viewer controls');
     // An explicit aria-label still wins over the description default.
     expect(pen(el)!.getAttribute('aria-label')).toBe('Annotate mode');
-    // Keys not overridden keep the defaults.
     expect(refresh(el)!.getAttribute('aria-label')).toBe(DEFAULT_HTML_SURFACE_CONTROL_LABELS.refreshingTitle);
     expect(refresh(el)!.textContent).toContain(DEFAULT_HTML_SURFACE_CONTROL_LABELS.refreshing);
   });
@@ -217,7 +195,6 @@ describe.if(hasDom)('HtmlSurfaceControls', () => {
     expect(hovered).toContain('Show tools');
     for (const cap of caps) expect(hovered!).toContain(cap);
 
-    // Keyboard reaches it too (the whole point of not using `title` alone).
     act(() => root?.unmount());
     const focusEl = render({ toolsHidden: false });
     await focusTrigger(eye(focusEl)!);
@@ -235,23 +212,20 @@ describe.if(hasDom)('HtmlSurfaceControls', () => {
     const penTip = openTooltipText();
     expect(penTip).toContain('Click to annotate');
     for (const cap of annotateCaps) expect(penTip!).toContain(cap);
-    // The shortcut is announced, not only drawn.
     const describedBy = pen(el)!.getAttribute('aria-describedby');
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy!)?.textContent)
       .toContain(formatShortcutBindingText(annotateBinding));
 
-    // Refresh has no chord: no keycaps, and nothing to describe.
     expect(refresh(el)!.hasAttribute('aria-describedby')).toBe(false);
     expect(el.querySelectorAll('kbd').length).toBe(0);
   });
 });
 
 describe.if(hasDom)('HtmlSurfaceControls back', () => {
-  // The way out of a linked HTML document. An HTML surface opens with the
-  // sidebar closed and a link click leaves it closed, so the sidebar's own
-  // "Viewing / Back to …" header is not a way back anyone can reach: without
-  // this control a reviewer who follows a link is stranded.
+  // An HTML surface opens with the sidebar closed and a link click leaves it closed, so the
+  // sidebar's own "Viewing / Back to …" header is not a way back anyone can reach: without this
+  // control a reviewer who follows a link is stranded.
   test('renders only with a handler, and is the FIRST control', () => {
     expect(back(render())).toBeNull();
 
@@ -277,8 +251,6 @@ describe.if(hasDom)('HtmlSurfaceControls back', () => {
   });
 
   test('it claims no keyboard shortcut', async () => {
-    // Alt+Left and the browser's own Back belong to the user, so the control
-    // renders no keycap row and describes no chord.
     const el = render({ onBack: () => {} });
     expect(back(el)!.hasAttribute('aria-describedby')).toBe(false);
     await hover(back(el)!);

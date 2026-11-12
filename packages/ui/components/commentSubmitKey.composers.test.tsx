@@ -1,15 +1,3 @@
-/**
- * "Enter saves a comment" (#1934) on the shared comment composers, against
- * the REAL components (DOM-gated, DOM_TESTS=1).
- *
- * What these catch: a composer that ignores the setting (so Enter saves in
- * one box and adds a line in the next), a composer that saves on the Enter
- * that commits a Japanese or Chinese composition, Shift+Enter no longer
- * adding a line, Cmd/Ctrl+Enter lost when the setting is on, an Enter that
- * picks a skill or mention row also saving the comment, the decision
- * control's own note composer starting to fire on Enter, and the Settings
- * row not reaching the setting.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -66,8 +54,6 @@ function must<T extends Element>(selector: string): T {
   if (!el) throw new Error(`nothing matches ${selector}`);
   return el;
 }
-
-// --- The plan / annotate comment popover (also the Inbox's file and message comments) ---
 
 async function mountPopover(text: string, onSubmit: () => void, skillReferences = false) {
   await render(
@@ -131,8 +117,6 @@ describe('CommentPopover with the skill menu open and no row active', () => {
   });
 });
 
-// --- The annotation panel's edit boxes ---
-
 const ANNOTATION: Annotation = {
   id: 'a1',
   blockId: 'b1',
@@ -189,7 +173,6 @@ describe('AnnotationPanel edit box with the mention menu open', () => {
       expect(enter.defaultPrevented).toBe(true);
       expect(el.value).toBe('ping @Marcus Chen ');
       expect(edits).toEqual([]);
-      // With the row inserted and the menu closed, the next Enter saves.
       await pressKey(el, 'Enter');
       expect(edits.length).toBe(1);
     } finally {
@@ -258,8 +241,6 @@ describeCommentSubmitKeys('AnnotationPanel code comment edit', async (text) => {
   return { field: () => must('[data-annotation-id="c1"] textarea'), saves: () => edits.length };
 }, { skip });
 
-// --- The note field: a comment only where the host says so ---
-
 describeCommentSubmitKeys('DecisionNoteField as a comment (enterSubmits from the setting)', async (text) => {
   let saves = 0;
   function Harness() {
@@ -303,8 +284,6 @@ describe('DecisionNoteField in the decision control (no enterSubmits)', () => {
   });
 });
 
-// --- The diagram composer: Enter has always saved there ---
-
 describe('DiagramComposer', () => {
   async function mountDiagram(onSubmit: () => void) {
     const element = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -343,8 +322,6 @@ describe('DiagramComposer', () => {
     });
   }
 });
-
-// --- The Settings row ---
 
 describe('Settings → General → "Enter saves a comment"', () => {
   for (const mode of ['plan', 'annotate', 'review'] as const) {

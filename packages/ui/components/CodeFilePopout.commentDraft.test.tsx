@@ -1,16 +1,3 @@
-/**
- * The code-file view's line composer (plan review's code-file popout, the
- * Inbox file pane, Shape's Code view) keeps the words typed (DOM-gated).
- *
- * What regresses: Escape on the composer throwing the words away, so choosing
- * the same lines again shows an empty box; one range's words showing up on
- * another range, or on another file with the same name (the Inbox passes a
- * basename, so two threads' `index.ts` share a path); Save leaving the words
- * behind.
- *
- * Pierre's `File` is replaced by a stub that hands its options back, so a line
- * range is chosen the way Pierre reports one (`onLineSelectionEnd`).
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -23,8 +10,6 @@ interface CapturedFileProps {
 }
 let lastFileProps: CapturedFileProps | null = null;
 
-// Spread-captured before the mock replaces the module record (see
-// DiffViewer.compactTouchSelection.test.tsx for why a bare namespace will not do).
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 mock.module('@pierre/diffs/react', () => ({
   ...realPierreDiffsReact,
@@ -67,7 +52,6 @@ async function mount(added: CodeFileAnnotationInput[], filepath = 'src/a.ts', co
 }
 
 async function chooseLines(start: number, end: number): Promise<HTMLTextAreaElement> {
-  // The pointer over the file is where the composer opens (the file area remembers it).
   const area = host!.firstElementChild as HTMLElement;
   await act(async () => {
     area.dispatchEvent(new PointerEvent('pointermove', { clientX: 100, clientY: 40 * start, bubbles: true }));
@@ -101,12 +85,10 @@ describe.if(hasDom)('CodeFileView line composer draft', () => {
     await press(document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!, 'Escape');
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
 
-    // Other lines start empty.
     const other = await chooseLines(4, 4);
     expect(other.value).toBe('');
     await press(other, 'Escape');
 
-    // The same lines again: the words come back.
     const back = await chooseLines(2, 3);
     expect(back.value).toBe('b and c should be one line');
 
@@ -117,18 +99,15 @@ describe.if(hasDom)('CodeFileView line composer draft', () => {
 
   test('two files with the same name keep separate drafts: the other one opens empty', async () => {
     const added: CodeFileAnnotationInput[] = [];
-    // Thread A's index.ts.
     await mount(added, 'index.ts', 'export const a = 1;\nexport const b = 2;');
     await type(await chooseLines(1, 1), 'rename a for thread A');
     await press(document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!, 'Escape');
 
-    // Thread B's index.ts, same name and lines, other contents: empty.
     await mount(added, 'index.ts', 'export const x = 9;\nexport const y = 8;');
     const other = await chooseLines(1, 1);
     expect(other.value).toBe('');
     await press(other, 'Escape');
 
-    // Thread A's file again: its words are still there.
     await mount(added, 'index.ts', 'export const a = 1;\nexport const b = 2;');
     expect((await chooseLines(1, 1)).value).toBe('rename a for thread A');
     expect(added).toEqual([]);

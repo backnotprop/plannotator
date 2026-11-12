@@ -103,14 +103,11 @@ describe('InlineMarkdown angle autolinks', () => {
   });
 });
 
-// The hrefs of every <a> in the rendered HTML, in order.
 function linkHrefs(html: string): string[] {
   return [...html.matchAll(/<a [^>]*href="([^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
 }
 
 describe('bare URL autolinks keep underscores (Workspaces ids: ws_, doc_, prj_)', () => {
-  // A bare URL after other text used to be cut at the first `_` (or `~`,
-  // `#`, `@`, `$`, `!`), because those end a plain-text chunk.
   test('a URL after text is one link through its underscores', () => {
     const url = 'http://localhost:3011/w/ws_01M5JCNXKERX0XDNABX0S8K9D0/docs/plan.md';
     const html = renderInline(`Open ${url} now.`);
@@ -147,10 +144,6 @@ describe('bare URL autolinks keep underscores (Workspaces ids: ws_, doc_, prj_)'
     expect(linkHrefs(renderInline('pay https://a.com/x$y_z ok'))).toEqual(['https://a.com/x$y_z']);
   });
 
-  // Guards the one-pass path: a URL that ends inside its plain-text chunk
-  // must not get a loop turn of its own (each turn rescans the rest of the
-  // text). 32,000 URLs render in about 0.1 s in one pass and several seconds
-  // with a turn per URL, so the budget is far from both.
   test('a paragraph of many plain URLs renders in one pass', () => {
     const n = 32_000;
     const text = Array.from({ length: n }, (_, i) => `https://a.com/p${i}`).join(' ');
@@ -188,10 +181,8 @@ describe('bare URL autolinks keep underscores (Workspaces ids: ws_, doc_, prj_)'
 });
 
 describe('InlineMarkdown math', () => {
-  // KaTeX reaches InlineMath through the renderer slot now (utils/math.ts);
-  // Plannotator's apps fill it by importing utils/math-eager. Register it
-  // here explicitly so these assertions do not depend on which test file ran
-  // first in bun's shared process, and restore whatever was there after.
+  // Register it here explicitly so these assertions do not depend on which test file ran first in
+  // bun's shared process, and restore whatever was there after.
   const saved = getMathRenderer();
   const savedSource = getMathRendererSource();
   beforeEach(() => setMathRenderer(katex));
@@ -334,7 +325,6 @@ describe('digit-only #refs vs hex swatches (#1932)', () => {
   const render = (text: string, githubRepo?: string, repoHost?: string) =>
     renderToStaticMarkup(createElement(InlineMarkdown, { text, githubRepo, repoHost }));
   const isSwatch = (html: string) => html.includes('background-color');
-  // Another test file may have loaded the Inbox app (which turns the flag on) earlier in this process.
   beforeEach(resetDigitHexIssueRefs);
   afterEach(resetDigitHexIssueRefs);
 
@@ -402,15 +392,12 @@ describe('cross-repo owner/repo#N refs', () => {
   });
 
   test('a repo named like a .js file is a ref, not a code path, unless the viewer knows the file', () => {
-    // No file handler: a ref.
     expect(hrefs(render('Fixed in vercel/next.js#1 and my_org/repo#2', GH))).toEqual([
       'https://github.com/vercel/next.js/issues/1',
       'https://github.com/my_org/repo/issues/2',
     ]);
-    // A handler, and the validator says the path is not a file: still a ref.
     const missing: CodePathValidationContextValue = { ready: true, validated: new Map([['vercel/next.js', { status: 'missing' }]]) as never };
     expect(hrefs(render('Fixed in vercel/next.js#1', { ...GH, onOpenCodeFile: () => {}, validation: missing }))).toEqual(['https://github.com/vercel/next.js/issues/1']);
-    // A handler and a file it knows (or cannot check): the code-file chip, as before.
     const found: CodePathValidationContextValue = { ready: true, validated: new Map([['src/app.js', { status: 'found', resolved: 'src/app.js' }]]) as never };
     for (const validation of [found, undefined]) {
       const html = render('See src/app.js#12 now', { ...GH, onOpenCodeFile: () => {}, validation });
@@ -477,7 +464,6 @@ describe('cross-repo refs where the caller names no repo (crossRepoRefsWithoutRe
   test('{ host }: it links on that host by the forge rule; a host no link can be formed for leaves it plain', () => {
     setCrossRepoRefsWithoutRepo({ host: 'gitlab.example.com' });
     expect(hrefs(render('See group/project#7 and #3.'))).toEqual(['https://gitlab.example.com/group/project/-/issues/7']);
-    // A caller with its own repo keeps it.
     expect(hrefs(render('See owner/repo#5', { githubRepo: 'acme/web', repoHost: 'github.com' }))).toEqual(['https://github.com/owner/repo/issues/5']);
     setCrossRepoRefsWithoutRepo({ host: 'git.internal.example' });
     expect(render('See owner/repo#5')).not.toContain('<a');
@@ -502,7 +488,6 @@ describe('code spans: a run of N backticks closes at the next run of exactly N',
 
   test('one space comes off each side, so a span can start and end with a backtick', () => {
     expect(renderInline('`` `x` ``')).toContain('>`x`</code>');
-    // All spaces: nothing is stripped.
     expect(renderInline('`` ``')).toContain('> </code>');
   });
 

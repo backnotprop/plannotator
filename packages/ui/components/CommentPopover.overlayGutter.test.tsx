@@ -1,23 +1,6 @@
 /**
- * Composer overlay gutter (#1525).
- *
- * The composer paints its glyphs with a mirror <div> over a transparent-text
- * textarea; only the caret comes from the textarea itself. When a classic,
- * layout-consuming scrollbar appears (Windows/Linux), the textarea's line box
- * narrows and the `overflow: hidden` mirror's does not, so the two wrap at
- * different points and the caret is drawn away from the glyph. The failures
- * guarded here:
- *
- *  - the mirror not picking up the scrollbar width (the bug itself),
- *  - the fix writing an inline style on platforms with overlay scrollbars,
- *    where the measured width is 0 — macOS/iOS/touch must stay byte-identical,
- *  - a stale gutter left behind when the scrollbar goes away, and
- *  - a resize that adds or drops the scrollbar without a keystroke (the
- *    ResizeObserver path; `syncScroll` alone only runs on scroll/value change).
- *
- * happy-dom has no layout engine, so the textarea's box metrics are stubbed.
- *
- * DOM-gated (DOM_TESTS=1), same harness as CommentPopover.skillReferences.test.tsx.
+ * The composer paints its glyphs with a mirror <div> over a transparent-text textarea; only the
+ * caret comes from the textarea itself.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React from 'react';
@@ -95,7 +78,6 @@ function overlay(): HTMLElement {
   return el;
 }
 
-/** Give the layout-less textarea a content box, with `scrollbar` px eaten. */
 function stubBox(el: HTMLTextAreaElement, scrollbar: number, border = 0): void {
   const width = 320;
   Object.defineProperty(el, 'offsetWidth', { value: width, configurable: true });
@@ -123,7 +105,6 @@ describe('composer overlay gutter', () => {
     const el = textarea();
     stubBox(el, 12);
     await type(el, 'a long enough comment to wrap');
-    // 4px class padding + the 12px the scrollbar took from the textarea.
     expect(overlay().style.paddingRight).toBe('16px');
   });
 
@@ -145,8 +126,6 @@ describe('composer overlay gutter', () => {
       await type(el, 'a long enough comment to wrap, and then some more of it');
       const ov = overlay();
       expect(ov.style.paddingRight).toBe('');
-      // Stronger than an empty value: the overlay carries no style attribute,
-      // so the rendered DOM is identical to the pre-fix build.
       expect(ov.getAttribute('style')).toBeNull();
     },
   );
@@ -188,8 +167,6 @@ describe('composer overlay gutter', () => {
         await type(el, 'a long enough comment to wrap');
         expect(overlay().getAttribute('style')).toBeNull();
 
-        // The panel narrows and the textarea grows a scrollbar — no keystroke,
-        // no scroll event; only the observer can notice.
         stubBox(el, 12);
         expect(callbacks.length).toBeGreaterThan(0);
         await act(async () => {
@@ -219,7 +196,6 @@ describe('composer overlay gutter', () => {
       const el = textarea();
       stubBox(el, 12);
       await type(el, 'a long enough comment to wrap');
-      // The scroll/value-change path still carries the fix.
       expect(overlay().style.paddingRight).toBe('16px');
     } finally {
       globalThis.ResizeObserver = realRO;

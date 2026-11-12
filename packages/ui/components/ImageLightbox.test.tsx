@@ -1,11 +1,3 @@
-/**
- * The image lightbox is keyboard-modal. The failures this guards: Escape
- * reaching the raw-HTML surface's Esc ladder (which would also drop the page
- * to Interact) instead of only closing the lightbox, and Mod+Enter submitting
- * a review decision behind an open lightbox. Both app-level handlers listen on
- * the window in the bubble phase, which is what the probe listener stands in
- * for.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -120,7 +112,6 @@ describe.if(hasDom)('ImageLightbox: the light version (plan review and annotate)
     await act(async () => { press('['); });
     expect(count(host)).toBe('2 of 3');
     expect(seen).toEqual([]);
-    // No pen and no comment box.
     expect(host.querySelector('textarea')).toBeNull();
   });
 
@@ -156,8 +147,6 @@ describe.if(hasDom)('ImageLightbox: the light version (plan review and annotate)
   });
 });
 
-// A touch screen's swipe (`swipe`, approval "inbox-image-swipe": the Inbox's decision mode passes it, with each
-// picture named by its choice). The swipe's numbers are the Inbox phone viewer's (useSwipeStep).
 describe.if(hasDom)('ImageLightbox: names and the swipe', () => {
   const NAMED = [
     { src: '/api/inbox/messages/m/image?src=a', alt: 'Option A', name: 'A · Gmail-style ⋯' },
@@ -172,7 +161,6 @@ describe.if(hasDom)('ImageLightbox: names and the swipe', () => {
       root.render(<ImageLightbox src={images[0]!.src} alt={images[0]!.alt} images={images} onClose={onClose} swipe={swipe} />);
     });
     cleanups.push(() => root.unmount());
-    // The area the swipe is heard on: the framed viewer's image area, or the one-image overlay.
     const area = host.querySelector<HTMLElement>('[data-lightbox-swipe]') ?? host.querySelector<HTMLElement>('[data-image-lightbox]')!;
     area.getBoundingClientRect = () => ({ left: 0, top: 0, width: 390, height: 600, right: 390, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
     return { host, area };
@@ -225,7 +213,6 @@ describe.if(hasDom)('ImageLightbox: names and the swipe', () => {
     };
     expect(await open(1)).toBe('B · Strip right, image 2 of 3');
     expect(await open()).toBe('A · Strip left, image 1 of 3');
-    // A place that is not that picture is not taken at its word.
     expect(await open(2)).toBe('A · Strip left, image 1 of 3');
   });
 
@@ -267,7 +254,6 @@ describe.if(hasDom)('ImageLightbox: names and the swipe', () => {
       });
     };
     await flick();
-    // Still sliding: nothing stepped yet.
     expect(count()).toBe('1 of 3');
     await flick();
     expect(count()).toBe('2 of 3');
@@ -290,10 +276,8 @@ describe.if(hasDom)('ImageLightbox: names and the swipe', () => {
       const { host } = await mountNamed(() => {}, false, images);
       const stage = host.querySelector('[data-lightbox-stage]')!;
       expect(host.querySelector('[data-lightbox-track]')).toBeNull();
-      // The stage sits where it always did: straight in the image area, or straight in the one-image overlay.
       expect(stage.parentElement!.matches(images.length > 1 ? '[data-lightbox-swipe], .relative.flex-1' : '[data-image-lightbox]')).toBe(true);
     }
-    // With `swipe`, the track is there for the finger to move.
     const { host } = await mountNamed(() => {});
     expect(host.querySelector('[data-lightbox-track] [data-lightbox-stage]')).not.toBeNull();
   });
@@ -308,12 +292,8 @@ describe.if(hasDom)('ImageLightbox: names and the swipe', () => {
   });
 });
 
-// Zoom (#2067). happy-dom lays nothing out, so the stage's box and the image's
-// own size are given here; tests/e2e/inbox-image-viewer.spec.ts measures the
-// real thing in Chromium.
 const STAGE = { left: 0, top: 0, width: 1000, height: 600 };
 
-/** Give the stage a box and the image a natural size (2000 × 1000), then load it. Fit is then 50%. */
 async function loadImage(host: HTMLElement, width = 2000, height = 1000) {
   const stage = host.querySelector<HTMLElement>('[data-lightbox-stage]')!;
   stage.getBoundingClientRect = () =>
@@ -331,7 +311,6 @@ function view(img: HTMLElement) {
   return { x: Number(m[1]), y: Number(m[2]), scale: Number(m[3]) };
 }
 
-/** happy-dom's WheelEvent drops some of its init (the pointer, Shift), so they are set on the event. */
 function wheelEvent(deltaY: number, init: WheelEventInit = {}) {
   const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...init });
   Object.defineProperty(event, 'clientX', { value: init.clientX ?? 500 });
@@ -363,7 +342,6 @@ describe.if(hasDom)('ImageLightbox: zoom (#2067)', () => {
     expect(view(img)).toEqual({ x: 0, y: 50, scale: 0.5 });
     expect(zoomText(host)).toBe('50%');
     expect(fitButton(host).textContent).toBe('Actual size');
-    // The pixel under the pointer (500, 300) stays under it.
     const before = view(img);
     const imageX = (500 - before.x) / before.scale;
     await wheel(stage, -100, { ctrlKey: true });
@@ -406,7 +384,6 @@ describe.if(hasDom)('ImageLightbox: zoom (#2067)', () => {
     // Shift turns it sideways; the image never leaves the stage.
     await wheel(loaded.stage, 5000, { shiftKey: true });
     expect(view(loaded.img)).toEqual({ x: -1000, y: -100, scale: 1 });
-    // With Ctrl it zooms even there.
     await wheel(loaded.stage, -100, { ctrlKey: true });
     expect(view(loaded.img).scale).toBeGreaterThan(1);
   });
@@ -415,7 +392,6 @@ describe.if(hasDom)('ImageLightbox: zoom (#2067)', () => {
     const host = await mountStepping(IMAGES[0]!.src, () => {});
     const { stage, img } = await loadImage(host);
     await act(async () => fitButton(host).click());
-    // Actual size: its own pixels, read from the top-left where it is larger than the stage.
     expect(view(img)).toEqual({ x: 0, y: 0, scale: 1 });
     expect(stage.getAttribute('data-lightbox-stage')).toBe('actual');
     await pointer(stage, 'pointerdown', 1, 500, 300);
@@ -447,7 +423,6 @@ describe.if(hasDom)('ImageLightbox: zoom (#2067)', () => {
       await pointer(stage, 'pointerup', 1, 500, 300);
     }
     expect(view(img).scale).toBe(0.5);
-    // Two fingers 200 px apart spread to 400 px: twice the scale.
     await pointer(stage, 'pointerdown', 1, 400, 300, 'touch');
     await pointer(stage, 'pointerdown', 2, 600, 300, 'touch');
     await pointer(stage, 'pointermove', 1, 300, 300, 'touch');
@@ -500,7 +475,6 @@ describe.if(hasDom)('ImageLightbox: zoom (#2067)', () => {
     expect(stage.tabIndex).toBe(0);
     expect(stage.getAttribute('aria-label')).toBe('Image: a.png');
     await act(async () => fitButton(host).click());
-    // Focus on the overlay (not the stage): ↓ does not pan.
     host.querySelector<HTMLElement>('[data-image-lightbox]')!.focus();
     await act(async () => { press('ArrowDown'); });
     expect(view(img)).toEqual({ x: 0, y: 0, scale: 1 });
@@ -521,7 +495,6 @@ describe.if(hasDom)('ImageLightbox: zoom (#2067)', () => {
     await act(async () => { press(' '); });
     expect(view(img).y).toBe(-525);
     expect(seen).toEqual([]);
-    // ← → are still stepping, and focus stays on the new image's stage.
     await act(async () => { press('ArrowRight'); });
     expect(host.querySelector('[data-lightbox-count]')!.textContent).toBe('2 of 3');
     const next = host.querySelector<HTMLElement>('[data-lightbox-stage]')!;
@@ -558,7 +531,6 @@ describe.if(hasDom)('ImageLightbox: zoom (#2067)', () => {
     expect(start.defaultPrevented).toBe(true);
     expect(change.defaultPrevented).toBe(true);
     expect(view(img).scale).toBeCloseTo(1, 5);
-    // Over the header, too, the page does not zoom.
     const header = host.querySelector('[data-lightbox-count]')!;
     const overHeader = gesture('gesturechange', 3);
     await act(async () => { header.dispatchEvent(overHeader); });

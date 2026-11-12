@@ -1,12 +1,3 @@
-/**
- * AnnotationPanel's Questions section (`questionRows`, DOM-gated).
- *
- * What regresses if this fails: answers show twice (as a Questions row AND a
- * Comment card), a row click stops reaching the host (no jump to the card),
- * an answer whose question was edited away vanishes from the panel instead
- * of listing Unanchored, or a host that passes no rows loses its answers
- * from the timeline.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -88,7 +79,6 @@ describe('AnnotationPanel Questions section', () => {
     expect(rowEls.map((r) => r.dataset.questionRowStatus)).toEqual(['answered', 'open']);
     expect(rowEls[0].textContent).toContain('Local only');
     expect(rowEls[1].textContent).toContain('Not answered yet');
-    // The comment stays a card; the answer does not become one.
     expect(cardIds(el)).toEqual(['c1']);
     await act(async () => { rowEls[1].click(); });
     expect(selected.map((r) => r.key)).toEqual([rows[1].key]);

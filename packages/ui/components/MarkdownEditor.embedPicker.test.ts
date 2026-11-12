@@ -1,9 +1,4 @@
-/**
- * Regression coverage for the mount-scoped `/embed` picker.
- *
- * Requires DOM_TESTS=1 (happy-dom preload). Run:
- *   DOM_TESTS=1 bun test packages/ui/components/MarkdownEditor.embedPicker.test.ts
- */
+/** Regression coverage for the mount-scoped `/embed` picker. Requires DOM_TESTS=1 (happy-dom preload). */
 import {
   CompletionContext,
   completionStatus,
@@ -57,8 +52,6 @@ function createView(doc: string, config: EmbedPickerConfig, includeSlashMenu = f
 async function pickerResult(view: EditorView): Promise<CompletionResult | null> {
   const pos = view.state.selection.main.head;
   const sources = view.state.languageDataAt<CompletionSource>('autocomplete', pos);
-  // `slashCommands()` may contribute the first source. The embed source is the
-  // one whose completion range begins at the `/` for an `/embed` query.
   for (const source of sources) {
     const result = await source(new CompletionContext(view.state, pos, true, view));
     if (result?.filter === false) return result;
@@ -227,8 +220,6 @@ describe('embed picker: empty states', () => {
 
 describe('embed picker: host labels', () => {
   test.skipIf(!hasDom)('a host replaces the three type-naming rows; an absent key keeps the built-in text', async () => {
-    // Sentinel strings: the point is that the host's wording reaches the row,
-    // and that a missing key falls back, not what the words are.
     const labels = { upload: 'UPLOAD-SENTINEL', empty: 'EMPTY-SENTINEL', noMatch: (q: string) => `NOMATCH-${q}` };
 
     const empty = await requirePickerResult(createView('/embed ', {
@@ -243,7 +234,6 @@ describe('embed picker: host labels', () => {
     }));
     requireOption(noMatch, 'NOMATCH-missing');
 
-    // Only `upload` supplied: the empty row keeps the built-in wording.
     const partial = await requirePickerResult(createView('/embed ', {
       getTargets: () => [], buildInsertLine, uploadTarget: async () => null, labels: { upload: 'UPLOAD-SENTINEL' },
     }));
@@ -282,7 +272,6 @@ describe('embed picker: upload row availability', () => {
         ...(entry.configured ? { uploadTarget } : {}),
       });
       const result = await requirePickerResult(view);
-      // The explicit action label is part of the public picker contract.
       expect(result.options.some((option) => option.label === 'Upload HTML...')).toBe(
         entry.configured,
       );
@@ -431,7 +420,6 @@ describe('embed picker: notice row', () => {
       getNotice: () => null,
     });
 
-    // Sentinel assertion: this guards conditional row presence, not host copy.
     expect((await requirePickerResult(withNotice)).options.some((row) => row.label === notice)).toBe(
       true,
     );

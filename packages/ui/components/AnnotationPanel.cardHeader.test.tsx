@@ -1,14 +1,3 @@
-/**
- * The `renderCardHeader` slot against the REAL AnnotationPanel (DOM-gated).
- *
- * What these catch: a header slot that lands outside the card's header row
- * (where a status stamp would sit under the quote instead of beside the
- * type word), a click inside it that selects the card underneath — the
- * defect `renderCardFooter` already guards against — a slot that disappears
- * on a read-only panel or in the All-files grouped view, and the one that
- * matters for Plannotator: a wrapper element existing when no host supplied
- * the prop.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -90,9 +79,6 @@ describe.if(hasDom)('AnnotationPanel renderCardHeader', () => {
       const slot = card.querySelector<HTMLElement>('[data-annotation-card-header]');
       expect(slot).not.toBeNull();
       expect(slot!.querySelector(`[data-test-stamp="${card.getAttribute('data-annotation-id')}"]`)).not.toBeNull();
-      // The header row is the card's FIRST element child (type word, chips,
-      // author · time). A slot rendered anywhere else would still be "in the
-      // card" while looking nothing like a stamp.
       const headerRow = card.firstElementChild as HTMLElement;
       expect(slot!.parentElement).toBe(headerRow);
       // Deliberately after the timestamp: the stamp reads as part of the meta
@@ -110,7 +96,6 @@ describe.if(hasDom)('AnnotationPanel renderCardHeader', () => {
     const button = document.querySelector<HTMLButtonElement>('[data-test-stamp="a1"]')!;
     await act(async () => { button.click(); });
     expect(selected).toEqual([]);
-    // The card itself still selects, so the stopPropagation is scoped.
     const card = document.querySelector<HTMLElement>('[data-annotation-id="a1"]')!;
     await act(async () => { card.click(); });
     expect(selected).toEqual(['a1']);

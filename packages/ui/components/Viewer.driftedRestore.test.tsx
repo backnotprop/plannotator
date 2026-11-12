@@ -1,18 +1,3 @@
-/**
- * Draft/share restores survive an upgrade that changes the rendered element
- * census.
- *
- * web-highlighter's stored metas are positional: `parentIndex` is the index
- * among ALL elements of that tag under the container. #1509 hoisted a GitHub
- * alert's bold-only first line out of the alert body and onto the icon row, so
- * a titled alert stopped contributing its own `<p>` — every stored index after
- * it now names a LATER element, and the restore resolves onto the wrong text.
- * Viewer turns the hook's content verification on for exactly this: the bad
- * resolve is dropped and the text search re-anchors the annotation by its own
- * quote.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -86,11 +71,8 @@ const articleRoot = (): HTMLElement => {
 };
 
 /**
- * The draft a reviewer wrote on the PRE-#1509 build: the alert body still
- * rendered the title as its own `<p>`, so the paragraph holding the quote sat
- * one `<p>` later in the container than it does today. Everything else (the
- * quote, the offsets inside the paragraph) is unchanged, which is what makes
- * the stale index resolve silently onto a different paragraph.
+ * Everything else (the quote, the offsets inside the paragraph) is unchanged, which is what
+ * makes the stale index resolve silently onto a different paragraph.
  */
 function preUpgradeDraft(): Annotation {
   const paragraphs = Array.from(articleRoot().getElementsByTagName('p'));
@@ -105,9 +87,7 @@ function preUpgradeDraft(): Annotation {
   }
   return {
     id: 'ann-drifted',
-    // Any stable id: restore resolves on the metas and the quote, never on
-    // this. Keep it camelCase — Tailwind scans this file, and a hyphenated id
-    // that parses as a utility candidate leaks a rule into every build.
+    // Any stable id: restore resolves on the metas and the quote, never on this.
     blockId: 'alertBody',
     startOffset: textOffset,
     endOffset: textOffset + QUOTE.length,
@@ -134,7 +114,6 @@ describe('Viewer restore after an element-census change', () => {
     const trailing = Array.from(articleRoot().getElementsByTagName('p'))
       .find((p) => (p.textContent ?? '').includes('BRAVO'));
     expect(trailing?.querySelector('mark')).toBeNull();
-    // ...and the rescued highlight is inside the alert it was written on.
     expect(painted[0]?.closest('[data-block-type="alert"]')).not.toBeNull();
   });
 });

@@ -1,20 +1,3 @@
-/**
- * Ask AI from a diagram comment: the composer offers the markdown
- * composer's "Ask AI" when the host passes its handler, and the question it
- * sends identifies the part.
- *
- * What regresses if these fail:
- * - the diagram composer has no Ask AI (the owner's report), or offers one
- *   that sends before anything is typed;
- * - the question reaches the host without the part's identity (family,
- *   kind, id, label, document line) or the diagram source, so the agent is
- *   asked about "Approve?" with no idea where that is;
- * - a host that passes no handler suddenly shows an Ask AI button;
- * - a question asked in the popout leaves the popout covering the panel the
- *   answer streams into.
- *
- * DOM-gated (DOM_TESTS=1). Same fixture as DiagramBlock.anchor.test.tsx.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,14 +33,11 @@ const MARKDOWN = [
   '',
   'Some prose after.',
 ].join('\n');
-/** `D` is declared on line 7 of the document (1-based). */
 const D_DOCUMENT_LINE = 7;
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let restoreParser: (() => void) | null = null;
-// happy-dom defines the two geometry methods on SVGGraphicsElement, which
-// would shadow a stub on SVGElement; install where the engine defines them.
 const svgProto = (hasDom ? ((globalThis as { SVGGraphicsElement?: typeof SVGElement }).SVGGraphicsElement ?? SVGElement).prototype : {}) as unknown as Record<string, unknown>;
 const elementProto = (hasDom ? Element.prototype : {}) as unknown as Record<string, unknown>;
 const saved = { getBBox: svgProto['getBBox'], getScreenCTM: svgProto['getScreenCTM'] };
@@ -206,7 +186,6 @@ describe.if(hasDom)('DiagramBlock: Ask AI from a diagram comment', () => {
     expect(context.detail).toContain(`Diagram node Approve? (D), line ${D_DOCUMENT_LINE}`);
     expect(context.detail).toContain('Mermaid (flowchart)');
     expect(context.detail).toContain('U([Reviewer]) --> D{Approve?}');
-    // Asked, not saved: no comment lands, and the composer closes.
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).toBeNull());
     expect(added).toEqual([]);
   });
@@ -252,7 +231,6 @@ describe.if(hasDom)('DiagramBlock: Ask AI from a diagram comment', () => {
     });
     await settle();
     expect(added).toEqual([]);
-    // Refused: the draft is editable and savable again.
     await act(async () => {
       release(false);
     });

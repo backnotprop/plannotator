@@ -1,21 +1,3 @@
-/**
- * Comments on part of an image (#2100, approval "image-region-comments",
- * variant C), driven through the REAL Viewer, lightbox, comment composer and
- * annotations panel (DOM-gated, DOM_TESTS=1). happy-dom lays nothing out, so
- * the stage's box and the image's own size are given, as in
- * ImageLightbox.test.tsx; tests/e2e/image-region-comments.spec.ts draws in
- * Chromium.
- *
- * Failures to catch: Region does not turn a drag into a box (it pans); the
- * box is stored in screen pixels instead of the image's own pixels; Save adds
- * something other than an ordinary COMMENT with one `imageRegion` field (the
- * src as written, its line, the box); Region drops back to Move after Save;
- * Escape closes the viewer before it leaves Region; the count and drawer do
- * not list the comment, or picking its card does not zoom to it; a saved
- * comment's box is not drawn again after a reload (draft restore); a region
- * comment is reported unanchored while its image is there, or not when it is
- * gone; the highlighter paints it; keys typed in the composer reach the page.
- */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -111,7 +93,6 @@ async function mountHost(markdown: string, initial: Annotation[] = [], reports: 
   return state;
 }
 
-/** Give the stage a box and the image its own size (2000 × 1000; Fit is 50%), then load it. */
 async function loadImage() {
   const stage = document.querySelector<HTMLElement>('[data-lightbox-stage]')!;
   stage.getBoundingClientRect = () =>
@@ -156,7 +137,6 @@ test.skipIf(!hasDom)('draw a box in Region mode, write the comment, save: one CO
   const state = await mountHost(MARKDOWN);
   const { stage } = await openViewer();
   const viewer = document.querySelector<HTMLElement>('[data-image-lightbox]')!;
-  // A single image with region comments gets the framed viewer and the strip.
   const move = viewer.querySelector<HTMLButtonElement>('[data-region-tool="move"]')!;
   const region = viewer.querySelector<HTMLButtonElement>('[data-region-tool="region"]')!;
   expect(move.getAttribute('role')).toBe('radio');
@@ -167,8 +147,6 @@ test.skipIf(!hasDom)('draw a box in Region mode, write the comment, save: one CO
   expect(region.getAttribute('aria-checked')).toBe('true');
   expect(stage.getAttribute('data-region-tool-active')).toBe('region');
 
-  // At Fit (50%, the image at y = 50) a drag from (100, 150) to (300, 250)
-  // covers image pixels (200, 200) to (400, 400).
   await pointer(stage, 'pointerdown', 100, 150);
   await pointer(stage, 'pointermove', 200, 200);
   expect(viewer.querySelector('[data-region-draft]')).not.toBeNull();
@@ -206,7 +184,6 @@ test.skipIf(!hasDom)('draw a box in Region mode, write the comment, save: one CO
     naturalWidth: 2000,
     naturalHeight: 1000,
   });
-  // On the image's block, and listed in the document's panel with its crop info.
   const imageBlock = parserModule!.parseMarkdownToBlocks(MARKDOWN).find((b) => b.content.includes('status-colors.png'))!;
   expect(saved.blockId).toBe(imageBlock.id);
   const card = document.querySelector<HTMLElement>(`[data-test-panel] [data-annotation-id="${saved.id}"]`)!;
@@ -215,19 +192,16 @@ test.skipIf(!hasDom)('draw a box in Region mode, write the comment, save: one CO
   expect(card.textContent).toContain('400 × 200 px · line 6');
   expect(card.textContent).not.toContain('"figures/status-colors.png"');
 
-  // Its box is drawn, Region stays on to draw another, and the count says 1.
   expect(viewer.querySelector(`[data-region-box="${saved.id}"]`)).not.toBeNull();
   expect(region.getAttribute('aria-checked')).toBe('true');
   expect(viewer.querySelector('[data-region-count]')!.textContent).toBe('1');
   expect(document.querySelector('[data-comment-popover]')).toBeNull();
 
-  // Escape: back to Move first, the viewer stays open; then it closes.
   stage.focus();
   await act(async () => { press('Escape'); });
   expect(move.getAttribute('aria-checked')).toBe('true');
   expect(document.querySelector('[data-image-lightbox]')).not.toBeNull();
 
-  // The export names the image, its line, and the box.
   const out = parserModule!.exportAnnotations(parserModule!.parseMarkdownToBlocks(MARKDOWN), state.annotations);
   expect(out).toContain('Feedback on a region of the image figures/status-colors.png\nImage: figures/status-colors.png (line 6)\nRegion: x=200 y=200 w=400 h=200 (of 2000×1000)\n> the paused box should be grey');
 });
@@ -257,13 +231,11 @@ test.skipIf(!hasDom)('the count opens the drawer; a card zooms to its box; delet
   expect(card.textContent).toContain('retry goes back to Failed');
   expect(card.textContent).toContain('100 × 50 px · line 6');
 
-  // Picking the card zooms to the box (it fills half the stage's tighter axis) and rings it.
   await act(async () => card.click());
   const m = /scale\(([\d.]+)\)/.exec(img.style.transform)!;
   expect(Number(m[1])).toBeCloseTo(Math.min(500 / 100, 300 / 50), 5);
   expect(viewer.querySelector('[data-region-box="r1"]')!.hasAttribute('data-region-selected')).toBe(true);
 
-  // Escape from inside the drawer closes it, focus back on the count.
   card.focus();
   await act(async () => { press('Escape'); });
   expect(viewer.querySelector('[data-region-drawer]')).toBeNull();
@@ -296,7 +268,6 @@ test.skipIf(!hasDom)('after a reload the saved box is drawn again; it is anchore
   expect(last.unanchored).not.toContain('r1');
   await openViewer();
   const box = document.querySelector<HTMLElement>('[data-region-box="r1"]')!;
-  // At Fit (50%, image at y = 50): left 100, top 150, 200 × 100 on screen.
   expect([box.style.left, box.style.top, box.style.width, box.style.height]).toEqual(['100px', '150px', '200px', '100px']);
 
   await act(async () => root?.unmount());
@@ -329,7 +300,6 @@ test.skipIf(!hasDom)('selecting a region card in the document\'s panel opens the
   expect(viewer.querySelector('[data-region-drawer] [data-annotation-id="r9"]')).not.toBeNull();
 });
 
-/** Draw a box at Fit from stage (x0, y0) to (x1, y1) and save `text` with Mod+Enter. */
 async function drawAndSave(stage: HTMLElement, from: [number, number], to: [number, number], text: string) {
   await act(async () => document.querySelector<HTMLButtonElement>('[data-region-tool="region"]')!.click());
   await pointer(stage, 'pointerdown', ...from);
@@ -351,12 +321,10 @@ test.skipIf(!hasDom)('a comment made in the viewer opens it again from its card 
   const { stage } = await openViewer();
   await drawAndSave(stage, [100, 150], [300, 250], 'grey, not orange');
   const id = state.annotations[0]!.id;
-  // The add's own selection does not refocus the open viewer.
   expect(document.querySelector('[data-region-drawer]')).toBeNull();
   await act(async () => document.querySelector<HTMLButtonElement>('[data-lightbox-close]')!.click());
   await settle();
   expect(document.querySelector('[data-image-lightbox]')).toBeNull();
-  // Closing let go of the selection, so the card is a fresh pick.
   expect(state.selected).toBeNull();
 
   await act(async () => document.querySelector<HTMLElement>(`[data-test-panel] [data-annotation-id="${id}"]`)!.click());
@@ -365,7 +333,6 @@ test.skipIf(!hasDom)('a comment made in the viewer opens it again from its card 
   expect(viewer).not.toBeNull();
   const { img } = await loadImage();
   await settle();
-  // Zoomed to the box (400 × 200 image pixels fill half the stage: 500/400 = 1.25), its card selected.
   const scale = Number(/scale\(([\d.]+)\)/.exec(img.style.transform)![1]);
   expect(scale).toBeCloseTo(Math.min(500 / 400, 300 / 200), 5);
   expect(viewer.querySelector(`[data-region-box="${id}"]`)!.hasAttribute('data-region-selected')).toBe(true);
@@ -404,7 +371,6 @@ test.skipIf(!hasDom)('a comment is anchored only while the document references i
     imageRegion: { v: 1, src: 'a.png', sourceLine: 3, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 10, naturalHeight: 10 },
   };
   const reports: Report[] = [];
-  // `data.png` and `a.png.bak` contain the text "a.png" but are other images.
   await mountHost('# Doc\n\n![one](data.png)\n\n![two](a.png.bak)\n', [saved], reports);
   expect(reports.filter((r) => r.attempted.includes('r2')).at(-1)!.unanchored).toContain('r2');
 });
@@ -412,7 +378,6 @@ test.skipIf(!hasDom)('a comment is anchored only while the document references i
 test.skipIf(!hasDom)('a single image: in Move a tap beside the image closes the viewer (its click swallowed, #2067); in Region it does not', async () => {
   await mountHost(MARKDOWN);
   const { stage } = await openViewer();
-  // At Fit the image spans y 50 to 550: (500, 10) is beside it.
   const tapBeside = async () => {
     await pointer(stage, 'pointerdown', 500, 10);
     await pointer(stage, 'pointerup', 500, 10);
@@ -429,6 +394,5 @@ test.skipIf(!hasDom)('a single image: in Move a tap beside the image closes the 
   await act(async () => document.querySelector<HTMLButtonElement>('[data-region-tool="move"]')!.click());
   const click = await tapBeside();
   expect(document.querySelector('[data-image-lightbox]')).toBeNull();
-  // The overlay takes the click with it, so nothing beneath receives it.
   expect(click.defaultPrevented).toBe(true);
 });

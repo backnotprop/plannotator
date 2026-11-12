@@ -1,26 +1,3 @@
-/**
- * A restored diagram comment must survive the window in which no diagram has
- * mounted yet.
- *
- * Since 0.41.1 `Viewer` reaches `MermaidBlock` / `GraphvizBlock` through
- * `React.lazy`, so on a chunked host the document paints, the draft restores,
- * and only then does the diagram engine arrive. Between those two moments the
- * annotation names a diagram that does not exist in the DOM. Three things
- * must hold across that window, and each of them is a way to lose the comment:
- *
- * - the row stays LISTED (the panel is the only place a comment on a part of
- *   a diagram can be read at all, so dropping it here is data loss);
- * - it is not reported unanchored — `Viewer`'s "this document has no diagram"
- *   report keys on the PARSE, not on what has mounted, or every lazy load
- *   would flash the "Unanchored" chip on a comment that restores fine;
- * - once the engine arrives, the block claims the row and paints its badge,
- *   with no second restore pass and no reload.
- *
- * The engine's arrival is held open here by gating the runtime loader, which
- * is the same pending state the lazy chunk produces one step earlier.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -70,7 +47,6 @@ const MARKDOWN = [
 const BLOCKS = hasDom ? parseMarkdownToBlocks(MARKDOWN) : [];
 const FENCE_ID = hasDom ? (BLOCKS.find((b) => b.type === 'code')?.id ?? '') : '';
 
-/** The row a draft restore hands back: a comment on node D of the fence. */
 const RESTORED: Annotation = {
   id: 'a1',
   blockId: FENCE_ID,
@@ -140,7 +116,6 @@ async function waitFor(check: () => void, tries = 60): Promise<void> {
   throw lastError;
 }
 
-/** The engine, held until the test lets it arrive. */
 function gatedRuntime(): { arrive: () => void; loader: () => Promise<unknown> } {
   let release: (() => void) | null = null;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -189,14 +164,11 @@ describe.if(hasDom)('Viewer: a diagram comment restored before the diagram mount
         </>,
       );
     });
-    // The lazy block chunk has resolved; its engine has not.
     await waitFor(() => expect(host!.querySelector('[data-diagram-pending]')).not.toBeNull());
     await settle(60);
 
     expect(host!.querySelector('[data-diagram-svg] > svg')).toBeNull();
-    // Listed: the panel is the comment's only home until the diagram arrives.
     expect(host!.querySelector(`[data-annotation-panel] [data-annotation-id="${RESTORED.id}"]`)).not.toBeNull();
-    // Not chipped: nobody may call it unanchored while no diagram has mounted.
     expect(reports.flatMap((r) => r.unanchored)).not.toContain(RESTORED.id);
 
     engine.arrive();

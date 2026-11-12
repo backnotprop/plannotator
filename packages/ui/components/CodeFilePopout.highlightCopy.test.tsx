@@ -1,16 +1,3 @@
-/**
- * Ctrl+C / Cmd+C in the code-file view's line composer (plan review's
- * code-file popout, the Inbox file pane, code review's whole-file view)
- * (DOM-gated, DOM_TESTS=1).
- *
- * What regresses: with lines chosen and their composer open (focus in its
- * textarea) the copy carries nothing, or the lines lose their line breaks;
- * text typed and selected in the composer is overwritten by the lines; a copy
- * still takes the clipboard once the composer has closed.
- *
- * Pierre's `File` is replaced by a stub that hands its options back, so a line
- * range is chosen the way Pierre reports one (`onLineSelectionEnd`).
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,8 +9,6 @@ interface CapturedFileProps {
 }
 let lastFileProps: CapturedFileProps | null = null;
 
-// Spread-captured before the mock replaces the module record (see
-// DiffViewer.compactTouchSelection.test.tsx for why a bare namespace will not do).
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 mock.module('@pierre/diffs/react', () => ({
   ...realPierreDiffsReact,
@@ -64,7 +49,6 @@ async function mount() {
 }
 
 async function chooseLines(start: number, end: number): Promise<HTMLTextAreaElement> {
-  // The pointer over the file is where the composer opens (the file area remembers it).
   const area = host!.firstElementChild as HTMLElement;
   await act(async () => {
     area.dispatchEvent(new PointerEvent('pointermove', { clientX: 100, clientY: 40 * start, bubbles: true }));
@@ -75,7 +59,6 @@ async function chooseLines(start: number, end: number): Promise<HTMLTextAreaElem
   return el;
 }
 
-/** What a Ctrl+C at `target` puts on the clipboard (the browser fires `copy`). */
 function copyAt(target: EventTarget) {
   const data = new Map<string, string>();
   const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;

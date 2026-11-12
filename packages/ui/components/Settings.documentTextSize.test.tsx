@@ -1,9 +1,3 @@
-/**
- * Settings → Display → Text size (#2066): picking a step reaches the page the
- * app is on (through `useDocumentTextSize`, which the plan / annotate app
- * mounts), picking the default clears it again, the row is offered in annotate
- * too, and a host that does not opt in never shows a row that would do nothing.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

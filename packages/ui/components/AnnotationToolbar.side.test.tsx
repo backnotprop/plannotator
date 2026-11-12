@@ -1,19 +1,3 @@
-/**
- * The selection toolbar's opt-in "Side" button (`onSide`, the Inbox's Ask AI).
- * Failures to catch: Side showing for a host that did not ask for it (plan
- * review, Workspaces), or its divider left behind; Side drifting out of its
- * place after the reactions, between its own divider and the one before ×;
- * a press that does not hand the host the selected words and their context,
- * or leaves the toolbar open; Side losing the touch-target marker theme.css sizes to 44px
- * on a phone. With the host's `sideButton` (the Inbox: the thread agent's
- * mark): the word coming back beside the icon, the button unnamed or named
- * something else than the host's label, the host's glyph not drawn (or the
- * two bubbles lost when it gives none), the button out of its place, a press
- * that stopped working; and, without `sideButton`, another host's "Side"
- * word changing.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -62,7 +46,6 @@ async function mount(props: Partial<React.ComponentProps<typeof AnnotationToolba
   return row;
 }
 
-/** The row left to right: each button's name ("|" for a divider). */
 const rowOrder = (row: HTMLElement) =>
   [...row.children].map((el) => {
     if (el.tagName !== 'BUTTON') return el.querySelector('button') ? nameOf(el.querySelector('button')!) : '|';
@@ -138,7 +121,6 @@ describe.if(hasDom)('AnnotationToolbar Side', () => {
     await mount({ onSide: (text, context) => (sides.push(text), anchors.push(context.element === anchor && context.text === text)), onClose: () => (closes += 1) });
     await act(async () => sideButton()!.click());
     expect(sides).toEqual(['the backoff is two, four and eight seconds']);
-    // The selection's context too, as the selection actions get it: the host says where the words came from.
     expect(anchors).toEqual([true]);
     expect(closes).toBe(1);
   });

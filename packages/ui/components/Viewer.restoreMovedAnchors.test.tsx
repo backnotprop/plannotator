@@ -1,23 +1,3 @@
-/**
- * The restore report says where a comment's text is NOW.
- *
- * Block ids are positional (`block-N`), so after the document changed a
- * comment's stored `blockId` can name another block while its text sits
- * elsewhere; the export turns `blockId` into a line label. The highlighter's
- * restore report therefore lists, under `moved`, each comment whose stored
- * block no longer holds its text — with the block the text landed in, or ''
- * when the text is gone — and lists nothing for an unchanged document. A
- * comment that nothing could paint (no positions to try, quote not found) is
- * reported unanchored too. Rows that are not text highlights (diff-view
- * comments, checkbox toggles) are skipped outright, so their blockId is
- * never reported for rewriting.
- *
- * Block ids are built from the parsed blocks or at runtime, never written as
- * literals: Tailwind scans this package, and a literal that parses as a
- * utility leaks a rule into the guides.show viewer's CSS.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -108,8 +88,6 @@ describe.skipIf(!hasDom)('restore report: moved anchors', () => {
   });
 
   test('a heading inserted above shifts the block id; the verified positions are kept', async () => {
-    // The `<p>` census is unchanged, so the stored positions still paint the
-    // right text, but the stored id now names the inserted heading.
     const edited = ['# Notes', '', '## Inserted', '', 'The retry loop is slow.', '', 'Cache keys collide.'].join('\n');
     const reports = await restore(edited, [retry()]);
     expect(reports[0]!.moved).toEqual([
@@ -160,7 +138,6 @@ describe.skipIf(!hasDom)('restore report: moved anchors', () => {
       endMeta: undefined,
     });
     const reports = await restore(ORIGINAL, [diffComment, checkbox]);
-    // Nothing a highlighter restore owns: no pass is reported at all.
     expect(reports).toEqual([]);
   });
 });

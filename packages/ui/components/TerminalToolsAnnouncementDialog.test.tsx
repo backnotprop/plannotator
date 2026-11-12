@@ -99,16 +99,14 @@ describe('TerminalToolsAnnouncementDialog', () => {
     await mountDialog();
 
     const element = video();
-    // Silent + inline is what lets a browser autoplay it at all (and what
-    // keeps iOS from hijacking the dialog into a fullscreen player). React
-    // mirrors `muted` to the property, not the attribute, so read both ways.
+    // Silent + inline is what lets a browser autoplay it at all (and what keeps iOS from hijacking
+    // the dialog into a fullscreen player).
     expect(element.muted || element.hasAttribute('muted')).toBe(true);
     expect(element.hasAttribute('playsinline')).toBe(true);
     expect(element.hasAttribute('loop')).toBe(true);
     expect(element.hasAttribute('autoplay')).toBe(true);
     expect(element.getAttribute('poster')).toMatch(/^https:\/\/plannotator\.ai\/assets\//);
 
-    // mp4 is the first source every browser can play; webm is the fallback.
     const sources = Array.from(element.querySelectorAll('source')).map((source) => source.type);
     expect(sources).toEqual(['video/mp4', 'video/webm']);
   });
@@ -156,8 +154,6 @@ describe('TerminalToolsAnnouncementDialog', () => {
 
     await act(async () => tab('Lite').click());
 
-    // The X link has to follow the footage: "Watch on X" under the Lite demo
-    // pointing at the Full post would be a lie.
     expect(video().getAttribute('data-terminal-tools-demo')).toBe('lite');
     expect(watchLink()?.getAttribute('href')).toBe(lite.watchUrl);
     expect(tab('Lite').getAttribute('aria-selected')).toBe('true');

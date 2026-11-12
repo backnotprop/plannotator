@@ -1,18 +1,3 @@
-/**
- * resolveLinkedDoc: synchronous host resolution of wiki-links ([[target]] /
- * [[target|label]]) in InlineMarkdown.
- *
- * Contract under test:
- *  - callback absent, or returning null → byte-identical to today's rendering
- *  - the callback receives the RAW stored target (no `.md` normalization)
- *  - `label` overrides the stored label; stored label is the fallback,
- *    target the last resort
- *  - `status: 'deleted'` → muted NON-link (no anchor, no icon, no
- *    onOpenLinkedDoc wiring) even when onOpenLinkedDoc is present
- *  - non-deleted links keep today's onOpenLinkedDoc payload (normalized path)
- *
- * Requires DOM (happy-dom) — run with DOM_TESTS=1 bun test.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -57,7 +42,6 @@ describe('InlineMarkdown resolveLinkedDoc', () => {
     );
     expect(withNull.innerHTML).toBe(without.innerHTML);
 
-    // Same equivalence without onOpenLinkedDoc (the non-link branch).
     const withoutLink = await render(<InlineMarkdown text={text} />);
     const withNullNoLink = await render(
       <InlineMarkdown text={text} resolveLinkedDoc={() => null} />,
@@ -77,9 +61,6 @@ describe('InlineMarkdown resolveLinkedDoc', () => {
         }}
       />,
     );
-    // Raw targets: no `.md` appended to the opaque id; an existing extension
-    // passes through as stored; surrounding whitespace is trimmed (as it
-    // already is for display/path today).
     expect(seen).toEqual(['doc_01XYZ', 'notes.md', 'spaced']);
   });
 
@@ -95,7 +76,6 @@ describe('InlineMarkdown resolveLinkedDoc', () => {
     const anchor = host.querySelector('a');
     expect(anchor).not.toBeNull();
     expect(anchor?.textContent).toBe('Fresh Live Title');
-    // onOpenLinkedDoc still receives today's payload: the normalized path.
     await act(async () => {
       anchor?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
@@ -103,7 +83,6 @@ describe('InlineMarkdown resolveLinkedDoc', () => {
   });
 
   test.skipIf(!hasDom)('label fallback chain: resolved label → stored label → target', async () => {
-    // Resolution without label → stored label wins.
     const stored = await render(
       <InlineMarkdown
         text="[[doc_01XYZ|Stored Label]]"
@@ -113,7 +92,6 @@ describe('InlineMarkdown resolveLinkedDoc', () => {
     );
     expect(stored.querySelector('a')?.textContent).toBe('Stored Label');
 
-    // No stored label, resolution without label → target is the last resort.
     const target = await render(
       <InlineMarkdown
         text="[[doc_01XYZ]]"
@@ -145,19 +123,16 @@ describe('InlineMarkdown resolveLinkedDoc', () => {
         resolveLinkedDoc={() => ({ status: 'deleted' })}
       />,
     );
-    // No anchor, no link icon.
     expect(host.querySelector('a')).toBeNull();
     expect(host.querySelector('svg')).toBeNull();
 
     const span = host.querySelector('span[title="Document deleted"]');
     expect(span).not.toBeNull();
     expect(span?.textContent).toBe('Old Doc');
-    // Quiet, muted, struck-through — not the link treatment.
     expect(span?.className).toContain('text-muted-foreground');
     expect(span?.className).toContain('line-through');
     expect(span?.className).not.toContain('cursor-pointer');
 
-    // Clicking is inert: onOpenLinkedDoc is NOT wired on deleted links.
     await act(async () => {
       span?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });

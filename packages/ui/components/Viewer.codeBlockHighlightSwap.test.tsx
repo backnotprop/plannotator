@@ -1,21 +1,3 @@
-/**
- * A code-block annotation mark must survive every syntax-highlight swap.
- *
- * Fenced code is annotated by hand — one `<mark data-bind-id>` inside the
- * `<code>` element — while `applyHighlight` owns that same element's children.
- * Every swap (palette change, dark/light toggle, or the first async grammar
- * attach after load) replaces those children, so without the swap listener in
- * `Viewer` the mark is silently wiped and never comes back.
- *
- * The swap tests assert the SAME pair of facts after the swap: the mark is
- * still there, AND the tokens carry the new theme's colours. Getting one
- * without the other is the bug in either direction.
- *
- * `@pierre/diffs` is stood in for through `__setCodeHighlightModuleForTests`,
- * which keeps Shiki's full bundle out of the test and — more importantly —
- * lets the second test decide EXACTLY when the async swap lands relative to the
- * restore it races. That ordering is a released promise, never a sleep.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -30,9 +12,8 @@ import { syncHistoryHighlight } from '../utils/undoHistory';
 
 const hasDom = typeof document !== 'undefined';
 
-// Viewer pulls in @plannotator/web-highlighter, whose UMD bundle reads `window`
-// at module-eval time. Import lazily so this file loads under the DOM-less
-// default `bun test` run.
+// Viewer pulls in @plannotator/web-highlighter, whose UMD bundle reads `window` at module-eval
+// time.
 const viewerMod = hasDom ? await import('./Viewer') : null;
 const Viewer = viewerMod?.Viewer as typeof import('./Viewer')['Viewer'];
 type ViewerHandle = import('./Viewer').ViewerHandle;
@@ -45,8 +26,6 @@ const codeBlocks: Block[] = [
   { id: 'code-1', type: 'code', content: CODE, language: 'typescript', order: 0, startLine: 1 },
 ];
 
-/** One distinctive colour per Shiki theme, so "did the tokens re-theme?" is a
- *  string match rather than a guess. */
 const TOKEN_COLOR: Record<string, string> = {
   'github-dark': '#79c0ff',
   'github-light': '#0550ae',
@@ -54,9 +33,9 @@ const TOKEN_COLOR: Record<string, string> = {
 };
 
 /**
- * Stand-in for `@pierre/diffs`. `attach` decides when a (lang, theme) pair
- * becomes available: `'immediate'` resolves on the microtask queue, `'gated'`
- * hands back a release function so a test can hold the async swap open.
+ * `attach` decides when a (lang, theme) pair becomes available: `'immediate'` resolves on the
+ * microtask queue, `'gated'` hands back a release function so a test can hold the async swap
+ * open.
  */
 function fakePierre(attach: 'immediate' | 'gated'): {
   mod: typeof import('@pierre/diffs');
@@ -70,8 +49,6 @@ function fakePierre(attach: 'immediate' | 'gated'): {
         : new Promise((resolve) => pending.push(() => resolve(undefined))),
     getHighlighterIfLoaded: () => ({
       codeToTokens: (code: string, { theme }: { theme: string }) => ({
-        // One token per line reproduces the source byte-for-byte, which is what
-        // `highlightToHtml` insists on before it will emit markup at all.
         tokens: code
           .split('\n')
           .map((line) => [{ content: line, color: TOKEN_COLOR[theme] ?? '#ffffff' }]),
@@ -87,7 +64,6 @@ function fakePierre(attach: 'immediate' | 'gated'): {
   };
 }
 
-/** A whole-fence annotation, the shape `applyCodeBlockAnnotation` produces. */
 function codeBlockAnnotation(id: string, type: AnnotationType): Annotation {
   return {
     id,
@@ -124,8 +100,6 @@ const Harness: React.FC<{ initial: Annotation[] }> = ({ initial }) => {
   React.useEffect(() => {
     controls.setColorTheme = theme.setColorTheme;
     controls.viewer = viewerRef.current;
-    // Mirrors App's removeAnnotation: strip the highlight, then drop it from
-    // state. The two happen in that order, one tick apart.
     controls.removeAnnotation = (id: string) => {
       viewerRef.current?.removeHighlight(id);
       setAnnotations((prev) => prev.filter((a) => a.id !== id));
@@ -218,10 +192,8 @@ describe('code-block annotations across highlight swaps', () => {
     await mountHarness();
     await flush();
 
-    // Baseline: the fence is highlighted in the github-dark palette.
     expect(tokenColors().join(' ')).toContain(TOKEN_COLOR['github-dark']);
 
-    // Annotate the whole fence (pinpoint + redline is the code-block path).
     const block = document.querySelector<HTMLElement>('[data-block-id="code-1"]')!;
     await act(async () => {
       block.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
@@ -231,19 +203,16 @@ describe('code-block annotations across highlight swaps', () => {
     expect(mark).not.toBeNull();
     expect(mark!.textContent).toBe(CODE);
 
-    // Switch the palette. This is the reported repro.
     await act(async () => {
       controls.setColorTheme('kanagawa-wave');
     });
     await flush();
 
     const after = codeEl();
-    // Both facts, together: the mark is still there...
     const survivor = after.querySelector<HTMLElement>('mark[data-bind-id]');
     expect(survivor).not.toBeNull();
     expect(survivor!.textContent).toBe(CODE);
     expect(after.textContent).toBe(CODE);
-    // ...and the tokens moved to the new theme.
     const styles = tokenColors().join(' ');
     expect(styles).toContain(TOKEN_COLOR['kanagawa-wave']);
     expect(styles).not.toContain(TOKEN_COLOR['github-dark']);
@@ -285,9 +254,6 @@ describe('code-block annotations across highlight swaps', () => {
   test.skipIf(!hasDom)(
     'an async swap that lands after a share/draft restore does not wipe it',
     async () => {
-      // The cousin bug: restore fires on a timer after load, and on a slow
-      // machine the FIRST async highlight swap can land after it. Held open
-      // explicitly here so the ordering is decided by the test, not by luck.
       const { mod, release } = fakePierre('gated');
       __setCodeHighlightModuleForTests(mod);
 
@@ -304,17 +270,14 @@ describe('code-block annotations across highlight swaps', () => {
       await mountHarness([restored]);
       await flush();
 
-      // The swap is still pending: the fence is plain and unmarked.
       expect(tokenColors()).toEqual([]);
       expect(codeEl().querySelector('mark[data-bind-id]')).toBeNull();
 
-      // Restore runs first — exactly what App does on a share/draft load.
       await act(async () => {
         controls.viewer?.applySharedAnnotations([restored]);
       });
       expect(codeEl().querySelector(`[data-bind-id="${restored.id}"]`)).not.toBeNull();
 
-      // Now let the swap land on top of the restored mark.
       await act(async () => {
         release();
       });
@@ -328,10 +291,6 @@ describe('code-block annotations across highlight swaps', () => {
   );
 
   test.skipIf(!hasDom)('removal is honoured even though it re-highlights the block', async () => {
-    // Removing an annotation re-highlights the fence on its way out, and the
-    // host only drops it from state on the NEXT tick — so for one tick the
-    // swap listener sees a list that still names the annotation whose mark was
-    // just deleted. It must not be the one painted back in.
     const { mod } = fakePierre('immediate');
     __setCodeHighlightModuleForTests(mod);
 
@@ -340,8 +299,6 @@ describe('code-block annotations across highlight swaps', () => {
     await mountHarness([older, newer]);
     await flush();
 
-    // Two annotations, one fence: the later one owns the mark, exactly as it
-    // does when a block is annotated twice.
     expect(codeEl().querySelector('mark[data-bind-id]')?.getAttribute('data-bind-id'))
       .toBe(newer.id);
 
@@ -350,15 +307,11 @@ describe('code-block annotations across highlight swaps', () => {
     });
     await flush();
 
-    // The removed one is gone, and the fence falls back to the annotation that
-    // is still on it rather than being left bare.
     const after = codeEl();
     expect(after.querySelector(`[data-bind-id="${newer.id}"]`)).toBeNull();
     expect(after.querySelector(`[data-bind-id="${older.id}"]`)).not.toBeNull();
     expect(after.textContent).toBe(CODE);
 
-    // And a later palette change — after the tombstone has been retired —
-    // still honours the removal.
     await act(async () => {
       controls.setColorTheme('kanagawa-wave');
     });

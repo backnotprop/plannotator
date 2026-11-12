@@ -1,11 +1,7 @@
 /**
- * The touch toolbar goes below the WHOLE selection, which only the surfaces
- * know: the markdown Viewer (a selection split into several marks; the
- * toolbar's `element` is the first) and HtmlViewer (a 1px anchor over the
- * frame; the bridge reports the selection's rect). These drive the real
- * Viewer and HtmlViewer, so dropping their `touchAnchorRect` wiring, or
- * getting the frame-plus-bridge math wrong, fails here. DOM-gated
- * (DOM_TESTS=1).
+ * The touch toolbar goes below the WHOLE selection, which only the surfaces know: the markdown
+ * Viewer (a selection split into several marks; the toolbar's `element` is the first) and
+ * HtmlViewer (a 1px anchor over the frame; the bridge reports the selection's rect).
  */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -84,7 +80,6 @@ function toolbarTop(): number {
 
 test.skipIf(!hasDom)('Viewer: a selection across two paragraphs puts the toolbar under the second, not the first mark', async () => {
   touchPhone();
-  // Each highlight mark draws on its paragraph's line: the first at 100..120, the second at 200..220.
   const markRect = function (this: HTMLElement) {
     const blocks = Array.from(document.querySelectorAll('[data-block-id]'));
     const index = blocks.findIndex((b) => b.contains(this));
@@ -171,14 +166,12 @@ test.skipIf(!hasDom)('HtmlViewer: the toolbar goes under the bridge\'s whole sel
     window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data }));
   });
 
-  // Two lines, 10..58 inside the frame: the frame starts at 100, so the selection ends at 158.
   await post({ type: 'plannotator-bridge-selection', text: 'Two lines of selected words', rect: { top: 10, left: 20, width: 300, height: 48 } });
   await settle();
   const first = toolbarTop();
   expect(first).toBeGreaterThanOrEqual(100 + 10 + 48 + 28);
   expect(first).toBeLessThan(100 + 10 + 48 + 60);
 
-  // The page inside the frame scrolled: the bridge reports the new rect.
   await post({ type: 'plannotator-bridge-selection-rect', rect: { top: 300, left: 20, width: 300, height: 24 } });
   await settle();
   const moved = toolbarTop();

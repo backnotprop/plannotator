@@ -1,12 +1,6 @@
 /**
- * Ask AI from a text selection names the selection's source line (#1731),
- * driven through the REAL Viewer and web-highlighter (DOM-gated, DOM_TESTS=1).
- *
- * Failure to catch: the phrase occurs twice in the document and the question
- * reaches the agent (side chat, Ask this session, or the agent terminal, which
- * all send `buildDefaultPrompt`'s output) with only the path, or with the line
- * of the OTHER occurrence, so the agent cannot tell which one the reviewer
- * means.
+ * Ask AI from a text selection names the selection's source line, driven through the REAL Viewer
+ * and web-highlighter (DOM-gated, DOM_TESTS=1).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -21,7 +15,6 @@ const parserModule = hasDom ? await import('../utils/parser') : null;
 const chatModule = hasDom ? await import('../hooks/useAIChat') : null;
 
 const PHRASE = 'retry the job';
-// The phrase sits on line 3 and again on line 9.
 const MARKDOWN = [
   '# Rollout',
   '',
@@ -82,8 +75,6 @@ async function mountViewer(asked: CommentAskAIContext[]): Promise<HTMLElement> {
   return host!;
 }
 
-/** Select PHRASE inside the block whose text includes `marker`, then end the
- *  pointer gesture the way the highlighter listens for it. */
 async function selectPhraseIn(container: HTMLElement, marker: string): Promise<void> {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   let node: Text | null = null;

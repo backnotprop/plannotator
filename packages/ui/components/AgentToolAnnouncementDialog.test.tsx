@@ -1,11 +1,7 @@
 /**
- * The agent tool offer's own keyboard and save contract (DOM_TESTS=1). The
- * App-level flows (when it shows, what it posts, the cookie) live in
- * packages/editor/App.agentTool.test.tsx and its review twin.
- *
- * Guards: Escape and the backdrop closing it like "Not now"; a close while a
- * save is in flight, which would hide whether the setting saved; "Not now"
- * not holding focus, so a stray Enter could turn the tool on.
+ * Guards: Escape and the backdrop closing it like "Not now"; a close while a save is in flight,
+ * which would hide whether the setting saved; "Not now" not holding focus, so a stray Enter
+ * could turn the tool on.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';

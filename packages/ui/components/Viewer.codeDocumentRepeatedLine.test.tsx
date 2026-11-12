@@ -1,12 +1,6 @@
 /**
- * A whole-file code document (a YAML or TOML file is ONE code block) names
- * the line a comment was made on, driven through the REAL Viewer and
- * web-highlighter (DOM-gated, DOM_TESTS=1).
- *
- * Failure to catch: the same text sits on two lines (`enabled: true` under
- * two keys) and the comment on the second copy exports `(line 2)` and asks
- * Ask AI about line 2, because the offset the highlighter stored was the
- * text's first match in the block rather than where the selection was.
+ * A whole-file code document (a YAML or TOML file is ONE code block) names the line a comment
+ * was made on, driven through the REAL Viewer and web-highlighter (DOM-gated, DOM_TESTS=1).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -22,7 +16,6 @@ const viewerModule = hasDom ? await import('./Viewer') : null;
 const parserModule = hasDom ? await import('../utils/parser') : null;
 
 const QUOTE = 'enabled: true';
-// `enabled: true` is line 2 and again line 4.
 const YAML = 'a:\n  enabled: true\nb:\n  enabled: true\n';
 
 interface ViewerHandle {
@@ -90,10 +83,6 @@ async function mountViewer(blocks: Block[], markdown: string): Promise<Mounted> 
   return { container: host!, added, asked, reports, handle };
 }
 
-/** Select `quote` starting at `offset` in `scope`'s text. Syntax highlighting
- *  splits a line across token spans, so the offset is mapped over every text
- *  node in order, then the pointer gesture is ended the way the highlighter
- *  listens for it. */
 async function selectAt(scope: Element, offset: number, length: number): Promise<void> {
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
@@ -204,10 +193,8 @@ describe.if(hasDom)('Viewer: a whole-file code document names the commented copy
   });
 });
 
-// A draft saved while config files still rendered as markdown points at a
-// markdown block (`block-N`) with positions in that markdown DOM. Opened as a
-// code document, the comment must re-attach by its quote and be reported as
-// moved into the file's one block at the quote's real place.
+// Opened as a code document, the comment must re-attach by its quote and be reported as moved into
+// the file's one block at the quote's real place.
 const TOML = '# Service config\n[server]\nport = 8080\n';
 
 describe.if(hasDom)('Viewer: a markdown-era draft of a config file re-attaches in the code document', () => {

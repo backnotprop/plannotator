@@ -1,12 +1,3 @@
-/**
- * ui's Tooltip: the owner's design-system ruling q4 (a borderless float that
- * opens after 150 ms, in every product).
- *
- * Failures to catch: the popup drawing a visible border again; the shadow token
- * it relies on going missing from theme.css (the tooltip would lose its only
- * edge); a lone Tooltip falling back to Base UI's 600 ms; a TooltipProvider
- * without props using anything but 150 ms; a host's own delay no longer winning.
- */
 import React, { act } from 'react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,7 +27,6 @@ function render(node: React.ReactNode): HTMLButtonElement {
 
 const wait = (ms: number) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-/** Base UI opens on pointer rest; the popup is portaled to the body. */
 async function rest(button: HTMLButtonElement): Promise<void> {
   await act(async () => {
     button.dispatchEvent(new MouseEvent('mouseenter'));
@@ -46,7 +36,6 @@ async function rest(button: HTMLButtonElement): Promise<void> {
 
 const popup = () => document.querySelector<HTMLElement>('[data-pn-tooltip]');
 
-/** Opens no sooner than `before` ms and by `after` ms of rest. */
 async function expectOpensBetween(button: HTMLButtonElement, before: number, after: number): Promise<void> {
   await rest(button);
   await wait(before);
@@ -56,7 +45,6 @@ async function expectOpensBetween(button: HTMLButtonElement, before: number, aft
 }
 
 describe('Tooltip defaults', () => {
-  // Pinned on purpose: the owner's ruling (q4) fixes these numbers for every product.
   test('one timing: 150 ms to open, 400 ms to the next', () => {
     expect(TOOLTIP_DELAY_MS).toBe(150);
     expect(TOOLTIP_SKIP_DELAY_MS).toBe(400);
@@ -119,7 +107,6 @@ describe.if(hasDom)('Tooltip (DOM)', () => {
     await expectOpensBetween(button, 400, 1000);
   });
 
-  // The Inbox shows a row badge's card while the row (not the badge) has keyboard focus.
   test("under a host's TooltipEscapePassesThrough, Escape reaches the page and still closes the tooltip; elsewhere Base UI keeps it", async () => {
     const pressEscape = async () => {
       let reached = false;

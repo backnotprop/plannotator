@@ -1,13 +1,7 @@
 /**
- * HostTitle: ui's own hover text. Off (the default, every host but the
- * Plannotator Inbox, Workspaces included) it is the native `title` exactly as
- * before: no tooltip, no added aria-label or aria-describedby, an empty title
- * kept. On (`componentTooltips`) it is ui's Tooltip: no native title, a title
- * that was the control's only name becomes its aria-label, and any other title
- * stays readable as the control's description (a hidden element named by
- * aria-describedby, since the tooltip itself tags nothing).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
+ * Off (the default, every host but the Plannotator Inbox, Workspaces included) it is the native
+ * `title` exactly as before: no tooltip, no added aria-label or aria-describedby, an empty title
+ * kept.
  */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -70,7 +64,6 @@ test.skipIf(!hasDom)('off (the default): every wrapper keeps the native title an
   expect(el(r, 'name').getAttribute('title')).toBe('Delete annotation');
   expect(el(r, 'desc').getAttribute('title')).toBe('This comment no longer matches a location in the document');
   expect(el(r, 'same').getAttribute('title')).toBe('Record as a decision');
-  // An empty title still renders, as it did before HostTitle.
   expect(el(r, 'empty').getAttribute('title')).toBe('');
   expect(el(r, 'none').hasAttribute('title')).toBe(false);
   for (const k of ['name', 'desc', 'empty', 'none']) {
@@ -79,7 +72,6 @@ test.skipIf(!hasDom)('off (the default): every wrapper keeps the native title an
   }
   expect(el(r, 'same').hasAttribute('aria-describedby')).toBe(false);
   expect(r.querySelectorAll('[data-host-title-description]').length).toBe(0);
-  // The markup is the plain children, nothing wrapped around them.
   expect(r.firstElementChild!.children.length).toBe(5);
 });
 
@@ -92,6 +84,5 @@ test.skipIf(!hasDom)('on: no native title; a name becomes the aria-label; a desc
   const described = document.getElementById(el(r, 'desc').getAttribute('aria-describedby') ?? '');
   expect(described?.textContent).toBe('This comment no longer matches a location in the document');
   expect(described?.hidden).toBe(true);
-  // A title equal to the control's own label is not repeated as its description.
   expect(el(r, 'same').hasAttribute('aria-describedby')).toBe(false);
 });

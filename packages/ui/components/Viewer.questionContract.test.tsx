@@ -1,15 +1,3 @@
-/**
- * Viewer's two question props (approval "inbox-decision-mode", agent
- * contract lines): `questionContractLines` (default false) and
- * `questionPictureChoices` (default true).
- *
- * What regresses if this fails: plan review and annotate (the default) start
- * drawing Stakes / Why / Shows / "Can't be undone" as card parts instead of
- * plain text, the Inbox (true) stops drawing them, or a host's
- * `questionPictureChoices={false}` no longer reaches the card.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,7 +10,6 @@ const hasDom = typeof document !== 'undefined';
 const viewerMod = hasDom ? await import('./Viewer') : null;
 const Viewer = viewerMod?.Viewer as typeof import('./Viewer')['Viewer'];
 
-// A data URL loads in happy-dom (a server path fires `error`, which would draw text rows).
 const GIF = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
 const DOC = [
   ':::question',

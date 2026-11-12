@@ -1,12 +1,6 @@
 /**
- * Mounted-surface tests for the ui MarkdownDiff shim: byte preservation,
- * the frozen (never-editable) contract, consumer extension composition, and
- * theme/host-class forwarding. Mounting goes through the SHIM
- * (components/MarkdownDiff.tsx), so these pin the whole seam end-to-end:
- * shim → @plannotator/markdown-editor MarkdownDiff → @plannotator/atomic-editor.
- *
- * Requires DOM_TESTS=1 (happy-dom preload). Run:
- *   DOM_TESTS=1 bun test MarkdownDiff.frozen
+ * Mounted-surface tests for the ui MarkdownDiff shim: byte preservation, the frozen
+ * (never-editable) contract, consumer extension composition, and theme/host-class forwarding.
  */
 import { describe, test, expect } from 'bun:test';
 import React from 'react';
@@ -35,9 +29,10 @@ The new paragraph that replaced the old one.
 - added bullet with more words
 `;
 
-/* Byte-preservation fixtures deliberately include the shapes an editor is
-   most tempted to normalize: CRLF line endings, trailing spaces, a missing
-   final newline. The diff handle's contract is "the exact text supplied". */
+/*
+ * Byte-preservation fixtures deliberately include the shapes an editor is most tempted to
+ * normalize: CRLF line endings, trailing spaces, a missing final newline.
+ */
 const BYTE_FIXTURES: Record<string, { older: string; newer: string }> = {
   'lf-trailing-spaces': {
     older: `line one  \nline two\t\n\nend without newline`,
@@ -82,8 +77,6 @@ async function mountDiff(
       </ThemeProvider>,
     );
   });
-  // Flush the engine's post-mount async work (change-count state, async
-  // resolvers) inside act so assertions see the settled surface.
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -124,9 +117,7 @@ describe('MarkdownDiff shim: frozen surface', () => {
     expect(content).not.toBeNull();
     expect(content!.getAttribute('contenteditable')).toBe('false');
 
-    // The comparison is real: changed regions exist and the review cursor moves.
     expect(handle!.getChangeCount()).toBeGreaterThan(0);
-    // Navigation updates the toolbar's React state — keep it inside act.
     let moved = false;
     await act(async () => {
       moved = handle!.goToNextChange();
@@ -138,8 +129,6 @@ describe('MarkdownDiff shim: frozen surface', () => {
 });
 
 describe('MarkdownDiff shim: extension composition', () => {
-  // Module-level constants: the diff captures `extensions` once per mounted
-  // comparison, so stable references are the documented calling convention.
   const WIKI_OLDER = `See [[roadmap]] for details.\n`;
   const WIKI_NEWER = `See [[roadmap]] for the updated details.\n`;
   const WIKI_EXTENSIONS = [
@@ -156,16 +145,12 @@ describe('MarkdownDiff shim: extension composition', () => {
         extensions: WIKI_EXTENSIONS,
       });
 
-      // The facet probe proves the extension array reached the engine's
-      // EditorState.create() through the shim and the packaged wrapper.
       const probed = mounted.host.querySelector('[data-extensions-probe="reached-diff-engine"]');
       expect(probed).not.toBeNull();
 
-      // And the wiki-link decoration actually renders in the frozen document.
       const wikiEl = mounted.host.querySelector('.cm-atomic-wiki-link');
       expect(wikiEl).not.toBeNull();
 
-      // Byte fidelity is unaffected by consumer extensions.
       expect(mounted.handleRef.current?.getMarkdown()).toBe(WIKI_NEWER);
       expect(mounted.handleRef.current?.getOriginalMarkdown()).toBe(WIKI_OLDER);
 

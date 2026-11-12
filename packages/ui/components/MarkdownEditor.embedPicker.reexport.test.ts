@@ -1,5 +1,4 @@
-// This test guards the supported consumer surface. A regression would force a
-// host to import package internals or @plannotator/core directly.
+// A regression would force a host to import package internals or @plannotator/core directly.
 import { describe, expect, test } from 'bun:test';
 import { planEmbedInsert as corePlanEmbedInsert } from '@plannotator/core/embed-insert';
 

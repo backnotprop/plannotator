@@ -127,7 +127,6 @@ describe('AskSessionAnnouncementDialog', () => {
       ['a[data-ask-session-learn-more]', ASK_SESSION_DOCS_URL],
     ] as const;
     const gotIt = gotItButton();
-    // Got it stays the primary: it has focus, and Tab order reaches the links first.
     expect(document.activeElement).toBe(gotIt);
 
     for (const [selector, href] of links) {
@@ -138,8 +137,6 @@ describe('AskSessionAnnouncementDialog', () => {
       expect(link.getAttribute('rel')).toBe('noopener noreferrer');
       expect(link.compareDocumentPosition(gotIt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-      // Like the terminal-tools announcement's outbound links, following one
-      // neither closes the announcement nor spends its cookie.
       const stopNavigation = (event: Event) => event.preventDefault();
       link.addEventListener('click', stopNavigation);
       await act(async () => link.click());
@@ -181,7 +178,6 @@ describe('AskSessionAnnouncementDialog', () => {
     });
     const fallback = document.querySelector(`${DIALOG} [data-ask-session-demo-unavailable]`);
     expect(fallback?.querySelector('a')?.getAttribute('href')).toBe(ASK_SESSION_WATCH_URL);
-    // The way out is unaffected.
     expect(gotItButton()).toBeDefined();
   });
 

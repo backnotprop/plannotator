@@ -1,21 +1,3 @@
-/**
- * Lazy diagram runtimes must be strictly no worse than a static import on a
- * chunking host: a transient failure of the Mermaid or Graphviz chunk must
- * not leave the diagram dead.
- *
- * What regresses if these fail:
- * - a rejected import() stays memoized, so every later attempt replays the
- *   cached rejection and the diagram can never render in that page;
- * - the automatic single re-attempt is gone, so a one-off fetch hiccup lands
- *   the user on the error panel;
- * - a persistent failure no longer shows the existing error panel with the
- *   source (never blank), or its Retry no longer issues a fresh attempt.
- *
- * The runtimes are stood in for through the test hooks so the real Mermaid
- * and Graphviz never load; the rendered SVG is a sentinel string.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -24,8 +6,6 @@ import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { MermaidBlock, __setMermaidRuntimeLoaderForTests } from './MermaidBlock';
 import { GraphvizBlock, __setVizLoaderForTests } from './GraphvizBlock';
 
-// happy-dom cannot host DOMPurify: the render slot's parse step is the inert
-// template parse for these tests (the scrub still runs).
 let restoreParser: (() => void) | null = null;
 beforeAll(() => {
   if (hasDom) restoreParser = installInertDiagramSvgParser();
@@ -48,9 +28,8 @@ const mermaidBlock: Block = { id: 'm1', type: 'code', language: 'mermaid', conte
 const dotBlock: Block = { id: 'g1', type: 'code', language: 'dot', content: 'digraph { A -> B }', order: 0, startLine: 1 };
 
 const fakeMermaid = { initialize() {}, render: async () => ({ svg: SVG }) } as never;
-// The renderer slot drives the engine through `render()` (a value with the
-// status and the errors, never a throw for a bad graph), so the stand-in
-// answers that shape.
+// The renderer slot drives the engine through `render()` (a value with the status and the errors,
+// never a throw for a bad graph), so the stand-in answers that shape.
 const fakeViz = { render: () => ({ status: 'success', output: SVG, errors: [] }) } as never;
 
 let root: Root | null = null;
@@ -115,10 +94,8 @@ const cases = [
 ];
 
 /**
- * Since Mermaid 12 the plan editor takes the lazy path itself, so the window
- * between mount and the first render is now a user-visible state on every
- * surface. What regresses: the block flashes the error panel (or nothing)
- * while the runtime is still loading, instead of the source under a status.
+ * What regresses: the block flashes the error panel (or nothing) while the runtime is still
+ * loading, instead of the source under a status.
  */
 describe('Mermaid pending state', () => {
   test.skipIf(!hasDom)('shows the source under a rendering status until the runtime lands, never the error panel', async () => {
@@ -167,7 +144,6 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
     const el = await mount(element);
     await settle(RETRY_DELAY_MS * 5);
 
-    // Two attempts (initial + automatic re-attempt), then the existing panel.
     expect(calls).toBe(2);
     expect(el.textContent).toContain(errorTitle);
     expect(el.textContent).toContain('chunk failed');
@@ -189,9 +165,8 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
   });
 
   test.skipIf(!hasDom)('one Retry re-attempts every sibling block that failed on the shared runtime', async () => {
-    // The runtime is memoized per module, so all blocks fail together; a
-    // Retry that bumped only its own block left the siblings on stale error
-    // panels after the runtime had recovered.
+    // The runtime is memoized per module, so all blocks fail together; a Retry that bumped only
+    // its own block left the siblings on stale error panels after the runtime had recovered.
     let healthy = false;
     let calls = 0;
     install(() => {
@@ -221,7 +196,6 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
     expect(a.innerHTML).toContain('data-sentinel="diagram"');
     expect(b.innerHTML).toContain('data-sentinel="diagram"');
     expect(b.textContent).not.toContain(errorTitle);
-    // Both blocks re-attempt in the same commit and share one memoized load.
     expect(calls).toBe(callsBeforeRetry + 1);
   });
 
@@ -241,12 +215,9 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
 });
 
 /**
- * Mermaid loads each diagram type (sequence, flowchart, ELK) as a chunk of its
- * own on that type's first render, after the runtime has loaded; the error
- * then comes out of `render()`, not the runtime import. What regresses: one
- * dropped chunk (a flaky link, a proxy hiccup) leaves that diagram on
- * "Importing a module script failed." for the life of the page, with no
- * automatic re-attempt and no Retry, as if the source were wrong.
+ * What regresses: one dropped chunk (a flaky link, a proxy hiccup) leaves that diagram on
+ * "Importing a module script failed." for the life of the page, with no automatic re-attempt and
+ * no Retry, as if the source were wrong.
  */
 describe('Mermaid diagram-type chunk', () => {
   /** WebKit's words (Safari, every iPad browser) for an import that did not arrive. */
@@ -271,10 +242,9 @@ describe('Mermaid diagram-type chunk', () => {
     expect(el.textContent).not.toContain('Mermaid Error');
   });
 
-  // Safari keeps the failed fetch for the page, so neither a re-attempt nor a
-  // Retry can recover it: the source stays readable under the quiet Reload
-  // line every other part that could not load uses, never the red panel that
-  // reads as a broken diagram.
+  // Safari keeps the failed fetch for the page, so neither a re-attempt nor a Retry can recover
+  // it: the source stays readable under the quiet Reload line every other part that could not load
+  // uses, never the red panel that reads as a broken diagram.
   test.skipIf(!hasDom)('a diagram-type chunk that keeps failing shows the source under the Reload line, not the error panel', async () => {
     let renders = 0;
     const runtime = {
@@ -297,12 +267,8 @@ describe('Mermaid diagram-type chunk', () => {
 });
 
 /**
- * Mermaid renders into a temporary `#d{id}` node on `document.body` and, on a
- * parse failure (a diagram-type chunk that did not load is reported the same
- * way) or a draw error, throws without removing it, with its "Syntax error in
- * text" graphic inside. What regresses: that graphic piles up at the bottom of
- * the page, under the app, one per failed render (the Inbox on an iPad).
- * The stand-in leaves the node exactly where Mermaid 12.2 leaves it.
+ * What regresses: that graphic piles up at the bottom of the page, under the app, one per failed
+ * render (the Inbox on an iPad).
  */
 describe('Mermaid failure leaves nothing outside the block', () => {
   test.skipIf(!hasDom)('failed renders of several diagrams leave no node on document.body', async () => {
@@ -334,11 +300,9 @@ describe('Mermaid failure leaves nothing outside the block', () => {
 });
 
 /**
- * `sourceOnError` (opt-in; the Inbox's guide overview): a source that does not
- * render shows its plain fence, never the red panel; a renderer that could
- * not load still shows the panel and its Retry, which recovers the diagram.
- * What regresses: a load failure left as a bare fence with no way back (the
- * `runtimeUnavailable` exception dropped), or a parse error back on the panel.
+ * `sourceOnError` (opt-in; the Inbox's guide overview): a source that does not render shows its
+ * plain fence, never the red panel; a renderer that could not load still shows the panel and its
+ * Retry, which recovers the diagram.
  */
 describe('Mermaid sourceOnError', () => {
   test.skipIf(!hasDom)('a renderer that does not load keeps the panel and Retry, and Retry draws the diagram', async () => {
@@ -386,11 +350,8 @@ describe('Mermaid sourceOnError', () => {
 });
 
 /**
- * A host that redirects Mermaid's `katex` import to `utils/mermaid-math-slot`
- * gets `$$` labels typeset through the math slot, which is only useful if the
- * slot is filled by the time Mermaid renders. What regresses: the block stops
- * awaiting the registered loader before a math diagram (labels throw on an
- * empty slot), or starts loading KaTeX for diagrams with no math at all.
+ * What regresses: the block stops awaiting the registered loader before a math diagram (labels
+ * throw on an empty slot), or starts loading KaTeX for diagrams with no math at all.
  */
 describe('Mermaid math labels warm the math slot', () => {
   const savedRenderer = getMathRenderer();

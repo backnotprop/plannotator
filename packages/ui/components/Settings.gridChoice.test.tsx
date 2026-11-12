@@ -1,9 +1,3 @@
-/**
- * Settings → Display → Grid Background is a real choice. Clean is the default
- * and a stored Grid value counts only once the choice is resolved (see
- * `config/gridEnabledSetting.test.ts`), so the switch must record the choice:
- * otherwise turning Grid on in Settings would fall back to Clean on reload.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -53,8 +47,6 @@ describe.if(hasDom)('Settings → Grid Background', () => {
     root = null;
     host?.remove();
     host = null;
-    // Put the shared store back as it was, through the test's backend, before
-    // the real backend returns.
     if (priorGrid !== null) configStore.set('gridEnabled', priorGrid);
     priorGrid = null;
     resetStorageBackend();
@@ -71,7 +63,6 @@ describe.if(hasDom)('Settings → Grid Background', () => {
     await act(async () => gridSwitch().click());
     expect(gridSwitch().getAttribute('aria-checked')).toBe('true');
 
-    // A reload resolves settings from storage again.
     expect(new ConfigStoreForTest().get('gridEnabled')).toBe(true);
   });
 });

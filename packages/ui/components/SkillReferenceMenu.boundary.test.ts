@@ -1,8 +1,7 @@
 /**
- * computeMenuPlacement's optional seams (a host's box and its preferred side),
- * used by the Inbox's compose dialog, where the picker opens at the caret and
- * must stay above the dialog's footer. With neither seam the rule is the one
- * SkillReferenceMenu.placement.test.tsx pins against the viewport.
+ * computeMenuPlacement's optional seams (a host's box and its preferred side), used by the
+ * Inbox's compose dialog, where the picker opens at the caret and must stay above the dialog's
+ * footer.
  */
 import { describe, expect, test } from 'bun:test';
 import { computeMenuPlacement } from './SkillReferenceMenu';
@@ -32,7 +31,6 @@ describe('computeMenuPlacement with a boundary and a preferred side', () => {
 
   test('when neither side fits, the roomier side wins and the list is clamped to the box, never past the footer', () => {
     const placed = computeMenuPlacement({ top: 260, bottom: 284 }, 480, CHROME, 520, { boundaryTop: 100, prefer: 'below' });
-    // Below: 520 - 284 - 16 = 220; above: 260 - 100 - 16 = 144.
     expect(placed).toEqual({ direction: 'below', maxListHeight: 220 });
     expect(284 + 6 + CHROME + placed.maxListHeight).toBeLessThanOrEqual(520 - 8);
   });

@@ -1,16 +1,3 @@
-/**
- * `mentionSource` on the annotation card's EDIT box, against the REAL
- * AnnotationPanel (DOM-gated).
- *
- * What these catch: an `@` menu that never opens in the edit box (or opens
- * without a host source), a pick that inserts the wrong bytes or forgets the
- * id, the card's own Mod+Enter / Escape handlers fighting the menu for the
- * same keystroke, a blocked person whose token gets inserted anyway — and
- * the two that matter most for the field itself: a pick-less save that
- * writes `mentions` (which would wipe tags the annotation already carries),
- * and an edit box that grows an `@` listener or a `mentions` key when no
- * host supplied a source.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -126,7 +113,6 @@ describe.if(hasDom)('AnnotationPanel card edit box mentionSource', () => {
     expect(el.hasAttribute('aria-activedescendant')).toBe(false);
     await type(el, 'ping @ma');
     expect(picker()).toBeNull();
-    // Enter is still a newline: nothing consumed it.
     const enter = await press(el, 'Enter');
     expect(enter.defaultPrevented).toBe(false);
     await press(el, 'Enter', { metaKey: true });
@@ -242,8 +228,6 @@ describe.if(hasDom)('AnnotationPanel card edit box mentionSource', () => {
     await press(el, 'Enter', { metaKey: true });
     expect(edits.updates[0]).toEqual({ text: 'ping @Marcus Chen ', mentions: ['user_1'] });
 
-    // The panel is presentation-only, so the annotation prop did not change;
-    // what matters is that the second session starts with nobody picked.
     const pencil = document.querySelector<HTMLButtonElement>('button[title="Edit annotation"]')!;
     await act(async () => { pencil.click(); });
     await act(async () => {});

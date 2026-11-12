@@ -1,13 +1,3 @@
-/**
- * `mentionSource` threaded through the REAL Viewer (DOM-gated).
- *
- * What these catch: a `mentionSource` that reaches only one of the viewer's
- * two composers (the text-selection one and the global/code-block one), a
- * submit that drops the picked ids on the floor instead of putting them on the
- * annotation `onAddAnnotation` receives, and — the one that matters for
- * Plannotator, which passes no source — an annotation that grows a `mentions`
- * key, or a composer that grows an `@` menu, when no host supplied one.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -15,8 +5,6 @@ import type { Annotation } from '../types';
 import type { MentionPerson, MentionSource } from '../utils/mentions';
 
 const hasDom = typeof document !== 'undefined';
-// Viewer and the parser read the DOM at module scope; load lazily so this file
-// stays inert in the DOM-less default `bun test` run.
 const viewerModule = hasDom ? await import('./Viewer') : null;
 const parserModule = hasDom ? await import('../utils/parser') : null;
 
@@ -77,12 +65,6 @@ function keydown(target: HTMLElement, key: string, init: KeyboardEventInit = {})
   return event;
 }
 
-/**
- * Open the TEXT-SELECTION composer the way the keyboard does in the real app:
- * `m` opens the shared annotation toolbar on the Vim target, and typing a
- * letter at it is the toolbar's type-to-comment gesture. This is the composer
- * `useAnnotationHighlighter` owns (Viewer's first CommentPopover mount).
- */
 async function openSelectionComposer(container: HTMLElement): Promise<void> {
   const article = container.querySelector<HTMLElement>('[data-vim-mode="enabled"]');
   if (!article) throw new Error('Vim article missing');
@@ -91,7 +73,6 @@ async function openSelectionComposer(container: HTMLElement): Promise<void> {
   await act(async () => { keydown(article, 'x'); });
 }
 
-/** Open the GLOBAL composer (Viewer's second CommentPopover mount). */
 async function openGlobalComposer(container: HTMLElement): Promise<void> {
   const button = container.querySelector<HTMLButtonElement>('button[title="Add global comment"]');
   if (!button) throw new Error('Global comment button missing');
@@ -125,7 +106,6 @@ function picker(): Element | null {
   return document.querySelector('[data-mention-picker]');
 }
 
-/** Type `@dan`, pick Dana Ruiz from the menu, and submit the composer. */
 async function mentionAndSubmit(): Promise<void> {
   const el = textarea();
   await type(el, 'ask @dan');
@@ -145,7 +125,6 @@ describe.if(hasDom)('Viewer mentionSource', () => {
 
     expect(added).toHaveLength(1);
     expect(added[0]?.mentions).toEqual(['user_2']);
-    // The body carries the readable token; the id is what the host reads.
     expect(added[0]?.text).toContain('@Dana Ruiz');
   });
 
@@ -157,7 +136,6 @@ describe.if(hasDom)('Viewer mentionSource', () => {
 
     expect(added).toHaveLength(1);
     expect(added[0]?.mentions).toEqual(['user_2']);
-    // The body carries the readable token; the id is what the host reads.
     expect(added[0]?.text).toContain('@Dana Ruiz');
   });
 
@@ -203,8 +181,6 @@ describe.if(hasDom)('Viewer mentionSource', () => {
     const container = await mountViewer(undefined, added);
     await openGlobalComposer(container);
 
-    // Sentinel for "the composer mounted", so the absence assertions below
-    // are about the mention surface and not about an empty render.
     expect(document.querySelector('[data-comment-popover]')).not.toBeNull();
     expect(document.querySelector('[data-mention-picker]')).toBeNull();
     expect(document.querySelector('[data-mention-option]')).toBeNull();

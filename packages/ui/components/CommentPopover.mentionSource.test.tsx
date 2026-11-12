@@ -1,13 +1,3 @@
-/**
- * The `mentionSource` seam against the REAL CommentPopover (DOM-gated).
- *
- * What these catch: an `@` menu that never opens (or opens on an email), a
- * pick that inserts the wrong bytes or forgets the id, a blocked person whose
- * token gets inserted anyway, ids that keep being reported after the author
- * deleted the token — and the one that matters for Plannotator: the composer
- * growing an `@` listener, a portal, or a third submit argument when no host
- * supplied a source.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -15,8 +5,6 @@ import type { MentionPerson, MentionSource } from '../utils/mentions';
 
 const hasDom = typeof document !== 'undefined';
 
-// CommentPopover imports DOM-reading modules; load lazily so this file stays
-// inert in the DOM-less default `bun test` run.
 const popoverMod = hasDom ? await import('./CommentPopover') : null;
 const CommentPopover =
   popoverMod?.CommentPopover as typeof import('./CommentPopover')['CommentPopover'];
@@ -111,7 +99,6 @@ describe.if(hasDom)('CommentPopover mentionSource seam', () => {
     const el = textarea();
     await type(el, 'ping @ma');
     expect(picker()).toBeNull();
-    // Enter is still a newline, and nothing was consumed.
     const enter = await press(el, 'Enter');
     expect(enter.defaultPrevented).toBe(false);
     await press(el, 'Enter', { metaKey: true });
@@ -244,9 +231,7 @@ describe.if(hasDom)('CommentPopover mentionSource seam', () => {
     const dana = rows[1]!.querySelector<HTMLElement>('[data-mention-avatar]')!;
     expect(dana.textContent).toBe('DR');
     expect(dana.style.backgroundColor).toBe('rgb(10, 20, 30)');
-    // No initials given: the first letter of the label, uppercased.
     expect(rows[2]!.querySelector('[data-mention-avatar]')!.textContent).toBe('P');
-    // The avatar precedes the label in DOM order.
     const first = rows[0]!.firstElementChild!;
     expect(first.getAttribute('data-mention-avatar')).toBe('image');
   });
@@ -319,9 +304,7 @@ describe.if(hasDom)('CommentPopover mentionSource: agents, groups and the notice
     expect(options()).toEqual(['cc-2', 'pi-1', 'codex']);
     const groups = Array.from(document.querySelectorAll('[data-mention-picker] [role="group"]'));
     expect(groups.map((g) => g.getAttribute('data-mention-group'))).toEqual(['Claude Code', 'Pi', 'Reads the Inbox, not woken']);
-    // Each group is named by its heading.
     for (const g of groups) expect(document.getElementById(g.getAttribute('aria-labelledby')!)?.textContent).toBe(g.getAttribute('data-mention-group'));
-    // "infra" is only Pi's detail: with matchDetail false nothing matches, so the picker closes.
     await type(el, 'ok @infra');
     expect(picker()).toBeNull();
     await type(el, 'ok @pi');

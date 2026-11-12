@@ -1,10 +1,7 @@
 /**
- * The "Use ⌘ + scroll to zoom" hint (#2127). A plain wheel scrolls an image
- * larger than the stage, which a mouse user read as zoom having stopped
- * working. The failures this guards: the hint missing when the wheel starts
- * scrolling, showing where the wheel did what the reader expected (a fitted
- * image zooms, Ctrl/⌘ + wheel and pinch zoom), showing on a touch-only device,
- * and showing again and again in one viewer.
+ * The failures this guards: the hint missing when the wheel starts scrolling, showing where the
+ * wheel did what the reader expected (a fitted image zooms, Ctrl/⌘ + wheel and pinch zoom),
+ * showing on a touch-only device, and showing again and again in one viewer.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -16,7 +13,6 @@ const platform = hasDom ? await import('../utils/platform') : null;
 
 const cleanups: Array<() => void> = [];
 let originalMatchMedia: typeof window.matchMedia | undefined;
-/** Whether the device has a mouse or trackpad (`(any-pointer: fine)`). */
 let finePointer = true;
 
 beforeEach(() => {
@@ -48,7 +44,6 @@ const STAGE = { left: 0, top: 0, width: 1000, height: 600 };
 
 type Gate = import('./ImageZoomStage').WheelHintGate;
 
-/** A stage over a 2000 × 1000 image (Fit 50%), opened at `mode`. */
 async function mountStage(mode: 'fit' | 'actual', wheelHint?: Gate | false) {
   const { ImageZoomStage } = stageModule!;
   const host = document.createElement('div');
@@ -70,7 +65,6 @@ async function mountStage(mode: 'fit' | 'actual', wheelHint?: Gate | false) {
   return { host, stage, img };
 }
 
-/** happy-dom's WheelEvent drops some of its init (the pointer, the modifiers), so they are set on the event. */
 function wheelEvent(deltaY: number, init: WheelEventInit = {}) {
   const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...init });
   Object.defineProperty(event, 'clientX', { value: 500 });
@@ -83,7 +77,6 @@ async function wheel(stage: HTMLElement, deltaY: number, init: WheelEventInit = 
   await act(async () => { stage.dispatchEvent(wheelEvent(deltaY, init)); });
 }
 
-/** Past the wheel latch, so the next wheel event starts a new gesture. */
 const nextGesture = () => new Promise((r) => setTimeout(r, 300));
 
 const hintOf = (host: HTMLElement) => host.querySelector<HTMLElement>('[data-wheel-hint]');
@@ -118,7 +111,6 @@ describe.if(hasDom)('ImageZoomStage: the wheel hint (#2127)', () => {
     await wheel(stage, 100);
     expect(scaleOf(img)).toBe(before);
     expect(hintOf(host)!.getAttribute('data-wheel-hint')).toBe('shown');
-    // Doing what it says hides it at once, and zooms.
     await wheel(stage, 100, { metaKey: true });
     expect(scaleOf(img)).toBeLessThan(before);
     expect(hintOf(host)!.getAttribute('data-wheel-hint')).toBe('hidden');
@@ -132,7 +124,6 @@ describe.if(hasDom)('ImageZoomStage: the wheel hint (#2127)', () => {
     const big = await mountStage('actual');
     await wheel(big.stage, 100, { ctrlKey: true });
     await wheel(big.stage, 100, { metaKey: true });
-    // A trackpad pinch arrives as a small Ctrl + wheel.
     await wheel(big.stage, -3.5, { ctrlKey: true });
     // Safari's own pinch: gesture events.
     await act(async () => { big.stage.dispatchEvent(new Event('gesturestart', { cancelable: true })); });
@@ -158,14 +149,11 @@ describe.if(hasDom)('ImageZoomStage: the wheel hint (#2127)', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, stageModule!.WHEEL_HINT_HOLD_MS)); });
     expect(hintOf(host)!.getAttribute('data-wheel-hint')).toBe('hidden');
     expect(spokenOf(host)).toBe('');
-    // A second scroll in the same stage: nothing.
     await wheel(stage, 100);
     expect(hintOf(host)!.getAttribute('data-wheel-hint')).toBe('hidden');
-    // The next image of the same viewer (one gate): nothing either.
     const next = await mountStage('actual', gate);
     await wheel(next.stage, 100);
     expect(hintOf(next.host)).toBeNull();
-    // A new viewer (a new gate) shows it again.
     const reopened = await mountStage('actual', { shown: false });
     await wheel(reopened.stage, 100);
     expect(hintOf(reopened.host)!.getAttribute('data-wheel-hint')).toBe('shown');

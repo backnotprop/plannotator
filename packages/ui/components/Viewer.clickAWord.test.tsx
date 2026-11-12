@@ -1,21 +1,3 @@
-/**
- * Click a word: in the Select input method, one click on a word highlights
- * that word, as a drag over it would.
- *
- * What must not regress, each a test below: a click making a highlight where
- * it must not (Pinpoint, redline, read-only, answer-only, a host that turned
- * it off, a click that only closes the toolbar, a click on an existing
- * highlight); a triple click no longer taking the paragraph; a drag no longer
- * selecting exactly what the browser selected; and the host switches (the
- * `clickAWord` prop over `configurePlannotatorUI({ clickAWord })`); and
- * Ctrl+C / Cmd+C no longer copying the clicked word once its toolbar or
- * composer is up (`utils/highlightCopy`).
- *
- * happy-dom has no layout: the caret under a point is stubbed to a position
- * the test sets, and every range reports one box at the origin.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -101,7 +83,6 @@ async function mount(options: Options = {}) {
   const article = host.querySelector('article') as HTMLElement;
   const paragraph = (needle: string) =>
     Array.from(article.querySelectorAll<HTMLElement>('[data-block-id]')).find((el) => el.textContent?.includes(needle))!;
-  /** The text node holding `word`, and the offset of a letter inside it. */
   const at = (word: string) => {
     const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
     let node: Node | null;
@@ -134,7 +115,6 @@ const click = async (target: Element, position: { node: Node; offset: number }, 
     target.dispatchEvent(mouse('click', { detail }));
   });
 };
-/** What a Ctrl+C at `target` puts on the clipboard (the browser fires `copy`). */
 const copyAt = (target: EventTarget) => {
   const data = new Map<string, string>();
   const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
@@ -222,12 +202,9 @@ describe.if(hasDom)('Viewer: click a word (Select)', () => {
     const p = paragraph('retry');
     const position = at('retry');
 
-    // What the browser does: the second click selects the word, the third the paragraph;
-    // the highlighter takes each selection at its release.
     await click(p, position, 1);
     const selections = [
       () => window.getSelection()!.setBaseAndExtent(position.node, 4, position.node, 9),
-      // Chromium ends a triple click at offset 0 of the next block.
       () => window.getSelection()!.setBaseAndExtent(document.createTreeWalker(p, NodeFilter.SHOW_TEXT).nextNode()!, 0, paragraph('Cache'), 0),
     ];
     for (const [index, select] of selections.entries()) {

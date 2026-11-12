@@ -1,18 +1,6 @@
 /**
- * Ctrl+C / Cmd+C in the markdown Viewer once the yellow pending highlight is
- * up, driven through the REAL Viewer and web-highlighter (DOM-gated,
- * DOM_TESTS=1).
- *
- * Failures to catch: with the selection's composer open (focus in its empty
- * textarea, or on the page outside it) the copy carries nothing; Comment mode
- * (composer with no toolbar) carries nothing; the toolbar stage stops copying;
- * the copy grows an html part (rich text is the toolbar's Copy button alone,
- * the owner's call on #2191); text the person selected in the textarea is
- * overwritten by the highlight; another field on the page (an Inbox reply
- * box) loses its own copy while a composer with words in it stays open; a
- * copy with no highlight (or after the composer closed) takes the clipboard;
- * or an Inbox thread message (text comments, answer-only, click-a-word off)
- * stops copying.
+ * Ctrl+C / Cmd+C in the markdown Viewer once the yellow pending highlight is up, driven through
+ * the REAL Viewer and web-highlighter (DOM-gated, DOM_TESTS=1).
  */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -43,7 +31,6 @@ afterEach(async () => {
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
-/** The Inbox's thread message: text comments on, answer-only, no click-a-word (Thread.tsx). */
 const INBOX_MESSAGE = { textComments: true, answerOnly: true, clickAWord: false, maxWidth: null } as const;
 
 async function mount(mode: EditorMode = 'selection', extra: Record<string, unknown> = {}) {
@@ -72,7 +59,6 @@ async function mount(mode: EditorMode = 'selection', extra: Record<string, unkno
   return host!;
 }
 
-/** Select from "backoff" through "four", then let the viewer hear the pointer go up. */
 async function select(scope: HTMLElement) {
   const texts: Text[] = [];
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
@@ -90,7 +76,6 @@ async function select(scope: HTMLElement) {
   await settle();
 }
 
-/** What a Ctrl+C at `target` puts on the clipboard (the browser fires `copy`). */
 function copyAt(target: EventTarget) {
   const data = new Map<string, string>();
   const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;

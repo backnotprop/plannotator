@@ -1,15 +1,3 @@
-/**
- * `closeOnScrollOut`: the selection toolbar closes when its selection is out of
- * sight, which removes the pending highlight.
- *
- * It used to judge by the selection's FIRST piece alone. A long drag that
- * scrolls the page leaves the first words above the window while the pointer,
- * and most of the selection, are still on screen: the toolbar closed as it
- * opened, and the highlight just made was gone. It now closes only when the
- * whole selection is out of sight, and stays on screen while any of it is.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -30,7 +18,6 @@ afterEach(async () => {
 type Box = { top: number; bottom: number; left: number; right: number };
 const rectOf = (box: Box) => ({ ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box }) as DOMRect;
 
-/** The toolbar on a selection whose first piece is at `first`; `whole`, when given, is the whole selection's box. */
 async function mount(first: Box, whole?: () => Box | null) {
   const element = document.createElement('mark');
   element.textContent = 'first words';

@@ -1,20 +1,3 @@
-/**
- * A lazy block whose chunk cannot load must not take the page down with it.
- * In the packed app builds the diagram, embed and preview components are
- * separate chunks fetched over the network; a rejected React.lazy import
- * with no boundary unmounts the whole React root, and the user's unsent
- * comments and edits vanish from the screen.
- *
- * What regresses if these fail:
- * - the boundary stops catching, so a failed chunk blanks the app again;
- * - the fallback stops showing the block's source and the Reload notice;
- * - a sibling remounts (or unmounts), losing state the user typed;
- * - a chunk the server answers with 404 (a tab older than the server's
- *   build) stops saying the app was updated;
- * - a block whose chunk loads shows the notice anyway.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act, lazy, Suspense } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -28,7 +11,6 @@ const mermaidBlock: Block = { id: 'm1', type: 'code', language: 'mermaid', conte
 
 type HappyWindow = { happyDOM: { setURL: (url: string) => void } };
 let previousUrl = '';
-// A page served from a local port, as Plannotator's are: about:blank has no origin to compare against.
 beforeAll(() => {
   if (!hasDom) return;
   previousUrl = window.location.href;
@@ -52,7 +34,6 @@ afterEach(async () => {
   while (restores.length > 0) restores.pop()!();
 });
 
-/** React reports a caught render error on console.error; keep the run quiet. */
 function quietConsoleError(): void {
   const original = console.error;
   console.error = () => {};
@@ -96,7 +77,6 @@ const chunkUrl = () => `${window.location.origin}/assets/MermaidBlock-Old1234.js
 const failingLazy = () =>
   lazy<React.FC>(() => Promise.reject(new TypeError(`Failed to fetch dynamically imported module: ${chunkUrl()}`)));
 
-/** The page around the block: a field holding text the user has typed. */
 const Sibling: React.FC = () => <textarea data-testid="draft" defaultValue="" />;
 
 function page(Block: React.FC) {
@@ -124,10 +104,8 @@ describe('LazyBlockBoundary', () => {
     const notice = el.querySelector('[data-lazy-load-failed]');
     expect(notice?.textContent).toContain("Couldn't load this view.");
     expect(notice?.querySelector('button')?.textContent).toBe('Reload');
-    // The block's source stays readable in its place; no pending status.
     expect(el.querySelector('[data-diagram-block="mermaid"] pre')?.textContent).toBe(mermaidBlock.content);
     expect(el.querySelector('[data-mermaid-pending]')).toBeNull();
-    // Same node, same text: nothing above the boundary remounted.
     expect(el.querySelector('[data-testid="draft"]')).toBe(draft);
     expect(draft.value).toBe('unsent comment');
   });
