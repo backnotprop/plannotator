@@ -16,11 +16,12 @@ NO_WAKE = f"Replies will not come back into this session by themselves: Hermes h
 START_TIMEOUT_S = 5.0
 REFRESH_S = 5.0
 RETRY_S = 30.0
+MANIFEST = Path(__file__).parent / "plugin.yaml"
 
 
 def plugin_version() -> str:
     try:
-        for line in (Path(__file__).parent / "plugin.yaml").read_text(encoding="utf-8").splitlines():
+        for line in MANIFEST.read_text(encoding="utf-8").splitlines():
             if line.startswith("version:"):
                 return line.split(":", 1)[1].strip()
     except OSError:
@@ -38,7 +39,7 @@ class InboxPlugin:
         self.told: set = set()
         self.lock = threading.Lock()
         self.hooked = False
-        self.tried = None
+        self.failed = None
         self.said = None
         self.stopped = threading.Event()
 
@@ -63,21 +64,25 @@ class InboxPlugin:
                 logger.warning("plannotator: %s", error)
 
     def refresh(self) -> None:
+        if not MANIFEST.exists():
+            self.stop()
+            return
         wakes = hermes.injection_granted(self.ctx)
         link = self.link
         healthy = link is not None and link.tool is not None and link.alive()
         if healthy and link.wakes == wakes:
             return
-        if not healthy and self.tried is not None and time.monotonic() - self.tried < RETRY_S:
+        if self.failed is not None and time.monotonic() - self.failed < RETRY_S:
             return
-        self.tried = time.monotonic()
         argv = plannotator_command()
         if argv:
-            argv = [*argv, "inbox", "connection", "--host", hermes.HOST, "--plugin-version", plugin_version()]
+            version = plugin_version()
+            argv = [*argv, "inbox", "connection", "--host", hermes.HOST, *(["--plugin-version", version] if version else [])]
             if not wakes:
                 argv.append("--no-wake")
         fresh = Link(argv, self.on_event, wakes)
         if not fresh.start(START_TIMEOUT_S):
+            self.failed = time.monotonic()
             fresh.stop()
             if fresh.why != self.said:
                 self.said = fresh.why
@@ -87,6 +92,7 @@ class InboxPlugin:
             fresh.stop()
             return
         self.said = None
+        self.failed = None
         self.link = fresh
         self.offer(fresh.tool)
         if wakes:

@@ -51,12 +51,14 @@ class PluginTest(unittest.TestCase):
         host.reset_platforms()
         host.grant(False)
 
-    def start(self, follow: bool = False) -> host.FakeHermes:
+    def start(self, follow: bool = False, manifest=None) -> host.FakeHermes:
         hermes = host.FakeHermes()
         plugin = host.load_plugin()
         if follow:
             plugin.REFRESH_S = 0.05
             plugin.RETRY_S = 0.05
+        if manifest is not None:
+            plugin.MANIFEST = manifest
         plugin.register(hermes)
         self.started.append(hermes)
         return hermes
@@ -154,6 +156,18 @@ class PluginTest(unittest.TestCase):
         link = hermes.tools["plannotator_inbox"]["handler"].__self__.link
         hermes.unload()
         self.assertTrue(until(lambda: not link.alive()))
+
+    def test_a_plugin_removed_while_hermes_runs_ends_its_connection_and_hides_the_tool(self):
+        manifest = self.dir / "plugin.yaml"
+        manifest.write_text("version: 0.1.0\n")
+        hermes = self.start(follow=True, manifest=manifest)
+        link = hermes.tools["plannotator_inbox"]["handler"].__self__.link
+        self.assertTrue(hermes.tools["plannotator_inbox"]["check_fn"]())
+        manifest.unlink()
+        host.grant(False)
+        self.assertTrue(until(lambda: not link.alive()))
+        self.assertFalse(hermes.tools["plannotator_inbox"]["check_fn"]())
+        self.assertEqual(len(self.connections()), 1)
 
     def test_the_switch_hides_the_tool_and_stops_wakes(self):
         os.environ["FAKE_SWITCH"] = "0"
