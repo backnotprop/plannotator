@@ -1,9 +1,3 @@
-/**
- * The Linear key from Settings → Accounts (inbox-linear-key.ts). What can regress: a pasted key not winning over
- * LINEAR_API_KEY (or the env no longer a fallback), the key reaching an answer (only its source and last 4 may),
- * the file being readable by others, Remove leaving it, a key taken over plain http from the tailnet, a stale page's
- * write, and the cards not forgetting what the old key saw.
- */
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, statSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";

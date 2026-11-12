@@ -3486,7 +3486,6 @@ export interface InboxVoiceKeyState {
   last4: string | null;
 }
 
-/** Settings → Accounts → Linear (`GET /api/inbox/settings` `linear_key`): where the Linear hover cards' key comes from. Never the key. */
 export type InboxLinearKeyState = InboxVoiceKeyState;
 
 /** Settings → Voice (`GET /api/inbox/settings` `voice`). */

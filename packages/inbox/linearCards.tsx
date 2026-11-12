@@ -29,7 +29,6 @@ export function linearIdentifierLinker(refs: LinearIssueRefs): PlainTextLinker {
   };
 }
 
-/** The card's words when this computer has no Linear key, or Linear refused it: where to add one. */
 export const NO_KEY_TEXT = 'Add your Linear API key in Settings → Accounts to see details here.';
 
 /** The provider: Linear issue links, Linear's own card, and the identifier as the card's accessible name. */
@@ -47,7 +46,6 @@ let installed = false;
 let fetchTeams: (url: string, init?: RequestInit) => Promise<Response> = (url, init) => fetch(url, init);
 let unlink: (() => void) | null = null;
 
-/** Read the teams and link their bare identifiers (none without a key); a later read replaces the earlier linker. */
 function linkTeams(): Promise<void> {
   return fetchTeams(inboxUrl('/linear-refs'), { headers: { accept: 'application/json' } })
     .then((res) => (res.ok ? (res.json() as Promise<{ workspace?: string | null; teams?: string[] }>) : null))
@@ -68,10 +66,8 @@ export function installLinearCards(fetchImpl?: (url: string, init?: RequestInit)
   void linkTeams();
 }
 
-/** The key changed (Settings → Accounts → Linear): cards answered under the old key are dropped, and the teams read again. */
 export function refreshLinearCards(): Promise<void> {
   if (!installed) return Promise.resolve();
-  // Setting the same transport again empties the window's card cache (@plannotator/ui/utils/refCard).
   setRefCardTransport(getRefCardTransport());
   return linkTeams();
 }

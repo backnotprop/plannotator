@@ -1229,7 +1229,6 @@ export function SettingsPage(props: SettingsPageProps) {
         body = (
           <>
             <AccountsSection machine={machines.find((machine) => machine.self)?.name} />
-            {/* The Linear hover cards' key (LinearKeySettings.tsx); a tailnet guest's settings have none. */}
             {settings.linear_key && <LinearKeySettings initial={settings.linear_key} where={voiceWhere(settings.voice ?? null)} />}
           </>
         );

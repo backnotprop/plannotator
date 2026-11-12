@@ -44,10 +44,6 @@ export function LinearStateIcon({ type, color, className = '' }: { type: LinearC
   );
 }
 
-/**
- * `noKeyText`: what the card says when the host has no Linear key or Linear refused it; a host names where its key is
- * set. Absent: a plain "Add a Linear API key".
- */
 export function LinearRefCardView({ target, href, result, pinned, onClose, sheet, tight, noKeyText }: RefCardViewProps & { noKeyText?: string }) {
   const identifier = `${target.repo}-${target.number}`;
   const btn = sheet ? 'min-h-11 px-3' : 'h-7 px-2.5';

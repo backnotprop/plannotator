@@ -1217,7 +1217,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
   // Linear issue links answer from Linear (inbox-linear-cards.ts); a test's own runner gets no real Linear.
-  // Its key: pasted in Settings → Accounts (inbox-linear-key.ts), else LINEAR_API_KEY.
   const linearKey = createLinearKey({ dataDir, serverSession, json, readBody: (req) => readBody(req), changed: () => linearCards?.forget() });
   const linearCards = options.refRunner ? null : createLinearCards({ apiKey: () => linearKey.apiKey() });
   const refCards = withLinearCards(createRefCards(options.refRunner ? { run: options.refRunner } : {}), linearCards);
@@ -3362,7 +3361,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     reveal: line,
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
-    /** Settings → Accounts → Linear: where the hover cards' Linear key comes from. Never the key; not for a guest. */
     ...(guest ? {} : { linear_key: linearKey.state() }),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
@@ -5703,7 +5701,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await voice.route(req, url, via);
         if (answer) return answer;
       }
-      // Settings → Accounts → Linear: the hover cards' key (inbox-linear-key.ts), the owner only, as voice's key.
       if (path === "/api/inbox/linear/key") {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);

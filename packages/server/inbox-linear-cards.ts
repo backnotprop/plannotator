@@ -8,9 +8,7 @@
  * links; one more hook in inbox.ts).
  *
  * The fetch: one read-only GraphQL `query` POSTed to api.linear.app with the
- * API key as is (never logged, never sent anywhere else). The key is the one
- * pasted in Settings → Accounts (inbox-linear-key.ts), else `LINEAR_API_KEY`
- * in the env, read per fetch. No
+ * API key as is (never logged, never sent anywhere else), read per fetch. No
  * key: the card says to set one (`signed_out`), and no teams link. Per issue:
  * fresh 60 s, a failure 30 s, a stale answer served while one refresh runs (up
  * to 15 min), one request shared by hovers, at most 500 kept; a rate-limit
@@ -171,7 +169,6 @@ export interface LinearCards {
   get(href: string): Promise<ForgeRefCardResult | null>;
   /** The workspace and team keys bare identifiers link with; null with no key or on a failure. */
   issueRefs(): Promise<LinearIssueRefs | null>;
-  /** Drop every answer and the teams: the key changed, so what the old one saw (or could not) is stale. */
   forget(): void;
 }
 

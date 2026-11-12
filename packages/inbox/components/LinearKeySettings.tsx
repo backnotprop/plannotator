@@ -1,9 +1,3 @@
-/**
- * Settings → Accounts → Linear: the key the Linear hover cards use (server `inbox-linear-key.ts`), one row built like
- * Voice's API key row (VoiceSettings.tsx `ApiKey`). A key typed here goes to the Inbox and never comes back: the page
- * holds at most its last 4. `LINEAR_API_KEY` in the Inbox's environment is the fallback, shown when no key is saved.
- * Not drawn for a tailnet guest (the settings answer has no `linear_key` for one).
- */
 import { useState, type FormEvent } from 'react';
 import type { InboxLinearKeyState } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
