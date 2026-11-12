@@ -28,10 +28,12 @@ export const INBOX_LINK_USAGE = [
   "  plannotator inbox link <code> [--address <host:port>] [--back <host:port>] [--one-way]",
   "                                  Link with the machine that printed <code>: each",
   "                                  Inbox then shows both machines' threads. --address",
-  "                                  overrides the code's address; --back is how that",
-  "                                  machine reaches this one (default: this Inbox's",
-  "                                  tailnet door, published now when it is not yet);",
-  "                                  --one-way links this side only.",
+  "                                  overrides the code's address: an https address on",
+  "                                  your tailnet, or a loopback port you forward to it",
+  "                                  (as ssh -L does). --back is how that machine reaches",
+  "                                  this one, either shape (default: this Inbox's tailnet",
+  "                                  door, published now when it is not yet); --one-way",
+  "                                  links this side only.",
   "  plannotator inbox link --list   The linked machines and their state.",
   "  plannotator inbox unlink <machine>",
   "                                  Remove the link on both machines (by name or id).",
@@ -82,7 +84,7 @@ export async function runInboxLinkCommand(args: readonly string[], ensureRunning
     else if (command === "link" && arg === "--one-way") oneWay = true;
     else if (command === "link" && (arg === "--address" || arg === "--back")) {
       const value = rest[++i];
-      if (!value) return fail(`${arg} needs a value, like mini.tail1234.ts.net:8443.`);
+      if (!value) return fail(`${arg} needs a value, like mini.tail1234.ts.net:8443 or localhost:14433.`);
       if (arg === "--address") address = value;
       else back = value;
     } else if (arg.startsWith("--")) return fail(`Unknown inbox ${command} option: ${arg}\nRun 'plannotator inbox --help' for usage.`);
@@ -119,6 +121,9 @@ export async function runInboxLinkCommand(args: readonly string[], ensureRunning
           tailscale
             ? "This code carries no tailnet address: this Inbox could not publish its door on your tailnet (the reason is above). Fix that and run this again.\n"
             : "This code carries no tailnet address: run this again with --tailscale to publish this Inbox's door on your tailnet.\n",
+        );
+        process.stderr.write(
+          `This Inbox's door also answers on this machine at 127.0.0.1:${entry.port}. Forward that port on the other computer (as ssh -L does), then link there with --address localhost:<forwarded port> --one-way.\n`,
         );
       }
       process.stderr.write(`On the other machine, within 10 minutes, run:\n  plannotator inbox link '<the code below>'\nSix digits, for typing it in Settings: ${answer.body.code}\n`);

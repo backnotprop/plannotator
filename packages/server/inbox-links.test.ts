@@ -84,6 +84,16 @@ describe("machines.json", () => {
     writeFileSync(file, text);
     expect(InboxLinks.open(dir).list()).toHaveLength(0);
   });
+
+  test("a tunnel record loads in any process, with or without a test sandbox; a loopback port tampered into another host does not", () => {
+    const dir = dataDir();
+    const links = InboxLinks.open(dir);
+    links.put({ ...record(OTHER, "Mini"), transport: { kind: "tunnel", url: "http://localhost:14433" } });
+    expect(InboxLinks.open(dir).list().map((l) => l.transport)).toEqual([{ kind: "tunnel", url: "http://localhost:14433" }]);
+    const file = join(dir, "inbox", "machines.json");
+    writeFileSync(file, readFileSync(file, "utf8").replace("http://localhost:14433", "http://192.168.1.4:14433"));
+    expect(InboxLinks.open(dir).list()).toHaveLength(0);
+  });
 });
 
 describe("the pairing link", () => {
