@@ -293,8 +293,11 @@ jobs:
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.plan.result == 'success' }}
     # The repo variable E2E_RUNNER picks the machine for the shards (e.g. a
     # Namespace label); unset, they run on GitHub's own ubuntu-24.04. Setting
-    # it moves them without a PR, and deleting it moves them back.
-    runs-on: ${{ vars.E2E_RUNNER || 'ubuntu-24.04' }}
+    # it moves them without a PR, and deleting it moves them back. A PR from a
+    # fork stays on ubuntu-24.04 whatever it says: a self-hosted runner must
+    # never run a fork's code, and once a fork PR has the `ci:e2e` label, every
+    # later push from its author would run there unreviewed.
+    runs-on: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.E2E_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.build.outputs.playwright }}-noble
