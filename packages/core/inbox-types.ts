@@ -438,6 +438,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   cloud: "Cloud agent",
   "cloud-claude": "Claude Code routine",
   "cloud-grok": "Grok Bot",
+  "cloud-muse": "Muse by Meta",
 };
 
 /**
@@ -1790,8 +1791,8 @@ export interface InboxListRow extends InboxThreadSummary {
    * always null: no agent can set one. Like `pinned_at`, only on the list model the window
    * and the phone read, never on anything an agent reads. Every row from an
    * Inbox that keeps priority carries the key; absent from an older Inbox (no
-   * menu item, no group) and on a linked machine's row (Priority is not
-   * forwarded to the machine that owns the thread, so none is offered there).
+   * menu item, no group). A linked machine's row carries that machine's own
+   * (approval "inbox-linked-marks": the add lives on the thread's machine).
    */
   priority?: InboxRowPriority | null;
   /**
@@ -2563,6 +2564,10 @@ export function inboxElsewhereText(moved: { agent: InboxAgentId; path: string | 
   return `${label} is connected in ${moved.path ?? "another file"}, but ${why}. Plannotator left both as they are; Settings → Agents shows it off here, and turning it on moves it.`;
 }
 
+export function inboxGrantText(grant: { agent: InboxAgentId; setting: string; undo: string }): string {
+  return `Plannotator turned on ${INBOX_AGENT_LABELS[grant.agent]}'s ${grant.setting}, so your replies can start a turn in the session that asked. To turn it off: ${grant.undo}`;
+}
+
 /** What one `plannotator inbox` run did to the agents on this computer. */
 export interface InboxConnectReport {
   at: string;
@@ -2598,6 +2603,7 @@ export interface InboxConnectReport {
    * packages/server/inbox-qwen-trust.ts). Absent from older Inboxes.
    */
   trusted?: InboxAgentId[];
+  granted?: { agent: InboxAgentId; setting: string; undo: string }[];
   /** Why registering as a trusted sender failed this run, said once per reason. */
   trust_failed?: { agent: InboxAgentId; reason: string }[];
 }
@@ -3253,6 +3259,14 @@ export const INBOX_DRAFT_PASTED_PREVIEW_MAX = 200;
 export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
 
 /**
+ * The marks a person sets on an agent or a thread that a linked machine may send to this Inbox, the one that owns it
+ * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
+ * rows only once this Inbox takes it; an older Inbox says none.
+ */
+export const INBOX_LINKED_MARKS = ["star", "priority"] as const;
+export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
+
+/**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
  * window furniture only. Kept in `inbox/pins.json`, in pin order, outside the
  * event log, so agents, the MCP, search and the phone's event stream never
@@ -3787,11 +3801,27 @@ export const INBOX_AGENT_FACE_SESSIONS_MAX = 16;
 /** The longest agent or session id an entry takes. */
 export const INBOX_AGENT_FACE_ID_MAX = 200;
 
-/** One agent's face. */
+/** One agent's face, and the name the person gave it. */
 export interface InboxAgentFaceEntry {
-  face: Exclude<InboxAgentFace, "agent">;
+  /** `agent` (its own mark) only beside a `name`: an entry is kept for a face, a name, or both. */
+  face: InboxAgentFace;
   /** Every session id this agent was or is (never its key itself), oldest first. */
   sessions: string[];
+  /**
+   * The name the person gave it (Rename… on its sidebar row): the window's name for it everywhere, over its own
+   * title. Display only: never sent to an agent. Absent: none given. An older Plannotator drops an entry that has a
+   * name and no face when it reads the file, and keeps the face of one with both.
+   */
+  name?: string;
+}
+
+/** The longest name an agent can be given, in characters (code points), as a project's. */
+export const INBOX_AGENT_NAME_MAX = INBOX_PROJECT_NAME_MAX;
+
+/** A given name as an entry keeps it, by a project name's rules (`checkInboxProjectName`); null for none or a refused one. */
+export function cleanInboxAgentName(value: unknown): string | null {
+  const checked = checkInboxProjectName(value);
+  return checked.ok ? checked.name : null;
 }
 
 /** One uploaded picture the Inbox keeps ("Your own…"): its hash, its type (sniffed from the bytes), when it was added (ms). */
@@ -3825,8 +3855,14 @@ export function readInboxAgentIcons(value: unknown): InboxAgentIcon[] {
   return out.slice(0, INBOX_AGENT_ICONS_KEPT * 2);
 }
 
-/** `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), or this browser's faces from before (`adopt`). */
-export type InboxAgentFaceChange = { agent: string; sessions?: string[]; face: InboxAgentFace } | { adopt: Record<string, InboxAgentFace> };
+/**
+ * `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), one agent's given name (null: back to its own),
+ * or this browser's faces from before (`adopt`).
+ */
+export type InboxAgentFaceChange =
+  | { agent: string; sessions?: string[]; face: InboxAgentFace }
+  | { agent: string; sessions?: string[]; name: string | null }
+  | { adopt: Record<string, InboxAgentFace> };
 
 const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= INBOX_AGENT_FACE_ID_MAX && value.trim() === value;
 
@@ -3842,9 +3878,11 @@ export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFa
   const out = Object.create(null) as Record<string, InboxAgentFaceEntry>;
   if (!value || typeof value !== "object" || Array.isArray(value)) return out;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const entry = raw as { face?: unknown; sessions?: unknown } | null;
-    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face) || entry.face === "agent") continue;
-    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key) };
+    const entry = raw as { face?: unknown; sessions?: unknown; name?: unknown } | null;
+    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face)) continue;
+    const name = cleanInboxAgentName(entry.name);
+    if (entry.face === "agent" && !name) continue;
+    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key), ...(name ? { name } : {}) };
   }
   return out;
 }

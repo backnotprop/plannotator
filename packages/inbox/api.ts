@@ -5,7 +5,7 @@
  * writing into a store it did not read.
  */
 
-import type { InboxCloudAgentView, InboxCloudPreset } from '@plannotator/core/inbox-cloud';
+import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
@@ -233,6 +233,8 @@ export interface MachineView {
   message_deletions?: boolean;
   /** Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing. */
   snooze_old?: boolean;
+  /** The marks it takes for its own threads and agents (approval "inbox-linked-marks"; `machineTakes`). Absent from an older Inbox. */
+  marks?: string[];
   /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
   update?: MachineUpdateView | null;
 }
@@ -1246,7 +1248,8 @@ const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encod
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self);
-  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? [])];
+  // Starred rows too: another machine's archived star is in no section here.
+  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? []), ...(model.pins ?? [])];
   // This Inbox's own rows and projects first, every id in them (a row's delivery and message ids too): a linked
   // machine's row with the same id never takes one over. Two linked machines naming one id leave it contested.
   rememberLocal(localIdsIn(model));
@@ -1331,6 +1334,7 @@ export interface SearchRequest {
 export interface CloudAgentsModel {
   agents: InboxCloudAgentView[];
   projects: { id: string; name: string }[];
+  available?: boolean;
 }
 
 export interface CloudAgentTest {
@@ -2184,16 +2188,19 @@ export const inboxApi = {
     if (query.limit) params.set('limit', String(query.limit));
     return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal);
   },
-  pin: (threadId: string, pinned: boolean) =>
-    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pin`), { pinned }),
-  /** Put the pins in this order (Move up, Move down): pins it does not name keep their place after them; a named thread not pinned now is skipped. */
-  pinOrder: (order: readonly string[]) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { order }),
-  /** Unpin's Undo: pin this one thread again at its old index, with the time it was first pinned. */
+  /** Star or unstar, on the thread's own machine (approval "inbox-linked-marks"). */
+  pin: (threadId: string, pinned: boolean) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(threadUrl(threadId, '/pin'), { pinned }),
+  /**
+   * Put one machine's stars in this order (Move up, Move down), on that machine: pins it does not name keep their place
+   * after them; a named thread not pinned now is skipped.
+   */
+  pinOrder: (order: readonly string[]) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(order[0])), { order }),
+  /** Unpin's Undo, on the thread's own machine: pin this one thread again at its old index there, with the time it was first pinned. */
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
-    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { restore }),
-  /** Add the thread to Priority (`true`) or remove it, or (`restore`) put back a `before` an earlier write answered. */
+    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(restore.thread_id)), { restore }),
+  /** Add the thread to Priority (`true`) or remove it, or (`restore`) put back a `before` an earlier write answered. On the thread's own machine. */
   priority: (threadId: string, change: boolean | { restore: InboxPriorityBefore }) =>
-    post<{ before: InboxPriorityBefore }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/priority`), typeof change === 'boolean' ? { priority: change } : change),
+    post<{ before: InboxPriorityBefore }>(threadUrl(threadId, '/priority'), typeof change === 'boolean' ? { priority: change } : change),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
@@ -2250,8 +2257,11 @@ export const inboxApi = {
   devices: () => get<{ devices: PairedDevice[] }>(inboxUrl('/devices')),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(inboxUrl(`/devices/${encodeURIComponent(id)}/revoke`), {}),
   cloudAgents: () => get<CloudAgentsModel>(inboxUrl('/cloud-agents')),
-  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; url: string; key: string; project_id: string | null }) =>
-    post<CloudAgentsModel & { agent: InboxCloudAgentView }>(inboxUrl('/cloud-agents'), fields),
+  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; project_id: string | null }) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl('/cloud-agents'), fields),
+  newCloudPairing: (session: string) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/pairing`), {}),
+  setCloudWake: (session: string, url: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/wake`), { url, key }),
   testCloudAgent: (session: string) => post<CloudAgentsModel & { test: CloudAgentTest }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/test`), {}),
   rekeyCloudAgent: (session: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/key`), { key }),
   removeCloudAgent: (session: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/remove`), {}),

@@ -12,15 +12,38 @@
  * Every row and thread reads one map, the list's `session_labels` (App puts each list read here), so a rename shows
  * everywhere at once and a session that ended keeps its name while the Inbox runs. The map has no prototype and is
  * read with `Object.hasOwn`, so a session id like "constructor" finds nothing.
+ *
+ * A name the person gave the agent (agents/agentNames.ts) is read here over the label its poll sends; the poll's
+ * label is kept, so Reset name shows it as it is then.
  */
 import { useSyncExternalStore } from 'react';
 import { graphemesOf } from '@plannotator/core/inbox-format';
+import { agentNamesNow, onAgentNames } from './agents/agentNames';
 
 export type SessionLabels = Readonly<Record<string, string>>;
 
 const EMPTY: SessionLabels = Object.freeze(Object.create(null) as Record<string, string>);
+/** What the list read brought. */
+let polled: SessionLabels = EMPTY;
+/** `polled` with the given names over it: what every reader gets. */
 let current: SessionLabels = EMPTY;
 const listeners = new Set<() => void>();
+
+function merge(): void {
+  const names = agentNamesNow();
+  if (names.size === 0) {
+    current = polled;
+    return;
+  }
+  const out = Object.assign(Object.create(null), polled) as Record<string, string>;
+  for (const [id, name] of names) out[id] = name;
+  current = Object.freeze(out);
+}
+
+onAgentNames(() => {
+  merge();
+  for (const listener of listeners) listener();
+});
 
 /** The labels as a list read brought them; anything that is not a short string is dropped. Unchanged: no redraw. */
 export function setSessionLabels(next: unknown): void {
@@ -31,8 +54,9 @@ export function setSessionLabels(next: unknown): void {
     }
   }
   const keys = Object.keys(clean);
-  if (keys.length === Object.keys(current).length && keys.every((key) => labelOf(current, key) === clean[key])) return;
-  current = keys.length === 0 ? EMPTY : Object.freeze(clean);
+  if (keys.length === Object.keys(polled).length && keys.every((key) => labelOf(polled, key) === clean[key])) return;
+  polled = keys.length === 0 ? EMPTY : Object.freeze(clean);
+  merge();
   for (const listener of listeners) listener();
 }
 
@@ -43,7 +67,12 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => current;
 
-/** The labels now, redrawn when a list read changes them. */
+/** The labels now, outside React. */
+export function sessionLabelsNow(): SessionLabels {
+  return current;
+}
+
+/** The labels now, redrawn when a list read or a given name changes them. */
 export function useSessionLabels(): SessionLabels {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

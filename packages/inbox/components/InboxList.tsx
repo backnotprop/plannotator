@@ -34,7 +34,7 @@ import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
 import { ListFilterButton, type ListFilterSource } from './ListFilter';
-import { awayLine, type MachinesModel } from '../machines';
+import { awayLine, machineTakes, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
 import { useStarredAbove } from '../starredPills';
@@ -1572,8 +1572,7 @@ export function InboxList(props: InboxListProps) {
       onMarkRead={props.onMarkRead ? markRead : undefined}
       onMarkUnread={props.onMarkUnread ? markUnread : undefined}
       onSendNow={props.onSendNow ? sendNow : undefined}
-      // Pins are this Inbox's own: another machine's thread has no star to press here.
-      onUnstar={props.onUnstar && !(row.machine && props.machines?.names.has(row.machine)) ? unstar : undefined}
+      onUnstar={props.onUnstar ? unstar : undefined}
       day={day}
       menu={menuRow === row.thread_id}
       pinned={props.pinned?.has(row.thread_id) === true}
@@ -1736,7 +1735,8 @@ export function InboxList(props: InboxListProps) {
           snoozeRequest={snoozeRequest}
           snoozeBlockedOf={props.snoozeBlockedOf}
           onSnoozeBlocked={props.onSnoozeBlocked}
-          pinnedOf={props.pinned ? (threadId) => props.pinned!.has(threadId) : undefined}
+          pinnedOf={props.pinned ? (row) => (!props.machines || machineTakes(row, props.machines, 'star') ? props.pinned!.has(row.thread_id) : null) : undefined}
+          prioritizesOf={props.machines ? (row) => machineTakes(row, props.machines!, 'priority') : undefined}
           onTarget={setMenuRow}
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}

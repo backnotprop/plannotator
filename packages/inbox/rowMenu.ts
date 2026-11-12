@@ -40,13 +40,14 @@ export function threadLink(threadId: string, base: { url?: string | null; via?: 
  * `canSnooze` (an Inbox that keeps snoozes, approval "inbox-snooze"): Snooze
  * leads the writes on a thread not archived, with Unsnooze on a snoozed one.
  * Add to Priority (Remove from Priority on a row in it) follows the star, in
- * its group, on a row whose Inbox keeps priority (`priority` absent: none);
- * an archived row offers only Remove.
+ * its group, on a row whose Inbox keeps priority (`priority` absent: none)
+ * and whose machine takes it from this one (`canPrioritize`); an archived row
+ * offers only Remove.
  */
-export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: boolean | null = null, drawn: InboxListGroupId | null = null, canSnooze = false): RowMenuAction[] {
+export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: boolean | null = null, drawn: InboxListGroupId | null = null, canSnooze = false, canPrioritize = true): RowMenuAction[] {
   const actions: RowMenuAction[] = [];
   if (pinned !== null) actions.push(pinned ? 'unpin' : 'pin');
-  const priority = priorityAction(row);
+  const priority = canPrioritize ? priorityAction(row) : null;
   if (priority) actions.push(priority);
   actions.push('copy-thread', 'copy-link', 'copy-id');
   if (canSnooze && !inboxRowArchived(row)) actions.push(...(row.snoozed ? (['snooze', 'unsnooze'] as const) : (['snooze'] as const)));

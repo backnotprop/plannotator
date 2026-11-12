@@ -454,11 +454,10 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     // On the door for a phone, in the table, and still never forwarded: a held one would answer no upload id.
     expect(DOOR_WRITES["POST uploads/reuse"]).toBe("local");
     expect(doorWriteKind("uploads/reuse")).toBeNull();
-    // A star is on the door for a phone and stays on the computer that holds it: never forwarded to a linked machine.
-    expect(doorWriteKind("threads/msg_1/pin")).toBeNull();
-    expect(doorWriteKind("pins")).toBeNull();
-    // The person's Priority is applied here too: it is offered on this computer's own threads only.
-    expect(doorWriteKind("threads/msg_1/priority")).toBeNull();
+    // A star and the person's Priority live on the thread's own machine (inbox-linked-marks): held and sent there like a snooze.
+    expect(doorWriteKind("threads/msg_1/pin")).toBe("set");
+    expect(doorWriteKind("pins")).toBe("set");
+    expect(doorWriteKind("threads/msg_1/priority")).toBe("set");
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {

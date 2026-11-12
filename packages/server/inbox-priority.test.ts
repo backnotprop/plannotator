@@ -3,7 +3,7 @@
  * on a running Inbox (temp data dir, loopback): Add, Remove and their Undo,
  * kept in `inbox/priority.json` outside the event log, the row's `priority`,
  * an archive dropping the add and its Undo putting it back, a reply keeping
- * it, an add dropping an earlier `off`, `event: priority` to windows only, the
+ * it, an add dropping an earlier `off`, `event: priority` to windows and to a linked machine that asks, the
  * window's guards, a phone through its door, and agents never seeing any of it.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -138,7 +138,7 @@ describe("the person's Priority", () => {
     expect(server.store.priorities()).toEqual({ threads: [], off: [] });
   });
 
-  test("every open window hears `event: priority`; the phone's stream (no window id) does not", async () => {
+  test("every open window and a linked machine that asks (`priority=1`) hear `event: priority`; the phone's stream does not", async () => {
     const { server, send } = await setup();
     const a = await send("Add me", "ses_a");
     const read = async (query: string, act: () => Promise<unknown>) => {
@@ -159,6 +159,7 @@ describe("the person's Priority", () => {
     };
     expect(await read("&window=window-priority-1&permission=granted", () => priority(server, a.thread_id, { priority: true }))).toContain("event: priority\ndata: {}");
     expect(await read("", () => priority(server, a.thread_id, { priority: false }))).not.toContain("event: priority");
+    expect(await read("&priority=1", () => priority(server, a.thread_id, { priority: true }))).toContain("event: priority\ndata: {}");
   });
 
   test("agents never see it, and an add writes no store line", async () => {

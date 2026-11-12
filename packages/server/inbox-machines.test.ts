@@ -1657,6 +1657,186 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
   });
 });
 
+describe("a star or Priority on a linked machine's thread lives on that machine (approval inbox-linked-marks)", () => {
+  const dirs: string[] = [];
+  const sandboxWas = process.env.PLANNOTATOR_TEST_SANDBOX;
+  beforeAll(() => {
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+  });
+  afterAll(() => {
+    if (sandboxWas === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    else process.env.PLANNOTATOR_TEST_SANDBOX = sandboxWas;
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+  const scratch = (prefix: string) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    dirs.push(dir);
+    return dir;
+  };
+  const start = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run });
+  const at = (port: number) => `http://127.0.0.1:${port}`;
+  const list = async (port: number) => (await (await fetch(`${at(port)}/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1`)).json()) as Json;
+  /** The Starred rows of a merged list, each with the machine that holds it. */
+  const starred = async (port: number) => ((await list(port)).pins as Json[]).map((row) => [row.thread_id, row.machine]);
+  const post = async (port: number, path: string, body: Json) => {
+    const health = (await (await fetch(`${at(port)}/api/inbox/health`)).json()) as Json;
+    return fetch(`${at(port)}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: health.serverSession, ...body }) });
+  };
+  let keys = 0;
+  /** A's window writing to B through the forward, with the key the window adds. */
+  const forward = (port: number, machine: string, route: string, body: Json) => post(port, `/api/inbox/m/${machine}/${route}`, { idempotency_key: `window-star-${++keys}`, ...body });
+
+  test("starred from A, it is stored on B and shows on both; unstarred on B, A follows; order and Undo go to B; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-star-linked-a-");
+    const dataB = scratch("plannotator-star-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    let client: Client | null = null;
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      client = new Client({ name: "inbox-machines-star", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-star-linked-project-");
+      const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const one = await send("First news");
+      const two = await send("Second news");
+      await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      expect((await view()).marks).toEqual(["star", "priority"]);
+
+      // Starred from A: one copy, on B. A's answer comes after its list of B was read, so its next read shows the star.
+      expect((await forward(a.port, bId, `threads/${one}/pin`, { pinned: true })).status).toBe(200);
+      expect(b.store.pins().map((pin) => pin.thread_id)).toEqual([one]);
+      expect(a.store.pins()).toEqual([]);
+      expect(existsSync(join(dataA, "inbox", "pins.json"))).toBe(false);
+      expect(await starred(a.port)).toEqual([[one, bId]]);
+      expect(await starred(b.port)).toEqual([[one, bId]]);
+
+      // Unstarred in B's own window: A's list follows, with no write of A's.
+      expect((await post(b.port, `/api/inbox/threads/${one}/pin`, { pinned: false })).status).toBe(200);
+      await waitFor("the star gone on A", async () => (await starred(a.port)).length === 0);
+
+      // Move and Undo from A act on B's order.
+      for (const id of [one, two]) expect((await forward(a.port, bId, `threads/${id}/pin`, { pinned: true })).status).toBe(200);
+      expect((await forward(a.port, bId, "pins", { order: [two, one] })).status).toBe(200);
+      expect(b.store.pins().map((pin) => pin.thread_id)).toEqual([two, one]);
+      const pinnedAt = b.store.pins()[1]!.pinned_at;
+      expect((await forward(a.port, bId, `threads/${one}/pin`, { pinned: false })).status).toBe(200);
+      expect((await forward(a.port, bId, "pins", { restore: { thread_id: one, index: 1, pinned_at: pinnedAt } })).status).toBe(200);
+      expect(b.store.pins().map((pin) => [pin.thread_id, pin.pinned_at])).toEqual([[two, expect.any(String)], [one, pinnedAt]]);
+      expect(await starred(a.port)).toEqual([[two, bId], [one, bId]]);
+
+      // B away: the star waits (202, nothing drawn here) and lands when B is back.
+      expect((await forward(a.port, bId, `threads/${two}/pin`, { pinned: false })).status).toBe(200);
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `threads/${two}/pin`, { pinned: true });
+      expect(held.status).toBe(202);
+      expect(a.store.pins()).toEqual([]);
+      b = await start(dataB);
+      await waitFor("the held star on B", () => b.store.pins().some((pin) => pin.thread_id === two), 45_000);
+      await waitFor("the star on A", async () => JSON.stringify(await starred(a.port)) === JSON.stringify([[one, bId], [two, bId]]), 15_000);
+    } finally {
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("added to Priority from A, it is stored on B and drawn on both; removed on B, A follows; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-priority-linked-a-");
+    const dataB = scratch("plannotator-priority-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    let client: Client | null = null;
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      client = new Client({ name: "inbox-machines-priority", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-priority-linked-project-");
+      const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const one = await send("First news");
+      const two = await send("Second news");
+      await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      /** A thread's `priority` as a merged list draws it. */
+      const priorityOn = async (port: number, id: string) => ((await list(port)).sections as Json[]).flatMap((s) => s.threads as Json[]).find((row) => row.thread_id === id)?.priority ?? null;
+
+      // Added from A: one copy, on B, and A's answer comes after its list of B was read.
+      const added = await forward(a.port, bId, `threads/${one}/priority`, { priority: true });
+      expect(added.status).toBe(200);
+      expect(((await added.json()) as Json).before).toEqual({ at: null, off_at: null });
+      expect(b.store.priorities().threads.map((e) => e.thread_id)).toEqual([one]);
+      expect(a.store.priorities().threads).toEqual([]);
+      expect(existsSync(join(dataA, "inbox", "priority.json"))).toBe(false);
+      const first = b.store.priorities().threads[0]!.at;
+      expect(await priorityOn(a.port, one)).toEqual({ person: true, at: first, ask: null });
+      expect(await priorityOn(b.port, one)).toEqual({ person: true, at: first, ask: null });
+
+      // Removed in B's own window: A's list follows (`event: priority` on B's stream), with no write of A's.
+      expect((await post(b.port, `/api/inbox/threads/${one}/priority`, { priority: false })).status).toBe(200);
+      await waitFor("Priority gone on A", async () => (await priorityOn(a.port, one)) === null);
+
+      // B away: the add waits (202, nothing drawn here) and lands when B is back.
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `threads/${two}/priority`, { priority: true });
+      expect(held.status).toBe(202);
+      expect(a.store.priorities().threads).toEqual([]);
+      b = await start(dataB);
+      await waitFor("the held add on B", () => b.store.priorities().threads.some((e) => e.thread_id === two), 45_000);
+      await waitFor("the add on A", async () => (await priorityOn(a.port, two)) !== null, 15_000);
+    } finally {
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("an older machine (its list names no marks): its stars are not drawn here and it is not offered a star; one that names `star` is", async () => {
+    const thread = "msg_01K0000000000000000000000S";
+    for (const marks of [undefined, ["star"]]) {
+      const id = "ibx_01K0000000000000000000000S";
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.62" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          const row = { thread_id: thread, project: { id: "prj_x" }, resolved_at: null };
+          if (route === "threads") return Response.json({ cursor: 0, sections: [{ id: "new", threads: [row] }], projects: [], pins: [row], ...(marks ? { marks } : {}) });
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-star-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await start(dataDir);
+      try {
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        expect((await view())!.marks).toEqual(marks ?? []);
+        expect(await starred(inbox.port)).toEqual(marks ? [[thread, id]] : []);
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
+});
+
 describe("a tailnet guest through the forward: it answers, it never starts an agent there", () => {
   const MAGIC = "laptop.tail0000.ts.net";
   const OWNER = "owner@example.com";

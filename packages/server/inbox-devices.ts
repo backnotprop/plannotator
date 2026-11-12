@@ -177,10 +177,11 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // Snooze and Unsnooze (approval "inbox-snooze"): a snooze lives on the thread's home machine.
   { method: "POST", route: /^threads\/([^/]+)\/snooze$/, window: (m) => `/api/inbox/threads/${m[1]}/snooze`, fromMachine: `?${INBOX_SNOOZE_HELD}` },
   // Star and Unstar (`threads/:id/pin`), and the stars' order or Unstar's Undo (`pins`): contract 7.65, approval
-  // "inbox-starred-pills". A star stays on the computer the phone reaches (DOOR_WRITES `local`): never forwarded.
+  // "inbox-starred-pills". A linked machine sends the same two for this Inbox's threads (approval "inbox-linked-marks").
   { method: "POST", route: /^threads\/([^/]+)\/pin$/, window: (m) => `/api/inbox/threads/${m[1]}/pin` },
   { method: "POST", route: /^pins$/, window: () => "/api/inbox/pins" },
-  // Add to Priority, Remove from Priority and their Undo (contract 7.66): applied on this computer (DOOR_WRITES `local`).
+  // Add to Priority, Remove from Priority and their Undo (contract 7.66). A linked machine sends the same for this
+  // Inbox's threads (approval "inbox-linked-marks").
   { method: "POST", route: /^threads\/([^/]+)\/priority$/, window: (m) => `/api/inbox/threads/${m[1]}/priority` },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
@@ -388,6 +389,8 @@ export interface InboxDoorMachines {
 
 /** The platform a linked Inbox pairs as. */
 export const MACHINE_PLATFORM = "machine";
+/** A paired cloud agent's device (section 13 of the contract): minted by this computer, served by the agent door only. */
+export const AGENT_PLATFORM = "agent";
 /** Machine offers kept, open or redeemed (a CLI offer and a link-back can be open at once). */
 const MACHINE_OFFERS_KEPT = 8;
 
@@ -959,6 +962,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
         if (device.refusal_owed_until !== undefined) refusalAnswered(device.id);
         return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
       }
+      if (device.platform === AGENT_PLATFORM) return refuse(403, "agent_not_accepted_here", "A cloud agent's pairing opens the agent door only.");
       // A machine reaches this door over the tailnet only, never the Wi-Fi's listener.
       if (device.platform === MACHINE_PLATFORM && via === "wifi") return refuse(403, "machine_not_accepted_here", "Machines reach this Inbox over the tailnet, not the Wi-Fi.");
       return await serve(req, url, route, device);
@@ -986,6 +990,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const device = devices.get(deviceId);
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
       if (device.revoked_at !== null) return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
+      if (device.platform === AGENT_PLATFORM) return refuse(403, "agent_not_accepted_here", "A cloud agent's pairing opens the agent door only.");
       if (input.method !== "GET" && input.method !== "POST") return refuse(404, "device_route_not_found", "Not a phone route.");
       let url: URL;
       try {
@@ -1442,7 +1447,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
     if (path === "/api/inbox/devices") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-      return json({ devices: devices.list().map(publicDevice) });
+      return json({ devices: devices.list().filter((d) => d.platform !== AGENT_PLATFORM).map(publicDevice) });
     }
     const revokeMatch = /^\/api\/inbox\/devices\/([A-Za-z0-9_]+)\/revoke$/.exec(path);
     if (revokeMatch) {
@@ -1514,5 +1519,37 @@ export function createInboxDevices(context: InboxDevicesContext) {
     computerName: () => computer().name,
   };
 
-  return { door, asDevice, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices, machineDoor };
+  /** Cloud agents' devices: minted here because the person asked on this computer, so no offer is redeemed. */
+  const agentDevices = {
+    mint: (name: string): { device: InboxDevice; token: string; secret: string } => {
+      const token = `tok_${randomBytes(32).toString("base64url")}`;
+      const secret = randomBytes(32).toString("base64url");
+      const at = now().toISOString();
+      const device = devices.add({ id: inboxId("dev"), name, platform: AGENT_PLATFORM, token, secret, at });
+      devices.setCarriage(device.id, false, at);
+      return { device: devices.get(device.id) ?? device, token, secret };
+    },
+    relay: async (device: InboxDevice): Promise<{ url: string; mailbox_id: string } | null> => (await context.relay?.paired(device)) ?? null,
+    byToken: (token: string): InboxDevice | null => {
+      const device = devices.byToken(token);
+      return device?.platform === AGENT_PLATFORM ? device : null;
+    },
+    byId: (id: string): InboxDevice | null => {
+      const device = devices.get(id);
+      return device?.platform === AGENT_PLATFORM ? device : null;
+    },
+    /** A phone's or a machine's token, which the agent door refuses by name. */
+    isOtherDevice: (token: string): boolean => {
+      const device = devices.byToken(token);
+      return device !== null && device.platform !== AGENT_PLATFORM;
+    },
+    touch: (id: string) => devices.touch(id, now().toISOString()),
+    seenAt: (id: string): string | null => devices.get(id)?.last_seen_at ?? null,
+    revoke: (id: string) => {
+      const device = devices.get(id);
+      if (device?.platform === AGENT_PLATFORM && device.revoked_at === null) revoke(device);
+    },
+  };
+
+  return { door, asDevice, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices, machineDoor, agentDevices };
 }

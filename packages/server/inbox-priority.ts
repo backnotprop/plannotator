@@ -10,11 +10,12 @@
  * The state lives in `inbox/priority.json`, outside the event log
  * (shared/inbox/priority.ts): agents, the MCP, search and the phone's event
  * stream never see it. The list model carries each row's `priority`, and a
- * change tells every window (`event: priority`, as `event: pins` does). The
- * phone's door carries the same write (`POST threads/:id/priority` under an
- * `idempotency_key`, contract 7.66), applied on this computer (`local` in
- * inbox-outbox.ts). It is offered on this computer's own threads only: a
- * linked machine's rows carry no `priority`, since nothing forwards it there.
+ * change tells every window, and a linked machine that asks (`event:
+ * priority`, as `event: pins` does). The phone's door carries the same write
+ * (`POST threads/:id/priority` under an `idempotency_key`, contract 7.66). The
+ * add lives on the thread's own machine (approval "inbox-linked-marks"): a
+ * linked machine's window sends it here through its forward (`set` in
+ * inbox-outbox.ts) and reads it back from this Inbox's list.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";

@@ -69,7 +69,7 @@ import { createSignal } from './signal';
 import { onlyQuestionsChanged } from './pickQueue';
 import { keepSame, sameListModel } from './listSame';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
-import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
+import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, readListView, useListView, type ListSort } from './listView';
@@ -177,7 +177,7 @@ import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
-import { movePin, unpinnedWhere } from './pins';
+import { movePin, sameMachinePins, unpinnedWhere } from './pins';
 import { priorityAction, priorityBackIn } from './priority';
 import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
@@ -206,7 +206,7 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
-import { hearAgentFacesEvent, readAgentFaces } from './agents/agentFaces';
+import { hearAgentFacesEvent, keepAgentName, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -245,7 +245,7 @@ import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
@@ -4327,9 +4327,12 @@ function Inbox() {
    */
   const setPin = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, pinned: boolean) => {
     // Unpin's Undo puts this one thread back where it was, with the time it was first pinned.
+    // Its index among its own machine's stars, where the Undo goes.
     const pinsNow = latestRef.current?.pins ?? [];
-    const index = pinsNow.findIndex((pin) => pin.thread_id === row.thread_id);
-    const pinnedAt = index >= 0 ? (pinsNow[index]!.pinned_at ?? null) : null;
+    const starred = pinsNow.find((pin) => pin.thread_id === row.thread_id);
+    const own = starred ? sameMachinePins(pinsNow, starred) : [];
+    const index = own.findIndex((pin) => pin.thread_id === row.thread_id);
+    const pinnedAt = index >= 0 ? (own[index]!.pinned_at ?? null) : null;
     // Where it still is, from the pinned row (an archived thread has none in the list) or the list.
     const listed = (latestRef.current?.pins ?? []).find((pin) => pin.thread_id === row.thread_id) ?? rowOf(row.thread_id) ?? (threadRow?.thread_id === row.thread_id ? threadRow : null);
     if (pinned) noteStarred(row.thread_id);
@@ -4394,7 +4397,8 @@ function Inbox() {
   const pinAction = async (row: InboxListRow, action: PinnedAction, pills = false) => {
     if (action === 'unpin') return void setPin(row, false);
     if (action === 'copy-link') return void rowAction(row, 'copy-link');
-    const order = (latestRef.current?.pins ?? []).map((pin) => pin.thread_id);
+    // A move stays among its own machine's stars, and that machine keeps the order.
+    const order = sameMachinePins(latestRef.current?.pins ?? [], row).map((pin) => pin.thread_id);
     const next = movePin(order, row.thread_id, action === 'up' ? -1 : 1);
     if (next.every((id, i) => id === order[i])) return;
     try {
@@ -4543,6 +4547,18 @@ function Inbox() {
     await refreshList(false);
     const now = latestRef.current?.projects.find((p) => p.id === projectId)?.name;
     say(name === null ? `Name reset${now ? ` to ${now}` : ''}.` : `Renamed to ${name}.`);
+    return true;
+  };
+
+  /** An agent row's Rename… and Reset name, kept with its face (agents/agentFaces.ts); the live region says it as for a project. */
+  const renameAgent = async (agent: InboxAgent, name: string | null, own: string): Promise<boolean> => {
+    try {
+      await keepAgentName(agent, name);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The name did not change.'));
+      return false;
+    }
+    say(name === null ? `Name reset${own ? ` to ${own}` : ''}.` : `Renamed to ${name}.`);
     return true;
   };
 
@@ -7527,10 +7543,9 @@ function Inbox() {
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}
-            // Pins are this Inbox's own: another machine's thread is pinned on that machine (PLAN Phase 2).
-            onPin={pinsOn && !machineOf(thread.thread_id) ? (next) => setPin(thread, next) : undefined}
+            onPin={pinsOn && machineTakes({ machine: machineOf(thread.thread_id) ?? undefined }, machines, 'star') ? (next) => setPin(thread, next) : undefined}
             priority={(() => {
-              const action = openThreadRow ? priorityAction(openThreadRow) : null;
+              const action = openThreadRow && machineTakes(openThreadRow, machines, 'priority') ? priorityAction(openThreadRow) : null;
               return action ? { on: action === 'priority-remove', onToggle: () => void setPriority(thread, action === 'priority-add') } : undefined;
             })()}
             onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
@@ -7828,6 +7843,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onAgentRename={guestPage ? undefined : renameAgent}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.

@@ -8,8 +8,9 @@ import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 
 /**
  * Add to Priority or Remove from Priority for a row, or null where neither is
- * offered: a row from an Inbox that keeps no priority (or a linked machine's
- * row), and Add on an archived row.
+ * offered: a row from an Inbox that keeps no priority, and Add on an archived
+ * row. A linked machine's row also needs that machine to take it
+ * (`machineTakes(row, model, 'priority')`, which the callers ask).
  */
 export function priorityAction(row: Pick<InboxListRow, 'priority' | 'resolved_at' | 'back_from_archive'>): 'priority-add' | 'priority-remove' | null {
   if (row.priority === undefined) return null;

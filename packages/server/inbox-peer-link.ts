@@ -57,12 +57,25 @@ export interface PeerRecord {
   record: unknown;
 }
 
+/**
+ * That machine's events for a change that writes no record there (a snooze, a star): this Inbox asks for each
+ * (`<event>=1` on its stream), reads that machine's list again when one comes, and tells its own windows the same
+ * event (approval "inbox-linked-marks"). A new mark adds its event here.
+ */
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority"] as const;
+export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
+const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
+
 export interface PeerList {
   cursor: number;
   rows: (InboxListRow & { machine: string })[];
   projects: Record<string, unknown>[];
   /** Its Inbox keeps snoozes (its list says `snoozes: true`; an older one says nothing): only then is Snooze offered on its rows. */
   snoozes: boolean;
+  /** The marks it takes from a linked machine (its list's `marks`; none from an older Inbox). */
+  marks: string[];
+  /** Its starred threads, in its own order (its list's `pins`). */
+  pins: string[];
   /** Its agents (its list's `agents`, capped, with `machine`; inbox-agents-list.ts); null from an older Inbox. */
   agents: InboxAgentsGroup | null;
   session_labels: Record<string, string>;
@@ -96,8 +109,8 @@ export interface PeerLinkOptions {
   onRecord: (record: PeerRecord) => void;
   /** State, list or anything else the window draws changed. */
   onChange: () => void;
-  /** That machine's snoozes changed and its list was read again: the windows read theirs. */
-  onSnoozes?: () => void;
+  /** A no-record change there (`PEER_REREAD_EVENTS`) and its list was read again: the windows hear the same event. */
+  onReread?: (event: PeerRereadEvent) => void;
   /**
    * That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows
    * read theirs. `sessions`: a session ended or came back there; `agents`: its Agents section moved; `labels`: a
@@ -322,8 +335,9 @@ export class PeerLink {
     }, this.t.silenceMs);
     let response: Response;
     try {
-      // `snoozes=1`, `deliveries=1`: neither writes a record, so the stream tells this machine when to read the list again.
-      response = await this.options.transport.events(headers, this.cursor === null ? "?snoozes=1&deliveries=1" : `?cursor=${this.cursor}&snoozes=1&deliveries=1`, abort.signal);
+      // The reread events and `deliveries=1`: none writes a record, so the stream tells this machine when to read the list again.
+      const asks = [...PEER_REREAD_EVENTS, "deliveries"].map((event) => `${event}=1`).join("&");
+      response = await this.options.transport.events(headers, this.cursor === null ? `?${asks}` : `?cursor=${this.cursor}&${asks}`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
       if (headersLate) return `the event stream did not answer for ${Math.round(this.t.silenceMs / 1000)} s`;
@@ -381,9 +395,10 @@ export class PeerLink {
               if (this.asked && (this.farUpdate?.state === "failed" || this.noChange)) this.asked = null;
               this.options.onChange();
             }
-          } else if (parsed.event === "snoozes") {
+          } else if (isRereadEvent(parsed.event)) {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
-            void this.refreshList().then(() => this.options.onSnoozes?.());
+            const event = parsed.event;
+            void this.refreshList().then(() => this.options.onReread?.(event));
           } else if (parsed.event === "deliveries") {
             const change = JSON.parse(parsed.data) as Json;
             this.deliveriesMoved(change.sessions === true, change.agents === true, change.labels === true);
@@ -436,6 +451,8 @@ export class PeerLink {
       rows: rows.map((row: InboxListRow) => ({ ...row, machine: this.id })),
       projects: projects.map((project: Json) => ({ ...project, machine: this.id })),
       snoozes: list.snoozes === true,
+      marks: Array.isArray(list.marks) ? list.marks.filter((mark: unknown): mark is string => typeof mark === "string") : [],
+      pins: Array.isArray(list.pins) ? list.pins.flatMap((row: Json) => (typeof row?.thread_id === "string" ? [row.thread_id] : [])) : [],
       agents: inboxPeerAgentsGroup(list.agents, this.id),
       session_labels: inboxPeerSessionNames(list.session_labels),
       session_titles: inboxPeerSessionNames(list.session_titles),
