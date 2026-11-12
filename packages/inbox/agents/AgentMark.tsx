@@ -7,6 +7,7 @@ import { agentFaceSources, loadAgentFaceArt } from './faceArtLoad';
 import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
 import { AgentIconDialog, type AgentIconPlace } from './AgentIconDialog';
+import { iconReopen } from './iconFlowDev';
 import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, showAgentFace, unmountAgentMark } from './motion';
 
 export { loadAgentFaceArt } from './faceArtLoad';
@@ -115,6 +116,12 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
       return;
     }
     clearTimeout(dwell.current);
+    // Exploration (agents/iconFlowDev.ts): an uploaded picture or a set icon opens its place in the dialog again,
+    // where a step of the cycle would drop it for Transparent.
+    if (iconReopen() && (face.startsWith('own:') || face.startsWith('set:'))) {
+      openDialog(face.startsWith('own:') ? 'own' : 'sets');
+      return;
+    }
     clicked.current = true;
     keepAgentFace(agent ?? id, nextAgentFace(face));
   };

@@ -1,9 +1,10 @@
 import { useId, useState } from 'react';
 import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
-import type { AgentFaceRef } from './agentFaces';
+import { agentFaceOf, keepAgentFace, type AgentFaceRef } from './agentFaces';
 import type { AgentFace } from './faceChoices';
-import { AnimateIt } from './AnimateIt';
+import { ANIMATE_WORDS, AnimateIt, animateSource, startAnimate } from './AnimateIt';
+import { iconFlow, showToastFromAnywhere } from './iconFlowDev';
 import { OWN_LABEL, SETS_LABEL } from './FaceFan';
 import { OwnIconsBody } from './OwnIconsBody';
 import { SetsBody } from './SetsBody';
@@ -29,6 +30,33 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose }: { p
   // On a touch screen the search is not focused as the dialog opens: its keyboard would come up over the icons.
   const [touch] = useState(() => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
   const initialFocus = touch ? '.ib-agi-body' : on === 'sets' ? '.am-sets-q' : '.ib-agi-drop';
+  // Exploration (agents/iconFlowDev.ts): what a pick does. `close`: today. `stay`: the dialog stays, its head and
+  // "Animate it" follow the pick. `toast`: it closes and a toast offers "Animate it" and Undo. `beside`: it stays, and
+  // "Animate it" sits under the picked icon in the grid.
+  const [flow] = useState(iconFlow);
+  const before = face;
+  const picked = () => {
+    if (flow === 'stay' || flow === 'beside') return;
+    onClose();
+    if (flow !== 'toast') return;
+    const now = agentFaceOf(agentId);
+    const source = animateSource(now, null);
+    if (!source || now === before) return;
+    showToastFromAnywhere({
+      icon: 'check',
+      lead: 'Icon changed',
+      detail: name,
+      action: {
+        label: ANIMATE_WORDS.button,
+        onPress: () =>
+          void startAnimate(agent, source).then((ok) => {
+            if (!ok) showToastFromAnywhere({ icon: 'warn', lead: ANIMATE_WORDS.failed, wrap: true });
+          }),
+      },
+      onUndo: () => keepAgentFace(agent, before),
+    });
+  };
+  const keepOpen = flow === 'stay' || flow === 'beside';
   return (
     <Modal labelledBy={`${uid}-t`} testId="agent-icon" onClose={onClose} ownKeys initialFocus={initialFocus} className="ib-agi">
       <div className="ib-dlg-head ib-agi-head">
@@ -49,9 +77,13 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose }: { p
           <Icon name="x" />
         </button>
       </div>
-      <AnimateIt agent={agent} face={face} onDone={onClose} />
+      {!(flow === 'beside' && on === 'sets') && <AnimateIt agent={agent} face={face} onDone={onClose} onBack={keepOpen ? () => {} : onClose} />}
       <div className="ib-agi-body" role="tabpanel" tabIndex={-1}>
-        {on === 'own' ? <OwnIconsBody agent={agent} face={face} onDone={onClose} /> : <SetsBody agent={agent} face={face} onDone={onClose} />}
+        {on === 'own' ? (
+          <OwnIconsBody agent={agent} face={face} onDone={picked} />
+        ) : (
+          <SetsBody agent={agent} face={face} onDone={picked} pin={flow === 'beside' ? <AnimateIt agent={agent} face={face} onDone={onClose} bare /> : undefined} />
+        )}
       </div>
     </Modal>
   );

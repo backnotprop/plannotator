@@ -105,3 +105,9 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
   :root[data-ib-keyboard] .ib-agi .am-sets-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -14px; padding: 0 14px; }
   :root[data-ib-keyboard] .ib-agi .am-sets-tabs::-webkit-scrollbar { display: none; }
 }
+
+/* Exploration ("beside", agents/iconFlowDev.ts): "Animate it" under the agent's icon in the grid, scrolling with it. */
+.ib-agi .am-sets-scroll { position: relative; }
+.ib-agi-pin { position: absolute; z-index: 2; transform: translateX(-50%); }
+.ib-agi-pinb { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ib-agi-pinb .ib-agi-anim-b { background: var(--card); box-shadow: var(--ib-pill-shadow-hover); white-space: nowrap; }
