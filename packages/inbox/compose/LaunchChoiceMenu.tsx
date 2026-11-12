@@ -138,6 +138,11 @@ function ModelFilterColumn({ models, picked, onPick }: { models: string[]; picke
     const found = next.trim() ? filterLaunchModels(models, next) : models;
     setHl(next.trim() ? (found.length > 0 ? 1 : 0) : Math.max(0, [null, ...found].indexOf(picked)));
   };
+  const pick = (value: string | null) => {
+    setQuery('');
+    setHl(Math.max(0, [null, ...models].indexOf(value)));
+    onPick(value);
+  };
   const onKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -146,7 +151,7 @@ function ModelFilterColumn({ models, picked, onPick }: { models: string[]; picke
       setHl((at) => (at + step + rows.length) % rows.length);
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      if (hl < rows.length) onPick(rows[hl]!);
+      if (hl < rows.length) pick(rows[hl]!);
       if (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) event.currentTarget.blur();
     } else if (event.key === 'Escape' && query) {
       event.preventDefault();
@@ -190,10 +195,7 @@ function ModelFilterColumn({ models, picked, onPick }: { models: string[]; picke
             data-compose-choice-value={value ?? 'default'}
             data-row={i}
             title={value ?? undefined}
-            onClick={() => {
-              setHl(i);
-              onPick(value);
-            }}
+            onClick={() => pick(value)}
           >
             <span className="ib-cp-op ib-cp-lchname">
               <span>{value === null ? 'Default' : idOf(value)}</span>

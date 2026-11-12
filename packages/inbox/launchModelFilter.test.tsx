@@ -18,7 +18,7 @@ afterEach(() => {
 const models = ['opencode/big-pickle', 'opencode/flint-40b-free', 'opencode/inkling-2-small-free', 'anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-5', 'openai/gpt-5.5', 'openai/gpt-6.1-sol', 'openrouter/anthropic/claude-opus-4-5', 'google/gemini-3-pro', 'deepseek/deepseek-v4', 'xai/grok-5', 'mistral/devstral-3'];
 const choices: InboxLaunchChoices = { models, efforts: ['low', 'high'], effort_word: 'Variant', model_efforts: Object.fromEntries(models.map((m) => [m, ['low', 'high']])) };
 
-test.skipIf(!hasDom)('a long model list filters as you type, Enter picks the best match, Escape clears the filter before it closes', () => {
+test.skipIf(!hasDom)('a long model list filters as you type; Enter picks the best match and shows the whole list again, so one Escape closes; Escape with words typed clears them first', () => {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -40,6 +40,13 @@ test.skipIf(!hasDom)('a long model list filters as you type, Enter picks the bes
   expect(rows()).toEqual(['default', 'openrouter/anthropic/claude-opus-4-5']);
   key('Enter');
   expect(picks.at(-1)).toEqual({ model: 'openrouter/anthropic/claude-opus-4-5' });
+  expect(input.value).toBe('');
+  expect(rows()).toHaveLength(models.length + 1);
+
+  type('gemini');
+  act(() => host!.querySelector<HTMLButtonElement>('[data-compose-choice-value="google/gemini-3-pro"]')!.click());
+  expect(picks.at(-1)).toEqual({ model: 'google/gemini-3-pro' });
+  expect(input.value).toBe('');
 
   type('zzz');
   expect(rows()).toEqual(['default']);
