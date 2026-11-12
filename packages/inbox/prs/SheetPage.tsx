@@ -5,6 +5,9 @@
  * own closed search as a link. A tile's popover (hover or focus; Enter or a tap pins it, a bottom sheet on a phone)
  * says what the PR is and offers Open, Open on GitHub, and Merge when the forge said it can (a second click confirms).
  * A desktop's Grid | Table shows the same PRs as rows instead (SheetTable.tsx; approval "inbox-pr-board-bulk").
+ * Select (the owner's pick B there) is a mode of its own: no box shows until it is pressed; then a tile's or a row's
+ * click picks, a shift-click picks the range from the last one, and the bar in place of the filter row counts them
+ * (a phone's sheet at the bottom). Done or Clear leaves it; outside it, clicks are as above.
  *
  * Keyboard: Tab and Enter only (arrow keys are deferred, q-38094e68). A tile's popover actions join the Tab order only
  * once Enter pins it; Escape closes it back to the tile.
@@ -20,8 +23,9 @@ import { usePullRisk } from '../pulls/usePullRisk';
 import { Named, Person } from '../pulls/Face';
 import { facesOnce } from '../pulls/words';
 import { ChecksMark, checksLabel } from './ChecksMark';
+import { BoxMark, boxState, SelectBox } from './SelectBox';
 import { SheetTable, type TableSection } from './SheetTable';
-import { nextSort, pullWords, type SheetLayout, type TableSort } from './tableModel';
+import { nextSort, pullWords, sortUnits, type SheetLayout, type TableSort } from './tableModel';
 import {
   agoWords,
   closedLinks,
@@ -134,6 +138,16 @@ export function SheetPage(props: SheetPageProps) {
   const merged = useMemo(() => (model && view === 'merged' ? mergedModel(model, now) : null), [model, now, view]);
   const notices = useMemo(() => (model ? pullsNotices(model) : []), [model]);
   const q = query.trim();
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  // Where a shift-click's range starts: the PR last picked or let go.
+  const anchor = useRef<string | null>(null);
+  const selectOn = selecting && view === 'open';
+  // A pick that is no longer open (merged meanwhile) drops out.
+  const chosen = useMemo(() => {
+    const open = new Set(model?.pulls.filter(inboxPullIsOpen).map((p) => p.key));
+    return new Set([...picked].filter((key) => open.has(key)));
+  }, [model, picked]);
 
   const show = useCallback((next: Pop) => {
     clearTimers();
@@ -147,8 +161,11 @@ export function SheetPage(props: SheetPageProps) {
     });
   }, []);
 
-  /** A tile's handlers: hover and focus show the popover, a mouse click opens the PR, Enter or a tap pins the popover. */
-  const tileHandlers = (pull: InboxPull, stack: InboxPullStack) => ({
+  /**
+   * A tile's handlers: hover and focus show the popover, a mouse click opens the PR, Enter or a tap pins the popover.
+   * In select mode a click (or Enter, or a tap) picks it, and there is no popover.
+   */
+  const tileHandlers = (pull: InboxPull, stack: InboxPullStack) => (selectOn ? pickHandlers(pull) : {
     onPointerEnter: (event: ReactPointerEvent<HTMLButtonElement>) => {
       if (event.pointerType !== 'mouse' || phone) return;
       const anchor = event.currentTarget;
@@ -184,11 +201,22 @@ export function SheetPage(props: SheetPageProps) {
       show({ pull, stack, anchor, pinned: true });
     },
   });
+  const pickHandlers = (pull: InboxPull) => ({
+    onMouseDown: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      // A shift-click picks a range: it must not select the text between.
+      if (event.shiftKey) event.preventDefault();
+    },
+    onClick: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (inboxPullIsOpen(pull)) pick(pull.key, event.shiftKey);
+    },
+  });
 
   const tile = (pull: InboxPull, stack: InboxPullStack, inStack: boolean) => {
     const you = needsYou(pull);
     const dim = !!q && !matchesQuery(pull, q);
     const words = pullWords(pull);
+    const box = selectOn && inboxPullIsOpen(pull);
+    const on = box && chosen.has(pull.key);
     return (
       <button
         key={pull.key}
@@ -199,11 +227,15 @@ export function SheetPage(props: SheetPageProps) {
         data-you={you ? '' : undefined}
         data-dim={dim ? '' : undefined}
         data-in-stack={inStack ? '' : undefined}
+        data-picked={on ? '' : undefined}
+        role={box ? 'checkbox' : undefined}
+        aria-checked={box ? on : undefined}
         aria-label={words}
-        aria-haspopup="dialog"
-        aria-expanded={pop?.pull.key === pull.key && pop.pinned ? true : undefined}
+        aria-haspopup={selectOn ? undefined : 'dialog'}
+        aria-expanded={!selectOn && pop?.pull.key === pull.key && pop.pinned ? true : undefined}
         {...tileHandlers(pull, stack)}
       >
+        {box && <BoxMark on={on} />}
         {pull.state === 'merged' && <Icon name="pullRequest" size={12} />}
         <span className="ib-prt-n">{inboxPullLabel(pull)}</span>
         {inboxPullIsOpen(pull) && <ChecksMark checks={pull.checks} />}
@@ -269,6 +301,47 @@ export function SheetPage(props: SheetPageProps) {
   const closed = model ? closedLinks(model.hosts) : [];
   const empty = model && sheet && sheet.sections.length === 0 ? pullsEmptyWords(model, notices) : null;
   const visible = sheet ? sheet.sections.filter((s) => !q || s.units.some((u) => u.layers.some((l) => matchesQuery(l, q)))) : [];
+
+  // What can be picked: an open PR the filter doesn't dim.
+  const pickable = (pull: InboxPull) => inboxPullIsOpen(pull) && (!q || matchesQuery(pull, q));
+  const keysOf = (section: { units: InboxPullStack[] }) => section.units.flatMap((u) => u.layers.filter(pickable).map((l) => l.key));
+  // A shift-click's range runs over the PRs in the order drawn; a folded strip draws no tile of its own layers.
+  const order = visible.flatMap((s) => (layout === 'table' ? sortUnits(s.units, sort, now, risk) : s.units.filter((u) => !foldsToStrip(u))).flatMap((u) => u.layers.filter(pickable).map((l) => l.key)));
+  const allKeys = visible.flatMap(keysOf);
+  const pick = (key: string, range: boolean) => {
+    const from = anchor.current;
+    anchor.current = key;
+    setPicked((was) => {
+      const next = new Set(was);
+      const a = from ? order.indexOf(from) : -1;
+      const b = order.indexOf(key);
+      if (range && a >= 0 && b >= 0) for (const k of order.slice(Math.min(a, b), Math.max(a, b) + 1)) next.add(k);
+      else if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  /** A group's box: picks all of it, or lets all of it go when all of it is picked. */
+  const pickAll = (keys: string[]) =>
+    setPicked((was) => {
+      const all = keys.every((k) => was.has(k));
+      const next = new Set(was);
+      for (const k of keys) {
+        if (all) next.delete(k);
+        else next.add(k);
+      }
+      return next;
+    });
+  const startSelect = () => {
+    hide(false);
+    setSelecting(true);
+  };
+  const leaveSelect = () => {
+    setSelecting(false);
+    setPicked(new Set());
+    anchor.current = null;
+  };
+  const actions = selectOn && chosen.size > 0;
   const table = (sections: TableSection[]) => (
     <SheetTable
       sections={sections}
@@ -278,9 +351,23 @@ export function SheetPage(props: SheetPageProps) {
       judgments={props.risk ? undefined : riskAnswer?.judgments}
       sort={sort}
       onSort={(key) => setSort((was) => nextSort(was, key))}
-      onRow={(pull, stack) => props.onOpenPull(pull, stack)}
+      onRow={(pull, stack, event) => {
+        if (!selectOn) props.onOpenPull(pull, stack);
+        else if (inboxPullIsOpen(pull)) pick(pull.key, event.shiftKey);
+      }}
       onOpenStack={props.onOpenStack}
       labelledBy={titleId}
+      select={
+        selectOn
+          ? {
+              picked: chosen,
+              all: boxState(allKeys, chosen),
+              onAll: () => pickAll(allKeys),
+              section: (section) => boxState(keysOf(section), chosen),
+              onSection: (section) => pickAll(keysOf(section)),
+            }
+          : undefined
+      }
     />
   );
 
@@ -352,6 +439,7 @@ export function SheetPage(props: SheetPageProps) {
         {layout === 'grid' && visible.map((section) => (
           <section key={section.key} className="ib-prs-sec" aria-label={section.label} data-pr-repo={section.key}>
             <div className="ib-prs-sech">
+              {selectOn && <SelectBox state={boxState(keysOf(section), chosen)} label={`Select all in ${section.label}`} tooltip onClick={() => pickAll(keysOf(section))} />}
               <h2 title={`${section.host}/${section.repo}`}>{section.label}</h2>
               {section.outside && <span className="ib-prs-outside">not a project</span>}
               <span className="ib-prs-secn">{count(section)}</span>
@@ -403,6 +491,8 @@ export function SheetPage(props: SheetPageProps) {
       data-prs-page=""
       data-phone={phone ? '' : undefined}
       data-layout={layout}
+      data-selecting={selectOn ? '' : undefined}
+      data-picking={actions ? '' : undefined}
       style={layout === 'table' ? ({ '--ib-prs-bar-h': `${barHeight}px` } as CSSProperties) : undefined}
     >
       <div className="ib-prs-scroll">
@@ -431,42 +521,72 @@ export function SheetPage(props: SheetPageProps) {
             </p>
           )}
         </header>
-        <div className="ib-prs-bar" ref={barRef}>
-          <label className="ib-prs-field">
-            <Icon name="search" size={14} />
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={phone ? 'Filter by title, author, repo or #' : 'Filter by title, author, repository or number'}
-              aria-label="Filter pull requests"
-              spellCheck={false}
-              autoComplete="off"
-              data-pr-filter=""
-            />
-          </label>
-          <div className="ib-seg ib-prs-seg" role="group" aria-label="State">
-            {(['open', 'merged'] as const).map((v) => (
-              <button key={v} type="button" className="ib-seg-o" data-on={view === v ? '' : undefined} aria-pressed={view === v} onClick={() => props.onView(v)} data-pr-view={v}>
-                {v === 'open' ? 'Open' : 'Merged'}
+        {/* While something is picked the bar is select mode's own (a phone's is a sheet at the bottom instead). */}
+        <div className="ib-prs-bar" ref={barRef} data-pr-actions={actions && !phone ? '' : undefined}>
+          {actions && !phone ? (
+            <>
+              <span className="ib-prs-picked" data-pr-picked="">
+                {chosen.size} selected
+              </span>
+              <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
+                Clear
               </button>
-            ))}
-          </div>
-          {props.onLayout && !phone && (
-            <div className="ib-seg ib-prs-seg">
-              {(['grid', 'table'] as const).map((l) => (
-                <button key={l} type="button" className="ib-seg-o" data-on={layout === l ? '' : undefined} aria-pressed={layout === l} onClick={() => props.onLayout!(l)} data-pr-layout={l}>
-                  {l === 'grid' ? 'Grid' : 'Table'}
-                </button>
+            </>
+          ) : (
+            <>
+              <label className="ib-prs-field">
+                <Icon name="search" size={14} />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={phone ? 'Filter by title, author, repo or #' : 'Filter by title, author, repository or number'}
+                  aria-label="Filter pull requests"
+                  spellCheck={false}
+                  autoComplete="off"
+                  data-pr-filter=""
+                />
+              </label>
+              <div className="ib-seg ib-prs-seg" role="group" aria-label="State">
+                {(['open', 'merged'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className="ib-seg-o"
+                    data-on={view === v ? '' : undefined}
+                    aria-pressed={view === v}
+                    onClick={() => {
+                      if (v === 'merged') leaveSelect();
+                      props.onView(v);
+                    }}
+                    data-pr-view={v}
+                  >
+                    {v === 'open' ? 'Open' : 'Merged'}
+                  </button>
+                ))}
+              </div>
+              {props.onLayout && !phone && (
+                <div className="ib-seg ib-prs-seg">
+                  {(['grid', 'table'] as const).map((l) => (
+                    <button key={l} type="button" className="ib-seg-o" data-on={layout === l ? '' : undefined} aria-pressed={layout === l} onClick={() => props.onLayout!(l)} data-pr-layout={l}>
+                      {l === 'grid' ? 'Grid' : 'Table'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {closed.map((link) => (
+                <a key={link.host} className="ib-prs-closed" href={link.url} target="_blank" rel="noreferrer">
+                  {link.label}
+                  <Icon name="external" size={12} />
+                </a>
               ))}
-            </div>
+              {view === 'open' && (selecting || visible.length > 0) && (
+                <button type="button" className="ib-prs-btn ib-prs-end" onClick={selecting ? leaveSelect : startSelect} data-pr-select={selecting ? 'done' : 'select'}>
+                  {selecting ? 'Done' : 'Select'}
+                </button>
+              )}
+            </>
           )}
-          {closed.map((link) => (
-            <a key={link.host} className="ib-prs-closed" href={link.url} target="_blank" rel="noreferrer">
-              {link.label}
-              <Icon name="external" size={12} />
-            </a>
-          ))}
         </div>
         {model && notices.length > 0 && !empty && (
           <div className="ib-prs-notices">
@@ -489,6 +609,16 @@ export function SheetPage(props: SheetPageProps) {
         <div className="ib-prs-body">{body}</div>
       </div>
       {popover}
+      {actions && phone && (
+        <div className="ib-prs-picksheet" data-pr-actions="">
+          <span className="ib-prs-picked" data-pr-picked="">
+            {chosen.size} selected
+          </span>
+          <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
+            Clear
+          </button>
+        </div>
+      )}
     </section>
   );
 }

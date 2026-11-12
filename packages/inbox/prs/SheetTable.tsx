@@ -2,7 +2,8 @@
  * The board as a table (approval "inbox-pr-board-bulk"): one row per PR under one row per repository, the columns
  * Pull request, Title, Author, State, Checks, Risk, Updated and Size. A header sorts its column; a stack's layers stay
  * together in landing order, the first with the layers mark (it opens the stack's page), the rest with an elbow.
- * A row's click is a tile's: it opens the PR. Narrow, Risk goes first, then Updated and Size (prs.css).
+ * A row's click is a tile's: it opens the PR, or in select mode picks it, a shift-click picking the range from the last
+ * one. Narrow, Risk goes first, then Updated and Size (prs.css).
  */
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { inboxPullIsOpen, inboxPullLabel, type InboxPull, type InboxPullRiskJudgment, type InboxPullStack } from '@plannotator/core/inbox-types';
@@ -12,6 +13,7 @@ import { RiskMark } from '../pulls/RiskMark';
 import { riskLevelWord } from '../pulls/risk';
 import { facesOnce } from '../pulls/words';
 import { ChecksMark } from './ChecksMark';
+import { SelectBox, type BoxState } from './SelectBox';
 import { ageShort, isStack, matchesQuery, needsYou, statusParts, type RiskLevels } from './sheetModel';
 import { checksWord, pullWords, sortUnits, type SortKey, type TableSort } from './tableModel';
 
@@ -24,6 +26,15 @@ export interface TableSection {
   units: InboxPullStack[];
   /** The repository row's count: "7 open · 1 landed this week", "3 merged". */
   count: string;
+}
+
+/** Select mode: a first column of boxes, one in the head for every row and one per repository. */
+export interface TableSelect {
+  picked: ReadonlySet<string>;
+  all: BoxState;
+  onAll: () => void;
+  section: (section: TableSection) => BoxState;
+  onSection: (section: TableSection) => void;
 }
 
 const COLUMNS: { key: SortKey; label: string; className: string }[] = [
@@ -50,8 +61,9 @@ export function SheetTable(props: {
   onRow: (pull: InboxPull, stack: InboxPullStack, event: ReactMouseEvent<HTMLTableRowElement>) => void;
   onOpenStack: (stack: InboxPullStack) => void;
   labelledBy: string;
+  select?: TableSelect;
 }) {
-  const { now, risk, sort, query } = props;
+  const { now, risk, sort, query, select } = props;
   const span = COLUMNS.length;
 
   const row = (pull: InboxPull, stack: InboxPullStack, at: number) => {
@@ -61,6 +73,7 @@ export function SheetTable(props: {
     const judgment = props.judgments?.[pull.key];
     const level = risk[pull.key];
     const word = checksWord(open ? pull.checks : null);
+    const on = !!select && open && select.picked.has(pull.key);
     return (
       <tr
         key={pull.key}
@@ -69,8 +82,22 @@ export function SheetTable(props: {
         data-state={pull.state}
         data-you={you ? '' : undefined}
         data-dim={query && !matchesQuery(pull, query) ? '' : undefined}
+        data-picked={on ? '' : undefined}
+        onMouseDown={(event) => {
+          // A shift-click picks a range: it must not select the text between.
+          if (select && event.shiftKey) event.preventDefault();
+        }}
         onClick={(event) => props.onRow(pull, stack, event)}
       >
+        {select && (
+          <td className="ib-prtb-c">
+            {open && (
+              <button type="button" role="checkbox" className="ib-prs-box" aria-checked={on} aria-label={pullWords(pull)} data-on={on ? '' : undefined} data-pr-box={pull.key}>
+                <Icon name="check" size={12} />
+              </button>
+            )}
+          </td>
+        )}
         <td className="ib-prtb-n">
           <span className="ib-prtb-nin">
             {stacked && at === 0 && (
@@ -89,7 +116,7 @@ export function SheetTable(props: {
               </button>
             )}
             {stacked && at > 0 && <i className="ib-prtb-elbow" aria-hidden="true" />}
-            <button type="button" className="ib-prtb-open" aria-label={pullWords(pull)} data-pr-open="">
+            <button type="button" className="ib-prtb-open" aria-label={pullWords(pull)} tabIndex={select ? -1 : undefined} data-pr-open="">
               {pull.state === 'merged' && <Icon name="pullRequest" size={12} />}
               {inboxPullLabel(pull)}
             </button>
@@ -137,6 +164,11 @@ export function SheetTable(props: {
       <table className="ib-prtb" aria-labelledby={props.labelledBy} data-pr-table="">
         <thead>
           <tr>
+            {select && (
+              <th className="ib-prtb-c" scope="col">
+                <SelectBox state={select.all} label="Select all" onClick={select.onAll} />
+              </th>
+            )}
             {COLUMNS.map((column) => {
               const on = sort?.key === column.key;
               // Updated's first click is the newest first: a descending date.
@@ -157,6 +189,11 @@ export function SheetTable(props: {
         {props.sections.map((section) => (
           <tbody key={section.key} data-pr-repo={section.key}>
             <tr className="ib-prtb-g">
+              {select && (
+                <td className="ib-prtb-c">
+                  <SelectBox state={select.section(section)} label={`Select all in ${section.label}`} tooltip onClick={() => select.onSection(section)} />
+                </td>
+              )}
               <th colSpan={span} scope="rowgroup">
                 <span className="ib-prtb-gin">
                   <span className="ib-prtb-gl" title={`${section.host}/${section.repo}`}>

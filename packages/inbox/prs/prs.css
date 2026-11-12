@@ -329,6 +329,39 @@ td.ib-prtb-size { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px
 @container (max-width: 920px) { .ib-prtb :is(.ib-prtb-upd, .ib-prtb-size) { width: 0; padding: 0; } .ib-prtb :is(.ib-prtb-upd, .ib-prtb-size) > * { display: none; } }
 @container (max-width: 640px) { .ib-prtb .ib-prtb-a { width: 0; padding: 0; } .ib-prtb .ib-prtb-a > * { display: none; } }
 
+/* Select mode (approval "inbox-pr-board-bulk", take B): a box in every open tile, before each repository's name, and a
+   first column in the table; a picked tile or row is filled (--ib-cur-bg), never outlined. On a desktop the bar stays
+   put while it is on, and while something is picked it is the count and Clear. */
+.ib-prs[data-selecting]:not([data-phone]) .ib-prs-bar { position: sticky; top: 0; z-index: 4; background: var(--ib-prs-solid); }
+.ib-prs-bar[data-pr-actions] { min-height: 30px; }
+.ib-prs-picked { font-weight: 600; font-size: var(--ib-fs-13-5, 13.5px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-prs-btn { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: var(--ib-prt-fill); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); white-space: nowrap; cursor: pointer; }
+.ib-prs-btn:hover { background: var(--ib-prt-hover); }
+.ib-prs-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-end { margin-left: auto; }
+.ib-prs-box { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: var(--card); box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--muted-foreground) 60%, transparent); color: transparent; cursor: pointer; }
+.ib-prs-box svg { stroke-width: 2.6; }
+.ib-prs-box[data-on] { background: var(--primary); box-shadow: none; color: var(--primary-foreground); }
+button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prs-sech .ib-prs-box { align-self: center; }
+.ib-prt .ib-prs-box { width: 13px; height: 13px; margin-left: -2px; border-radius: 3px; }
+.ib-prt[data-you] .ib-prs-box:not([data-on]) { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--primary-foreground) 70%, transparent); }
+.ib-prt[data-you] .ib-prs-box[data-on] { background: var(--primary-foreground); color: var(--primary); }
+.ib-prs .ib-prt[data-picked]:not([data-you]) { background: var(--ib-cur-bg); color: var(--ib-cur-fg); box-shadow: none; }
+.ib-prs .ib-prt[data-picked]:not([data-you]) .ib-prck[data-checks='success'] { color: var(--ib-cur-fg); }
+.ib-prs .ib-prt[data-picked][data-you] { background: color-mix(in oklch, var(--primary) 80%, var(--foreground)); }
+.ib-prs[data-selecting] :is(.ib-prt, .ib-prtb-r) { user-select: none; }
+.ib-prtb .ib-prtb-c { width: 36px; padding: 0 0 0 10px; }
+.ib-prtb .ib-prtb-c .ib-prs-box { vertical-align: middle; }
+.ib-prtb-r[data-picked] td,
+.ib-prtb-r[data-picked]:hover td { background: var(--ib-cur-bg); }
+/* A phone: the count and Clear in a sheet at the bottom, 44 px to tap; the filter row keeps Done. */
+.ib-prs-picksheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: 12px; padding: 10px 12px calc(12px + var(--pn-safe-bottom, 0px)) 18px; border-radius: 14px 14px 0 0; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 -12px 30px -12px oklch(0 0 0 / 0.45)); }
+.ib-prs-picksheet .ib-prs-picked { font-size: var(--ib-fs-15, 15px); }
+.ib-prs-picksheet .ib-prs-btn { height: 44px; padding: 0 18px; font-size: var(--ib-fs-15, 15px); }
+.ib-prs[data-phone] .ib-prs-bar .ib-prs-btn { height: 36px; padding: 0 14px; }
+.ib-prs[data-phone][data-picking] .ib-prs-scroll { padding-bottom: 96px; }
+
 /* A phone: one column, tighter gutters; the counts part by space (a dot would dangle at a line's start). */
 .ib-prs[data-phone] .ib-prs-scroll { padding: 0 14px 32px; }
 .ib-prs[data-phone] .ib-prs-sum { column-gap: 12px; margin-left: 0; clip-path: none; }
