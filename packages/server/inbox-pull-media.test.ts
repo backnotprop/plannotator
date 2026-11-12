@@ -34,7 +34,7 @@ const context = {
 } as unknown as PRContext;
 
 const runtime: PRRuntime = {
-  runCommand: async (cmd, args) => ({ stdout: cmd === "gh" && args[0] === "auth" ? "gho_fake\n" : "", stderr: "", exitCode: 0 }),
+  runCommand: async (cmd, args) => ({ stdout: cmd === "gh" && args[0] === "auth" ? "test-token\n" : "", stderr: "", exitCode: 0 }),
 };
 
 const pulls = { text: async () => ({ pull, context, runtime }) };
@@ -88,7 +88,7 @@ describe("GET /api/inbox/pulls/media", () => {
     expect(res.headers.get("content-security-policy")).toContain("sandbox");
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(PNG);
     expect(fetched).toEqual([SHOT, BUCKET]);
-    expect(auth).toEqual(["Bearer gho_fake", null]);
+    expect(auth).toEqual(["Bearer test-token", null]);
 
     const signed = "https://private-user-images.githubusercontent.com/1/1111-aaaa.png?jwt=x";
     script((url) =>
@@ -98,7 +98,7 @@ describe("GET /api/inbox/pulls/media", () => {
     );
     expect((await pullMediaResponse(pulls, pull.key, SHOT, null)).status).toBe(200);
     expect(fetched).toEqual([SHOT, signed]);
-    expect(auth).toEqual(["Bearer gho_fake", null]);
+    expect(auth).toEqual(["Bearer test-token", null]);
 
     script((url) =>
       url === SHOT
@@ -136,6 +136,6 @@ describe("GET /api/inbox/pulls/media", () => {
     const res = await pullMediaSizesResponse(pulls, pull.key);
     expect(await res.json()).toEqual({ sizes: { [SHOT]: { width: 1000, height: 500 } } });
     expect(fetched).toEqual([SHOT, BUCKET]);
-    expect(auth).toEqual(["Bearer gho_fake", null]);
+    expect(auth).toEqual(["Bearer test-token", null]);
   });
 });

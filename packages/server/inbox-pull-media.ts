@@ -62,7 +62,7 @@ export async function pullMediaResponse(pulls: Pick<InboxPulls, "text">, key: st
   try {
     const media = await fetchMedia(read, metadata, rawUrl, range);
     if (!MEDIA_TYPES.has(media.contentType.toLowerCase())) return refuse(415, "media_not_media", "Not a picture or a video.");
-    return new Response(media.content, {
+    return new Response(Uint8Array.from(media.content).buffer, {
       status: media.status === 206 ? 206 : 200,
       headers: {
         "content-type": media.contentType,
