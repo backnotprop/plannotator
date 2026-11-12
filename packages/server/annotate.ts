@@ -28,7 +28,7 @@ import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE
 import { contentHash } from "./draft";
 import { annotateDraftFilePath, annotateSessionHasRootlessDocuments, createAnnotateDraftSession } from "@plannotator/shared/annotate-draft";
 import { isDocServeAllowed, isPathAllowed } from "@plannotator/shared/doc-resolve";
-import { isThisMachineRequest } from "./this-machine";
+import { isSshTunnelRequest, isThisMachineRequest, notePeer } from "./this-machine";
 import { isReferenceReadPath, referenceReadRefusal } from "@plannotator/shared/reference-reader";
 import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
@@ -89,7 +89,7 @@ import {
 } from "@plannotator/shared/live-proxy-core";
 import { randomBytes } from "node:crypto";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
-import { annotateDocumentRenderKind } from "@plannotator/shared/annotatable";
+import { annotateDocumentRenderKind, isSecretEnvPath } from "@plannotator/shared/annotatable";
 import {
   annotateBundleDocumentCounts,
   annotateBundleRoot,
@@ -391,7 +391,9 @@ export async function startAnnotateServer(
   // when headings change. Diff content is the markdown, or the raw HTML source
   // when rendering HTML. Only single local files (not URLs/folders/messages).
   const annotateProjectName = project ?? "_unknown";
-  const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
+  // A `.env` file the person named (isSecretEnvPath) keeps nothing in the data
+  // dir: no version copy, no submit record, no feedback archive entry.
+  const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig()) && !(mode === "annotate" && isSecretEnvPath(filePath));
   // Single local file sessions are the only ones this eager gate covers.
   // URL, agent-message, and live-app sessions never write session content to
   // the data dir. Folder sessions do participate in per-file version history,
@@ -916,6 +918,8 @@ export async function startAnnotateServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Who sent it (an SSH session answers its own tunnel as local: this-machine.ts).
+          notePeer(req, server);
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
@@ -972,7 +976,7 @@ export async function startAnnotateServer(
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge), { cookieHost: !isRemote && options.tailnetPublished !== true }),
               ...getAutoUpdateAdvert(),
               ...getUpdateAdvert(origin, { exposed: isRemote || options.tailnetPublished === true }),
-              agentTerminal: agentTerminal.capability,
+              agentTerminal: agentTerminal.capabilityFor(req),
               feedbackTemplates: {
                 fileFeedback: getAnnotateFileFeedbackTemplate(origin),
                 messageFeedback: getAnnotateMessageFeedbackTemplate(origin),
@@ -1053,7 +1057,7 @@ export async function startAnnotateServer(
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge), { cookieHost: !isRemote && options.tailnetPublished !== true }),
               ...getAutoUpdateAdvert(),
               ...getUpdateAdvert(origin, { exposed: isRemote || options.tailnetPublished === true }),
-              agentTerminal: agentTerminal.capability,
+              agentTerminal: agentTerminal.capabilityFor(req),
               ...(recentMessages ? { recentMessages } : {}),
               // Resolved copy-wrapper templates (config-aware, placeholders
               // intact) so clipboard Copy matches what Send Feedback produces
@@ -1205,7 +1209,8 @@ export async function startAnnotateServer(
 
           // API: a hover card's data for an issue, PR or MR link (GET /api/ref, ref-cards.ts).
           const refRoute = await refCardRouteResponse(req, url, refCards, {
-            enabled: isRemote ? false : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
+            // Remote mode: only an SSH session's own tunnel (isSshTunnelRequest) may drive gh / glab here.
+            enabled: isRemote ? isSshTunnelRequest : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
             serverSession,
           });
           if (refRoute) return refRoute;

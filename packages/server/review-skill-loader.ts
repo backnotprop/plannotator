@@ -41,9 +41,12 @@ import {
 } from "@plannotator/shared/review-profiles";
 
 /**
- * Oversized-body bound. A giant SKILL.md would blow up the review prompt; over
- * this length the skill is dropped with a log line and falls through to the
- * built-in default. This is the old MAX_INSTRUCTIONS_LEN value, re-homed here.
+ * The longest SKILL.md body put in the review prompt itself. Codex, Cursor,
+ * OpenCode and Pi take the prompt as one command-line argument, and a command
+ * line has a ceiling (32,767 characters in all on Windows, 128 KiB for one
+ * argument on Linux). A longer body is not dropped or cut: the prompt tells
+ * the agent to read the whole SKILL.md from disk instead (skillFileInstructions).
+ * (Through 0.28.61 a longer skill was dropped, with only a log line.)
  */
 export const MAX_SKILL_BODY_LEN = 20_000;
 
@@ -274,6 +277,14 @@ function skillHasExtraFiles(sourcePath: string): boolean {
  * The agent reads those files on demand (progressive disclosure) straight from
  * where the skill already lives — which it can, since it shares the filesystem.
  */
+/**
+ * The instructions of a skill too long for the prompt (MAX_SKILL_BODY_LEN):
+ * where its SKILL.md is, read whole, before anything else.
+ */
+export function skillFileInstructions(skillMdPath: string, skillDir: string): string {
+  return `This review's instructions are too long to fit in this prompt, so they are in a file. Before you start, read all of ${skillMdPath} (every line; skip only the frontmatter between the --- lines at the top) and follow it as your review instructions. Resolve any relative paths in it (e.g. references/, scripts/, assets/) against ${skillDir}: the working directory is the repository under review, not the skill directory.`;
+}
+
 function skillFilesPointerLine(skillDir: string): string {
   return `This review skill's files (references, scripts, assets) are at: ${skillDir}\nResolve any relative paths in the instructions below (e.g. references/, scripts/, assets/) against that absolute directory — the working directory is the repository under review, not the skill directory.`;
 }
@@ -686,8 +697,8 @@ export function enableReviewSkill(name: string): { enabled: string[] } {
  * `skill:<name>` (an id-string convention; `source` stays `"user"` and adds no
  * ReviewProfileSource variant). The body is read live at this call.
  *
- * Returns `null` when the body is over the size bound (dropped + logged) so the
- * caller falls through to the built-in default.
+ * Returns `null` when SKILL.md is unreadable or its body empty. A body over
+ * MAX_SKILL_BODY_LEN is kept: the instructions tell the agent to read the file.
  */
 export function resolveSkillProfile(skill: DiscoveredSkill): ResolvedReviewProfile | null {
   let raw: string;
@@ -709,19 +720,16 @@ export function resolveSkillProfile(skill: DiscoveredSkill): ResolvedReviewProfi
     );
     return null;
   }
-  if (body.length > MAX_SKILL_BODY_LEN) {
-    console.error(
-      `[plannotator] Skipping review skill ${skill.name}: SKILL.md body exceeds ${MAX_SKILL_BODY_LEN} chars.`,
-    );
-    return null;
-  }
 
   // When the skill carries extra files, point the agent at the skill's real
   // directory so its relative references resolve. No copy is made — the agent
   // reads those files live, on demand, from where the skill already lives.
-  const instructions = skillHasExtraFiles(skill.sourcePath)
-    ? `${skillFilesPointerLine(skill.sourcePath)}\n\n${body}`
-    : body;
+  // A body too long for the prompt is read the same way, whole.
+  const instructions = body.length > MAX_SKILL_BODY_LEN
+    ? skillFileInstructions(skill.skillMdPath, skill.sourcePath)
+    : skillHasExtraFiles(skill.sourcePath)
+      ? `${skillFilesPointerLine(skill.sourcePath)}\n\n${body}`
+      : body;
 
   return {
     id: `skill:${skill.name}`,
@@ -784,7 +792,7 @@ export function resolveRequestedReviewProfile(
   const resolved = resolveSkillProfile(skill);
   if (!resolved) {
     throw new Error(
-      `Review "${skill.name}" could not be loaded — its SKILL.md is unreadable, empty, or too large. Fix the skill or pick another review.`,
+      `Review "${skill.name}" could not be loaded — its SKILL.md is unreadable or empty. Fix the skill or pick another review.`,
     );
   }
   return resolved;

@@ -35,7 +35,7 @@ import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
-import { placeKey, readAgentFile } from "./agent-files";
+import { placeKey, readAgentFile, samePlace } from "./agent-files";
 import {
   agentVersionRun,
   claudeBypassSetup,
@@ -46,6 +46,7 @@ import {
   createAgentEnvironmentFor,
   type AgentEnvironment,
   type AgentRunResult,
+  type ClaudeProjectSettingsDirs,
 } from "./inbox-agents";
 import { launchChoiceArgs, parseClaudeChoices } from "@plannotator/core/inbox-launch-choice";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
@@ -262,6 +263,17 @@ export function claudeRepositoryAbove(folder: string): string | null {
     if (existsSync(join(dir, ".git"))) return dir;
     if (dirname(dir) === dir) return null;
   }
+}
+
+/**
+ * Where Claude Code reads a launch folder's project settings: the shared `.claude/settings.json` in the folder it
+ * starts in, and the local `.claude/settings.local.json` at the repository's root (a linked worktree's main
+ * checkout), or in the folder itself outside a repository, when that root is home, and on Windows.
+ */
+export function claudeProjectSettingsDirs(folder: string, homeDir: string, platform: NodeJS.Platform): ClaudeProjectSettingsDirs {
+  if (platform === "win32") return { project: folder, local: folder };
+  const root = claudeTrustKey(folder);
+  return { project: folder, local: samePlace(root, homeDir) ? folder : root };
 }
 
 /** Claude's transcripts folder name for a project path: every character but a letter or digit as `-`. */
@@ -554,8 +566,12 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     // Whether the login shell signs Claude Code in some other way: set or not, never the value.
     shellFlags: CLAUDE_OTHER_SIGN_IN_ENV,
 
-    /** `claude` on the plain env's PATH (the Inbox's, the last login PATH, Claude's install folders), new enough, the plugin's mod and its Inbox tool on. */
-    async available(): Promise<LaunchAvailability> {
+    /**
+     * `claude` on the plain env's PATH (the Inbox's, the last login PATH, Claude's install folders), new enough, the
+     * plugin's mod and its Inbox tool on. With `folders`, the plugin is on for at least one of them, with that
+     * folder's project settings (a project can turn it on, or off, for itself).
+     */
+    async available(folders: readonly string[] = []): Promise<LaunchAvailability> {
       const e = await ctx.environment();
       const path = e.which("claude");
       if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local", code: "missing" };
@@ -565,7 +581,11 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       // In the Claude folder a launched session will use: CLAUDE_CONFIG_DIR may be set only in the person's shell.
       const configDir = ctx.shell()?.CLAUDE_CONFIG_DIR;
       const files = configDir ? createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: { ...e.env, CLAUDE_CONFIG_DIR: configDir } }) : e;
-      if (!claudeCodePluginEnabled(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "plugin_off" };
+      const pluginOn =
+        folders.length === 0
+          ? claudeCodePluginEnabled(files)
+          : folders.some((folder) => claudeCodePluginEnabled(files, claudeProjectSettingsDirs(folder, ctx.homeDir, ctx.platform)));
+      if (!pluginOn) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "plugin_off" };
       if (!claudeCodeInboxToolOn(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "tool_off" };
       // Signed in, as a launched session will be (its Claude folder). Over SSH macOS keeps the login locked, so this
       // reads as signed out; the launch block says the Inbox was started over SSH.

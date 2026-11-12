@@ -80,14 +80,14 @@ afterEach(() => {
   host = null;
 });
 
-function show(props: { count?: SetAsideCount; bulk?: boolean; offerNever?: boolean }) {
+function show(props: { count?: SetAsideCount; bulk?: boolean }) {
   const answers: SetAsideAnswer[] = [];
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(
-      <MarkReadWarning count={props.count ?? { questions: 2, actions: 0, threads: 1 }} bulk={props.bulk ?? false} offerNever={props.offerNever ?? true} onAnswer={(a) => answers.push(a)} />,
+      <MarkReadWarning count={props.count ?? { questions: 2, actions: 0, threads: 1 }} bulk={props.bulk ?? false} onAnswer={(a) => answers.push(a)} />,
     );
   });
   const dialog = document.querySelector<HTMLElement>('[data-dialog="mark-read-warning"]')!;
@@ -122,11 +122,6 @@ describe.skipIf(!hasDom)('the dialog', () => {
     act(() => dialog.querySelector<HTMLInputElement>('[data-mark-read-warning-never] input')!.click());
     act(() => dialog.querySelector<HTMLButtonElement>('[data-mark-read-warning-go]')!.click());
     expect(answers).toEqual([{ go: true, never: true }]);
-  });
-
-  test('a tailnet guest, who cannot save it, is not offered it', () => {
-    const { dialog } = show({ offerNever: false });
-    expect(dialog.querySelector('[data-mark-read-warning-never]')).toBeNull();
   });
 
   test('Mark all as read names the batch on its button', () => {
