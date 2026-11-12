@@ -60,6 +60,12 @@ function copiedLines(lines: InboxLine[], copies: number): InboxLine[] {
   return out.sort((a, b) => a.seq - b.seq);
 }
 
+async function timedAsync<T>(run: () => Promise<T>): Promise<{ ms: number; value: T }> {
+  const t = performance.now();
+  const value = await run();
+  return { ms: performance.now() - t, value };
+}
+
 function timed<T>(run: () => T): { ms: number; value: T } {
   const t = performance.now();
   const value = run();
@@ -123,7 +129,7 @@ describe.skipIf(!ON).each(LOGS_UNDER_TEST)("the size budget through the $name lo
       const since = timed(() => store.changesSince(store.cursor() - 100));
       index.dispose();
       // The move into SQLite, from these files (JSONL only), and the first start after it.
-      const upgrade = name === "jsonl" ? timed(() => importJsonlInbox(dataDir, { now: world.now })) : null;
+      const upgrade = name === "jsonl" ? await timedAsync(() => importJsonlInbox(dataDir, { now: world.now })) : null;
       const afterUpgrade = upgrade?.value.status === "imported" ? timed(() => InboxStore.open(dataDir, { now: world.now, log: LOGS_UNDER_TEST.find((l) => l.name === "sqlite")!.log })) : null;
 
       const numbers = {
