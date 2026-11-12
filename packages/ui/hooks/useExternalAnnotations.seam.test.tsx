@@ -1,20 +1,3 @@
-/**
- * Seam test: ExternalAnnotationTransport override
- *   (setExternalAnnotationTransport / resetExternalAnnotationTransport).
- *
- * Contract:
- *  - On mount (enabled: true) → fake.subscribe() is called.
- *  - deleteExternalAnnotation() → fake.remove() called on the SAME transport
- *    instance (pins the already-landed split-transport fix: transportRef captures
- *    the transport once at mount, so CRUD and subscribe use the same backend).
- *  - resetExternalAnnotationTransport() restores the default.
- *
- * Requires DOM — runs under bun test (preloaded via bunfig.toml).
- *
- * IMPORTANT: function references are captured at module-load time (top-level)
- * so they remain valid even when configure.test.ts's mock.module() replaces
- * the module exports later during test execution.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,7 +5,6 @@ import { act } from 'react';
 import * as useExternalAnnotationsModule from './useExternalAnnotations';
 import type { ExternalAnnotationTransport } from './useExternalAnnotations';
 
-// Capture real function references at import time.
 const setExternalAnnotationTransport = useExternalAnnotationsModule.setExternalAnnotationTransport;
 const resetExternalAnnotationTransport = useExternalAnnotationsModule.resetExternalAnnotationTransport;
 const useExternalAnnotations = useExternalAnnotationsModule.useExternalAnnotations;
@@ -134,7 +116,6 @@ describe('ExternalAnnotationTransport seam', () => {
     setExternalAnnotationTransport(fake);
     resetExternalAnnotationTransport();
 
-    // Replace EventSource so the default SSE transport does not error.
     class FakeEventSource {
       onmessage: ((e: MessageEvent) => void) | null = null;
       onerror: (() => void) | null = null;
@@ -190,9 +171,7 @@ describe('session-closed event', () => {
     await act(async () => {
       emit?.({ type: 'snapshot', annotations: [{ id: 'x' }] });
       emit?.({ type: 'session-closed', by: 'agent', unsentAnnotations: 4 });
-      // Plan mode / the agent session ended (Pi's plan review): not an agent close.
       emit?.({ type: 'session-closed', by: 'session', unsentAnnotations: 1 });
-      // An unknown closer reads as the agent, as before the field had variants.
       emit?.({ type: 'session-closed', by: 'later-kind', unsentAnnotations: 0 });
     });
     expect(closed).toEqual([

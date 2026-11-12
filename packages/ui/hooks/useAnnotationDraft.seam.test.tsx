@@ -1,17 +1,3 @@
-/**
- * Seam test: DraftTransport override (setDraftTransport / resetDraftTransport).
- *
- * Contract:
- *  - fake.load() is called on mount (isApiMode: true, not shared).
- *  - fake.save() is called after scheduleDraftSave() fires (annotations non-empty).
- *  - resetDraftTransport() restores the default transport (does not call the fake).
- *
- * Requires DOM — runs under bun test (preloaded via bunfig.toml).
- *
- * IMPORTANT: function references are captured at module-load time (top-level)
- * so they remain valid even when configure.test.ts's mock.module() replaces
- * the module exports later during test execution.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -20,7 +6,6 @@ import * as useAnnotationDraftModule from './useAnnotationDraft';
 import { AnnotationType, type Annotation } from '../types';
 import type { DraftTransport } from './useAnnotationDraft';
 
-// Capture real function references at import time.
 const setDraftTransport = useAnnotationDraftModule.setDraftTransport;
 const resetDraftTransport = useAnnotationDraftModule.resetDraftTransport;
 const useAnnotationDraft = useAnnotationDraftModule.useAnnotationDraft;
@@ -102,7 +87,6 @@ describe('DraftTransport seam', () => {
       submitted: false,
     });
 
-    // Give the async load a moment to settle.
     await tick(50);
 
     expect(state.loaded).toBeGreaterThanOrEqual(1);
@@ -128,7 +112,6 @@ describe('DraftTransport seam', () => {
       session.result.current!.scheduleDraftSave();
     });
 
-    // scheduleDraftSave has a 500 ms debounce; wait for it to fire.
     await tick(600);
 
     expect(state.saved.length).toBeGreaterThanOrEqual(1);
@@ -141,7 +124,6 @@ describe('DraftTransport seam', () => {
     setDraftTransport(transport);
     resetDraftTransport();
 
-    // After reset, the default transport hits /api/draft — install a fetch spy.
     const fetchCalls: string[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -161,7 +143,6 @@ describe('DraftTransport seam', () => {
 
     globalThis.fetch = realFetch;
 
-    // Fake was NOT called; the default transport hit /api/draft.
     expect(state.loaded).toBe(0);
     expect(fetchCalls.some((u) => u.includes('/api/draft'))).toBe(true);
 
@@ -189,7 +170,6 @@ describe('DraftTransport seam', () => {
       ],
     };
 
-    // Save side: the annotation (with its targets) appears in the save body.
     const { transport, state } = makeFakeTransport();
     setDraftTransport(transport);
     const session = await mountHook({
@@ -210,7 +190,6 @@ describe('DraftTransport seam', () => {
       .toEqual(MULTI_ANNOTATION.htmlAdditionalTargets);
     await session.unmount();
 
-    // Restore side: a stored draft hands the targets back untouched.
     const restoreTransport: DraftTransport = {
       load: async () => ({
         data: {

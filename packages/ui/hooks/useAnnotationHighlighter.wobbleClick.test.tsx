@@ -1,14 +1,6 @@
 /**
- * A click with a wobble is not a drag.
- *
- * A press that moves a pixel or two before the release (a trackpad click, a
- * hand that is not perfectly still) makes the browser select one letter, and
- * the highlighter made a one-letter highlight of it: 15 of 150 plain clicks in
- * the real viewer, most with no toolbar, piling up on the page. A release
- * whose pointer never went 4px from the press and whose selection is one or
- * two characters is now a click: nothing is made.
- *
- * DOM-gated (DOM_TESTS=1).
+ * A release whose pointer never went 4px from the press and whose selection is one or two
+ * characters is now a click: nothing is made.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
@@ -64,7 +56,6 @@ async function mount() {
 const mouse = (type: string, x: number, init: MouseEventInit = {}) =>
   new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1, clientX: x, clientY: 5, detail: 1, ...init });
 
-/** Press at `from`, move to each of `via`, with `start`..`end` selected by the browser, release at the last point. */
 const press = async (first: HTMLElement, text: Text, from: number, via: number[], start: number, end: number, init: MouseEventInit = {}) => {
   await act(async () => {
     first.dispatchEvent(mouse('mousedown', from, init));

@@ -1,26 +1,3 @@
-/**
- * A drag that starts in the document and is let go outside it still makes the
- * highlight.
- *
- * web-highlighter listens for the release on its root only, so a selection
- * dragged across some words and released left of the text, below the document,
- * over a side panel or outside the window stayed on screen as a plain
- * selection: no highlight, no toolbar. The hook now follows a press that
- * starts in the document to its release anywhere and commits the selection
- * through the same guard, snaps, quote repair and mode routing as a release
- * inside.
- *
- * What it commits is never more than the person saw selected in the document.
- * When the pointer goes over something else on the page (a panel after the
- * document, one before it, off the side of the window), the browser's own
- * selection runs on to the END or the START of the document and into that
- * other thing. Committing that highlighted (in redline: deleted) the rest of
- * the document in one drag. Such a selection is never committed: the highlight
- * is the last selection that lay wholly inside the document during the drag,
- * and nothing when there was none.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -134,12 +111,6 @@ const select = (start: Node, startOffset: number, end: Node, endOffset: number):
 const mouse = (type: string, init: MouseEventInit = {}) =>
   new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1, ...init });
 
-/**
- * Press on `from`, make the selection the drag would, let go on `to`. Each
- * selection is announced as a browser does (`selectionchange`, then a move),
- * so the hook sees it during the drag. `then`: what the browser's selection
- * becomes once the pointer is over `to`.
- */
 const drag = async (from: EventTarget, to: EventTarget, makeSelection: () => void, press: MouseEventInit = {}, then?: () => void) => {
   await act(async () => {
     from.dispatchEvent(mouse('mousedown', press));
@@ -254,8 +225,6 @@ describe('useAnnotationHighlighter: a drag let go outside the document', () => {
 });
 
 describe('useAnnotationHighlighter: a drag that overshoots onto something else on the page', () => {
-  // In each, the person selected "paragraph" in the first block while the pointer was in the
-  // document; then the pointer went over something else and the browser's selection ran away.
   const inside = (first: HTMLElement) => () => select(first.firstChild!, 6, first.firstChild!, 15);
 
   for (const mode of ['selection', 'redline'] as const) {
@@ -338,8 +307,6 @@ describe('useAnnotationHighlighter: a drag that overshoots onto something else o
   });
 
   test.skipIf(!hasDom)('off to the side with nothing selectable there: the selection run to the document\'s own first words is not taken', async () => {
-    // Nothing selectable comes before the document (a panel of buttons), so the browser's runaway
-    // selection ends on the document's first text and still lies wholly inside it.
     const { container, first, second, gutter, added } = await mount('redline');
     container.getBoundingClientRect = () => ({ left: 100, right: 500, top: 0, bottom: 400, x: 100, y: 0, width: 400, height: 400, toJSON: () => ({}) }) as DOMRect;
 
@@ -348,7 +315,6 @@ describe('useAnnotationHighlighter: a drag that overshoots onto something else o
       window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, second.firstChild!, 7);
       document.dispatchEvent(new Event('selectionchange'));
       second.dispatchEvent(mouse('mousemove', { clientX: 170, clientY: 50 }));
-      // A browser moves its selection AFTER the move that took the pointer off the document.
       gutter.dispatchEvent(mouse('mousemove', { clientX: 40, clientY: 50 }));
       window.getSelection()!.setBaseAndExtent(second.firstChild!, 15, first.firstChild!, 0);
       document.dispatchEvent(new Event('selectionchange'));
@@ -365,7 +331,6 @@ describe('useAnnotationHighlighter: a drag that overshoots onto something else o
     container.getBoundingClientRect = () => ({ left: 100, right: 500, top: 0, bottom: 400, x: 100, y: 0, width: 400, height: 400, toJSON: () => ({}) }) as DOMRect;
     const doc = document as unknown as { caretRangeFromPoint?: unknown; caretPositionFromPoint?: unknown };
     const saved = [doc.caretRangeFromPoint, doc.caretPositionFromPoint];
-    // The start of the pressed line, for any point at the document's left edge.
     doc.caretPositionFromPoint = (x: number) => (x <= 102 ? { offsetNode: second.firstChild!, offset: 0 } : null);
     try {
       await act(async () => {
@@ -421,7 +386,6 @@ describe('useAnnotationHighlighter: a drag that overshoots onto something else o
   });
 
   test.skipIf(!hasDom)('a selection that jumps to many times its size in one step inside the document is not trusted', async () => {
-    // The browser can also run a selection to the document's own last words (nothing follows it).
     const { container, first, third, gutter, added } = await mount('redline');
     const filler = 'x'.repeat(4000);
     third.firstChild!.textContent = filler;
@@ -451,14 +415,12 @@ describe('useAnnotationHighlighter: what a release outside must not do', () => {
 
     expect(added).toEqual([]);
     expect(container.querySelectorAll('mark').length).toBe(0);
-    // The person's selection is left alone.
     expect(window.getSelection()!.isCollapsed).toBe(false);
   });
 
   test.skipIf(!hasDom)('a selection made elsewhere, with an old press in the document long over, makes nothing', async () => {
     const { container, first, panel, added } = await mount('redline');
     const panelText = panel.querySelector('p')!.firstChild!;
-    // A plain click in the document, then a drag inside the panel.
     await drag(first, first, () => {});
 
     await drag(panel, panel, () => select(panelText, 0, panelText, 5));

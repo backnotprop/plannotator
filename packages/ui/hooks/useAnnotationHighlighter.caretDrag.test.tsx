@@ -1,19 +1,4 @@
-/**
- * A press-and-drag the browser leaves as a moving caret still selects.
- *
- * Chromium, after a press at some fractional x positions (what a trackpad and
- * a Retina screen give), moves a caret with the pointer instead of extending a
- * selection: on a page with one <p> and no script, 3 to 8 of 52 such presses.
- * At the release the library reads a collapsed selection and makes nothing, so
- * the drag "did not work". The hook now notices a real drag whose selection is
- * still a caret while the pointer is over other text, and sets the selection
- * from the press to the pointer itself; the release then commits as always.
- *
- * happy-dom has no layout, so the text position under a point is stubbed: x
- * is ten pixels per character of the first paragraph.
- *
- * DOM-gated (DOM_TESTS=1).
- */
+/** A press-and-drag the browser leaves as a moving caret still selects. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -74,7 +59,6 @@ async function mount() {
   const first = container.children[0] as HTMLElement;
   const second = container.children[1] as HTMLElement;
 
-  // The text position under a point: ten pixels per character of the first paragraph.
   const doc = document as unknown as CaretDoc;
   savedCaretRange = doc.caretRangeFromPoint;
   savedCaretPosition = doc.caretPositionFromPoint;

@@ -1,19 +1,3 @@
-/**
- * Seam test: host-chosen fence theme (`configurePlannotatorUI({ fenceTheme })`,
- * `setFenceThemeResolver` / `resetFenceThemeResolver`).
- *
- * Contract: with no resolver installed, fences resolve exactly as before (the
- * palette's SHIKI_THEME_MAP entry, else pierre-dark / pierre-light). A host
- * resolver's string wins; `undefined` (or a throw, or an empty string) falls
- * through to the default. Every fence consumer reads `useFenceTheme`, so the
- * hook is the observable surface.
- *
- * The hook half needs a DOM (DOM_TESTS=1 preloads happy-dom); the resolver
- * half runs everywhere.
- *
- * Function references are captured at module load so configure.test.ts's
- * mock.module() calls cannot swap them out from under this file.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -63,7 +47,6 @@ describe('fence theme seam', () => {
   });
 
   test.skipIf(!hasDom)('the override reaches useFenceTheme, which every fence consumer reads', () => {
-    // Outside a ThemeProvider the default context is the plannotator palette, dark.
     expect(renderFenceTheme()).toBe('pierre-dark');
     if (root) {
       act(() => root!.unmount());

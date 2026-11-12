@@ -37,7 +37,6 @@ describe('useCompactTouchLayout', () => {
     let matches = false;
     const listeners = new Set<(event: MediaQueryListEvent) => void>();
 
-    // SAFETY: The test double implements the MediaQueryList surface consumed by the hook.
     window.matchMedia = ((query: string): MediaQueryList => ({
       matches,
       media: query,
@@ -59,7 +58,6 @@ describe('useCompactTouchLayout', () => {
 
     matches = true;
     await act(async () => {
-      // SAFETY: The hook reads only `matches` from this synthetic media event.
       for (const listener of listeners) listener({ matches } as MediaQueryListEvent);
     });
     expect(document.querySelector('output')?.getAttribute('data-compact')).toBe('true');

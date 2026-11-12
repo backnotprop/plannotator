@@ -1,14 +1,4 @@
-/**
- * A comment on a rendered diagram part has no text anchor; the highlighter
- * must leave it alone.
- *
- * What regresses if this fails: the restore pass tries to find the node's
- * label ("Approve?") in the prose, paints a stray highlight on the first
- * prose match, or reports the row as unanchored so the panel shows an
- * "Unanchored" chip on a comment the diagram overlay restored fine.
- *
- * DOM-gated (DOM_TESTS=1).
- */
+/** A comment on a rendered diagram part has no text anchor; the highlighter must leave it alone. */
 import { describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -17,7 +7,6 @@ import { AnnotationType, type Annotation } from '../types';
 
 const hasDom = typeof document !== 'undefined';
 
-// web-highlighter reads `window` at module-eval time (see the sibling test).
 const mod = hasDom ? await import('./useAnnotationHighlighter') : null;
 const useAnnotationHighlighter =
   mod?.useAnnotationHighlighter as typeof import('./useAnnotationHighlighter')['useAnnotationHighlighter'];
@@ -45,18 +34,11 @@ const TEXT: Annotation = {
   createdA: 2,
 };
 
-/** A text row whose quote exists ONLY inside a diagram (a reply that lost
- * its anchor, an older writer). */
+/** A text row whose quote exists ONLY inside a diagram (a reply that lost its anchor, an older writer). */
 const IN_DIAGRAM_ONLY: Annotation = { ...TEXT, id: 't2', originalText: 'OnlyInsideTheDiagram' };
 
 const ANNOTATIONS = [DIAGRAM, TEXT, IN_DIAGRAM_ONLY];
 
-/**
- * The shape an anchor with nothing to quote produces: a comment on the whole
- * diagram, or on a label-less part, posted by an agent that named no block.
- * `originalText` is empty and `blockId` names no block of the document, which
- * is exactly what the text pass treats as unrestorable.
- */
 const QUOTELESS: Annotation = {
   id: 'd2',
   blockId: '',
@@ -79,13 +61,10 @@ function Harness({ onReport, applyRef, annotations = ANNOTATIONS }: { onReport: 
     onAddAnnotation: () => {},
     onRestoreReport: onReport,
   });
-  // The restore pass is imperative (Viewer runs it once the blocks are on
-  // screen); the harness runs it the same way.
   applyRef.current = () => hook.applyAnnotations(annotations);
   return (
     <div ref={containerRef}>
       <p data-block-id="block-1">Should we Approve? the plan</p>
-      {/* What DiagramBlock renders: the diagram is excluded from the text layer. */}
       <div className="annotation-exclude" data-block-id="block-2" data-diagram-block="mermaid">
         <svg>
           <text>OnlyInsideTheDiagram</text>
@@ -129,11 +108,8 @@ describe('useAnnotationHighlighter: diagram anchors', () => {
     host.remove();
   });
 
-  // A diagram row with no quote and no block is the one shape the text pass
-  // would otherwise reject outright: `findTextInDOM('')` matches nothing and
-  // the blockId names nothing. It must still be skipped rather than reported,
-  // or a comment on a whole diagram comes back from a reload wearing the
-  // "Unanchored" chip while the diagram overlay is showing it perfectly well.
+  // A diagram row with no quote and no block is the one shape the text pass would otherwise reject
+  // outright: `findTextInDOM('')` matches nothing and the blockId names nothing.
   test.skipIf(!hasDom)('a diagram row with no quote and no blockId is skipped, not called unrestorable', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);

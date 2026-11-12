@@ -21,10 +21,9 @@ afterEach(() => {
 
 type SharingResult = ReturnType<typeof useSharing>;
 
-// The paste POST is only issued after compress + encrypt, which take several
-// event-loop turns; invalidating before it exists leaves the request promise
-// unresolvable (the resolver is captured per call) and the test hangs. How
-// many turns that takes depends on what ran earlier in the same process.
+// The paste POST is only issued after compress + encrypt, which take several event-loop turns;
+// invalidating before it exists leaves the request promise unresolvable (the resolver is captured
+// per call) and the test hangs.
 async function waitForPasteRequest(issued: () => boolean): Promise<void> {
   for (let i = 0; i < 50 && !issued(); i++) {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -150,12 +149,8 @@ describe.if(hasDom)('useSharing request invalidation', () => {
     expect(latest?.shortShareUrl).toBe('');
   });
 
-  // Guards the failure where the resolver's own success invalidated the
-  // request: App's resolveRawHtmlForShare caches the portable HTML via
-  // setShareHtml and is memoized on shareHtml, so its identity changes
-  // mid-request. With the resolver in the request-context deps, the first
-  // short-link generation on an HTML session discarded its own paste result
-  // and the loading flag never cleared.
+  // With the resolver in the request-context deps, the first short-link generation on an HTML
+  // session discarded its own paste result and the loading flag never cleared.
   test('keeps a short link whose resolver cached portable HTML mid-request', async () => {
     let resolvePaste: ((response: Response) => void) | null = null;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -167,15 +162,12 @@ describe.if(hasDom)('useSharing request invalidation', () => {
 
     function CachingResolverHarness({ onResult }: { onResult: (result: SharingResult) => void }) {
       const [markdown, setMarkdown] = useState('');
-      // Stable identity: a fresh [] per render would invalidate the request
-      // context on its own and mask what this test isolates.
       const [annotations] = useState<Annotation[]>([]);
       const setAnnotations = (() => {}) as Parameters<typeof useSharing>[4];
       const [attachments, setAttachments] = useState<Parameters<typeof useSharing>[2]>([]);
       const [rawHtml, setRawHtml] = useState('<h1>Doc</h1>');
       const [shareHtml, setShareHtml] = useState('');
       const [, setRenderAs] = useState<DocumentRenderAs>('html');
-      // Mirrors App.tsx resolveRawHtmlForShare: memoized on shareHtml, sets it on success.
       const resolveRawHtmlForShare = useCallback(async (): Promise<string | null> => {
         if (shareHtml) return shareHtml;
         const res = await fetch('/api/share-html');
@@ -200,9 +192,6 @@ describe.if(hasDom)('useSharing request invalidation', () => {
       root?.render(<CachingResolverHarness onResult={(result) => { latest = result; }} />);
     });
 
-    // Kick off the click and let the share-html fetch, setShareHtml, and the
-    // resulting re-render land while the paste POST is still on the wire —
-    // the ordering a real network round-trip always produces.
     let pendingShortUrl: Promise<string | null> = Promise.resolve(null);
     await act(async () => {
       pendingShortUrl = latest?.generateShortUrl() ?? Promise.resolve(null);

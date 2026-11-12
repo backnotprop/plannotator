@@ -3,12 +3,9 @@ import React, { useCallback, useRef } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-// The page has ONE selection. The vim hook resets it when vim goes from on to
-// off (since 0.53.1 never on a mount or content change where vim was never on:
-// reading the selection forces a layout on every document open). A host
-// (Workspaces) once lost selections made in another panel ~12 ms after making
-// them whenever the document behind them loaded. These tests pin that the
-// reset only touches a selection inside the viewer's own container.
+// A host (Workspaces) once lost selections made in another panel ~12 ms after making them whenever
+// the document behind them loaded. These tests pin that the reset only touches a selection inside
+// the viewer's own container.
 
 const hasDom = typeof document !== 'undefined';
 const hookModule = hasDom ? await import('./useVimSelection') : null;
@@ -16,7 +13,6 @@ const hookModule = hasDom ? await import('./useVimSelection') : null;
 interface HarnessProps {
   enabled: boolean;
   contentVersion: unknown;
-  /** Runs in the commit phase, before the hook's passive effects. */
   onArticleAttach?: (article: HTMLElement) => void;
 }
 

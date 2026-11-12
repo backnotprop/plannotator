@@ -1,26 +1,7 @@
 /**
- * Selections whose edges the library cannot use must not paint the rest of
- * the document.
- *
- * web-highlighter paints by walking the root from the range's start node to
- * its end node, and it never ENTERS an element in `exceptSelectors`. Two
- * shapes therefore never meet their end node and paint every text node up to
- * the end of the root:
- *
- *  1. The end sits inside (or right at) skipped chrome: a drag released on a
- *     button in the text, a code block's Copy button, a formula, an alert's
- *     hidden type word.
- *  2. The end sits outside the root: a drag that STARTS in a side panel that
- *     follows the document and ends in the document. Its quote also carries
- *     the panel's words.
- *
- * And one gesture that is not a selection gesture at all: a release of a
- * button other than the main one (a context click on selected words).
- *
- * The file drives the real library over a real `mouseup`, like
- * `useAnnotationHighlighter.blankSelection.test.tsx`.
- *
- * DOM-gated (DOM_TESTS=1).
+ * Selections whose edges the library cannot use must not paint the rest of the document.
+ * web-highlighter paints by walking the root from the range's start node to its end node, and it
+ * never ENTERS an element in `exceptSelectors`.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
@@ -166,7 +147,6 @@ const paintedText = (container: HTMLElement): string =>
 describe('useAnnotationHighlighter: an end the painter cannot reach', () => {
   test.skipIf(!hasDom)('a drag released inside a button in the text stops at the text before it', async () => {
     const { container, first, button, added, uncaught } = await mount('redline');
-    // "words here " + part of the button's label: the release landed on it.
     select(first.firstChild!, 5, button.firstChild!, 2);
 
     await pointerEnd(button);
@@ -178,8 +158,6 @@ describe('useAnnotationHighlighter: an end the painter cannot reach', () => {
   });
 
   test.skipIf(!hasDom)('an end at the element boundary right before a button stops there too', async () => {
-    // The library resolves an element boundary to the child at its offset:
-    // here the button itself, which the painter skips before comparing.
     const { container, first, button, added } = await mount('redline');
     const buttonIndex = Array.from(first.childNodes).indexOf(button);
     select(first.firstChild!, 5, first, buttonIndex);
@@ -249,8 +227,6 @@ describe('useAnnotationHighlighter: an end the painter cannot reach', () => {
 describe('useAnnotationHighlighter: a selection that reaches outside the document', () => {
   test.skipIf(!hasDom)('a drag from a panel after the document into it makes no highlight', async () => {
     const { container, panel, second, added, hook, uncaught } = await mount('selection');
-    // Pressed in the panel, released in the second paragraph: in document
-    // order the range runs from the release point to the press point.
     const panelText = panel.querySelector('p')!.firstChild!;
     select(second.firstChild!, 7, panelText, 5);
 
@@ -273,10 +249,8 @@ describe('useAnnotationHighlighter: a selection that reaches outside the documen
   });
 
   test.skipIf(!hasDom)('a triple-click on the last block, which ends in the next element, still highlights it', async () => {
-    // Chromium ends a triple-click at offset 0 of whatever follows the block.
-    // After the LAST block that is an element outside the document, so the
-    // range's common ancestor is outside too; it carries no words from there
-    // and must keep working.
+    // After the LAST block that is an element outside the document, so the range's common ancestor
+    // is outside too; it carries no words from there and must keep working.
     const { container, panel, third, added } = await mount('redline');
     select(third.firstChild!, 0, panel, 0);
 

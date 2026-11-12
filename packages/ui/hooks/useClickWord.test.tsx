@@ -1,18 +1,3 @@
-/**
- * Click a word (part of Select): one click on a word selects it and, after a
- * short wait, hands the word to the shared highlight path.
- *
- * What must not regress: a click becoming a highlight where it has another
- * meaning (a link, a button, an existing highlight, a click that closes a
- * toolbar), from another mouse button or a modified click, while a second
- * click is on its way (double and triple click stay the browser's) or while
- * the page is scrolling; and the method doing anything when it is off.
- *
- * happy-dom has no layout: the caret under a point is stubbed to an offset the
- * test sets, and every range reports one box at the origin.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -168,7 +153,6 @@ describe.if(hasDom)('useClickWord: a document that changes during the wait', () 
   test('the text under the click replaced by new nodes: nothing', async () => {
     const { first, text, picked } = await mount();
     click(first, { node: text, offset: 10 });
-    // A host that re-renders its body: same words, new nodes.
     first.replaceChildren(document.createTextNode(TEXT));
     await wait(AFTER);
     expect(picked).toEqual([]);
@@ -268,7 +252,6 @@ describe.if(hasDom)('useClickWord: a drag selects whole words', () => {
     first.dispatchEvent(pointer('pointerdown'));
     first.dispatchEvent(mouse('mousedown'));
     first.dispatchEvent(pointer('pointermove', { clientX: 80 }));
-    // The browser's own selection: "cused te".
     window.getSelection()!.setBaseAndExtent(text, 10, text, 18);
     document.dispatchEvent(new Event('selectionchange'));
 

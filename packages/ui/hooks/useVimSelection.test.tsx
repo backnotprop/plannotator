@@ -154,7 +154,6 @@ describe.if(hasDom)('useVimSelection', () => {
     expect(article.dataset.phase).toBe('inactive');
     expect(window.getSelection()?.rangeCount).toBe(0);
 
-    // Off again with the selection back: a later run while off resets nothing.
     selection?.addRange(range);
     act(() => {
       root.render(<VimHarness enabled={false} onRange={() => {}} />);

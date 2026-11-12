@@ -1,16 +1,3 @@
-/**
- * Pinpoint input mode over a `:::question` card.
- *
- * What regresses if this fails: a pinpoint click on option text both pins
- * the text (opening the comment composer) AND picks the option, because the
- * row is a <label> that forwards the click to its radio; or a click on the
- * radio itself pins the whole card instead of only answering; or a click
- * anywhere in the card pins the PROMPT instead of what was clicked (the card
- * starts with a select-none eyebrow, so the semantic graph mistook it for a
- * list item and made its second child, the prompt, the whole card's target).
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef, useState } from 'react';
 import { act } from 'react';

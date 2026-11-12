@@ -6,17 +6,6 @@ import { useLinkedDoc, type UseLinkedDocReturn } from './useLinkedDoc';
 import type { ViewerHandle } from '../components/Viewer';
 import { AnnotationType, type Annotation, type DocumentRenderAs, type ImageAttachment } from '../types';
 
-// Going back to the root document (or re-opening a cached one) re-applies its
-// stored annotations through the Viewer's restore. Only text highlights may go
-// through it: a comment made in the plan diff view (blockId `diff-block-N`)
-// or a checkbox toggle (raw-markdown quote) finds no text in the normal view,
-// so the restore would report it unanchored and the host would rewrite its
-// blockId, breaking the diff view's markers and the export. Repro before the
-// fix: comment in the diff view, turn the diff off, open a linked doc, Back.
-//
-// Ids are built at runtime: Tailwind scans this package's sources, and a
-// literal that parses as a utility leaks a rule into the guides.show viewer.
-
 const hasDom = typeof document !== 'undefined';
 
 const blockId = (n: number) => ['block', n].join('-');

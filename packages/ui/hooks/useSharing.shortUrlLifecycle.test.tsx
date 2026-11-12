@@ -136,7 +136,6 @@ async function waitForSharedPayload(
             return payload;
           }
         } catch {
-          // Decompress can fail during mid-update or malformed hash
         }
       }
     }
@@ -192,7 +191,6 @@ function installPasteService(initial: Record<string, string> = {}) {
   const pastes = new Map(Object.entries(initial));
   const uploads: string[] = [];
   const rejectedMutations: string[] = [];
-  // SAFETY: Only the in-memory paste endpoint is implemented, with real Request/Response bodies.
   globalThis.fetch = (async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
@@ -350,7 +348,6 @@ describe.if(hasDom)('useSharing short URL lifecycle', () => {
     await act(async () => {
       renderHarness(0, capture, { shortLinksSupported: false });
     });
-    // Full URL sharing still works on a surface that has no paste-generation callback.
     const fullUrl = host!.querySelector('textarea')!.value;
     expect(await decompress(new URL(fullUrl).hash.slice(1))).toEqual({ p: '# Private plan', a: [] });
     expect(createShortLinkButton()).toBeUndefined();
@@ -366,7 +363,6 @@ describe.if(hasDom)('useSharing short URL lifecycle', () => {
     };
     const incoming = await installIncomingPaste(payload, 'AbCd1234');
     let postCount = 0;
-    // SAFETY: This boundary fake implements the fetch calls exercised by useSharing and returns real Response values.
     globalThis.fetch = (async (input, init) => {
       const url = String(input);
       if (url.endsWith('/api/paste/AbCd1234')) return incoming.getPasteResponse.clone();
@@ -449,7 +445,6 @@ describe.if(hasDom)('useSharing short URL lifecycle', () => {
 
   test('clears a failed short-link error only after the represented content changes', async () => {
     let postCount = 0;
-    // SAFETY: This boundary fake implements the paste POST exercised by useSharing.
     globalThis.fetch = (async (_input, init) => {
       if (init?.method === 'POST') {
         postCount += 1;

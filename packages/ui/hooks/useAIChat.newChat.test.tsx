@@ -1,18 +1,3 @@
-/**
- * #1981: the Ask AI panel's "New chat" (`useAIChat().newChat`).
- *
- * What it must guard:
- *  - a question in flight is never cut off: no server abort, the answer still
- *    lands, the thread is kept (a busy "Ask this session" question waiting for
- *    the session would otherwise be dropped);
- *  - once idle, it clears the thread and the next question starts a NEW
- *    Plannotator AI session, without aborting anything;
- *  - the "Ask this session" draft bookkeeping survives: the host session
- *    already read the list, so it is not pasted again, and a later clear is
- *    still reported.
- *
- * Requires DOM (preloaded via bunfig.toml).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -56,7 +41,6 @@ async function mount(): Promise<{ current: HookResult | null }> {
   return ref;
 }
 
-/** A fake transport whose answers the test finishes by hand. */
 function controlledTransport() {
   const sessions: string[] = [];
   const queries: Array<Record<string, unknown>> = [];

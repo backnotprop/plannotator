@@ -1,6 +1,6 @@
 /**
- * Contents must recover after a scroll skips headings and after another document
- * replaces them with the same count and ids. DOM-gated (DOM_TESTS=1).
+ * Contents must recover after a scroll skips headings and after another document replaces them
+ * with the same count and ids.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef, useState } from 'react';
@@ -20,7 +20,6 @@ afterEach(async () => {
 
 const TOPS = { Overview: 0, Context: 300, Design: 700, Rollout: 1100, Risks: 1500 };
 
-/** Let the hook's coalesced scroll or mutation callback run. */
 const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
 
 describe.if(hasDom)('useActiveSection at fixed scroll positions (plan review)', () => {
