@@ -4069,6 +4069,8 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
 .ib-gk-eyes, .am-gk-e { fill: #0b0b0c; }
 .light .ib-gk-body, .light .am-gk-b { fill: #0b0b0c; }
 .light .ib-gk-eyes, .light .am-gk-e { fill: #fff; }
+.ib-hermes { --ib-hermes-mask: var(--ib-hermes-dark); }
+.light .ib-hermes { --ib-hermes-mask: var(--ib-hermes-light); }
 /* The sound dialog's shell, wider; the body scrolls and the footer stays (a long list never pushes the buttons away). */
 .pn-inbox dialog.ib-dlg.ib-anote, dialog.ib-dlg.ib-anote { width: min(720px, calc(100vw - 32px)); border-radius: 14px; overflow: hidden; }
 dialog.ib-dlg.ib-anote[open] { display: flex; flex-direction: column; }
