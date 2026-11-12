@@ -1,15 +1,3 @@
-/**
- * A scratch world on a real TypeScript project, for the Guide tab's hover
- * check (`tests/screenshots/hover-latency.ts`): a local clone of this
- * repository with `main` at a base commit and a branch at a later one (a real
- * change to the VS Code extension's TypeScript), the clone's `node_modules`
- * linked to this checkout's so the TypeScript server sees the real types, and
- * a saved guided review of that change (chapters by folder) written straight
- * into the guide store. No agent, no network.
- *
- *   PLANNOTATOR_DATA_DIR=<scratch>/pn-data bun tests/screenshots/make-ts-fixture.ts <scratch dir> [base] [head]
- */
-
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -18,8 +6,6 @@ import { buildLocalChangesPatch, getRepoInfo } from "../../src/guides/sources/gi
 import { defaultRunner } from "../../src/guides/sources/runner";
 import { saveFinishedGuide, snapshotSource, sourceGitRef, type ReviewSourceRecord } from "../../src/guides/store";
 
-// `--pr`: the guide is of pull request #2124 instead of local changes; the clone stays on `main`
-// and the reader reads the head from a worktree it makes in the extension's storage (outside the workspace).
 const asPr = process.argv.includes("--pr");
 const [scratch, baseArg, headArg] = process.argv.slice(2).filter((a) => a !== "--pr");
 if (!scratch) throw new Error("usage: make-ts-fixture.ts <scratch dir> [base] [head]");
@@ -27,7 +13,6 @@ if (!process.env.PLANNOTATOR_DATA_DIR?.startsWith(resolve(scratch))) throw new E
 
 const source = resolve(import.meta.dir, "../../../..");
 const sourceGit = (...args: string[]) => execFileSync("git", args, { cwd: source, encoding: "utf8" }).trim();
-// Default: the change that added "Ask the agent" (#2124), 65 files of the extension's TypeScript.
 const head = headArg ?? sourceGit("rev-parse", "403f54e5a");
 const base = baseArg ?? sourceGit("rev-parse", `${head}^1`);
 
@@ -39,12 +24,10 @@ const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, encodi
 git("config", "commit.gpgsign", "false");
 git("checkout", "--quiet", "-B", "main", base);
 git("checkout", "--quiet", "-B", "feat/vscode-guides-ask", head);
-// A GitHub-looking origin names the repository (never fetched: the world's gh is fake).
 git("remote", "set-url", "origin", "https://github.com/backnotprop/plannotator.git");
 git("update-ref", "refs/remotes/origin/main", base);
 git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
 
-// The TypeScript server resolves types through node_modules: link this checkout's.
 const linkModules = (rel: string) => {
   const from = join(source, rel, "node_modules");
   const to = join(repo, rel, "node_modules");
@@ -61,7 +44,6 @@ if (!info) throw new Error("not a repository");
 const local = await buildLocalChangesPatch(runner, info, "since-base");
 if (asPr) git("checkout", "--quiet", "main");
 
-// Chapters by folder, in a reading order: the model first, then the extension, the views, tests, the rest.
 const ORDER: Array<[RegExp, string, string]> = [
   [/^apps\/vscode-extension\/src\/guides\/ask\//, "The question and its answer", "The ask session (ACP), the answer tool the agent calls, and where answers are kept. `GuideAskSession` loads the guide's own session when the agent can, else starts one seeded with the guide."],
   [/^apps\/vscode-extension\/src\/guides\/vscode\//, "Asking from the editor", "The box under the selected lines is a comment thread (`AskThreads`); `GuideAsks` runs one question at a time per guide and opens the answer beside the diff."],

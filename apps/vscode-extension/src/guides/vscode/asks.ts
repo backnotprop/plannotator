@@ -1,14 +1,3 @@
-/**
- * "Ask the agent" (approved 2026-10-23; asked from the Guide tab since
- * 2026-10-24): select lines in a diff in the Guide tab and ask in its Ask box,
- * or ask about a chapter at the foot of the chapter's prose; in a native
- * editor showing a guide file, right-click "Ask the Agent About This…" (a
- * Quick Pick). The question goes to the agent that wrote the guide (its model
- * and effort), and its answer opens as a page in a tab beside the guide,
- * listed under the chapter and marked on the lines. Follow-ups continue the
- * same conversation.
- */
-
 import * as vscode from "vscode";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -51,14 +40,12 @@ export interface AsksHost {
   agentById(id: string): AgentDescriptor | null;
   defaultChoice(): AgentChoiceRecord;
   ensureLaunch(agent: AgentDescriptor): Promise<ReadyLaunch | null>;
-  /** Pick another agent, model or effort (the start flow's picker). */
   pickModel(current: AgentChoiceRecord): Promise<AgentChoiceRecord | null>;
   notifyPermission(pending: PendingPermission, signal: AbortSignal, agentLabel: string): Promise<PermissionAnswer | null>;
   autoApprove(): boolean;
   approveAlways(): void;
   signIn(agentId: string, logins: LoginCommand[], label: string | undefined, cwd: string): Promise<void>;
   createPanel(title: string, column: vscode.ViewColumn, onLink: (link: string) => void, preserveFocus?: boolean): AsksPanel;
-  /** Whether answers are written to disk (guide history on, and the guide itself is saved). */
   persists(guide: LoadedGuide): boolean;
   updateChapterView(): void;
   setAnswering(text: string | null, answerId: string | null): void;
@@ -79,11 +66,9 @@ interface AskOptions {
 type AskResult = { started: true } | { started: false; reason?: string };
 
 interface AnswerPanel extends AsksPanel {
-  /** The answer it shows now (a follow-up moves it to the next answer). */
   current: string;
   guideId: string;
   repoKey: string;
-  /** Where to open code links: the diff's editor group. */
   codeColumn: vscode.ViewColumn | undefined;
 }
 
@@ -94,7 +79,6 @@ export class GuideAsks implements vscode.Disposable {
   private readonly sessions = new Map<string, GuideAskSession>();
   private readonly live = new Map<string, LiveAsk>();
   private readonly panels = new Set<AnswerPanel>();
-  /** The answers on disk or in memory, what was deleted, and the one-question-per-guide slot. */
   private readonly shelf: AnswerShelf;
   private answerColumn: vscode.ViewColumn | undefined;
 
@@ -102,15 +86,10 @@ export class GuideAsks implements vscode.Disposable {
     this.shelf = new AnswerShelf((line) => host.log(line));
   }
 
-  // ---------------------------------------------------------------------------
-  // Answers, on disk or in memory
-  // ---------------------------------------------------------------------------
-
   private save(record: AnswerRecord, guide: LoadedGuide): boolean {
     return this.shelf.save(record, this.host.persists(guide));
   }
 
-  /** The guide's answers, newest first (a live one as it is now). */
   answersOf(guide: LoadedGuide): AnswerRecord[] {
     return this.shelf.list(guide.repoKey, guide.id, this.host.persists(guide)).map((r) => this.live.get(r.id)?.record ?? r);
   }
@@ -119,7 +98,6 @@ export class GuideAsks implements vscode.Disposable {
     return this.live.get(id)?.record ?? this.answersOf(guide).find((r) => r.id === id) ?? null;
   }
 
-  /** The Guide tab's list under a chapter: answers about this chapter, and the footer. */
   chapterAnswers(guide: LoadedGuide, chapter: number): { items: AnswerListItem[]; footer?: string; busy: boolean; agent: string } {
     const all = this.answersOf(guide);
     const mine = all.filter((r) => r.about.chapter === chapter);
@@ -136,11 +114,6 @@ export class GuideAsks implements vscode.Disposable {
     return this.shelf.isReserved(guideId) || !!this.sessions.get(guideId)?.current;
   }
 
-  // ---------------------------------------------------------------------------
-  // Entry points
-  // ---------------------------------------------------------------------------
-
-  /** Right-click on selected code in a native editor showing a guide file: the question in a Quick Pick. */
   async askAboutSelection(): Promise<void> {
     const reader = this.host.reader();
     const editor = vscode.window.activeTextEditor;
@@ -154,7 +127,6 @@ export class GuideAsks implements vscode.Disposable {
       void vscode.window.showInformationMessage("That file is not part of the open guided review.");
       return;
     }
-    // A symlink of the change that leads out of the repository is not the guide's file: its text is never sent.
     if (side.side === "head" && headLeavesRepo(reader.sides, reader.model.files.get(side.path) ?? { path: side.path })) {
       void vscode.window.showInformationMessage(`${side.path} leads out of the repository; it is not asked about.`);
       return;
@@ -164,7 +136,6 @@ export class GuideAsks implements vscode.Disposable {
     await this.askWithBox(about, editor.viewColumn);
   }
 
-  /** A chapter's ask box (the Guide tab): what was typed is asked; nothing typed opens the question box. */
   async askChapter(n: number | undefined, text: string | undefined): Promise<void> {
     const reader = this.host.reader();
     if (!reader) return;
@@ -178,21 +149,12 @@ export class GuideAsks implements vscode.Disposable {
     await this.askWithBox(about, column);
   }
 
-  /**
-   * The Guide tab: lines selected in a file's diff (head lines), and the
-   * question typed in the selection toolbar. The answer opens beside the
-   * guide and shows the agent's work as it goes; the lines get a marker in
-   * the reader.
-   */
   async askAboutLines(path: string, side: "old" | "new", start: number, end: number, question: string): Promise<void> {
     const reader = this.host.reader();
     if (!reader) return;
     const chapter = reader.model.chapterOf(path);
     const text = question.trim().slice(0, MAX_QUESTION);
     if (chapter < 0 || !text) return;
-    // The code is what the reviewer saw: the lines of the guide's own diff on
-    // that side (removed lines are base lines; a deleted file has only those).
-    // Never read from disk, where a symlink in the change could point anywhere.
     const excerpt = patchExcerpt(reader.model.loaded.rawPatch ?? "", path, side, start, end);
     const oldPath = side === "old" ? reader.model.files.get(path)?.oldPath : undefined;
     const about: AskAbout = {
@@ -208,7 +170,6 @@ export class GuideAsks implements vscode.Disposable {
     await this.ask(reader.model.loaded, about, text, { codeColumn: vscode.ViewColumn.Active });
   }
 
-  /** Line answers of the guide, for the reader's markers (newest first). */
   lineAnswers(guide: LoadedGuide): Array<{ id: string; path: string; side: "old" | "new"; start: number; end: number; question: string; status: AnswerRecord["status"] }> {
     return this.answersOf(guide)
       .filter((r) => r.about.kind === "selection" && r.about.path && r.about.lines)
@@ -224,7 +185,6 @@ export class GuideAsks implements vscode.Disposable {
   }
 
   private selectionAbout(reader: { model: ReaderModel; sides: ReaderSides }, doc: vscode.TextDocument, sel: vscode.Selection, side: { path: string; side: "head" | "base" }, chapter: number): AskAbout {
-    // A selection ending at column 0 of a line does not take that line.
     const endLine = sel.end.character === 0 && sel.end.line > sel.start.line ? sel.end.line - 1 : sel.end.line;
     const range = new vscode.Range(sel.start.line, 0, endLine, doc.lineAt(endLine).text.length);
     const code = doc.getText(range);
@@ -238,7 +198,6 @@ export class GuideAsks implements vscode.Disposable {
       side: side.side,
       lines: { start: sel.start.line + 1, end: endLine + 1 },
       code: capCode(code),
-      // What was asked about: these lines, as the editor showed them (the open document, saved or not).
       codeHash: linesHash(code),
     };
   }
@@ -248,12 +207,6 @@ export class GuideAsks implements vscode.Disposable {
     return { kind: "file", chapter, chapterTitle: reader.model.chapters[chapter].title, path, side: "head", ...(hash && { fileHash: hash }) };
   }
 
-  /**
-   * The same things the record's hash describes, now: the lines asked about
-   * on the head (read from disk, inside the repository only), or the whole
-   * head file. Not known (left out) for the base side and a head revision,
-   * which do not move.
-   */
   private currentHashes(reader: { sides: ReaderSides }, record: AnswerRecord): { fileHash?: string | null; codeHash?: string | null } {
     const about = record.about;
     if (!about.path || about.side === "base" || reader.sides.head.kind !== "fs") return {};
@@ -304,7 +257,6 @@ export class GuideAsks implements vscode.Disposable {
     await this.ask(guide, about, picked.question.slice(0, MAX_QUESTION), { codeColumn });
   }
 
-  /** The agent, model and effort that answer: the reader's pick for this guide, else the guide's own. */
   choiceFor(guide: LoadedGuide): AgentChoiceRecord {
     const picked = this.host.context.globalState.get<AgentChoiceRecord>(askChoiceKey(guide.id));
     if (picked && this.host.agentById(picked.id)) return picked;
@@ -315,15 +267,9 @@ export class GuideAsks implements vscode.Disposable {
     return this.host.defaultChoice();
   }
 
-  // ---------------------------------------------------------------------------
-  // Asking
-  // ---------------------------------------------------------------------------
-
   private async ask(guide: LoadedGuide, about: AskAbout, question: string, opts: AskOptions): Promise<AskResult> {
     const reader = this.host.reader();
     if (!reader || reader.model.id !== guide.id) return { started: false, reason: "Its guide is not open." };
-    // One question at a time per guide: the slot is taken before anything is awaited, so a
-    // second ask (a double Enter, the box and the chapter at once) is refused, never half-started.
     if (!this.shelf.reserve(guide.id)) {
       const busy = this.sessions.get(guide.id)?.current;
       const running = busy ? this.live.get(busy.state.answerId)?.record : undefined;
@@ -345,7 +291,6 @@ export class GuideAsks implements vscode.Disposable {
     return started ? { started: true } : { started: false, reason: "The agent did not start." };
   }
 
-  /** Start answering (the guide's slot is held); true when a run started, which releases the slot when it ends. */
   private async start(guide: LoadedGuide, reader: { model: ReaderModel; sides: ReaderSides }, about: AskAbout, question: string, opts: AskOptions): Promise<boolean> {
     const choice = this.choiceFor(guide);
     const descriptor = this.host.agentById(choice.id);
@@ -390,7 +335,6 @@ export class GuideAsks implements vscode.Disposable {
     });
     const live: LiveAsk = { run, record, ...(opts.codeColumn && { codeColumn: opts.codeColumn }) };
     this.live.set(record.id, live);
-    // The tab opens beside the guide at once and shows the work as it goes (a follow-up's open tab moves on).
     const panel = opts.panel ?? this.panelFor(record, opts.codeColumn, true);
     panel.current = record.id;
     panel.panel.title = tabTitle(question, true);
@@ -473,12 +417,10 @@ export class GuideAsks implements vscode.Disposable {
     record.seen = !!panel?.panel.visible;
     this.live.delete(record.id);
     this.host.setAnswering(null, null);
-    // Deleted while it was being answered (the answer, or its guide): nothing is written back.
     if (!this.save(record, guide)) {
       this.host.updateChapterView();
       return;
     }
-    // Remember the session, so a later window loads it when the agent can.
     if (session.askSessionId && !this.shelf.isGuideDeleted(guide.id)) {
       guide.sidecar.askSession = { id: session.askSessionId, agent: session.agentId };
       if (this.host.persists(guide)) writeSidecar(guide.repoKey, guide.id, guide.sidecar);
@@ -500,10 +442,6 @@ export class GuideAsks implements vscode.Disposable {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // The answer tab
-  // ---------------------------------------------------------------------------
-
   private panelShowing(answerId: string): AnswerPanel | null {
     for (const p of this.panels) if (p.current === answerId) return p;
     return null;
@@ -512,7 +450,6 @@ export class GuideAsks implements vscode.Disposable {
   private panelFor(record: AnswerRecord, codeColumn: vscode.ViewColumn | undefined, preserveFocus = false): AnswerPanel {
     const existing = this.panelShowing(record.id);
     if (existing) return existing;
-    // Later answers reuse the right-hand group the first one opened in.
     const column = this.answerColumn && [...this.panels].some((p) => p.panel.viewColumn === this.answerColumn) ? this.answerColumn : vscode.ViewColumn.Beside;
     let entry: AnswerPanel;
     const base = this.host.createPanel(tabTitle(record.question, record.status === "answering"), column, (link) => void this.openAnswerLink(entry, link), preserveFocus);
@@ -549,7 +486,6 @@ export class GuideAsks implements vscode.Disposable {
     panel.host.show(answerViewState({ record, now: Date.now(), stale, followUpOf: this.followUpOf(record), busy: this.isBusy(record.guideId) }));
   }
 
-  /** Open an answer of the open guide in its tab (beside the diff). */
   async openAnswer(id: string | undefined): Promise<void> {
     const reader = this.host.reader();
     if (!id || !reader) return;
@@ -571,7 +507,6 @@ export class GuideAsks implements vscode.Disposable {
     await this.showRecord(panel, record);
   }
 
-  /** A link in an answer page: open the guide it belongs to first, then the link, in the diff's editor group. */
   private async openAnswerLink(panel: AnswerPanel, link: string): Promise<void> {
     if (this.host.reader()?.model.id !== panel.guideId) await this.host.openGuide(panel.guideId);
     await this.host.openLink(link, panel.codeColumn ?? vscode.ViewColumn.One);
@@ -591,7 +526,6 @@ export class GuideAsks implements vscode.Disposable {
     await this.live.get(answerId)?.run.cancel();
   }
 
-  /** The tab's "…": ask again, delete (after a confirm), copy the question. `again` (the tab's button) asks again at once. */
   async menu(answerId: string | undefined, action?: string): Promise<void> {
     const reader = this.host.reader();
     if (!reader || !answerId) return;
@@ -608,7 +542,6 @@ export class GuideAsks implements vscode.Disposable {
     if (pick === "delete") {
       const sure = await vscode.window.showWarningMessage(`Delete the answer to “${record.question}”?`, { modal: true }, "Delete");
       if (sure !== "Delete") return;
-      // Marked deleted first, so a run still answering it does not write it back when it ends.
       this.shelf.remove(record, this.host.persists(guide));
       if (this.live.has(record.id)) await this.stop(record.id);
       this.panelShowing(record.id)?.panel.dispose();
@@ -616,14 +549,12 @@ export class GuideAsks implements vscode.Disposable {
     }
   }
 
-  /** A web link in an answer page: the agent wrote it, so ask before opening it. */
   async openExternal(url: string | undefined): Promise<void> {
     if (!url || !/^https?:\/\//i.test(url)) return;
     const choice = await vscode.window.showInformationMessage(`The answer links to ${url}. Open it in your browser?`, "Open");
     if (choice === "Open") await vscode.env.openExternal(vscode.Uri.parse(url));
   }
 
-  /** Permission answers from an answer tab; false when the id is not an answer being asked. */
   answerPermission(answerId: string | undefined, id: number | undefined, optionId: string | undefined): boolean {
     const live = answerId ? this.live.get(answerId) : undefined;
     if (!live) return false;
@@ -631,7 +562,6 @@ export class GuideAsks implements vscode.Disposable {
     return true;
   }
 
-  /** Whether this answer's run is waiting on the user for this permission request. */
   hasPendingPermission(answerId: string | undefined, id: number | undefined): boolean {
     const live = answerId ? this.live.get(answerId) : undefined;
     return !!live && live.run.live && id !== undefined && live.run.state.pendingPermissions.some((p) => p.id === id);
@@ -644,16 +574,13 @@ export class GuideAsks implements vscode.Disposable {
     return true;
   }
 
-  /** The guide was deleted: its conversation and answers go too. */
   onGuideDeleted(repoKey: string, guideId: string): void {
-    // Marked first: a question still being answered must not write its answer or the sidecar back.
     this.shelf.removeGuide(repoKey, guideId);
     this.sessions.get(guideId)?.dispose();
     this.sessions.delete(guideId);
     for (const p of [...this.panels]) if (p.guideId === guideId) p.panel.dispose();
   }
 
-  /** The reader opened another guide, or closed. */
   onReaderChanged(_guideId: string | null): void {}
 
   dispose(): void {
@@ -661,7 +588,6 @@ export class GuideAsks implements vscode.Disposable {
     this.sessions.clear();
   }
 
-  /** VS Code is closing. */
   kill(): void {
     for (const s of this.sessions.values()) s.kill();
   }
@@ -676,7 +602,6 @@ function tabTitle(question: string, answering: boolean): string {
   return `${answering ? "Answering: " : "Answer: "}${q}`;
 }
 
-/** The guide as the prompt tells it, and where the change is. */
 function guideContext(guide: LoadedGuide, reader: { model: ReaderModel; sides: ReaderSides }, cwd: string): AskGuideContext {
   const env = guide.envelope;
   const source = guide.sidecar.source;

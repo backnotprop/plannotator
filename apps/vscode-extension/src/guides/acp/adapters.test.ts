@@ -19,7 +19,6 @@ afterEach(() => {
 
 const FOUND = (names: string[]) => (name: string) => (names.includes(name) ? `/bin/${name}` : null);
 
-/** A scripted npm: records every call and, when `ok`, writes the package the way npm would. */
 function fakeNpm(opts: { ok?: boolean; stderr?: string; engines?: string } = {}) {
   const calls: Array<{ command: string; args: string[] }> = [];
   const runner: Runner = async (command, args) => {
@@ -49,7 +48,6 @@ describe("which agents have an npm adapter Guided Reviews installs", () => {
     for (const a of KNOWN_AGENTS) {
       if (!a.adapter) continue;
       expect(a.adapter.version).toMatch(/^\d+\.\d+\.\d+$/);
-      // The manual command a person is shown is the same pinned version.
       expect(a.installCommand).toBe(manualInstallCommand(a.adapter));
     }
   });
@@ -75,7 +73,6 @@ describe("resolution order: setting, PATH, the installed copy, then install now"
     expect(r).toMatchObject({ ok: false, reason: "adapter" });
     expect(!r.ok && r.message).toContain("@agentclientprotocol/codex-acp@2.2.2");
     expect(resolveAgentLaunch(OPENCODE, {}, FOUND([]), none)).toMatchObject({ ok: false, reason: "agent" });
-    // A command in settings that is missing is never papered over with an install.
     expect(resolveAgentLaunch(CODEX, { command: "gone" }, FOUND([]), none)).toMatchObject({ ok: false, reason: "setting" });
   });
 
@@ -126,7 +123,6 @@ describe("installing an adapter", () => {
       const { runner, calls } = fakeNpm();
       await installAdapter(tempRoot(), a.id, a.label, a.adapter, { runner, findExecutable: FOUND(["npm", "node"]) });
       expect(calls[0].args).toContain(`--before=${a.adapter.before}`);
-      // The pin date is at least 7 days before the pins were chosen (2026-10-23).
       expect(Date.parse(a.adapter.before)).toBeLessThanOrEqual(Date.parse("2026-10-16"));
     }
   });
@@ -219,7 +215,7 @@ describe("removing old adapter copies", () => {
     const root = tempRoot();
     const agentDir = managedDir(root, "codex");
     await installAdapter(root, "codex", "Codex", CODEX.adapter!, deps("a"));
-    hoursAgo(join(agentDir, "a"), 30); // installed long ago, and a run in another window still uses it
+    hoursAgo(join(agentDir, "a"), 30);
     await installAdapter(root, "codex", "Codex", CODEX.adapter!, deps("b"));
     sweepCopies(root, agentDir, Date.now());
     expect(existsSync(join(agentDir, "a"))).toBe(true);

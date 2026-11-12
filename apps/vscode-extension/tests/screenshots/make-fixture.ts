@@ -1,13 +1,3 @@
-/**
- * A scratch world for driving the Guides view in a real VS Code (headless,
- * through `code serve-web`): a git repository with a realistic change on a
- * branch, a FAKE `gh` that answers from canned JSON, and a script for the
- * FAKE ACP agent (tests/helpers/fake-acp-agent.ts). Nothing here talks to GitHub or
- * runs a real agent.
- *
- *   bun tests/screenshots/make-fixture.ts <scratch dir>
- */
-
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -27,7 +17,6 @@ const write = (path: string, text: string) => {
 git("init", "-q", "-b", "main");
 git("config", "commit.gpgsign", "false");
 
-// --- main: the code before the PR -------------------------------------------
 write("package.json", `{ "name": "checkout-service", "private": true, "type": "module" }\n`);
 write("tsconfig.json", `{ "compilerOptions": { "strict": true, "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler" }, "include": ["src"] }\n`);
 write("src/net/httpClient.ts", `
@@ -110,7 +99,6 @@ git("add", "-A");
 git("commit", "-q", "-m", "checkout-service: webhook delivery");
 const mainSha = git("rev-parse", "HEAD");
 
-// --- the PR branch -----------------------------------------------------------
 git("checkout", "-q", "-b", "feat/webhook-retries");
 write("src/webhooks/retryPolicy.ts", `
 import type { Config } from "../config/schema";
@@ -266,13 +254,11 @@ git("add", "-A");
 git("commit", "-q", "-m", "Retry failed webhook deliveries with backoff and a dead-letter table");
 const prHead = git("rev-parse", "HEAD");
 
-// Remote-tracking refs as if fetched from GitHub (no network is ever used).
 git("remote", "add", "origin", "git@github.com:northwind/checkout-service.git");
 git("update-ref", "refs/remotes/origin/main", mainSha);
 git("update-ref", "refs/remotes/origin/feat/webhook-retries", prHead);
 git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
 
-// A little uncommitted work on top, for "Local changes".
 write("src/webhooks/sign.ts", `
 import type { WebhookJob } from "./types";
 
@@ -282,7 +268,6 @@ export function signHeaders(job: WebhookJob): Record<string, string> {
 }
 `);
 
-// --- the fake gh --------------------------------------------------------------
 const bin = join(root, "bin");
 mkdirSync(bin, { recursive: true });
 const now = Date.now();
@@ -315,10 +300,8 @@ esac
 `);
 chmodSync(join(bin, "gh"), 0o755);
 
-// --- what the FAKE agent does ------------------------------------------------
 const place = (file: string, chapter: string, summary: string, focus?: unknown[]) => ({ mcp: { name: "guide_place_file", args: { file, chapter, summary, ...(focus && { focus }) } } });
 const agentScript = {
-  // Like claude-agent-acp: a question about the guide loads the session that wrote it.
   loadSession: true,
   pace: Number(process.env.FAKE_AGENT_PACE ?? 700),
   steps: [
@@ -372,7 +355,6 @@ const agentScript = {
     { say: "The guide is saved: 5 chapters and an overview." },
   ],
 };
-// --- what the FAKE agent answers when asked (the ask session offers show_answer) ---
 const box = (x: number, y: number, w: number, title: string, sub: string, color: string, link: string) =>
   `<g class="box" data-link="${link}" tabindex="0"><rect x="${x}" y="${y}" width="${w}" height="44" rx="6" fill="var(--card)" stroke="${color}" stroke-width="1.5"/>` +
   `<text x="${x + 12}" y="${y + 19}" font-family="var(--mono)" font-size="13" fill="var(--foreground)">${title}</text>` +

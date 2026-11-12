@@ -1,27 +1,17 @@
-/**
- * The one prompt (SPEC 4.3), built by core's `buildGuideBuilderPrompt`: what
- * to review (here: the PR or the local range, where the files are, how to see
- * the diff, and the exact changed paths), the methodology without the
- * exploration limit, the builder paragraph, and the reader's instructions.
- */
-
 import { buildGuideBuilderPrompt } from "./core/adapter";
 import type { ReviewSourceRecord } from "./store";
 
 const MAX_LISTED_FILES = 400;
 
-/** What the run is for: a review needs no edits, and the guide is written only through the builder's tools. */
 export const READ_ONLY_NOTE =
   "This is a review: you do not need to edit, create or delete any file. Read and search the code as you need, and write the guide only with the guide_* tools.";
 
-/** What to review, one line: core's prompt reads "Write a guided review of <target>." */
 export function shortTarget(source: ReviewSourceRecord): string {
   if (source.kind === "pr" && source.pr) return `pull request #${source.pr.number}, "${source.pr.title}" (${source.pr.url})`;
   if (source.baseSha === source.headSha) return `the uncommitted changes in ${source.headRoot}${source.branch ? ` (branch ${source.branch})` : ""}`;
   return `${source.baseLabel}..HEAD and the uncommitted changes in ${source.headRoot}${source.branch ? ` (branch ${source.branch})` : ""}`;
 }
 
-/** Where the files are and how to see the diff. */
 export function describeTarget(source: ReviewSourceRecord): string {
   if (source.kind === "pr" && source.pr) {
     return [
@@ -56,7 +46,6 @@ export function buildGuidePrompt(input: {
     ...(input.instructions && { instructions: input.instructions }),
     ...(input.resume && { resume: true }),
   });
-  // Core's first paragraph names the target; where the files are, how to see the diff and the exact paths follow it.
   const cut = prompt.indexOf("\n\n");
   const context = `${describeTarget(input.source)}\n\n${changedFilesBlock(input.files)}\n\n${READ_ONLY_NOTE}`;
   return cut < 0 ? `${prompt}\n\n${context}` : `${prompt.slice(0, cut)}\n\n${context}${prompt.slice(cut)}`;

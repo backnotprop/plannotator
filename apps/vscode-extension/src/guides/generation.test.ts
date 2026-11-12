@@ -1,10 +1,3 @@
-/**
- * A whole guide run against the FAKE ACP agent (tests/helpers/fake-acp-agent.ts):
- * the extension's ACP client starts it, it starts the builder relay script
- * from `session/new`, calls the guide_* tools through it, asks for a
- * permission, reports cost, and finishes. No real agent ever runs here.
- */
-
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,7 +43,6 @@ interface World {
   deps: GenerationDeps;
   log: () => Array<Record<string, any>>;
   permissions: string[];
-  /** The option ids each forwarded request offered. */
   offered: string[][];
 }
 
@@ -114,16 +106,14 @@ const ch1 = { mcp: { name: "guide_add_chapter", args: { title: "The retry budget
 const ch2 = { mcp: { name: "guide_add_chapter", args: { title: "Delivery loop learns to back off", overview: "The loop backs off." } } };
 const place = (file: string, chapter: string, extra: Record<string, unknown> = {}) => ({ mcp: { name: "guide_place_file", args: { file, chapter, summary: `What ${file} does.`, ...extra } } });
 
-/** The fake agent's stubborn grandchildren (they ignore SIGTERM): killed after each test whatever it asserted, so a failing test never leaves one running. */
 const stubborn = new Set<number>();
 
 describe("guide generation over ACP", () => {
   afterEach(() => {
     for (const pid of stubborn) {
       try {
-        process.kill(pid, "SIGKILL"); // own grandchild (the fake agent's), never anything else
+        process.kill(pid, "SIGKILL");
       } catch {
-        // Already gone.
       }
     }
     stubborn.clear();
@@ -162,8 +152,6 @@ describe("guide generation over ACP", () => {
 
     const log = w.log();
     expect(log.find((e) => e.event === "initialize")?.clientCapabilities).toMatchObject({ fs: { readTextFile: false, writeTextFile: false }, terminal: false, auth: { terminal: true } });
-    // Local changes are the user's own checkout: their project settings apply; only Claude Code's write tools are disallowed.
-    // The agent runs with the user's own config: no _meta of Guides', nothing narrowed.
     expect(log.find((e) => e.event === "newSession")?.meta).toBeNull();
     expect(log.find((e) => e.event === "mcpReady")?.tools).toContain("guide_place_file");
     expect(log.filter((e) => e.event === "setConfig").map((e) => `${e.configId}=${e.value}`)).toEqual(["model=sonnet", "effort=low"]);
@@ -179,7 +167,6 @@ describe("guide generation over ACP", () => {
     expect(calls.filter((c) => c.name === "guide_finish")[0].text).toContain("neither placed nor marked not in a chapter: `src/deliver.ts`");
     expect(calls.filter((c) => c.name === "guide_finish")[1].text).toContain("Saved \"Retry failed webhook deliveries\": 2 chapters and an overview.");
 
-    // The activity stream: the agent's message, its own tool call with a link, the builder lines (no duplicates from the ACP side).
     const kinds = gen.state.activity.map((a) => `${a.kind}:${a.kind === "builder" ? a.title : ""}`);
     expect(kinds.filter((k) => k.startsWith("tool:"))).toHaveLength(2);
     expect(gen.state.activity.find((a) => a.kind === "message")?.title).toBe("Reading the change first.");
@@ -188,7 +175,6 @@ describe("guide generation over ACP", () => {
     const refused = gen.state.activity.find((a) => a.kind === "builder" && a.isError);
     expect(refused?.detail).toBe("src/deliver.test.ts → 1: `src/deliver.test.ts` is already in chapter 2 (c2). Use guide_move_file to move it.");
 
-    // Saved where the web app finds it, with the VS Code sidecar beside it; the draft is gone.
     const saved = loadSavedGuide(w.input.repoKey, gen.state.savedGuideId!);
     expect(saved?.envelope.guide.sections.map((s) => s.diffs.map((d) => d.file))).toEqual([["src/retryPolicy.ts"], ["src/deliver.test.ts", "src/deliver.ts"]]);
     expect((saved?.envelope.guide as { overview?: { text: string } }).overview?.text).toContain("symbol:computeBackoff");
@@ -248,11 +234,10 @@ describe("guide generation over ACP", () => {
     expect(w.log().some((e) => e.event === "cancel")).toBe(true);
     expect(loadDraftRecord(w.input.repoKey, gen.state.id)?.status).toBe("stopped");
 
-    // Save as is: the leftovers go to "Not in a chapter", the empty chapter is dropped.
     const placed = world([]);
     void placed;
     const result = await gen.saveAsIs();
-    expect(result.ok).toBe(false); // the only chapter has no files
+    expect(result.ok).toBe(false);
   });
 
   it("passes a rejected permission back to the agent, and names the bottleneck with a way through", async () => {
@@ -267,7 +252,6 @@ describe("guide generation over ACP", () => {
       detail: "Claude Code will try another way. Approve automatically to let its requests through for the rest of this run.",
       action: "approveRun",
     });
-    // The run ended without the guide after a request was turned down: resume with approval.
     expect(gen.state.bottlenecks.find((b) => b.key === "ended-blocked")?.action).toBe("resumeWithApproval");
     expect(gen.state.status).toBe("stopped");
     expect(gen.state.statusMessage).toContain("without calling guide_finish");
@@ -398,7 +382,6 @@ describe("guide generation over ACP", () => {
       { mcp: { name: "guide_set_overview", args: { text: "Start here.", diagram: { kind: "mermaid", source: "flowchart LR\n a-->b" } } } },
       { mcp: { name: "guide_finish" } },
     ]);
-    // The overview's diagram is render-checked; the chapter's could not be.
     w.deps.checkMermaid = async (source) => ({ ok: true, checked: source !== chapterSource });
     const gen = new GuideGeneration(w.input, w.deps);
     await gen.run();
@@ -483,7 +466,7 @@ describe("your agent, your config: Guides never blocks it", () => {
     const gen = new GuideGeneration(w.input, w.deps);
     await gen.run();
     expect(gen.state.status).toBe("finished");
-    expect(w.permissions).toEqual([]); // never asked
+    expect(w.permissions).toEqual([]);
     expect(w.log().find((e) => e.event === "permission")?.outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
     expect(modeChanges(w.log())).toEqual([{ event: "setConfig", configId: "mode", value: "acceptEdits" }]);
     expect(gen.state.permissiveMode).toBe("acceptEdits");
@@ -526,7 +509,7 @@ describe("your agent, your config: Guides never blocks it", () => {
     await running;
     const outcomes = w.log().filter((e) => e.event === "permission").map((e) => e.outcome);
     expect(outcomes).toEqual([{ outcome: "selected", optionId: "allow-once" }, { outcome: "selected", optionId: "allow-once" }]);
-    expect(w.permissions).toEqual(["Run git log"]); // the second was approved without asking
+    expect(w.permissions).toEqual(["Run git log"]);
     expect(gen.state.pendingPermissions).toEqual([]);
     expect(gen.state.autoApprove).toBe(true);
     expect(gen.state.offerAutoApprove).toBe(false);
@@ -545,7 +528,7 @@ describe("your agent, your config: Guides never blocks it", () => {
         }
       });
     });
-    gen.answerPermission(1, { optionId: "not-an-option" }); // ignored
+    gen.answerPermission(1, { optionId: "not-an-option" });
     expect(gen.state.pendingPermissions).toHaveLength(1);
     gen.answerPermission(1, { optionId: "reject-once" });
     await running;
@@ -570,7 +553,6 @@ describe("your agent, your config: Guides never blocks it", () => {
   });
 
   it("does not advise resuming with automatic approval when only a deny rule blocked the agent", async () => {
-    // The run ends without the guide; the only blocks came from the agent's own settings.
     const w = world([{ tool: { title: "Bash", kind: "execute", fail: true, output: "Permission to use Bash has been denied." } }, header]);
     const gen = new GuideGeneration(w.input, w.deps);
     await gen.run();
@@ -594,7 +576,6 @@ describe("your agent, your config: Guides never blocks it", () => {
     const gen = new GuideGeneration(w.input, w.deps);
     await gen.run();
     expect(gen.state.bottlenecks.filter((b) => b.key.startsWith("blocked"))).toEqual([]);
-    // Nothing was blocked, so the end of the run does not blame the user's setup.
     expect(gen.state.bottlenecks.some((b) => b.key === "ended-blocked")).toBe(false);
   });
 
@@ -625,12 +606,11 @@ describe("your agent, your config: Guides never blocks it", () => {
         }
       });
     });
-    gen.answerPermission(999, { approve: "run" }); // no such pending request any more
+    gen.answerPermission(999, { approve: "run" });
     await running;
     expect(gen.state.autoApprove).toBe(true);
-    expect(w.permissions).toEqual([]); // the later request was approved without asking
+    expect(w.permissions).toEqual([]);
     expect(w.log().find((e) => e.event === "permission")?.outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
-    // Once a run ended, a late "Approve all" changes nothing.
     const ended = world([header]);
     const after = new GuideGeneration(ended.input, ended.deps);
     await after.run();
@@ -651,14 +631,13 @@ describe("your agent, your config: Guides never blocks it", () => {
       });
     });
     gen.approveAutomatically();
-    expect(gen.state.pendingPermissions).toHaveLength(1); // still waiting for the user
+    expect(gen.state.pendingPermissions).toHaveLength(1);
     gen.answerPermission(gen.state.pendingPermissions[0].id, { optionId: "no" });
     await running;
     expect(w.log().find((e) => e.event === "permission")?.outcome).toEqual({ outcome: "selected", optionId: "no" });
   });
 
   it("says so when the agent never reaches the guide's tools", async () => {
-    // An agent that accepts the client's MCP servers but never starts them (pi-acp today).
     const w = world([{ say: "I looked around." }], { script: { ignoreMcp: true } });
     const gen = new GuideGeneration(w.input, w.deps);
     await gen.run();
@@ -677,7 +656,6 @@ describe("your agent, your config: Guides never blocks it", () => {
   });
 });
 
-/** Wait until a process no longer exists. */
 async function gone(pid: number, timeoutMs: number): Promise<boolean> {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {

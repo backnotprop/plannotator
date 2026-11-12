@@ -1,9 +1,3 @@
-/**
- * The Guides side bar (shots 1, 5, 9): the dashboard (this repo, recent
- * guides, PRs waiting on you), a "Building guide" section while an agent
- * works, and the open guide's chapters and files with their ticks.
- */
-
 import * as vscode from "vscode";
 import { basename, dirname } from "node:path";
 import type { DashboardModel } from "../dashboard";
@@ -218,8 +212,6 @@ export function getTreeItem(data: TreeData, node: TreeNode): vscode.TreeItem {
       t.description = tags.join(" · ");
       t.tooltip = new vscode.MarkdownString(`**#${p.number} ${escapeMd(p.title)}**\n\n${p.baseRefName} ← ${p.headRefName} · ${p.changedFiles} files · +${p.additions} −${p.deletions}`);
       t.contextValue = "pn.pr";
-      // Opens its guided review when one exists for the PR's head, else starts one. Never the browser.
-      // A row of this repository's own PR list: always the open repository, so only its number is passed.
       t.command = { command: "plannotator.guides.openPullRequest", title: "Open the guided review", arguments: [p.number] };
       return t;
     }

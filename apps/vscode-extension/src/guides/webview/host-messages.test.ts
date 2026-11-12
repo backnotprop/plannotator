@@ -3,7 +3,6 @@ import { fromWebviewHost, type MessageWindow } from "./host-messages";
 
 describe("which messages the webview acts on", () => {
   const ORIGIN = "vscode-webview://1a2b3c";
-  // VS Code's window → the webview's host frame → this page (whose `parent` VS Code 1.143 sets to itself)
   const top: MessageWindow = { get parent() { return top; }, origin: "vscode-file://vscode-app" };
   const hostFrame: MessageWindow = { parent: top, origin: ORIGIN };
   const self: MessageWindow = { get parent() { return self; }, origin: ORIGIN };

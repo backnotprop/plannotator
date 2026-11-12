@@ -1,28 +1,7 @@
-/**
- * The agent's answer page, as it wrote it, scripts included (owner's
- * decision, 2026-10-23: "If its html scripts can be embedded … we need to
- * support"), inside an `<iframe sandbox="allow-scripts">` of the answer tab:
- *
- * - The frame has an opaque origin: its scripts cannot reach the tab's DOM or
- *   the webview API (`acquireVsCodeApi`); they can only post messages.
- * - It inherits the answer tab's CSP: inline scripts and styles, images only
- *   from `data:` and the extension, and nothing else, so it reaches no network.
- * - No top navigation, popups, forms or modals (the sandbox allows none).
- *
- * A small script we put first in the page reports clicks on `code:`,
- * `symbol:` and `chapter:` links (and `data-link` on any element, such as a
- * box in a drawing) and on web links, and the page's height. The tab accepts
- * only those messages, only from this frame. Mermaid blocks
- * (`<pre class="mermaid">`) are drawn beforehand with the Guide tab's engine.
- */
-
 import { renderMermaid } from "./diagram-loader";
 
-/** Theme colors the page can use, read from VS Code's variables. */
 const THEME_VARS: Array<[string, string, string]> = [
-  // [our name, VS Code variable, fallback]
   ["--foreground", "--vscode-editor-foreground", "#cccccc"],
-  // The frame paints its own background: a color-scheme the tab does not declare makes it opaque.
   ["--background", "--vscode-editor-background", "#1f1f1f"],
   ["--muted", "--vscode-descriptionForeground", "#9d9d9d"],
   ["--card", "--vscode-editorWidget-background", "#252526"],
@@ -42,7 +21,6 @@ const THEME_VARS: Array<[string, string, string]> = [
   ["--font-size", "--vscode-font-size", "13px"],
 ];
 
-/** The CSS the page gets before its own: the color variables and plain defaults. */
 export function answerThemeCss(read: (name: string) => string = (name) => getComputedStyle(document.documentElement).getPropertyValue(name)): string {
   const vars = THEME_VARS.map(([ours, theirs, fallback]) => `${ours}: ${read(theirs).trim() || fallback};`).join(" ");
   return `:root { ${vars} color-scheme: ${isLight() ? "light" : "dark"}; }
@@ -60,7 +38,6 @@ function isLight(): boolean {
   return document.body.classList.contains("vscode-light") || document.body.classList.contains("vscode-high-contrast-light");
 }
 
-/** The first script of the page: link clicks and the page height go to the tab, nothing else. */
 export const ANSWER_BOOTSTRAP = `(function () {
   var post = function (m) { m.pnAnswer = 1; parent.postMessage(m, "*"); };
   var target = function (e) { var t = e.target; return t && t.closest ? t.closest("[data-link], a[href]") : null; };
@@ -80,7 +57,6 @@ export const ANSWER_BOOTSTRAP = `(function () {
   setTimeout(send, 0);
 })();`;
 
-/** Mermaid blocks drawn with the Guide tab's engine; a block that does not draw stays as its source. */
 async function drawMermaid(doc: Document): Promise<void> {
   for (const block of Array.from(doc.querySelectorAll("pre.mermaid, div.mermaid"))) {
     const result = await renderMermaid(block.textContent ?? "");
@@ -92,11 +68,6 @@ async function drawMermaid(doc: Document): Promise<void> {
   }
 }
 
-/**
- * The page as the frame's `srcdoc`: the agent's HTML (a fragment or a whole
- * document) with our theme and bootstrap script first in its head. The
- * agent's scripts are kept; DOMParser does not run them here.
- */
 export async function buildAnswerDocument(html: string, themeCss: string, options: { mermaid?: boolean } = {}): Promise<string> {
   const doc = new DOMParser().parseFromString(html, "text/html");
   if (options.mermaid !== false && /\bmermaid\b/.test(html)) await drawMermaid(doc);
@@ -115,7 +86,6 @@ export async function buildAnswerDocument(html: string, themeCss: string, option
 
 export type AnswerFrameMessage = { kind: "link"; link: string } | { kind: "external"; url: string } | { kind: "height"; height: number };
 
-/** A message from the answer frame, checked; null for anything else. */
 export function readAnswerMessage(data: unknown): AnswerFrameMessage | null {
   if (!data || typeof data !== "object" || (data as { pnAnswer?: unknown }).pnAnswer !== 1) return null;
   const m = data as Record<string, unknown>;
@@ -125,13 +95,9 @@ export function readAnswerMessage(data: unknown): AnswerFrameMessage | null {
   return null;
 }
 
-/** The frame, with its messages routed: links open, the frame grows with its page. */
 export function answerFrame(html: string, on: { link(link: string): void; external(url: string): void }): HTMLIFrameElement {
   const frame = document.createElement("iframe");
   frame.className = "pn-answer-frame";
-  // Never add allow-same-origin: the webview trusts only messages from its own origin
-  // (host-messages.ts), and this frame must stay opaque ("null") so the agent's page
-  // can never pass that check or reach the tab's DOM.
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("title", "The agent's answer");
   frame.setAttribute("referrerpolicy", "no-referrer");

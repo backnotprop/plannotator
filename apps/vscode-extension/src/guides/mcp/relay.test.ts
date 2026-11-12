@@ -120,14 +120,12 @@ describe("builder MCP relay", () => {
     const session = host.openSession({ ...tools, callTool: async (_name, args) => (seen.push(args), { text: "ok", isError: false }) });
     const hello = (socket: ReturnType<typeof connect>) => socket.write(`${JSON.stringify({ hello: RELAY_HELLO, token: session.token })}\n`);
 
-    // 50 three-byte characters: 50 characters but 150 bytes. Over a 128-byte limit, so the connection ends.
     const over = connect(host.socketPath);
     await new Promise((r) => over.once("connect", r));
     hello(over);
     over.write(`${"\u20ac".repeat(50)}`);
     await new Promise((r) => over.once("close", r));
 
-    // Under the limit (about 100 bytes), a multi-byte character sent in two chunks arrives whole.
     const ok = connect(host.socketPath);
     await new Promise((r) => ok.once("connect", r));
     hello(ok);

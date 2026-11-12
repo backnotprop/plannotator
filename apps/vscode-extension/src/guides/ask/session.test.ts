@@ -1,10 +1,3 @@
-/**
- * Asking the agent about a guide, against the FAKE ACP agent
- * (tests/helpers/fake-acp-agent.ts): the extension's ACP client starts it, it starts
- * the relay from `session/new` or `session/load`, and calls `show_answer`.
- * No real agent ever runs here.
- */
-
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -186,7 +179,6 @@ describe("asking the agent over ACP", () => {
     expect(first.answer?.title).toBe("First");
     const second = await w.session.ask(w.question("ans-6-aaaa", "And the worker?", "followUp")).done;
     expect(second.answer?.title).toBe("Second");
-    // The fake reports each turn's own cost (less than the running total so far): counted per turn.
     expect(second.cost?.amount).toBeCloseTo(0.02);
     const log = w.log();
     expect(log.filter((e) => e.event === "initialize")).toHaveLength(1);

@@ -49,8 +49,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const openInPanel = async (url: string) => {
     log.info(`[open] received url: ${url}`);
 
-    // Each panel gets its own cookie proxy so multiple agents
-    // can point to different upstream servers without conflicts.
     const proxy = await createCookieProxy({
       loadCookies: () => {
         const cookies = context.globalState.get<string>(COOKIE_KEY) ?? "";
@@ -69,10 +67,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const panel = await panelManager.open(proxy.rewriteUrl(url));
     setActiveProxyPort(proxy.port);
 
-    // Auto-close this specific panel when plannotator signals completion
     proxy.events.on("close", () => panel.dispose());
 
-    // Clean up proxy server and editor annotations state when the panel is closed
     panel.onDidDispose(() => {
       proxy.server.close();
       setActiveProxyPort(null);
@@ -81,8 +77,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.showInformationMessage("Plannotator panel opened");
   };
 
-  // Start local IPC server to receive URLs from the router script.
-  // Reuse the last port so restored terminals still have a valid PLANNOTATOR_VSCODE_PORT.
   const lastPort = context.workspaceState.get<number>("ipcPort");
   const { server, port } = await createIpcServer((url) => {
     openInPanel(url).catch((err) => {
@@ -93,15 +87,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.workspaceState.update("ipcPort", port);
   context.subscriptions.push({ dispose: () => server.close() });
 
-  // Write IPC port to file-based registry so non-terminal processes (e.g. hooks)
-  // can discover it without relying on environmentVariableCollection.
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
   if (workspacePath) {
     registerIpcPort(workspacePath, port);
     context.subscriptions.push({ dispose: () => unregisterIpcPort(workspacePath) });
   }
 
-  // Inject env vars into integrated terminals
   const config = vscode.workspace.getConfiguration("plannotatorWebview");
   const injectBrowser = config.get("injectBrowser", true) as boolean;
 
@@ -122,7 +113,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
   }
 
-  // Register command for manual URL opening
   const openCommand = vscode.commands.registerCommand(
     "plannotator-webview.openUrl",
     async () => {
@@ -140,10 +130,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   context.subscriptions.push(openCommand);
 
-  // Register editor annotation command
   registerEditorAnnotationCommand(context, log);
 
-  // The Guides view: its bundle loads the first time the view or a command is used.
   registerGuidesLoader(context, log);
 }
 

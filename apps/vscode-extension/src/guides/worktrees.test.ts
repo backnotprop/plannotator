@@ -1,9 +1,3 @@
-/**
- * Discarding a PR draft removes its worktree under the same rule deleting a
- * guide uses: unless another guide, a draft, the live run or the open reader
- * still reads it. A real git repository and real worktrees in a temp dir.
- */
-
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -42,7 +36,6 @@ afterAll(() => {
   rmSync(work, { recursive: true, force: true });
 });
 
-/** A fresh repo key with a real worktree at the PR's path. */
 function prWorktree(): { repoKey: string; path: string; source: ReviewSourceRecord } {
   const repoKey = `test__wt-${++n}`;
   const path = pullRequestWorktreePath(storageDir, repoKey, 482, headSha);
@@ -79,7 +72,6 @@ function draft(repoKey: string, source: ReviewSourceRecord): DraftRecord {
   return record;
 }
 
-/** What the controller does on Discard: delete the record, then the worktree unless something reads it. */
 async function discard(record: DraftRecord, extra: { liveRunHeadRoot?: string; readerGitRoot?: string } = {}): Promise<boolean> {
   deleteDraftRecord(record.repoKey, record.id);
   return removeDraftWorktree(defaultRunner, record, { storageDir, ...extra });

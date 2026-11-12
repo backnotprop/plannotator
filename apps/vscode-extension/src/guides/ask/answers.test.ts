@@ -81,15 +81,11 @@ describe("answers saved with the guide", () => {
     const code = "const attempt = job.attempt + 1;\nreturn attempt;";
     const a = record({ about: { ...record().about, fileHash: undefined, codeHash: linesHash(code) } });
     const file = (body: string) => `// header\n${body}\n// more\n`;
-    // Lines 2-3 of the file now hold the same text: the file changed elsewhere, the answer is not stale.
     expect(staleNote(a, { codeHash: fileLinesHash(file(code).replace("// more", "// edited"), 2, 3) })).toBeNull();
     expect(staleNote(a, { codeHash: fileLinesHash(file(code.replace("+ 1", "+ 2")), 2, 3) })).toBe("Written for 9b07e4d; these lines have changed since.");
-    // The file is gone (or shorter): changed.
     expect(staleNote(a, { codeHash: null })).toBe("Written for 9b07e4d; these lines have changed since.");
-    // Line endings and a final line break do not count.
     expect(fileLinesHash(file(code).replace(/\n/g, "\r\n"), 2, 3)).toBe(linesHash(code));
     expect(fileLinesHash("one\n", 2, 3)).toBeNull();
-    // Not known now (a head revision): no note, and no fallback to the head's commit.
     expect(staleNote(a, { headSha: "1111111" })).toBeNull();
   });
 

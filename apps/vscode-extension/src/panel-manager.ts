@@ -2,18 +2,11 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { buildWrapperThemeScript } from "./vscode-theme";
 
-// Messages the app iframe sends up to the extension host (see the clipboard
-// bridge injected in cookie-proxy.ts).
 type ClipboardWriteMessage = { type: "plannotator-clipboard-write"; text: string };
 type ClipboardReadMessage = { type: "plannotator-clipboard-read"; id: number };
-// External links (PR pages, release notes): the nested app iframe inherits the
-// webview's sandbox, which has no allow-popups, so window.open and
-// target=_blank links are dead there. The cookie-proxy bridge routes absolute
-// http(s) URLs up here instead (#1583).
 type OpenExternalMessage = { type: "plannotator-open-external"; url: string };
 type WebviewMessage = ClipboardWriteMessage | ClipboardReadMessage | OpenExternalMessage;
 
-/** The http(s) URL an open-external message may open, or null. */
 export function externalUrlToOpen(raw: unknown): string | null {
   if (typeof raw !== "string" || raw.length > 4096) return null;
   try {
@@ -58,7 +51,6 @@ export class PanelManager {
         panel.webview.postMessage({ type: "plannotator-clipboard-data", id: msg.id, text });
       } else if (msg.type === "plannotator-open-external") {
         const target = externalUrlToOpen(msg.url);
-        // VS Code asks before opening an untrusted domain.
         if (target) await vscode.env.openExternal(vscode.Uri.parse(target));
       }
     });

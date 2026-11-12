@@ -1,24 +1,3 @@
-/**
- * Asking the agent about a guide: one ACP session per guide, kept while the
- * window is open, that answers the reader's questions one at a time.
- *
- * Which session (owner's decision, 2026-10-23): when the agent says in
- * `initialize` that it can load sessions (`agentCapabilities.loadSession`),
- * the first question loads the guide's own session (or the ask session of an
- * earlier window), so the agent remembers what it read while writing the
- * guide. When it cannot, or the load fails, a new session starts and the
- * prompt carries the guide, the selected code and the file's diff.
- *
- * The agent runs as for a guide run (agent policy, 2026-10-23): the user's
- * own config and permissions; permission requests go to the user with every
- * option, and automatic approval is opt-in. The answer arrives through the
- * `show_answer` tool on the builder's MCP relay; an agent that ends its turn
- * without it (or cannot reach MCP servers) has its last message shown as a
- * text answer.
- *
- * No `vscode` here.
- */
-
 import type { McpServer, RequestPermissionRequest, RequestPermissionResponse, SessionConfigOption, SessionNotification, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import { isAbsolute, relative } from "node:path";
 import { ACP_AUTH_REQUIRED_CODE, AcpClient, readEffortSelect, readModeSelect, readModelSelect, type AcpClientInfo, type AgentLaunch } from "@plannotator/acp-client/client";
@@ -29,7 +8,6 @@ import type { RelayHost, RelaySession } from "../mcp/relay-host";
 import type { AgentChoiceRecord } from "../store";
 import { SHOW_ANSWER_TOOL, SHOW_ANSWER_TOOL_NAME, checkShowAnswer, type AnswerLinkHooks } from "./answer-tool";
 
-/** The agent process stops after this long with nothing asked. */
 export const ASK_IDLE_MS = 10 * 60 * 1000;
 const MAX_ACTIVITY = 200;
 const SHOW_ANSWER_TITLE = /(?:^|[_.:/ ])show_answer$/;
@@ -43,28 +21,22 @@ export interface AskRunState {
   startedAt: number;
   endedAt?: number;
   activity: ActivityEntry[];
-  /** What the agent is writing now (its current message), shown in grey while it works. */
   stream: string;
   pendingPermissions: PendingPermission[];
   autoApprove: boolean;
   offerAutoApprove: boolean;
   permissiveMode?: string;
-  /** What this question cost (the agent's session total, less what it had cost before). */
   cost?: { amount: number; currency: string };
-  /** Whether the guide's own session (or an earlier ask session) answered, or a new one. */
   session?: "loaded" | "fresh";
   answer?: { title: string; html: string };
-  /** The agent's last message, when it answered without `show_answer`. */
   text?: string;
   appliedModel?: string;
   appliedEffort?: string;
   signIn?: { logins: LoginCommand[] };
 }
 
-/** A session the ask session may load, with what it holds. */
 export interface SavedSession {
   id: string;
-  /** `guide`: the session that wrote the guide; `asks`: an ask session of an earlier window. */
   from: "guide" | "asks";
 }
 
@@ -84,9 +56,7 @@ export interface AskSessionDeps {
 
 export interface AskSessionInput {
   guideId: string;
-  /** Where the agent runs: the guide's head (the repository, or the PR worktree). */
   cwd: string;
-  /** Sessions to try loading, in order (the guide's ask session, then the guide's own). */
   saved: SavedSession[];
 }
 
@@ -94,22 +64,15 @@ export interface AskQuestion {
   answerId: string;
   agent: AgentChoiceRecord;
   autoApprove: boolean;
-  /** The prompt for the session the question lands in. */
   prompt(mode: { session: "loaded" | "fresh"; loadedFrom?: SavedSession["from"]; firstInSession: boolean }): string;
 }
 
-/**
- * Which saved sessions to try loading, in order: none when the agent cannot
- * load sessions (it said so in `initialize`), else every saved session, the
- * ask session of an earlier window first.
- */
 export function sessionsToLoad(capabilities: { loadSession?: boolean | null } | null | undefined, saved: readonly SavedSession[]): SavedSession[] {
   if (capabilities?.loadSession !== true) return [];
   const seen = new Set<string>();
   return [...saved.filter((s) => s.from === "asks"), ...saved.filter((s) => s.from === "guide")].filter((s) => !!s.id && !seen.has(s.id) && !!seen.add(s.id));
 }
 
-/** One question being answered. */
 export class AskRun {
   readonly state: AskRunState;
   private readonly listeners = new Set<(s: AskRunState) => void>();
@@ -120,7 +83,6 @@ export class AskRun {
   readonly toolTitles = new Map<string, string>();
   readonly permissionWaiters = new Map<number, { request: RequestPermissionRequest; resolve: (r: RequestPermissionResponse) => void }>();
   messageEntry: ActivityEntry | null = null;
-  /** The last thing the agent wrote that is not followed by a tool call. */
   lastMessage = "";
   cancelled = false;
   costBaseline: number | null = null;
@@ -156,7 +118,6 @@ export class AskRun {
     return this.nextPermission++;
   }
 
-  /** Stop answering: `session/cancel`; the agent process stays for the next question. */
   cancel(): Promise<void> {
     return this.session.cancelRun(this);
   }
@@ -201,7 +162,6 @@ export class GuideAskSession {
     this.now = deps.now ?? Date.now;
   }
 
-  /** The ACP session answering this guide's questions (saved, so a later window can load it). */
   get askSessionId(): string | null {
     return this.sessionId;
   }
@@ -218,12 +178,10 @@ export class GuideAskSession {
     return this.deps.agent.id;
   }
 
-  /** Whether the agent process is running (between questions it stays up until the idle timeout). */
   get isAlive(): boolean {
     return !!this.client && !this.client.hasExited;
   }
 
-  /** Ask a question. One at a time: a second one while the first is answering throws. */
   ask(question: AskQuestion): AskRun {
     if (this.disposed) throw new Error("This ask session was closed.");
     if (this.current) throw new Error("Another question is being answered.");
@@ -270,7 +228,6 @@ export class GuideAskSession {
       const message = this.client ? await this.client.describeFailure(err) : err instanceof Error ? err.message : String(err);
       const needsSignIn = (err as { code?: unknown } | null)?.code === ACP_AUTH_REQUIRED_CODE || AUTH_TEXT.test(message);
       if (needsSignIn) run.state.signIn = { logins: loginCommands(this.client?.authMethods) };
-      // The session may be broken: the next question starts the agent again.
       this.stopAgent();
       this.end(run, "failed", needsSignIn ? `${this.deps.agent.label} is not signed in. Sign in, then ask again.\n${message}` : message);
     }
@@ -286,7 +243,6 @@ export class GuideAskSession {
     run.emit();
   }
 
-  /** Start the agent and open the session: load a saved one when the agent can, else a new one. */
   private async ensureSession(run: AskRun): Promise<void> {
     if (this.client && !this.client.hasExited && this.sessionId) {
       run.addActivity({ kind: "info", title: "Same conversation as the last question" });
@@ -339,7 +295,6 @@ export class GuideAskSession {
     run.addActivity({ kind: "info", title: "Started a new session with the guide and the code" });
   }
 
-  /** Apply the model and effort for this question (the guide's, or what the reader picked). */
   private async applyChoices(agent: AgentChoiceRecord): Promise<void> {
     const client = this.client!;
     const sessionId = this.sessionId!;
@@ -360,7 +315,6 @@ export class GuideAskSession {
     if (e) run.state.appliedEffort = e.options.find((o) => o.value === e.current)?.name ?? e.current;
   }
 
-  /** Only when the reader opted in to automatic approval: the agent's own permissive mode, where it has one. */
   private async enterPermissiveMode(run: AskRun): Promise<void> {
     const wanted = this.deps.agent.permissiveModes ?? [];
     const client = this.client;
@@ -388,10 +342,6 @@ export class GuideAskSession {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // show_answer (from the relay)
-  // ---------------------------------------------------------------------------
-
   private async callTool(name: string, args: unknown): Promise<{ text: string; isError: boolean }> {
     if (name !== SHOW_ANSWER_TOOL_NAME) return { text: `Unknown tool ${name}.`, isError: true };
     const run = this.run;
@@ -408,10 +358,6 @@ export class GuideAskSession {
     return { text: check.text, isError: false };
   }
 
-  // ---------------------------------------------------------------------------
-  // ACP updates
-  // ---------------------------------------------------------------------------
-
   private onUpdate(notification: SessionNotification): void {
     const u = notification.update;
     if (u.sessionUpdate === "usage_update") {
@@ -419,7 +365,6 @@ export class GuideAskSession {
         this.sessionCost = u.cost.amount;
         const run = this.run;
         if (run && run.live && !this.replaying) {
-          // Adapters report the session's running total; one that reports less than before counts per turn.
           if (run.costBaseline !== null && u.cost.amount < run.costBaseline) run.costBaseline = 0;
           const base = run.costBaseline;
           const amount = base !== null ? u.cost.amount - base : u.cost.amount;
@@ -437,7 +382,6 @@ export class GuideAskSession {
       if (this.sessionModes) this.sessionModes = { ...this.sessionModes, currentModeId: u.currentModeId };
       return;
     }
-    // A loaded session replays its conversation first: none of it is this question.
     if (this.replaying) return;
     const run = this.run;
     if (!run || !run.live) return;
@@ -459,7 +403,6 @@ export class GuideAskSession {
         if (u.kind) run.toolKinds.set(u.toolCallId, u.kind);
         if (u.title) run.toolTitles.set(u.toolCallId, u.title);
         if (SHOW_ANSWER_TITLE.test(u.title ?? "")) {
-          // Shown from the tool's side, with whether it was accepted.
           run.toolEntries.set(u.toolCallId, run.addActivity({ kind: "tool", title: "Drawing the answer", status: u.status ?? "in_progress" }));
           break;
         }
@@ -501,10 +444,6 @@ export class GuideAskSession {
       return { path, ...(typeof l.line === "number" && { line: l.line }) };
     });
   }
-
-  // ---------------------------------------------------------------------------
-  // Permissions: as in a guide run
-  // ---------------------------------------------------------------------------
 
   private async onPermission(request: RequestPermissionRequest, signal: AbortSignal): Promise<RequestPermissionResponse> {
     const own = builderAutoAllow(request);
@@ -575,10 +514,6 @@ export class GuideAskSession {
     run.emit();
   }
 
-  // ---------------------------------------------------------------------------
-  // Stopping
-  // ---------------------------------------------------------------------------
-
   async cancelRun(run: AskRun): Promise<void> {
     if (!run.live || run.cancelled) return;
     run.cancelled = true;
@@ -587,7 +522,6 @@ export class GuideAskSession {
     if (!client || !this.sessionId) return;
     await client.cancel(this.sessionId);
     const ended = await Promise.race([run.done.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 5000))]);
-    // An agent that does not end its turn is stopped; the next question starts it again.
     if (!ended) this.stopAgent();
   }
 
@@ -603,7 +537,6 @@ export class GuideAskSession {
     this.idleTimer = null;
   }
 
-  /** Stop the agent process; the session id is kept so the next question can load it. */
   private stopAgent(): void {
     this.clearIdle();
     this.relaySession?.dispose();
@@ -611,7 +544,6 @@ export class GuideAskSession {
     this.client?.dispose();
     this.client = null;
     if (this.sessionId) {
-      // A later question loads this session when the agent can (it holds the conversation so far).
       this.input.saved = [{ id: this.sessionId, from: this.loadedFrom === "guide" ? "guide" : "asks" }, ...this.input.saved.filter((s) => s.id !== this.sessionId)];
     }
     this.sessionId = null;
@@ -624,7 +556,6 @@ export class GuideAskSession {
     this.stopAgent();
   }
 
-  /** VS Code is closing: stop the agent and everything it started at once. */
   kill(): void {
     this.disposed = true;
     this.clearIdle();

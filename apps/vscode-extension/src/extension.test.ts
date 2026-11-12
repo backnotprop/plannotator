@@ -12,7 +12,6 @@ describe("activate", () => {
   });
 
   afterEach(() => {
-    // Dispose the IPC server and cookie proxy
     for (const sub of context.subscriptions) sub.dispose();
     for (const spy of spies) spy.mockRestore();
     spies.length = 0;
@@ -105,8 +104,6 @@ describe("activate", () => {
   it("pushes disposables to context.subscriptions", async () => {
     await activate(context as unknown as vscode.ExtensionContext);
 
-    // IPC server + command = at least 2 subscriptions
-    // (cookie proxies are created per-panel, not at activation)
     expect(context.subscriptions.length).toBeGreaterThanOrEqual(2);
   });
 });

@@ -1,6 +1,3 @@
-/** Shared by the screenshot scripts. */
-
-/** A subset of VS Code's Dark Modern theme variables the webview reads. */
 export const THEME = `
 :root {
   --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --vscode-font-size: 13px;

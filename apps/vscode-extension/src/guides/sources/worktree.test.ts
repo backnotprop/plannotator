@@ -1,10 +1,3 @@
-/**
- * PR worktrees against real git repositories in a temp folder (an "origin"
- * with `refs/pull/<n>/head`, and the user's clone): one worktree per PR head,
- * never moved under another reader, no `git worktree prune`, no ref of the
- * user's moved by a fetch, and nothing removed outside the extension's storage.
- */
-
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -41,7 +34,6 @@ beforeAll(() => {
   git(origin, "checkout", "-q", "main");
   git(work, "clone", "-q", origin, join(work, "user"));
   user = join(work, "user");
-  // After the clone: the PR gets a new head and main moves on, so both must be fetched.
   git(origin, "checkout", "-q", "feat");
   git(origin, "commit", "-q", "--allow-empty", "-m", "pr two");
   shas.head2 = git(origin, "rev-parse", "HEAD");
@@ -67,7 +59,6 @@ describe("PR worktrees", () => {
     expect(wt.path).toBe(pullRequestWorktreePath(storage, "key", 7, shas.head2));
     expect(wt.path.endsWith(`pr-7-${shas.head2.slice(0, 7)}`)).toBe(true);
     expect(git(wt.path, "rev-parse", "HEAD")).toBe(shas.head2);
-    // origin/main and every other ref of the user's are where they were; no private ref is left.
     expect(git(user, "rev-parse", "origin/main")).toBe(originMain);
     expect(git(user, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(refsBefore);
     expect(calls.some((c) => /worktree prune/.test(c))).toBe(false);
@@ -75,7 +66,6 @@ describe("PR worktrees", () => {
 
   it("falls back to a private ref for the base when the sha cannot be fetched, and removes it", async () => {
     const before = git(user, "for-each-ref", "--format=%(refname) %(objectname)");
-    // A base sha the origin does not have: the branch is fetched into a private ref instead.
     const wt = await preparePullRequestWorktree(runner, repo(), pr(shas.head2, "0".repeat(40)), storage);
     expect(wt.mergeBase).toBe(shas.base);
     expect(git(user, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(before);

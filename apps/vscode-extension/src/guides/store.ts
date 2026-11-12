@@ -1,13 +1,3 @@
-/**
- * Guides on disk, shared with the web app (SPEC 3.7): finished guides go in
- * Plannotator's guide store (`${DATA_DIR}/guides/{repo-key}/{id}.json` +
- * `.patch`, written by `@plannotator/shared/guide-store`), so the web app
- * lists them and `plannotator guide export` exports them. What only VS Code
- * needs (file ticks, `focus` ranges, the base commit, the PR worktree,
- * unfinished drafts) lives beside them under `vscode/`, which the shared
- * store never reads.
- */
-
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -28,30 +18,22 @@ import { buildGuideSnapshot, type GuideSnapshot, type GuideSnapshotSource } from
 import { guideDraftProgress, parseGuideDraft, type GuideDraft, type GuideFocusRange } from "./core/adapter";
 import { deleteGuideAnswers } from "./ask/answers";
 
-/** What a guide is of, recorded with drafts and guides so a run can resume and a reader can find its files. */
 export interface ReviewSourceRecord {
   kind: "local" | "pr";
-  /** Repository root (the user's checkout). */
   repoRoot: string;
-  /** Where the agent ran and where head files are: the repo root, or the PR worktree. */
   headRoot: string;
   repoName: string;
-  /** Short label: "PR #482" or "Local changes". */
   label: string;
   branch?: string;
   headSha: string;
-  /** The commit the base side of every diff is read from (merge base, or HEAD for uncommitted only). */
   baseSha: string;
-  /** e.g. `main`. */
   baseLabel: string;
-  /** For local changes: whether the head side is the working tree (it always is, for now). */
   workingTree?: boolean;
   pr?: { number: number; url: string; title: string; author?: string };
   worktreePath?: string;
 }
 
 export interface AgentChoiceRecord {
-  /** The agent's id in `acp/agents.ts` (`claude-code`, `codex`, …), or `custom`. */
   id: string;
   label: string;
   model?: { id: string; label: string };
@@ -69,7 +51,6 @@ export interface DraftRecord {
   source: ReviewSourceRecord;
   agent: AgentChoiceRecord;
   instructions?: string;
-  /** Core's draft; it carries the change (`review.rawPatch`) itself. */
   draft: GuideDraft;
   acpSessionId?: string;
   cost?: { amount: number; currency: string };
@@ -78,29 +59,16 @@ export interface DraftRecord {
 
 export interface GuideSidecar {
   v: 1;
-  /** Ticked files (extension state, SPEC 3.4). */
   fileTicks: string[];
-  /** Reader hints from the agent: head line ranges or hunk numbers per file. */
   focus: Record<string, readonly GuideFocusRange[]>;
   source?: ReviewSourceRecord;
   agent?: AgentChoiceRecord;
   acpSessionId?: string;
-  /**
-   * The ACP session that answers questions about this guide (the guide's own
-   * when it was loaded, else a new one), and the agent it belongs to, so a
-   * later window can load it.
-   */
   askSession?: { id: string; agent: string };
   cost?: { amount: number; currency: string };
-  /** The overview diagram's render check when the guide was saved: "unchecked" until the reader checks it. */
   diagramCheck?: "ok" | "unchecked" | "failed";
 }
 
-/**
- * Whether guides are written to disk: Plannotator's own guide-history switch
- * (`PLANNOTATOR_GUIDE_HISTORY`, then `guideHistory` in config.json), read on
- * every run so a change applies to the next guide.
- */
 export function guideHistoryEnabled(): boolean {
   return resolveGuideHistory(loadConfig());
 }
@@ -131,10 +99,6 @@ function readJson(path: string): unknown {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Drafts
-// ---------------------------------------------------------------------------
-
 export function newDraftId(now = Date.now()): string {
   return `draft-${now}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -159,7 +123,6 @@ function parseDraftRecord(value: unknown): DraftRecord | null {
   return { ...r, draft: parsed.draft };
 }
 
-/** Drafts not turned into a guide yet, newest first. */
 export function listDraftRecords(repoKey: string): DraftRecord[] {
   let names: string[];
   try {
@@ -181,13 +144,8 @@ export function deleteDraftRecord(repoKey: string, id: string): void {
   rmSync(join(draftsDir(repoKey), `${id}.json`), { force: true });
 }
 
-// ---------------------------------------------------------------------------
-// Finished guides
-// ---------------------------------------------------------------------------
-
 export interface SaveFinishedInput {
   repoKey: string;
-  /** The snapshot core's guide_finish (or Save as is) built and validated. */
   snapshot: GuideSnapshot;
   source: ReviewSourceRecord;
   agent: AgentChoiceRecord;
@@ -212,7 +170,6 @@ export function sourceGitRef(source: ReviewSourceRecord): string {
   return source.kind === "pr" && source.pr ? `PR #${source.pr.number}` : `${source.baseLabel}..working tree`;
 }
 
-/** Save a finished guide where the web app finds it. Returns the guide id. */
 export function saveFinishedGuide(input: SaveFinishedInput): string {
   const built = buildFinishedGuide(input);
   if (!saveGuidePatch(input.repoKey, built.id, built.rawPatch ?? "")) throw new Error("Could not write the guide's patch.");
@@ -221,7 +178,6 @@ export function saveFinishedGuide(input: SaveFinishedInput): string {
   return built.id;
 }
 
-/** A finished guide as it would be stored (envelope, patch, sidecar), without writing anything. */
 export function buildFinishedGuide(input: SaveFinishedInput): LoadedGuide {
   const now = input.now ?? Date.now();
   const { snapshot } = input;
@@ -246,7 +202,6 @@ export function buildFinishedGuide(input: SaveFinishedInput): LoadedGuide {
       source: snapshot.source,
       patchFile: `${id}.patch`,
     },
-    // The v2 overview rides inside `guide`; the shared store passes it through.
     guide: guide as SavedGuideEnvelope["guide"],
     reviewed: guide.sections.map(() => false),
   };
@@ -299,7 +254,6 @@ export function writeSidecar(repoKey: string, id: string, sidecar: GuideSidecar)
   writeAtomic(join(vscodeDir(repoKey), `${id}.json`), JSON.stringify(sidecar, null, 2));
 }
 
-/** A guide as the portable snapshot exports are built from (null when its diff was not kept). */
 export function snapshotOfGuide(loaded: LoadedGuide): GuideSnapshot | null {
   const env = loaded.envelope;
   if (loaded.rawPatch === null || !env.review) return null;
@@ -323,7 +277,6 @@ export function setChapterReviewed(repoKey: string, id: string, reviewed: boolea
 export function deleteSavedGuide(repoKey: string, id: string): boolean {
   const removed = deleteGuide(repoKey, id);
   if (isValidGuideId(id)) rmSync(join(vscodeDir(repoKey), `${id}.json`), { force: true });
-  // Its answers go with it (they are kept only for this guide).
   deleteGuideAnswers(repoKey, id);
   return removed;
 }
@@ -333,29 +286,21 @@ export interface RecentEntry {
   id: string;
   title: string;
   label: string;
-  /** Epoch ms. */
   at: number;
-  /** Guides: chapters reviewed of total. */
   progress?: { reviewed: number; total: number };
-  /** The PR's head changed since the guide was made. */
   moved?: boolean;
-  /** Drafts: chapters so far and files left. */
   draftInfo?: { chapters: number; filesLeft: number; status: DraftRecord["status"] };
   prNumber?: number;
-  /** Kept in memory only (guide history is off). */
   sessionOnly?: boolean;
-  /** Set by `listRecentEverywhere`: the shelf and the repository it names (`owner/repo`). */
   repoKey?: string;
   repoName?: string;
 }
 
-/** `github.com__owner__repo` → `owner/repo` (other keys as they are). */
 export function repoNameOfKey(repoKey: string): string {
   const parts = repoKey.split("__");
   return parts.length >= 3 ? parts.slice(1).join("/") : repoKey;
 }
 
-/** Every shelf (`host__owner__repo`) that holds saved guides or drafts on this machine. */
 export function allRepoKeys(): string[] {
   try {
     return readdirSync(join(getPlannotatorDataDir(), "guides"), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
@@ -364,18 +309,12 @@ export function allRepoKeys(): string[] {
   }
 }
 
-/** Saved guides and drafts of every repository on this machine, newest first (the dashboard with no folder open). */
 export function listRecentEverywhere(options: { limit?: number } = {}): RecentEntry[] {
   const all = allRepoKeys().flatMap((repoKey) => listRecent(repoKey).map((e) => ({ ...e, repoKey, repoName: repoNameOfKey(repoKey) })));
   all.sort((a, b) => b.at - a.at);
   return all.slice(0, options.limit ?? 12);
 }
 
-/**
- * The guide to open for a pull request: the newest saved guide of that PR
- * made at `head` (any head when the head is not known). Null when there is
- * none, so the caller starts a new guide.
- */
 export function guideForPullRequest(repoKey: string, number: number, head?: string | null): string | null {
   let best: { id: string; at: number } | null = null;
   for (const { id, envelope } of listGuides(repoKey)) {
@@ -423,7 +362,6 @@ export function listRecent(
   return options.limit ? out.slice(0, options.limit) : out;
 }
 
-/** For tests and diagnostics. */
 export function guideStorePaths(repoKey: string) {
   return { guides: guidesDir(repoKey), vscode: vscodeDir(repoKey), drafts: draftsDir(repoKey), exists: existsSync(guidesDir(repoKey)) };
 }

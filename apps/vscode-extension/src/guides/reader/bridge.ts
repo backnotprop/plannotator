@@ -1,10 +1,3 @@
-/**
- * The reader's side of the messages with the extension: one place that
- * posts, one listener that accepts only the webview host's own messages
- * (`fromWebviewHost`, the same rule as the other Guides webviews), and
- * request/answer pairing for hovers and references.
- */
-
 import type { DiffPosition, FromReader, HoverAnswer, ToReader } from "../reader-protocol";
 import { fromWebviewHost } from "../webview/host-messages";
 
@@ -33,7 +26,6 @@ let nextReq = 1;
 const hoverWaiters = new Map<number, (a: HoverAnswer | null) => void>();
 const refWaiters = new Map<number, (n: number | null) => void>();
 
-/** Hover round trips, for the latency check (drive script reads `window.__pnHoverTimings`). */
 export const hoverTimings: Array<{ ms: number; serverMs: number | null; at: DiffPosition; ok: boolean; t: number; signature: string | null; doc: boolean; def: string | null }> = [];
 (window as unknown as { __pnHoverTimings: typeof hoverTimings }).__pnHoverTimings = hoverTimings;
 
@@ -58,7 +50,6 @@ window.addEventListener("message", (event: MessageEvent<ToReader>) => {
 
 const HOVER_TIMEOUT_MS = 15_000;
 
-/** Ask the extension for the language server's hover at a diff position. */
 export function requestHover(at: DiffPosition, signal?: AbortSignal): Promise<HoverAnswer | null> {
   const reqId = nextReq++;
   const t0 = performance.now();
@@ -105,7 +96,6 @@ export function requestReferences(at: DiffPosition): Promise<number | null> {
   });
 }
 
-/** For the latency check: hover each position directly (no dwell, no cache). */
 (window as unknown as { __pnMeasureHover: (list: DiffPosition[]) => Promise<number[]> }).__pnMeasureHover = async (list) => {
   const out: number[] = [];
   for (const at of list) {

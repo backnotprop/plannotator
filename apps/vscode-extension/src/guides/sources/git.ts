@@ -1,10 +1,3 @@
-/**
- * The repository and its local changes, for the dashboard and for a guide of
- * local changes. The patch comes from Plannotator's own review core
- * (`getWorkingTreeDiffFromBase`), so untracked files are handled exactly as in
- * the web app's "since base" view.
- */
-
 import { lstat, readFile, readlink } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
@@ -21,14 +14,11 @@ import type { Runner } from "./runner";
 
 export interface RepoInfo {
   root: string;
-  /** Directory name, or `owner/repo` when the origin is GitHub. */
   displayName: string;
   branch: string;
   headSha: string;
-  /** e.g. `origin/main`. */
   defaultBranch: string;
   remoteUrl?: string;
-  /** Guide store shelf, shared with the web app. */
   repoKey: string;
   github?: { host: string; owner: string; repo: string };
 }
@@ -39,7 +29,6 @@ export interface ChangedFileInfo {
   status: string;
   additions: number;
   deletions: number;
-  /** New-side hunk ranges, 1-based inclusive. */
   hunks: Array<{ start: number; end: number }>;
 }
 
@@ -87,7 +76,6 @@ async function git(runner: Runner, cwd: string, args: string[], timeoutMs = 30_0
   return r.code === 0 ? r.stdout : null;
 }
 
-/** The repository at `cwd`, or null when it is not a git work tree. */
 export async function getRepoInfo(runner: Runner, cwd: string): Promise<RepoInfo | null> {
   const root = (await git(runner, cwd, ["rev-parse", "--show-toplevel"]))?.trim();
   if (!root) return null;
@@ -119,9 +107,7 @@ export type LocalChangesMode = "since-base" | "uncommitted";
 
 export interface LocalChangesSummary {
   mode: LocalChangesMode;
-  /** The commit the change is measured from (merge base, or HEAD). */
   baseSha: string;
-  /** e.g. `main` or `HEAD`. */
   baseLabel: string;
   files: number;
   additions: number;
@@ -129,7 +115,6 @@ export interface LocalChangesSummary {
   untracked: number;
 }
 
-/** The merge base of HEAD and the default branch, or HEAD when there is none. */
 export async function resolveLocalBase(runner: Runner, repo: RepoInfo, mode: LocalChangesMode): Promise<{ sha: string; label: string }> {
   if (mode === "uncommitted") return { sha: repo.headSha, label: "HEAD" };
   const mb = (await git(runner, repo.root, ["merge-base", repo.defaultBranch, "HEAD"]))?.trim();
@@ -137,7 +122,6 @@ export async function resolveLocalBase(runner: Runner, repo: RepoInfo, mode: Loc
   return { sha: repo.headSha, label: "HEAD" };
 }
 
-/** Cheap counts for the dashboard row: no patch is built. */
 export async function summarizeLocalChanges(runner: Runner, repo: RepoInfo, mode: LocalChangesMode = "since-base"): Promise<LocalChangesSummary> {
   const base = await resolveLocalBase(runner, repo, mode);
   const [numstat, untrackedOut] = await Promise.all([
@@ -165,14 +149,12 @@ export interface LocalChangesPatch {
   files: ChangedFileInfo[];
 }
 
-/** The full patch of local changes (tracked against the base, plus untracked files). */
 export async function buildLocalChangesPatch(runner: Runner, repo: RepoInfo, mode: LocalChangesMode): Promise<LocalChangesPatch> {
   const base = await resolveLocalBase(runner, repo, mode);
   const rawPatch = await getWorkingTreeDiffFromBase(gitRuntime(runner), base.sha, repo.root);
   return { baseSha: base.sha, baseLabel: base.label, rawPatch, files: changedFilesFromPatch(rawPatch) };
 }
 
-/** Files of a patch with their head-side hunk ranges. */
 export function changedFilesFromPatch(rawPatch: string): ChangedFileInfo[] {
   return parseDiffToFiles(rawPatch).map((f) => ({
     path: f.path,
@@ -195,7 +177,6 @@ export function hunkRanges(filePatch: string): Array<{ start: number; end: numbe
   return out;
 }
 
-/** `git show <rev>:<path>` text, or null when the path does not exist at that revision. */
 export async function showFileAt(runner: Runner, cwd: string, rev: string, path: string): Promise<string | null> {
   const r = await runner("git", ["--no-pager", "show", `${rev}:${path}`], { cwd, timeoutMs: 30_000 });
   return r.code === 0 ? r.stdout : null;

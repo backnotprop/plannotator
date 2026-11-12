@@ -1,12 +1,3 @@
-/**
- * Drives a scratch `code serve-web` (see make-fixture.ts) in headless
- * Chromium and takes screenshots of the Guides view. Manual check, not CI:
- *
- *   bun tests/screenshots/drive.ts <url> <out dir> [step…]
- *
- * Steps: home, generate, guide, hover, diff. Without steps, all of them.
- */
-
 import { chromium, type Frame, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +15,6 @@ const USER_SETTINGS = JSON.stringify({
   "chat.disableAIFeatures": true,
   "workbench.tips.enabled": false,
   "editor.minimap.enabled": false,
-  // What the reader's "Turn on" answer sets (the extension asks once).
   "diffEditor.codeLens": true,
   "workbench.layoutControl.enabled": false,
   "window.commandCenter": true,
@@ -54,7 +44,6 @@ async function command(page: Page, title: string): Promise<void> {
   await page.keyboard.press("Enter");
 }
 
-/** The frame of the webview whose root shows `selector`. */
 async function webviewFrame(page: Page, selector: string, timeoutMs = 30_000): Promise<Frame> {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
@@ -62,7 +51,6 @@ async function webviewFrame(page: Page, selector: string, timeoutMs = 30_000): P
       try {
         if (await frame.locator(selector).count()) return frame;
       } catch {
-        // detached
       }
     }
     await sleep(300);
@@ -82,7 +70,6 @@ async function main(): Promise<void> {
   await page.goto(url);
   await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
   await sleep(4000);
-  // The web workbench keeps user settings in the browser: write them through the settings editor, then reload.
   await command(page, "Preferences: Open User Settings (JSON)");
   await sleep(2000);
   await page.evaluate((text) => navigator.clipboard.writeText(text), USER_SETTINGS);
@@ -95,11 +82,10 @@ async function main(): Promise<void> {
   await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
   await sleep(5000);
   await page.keyboard.press("Meta+K");
-  await page.keyboard.press("U"); // close the settings editor (close saved editors)
+  await page.keyboard.press("U");
   await sleep(800);
   await command(page, "View: Close Secondary Side Bar");
   await sleep(800);
-  // Open the Guides container.
   await page.locator('.activitybar .action-item [aria-label^="Guides"], .activitybar a[aria-label^="Guides"]').first().click();
   await sleep(2500);
 
@@ -115,10 +101,9 @@ async function main(): Promise<void> {
     await page.locator(".quick-input-widget").waitFor({ state: "visible" });
     await sleep(1200);
     await shot(page, "2-new-source");
-    await page.keyboard.press("Enter"); // the PR for this branch
+    await page.keyboard.press("Enter");
     await sleep(1500);
     await shot(page, "3-new-model");
-    // Pick the model the defaults point at, then effort.
     await page.keyboard.press("Enter");
     await sleep(1200);
     await shot(page, "4-new-effort");

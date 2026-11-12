@@ -1,17 +1,6 @@
-/**
- * The Guides view's footprint in the main bundle: a tree view and command
- * stubs, all of which load `dist/guides.cjs` the first time they
- * are used. Someone who only uses the browser router never loads it.
- *
- * Typed with a few local shapes rather than `vscode`'s, because this file is
- * checked against the test mock of `vscode`, which models only what the main
- * bundle uses.
- */
-
 import * as vscode from "vscode";
 import * as path from "path";
 
-/** Every `plannotator.guides.*` command in package.json. */
 export const GUIDE_COMMANDS = [
   "plannotator.guides.newReview",
   "plannotator.guides.openHome",
@@ -49,15 +38,12 @@ interface Disposable {
 }
 type Listener<T> = (value: T) => unknown;
 
-/** What `dist/guides.cjs` exports. */
 export interface GuidesModule {
   createGuides(context: unknown, log: unknown, host: GuidesHost): GuidesApi;
 }
 
 export interface GuidesHost {
-  /** The Guides tree view (a `vscode.TreeView`). */
   treeView: unknown;
-  /** Tell the tree view its data changed. */
   fireTreeChanged(element?: unknown): void;
 }
 
@@ -78,13 +64,6 @@ interface LoaderWindow {
   createTreeView(id: string, options: { treeDataProvider: unknown; showCollapseAll?: boolean; manageCheckboxStateManually?: boolean }): LoaderTreeView;
 }
 
-/**
- * Showing the view from the activity bar opens the Guided Reviews dashboard
- * tab, once per session: on the first change from hidden to visible. A view
- * VS Code restored as visible at startup does not open it; the next time the
- * user hides and shows it, it does. (The controller skips it when a
- * dashboard, guide or run tab is already open.)
- */
 export function dashboardAutoOpener(initiallyVisible: boolean, open: () => void): (visible: boolean) => void {
   let wasVisible = initiallyVisible;
   let opened = false;
@@ -107,7 +86,6 @@ export function registerGuidesLoader(
 
   const load = (): GuidesApi => {
     if (api) return api;
-    // A computed path, so the bundler leaves it alone: the Guides bundle is loaded only now.
     const modulePath = path.join(context.extensionPath, "dist", "guides.cjs");
     const mod = require(modulePath) as GuidesModule;
     api = mod.createGuides(context, log, {

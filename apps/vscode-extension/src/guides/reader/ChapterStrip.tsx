@@ -7,13 +7,6 @@ interface StripChapter {
   reviewed: boolean;
 }
 
-/**
- * The Guide tab's top strip: the guide's title, how many chapters are
- * reviewed, Overview and one pill per chapter (its color, its number, a
- * check when reviewed; the one in view is marked), then Export and the
- * outline. It stays at the top while the guide scrolls, so the side bar is
- * not needed to find a chapter.
- */
 export function ChapterStrip({
   title,
   label,
@@ -88,10 +81,8 @@ export function ChapterStrip({
   );
 }
 
-/** The chapter whose card holds the line just under the strip (-1 above the first: the overview). */
 export function chapterInView(count: number): number {
   const strip = (document.querySelector("[data-reader-strip]") as HTMLElement | null)?.offsetHeight ?? 0;
-  // A chapter counts from when its card reaches a little below the strip.
   const y = strip + 48;
   let found = -1;
   for (let i = 0; i < count; i++) {

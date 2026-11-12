@@ -1,8 +1,3 @@
-/**
- * Entry of `dist/guides.cjs`, loaded on first use by `src/guides-loader.ts`
- * in the main bundle.
- */
-
 import type * as vscode from "vscode";
 import { GuidesController, type GuidesHostBridge } from "./controller";
 import type { TreeNode } from "./tree";

@@ -1,48 +1,28 @@
-/**
- * The prompt for a question about a guide. Three shapes:
- *
- * - `loaded`: the guide's own session was loaded (the agent remembers the
- *   change and the guide), so the prompt is the question and what it is about.
- * - `fresh`: a new session, seeded with the guide (title, intent, chapters),
- *   where the change is, what the question is about and its diff.
- * - `next`: another question in the same conversation, about other code.
- * - `followUp`: a follow-up to the last answer, about the same code.
- *
- * Each ends with how to answer (`show_answer`). No `vscode` here.
- */
-
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { ANSWER_GUIDE } from "./answer-tool";
 import type { AskAbout } from "./answers";
 
-/** The most diff text a prompt carries (a chapter's files together). */
 const MAX_DIFF_CHARS = 60_000;
 
 export interface AskGuideContext {
   title: string;
   intent: string;
   chapters: Array<{ title: string; overview: string; files: string[] }>;
-  /** "PR #482, “Retry failed deliveries” (https://…)" or "the local changes on feat/x". */
   changeLabel: string;
-  /** Where the head files are (the agent's working directory). */
   cwd: string;
-  /** The commit the base side is read from. */
   baseRev: string;
   rawPatch: string;
 }
 
 export interface AskPromptInput {
   mode: "loaded" | "fresh" | "next" | "followUp";
-  /** For `loaded`: whether the session wrote the guide, or answered earlier questions about it. */
   loadedFrom?: "guide" | "asks";
   question: string;
   about: AskAbout;
   guide: AskGuideContext;
-  /** For a follow-up: the previous answer's question and title. */
   previous?: { question: string; title?: string };
 }
 
-/** One file's part of a patch, or null when the patch does not change it. */
 export function fileDiff(rawPatch: string, path: string): string | null {
   const f = parseDiffToFiles(rawPatch).find((x) => x.path === path || x.oldPath === path);
   return f ? f.patch : null;
@@ -58,14 +38,12 @@ function fence(text: string, lang = ""): string {
   return `${ticks}${lang}\n${text.replace(/\n$/, "")}\n${ticks}`;
 }
 
-/** "lines 25–31 of src/x.ts (the new version)", "src/x.ts", "chapter 2". */
 export function aboutLabel(about: AskAbout): string {
   const ch = `chapter ${about.chapter + 1}, “${about.chapterTitle}”`;
   if (about.kind === "chapter") return ch;
   const side = about.side === "base" ? " (the old version)" : " (the new version)";
   if (about.kind === "selection" && about.lines) {
     const lines = about.lines.start === about.lines.end ? `line ${about.lines.start}` : `lines ${about.lines.start}–${about.lines.end}`;
-    // On the old side of a renamed file the lines are the old path's: name it, and the new one.
     const where = about.side === "base" && about.oldPath ? `${about.oldPath} (renamed to ${about.path} by the change)` : about.path;
     return `${lines} of ${where}${side}, in ${ch}`;
   }

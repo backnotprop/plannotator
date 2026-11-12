@@ -1,10 +1,3 @@
-/**
- * The dashboard's data (SPEC 3.1): this repo's local changes and open PRs,
- * recent guides from the shared guide store, and PRs waiting on the user.
- * Stacks and other repositories are phase 2. Pure apart from the injected
- * runner, so tests script `git` and `gh`.
- */
-
 import { getRepoInfo, summarizeLocalChanges, type LocalChangesSummary, type RepoInfo } from "./sources/git";
 import { ghStatus, listRepoPullRequests, listReviewRequested, type GhStatus, type PullRequestRow, type WaitingRow } from "./sources/github";
 import type { Runner } from "./sources/runner";
@@ -17,11 +10,9 @@ export interface DashboardModel {
   local: LocalChangesSummary | null;
   gh: DashboardGh;
   prs: PullRequestRow[];
-  /** The open PR whose head branch is the current branch. */
   currentBranchPR: PullRequestRow | null;
   waiting: WaitingRow[];
   recent: RecentEntry[];
-  /** Problems worth one line each (a `gh` failure, …). */
   notes: string[];
   loadedAt: number;
 }
@@ -56,7 +47,6 @@ export async function loadDashboard(runner: Runner, cwd: string | undefined, opt
     if (repo && !repo.github) ghState = { state: "not-github" };
   }
   const headByPR = new Map(prs.map((p) => [p.number, p.headRefOid]));
-  // No folder open: the recent guides of every repository on this machine.
   const recent = repo ? listRecent(repo.repoKey, { headForPR: (n) => headByPR.get(n) || undefined, limit: options.recentLimit ?? 12 }) : listRecentEverywhere({ limit: options.recentLimit ?? 12 });
   const currentBranchPR = repo ? prs.find((p) => p.headRefName === repo.branch) ?? null : null;
   return { repo, local, gh: ghState, prs, currentBranchPR, waiting, recent, notes, loadedAt: now() };

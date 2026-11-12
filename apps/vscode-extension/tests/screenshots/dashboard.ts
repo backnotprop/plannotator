@@ -1,12 +1,3 @@
-/**
- * Screenshots of the Guided Reviews dashboard tab, with a folder open and with
- * none: the built webview bundle (`bun run build` first) in headless Chromium,
- * with VS Code's Dark Modern colors and canned dashboard states. No VS Code,
- * git or gh run here. Manual check, not CI:
- *
- *   bun tests/screenshots/dashboard.ts <out dir>
- */
-
 import { chromium } from "@playwright/test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,10 +1,3 @@
-/**
- * Answers about lines of a file, as the diff's own Ask AI markers (the
- * sparkle at the last line the question was about; clicking it opens the
- * answer beside). The answer itself is a page in its own tab, so the entry
- * carries only the question and whether it is done.
- */
-
 import type { AIChatEntry } from "@plannotator/ui/hooks/useAIChat";
 import type { AnswerMarker } from "../reader-protocol";
 

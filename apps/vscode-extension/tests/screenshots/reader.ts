@@ -1,20 +1,3 @@
-/**
- * The Guide tab in a real VS Code (manual, not CI): drives a scratch
- * `code serve-web` on the checkout-service world (make-fixture.ts, the FAKE
- * ACP agent, a fake `gh`) in headless Chromium, and takes the approved
- * design's four shots (`.product/approved/vscode-guide-reader/`, a1-a4):
- *
- *   a1  the guide in one tab: chapter 1 reviewed, chapter 2's prose beside its diff, the outline in the side bar
- *   a2  side bar closed; the language server's hover on `computeBackoff`, drawn by the reader
- *   a3  ⌘-click `signHeaders` (outside the change): sign.ts opens beside, at the definition
- *   a4  lines 25-31 selected, asked; the answer page beside, the marker on the lines
- *
- *   bun tests/screenshots/reader.ts <url> <out dir> [dark|light]
- *
- * The first run writes the guide through the New Guided Review flow (the fake
- * agent builds PR #482); later runs open it from the dashboard.
- */
-
 import { chromium, type Frame, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -65,7 +48,6 @@ async function webviewFrame(page: Page, selector: string, timeoutMs = 30_000): P
       try {
         if (await frame.locator(selector).count()) return frame;
       } catch {
-        // detached
       }
     }
     await sleep(300);
@@ -101,7 +83,6 @@ async function main(): Promise<void> {
   await command(page, "View: Close Secondary Side Bar");
   await sleep(600);
 
-  // Open the guide: from the dashboard when it exists, else write it.
   await command(page, "Guided Reviews: Open Dashboard");
   const home = await webviewFrame(page, ".pn-home", 60_000);
   await sleep(2500);
@@ -112,7 +93,6 @@ async function main(): Promise<void> {
     await command(page, "Guided Reviews: New Guided Review");
     await page.locator(".quick-input-widget").waitFor({ state: "visible" });
     await sleep(1200);
-    // What, then the agent, its model and its effort (each step's default).
     for (let step = 0; step < 4; step++) {
       await page.keyboard.press("Enter");
       await sleep(2000);
@@ -124,7 +104,6 @@ async function main(): Promise<void> {
   const frameBox = await (await reader.frameElement()).boundingBox();
   if (!frameBox) throw new Error("no reader frame");
 
-  // a1: chapter 1 reviewed (it folds), chapter 2 in view, the outline in the side bar.
   const firstReviewed = reader.locator('[data-guide-section="0"] button', { hasText: "Reviewed" });
   if (await firstReviewed.count()) await firstReviewed.first().click();
   await sleep(600);
@@ -140,11 +119,9 @@ async function main(): Promise<void> {
   await sleep(400);
   await shot(page, "a1");
 
-  // a2: the side bar closed; hover computeBackoff in deliver.ts.
   await command(page, "View: Close Primary Side Bar");
   await sleep(1500);
   const box2 = (await (await reader.frameElement()).boundingBox())!;
-  // Scroll deliver.ts's own viewer down to its last lines (the file's diff scrolls inside its card).
   await reader.evaluate(() => {
     const shell = document.querySelector('[data-guide-file-shell="src/webhooks/deliver.ts"]');
     for (const el of Array.from(shell?.querySelectorAll("*") ?? []) as HTMLElement[]) {
@@ -152,10 +129,8 @@ async function main(): Promise<void> {
     }
   });
   await sleep(1200);
-  // Hover the computeBackoff on line 31 (Playwright's locators reach into Pierre's shadow roots).
   const token = (file: string, text: string) => reader.locator(`[data-guide-file-shell="${file}"] span[data-char]`).filter({ hasText: new RegExp(`^${text}$`) });
   const backoff = token("src/webhooks/deliver.ts", "computeBackoff").last();
-  // The first hover in a window waits for the language server to load the project.
   for (let tries = 0; tries < 4 && !(await reader.locator("[data-reader-hover-card]").count()); tries++) {
     await page.mouse.move(box2.x + 30, box2.y + box2.height - 30);
     await sleep(300);
@@ -167,7 +142,6 @@ async function main(): Promise<void> {
   await sleep(900);
   await shot(page, "a2");
 
-  // a3: ⌘-click signHeaders (defined outside the change): sign.ts opens beside.
   await page.mouse.move(box2.x + 30, box2.y + box2.height - 30);
   await sleep(500);
   const sign = token("src/webhooks/deliver.ts", "signHeaders").last();
@@ -182,8 +156,6 @@ async function main(): Promise<void> {
   await sleep(600);
   await shot(page, "a3");
 
-  // a4: back to one group; select lines 25-31 and ask.
-  // Close sign.ts (its tab's close button), back to the Guide tab alone.
   const signTab = page.locator(".tab", { hasText: "sign.ts" }).first();
   await signTab.hover();
   await signTab.locator(".codicon-close, .action-label.codicon").first().click();
@@ -192,7 +164,6 @@ async function main(): Promise<void> {
   await sleep(1500);
   const reader4 = await webviewFrame(page, "[data-reader-strip]");
 
-  // A definition inside the guide: ⌘-click computeBackoff (defined in chapter 1's retryPolicy.ts) scrolls the Guide tab to its line.
   const backoff3 = reader4.locator('[data-guide-file-shell="src/webhooks/deliver.ts"] span[data-char]').filter({ hasText: /^computeBackoff$/ }).last();
   await backoff3.scrollIntoViewIfNeeded();
   await backoff3.click({ modifiers: ["Meta"] });
@@ -222,7 +193,6 @@ async function main(): Promise<void> {
   await sleep(300);
   await shot(page, "a4-ask");
   await reader4.locator("button", { hasText: /^Ask$/ }).last().click();
-  // The answer page opens beside; wait for the agent's page.
   await webviewFrame(page, ".pn-answer-frame, iframe[sandbox]", 60_000).catch(() => undefined);
   await sleep(9000);
   await shot(page, "a4");

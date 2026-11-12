@@ -1,11 +1,3 @@
-/**
- * Starting a review (SPEC 3.2): a four-step Quick Pick. What (a PR or the
- * local changes), the agent (installed ones first; a missing one shows how to
- * install it), its model, then effort, plus "Add instructions for
- * this guide…" with the standing instructions shown. The models and efforts
- * are the agent's own, read from its ACP session config options.
- */
-
 import * as vscode from "vscode";
 import type { ConfigChoice } from "@plannotator/acp-client/client";
 import { canStart, pickDefault, type AgentDescriptor, type AgentOptionsCache, type AgentStatus } from "@plannotator/acp-client/agents";
@@ -15,14 +7,8 @@ import type { RepoInfo } from "../sources/git";
 import type { LocalChangesMode } from "../sources/git";
 import type { AgentChoiceRecord } from "../store";
 
-/** `repo` (`[host/]owner/repo`): a pull request of a repository that is not the one open in VS Code. */
 export type SourceChoice = { kind: "local"; mode: LocalChangesMode } | { kind: "pr"; number: number; repo?: string };
 
-/**
- * What a typed PR number or link means: a PR of the open repository, or a
- * PR of another repository (a link), which is guided from a clone in the
- * extension's storage. Null when it is neither.
- */
 export function pullRequestChoice(text: string, repo: RepoInfo | null): SourceChoice | null {
   const url = parsePullRequestUrl(text);
   if (url) {
@@ -35,7 +21,6 @@ export function pullRequestChoice(text: string, repo: RepoInfo | null): SourceCh
   return n !== null ? { kind: "pr", number: n } : null;
 }
 
-/** With no repository open: paste a pull request link. */
 export async function pickPullRequestByLink(): Promise<SourceChoice | undefined> {
   const text = await vscode.window.showInputBox({
     title: "Guide a pull request",
@@ -56,7 +41,6 @@ function prDetail(p: PullRequestRow): string {
   return `${p.baseRefName} ← ${p.headRefName} · ${p.changedFiles} ${p.changedFiles === 1 ? "file" : "files"} · +${p.additions} −${p.deletions} · ${who}${p.isDraft ? " · draft" : ""}${p.reviewRequested ? " · waiting on you" : ""}`;
 }
 
-/** A Quick Pick that resolves to the accepted item, or the typed text when it matches `acceptValue`. */
 function pick<T>(qp: vscode.QuickPick<Item<T>>, acceptValue?: (text: string) => T | undefined): Promise<T | undefined> {
   return new Promise((resolve) => {
     let done = false;
@@ -124,7 +108,6 @@ export async function pickPullRequest(model: DashboardModel): Promise<SourceChoi
   return pick(qp, (text) => pullRequestChoice(text, model.repo) ?? undefined);
 }
 
-/** Whether a run approves automatically: exactly what the start flow's toggle ended on (it starts from the setting). */
 export function autoApproveChoice(picked: AgentPickResult): boolean {
   return picked.autoApprove === true;
 }
@@ -132,7 +115,6 @@ export function autoApproveChoice(picked: AgentPickResult): boolean {
 export interface AgentPickResult {
   agent: AgentChoiceRecord;
   instructions?: string;
-  /** The user opted in to approving the agent's permission requests automatically for this run. */
   autoApprove?: boolean;
 }
 
@@ -146,11 +128,6 @@ export interface RememberedChoice {
   effort?: string;
 }
 
-/**
- * The agent step's rows: agents ready to start first (the remembered one
- * active), then the ones to install. Ready means installed, or an agent whose
- * ACP adapter Guided Reviews installs on first use (`installAdapters`).
- */
 export function agentRows(agents: readonly AgentStatus[], remembered?: string, installAdapters = false, purpose: AgentPurpose = "write"): Array<{ status: AgentStatus; label: string; description: string; detail?: string; active: boolean; ready: boolean }> {
   const caveat = purpose === "answer" ? "answers in text only" : "can't write guides yet";
   const rows = agents.map((status) => {
@@ -183,40 +160,26 @@ export function agentRows(agents: readonly AgentStatus[], remembered?: string, i
   return rows;
 }
 
-/** What the picked agent will do: write a guide, or answer questions about one. */
 export type AgentPurpose = "write" | "answer";
 
-/** An agent with a note (it cannot reach Plannotator's tools) can still answer, in text. */
 const ANSWER_NOTE = "Answers in text only: it cannot reach Plannotator's tools, so it cannot draw an answer page.";
 
-/**
- * Steps 2 to 4: the agent, its model, then effort and instructions.
- * `loadOptions` asks an agent for its options when there are none cached yet;
- * `onMissing` is told when a missing agent is picked (show how to install it).
- */
 export async function pickAgentAndEffort(input: {
   agents: readonly AgentStatus[];
   optionsFor: (agentId: string) => AgentOptionsCache | null;
   loadOptions: (agent: AgentDescriptor) => Promise<AgentOptionsCache | null>;
-  /** A missing agent was picked: show how to get it. Answers the agent ready to start when that happened now (its adapter was installed), else null. */
   onMissing: (status: AgentStatus) => Promise<AgentStatus | null>;
-  /** `plannotator.guides.installAdapters`: an agent whose adapter is missing can be picked, and its adapter is installed on first use. */
   installAdapters?: boolean;
   remembered?: RememberedChoice;
   standingInstructions: string;
-  /** Only the defaults (the Change defaults command): no instructions step. */
   defaultsOnly?: boolean;
-  /** Automatic approval preselected (the `plannotator.guides.autoApprove` setting). */
   autoApprove?: boolean;
-  /** The Quick Pick's title (default "Guide defaults" or "New Guided Review"). */
   title?: string;
-  /** What the agent will do (default: write the guide); the words follow it. */
   purpose?: AgentPurpose;
 }): Promise<AgentPickResult | undefined> {
   const title = input.title ?? (input.defaultsOnly ? "Guide defaults" : "New Guided Review");
   const total = input.defaultsOnly ? 3 : 4;
   const offset = input.defaultsOnly ? 0 : 1;
-  // Step: agent
   for (;;) {
     const aq = vscode.window.createQuickPick<Item<AgentStatus>>();
     aq.title = title;
@@ -268,7 +231,6 @@ async function pickModelAndEffort(input: {
   const { agent } = input;
   let options = input.optionsFor(agent.id);
   let triedLoading = false;
-  // Step: model
   for (;;) {
     const qp = vscode.window.createQuickPick<Item<ConfigChoice | null | typeof LOAD_MODELS | typeof BACK>>();
     qp.title = input.title;
@@ -276,7 +238,6 @@ async function pickModelAndEffort(input: {
     qp.totalSteps = input.total;
     qp.placeholder = `Which ${agent.label} model ${input.purpose === "answer" ? "answers" : "writes the guide"}?`;
     if (!options && !triedLoading) {
-      // First time: the agent lists its own models (nothing is prompted, no cost); cached afterwards.
       triedLoading = true;
       qp.busy = true;
       qp.enabled = false;
@@ -322,7 +283,6 @@ async function pickModelAndEffort(input: {
       continue;
     }
     const model = chosen as ConfigChoice | null;
-    // Step: effort (+ instructions)
     let instructions = input.standingInstructions || undefined;
     let added = false;
     let autoApprove = !!input.autoApprove;

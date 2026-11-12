@@ -11,7 +11,6 @@ import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 
 type Rule = [RegExp, RunResult | ((cmd: string) => RunResult)];
 
-/** A runner that answers from rules matched against "cmd arg arg …"; anything else fails loudly. */
 function scripted(rules: Rule[], calls: string[] = []): Runner {
   return async (command, args) => {
     const line = `${command} ${args.join(" ")}`;
@@ -162,8 +161,6 @@ describe("pull request sources", () => {
     expect(wt).toMatchObject({ path: wtPath, headSha: "headsha", mergeBase: "mergebase" });
     expect(wt.files).toEqual([{ path: "x.ts", status: "modified", additions: 1, deletions: 0, hunks: [{ start: 1, end: 3 }] }]);
     expect(steps).toEqual(["Fetching PR #482", "Creating a worktree at the PR head"]);
-    // Nothing touches the user's own checkout: no checkout, reset, or branch in the repo itself,
-    // no `worktree prune` of their worktrees, and no fetch that could move one of their refs.
     expect(calls.some((c) => / (checkout|reset|switch|branch) /.test(c))).toBe(false);
     expect(calls.some((c) => /worktree prune/.test(c))).toBe(false);
     expect(calls.filter((c) => / fetch /.test(c)).every((c) => c.includes("--refmap= --"))).toBe(true);
@@ -212,7 +209,6 @@ describe("with no folder open", () => {
 });
 
 describe("a pull request of a repository that is not open", () => {
-  /** The rules for a repository at `root` whose origin is `remote`. */
   const repoRules = (root: string, remote: string): Rule[] => [
     [/git .*rev-parse --show-toplevel/, ok(`${root}\n`)],
     [/git .*rev-parse --abbrev-ref HEAD/, ok("main\n")],
@@ -286,7 +282,6 @@ describe("a pull request of a repository that is not open", () => {
     if (process.platform === "win32") return;
     const { execFileSync } = await import("node:child_process");
     for (const path of ["/opt/a b/gh", "/tmp/$HOME/`id`/gh", "/tmp/it's/$(echo x)/gh", "C:\\Program Files\\GitHub CLI\\gh.exe"]) {
-      // What git does with a `!` helper: sh -c "<helper> get". The first word must come back as the path, untouched.
       const out = execFileSync("/bin/sh", ["-c", `printf '%s' ${shellQuoteForGit(path)}`], { encoding: "utf8" });
       expect(out).toBe(path);
     }
@@ -314,14 +309,12 @@ describe("a pull request of a repository that is not open", () => {
     try {
       const a = ensureRepoClone(runner, "northwind/ledger-ui", storage);
       const b = ensureRepoClone(runner, "northwind/ledger-ui", storage);
-      // Another window finishes its clone first: its folder is moved in while ours is still cloning.
       mkdir(join(path, ".git"), { recursive: true });
       write(join(path, ".git", "theirs"), "");
       release();
       const [ra, rb] = await Promise.all([a, b]);
       expect(ra.root).toBe(path);
       expect(rb.root).toBe(path);
-      // One clone for both callers; it lost the race to the other window, so its own copy went and theirs stayed.
       expect(calls.filter((c) => c.startsWith("gh repo clone"))).toHaveLength(1);
       expect(exists(join(path, ".git", "theirs"))).toBe(true);
       expect(readdirSync(storage, { recursive: true }).some((n) => String(n).includes(".cloning-"))).toBe(false);
@@ -352,7 +345,6 @@ describe("a pull request of a repository that is not open", () => {
       expect(calls.filter((c) => c.startsWith("gh repo clone"))).toHaveLength(1);
       expect(exists(join(path, ".git"))).toBe(true);
       expect(exists(stale)).toBe(false);
-      // Still in progress in another window: left alone.
       expect(exists(fresh)).toBe(true);
     } finally {
       rmSync(storage, { recursive: true, force: true });

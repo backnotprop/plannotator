@@ -1,28 +1,14 @@
-/**
- * Editor Annotations — VS Code side.
- *
- * Uses CommentController for inline comment threads, CodeActionProvider
- * for lightbulb discoverability, and decorations for visual highlighting.
- * POSTs captured selections to the plannotator server through the cookie proxy.
- */
-
 import * as vscode from "vscode";
 import * as path from "path";
 import * as http from "http";
-
-// ── State ──────────────────────────────────────────────────────────
 
 let activeProxyPort: number | null = null;
 let commentController: vscode.CommentController | null = null;
 let annotationDecorationType: vscode.TextEditorDecorationType | null = null;
 
-/** Map of CommentThread → server-side annotation id */
 const threadIds = new Map<vscode.CommentThread, string>();
 
-/** Map of file URI string → decorated ranges */
 const decoratedRanges = new Map<string, vscode.Range[]>();
-
-// ── Public API ─────────────────────────────────────────────────────
 
 export function setActiveProxyPort(port: number | null): void {
   activeProxyPort = port;
@@ -46,9 +32,6 @@ function createController(): void {
     "Plannotator",
   );
 
-  // No commentingRangeProvider — we don't show the + gutter icons on every line.
-  // Users create annotations via keyboard shortcut, right-click, or lightbulb.
-
   commentController.options = {
     prompt: "Add annotation comment (optional)",
     placeHolder: "Your comment...",
@@ -59,7 +42,6 @@ export function registerEditorAnnotationCommand(
   context: vscode.ExtensionContext,
   log: vscode.LogOutputChannel,
 ): void {
-  // Create decoration type with gutter icon
   const gutterIconPath = vscode.Uri.file(
     path.join(context.extensionPath, "images", "annotation-gutter.svg"),
   );
@@ -76,7 +58,6 @@ export function registerEditorAnnotationCommand(
     gutterIconSize: "contain",
   });
 
-  // Submit handler — registered as a command so it works with the comment widget
   const submitCommand = vscode.commands.registerCommand(
     "plannotator-webview.submitComment",
     async (reply: vscode.CommentReply) => {
@@ -109,7 +90,6 @@ export function registerEditorAnnotationCommand(
         );
         const { id } = JSON.parse(responseBody);
 
-        // Set thread to preview mode with the comment
         const comment: vscode.Comment = {
           body: reply.text || "_(no comment)_",
           mode: vscode.CommentMode.Preview,
@@ -120,7 +100,6 @@ export function registerEditorAnnotationCommand(
         thread.contextValue = "plannotator-thread";
         threadIds.set(thread, id);
 
-        // Add decoration
         addDecoration(thread.uri, range);
 
         log.info(
@@ -136,8 +115,6 @@ export function registerEditorAnnotationCommand(
     },
   );
   context.subscriptions.push(submitCommand);
-
-  // ── Delete command ─────────────────────────────────────────────
 
   const deleteCommand = vscode.commands.registerCommand(
     "plannotator-webview.deleteEditorAnnotation",
@@ -166,8 +143,6 @@ export function registerEditorAnnotationCommand(
   );
   context.subscriptions.push(deleteCommand);
 
-  // ── Add Annotation command (keyboard shortcut / context menu) ──
-
   const addCommand = vscode.commands.registerCommand(
     "plannotator-webview.addEditorAnnotation",
     async () => {
@@ -186,7 +161,6 @@ export function registerEditorAnnotationCommand(
         return;
       }
 
-      // Create a comment thread at the selection — opens expanded with input ready
       const range = new vscode.Range(
         editor.selection.start,
         editor.selection.end,
@@ -196,8 +170,6 @@ export function registerEditorAnnotationCommand(
     },
   );
   context.subscriptions.push(addCommand);
-
-  // ── CodeActionProvider (lightbulb menu) ────────────────────────
 
   const codeActionProvider = vscode.languages.registerCodeActionsProvider(
     "*",
@@ -220,7 +192,6 @@ export function registerEditorAnnotationCommand(
   );
   context.subscriptions.push(codeActionProvider);
 
-  // Refresh decorations when switching editor tabs
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (editor) refreshDecorations(editor);
@@ -228,15 +199,12 @@ export function registerEditorAnnotationCommand(
   );
 }
 
-// ── Decoration helpers ─────────────────────────────────────────────
-
 function addDecoration(uri: vscode.Uri, range: vscode.Range): void {
   const key = uri.toString();
   const ranges = decoratedRanges.get(key) ?? [];
   ranges.push(range);
   decoratedRanges.set(key, ranges);
 
-  // Apply to visible editor if it matches
   const editor = vscode.window.visibleTextEditors.find(
     (e) => e.document.uri.toString() === key,
   );
@@ -275,16 +243,12 @@ function clearAllDecorations(): void {
   decoratedRanges.clear();
 }
 
-// ── Thread helpers ─────────────────────────────────────────────────
-
 function disposeAllThreads(): void {
   for (const [thread] of threadIds) {
     thread.dispose();
   }
   threadIds.clear();
 }
-
-// ── HTTP helpers ───────────────────────────────────────────────────
 
 function requestProxy(
   port: number,

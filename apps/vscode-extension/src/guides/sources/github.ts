@@ -1,10 +1,3 @@
-/**
- * GitHub pull requests through the user's own `gh` CLI: this repo's open PRs,
- * PRs waiting on the user's review, and a PR's head checked out in a git
- * worktree under the extension's storage (SPEC 4.1: the agent and the reader
- * both get real files, and the user's own checkout is never touched).
- */
-
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { deriveGuideRepoKeyFromRemote } from "@plannotator/shared/guide-store";
@@ -31,9 +24,7 @@ export interface PullRequestRow {
   deletions: number;
   changedFiles: number;
   updatedAt: string;
-  /** The signed-in user wrote it. */
   isMine: boolean;
-  /** The signed-in user is asked to review it. */
   reviewRequested: boolean;
 }
 
@@ -84,7 +75,6 @@ export async function ghStatus(runner: Runner, cwd?: string): Promise<GhStatus> 
 
 const PR_LIST_FIELDS = "number,title,url,author,isDraft,headRefName,headRefOid,baseRefName,additions,deletions,changedFiles,updatedAt,reviewRequests";
 
-/** Open PRs of the repository at `cwd`, newest activity first. */
 export async function listRepoPullRequests(runner: Runner, cwd: string, user: string, limit = 30): Promise<PullRequestRow[]> {
   const r = await gh(runner, cwd, ["pr", "list", "--state", "open", "--limit", String(limit), "--json", PR_LIST_FIELDS]);
   if (r.code !== 0) throw new Error(r.stderr.trim() || `gh pr list exited with ${r.code}`);
@@ -109,12 +99,10 @@ export async function listRepoPullRequests(runner: Runner, cwd: string, user: st
       reviewRequested: !!user && requests.some((q) => q?.login === user),
     };
   });
-  // Yours and the ones waiting on you first, then by activity.
   const rank = (p: PullRequestRow) => (p.isMine ? 0 : p.reviewRequested ? 1 : 2);
   return rows.sort((a, b) => rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt));
 }
 
-/** Open PRs anywhere on GitHub that ask the user for a review. */
 export async function listReviewRequested(runner: Runner, limit = 15): Promise<WaitingRow[]> {
   const r = await gh(runner, undefined, [
     "search", "prs", "--review-requested=@me", "--state=open", "--limit", String(limit),
@@ -135,7 +123,6 @@ export async function listReviewRequested(runner: Runner, limit = 15): Promise<W
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-/** `482`, `#482`, or a PR URL of this repository. */
 export function parsePullRequestRef(input: string, repo?: RepoInfo): number | null {
   const s = input.trim();
   const n = /^#?(\d+)$/.exec(s);
@@ -151,7 +138,6 @@ export function parsePullRequestRef(input: string, repo?: RepoInfo): number | nu
   return Number(url[4]);
 }
 
-/** `ghRepo` names the repository (`[host/]owner/repo`) instead of the one gh finds from `cwd`'s remotes. */
 export async function viewPullRequest(runner: Runner, cwd: string, number: number, ghRepo?: string): Promise<PullRequestDetail> {
   const r = await gh(runner, cwd, ["pr", "view", String(number), ...(ghRepo ? ["--repo", ghRepo] : []), "--json", "number,title,url,body,author,headRefName,headRefOid,baseRefName,baseRefOid"]);
   if (r.code !== 0) throw new Error(r.stderr.trim() || `gh pr view exited with ${r.code}`);
@@ -178,21 +164,14 @@ export interface PullRequestWorktree {
   files: ChangedFileInfo[];
 }
 
-/** Where the extension keeps its PR worktrees. Nothing outside it is ever removed. */
 export function worktreesRoot(storageDir: string): string {
   return join(storageDir, "worktrees");
 }
 
-/**
- * Where a PR's worktree lives under the extension's storage: one per PR head,
- * named by it, so a worktree is never moved under a live run or another saved
- * guide that reads the same head.
- */
 export function pullRequestWorktreePath(storageDir: string, repoKey: string, number: number, headSha: string): string {
   return join(worktreesRoot(storageDir), repoKey, `pr-${number}-${headSha.slice(0, 7)}`);
 }
 
-/** A branch name safe to put in a refspec. */
 const SAFE_REF = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]+$/;
 
 type Git = (args: string[], cwd?: string, timeoutMs?: number) => ReturnType<Runner>;
@@ -201,22 +180,12 @@ function gitIn(runner: Runner, repoRoot: string): Git {
   return (args, cwd = repoRoot, timeoutMs = 120_000) => runner("git", ["--no-pager", ...args], { cwd, timeoutMs, env: { GIT_TERMINAL_PROMPT: "0" } });
 }
 
-/**
- * Bring a PR's head commit into the repository's objects. `--refmap=` keeps
- * every configured fetch refspec out of it, so no ref of the user's moves
- * (only FETCH_HEAD is written, as for any fetch).
- */
 export async function fetchPullRequestHead(runner: Runner, repoRoot: string, number: number, headSha: string): Promise<{ ok: boolean; stderr: string }> {
   if (await commitExists(runner, repoRoot, headSha)) return { ok: true, stderr: "" };
   const f = await gitIn(runner, repoRoot)(["fetch", "--no-tags", "--refmap=", "--", "origin", `refs/pull/${number}/head`]);
   return { ok: f.code === 0 && (await commitExists(runner, repoRoot, headSha)), stderr: f.stderr.trim() };
 }
 
-/**
- * The PR's base commit, fetched without moving the user's `origin/<base>`:
- * by its sha first, else the branch into a private ref that is deleted again
- * once read (the merge base stays reachable from the PR head).
- */
 async function fetchBase(runner: Runner, repoRoot: string, pr: PullRequestDetail): Promise<string | null> {
   const g = gitIn(runner, repoRoot);
   if (pr.baseRefOid && (await commitExists(runner, repoRoot, pr.baseRefOid))) return pr.baseRefOid;
@@ -233,18 +202,12 @@ async function fetchBase(runner: Runner, repoRoot: string, pr: PullRequestDetail
   return sha || null;
 }
 
-/**
- * A detached worktree at `sha` in `path` (under the extension's storage).
- * Reuses it when it is there; never runs `git worktree prune` on the user's
- * repository (`--force` re-adds a path git still lists as missing).
- */
 export async function ensureWorktreeAt(runner: Runner, repoRoot: string, path: string, sha: string, storageDir: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!isInside(worktreesRoot(storageDir), path)) return { ok: false, error: `Refusing a worktree outside the extension's storage: ${path}` };
   const g = gitIn(runner, repoRoot);
   if (existsSync(join(path, ".git"))) {
     const at = (await g(["rev-parse", "HEAD"], path, 30_000)).stdout.trim();
     if (at === sha) return { ok: true };
-    // The path is named by its head: put it back there.
     const co = await g(["checkout", "--detach", "--force", sha], path);
     return co.code === 0 ? { ok: true } : { ok: false, error: co.stderr.trim() };
   }
@@ -259,10 +222,6 @@ function isInside(root: string, path: string): boolean {
   return !!rel && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-/**
- * Fetch a PR's head and base and check the head out in a detached worktree
- * of its own (`pr-<n>-<sha7>`), reused when it exists.
- */
 export async function preparePullRequestWorktree(
   runner: Runner,
   repo: RepoInfo,
@@ -293,30 +252,22 @@ export async function preparePullRequestWorktree(
   return { path, headSha: pr.headRefOid, mergeBase, rawPatch: diff.stdout, files: changedFilesFromPatch(diff.stdout) };
 }
 
-/** Remove one of the extension's PR worktrees (only ever a path under its storage). */
 export async function removePullRequestWorktree(runner: Runner, repoRoot: string, path: string, storageDir: string): Promise<boolean> {
   if (!isInside(worktreesRoot(storageDir), path) || !existsSync(path)) return false;
   const r = await gitIn(runner, repoRoot)(["worktree", "remove", "--force", "--", path], repoRoot, 60_000);
   return r.code === 0;
 }
 
-// ---------------------------------------------------------------------------
-// Pull requests of a repository that is not open: a blobless clone in storage
-// ---------------------------------------------------------------------------
-
-/** A PR URL (`https://<host>/<owner>/<repo>/pull/<n>`), or null. */
 export function parsePullRequestUrl(input: string): { host: string; owner: string; repo: string; number: number } | null {
   const m = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/.exec(input.trim());
   if (!m) return null;
   return { host: m[1].toLowerCase(), owner: m[2], repo: m[3].replace(/\.git$/, ""), number: Number(m[4]) };
 }
 
-/** `owner/repo` on github.com, else `host/owner/repo`: the form `gh` takes for `--repo` and `repo clone`. */
 export function ghRepoArg(ref: { host: string; owner: string; repo: string }): string {
   return ref.host === "github.com" ? `${ref.owner}/${ref.repo}` : `${ref.host}/${ref.owner}/${ref.repo}`;
 }
 
-/** `[host/]owner/repo` back into its parts (host github.com when left out). */
 export function parseGhRepoArg(arg: string): { host: string; owner: string; repo: string } | null {
   const parts = arg.split("/").filter(Boolean);
   if (parts.length === 2) return { host: "github.com", owner: parts[0], repo: parts[1] };
@@ -324,32 +275,21 @@ export function parseGhRepoArg(arg: string): { host: string; owner: string; repo
   return null;
 }
 
-/** The guide store shelf of a GitHub repository: the same key a local checkout of it gets. */
 export function repoKeyForGhRepo(arg: string): string | null {
   const ref = parseGhRepoArg(arg);
   return ref ? deriveGuideRepoKeyFromRemote(`https://${ref.host}/${ref.owner}/${ref.repo}.git`) : null;
 }
 
-/** A shelf key (`github.com__owner__repo`) back into the form gh takes, or null for a key that is not a GitHub repository. */
 export function ghRepoOfKey(repoKey: string): string | null {
   const parts = repoKey.split("__");
   if (parts.length !== 3 || !parts[0].includes(".")) return null;
   return ghRepoArg({ host: parts[0], owner: parts[1], repo: parts[2] });
 }
 
-/** Where the extension keeps its clone of a repository, by its shelf key. */
 export function repoClonePath(storageDir: string, repoKey: string): string {
   return join(storageDir, "repos", repoKey);
 }
 
-/**
- * Whether a pull request (by its URL's host, owner and repo) belongs to the
- * repository open in VS Code. Owner and repo compare case-insensitively, and
- * the host only loosely: an SSH host alias (`git@github-work:org/repo`, no
- * dot in the name) or `ssh.github.com` (port 443) is the same GitHub as
- * `github.com`, so the open repository's own PRs never look like another
- * repository's.
- */
 export function isOpenRepository(open: RepoInfo | null | undefined, ref: { host: string; owner: string; repo: string }): boolean {
   const gh = open?.github;
   if (!gh) return false;
@@ -364,26 +304,10 @@ function canonicalGitHubHost(host: string): string {
   return h === "ssh.github.com" || h === "www.github.com" ? "github.com" : h;
 }
 
-/** Clones being made in this window, by path: a second caller waits for the first. */
 const cloning = new Map<string, Promise<RepoInfo>>();
 
-/** A `*.cloning-*` folder older than this was left by a window that stopped mid-clone. */
 const STALE_CLONE_MS = 60 * 60_000;
 
-/**
- * A repository that is not open in VS Code, for guiding one of its pull
- * requests: a blobless, no-checkout clone (`gh repo clone`, so the user's own
- * gh auth and protocol apply) kept in the extension's storage and reused.
- * The PR itself then goes through the same per-PR worktree as any PR.
- *
- * The clone is made in a folder of its own and moved into place only when it
- * is complete, so two callers (or two windows) never delete each other's
- * clone; one that loses the race uses the winner's. gh lends git its
- * credentials only for the clone command itself, so the clone gets gh as its
- * credential helper in its own config (nothing outside it is changed): the
- * later fetches of the PR head, the base and on-demand blobs need it for a
- * private repository over HTTPS.
- */
 export function ensureRepoClone(runner: Runner, ghRepo: string, storageDir: string, onStep: (step: string) => void = () => {}, options: { ghPath?: string | null; now?: () => number } = {}): Promise<RepoInfo> {
   const repoKey = repoKeyForGhRepo(ghRepo);
   if (!repoKey) return Promise.reject(new Error(`${ghRepo} is not a GitHub repository name.`));
@@ -413,7 +337,6 @@ async function cloneOnce(runner: Runner, ghRepo: string, path: string, onStep: (
       try {
         renameSync(temp, path);
       } catch (err) {
-        // Another window moved its clone in first: use that one.
         rmSync(temp, { recursive: true, force: true });
         if (!existsSync(join(path, ".git"))) throw err;
       }
@@ -424,7 +347,6 @@ async function cloneOnce(runner: Runner, ghRepo: string, path: string, onStep: (
   return info;
 }
 
-/** `credential.https://<host>.helper` = gh, in the clone's own config only (what `gh auth setup-git` would set globally). */
 async function useGhForCredentials(runner: Runner, clone: string, ghRepo: string, ghPath: string | null | undefined): Promise<void> {
   const ref = parseGhRepoArg(ghRepo);
   if (!ref || !ghPath) return;
@@ -434,18 +356,10 @@ async function useGhForCredentials(runner: Runner, clone: string, ghRepo: string
   await g(["config", "--local", "--add", key, `!${shellQuoteForGit(ghPath)} auth git-credential`]);
 }
 
-/**
- * A program path for a git `!` credential helper, which git runs with
- * `sh -c` (Git for Windows too, through its bundled sh): POSIX single quotes,
- * so `$`, backticks and backslashes stay literal (`'` becomes `'\''`). A
- * Windows path comes out as `gh auth setup-git` itself writes it
- * (`'C:\Program Files\GitHub CLI\gh.exe'`).
- */
 export function shellQuoteForGit(path: string): string {
   return `'${path.replace(/'/g, "'\\''")}'`;
 }
 
-/** Folders left by a clone that never finished (its window closed or was killed). */
 function sweepStaleClones(path: string, now: number): void {
   const dir = dirname(path);
   const prefix = `${path.slice(dir.length + 1)}.cloning-`;
@@ -461,12 +375,10 @@ function sweepStaleClones(path: string, now: number): void {
     try {
       if (now - statSync(full).mtimeMs > STALE_CLONE_MS) rmSync(full, { recursive: true, force: true });
     } catch {
-      // Gone already.
     }
   }
 }
 
-/** A PR's current head commit, by `gh pr view` (`--repo` for another repository, else the one gh finds in `cwd`). */
 export async function pullRequestHead(runner: Runner, ghRepo: string | null, number: number, cwd?: string): Promise<string | null> {
   const r = await gh(runner, cwd, ["pr", "view", String(number), ...(ghRepo ? ["--repo", ghRepo] : []), "--json", "headRefOid"]);
   if (r.code !== 0) return null;

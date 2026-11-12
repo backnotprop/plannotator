@@ -1,8 +1,3 @@
-/**
- * What the answer tab and the Guide tab's answer list show, from a saved
- * answer and, while it is being answered, the live run. No `vscode` here.
- */
-
 import type { ActivityRow, AnswerListItem, AnswerViewState } from "../webview-protocol";
 import type { AnswerRecord, AskAbout } from "./answers";
 import type { AskRunState } from "./session";
@@ -15,24 +10,20 @@ function linesLabel(lines: { start: number; end: number }): string {
   return lines.start === lines.end ? `${lines.start}` : `${lines.start}–${lines.end}`;
 }
 
-/** The path the lines asked about have on their side: the old path of a renamed file on the old side. */
 function shownPath(about: AskAbout): string {
   return about.side === "base" && about.oldPath ? about.oldPath : about.path ?? "";
 }
 
-/** "deliver.ts · lines 25–31", "deliver.ts", "Chapter 2". */
 export function aboutShort(about: AskAbout): string {
   if (about.kind === "chapter" || !about.path) return `Chapter ${about.chapter + 1}`;
   if (about.kind === "selection" && about.lines) return `${base(shownPath(about))} · ${about.lines.start === about.lines.end ? "line" : "lines"} ${linesLabel(about.lines)}${about.side === "base" ? " (old)" : ""}`;
   return base(about.path);
 }
 
-/** "deliver.ts · lines 25–31" for the question box title; "chapter 2" for a chapter. */
 export function aboutTitle(about: AskAbout): string {
   return about.kind === "chapter" || !about.path ? `chapter ${about.chapter + 1}` : aboutShort(about);
 }
 
-/** What goes with the question, for the question box's last line. */
 export function goesWith(about: AskAbout): string[] {
   const out: string[] = [];
   if (about.kind === "selection" && about.path && about.lines) out.push(`${base(about.path)} ${linesLabel(about.lines)}`);
@@ -79,11 +70,9 @@ export function activityRows(state: AskRunState): ActivityRow[] {
 
 export interface AnswerViewInput {
   record: AnswerRecord;
-  /** The live run, while it answers (or just after). */
   run?: AskRunState | null;
   followUpOf?: { id: string; question: string } | null;
   stale?: string | null;
-  /** Another question of this guide is being answered (no follow-up until it ends). */
   busy?: boolean;
   now: number;
 }
@@ -146,7 +135,6 @@ export function answerListItem(record: AnswerRecord, now: number, live: boolean)
   };
 }
 
-/** "Claude Code · Sonnet · low · answers $0.05" under a chapter's answers. */
 export function answersFooter(records: readonly AnswerRecord[]): string | undefined {
   if (!records.length) return undefined;
   const last = records[0];

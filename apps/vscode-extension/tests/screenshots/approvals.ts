@@ -1,12 +1,3 @@
-/**
- * Screenshots of the run view's approvals and bottleneck notices: the built
- * webview bundle (`bun run build` first) in headless Chromium, with VS Code's
- * Dark Modern colors and canned run states. No agent and no VS Code run here.
- * Manual check, not CI:
- *
- *   bun tests/screenshots/approvals.ts <out dir>
- */
-
 import { chromium } from "@playwright/test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -136,10 +127,6 @@ const shots: Array<{ name: string; state: GeneratingViewState; element?: string 
   },
 ];
 
-/**
- * A MOCK of the start flow's last Quick Pick step (VS Code draws the real one;
- * the item texts are the ones `pickModelAndEffort` in new-review.ts builds).
- */
 const QUICK_PICK_MOCK = `
 <div class="qp">
   <div class="qp-title"><span>New Guided Review</span><span class="qp-step">4/4</span></div>

@@ -1,11 +1,3 @@
-/**
- * The question box: VS Code's own Quick Pick. Type a question or pick a
- * suggestion; a question asked before in this guide opens its answer instead
- * of asking again. The title says who answers and about what, its button the
- * model and effort (and changes them), and the last line what goes with the
- * question and where the answer opens.
- */
-
 import * as vscode from "vscode";
 
 export const ASK_SUGGESTIONS: ReadonlyArray<{ question: string; hint: string }> = [
@@ -18,16 +10,11 @@ export const ASK_SUGGESTIONS: ReadonlyArray<{ question: string; hint: string }> 
 
 export interface QuestionBoxInput {
   agentLabel: string;
-  /** "Sonnet · Low". */
   modelEffort: string;
-  /** "deliver.ts · lines 25–31", "chapter 2". */
   about: string;
-  /** What goes with the question: "deliver.ts 25–31", "the file's diff", "Chapter 2", "the guide". */
   goesWith: string[];
   past: Array<{ id: string; question: string; sub: string; when: string }>;
-  /** Pick another model or effort; the new "Model · Effort", or null when nothing changed. */
   changeModel(): Promise<string | null>;
-  /** Text already typed (the chapter box). */
   value?: string;
 }
 
@@ -38,7 +25,6 @@ interface Item extends vscode.QuickPickItem {
   open?: string;
 }
 
-/** Items for what is typed so far: the typed question first, then suggestions and past questions. */
 export function questionItems(input: Pick<QuestionBoxInput, "past" | "goesWith">, typed: string): Item[] {
   const items: Item[] = [];
   const text = typed.trim();
@@ -53,7 +39,6 @@ export function questionItems(input: Pick<QuestionBoxInput, "past" | "goesWith">
   return items;
 }
 
-/** Show the question box; undefined when it was dismissed. */
 export async function pickQuestion(input: QuestionBoxInput): Promise<QuestionChoice | undefined> {
   let modelEffort = input.modelEffort;
   let value = input.value ?? "";

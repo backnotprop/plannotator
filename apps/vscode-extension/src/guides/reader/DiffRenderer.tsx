@@ -8,33 +8,22 @@ import type { AIChatEntry } from "@plannotator/ui/hooks/useAIChat";
 const EMPTY_ANNOTATIONS: never[] = [];
 const noop = () => {};
 
-/** What the Guide tab passes every file's diff, beside the guide chain's own props. */
 export interface ReaderDiffProps {
   fontFamily: string | undefined;
   fontSize: string | undefined;
   onTokenHoverEnter: (props: DiffTokenEventBaseProps, filePath: string) => void;
   onTokenHoverLeave: () => void;
   onCodeNavRequest: (request: CodeNavRequest) => void;
-  /** Ask the agent about the selected lines of a file. Absent: no asking (no agent). */
   onAskAIForFile?: (filePath: string, question: string) => void;
   aiMessages: AIChatEntry[];
   onClickAIMarker: (questionId: string) => void;
   isAILoading: boolean;
-  /** This file's selected lines (the selection toolbar opens on them). */
   pendingSelection: SelectedLineRange | null;
   onLineSelection: (range: SelectedLineRange | null) => void;
   viewedFiles: Set<string>;
   onToggleViewed: (filePath: string) => void;
 }
 
-/**
- * The Guide tab's diff renderer: Plannotator's own `AllFilesCodeView`, the
- * same component guides.show and the review app use, unified at tab width.
- * `commentOnly` + `askOnly` give line selection and the selection toolbar
- * as an Ask box (the agent answers; there are no comments here), with no
- * review server behind it; without an agent to ask it is `readOnly`. Hover and
- * ⌘/Ctrl-click go to the extension, which asks the language server.
- */
 export const ReaderDiffRenderer: React.FC<GuideDiffRendererProps & ReaderDiffProps> = (props) => {
   const { fontFamily, fontSize, onTokenHoverEnter, onTokenHoverLeave, onCodeNavRequest, onAskAIForFile, aiMessages, onClickAIMarker, isAILoading, pendingSelection, onLineSelection, viewedFiles, onToggleViewed, ...guide } = props;
   const canAsk = !!onAskAIForFile;

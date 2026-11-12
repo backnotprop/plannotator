@@ -1,11 +1,7 @@
-// Mock VS Code module for bun:test
-// Only implements the APIs that plannotator-webview actually uses.
-
 export interface UriHandler {
   handleUri(uri: Uri): ProviderResult<void>;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ProviderResult<T> = T | undefined | null | Thenable<T | undefined | null>;
 
 export interface ExtensionContext {
@@ -100,7 +96,6 @@ export interface WebviewPanel {
   onDidDispose(listener: () => void): { dispose(): void };
 }
 
-/** Every panel `createWebviewPanel` made (tests read what it posted and send it messages). */
 export const createdWebviewPanels: Array<WebviewPanel & { posted: unknown[]; receive(message: unknown): void }> = [];
 
 export const ViewColumn = {
@@ -112,7 +107,6 @@ export const ViewColumn = {
 };
 
 export const window = {
-  /** No editor groups unless a test sets them. */
   tabGroups: { all: [] as unknown[], activeTabGroup: undefined as unknown },
   registerUriHandler(_handler: unknown) {
     return { dispose() {} };
@@ -155,7 +149,6 @@ export const window = {
           return Promise.resolve(true);
         },
       },
-      /** Test hooks: what the panel posted, and a message as if the webview sent it. */
       posted,
       receive: (message: unknown) => {
         for (const l of [...listeners]) l(message);
@@ -207,7 +200,6 @@ export const env = {
   },
 };
 
-/** Every comment thread made, for tests that look at what a controller shows. */
 export const createdCommentThreads: Array<{ uri: Uri; range: unknown; comments: unknown[]; label?: string; contextValue: string; canReply: boolean; collapsibleState: number; disposed: boolean; controller: string }> = [];
 
 export const comments = {
@@ -319,7 +311,6 @@ export const workspace = {
   },
 };
 
-// Mock EnvironmentVariableCollection
 class MockEnvironmentVariableCollection {
   private _vars = new Map<string, string>();
 
@@ -352,7 +343,6 @@ class MockEnvironmentVariableCollection {
   }
 }
 
-// Factory to create a mock ExtensionContext
 export function createMockExtensionContext(
   extensionPath = "/mock/extension/path",
 ) {
