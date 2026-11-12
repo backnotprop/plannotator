@@ -37,8 +37,8 @@
   {
     "path": "packages/references/src/",
     "pattern": "^// Source: ",
-    "wholeGroup": true,
-    "readBy": "packages/references/test/registry.test.ts (each file's first two lines name its Workspaces source and commit)"
+    "readBy": "packages/references/test/registry.test.ts (each file's first two lines name its Workspaces source and commit)",
+    "alsoKeepNextLines": 1
   },
   {
     "path": "packages/server/ai-runtime.ts",

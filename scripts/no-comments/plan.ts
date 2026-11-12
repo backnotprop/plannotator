@@ -35,13 +35,13 @@ export function planComments(path: string, text: string, keepList: KeepEntry[]):
   const keep: KeptSite[] = [];
   for (const group of lineCommentGroups(text, sites)) {
     const reasons = group.map((site) => site.comments.map((comment) => keepReason(path, comment.text, keepList)).find((reason) => reason !== null) ?? null);
-    const groupReason = reasons.includes('license')
-      ? 'license'
-      : group.some((site) => site.comments.some((comment) => keptForTest(path, comment.text, keepList)?.wholeGroup))
-        ? 'read by a test'
-        : null;
+    const licenseInGroup = reasons.includes('license');
+    let carriedLines = 0;
     group.forEach((site, index) => {
-      const reason = reasons[index] ?? groupReason;
+      const entry = site.comments.map((comment) => keptForTest(path, comment.text, keepList)).find((match) => match !== undefined);
+      const carried = carriedLines > 0;
+      carriedLines = entry?.alsoKeepNextLines ?? Math.max(0, carriedLines - 1);
+      const reason = reasons[index] ?? (licenseInGroup ? 'license' : carried ? 'read by a test' : null);
       if (reason) keep.push({ site, reason });
       else remove.push(site);
     });

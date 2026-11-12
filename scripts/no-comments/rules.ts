@@ -8,7 +8,7 @@ export interface KeepEntry {
   text?: string;
   pattern?: string;
   readBy: string;
-  wholeGroup?: boolean;
+  alsoKeepNextLines?: number;
 }
 
 export const REPO_ROOT = join(import.meta.dir, '..', '..');

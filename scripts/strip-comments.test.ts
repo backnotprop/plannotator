@@ -91,10 +91,10 @@ describe('what is left exactly as it is', () => {
     expect(strip('kill(pid); // inbox-guard: own child (spawned here)\nother(); // why\n', 'a.test.ts', keep)).toBe('kill(pid); // inbox-guard: own child (spawned here)\nother();\n');
   });
 
-  test('a whole-group keep entry keeps the run of line comments it starts', () => {
-    const keep: KeepEntry[] = [{ path: 'src/', pattern: '^// Source: ', wholeGroup: true, readBy: 'a test' }];
-    const source = '// Source: elsewhere at abc.\n// Changed: a seam.\n//\n\nexport const x = 1; // gone\n';
-    expect(strip(source, 'src/a.ts', keep)).toBe('// Source: elsewhere at abc.\n// Changed: a seam.\n//\n\nexport const x = 1;\n');
+  test('a keep entry can keep the line comment right after the one it matches, and no further', () => {
+    const keep: KeepEntry[] = [{ path: 'src/', pattern: '^// Source: ', alsoKeepNextLines: 1, readBy: 'a test' }];
+    const source = '// Source: elsewhere at abc.\n// Changed: a seam.\n// More history.\n\nexport const x = 1; // gone\n';
+    expect(strip(source, 'src/a.ts', keep)).toBe('// Source: elsewhere at abc.\n// Changed: a seam.\n\nexport const x = 1;\n');
   });
 
   test('stripping twice changes nothing more', () => {
