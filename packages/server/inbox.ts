@@ -1256,6 +1256,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // resolved for every known project once the server listens (below) and
   // when a project is first seen, never while a request waits (inbox-repos.ts).
   const repos = createInboxRepoCache(options.readProjectRepo ? { read: options.readProjectRepo } : {});
+  /** A project's remote host. It decides where a short `group/project!45` points, so it waits for a first read (at most INBOX_REPO_GIT_TIMEOUT_MS). */
+  const projectRepoHost = async (projectId: string): Promise<string | null> => {
+    const project = store.project(projectId);
+    if (!project) return null;
+    return (repos.get(project.root) ?? (await repos.refresh(project.root)))?.host ?? null;
+  };
   // Until the startup read of every project's origin has begun, an empty cache says nothing yet about Tidy's suggestions.
   let repoReadsBegun = false;
 
@@ -1493,6 +1499,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         stepsOn,
         // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
         pulls: threadPullStates,
+        projectHost: projectRepoHost,
         // Bro mode: send_message's `body` field carries the line only while the person has it on.
         broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
@@ -4544,6 +4551,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody,
     sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
     localOnly,
+    projectHost: projectRepoHost,
   });
 
   /** Running local sites shown in a thread through the live proxy (inbox-live.ts): this computer, and its owner over the tailnet. */
