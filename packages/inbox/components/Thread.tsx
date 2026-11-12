@@ -6951,7 +6951,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     replaced: questions.map((q) => (q.message_id ? [replacementOf(thread.messages, q), pending.get(`${message.id}/${q.key}`), replacedBy(thread.messages, q)] : null)),
                     readOnly: !isAgent || !liveMessage(message) || questions.length === 0 || allSent,
                     sent: message.author.kind === 'person' ? [sentAnswersByReply.get(message.id), sentActionsByReply.get(message.id), allFiles, personMessageIds] : null,
-                    thread: [thread.project.root, thread.project.repo ?? null, codeReview, codeReview && isAgent && hasReview ? (reviewOfNote.get(message.id) ?? null) : undefined, threadRefRepo, name],
+                    thread: [thread, codeReview, codeReview && isAgent && hasReview ? (reviewOfNote.get(message.id) ?? null) : undefined, threadRefRepo, name],
                     comments: isAgent && liveMessage(message) ? [messageComments.get(message.id) ?? NO_ANNOTATIONS, commentsList?.at ?? null, revealedComment, !!onSide] : null,
                   }}
                   draw={() => (
