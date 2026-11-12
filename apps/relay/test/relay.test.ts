@@ -472,8 +472,8 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     expect((await win(`/api/inbox/devices/${phone.id}/revoke`, { serverSession: health.serverSession })).status).toBe(200);
     await until(() => readMailbox(relay, mailbox.mailbox_id).devices.map((d) => d.id), (ids) => !ids.includes(phone.id), "the phone removed");
     const after = await atRelay("PUT", `/devices/${phone.id}/apns`, { token: TOKEN_OK, environment: "sandbox" });
-    expect(after.status).toBe(404);
-    expect(((await after.json()) as Json).code).toBe("device_not_found");
+    expect(after.status).toBe(401);
+    expect(((await after.json()) as Json).code).toBe("unauthorized");
     expect(existsSync(join(w.dataDir, "inbox", "device-secrets", phone.id))).toBe(false);
   });
 });
@@ -859,9 +859,9 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     expect((await win(`/api/inbox/devices/${a.id}/revoke`, { serverSession: health.serverSession })).status).toBe(200);
     await until(() => rows("devices").map((row) => row.id), (ids) => !ids.includes(a.id), "the iPhone removed");
     expect(rows("items").filter((row) => row.device_id === a.id)).toEqual([]);
-    expect((await atRelay(a, "GET", "/items?after=0")).status).toBe(404);
+    expect((await atRelay(a, "GET", "/items?after=0")).status).toBe(401);
     record("storage-4-after-revoke.json", dumpMailbox(relay, mailbox.mailbox_id));
-    say("ack by store cursor deletes the record items; the iPhone revoked: its device row and held items gone, its items route 404");
+    say("ack by store cursor deletes the record items; the iPhone revoked: its device row and held items gone, its items route 401, as for a device never registered");
   }, 60_000);
 });
 

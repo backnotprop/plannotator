@@ -8,7 +8,7 @@ import { decodeInboxAgentPairing, type InboxAgentPairing } from "../../../packag
 import { SimAgent } from "../../../scripts/inbox-sim";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 import { createInboxWorld, destroyInboxWorld, personSends, registry, removeStubbedHtml, stopInbox, stubBuiltHtml, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
-import { SIGNAL_LIMIT } from "../src/signal";
+import { SIGNAL_LIMIT } from "../src/limits";
 import { dumpMailbox, holds, readMailbox, sha256, sleep, startRelay, storageBytes, until, type Json, type Relay } from "./wrangler-relay";
 
 const KEY = "xai-WEBHOOKKEY0123456789";
@@ -350,7 +350,7 @@ describe("a paired cloud agent reaches the Inbox through the relay, under wrangl
     const after = cli("read_thread", { thread_id: agentThread });
     expect(after.code).toBe(1);
     expect(after.stderr).toStartWith("pairing_removed: ");
-    expect((await atRelay("POST", "/commands", await sealed("read_thread", {}))).status).toBe(404);
+    expect((await atRelay("POST", "/commands", await sealed("read_thread", {}))).status).toBe(401);
   }, 30_000);
 
   test("secrets never reach the relay's storage or log, the Inbox's log, or any answer but the one pair answer; the signal address shows only in the platform's own request log", async () => {

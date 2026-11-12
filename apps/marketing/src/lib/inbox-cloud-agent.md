@@ -47,6 +47,7 @@ Otherwise it prints one line `<code>: <what is wrong>`:
 | `pairing_without_relay` | The string was made while their computer could not reach the relay. Ask them for a new pairing. |
 | `relay_unreachable` | This machine cannot reach the relay address in the string. Claude Code routine: ask the person to add the hosts Plannotator's Settings showed under Network access, Allowed domains. Other platforms: the network blocks it; tell the person which host. |
 | `computer_asleep` | The person's computer is asleep or offline. The setup is fine; try again later. |
+| `too_many_waiting` | Many of your calls already wait for the person's computer, which is asleep. Nothing was sent. Try again later, not in a loop. |
 
 `whoami` also prints `signal_url`. Keep it as private as the pairing string.
 
@@ -90,6 +91,6 @@ Do what the person asked, with your own tools and repositories. Then answer in t
 
 - If read_thread says `name_this_thread: true`, add `"thread": "<a few words>"` to that reply: it names the thread.
 - Files: `"attachments": ["report.md", "shot.png"]`, paths on your machine; they are sent as bytes and show below your message.
-- If `send_message` prints `"queued": true`, the person's computer is asleep. It is posted once when the computer is back. Do not send it again.
+- If `send_message` prints `"queued": true`, the person's computer is asleep. It is posted once when the computer is back (within 30 days). Do not send it again.
 - A wake that says it is a test from Settings needs nothing: end the run.
 - `plannotator inbox call --help` lists everything you can do.
