@@ -326,6 +326,11 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
+  /**
+   * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
+   * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
+   */
+  tags?: InboxInitiative[];
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -2157,6 +2162,8 @@ export const inboxApi = {
   /** Unpin's Undo: pin this one thread again at its old index, with the time it was first pinned. */
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
     post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { restore }),
+  /** Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. */
+  setThreadTag: (threadId: string, tag: string, on: boolean) => post<{ tags: string[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/tags`), { tag, on }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
@@ -2410,6 +2417,8 @@ export interface InboxEventHandlers {
   onPins?: () => void;
   /** The pinned artifacts changed (`event: artifact-pins`, approval "inbox-artifact-stars"); never called by an older Inbox. */
   onArtifactPins?: () => void;
+  /** A thread's tags changed (`event: tags`, approval "inbox-thread-tags"); never called by an older Inbox. */
+  onTags?: () => void;
   /** Show a thread (`event: show`, `plannotator inbox --open <thread>`): only the window named moves; never called by an older Inbox. */
   onShow?: (threadId: string, windowId: string) => void;
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
@@ -2466,7 +2475,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2555,6 +2564,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();
+      return;
+    case 'tags':
+      handlers.onTags?.();
       return;
     case 'show':
       try {

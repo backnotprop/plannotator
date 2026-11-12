@@ -1750,6 +1750,11 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   pinned_at?: string | null;
   /**
+   * The live tags the thread is in (approval "inbox-thread-tags"), `ini_` ids, oldest tag first; absent when none.
+   * Like `pinned_at`, only on the list model the window and the phone read, never on anything an agent reads.
+   */
+  tags?: string[];
+  /**
    * The thread is snoozed (approval "inbox-snooze"; the rules are core's
    * inbox-snooze.ts), or null. Like `pinned_at`, only on the list model the
    * window and the phone read, never on anything an agent reads. Additive:

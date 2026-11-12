@@ -56,6 +56,12 @@ export interface InboxListProps {
   /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
   onHide?: () => void;
   title: string;
+  /**
+   * A tag's list (approval "inbox-thread-tags"): the tag's `#` before the title, and "5 threads · 2 projects" after it,
+   * quiet. Absent: neither.
+   */
+  titleMark?: ReactNode;
+  titleNote?: string | null;
   /** The project's folder, `~/src/billing-svc`, when one project is shown: in the title's tooltip, never drawn in the header. */
   path: string | null;
   sections: readonly InboxListSection[];
@@ -1615,6 +1621,7 @@ export function InboxList(props: InboxListProps) {
               data-list-refresh=""
               data-refreshing={props.refreshSpin != null ? '' : undefined}
             >
+              {props.titleMark && <span className="ib-lhead-mark">{props.titleMark}</span>}
               {props.path ? (
                 <Tip content={<ProjectTipText name={props.title} root={props.path} />}>
                   <span className="ib-lhead-tt">{props.title}</span>
@@ -1633,8 +1640,16 @@ export function InboxList(props: InboxListProps) {
           </h1>
         ) : (
           <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>
-            <h1 dir="auto">{props.title}</h1>
+            <h1 dir="auto">
+              {props.titleMark && <span className="ib-lhead-mark">{props.titleMark}</span>}
+              {props.title}
+            </h1>
           </Tip>
+        )}
+        {props.titleNote && (
+          <span className="ib-lhead-note" data-list-title-note="">
+            {props.titleNote}
+          </span>
         )}
         {/* The button's description, outside the h1 so the heading reads only the name. */}
         {props.onRefresh && (

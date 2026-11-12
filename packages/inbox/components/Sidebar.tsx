@@ -16,6 +16,8 @@ import { pinnedState } from '../pins';
 import { starPopping } from '../starPop';
 import type { MachinesModel } from '../machines';
 import { AgentsSection, GogglesMark } from '../agents/AgentsSection';
+import { TagsSection, type TagsSectionProps } from './TagsSection';
+import { TagIcon } from './InitiativePeek';
 import { useInboxAgents } from '../agentsList';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
@@ -89,6 +91,11 @@ export interface SidebarProps {
    * (absent on an Inbox that cannot link).
    */
   agentRows?: readonly InboxListRow[];
+  /**
+   * The Tags section (approval "inbox-thread-tags", TagsSection.tsx), under Starred: drawn while `shown` (a tag holds
+   * a thread, or the person made one). Absent (an Inbox that keeps no tags, the tour): no section.
+   */
+  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete'> & { shown: boolean };
   onAgentFilter?: (agentId: string | null) => void;
   onMessageAgent?: (session: string, opener: HTMLElement) => void;
   onAddAgent?: (opener: HTMLElement) => void;
@@ -307,7 +314,7 @@ export function Sidebar(props: SidebarProps) {
     next?.focus({ preventScroll: true });
   });
   const inboxRef = useRef<HTMLButtonElement>(null);
-  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter;
+  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId;
   const spinOf = (scope: string | null) => (props.refreshSpin && props.refreshSpin.scope === scope ? props.refreshSpin.key : null);
   const refreshHintId = useId();
   const pinnedLabelId = useId();
@@ -315,6 +322,9 @@ export function Sidebar(props: SidebarProps) {
   const projectsLabelId = useId();
   const projectsBodyId = useId();
   const agentsLabelId = useId();
+  const tagsLabelId = useId();
+  const tagsBodyId = useId();
+  const tagsClosed = sections.closed('tags');
   const agentsBodyId = useId();
   const machineList = props.machines?.all ?? [];
   const agentsClosed = sections.closed('agents');
@@ -349,7 +359,7 @@ export function Sidebar(props: SidebarProps) {
   useEffect(() => {
     const track = (event: FocusEvent) => {
       const target = event.target instanceof Element && asideRef.current?.contains(event.target) ? event.target : null;
-      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('[data-agents-section]') ? 'agents' : target?.closest('.ib-projs') ? 'projects' : null;
+      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('[data-tags-section]') ? 'tags' : target?.closest('[data-agents-section]') ? 'agents' : target?.closest('.ib-projs') ? 'projects' : null;
     };
     document.addEventListener('focusin', track);
     return () => document.removeEventListener('focusin', track);
@@ -371,7 +381,7 @@ export function Sidebar(props: SidebarProps) {
    * A project by the name its row has; a machine by its own name; an agent by its row's name. Nothing while the list
    * shows everything.
    */
-  const showingOnly = ((): { kind: 'project' | 'machine' | 'agent'; name: string } | null => {
+  const showingOnly = ((): { kind: 'project' | 'machine' | 'agent' | 'tag'; name: string } | null => {
     if (!phone || props.page !== 'inbox') return null;
     if (props.projectId) {
       const name = shown.find((project) => project.id === props.projectId)?.name ?? props.projectNames?.get(props.projectId) ?? props.projects.find((project) => project.id === props.projectId)?.name;
@@ -379,7 +389,9 @@ export function Sidebar(props: SidebarProps) {
     }
     const machine = props.machineId ? machineList.find((m) => m.id === props.machineId) : undefined;
     if (machine) return { kind: 'machine', name: machine.name };
-    return props.agentFilter ? { kind: 'agent', name: props.agentFilter.name } : null;
+    if (props.agentFilter) return { kind: 'agent', name: props.agentFilter.name };
+    const tag = props.tags?.tagId ? props.tags.tags.find((t) => t.id === props.tags?.tagId) : undefined;
+    return tag ? { kind: 'tag', name: tag.name } : null;
   })();
   // A phone's sheet: a section heading that has stuck to the top of the scroll takes a hairline, so rows read as passing under it.
   useLayoutEffect(() => {
@@ -423,11 +435,13 @@ export function Sidebar(props: SidebarProps) {
     shortcuts: Boolean(props.onShortcuts),
     copyPrompt: props.connectPrompt !== false,
     agents: agentsDrawn,
+    tags: props.tags?.shown === true,
     phone,
   });
   const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
   // Hidden in Customize sidebar (the owner, 2026-11-09): the whole section goes, heading and all. Agents keep running.
   const agentsShown = shows('agents');
+  const tagsShown = shows('tags');
   const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
   const searchButton = (
     <button
@@ -498,9 +512,9 @@ export function Sidebar(props: SidebarProps) {
         <button
           ref={inboxRef}
           type="button"
-          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter ? ' ib-on' : ''}`}
+          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId ? ' ib-on' : ''}`}
           onClick={pick(props.onInbox)}
-          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter ? 'page' : undefined}
+          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId ? 'page' : undefined}
           aria-describedby={inboxRefreshes ? refreshHintId : undefined}
           data-refreshes={inboxRefreshes ? '' : undefined}
           data-refreshing={spinOf(null) != null ? '' : undefined}
@@ -672,7 +686,7 @@ export function Sidebar(props: SidebarProps) {
           <div className="ib-sheet-now-t">
             <span className="ib-sheet-now-l">Showing only</span>
             <span className="ib-sheet-now-n">
-              {showingOnly.kind === 'agent' ? <GogglesMark /> : <Icon name={showingOnly.kind === 'project' ? 'folder' : 'laptop'} />}
+              {showingOnly.kind === 'agent' ? <GogglesMark /> : showingOnly.kind === 'tag' ? <TagIcon className="ib-ic" /> : <Icon name={showingOnly.kind === 'project' ? 'folder' : 'laptop'} />}
               <bdi dir="auto">{showingOnly.name}</bdi>
             </span>
           </div>
@@ -726,6 +740,36 @@ export function Sidebar(props: SidebarProps) {
               )))}
             </section>
           </>,
+        )}
+        {tagsShown && props.tags && sheetSection('tags',
+          <TagsSection
+            tags={props.tags.tags}
+            waiting={props.tags.waiting}
+            tagId={props.page === 'inbox' ? props.tags.tagId : null}
+            closed={tagsClosed}
+            onToggle={() => sections.toggle('tags')}
+            labelId={tagsLabelId}
+            bodyId={tagsBodyId}
+            header={
+              <SectionHeader
+                section="tags"
+                id={tagsLabelId}
+                controls={tagsBodyId}
+                label="Tags"
+                iconNode={<TagIcon className="ib-ic" />}
+                open={!tagsClosed}
+                count={0}
+                total={phone ? props.tags.tags.length : undefined}
+                onToggle={() => sections.toggle('tags')}
+              />
+            }
+            phone={phone}
+            pick={pick}
+            onOpen={props.tags.onOpen}
+            onCreate={props.tags.onCreate}
+            onRename={props.tags.onRename}
+            onDelete={props.tags.onDelete}
+          />,
         )}
         {agentsShown && (
           <AgentsSection

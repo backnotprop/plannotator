@@ -44,10 +44,19 @@ export interface InitiativeTags {
   mentions: ReadonlyMap<string, TaggedThreads>;
   /** Read the cards again (an opened preview does, so the threads tagged since are in it). */
   refresh?: () => void;
+  /**
+   * Where a sent tag links: absent, the Board filtered to it (`initiativeHref`); with the Board off, the tag's list in
+   * the Inbox (threadTags.ts `tagHref`, approval "inbox-thread-tags").
+   */
+  href?: (id: string) => string;
 }
 
 const NONE: InitiativeTags = { initiatives: [], counts: new Map(), cards: [], rows: new Map(), projects: new Map(), mentions: new Map() };
-/** App provides the Board's initiatives (read with the cards while the Board is on; off, `#` is plain text). */
+/**
+ * App provides the Board's initiatives (read with the cards while the Board is on). With the Board off, the list's tags
+ * (approval "inbox-thread-tags"), each counted by its threads, and `href` to their lists; an Inbox that keeps no
+ * tags gives none, and `#` is plain text.
+ */
 export const InitiativeTagsContext = createContext<InitiativeTags>(NONE);
 export const useInitiativeTags = () => useContext(InitiativeTagsContext);
 
@@ -285,9 +294,9 @@ export function initiativeHref(id: string): string {
 /**
  * A message's text with each tag that names a live initiative made a link to
  * the Board filtered to it (`[#Shape](#board&initiative=ini_…)`; display
- * only). Tags in code, or naming nothing, stay as written.
+ * only), or where `href` says (the tag's list, with the Board off). Tags in code, or naming nothing, stay as written.
  */
-export function linkHashtags(text: string, initiatives: readonly InboxInitiative[]): string {
+export function linkHashtags(text: string, initiatives: readonly InboxInitiative[], href: (id: string) => string = initiativeHref): string {
   if (initiatives.length === 0 || !text.includes('#')) return text;
   // A markdown link's own text (`[part of #Shape](…)`): a link inside a link is none. Its destination holds no
   // tag at all (core blanks it).
@@ -298,7 +307,7 @@ export function linkHashtags(text: string, initiatives: readonly InboxInitiative
     const initiative = inboxInitiativeOfTag(tag.key, initiatives);
     if (!initiative) continue;
     if (linkTexts.some(([from, to]) => tag.start > from && tag.end < to)) continue;
-    out += text.slice(last, tag.start) + `[#${tag.tag}](${initiativeHref(initiative.id)})`;
+    out += text.slice(last, tag.start) + `[#${tag.tag}](${href(initiative.id)})`;
     last = tag.end;
   }
   return out + text.slice(last);

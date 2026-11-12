@@ -279,9 +279,10 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
  */
 
 /** The initiative's mark: a `#` at the PR card's state-icon size and stroke, in the text's own muted colour. */
-function TagIcon({ className = '' }: { className?: string }) {
+/** The tag's `#` mark: the preview's, the sidebar's Tags heading and the Add tag item (approval "inbox-thread-tags": `#` once per set). */
+export function TagIcon({ className = '', size }: { className?: string; size?: number }) {
   return (
-    <svg viewBox="0 0 16 16" className={`h-4 w-4 flex-none ${className}`} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <svg viewBox="0 0 16 16" className={`h-4 w-4 flex-none ${className}`} style={size ? { width: size, height: size } : undefined} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <path d="M6.3 2.5 5 13.5M11 2.5l-1.3 11M2.8 5.8h10.6M2.6 10.2h10.6" />
     </svg>
   );
