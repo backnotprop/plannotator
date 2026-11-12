@@ -51,6 +51,7 @@ import { RowSlot } from './RowSlot';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
+import { newLineArrival, useNewLineSlide, type NewLineArrival } from '../newLine';
 
 export interface InboxListProps {
   /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
@@ -500,14 +501,24 @@ function liveCount(rows: readonly InboxListRow[]): number {
  * wrapped onto two). "N new in" and Show never shrink; the project's name takes the rest and is cut with "…", and
  * while it is cut the whole line is the tooltip.
  */
-function HeldNoticeLine({ count, project, onShow }: { count: number; project: string | null; onShow: () => void }) {
+function noticeProjectHidden(project: Element | null): boolean {
+  return !!project && (project.getClientRects().length === 0 || isTextCut(project));
+}
+
+function HeldNoticeLine({ count, project, onShow, arrival }: { count: number; project: string | null; onShow: () => void; arrival: NewLineArrival }) {
   const full = project ? `${count} new in ${project}` : `${count} new`;
   return (
-    <Tip content={full} when={(button) => isTextCut(button.querySelector('.ib-notice-proj'))}>
-      <button type="button" className="ib-notice" onClick={onShow} data-inbox-notice="">
+    <Tip content={full} when={(button) => noticeProjectHidden(button.querySelector('.ib-notice-proj'))}>
+      <button type="button" className="ib-notice" onClick={onShow} data-inbox-notice="" data-arrive={arrival} aria-label={arrival === 'float' ? `${full}, Show` : undefined}>
         <Icon name="inbox" size={15} />
         <span className="ib-notice-text">
-          <span className="ib-notice-n">{project ? `${count} new in` : `${count} new`}</span>
+          {arrival === 'float' ? (
+            <span className="ib-notice-n">
+              {count} new{project && <span className="ib-notice-in"> in</span>}
+            </span>
+          ) : (
+            <span className="ib-notice-n">{project ? `${count} new in` : `${count} new`}</span>
+          )}
           {/* A space for the line's text and accessible name; the flex gap draws it. */}
           {project && ' '}
           {project && (
@@ -1329,6 +1340,7 @@ export function InboxList(props: InboxListProps) {
   // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
   const [view, setView] = useListView(props.rememberLook !== false);
   const asList = view === 'list';
+  const arrival = newLineArrival(asList);
   // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
   const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
@@ -1336,6 +1348,7 @@ export function InboxList(props: InboxListProps) {
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
   // across a resize past the phone width, its scroll are kept).
   const bodyRef = useRef<HTMLDivElement>(null);
+  useNewLineSlide(bodyRef, props.notice != null, arrival);
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
@@ -1752,12 +1765,13 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
-          {props.notice && (
-            <HeldNoticeLine
-              count={props.notice.count}
-              project={props.notice.project ?? null}
-              onShow={() => showNew()}
-            />
+          {props.notice && arrival === 'float' && (
+            <div className="ib-notice-anchor">
+              <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={() => showNew()} arrival={arrival} />
+            </div>
+          )}
+          {props.notice && arrival !== 'float' && (
+            <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={() => showNew()} arrival={arrival} />
           )}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}

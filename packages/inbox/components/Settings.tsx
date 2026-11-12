@@ -23,6 +23,7 @@ import { openSidebarCustomizer } from '../sidebarLayout';
 import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
+import { MotionRow } from './MotionRow';
 import { chooseFavicon, useInboxFavicon } from '../faviconChoice';
 import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
@@ -405,6 +406,7 @@ function GeneralSection({
               </span>
             </span>
           </div>
+          <MotionRow />
           {/* The sidebar's layout (approval "inbox-sidebar-customize"): the keyboard's way to the Customize panel, and the phone's. */}
           <div className="ib-prow" data-settings-sidebar="">
             <span className="ib-txt">

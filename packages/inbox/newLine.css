@@ -1,0 +1,29 @@
+.ib-notice[data-arrive="slide"] { position: relative; z-index: 2; }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-notice[data-arrive="slide"] { animation: ib-notice-in 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+  @keyframes ib-notice-in { from { opacity: 0; transform: translateY(-4px); } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-notice[data-arrive="slide"] { animation: ib-notice-fade 120ms ease-out; }
+  @keyframes ib-notice-fade { from { opacity: 0; } }
+}
+.ib-notice-anchor { position: relative; height: 0; z-index: 3; }
+.pn-inbox .ib-notice[data-arrive="float"] { position: absolute; top: 3px; right: 34px; width: auto; max-width: calc(100% - 200px); min-width: 0; height: 28px; margin: 0; padding: 0 6px 0 10px; gap: 6px; border-radius: 999px; background: var(--popover); color: var(--foreground); border: 1px solid color-mix(in oklch, var(--primary) 45%, var(--border)); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14); font-size: var(--ib-fs-13, 13px); cursor: pointer; }
+.pn-inbox .ib-notice[data-arrive="float"] > svg { color: var(--primary); }
+.pn-inbox .ib-notice[data-arrive="float"] b { padding: 0 8px; height: 20px; display: inline-flex; align-items: center; border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, transparent); }
+.pn-inbox .ib-notice[data-arrive="float"]:hover b { background: color-mix(in oklch, var(--primary) 20%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .pn-inbox .ib-notice[data-arrive="float"] { animation: ib-notice-in 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-notice[data-arrive="float"] { animation: ib-notice-fade 120ms ease-out; }
+}
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-notice[data-arrive="float"] { top: 4px; right: 12px; height: 36px; min-height: 0; max-width: calc(100% - 184px); margin: 0; padding: 0 4px 0 12px; }
+  .pn-inbox .ib-notice[data-arrive="float"] b { height: 28px; padding: 0 10px; }
+  .pn-inbox .ib-notice[data-arrive="float"]::after { content: ""; position: absolute; inset: -4px -4px; }
+}
+.ib-notice-anchor { container-type: inline-size; }
+@container (max-width: 560px) {
+  .pn-inbox .ib-notice[data-arrive="float"] :is(.ib-notice-in, .ib-notice-proj) { display: none; }
+}

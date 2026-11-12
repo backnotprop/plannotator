@@ -54,6 +54,7 @@
 @import "../../packages/inbox/cloud/cloud.css";
 /* A phone's composer card and its picker sheet (components/BottomSheet.tsx, PhoneReplyRecipient.tsx, compose/PhoneToSheet.tsx). */
 @import "../../packages/inbox/phoneComposer.css";
+@import "../../packages/inbox/newLine.css";
 
 /* Window controls (inbox-window.md): read-only, for a desktop host, the line the panes' heads centre on while it has
    set its variables; its buttons go there. A length once computed, so a host reads a number. Here and not in inbox.css:
