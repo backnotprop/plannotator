@@ -1317,6 +1317,7 @@ export interface SearchRequest {
 export interface CloudAgentsModel {
   agents: InboxCloudAgentView[];
   projects: { id: string; name: string }[];
+  available?: boolean;
 }
 
 export interface CloudAgentTest {

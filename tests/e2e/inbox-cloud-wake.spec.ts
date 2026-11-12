@@ -22,6 +22,7 @@ let url = '';
 let agent: SimAgent | null = null;
 let hook: Server | null = null;
 let hookUrl = '';
+let relay: Server | null = null;
 const seen: Seen[] = [];
 
 test.describe.configure({ mode: 'serial' });
@@ -44,7 +45,14 @@ test.beforeAll(async () => {
 
   const root = inboxScratch('plannotator-cloud-wake-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
+  relay = createServer((_req, res) => {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found', code: 'not_found' }));
+  });
+  await new Promise<void>((done) => relay!.listen(0, '127.0.0.1', done));
+  const relayAddress = relay.address();
+  const relayUrl = `http://127.0.0.1:${typeof relayAddress === 'object' && relayAddress ? relayAddress.port : 0}`;
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_RELAY_URL: relayUrl };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();
@@ -56,6 +64,7 @@ test.afterAll(async () => {
   try {
     await agent?.close().catch(() => {});
     await new Promise((done) => (hook ? hook.close(done) : done(undefined)));
+    await new Promise((done) => (relay ? relay.close(done) : done(undefined)));
   } finally {
     await removeInboxScratch();
   }
