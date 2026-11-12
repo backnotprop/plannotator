@@ -8,10 +8,6 @@ import type { SessionBridge } from "@plannotator/ai/session-bridge";
 const AI_INDEX = path.join(import.meta.dir, "..", "..", "packages", "ai", "index.ts");
 
 describe("Ask this session through the CLI child (pull bridge)", () => {
-  // The CLI runs as a separate process, so the only way a question reaches the
-  // OpenCode session is: the plugin hands the child a token, learns its port
-  // from the ready file, and long-polls it. This stub CLI is a real pull-bridge
-  // server that asks one question and records the answer it gets back.
   test.skipIf(process.platform === "win32")("the plugin answers the child's question from the invoking session", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "plannotator-opencode-bridge-"));
     const binary = path.join(root, "cli.ts");
@@ -73,7 +69,6 @@ console.log(JSON.stringify({ decision: "dismissed" }));
       });
       const result = JSON.parse(readFileSync(out, "utf-8"));
       expect(result.config).toEqual({ host: "opencode", modes: { turn: true, transient: true }, tokenLength: 43 });
-      // The child scrubs the token so nothing it spawns inherits it.
       expect(result.tokenLeft).toBeNull();
       expect(asked).toHaveLength(1);
       expect(asked[0]).toContain("What is this file?");

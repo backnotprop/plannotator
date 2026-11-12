@@ -28,9 +28,6 @@ function createContext(
   options: Record<string, unknown> = {},
   agents: Array<{ id: string; description?: string; mode: string; hidden: boolean }> = [],
   hostOverrides: {
-    // Pre-#44765 hosts DO expose command.transform, but hand the callback a
-    // draft with no `add`. The adapter must then register nothing, throw
-    // nothing, and behave exactly as it did before.
     command?: { transform: (apply: (draft: any) => void) => Promise<unknown> };
     agentListShape?: "envelope" | "array";
   } = {},
@@ -75,7 +72,6 @@ function createContext(
     },
     getToolDefinition: () => toolDefinition,
     getSessionContextHook: () => sessionContextHook,
-    /** Run every registered context hook, in registration order, like the host. */
     runContextHooks: async (event: Parameters<SessionContextHook>[0]) => {
       for (const hook of contextHooks) await hook(event);
     },
@@ -92,9 +88,6 @@ describe("OpenCode V2 server plugin", () => {
     expect(serverPlugin.setup).toBeInstanceOf(Function);
   });
 
-  // OpenCode 1.18.34 also runs this V2 setup, with a context that has no
-  // `session` or `tool` domain (seen live). Failure caught: setup throwing on
-  // an unguarded `ctx.session.hook` / `ctx.tool.transform` there.
   for (const workflow of ["plan-agent", "all-agents", "manual"] as const) {
     test(`${workflow}: setup completes on a context without session or tool domains`, async () => {
       await expect(serverPlugin.setup({ options: { workflow } } as never)).resolves.toBeUndefined();
@@ -177,9 +170,6 @@ describe("OpenCode V2 server plugin", () => {
     };
     await hook?.(planningEvent);
 
-    // #1114: the planning path emits ONE composed system part (multi-part
-    // system arrays corrupt Qwen3.x Jinja chat templates). Existing text
-    // survives, in order, ahead of the planning prompt.
     expect(planningEvent.system.length).toBe(1);
     const composedText = planningEvent.system[0]!.text;
     expect(composedText).toContain("Base system prompt");
@@ -247,13 +237,11 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
     expect(first.tools.submit_plan).toBeDefined();
     expect(first.system[0]!.text).toContain("## Plannotator");
 
-    // Prompt caching: the next request with the same history carries the same bytes.
     const second = request();
     await testContext.runContextHooks(second);
     expect(JSON.stringify(second.messages)).toBe(JSON.stringify(first.messages));
     expect(JSON.stringify(second.system)).toBe(JSON.stringify(first.system));
 
-    // Another agent under plan-agent: the history is left as OpenCode sent it.
     const build = { ...request(), agent: "build" };
     await testContext.runContextHooks(build);
     expect((build.messages[0] as { content: Array<{ text: string }> }).content[0]!.text).toBe(enter);
@@ -297,17 +285,12 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
       "plannotator-inbox",
     ]);
 
-    // No command domain: nothing registered, and the pre-existing submit_plan
-    // contract is untouched.
     const withoutCommands = createContext();
     await serverPlugin.setup(withoutCommands.context as never);
     expect(withoutCommands.getToolDefinition()?.name).toBe("submit_plan");
   });
 
   test("a pre-#44765 command draft registers nothing and does not fail setup", async () => {
-    // The real `next` / `latest` shape: transform exists, the draft is
-    // { list, get, update, remove }. Touching `add` here would throw inside the
-    // host's batched reload flush and abort it before commit.
     let applied = false;
     const testContext = createContext({}, [], {
       command: {
@@ -325,8 +308,6 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
   });
 
   test("a rejecting command transform never fails plugin setup", async () => {
-    // A slash command has a working markdown fallback; the whole Plannotator
-    // integration going down for it would not.
     const testContext = createContext({}, [], {
       command: { transform: async () => { throw new Error("command domain unavailable"); } },
     });
@@ -341,8 +322,6 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
   });
 
   test("registers slash commands even when submit_plan is disabled", async () => {
-    // `workflow: "manual"` returns early before the tool registration, which is
-    // exactly the mode that depends on the slash commands existing.
     const registered: string[] = [];
     const testContext = createContext({ workflow: "manual" }, [], {
       command: {
@@ -359,9 +338,6 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
   });
 
   test("reads a bare-array agent list, so subagent gating still applies", async () => {
-    // Newer plugin hosts answer agent.list() with an array rather than the
-    // `{ data }` envelope; reading `.data` blindly emptied the list and let
-    // subagents keep submit_plan.
     delete process.env.PLANNOTATOR_ALLOW_SUBAGENTS;
     const testContext = createContext(
       { workflow: "all-agents" },
@@ -397,7 +373,6 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
     };
 
     await testContext.getSessionContextHook()?.(event);
-    // #1114: a second system part corrupts Qwen3.x Jinja templates.
     expect(event.system.length).toBe(1);
     expect(event.system[0]!.text).toContain("Base system prompt");
     expect(event.system[0]!.text).toContain("## Plan Submission");
@@ -407,10 +382,6 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
 });
 
 describe("system part consolidation (#1114 regression class)", () => {
-  // The bug class flagged in #1114's review: truncating the system array
-  // BEFORE composing silently drops the host's entire system prompt. These
-  // fail if either helper is reordered to `system.length = 0` first.
-
   test("replacePlanningSystemParts composes existing text before truncating", () => {
     const system = [
       { type: "text" as const, text: "Host base rules" },
@@ -419,13 +390,11 @@ describe("system part consolidation (#1114 regression class)", () => {
     replacePlanningSystemParts(system, ["## Plannotator planning prompt"]);
     expect(system.length).toBe(1);
     const text = system[0]!.text;
-    // Pre-existing prompt text survives the consolidation (compose ran first).
     expect(text).toContain("Host base rules");
     expect(text).toContain("Keep plans concise.");
     expect(text).toContain("## Plannotator planning prompt");
     expect(text.indexOf("Host base rules")).toBeLessThan(text.indexOf("Keep plans concise."));
     expect(text.indexOf("Keep plans concise.")).toBeLessThan(text.indexOf("## Plannotator planning prompt"));
-    // Conflicting plan-mode rules are still stripped.
     expect(text).not.toContain("STRICTLY FORBIDDEN");
   });
 
@@ -447,10 +416,6 @@ describe("system part consolidation (#1114 regression class)", () => {
 describe("V2 plan review URL delivery", () => {
   const SESSION_URL = "http://127.0.0.1:19432";
 
-  // Regression: only the slash-command path was fixed at first. The plan path
-  // builds its own client, so a remote reviewer who reached the review through
-  // submit_plan still saw nothing: no browser is opened for them, and the
-  // plugin's console output is discarded by the host.
   test("the embedded plan path posts the session URL as a transcript notice", async () => {
     const synthetic = mock(async (_input: unknown) => ({}));
     const client = createV2BridgeClient({
@@ -467,19 +432,10 @@ describe("V2 plan review URL delivery", () => {
       sessionID: "session-1",
       description: formatSessionUrlNotice(SESSION_URL),
       resume: false,
-      // #1515: `resume: false` only declines the immediate wake. The row still
-      // waits in the inbox, and a queued row promotes alone while steers
-      // promote as a batch (`SessionInbox.promote`), so queue delivery is what
-      // turns a notice into its own model turn. Mid-tool-call here, a steer
-      // lands at the running turn's next step boundary instead.
       delivery: "steer",
     });
   });
 
-  // Without session.synthetic the URL falls back to the console log, which an
-  // older host shows with OPENCODE_PRINT_LOGS=1. handleServerReady no longer
-  // prints the ready line here (the embedded path passes announce: false), so
-  // this log is the only place the URL can reach on such a host.
   test("without session.synthetic the plan path logs the URL once", () => {
     const log = mock((_entry: unknown) => {});
     const client = createV2BridgeClient({
@@ -495,36 +451,19 @@ describe("V2 plan review URL delivery", () => {
     expect(log.mock.calls[0]![0]).toEqual({ level: "info", message: formatSessionUrlNotice(SESSION_URL) });
   });
 
-  // Regression: the notifier tests above all pass while the plan path itself is
-  // wired to nothing, which is exactly the shape the bug had. Reaching the real
-  // wiring means running a plan review, so these two facts are pinned at source
-  // level instead: without the session id the client can build no notifier, and
-  // without the ready hook nothing ever calls it. Either one silently restores
-  // the invisible URL with no other symptom.
   test("the plan path threads the session id and drives the ready hook", () => {
     const source = readFileSync(path.join(import.meta.dir, "server.ts"), "utf-8");
 
-    // Booleans, not toMatch: a failing regex against a whole source file dumps
-    // the file into the report and buries the one line that matters.
     expect(/sessionID:\s*toolContext\.sessionID/.test(source)).toBe(true);
     expect(/logReady:\s*createPlanReadyNotifier\(/.test(source)).toBe(true);
   });
 
-  // Regression: the submit_plan path builds its own client, so it owns that
-  // client's notice watch too. A plan review that ends without delivering a
-  // prompt (denied and closed, or approved — the V2 approval handoff is the
-  // agent switch, not a `session.prompt`) would otherwise leave the host event
-  // subscription open for the life of the process. Pinned at source level for
-  // the same reason as the two facts above: reaching the real wiring means
-  // running a plan review.
   test("the plan path releases the notice watch when the review ends", () => {
     const source = readFileSync(path.join(import.meta.dir, "server.ts"), "utf-8");
 
     expect(/\}\s*finally\s*\{[^}]*client\.dispose\(\);/.test(source)).toBe(true);
   });
 
-  // Regression: a rejected notice must not surface as an unhandled rejection
-  // and must not take the plan review down with it.
   test("a rejecting notice is caught", async () => {
     const client = createV2BridgeClient({
       ctx: { session: { synthetic: async () => { throw new Error("session gone"); } } } as never,
@@ -538,10 +477,6 @@ describe("V2 plan review URL delivery", () => {
   });
 });
 
-// After a plan decision the still-pending session-URL notice (a steer) is
-// promoted at the boundary right after the tool result, so the model read the
-// notice LAST and could answer it instead of the decision (seen live on
-// 2.0.22). The notice is for the person; the model never needs it.
 describe("session-URL notices stay out of the model context", () => {
   const notice = (url = "http://localhost:19432") => ({ role: "user", content: [{ type: "text", text: formatSessionUrlNotice(url) }] });
   const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
@@ -578,8 +513,6 @@ describe("session-URL notices stay out of the model context", () => {
     expect(messages).toHaveLength(3);
   });
 
-  // Failure caught: a slash command's failure notice (for the person) read by
-  // the model alongside the next message it answers.
   test("a slash command's failure notice is dropped like the URL notice", () => {
     const failure = user(commandFailureNoticeText("plannotator-annotate", "File not found: nothere.md"));
     const messages: unknown[] = [user("q"), assistant("a"), failure, user("annotate notes.md instead")];
@@ -587,8 +520,6 @@ describe("session-URL notices stay out of the model context", () => {
     expect(messages).toEqual([user("q"), assistant("a"), user("annotate notes.md instead")]);
   });
 
-  // Failure caught: /plannotator-inbox's notices (where the Inbox is, or why
-  // it did not open) read by the model as a request.
   test("/plannotator-inbox's notice and failure notice are dropped; a pasted copy of the address line is not", () => {
     const opened = user(inboxNoticeText("http://localhost:61234/", "No browser opened: this is a remote session."));
     const failed = user(commandFailureNoticeText("plannotator-inbox", "The plannotator on PATH is older than /plannotator-inbox."));
@@ -598,9 +529,6 @@ describe("session-URL notices stay out of the model context", () => {
     expect(messages).toEqual([user("q"), assistant("a"), pasted]);
   });
 
-  // Failure caught: the person pasting the failure line they SAW (the
-  // notice's description) to ask about it, and that message vanishing from
-  // every later model request.
   test("a typed or pasted copy of the failure line is never dropped", () => {
     const seen = formatCommandFailureNotice("plannotator-annotate", "File not found: nothere.md");
     const messages: unknown[] = [user(seen), assistant("a"), user(`${seen}\n\nwhy?`), assistant("b"), user("next")];
@@ -634,8 +562,6 @@ describe("session-URL notices stay out of the model context", () => {
     });
   }
 
-  // Plan review's "Quick answer from this session" is a `session.generate`
-  // request, built through the `generate` hook rather than `context`.
   test("session.generate requests (plan review quick answers) are filtered too", async () => {
     const testContext = createContext({ workflow: "plan-agent" });
     await serverPlugin.setup(testContext.context as never);
@@ -652,10 +578,6 @@ describe("session-URL notices stay out of the model context", () => {
   });
 });
 
-// /plannotator-inbox on OpenCode 2 starts no turn, so the model learns the
-// Inbox from the session's requests after it. Failure caught: the briefing
-// never reaching the model, reaching another session or a subagent, or piling
-// up once per request.
 describe("OpenCode 2 /plannotator-inbox briefing", () => {
   const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
   const agents = async () => [{ name: "build", mode: "primary" }, { name: "explore", mode: "subagent" }] as never;

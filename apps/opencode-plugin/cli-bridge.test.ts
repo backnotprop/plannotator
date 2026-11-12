@@ -28,8 +28,6 @@ describe("OpenCode CLI bridge helpers", () => {
     const binary = path.join(root, "old-cli.ts");
     const opened = path.join(root, "review-opened");
     const previous = process.env.PLANNOTATOR_BIN;
-    // Model the old binary's contract: opencode-review ignores positional
-    // words; unknown commands exit before opening any UI.
     writeFileSync(binary, `#!/usr/bin/env bun
 import { writeFileSync } from "node:fs";
 await Bun.stdin.text();
@@ -53,8 +51,6 @@ console.log(JSON.stringify({ decision: "annotated", feedback: "caller feedback" 
       expect(client.session.prompt).not.toHaveBeenCalled();
       expect(client.app.log.mock.calls.map(([entry]) => entry.message).join("\n")).toContain("Update the Plannotator CLI");
       expect(toasts()).toContain("Update the Plannotator CLI");
-      // Binaries older than 0.27.11 have no unknown-command guard: the stdin
-      // JSON reaches the plan hook path, which fails with its own message.
       const ancient = path.join(root, "ancient-cli.ts");
       writeFileSync(ancient, `#!/usr/bin/env bun
 await Bun.stdin.text();
@@ -66,17 +62,12 @@ process.exit(1);
       await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "../target" });
       expect(client.app.log.mock.calls.map(([entry]) => entry.message).join("\n")).toContain("Update the Plannotator CLI");
       process.env.PLANNOTATOR_BIN = binary;
-      // Prose names no directory, so it keeps the old command and still works
-      // against an old binary exactly as before (#1483 tolerance).
       await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "please review my changes" });
       expect(existsSync(opened)).toBe(true);
       expect(client.session.prompt).toHaveBeenCalledTimes(1);
-      // Path-shaped prose among several words is ignored, not refused, and
-      // still takes the old command (v0.27.23 regression).
       rmSync(opened);
       await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "look at the api/users code" });
       expect(existsSync(opened)).toBe(true);
-      // A sole path-shaped typo is refused before the CLI runs, visibly.
       rmSync(opened);
       client.tui.showToast.mockClear();
       await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "./backnd" });
@@ -87,11 +78,8 @@ process.exit(1);
       else process.env.PLANNOTATOR_BIN = previous;
       rmSync(root, { recursive: true, force: true });
     }
-  }, 20_000); // spawns the stub CLI several times; the 5s default flakes
+  }, 20_000);
 
-  // Several file paths are one review: each path its own CLI argument (one
-  // joined argument would be "File not found"), the agent's prompt names
-  // every file, and an older CLI's "pick one" error reads as "update".
   test.skipIf(process.platform === "win32")("several file paths reach the CLI as one review; an older CLI reads as update", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "plannotator-annotate-bundle-bridge-"));
     writeFileSync(path.join(root, "spec.md"), "# Spec\n");
@@ -155,8 +143,6 @@ process.exit(1);
   });
 
   test("marks a host that can register the plannotator tool, and only that one", () => {
-    // What lets the child's Settings offer the agent tool switch: a host
-    // without a tool domain (or OpenCode 1) must not get it.
     expect(buildCliBridgeEnv({ toolCapable: true })).toEqual({ PLANNOTATOR_OPENCODE_TOOL_CAPABLE: "1" });
     expect(buildCliBridgeEnv({ sharingEnabled: true })).not.toHaveProperty("PLANNOTATOR_OPENCODE_TOOL_CAPABLE");
   });
@@ -203,9 +189,6 @@ process.exit(1);
     ]);
   });
 
-  // Failure caught: a slash command's words passed as ONE argument (the real
-  // CLI reads ". notes.md" as one path), an unquoted path with spaces split
-  // into words, or a dash word in prose reaching the CLI as a real flag.
   test("slash-command annotate words become separate CLI arguments only when the whole names nothing", () => {
     const root = mkdtempSync(path.join(tmpdir(), "plannotator-annotate-words-"));
     try {
@@ -216,7 +199,6 @@ process.exit(1);
       expect(targets('"my notes.md" please --gate')).toEqual(["my notes.md", "please"]);
       expect(targets("my notes.md")).toEqual(["my notes.md"]);
       expect(targets("nothere.md")).toEqual(["nothere.md"]);
-      // A URL with prose after it once went to the CLI as one "URL".
       expect(targets("https://example.com/page the pricing part")).toEqual(["https://example.com/page", "the", "pricing", "part"]);
       expect(targets("https://example.com/page")).toEqual(["https://example.com/page"]);
       expect(targets("notes.md --require-approval")).toEqual(["notes.md --require-approval"]);
@@ -278,8 +260,6 @@ process.exit(1);
     expect(prompt).not.toContain("artifact is approved");
   });
 
-  // #1701: the CLI's --json record for a bare Done keeps the zero-state
-  // sentence as feedback and adds nothingToSend; the bridge starts no turn.
   test("a Done with nothing to send builds no prompt", () => {
     for (const target of [{ kind: "message" as const }, { kind: "file" as const, fileHeader: "File" as const, filePath: "notes.md" }]) {
       expect(buildAnnotatePromptFromBridgeOutcome({
@@ -322,9 +302,6 @@ process.exit(1);
     expect(formatUserFacingCliStderrLine("  (1.2 KB - plan only, annotations added in browser)")).toBe(
       "(1.2 KB - plan only, annotations added in browser)",
     );
-    // The ready line every session prints, its remote follow-up, and the
-    // browser-failure line (dropped before, so a headless user got a URL and no
-    // reason the tab never appeared).
     expect(formatUserFacingCliStderrLine("  Plannotator session ready: http://localhost:54321")).toBe(
       "Plannotator session ready: http://localhost:54321",
     );
@@ -334,16 +311,12 @@ process.exit(1);
     expect(
       formatUserFacingCliStderrLine("  Could not open a browser automatically — open the URL above."),
     ).toBe("Could not open a browser automatically — open the URL above.");
-    // An older binary's two-line shape still gets through.
     expect(
       formatUserFacingCliStderrLine("  Plannotator session ready — open on your local machine (forward port 19432 if needed):"),
     ).toBe("Plannotator session ready — open on your local machine (forward port 19432 if needed):");
     expect(formatUserFacingCliStderrLine("Fetching: https://example.com")).toBeUndefined();
   });
 
-  // The filter matches hardcoded text, so build the line from the server's own
-  // constant and push it through: if the two drift apart, OpenCode users lose
-  // the URL and this test says so.
   test("forwards a ready line built from the server's own prefix constant", () => {
     const url = "http://localhost:54321";
     expect(formatUserFacingCliStderrLine(`  ${SESSION_READY_LINE_PREFIX}${url}`)).toBe(
@@ -428,11 +401,6 @@ process.exit(1);
     expect(approved.agent).toBe("build");
     expect(approved.message).toBe(getReviewApprovedPrompt("opencode"));
 
-    // PR5 delivery (spec §6.4, consumer #3): an approval carrying feedback
-    // must route through the shared approved-with-notes composer — this
-    // bridge previously discarded it even though the CLI's JSON record always
-    // included it. The framing itself is pinned in prompts.test.ts; here we
-    // guard the wiring: the note is delivered, inside the composed message.
     const note = "Approved — rename the flag in a follow-up.";
     const approvedWithNotes = buildReviewPromptFromBridgeOutcome({
       decision: "approved",
@@ -451,8 +419,6 @@ process.exit(1);
     });
     expect(localFeedback.agent).toBeUndefined();
     expect(localFeedback.message).toContain("Fix these issues.");
-    // Assert against the actual suffix (not a hardcoded copy) so future edits to
-    // the review trailer don't break this wiring test.
     expect(localFeedback.message).toContain(getReviewDeniedSuffix("opencode"));
 
     const prFeedback = buildReviewPromptFromBridgeOutcome({
@@ -461,14 +427,9 @@ process.exit(1);
       isPRMode: true,
       feedback: "PR comment only.",
     });
-    // An older CLI sends no `platform`; isPRMode stays the fallback.
     expect(prFeedback.message).toBe("PR comment only.");
   });
 
-  // A CLI that knows the flag always sends it as a boolean, so PR-mode
-  // feedback (including PR description / PR comment notes, which carry no
-  // code annotations) gets the suffix, and only the platform status post
-  // goes through verbatim.
   test("the CLI's platform flag, not isPRMode, decides the verbatim status post", () => {
     const prFeedback = buildReviewPromptFromBridgeOutcome({
       decision: "annotated",

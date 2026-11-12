@@ -72,8 +72,6 @@ describe("executeSubmitPlan", () => {
   });
 
   test("an answers-only deny uses the plan.answered prompt, not the denied one", async () => {
-    // What regresses: the agent is told its plan "was not approved" when the
-    // reviewer only answered its questions.
     prepareDataDir();
     const run = (answersOnly?: boolean) => executeSubmitPlan({
       edits: [{ start: 1, content: "# Plan\n\nShip it" }],
@@ -97,7 +95,6 @@ describe("executeSubmitPlan", () => {
     expect(answered).not.toContain("YOUR PLAN WAS NOT APPROVED");
     expect(answered).toContain("submit_plan");
     expect(answered).toContain("## Answers to your questions");
-    // The line-numbered plan still follows, for the targeted-edit resubmit.
     expect(answered).toContain("1| # Plan");
 
     for (const flag of [undefined, false]) {

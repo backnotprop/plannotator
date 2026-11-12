@@ -45,7 +45,6 @@ export async function deliverOpenCodePrompt(input: {
         message: `[Plannotator] ${input.failureMessage}`,
       });
     } catch {
-      // Preserve the delivery failure if logging is unavailable.
     }
     throw new OpenCodePromptDeliveryError(input.failureMessage, {
       cause: error,

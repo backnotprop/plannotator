@@ -1,8 +1,3 @@
-/**
- * The review and annotate commands' servers are listed in `plannotator
- * sessions` only while they wait: the entry goes when the decision comes, and
- * when the wait or the stop throws. A command with no project is "unknown".
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

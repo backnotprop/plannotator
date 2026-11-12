@@ -6,10 +6,6 @@ import { createTestEnvironment } from "../../tests/helpers/environment";
 import { handleCliCommand } from "./cli-bridge";
 import { createV2BridgeClient } from "./v2-client";
 
-// #1612, CLI-bridge runtime (the reporter's `cli` plugin runtime, and the path
-// OpenCode 2's native commands run through): feedback from /plannotator-last is
-// delivered to the agent that wrote the annotated message.
-
 const environment = createTestEnvironment(
   ["PLANNOTATOR_BIN", "PLANNOTATOR_TEST_OUTCOME", "PLANNOTATOR_TEST_RECORD_FILE"],
   "plannotator-opencode-agent-routing-",
@@ -27,7 +23,6 @@ function prepare(outcome: Record<string, unknown>): string {
   return recordFile;
 }
 
-/** A session where the user switched from `build` to a custom agent. */
 const V1_MESSAGES = [
   { info: { role: "user", id: "u1", agent: "agent-engineer" }, parts: [{ type: "text", text: "q" }] },
   { info: { role: "assistant", id: "a1", agent: "agent-engineer" }, parts: [{ type: "text", text: "Engineer answer" }] },
@@ -75,7 +70,6 @@ describe("/plannotator-last over the CLI bridge (OpenCode 1)", () => {
     await runLast(client);
 
     expect(deliveredBody(client).agent).toBe("agent-engineer");
-    // The agent stays plugin-side: the binary's payload is unchanged.
     const stdin = JSON.parse(JSON.parse(readFileSync(recordFile, "utf8")).stdin);
     expect(stdin.recentMessages.map((m: Record<string, unknown>) => Object.keys(m).sort()))
       .toEqual([["messageId", "text"], ["messageId", "text"]]);
@@ -92,7 +86,6 @@ describe("/plannotator-last over the CLI bridge (OpenCode 1)", () => {
 
   test("an unknown writer leaves the prompt exactly as before (no agent key)", async () => {
     prepare({ decision: "annotated", feedback: "Tighten this.", selectedMessageId: "a1" });
-    // An older OpenCode that records no agent on its messages.
     const client = v1Client(V1_MESSAGES.map((m) => ({ ...m, info: { ...m.info, agent: undefined } })));
 
     await runLast(client);
@@ -128,7 +121,6 @@ describe("/plannotator-annotate over the CLI bridge (OpenCode 1)", () => {
 });
 
 describe("/plannotator-last over the CLI bridge (OpenCode 2)", () => {
-  /** Flat V2 messages; assistants carry `agent`, users do not. */
   const V2_CONTEXT = [
     { id: "a1", type: "assistant", agent: "agent-engineer", content: [{ type: "text", text: "Engineer answer" }] },
     { id: "a2", type: "assistant", agent: "build", content: [{ type: "text", text: "Build answer" }] },
@@ -162,8 +154,6 @@ describe("/plannotator-last over the CLI bridge (OpenCode 2)", () => {
     expect(prompt).toHaveBeenCalledTimes(1);
   });
 
-  // `Session.switchAgent` writes an `agent-switched` transcript row every
-  // time, so a no-op switch must not be requested.
   test("already on that agent: no switch row, feedback still delivered", async () => {
     prepare({ decision: "annotated", feedback: "Tighten this.", selectedMessageId: "a1" });
     const { client, switchAgent, prompt } = v2Client("agent-engineer");

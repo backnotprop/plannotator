@@ -1,45 +1,5 @@
-/**
- * OpenCode 1: deliver slash-command feedback through the command's OWN turn.
- *
- * Why this exists. OpenCode 1 runs a command as `command.execute.before`
- * (which Plannotator awaits for the whole review) followed by
- * `prompt({ parts })` on the command's own user message, and `prompt` always
- * runs the model loop: the hook has no way to say "no reply"
- * (`SessionPrompt.command`, `packages/opencode/src/session/prompt.ts` @
- * v1.18.32). Plannotator used to clear `parts` and send the feedback with a
- * separate `session.prompt`, which ran its own loop. The command's emptied
- * message then ran a SECOND loop: its user message has no content, so the
- * model saw a history ending in its own reply and answered the same feedback
- * again. Every command that returned feedback cost two model turns.
- *
- * The fix is to let the command's own message carry the feedback. While a
- * command runs, its handlers get a client whose `session.prompt` to the
- * invoking session is RECORDED instead of sent (`createCommandTurnClient`);
- * the hook then puts that text into `output.parts`, the array OpenCode turns
- * into the command's message, and OpenCode runs exactly one turn for it.
- *
- * The one thing a hook's `parts` cannot say is WHO answers: the command's
- * message takes the command's agent and model (the ones the user is on). The
- * separate prompt named the agent the feedback was for (the review UI's agent
- * switch, or the agent that wrote an annotated message, #1612) or, when there
- * was none, no agent at all, so OpenCode's default agent answered; either way
- * on that agent's configured model and variant. `resolveFeedbackTarget`
- * computes exactly that when the feedback is delivered, and
- * `retargetCommandMessage` applies it in `chat.message`, the hook OpenCode
- * fires while building the command's message (`createUserMessage`, same
- * file). Only the turn count changes.
- *
- * A command with nothing to send still runs one turn on an empty message, as
- * before; OpenCode 1 gives a command hook no way to skip it.
- *
- * OpenCode 2 never goes through here: its native commands own the invocation
- * and deliver through `createV2BridgeClient`.
- */
-
-/** Feedback a command produced for its own turn. */
 export interface CommandFeedback {
   text: string;
-  /** The agent that should answer it, already validated by the handler. */
   agent?: string;
 }
 
@@ -61,32 +21,19 @@ function bindingProxy<T extends object>(target: T, overrides: Record<PropertyKey
     get(object, key) {
       if (Object.prototype.hasOwnProperty.call(overrides, key)) return overrides[key];
       const value = Reflect.get(object, key, object);
-      // SDK methods read `this` (the generated client keeps its transport on
-      // the instance), so unbound access through the proxy would break them.
       return typeof value === "function" ? value.bind(object) : value;
     },
   });
 }
 
-/**
- * A view of `client` whose `session.prompt` to `sessionID` is recorded rather
- * than sent. Everything else (logging, toasts, listing agents and messages,
- * prompts to other sessions, `noReply` prompts) passes straight through.
- */
 export function createCommandTurnClient<T>(
   client: T,
   sessionID: string | undefined,
   options: {
-    /**
-     * Command messages this plugin retargeted. Their `session.messages` view
-     * is restored to the agent the user ran the command on; see
-     * `CommandMessageAgents`.
-     */
     messageAgents?: CommandMessageAgents;
   } = {},
 ): {
   client: T;
-  /** The recorded feedback, once; undefined when nothing was recorded. */
   take: () => CommandFeedback | undefined;
 } {
   const recorded: CommandFeedback[] = [];
@@ -135,31 +82,11 @@ export function createCommandTurnClient<T>(
   };
 }
 
-/**
- * The agent each retargeted command message was BUILT with: the agent the user
- * ran the command on.
- *
- * Why it matters. The command handlers read "the agent the user is talking
- * to" as the agent of the session's last user message (`readLastUserAgent`,
- * #1612). Up to 0.28.0 that message, right after a Plannotator command, was
- * the command's own emptied message, which kept the user's agent. Since the
- * feedback rides that message and `retargetCommandMessage` points it at the
- * feedback's agent, a follow-up `/plannotator-annotate` would read the
- * PREVIOUS feedback's agent instead: after a review sent from `plan` with no
- * switch, the default `build` agent, which may edit files. So the handlers'
- * view of `session.messages` reports each retargeted message under the agent
- * it was built with, exactly what 0.28.0 read there. The model and OpenCode
- * itself still see the real (retargeted) message.
- *
- * In memory and bounded: after the plugin restarts, a message retargeted
- * before reads as its stored agent.
- */
 export class CommandMessageAgents {
   private readonly agents = new Map<string, string>();
 
   constructor(private readonly limit = 500) {}
 
-  /** Remember `originalAgent` for a message that now carries another agent. */
   record(messageID: unknown, originalAgent: unknown, currentAgent: unknown): void {
     if (typeof messageID !== "string" || !messageID) return;
     if (typeof originalAgent !== "string" || !originalAgent || originalAgent === currentAgent) return;
@@ -172,15 +99,10 @@ export class CommandMessageAgents {
     }
   }
 
-  /** The agent the message was built with, when this plugin retargeted it. */
   originalOf(messageID: unknown): string | undefined {
     return typeof messageID === "string" ? this.agents.get(messageID) : undefined;
   }
 
-  /**
-   * A `session.messages` response with retargeted user messages reported under
-   * their original agent. Copies what it changes; never mutates the response.
-   */
   restore(response: unknown): unknown {
     if (this.agents.size === 0 || !isRecord(response) || !Array.isArray(response.data)) return response;
     let changed = false;
@@ -195,18 +117,15 @@ export class CommandMessageAgents {
   }
 }
 
-/** Put the recorded feedback into the command's own message. */
 export function appendCommandFeedback(parts: unknown[], feedback: CommandFeedback): void {
   parts.push({ type: "text", text: feedback.text });
 }
 
-/** A model reference as OpenCode 1 user messages carry it. */
 export interface CommandModelRef {
   providerID: string;
   modelID: string;
 }
 
-/** An OpenCode 1 agent listing entry (`GET /agent`), as far as routing reads it. */
 export interface CommandAgentInfo {
   name?: string;
   mode?: string;
@@ -215,10 +134,8 @@ export interface CommandAgentInfo {
   variant?: string;
 }
 
-/** Who answers the feedback, on which model and variant. */
 export interface FeedbackTarget {
   agent: string;
-  /** Undefined when the host could not say; the message keeps its model then. */
   model?: CommandModelRef;
   variant?: string;
 }
@@ -230,27 +147,8 @@ function modelRef(value: unknown): CommandModelRef | undefined {
   return { providerID: value.providerID, modelID };
 }
 
-/**
- * The order OpenCode registers its built-in agents in (`Agent.state`), which is
- * the order `Agent.defaultInfo()` / `defaultAgent()` walk with
- * `Object.values(agents).find(...)`. Config agents come after them; a config
- * entry for a built-in name edits it in place and keeps its position.
- */
 const BUILT_IN_AGENT_ORDER = ["build", "plan", "general", "explore"] as const;
 
-/**
- * How `createUserMessage` picked the variant of a prompt that named none,
- * by OpenCode version (scanned over every v1.x tag of anomalyco/opencode):
- *  - before 1.1.49: never (`variant: input.variant`);
- *  - 1.1.49 to 1.1.53: the agent's variant when the message's model is the
- *    agent's own configured one, with NO check that the model offers it
- *    ("agent-model-unchecked");
- *  - 1.1.54 to 1.3.13: the agent's variant when the message's model offers it,
- *    whichever model that is ("offered");
- *  - 1.3.14 on: offered AND on the agent's own model (`&& same`,
- *    "agent-model").
- * An unknown or unparsable version takes the current rule.
- */
 export type AgentVariantRule = "none" | "agent-model-unchecked" | "offered" | "agent-model";
 
 export function agentVariantRule(hostVersion: string | undefined): AgentVariantRule {
@@ -266,39 +164,12 @@ export function agentVariantRule(hostVersion: string | undefined): AgentVariantR
   return "agent-model";
 }
 
-/**
- * Resolve what OpenCode 1 would have used for a prompt naming `namedAgent`
- * (or no agent) with no model and no variant: the shape of every feedback
- * prompt this plugin used to send. Mirrors `createUserMessage`
- * (`packages/opencode/src/session/prompt.ts`):
- *
- *  - agent: the named one, else `default_agent` from config, else the first
- *    primary, non-hidden agent in OpenCode's own order: the built-ins first
- *    (`BUILT_IN_AGENT_ORDER`), then the listing's order. `GET /agent` sorts
- *    differently (default/`build` first, then by name), which matters when
- *    `build` is disabled or hidden;
- *  - model: `agent.model ?? currentModel(session)` (`lastModel` before 1.18),
- *    the session's stored model, else the last user message's;
- *  - variant: per `agentVariantRule(hostVersion)`; where the rule checks that
- *    the model offers it (`full?.variants?.[agent.variant]`), `modelVariants`
- *    answers that, and undefined there means the host could not list models,
- *    so the agent's own configured variant is kept.
- *
- * Returns undefined when the agent cannot be resolved, in which case the
- * command's message is left exactly as OpenCode built it.
- */
 export function resolveFeedbackTarget(input: {
   namedAgent?: string;
   agents: readonly CommandAgentInfo[];
-  /** `default_agent` from the OpenCode config, when set. */
   defaultAgent?: string;
-  /** The session's current model before the command's message was created. */
   sessionModel?: CommandModelRef;
   modelVariants?: (model: CommandModelRef) => readonly string[] | undefined;
-  /**
-   * The OpenCode version, from the session's own `version` (see
-   * `resolveCommandFeedbackTarget` in index.ts for why not the running host's).
-   */
   hostVersion?: string;
 }): FeedbackTarget | undefined {
   let agent: CommandAgentInfo | undefined;
@@ -320,8 +191,6 @@ export function resolveFeedbackTarget(input: {
   if (rule === "agent-model-unchecked") {
     variant = agentModel ? agent.variant : undefined;
   } else {
-    // The model the variant is checked against: the agent's own under the
-    // current rule, whichever model the message gets under "offered".
     const variantModel = rule === "agent-model" ? agentModel : rule === "offered" ? model : undefined;
     if (variantModel && agent.variant) {
       const offered = input.modelVariants?.(variantModel);
@@ -335,30 +204,14 @@ export function resolveFeedbackTarget(input: {
   };
 }
 
-/** Feedback waiting for its message, with the target resolved at delivery time. */
 export interface PendingCommandFeedback {
   text: string;
   target: FeedbackTarget;
 }
 
-/**
- * Give the command's message the agent, model and variant the feedback prompt
- * would have had (`resolveFeedbackTarget`), so moving the feedback into the
- * command's own turn changes nothing but the number of turns.
- *
- * Where the variant lives depends on the OpenCode version: up to 1.3.x a user
- * message carries it top-level (`info.variant`, set from the command's
- * `input.variant`, i.e. the TUI pick, and read from there by the request);
- * 1.18 moved it into `info.model.variant`. A message that has its own
- * `variant` key is the older shape, and that key is what gets replaced.
- *
- * Applies only to the message that carries `pending.text` in `sessionID`, so
- * an unrelated prompt can never be retargeted. Returns whether it applied.
- */
 export function retargetCommandMessage(input: {
   sessionID: string;
   pending: PendingCommandFeedback;
-  /** `chat.message`'s own input. */
   hook: { sessionID?: unknown };
   message: unknown;
   parts: unknown;

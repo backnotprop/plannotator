@@ -7,8 +7,6 @@ import {
   validateEdits,
 } from "./plan-edits";
 
-// ── applyEdits ─────────────────────────────────────────────────────────────
-
 describe("applyEdits", () => {
   test("initial full write (start=1, no end)", () => {
     const result = applyEdits([], [{ start: 1, content: "# Plan\n\n## Goals\nDo the thing" }]);
@@ -70,8 +68,6 @@ describe("applyEdits", () => {
   });
 });
 
-// ── validateEdits ──────────────────────────────────────────────────────────
-
 describe("validateEdits", () => {
   test("rejects start < 1", () => {
     expect(validateEdits([], [{ start: -5, content: "x" }])).not.toBeNull();
@@ -88,7 +84,6 @@ describe("validateEdits", () => {
 
   test("rejects start beyond file length + 1", () => {
     const lines = ["a", "b", "c"];
-    // file has 3 lines; max valid start is 4 (append); start=5 is beyond
     expect(validateEdits(lines, [{ start: 5, content: "x" }])).not.toBeNull();
   });
 
@@ -134,13 +129,9 @@ describe("validateEdits", () => {
   });
 
   test("passes for empty file with start=1 and end=1 (#742)", () => {
-    // Agent or framework may include end on first call; validation should
-    // not reject it since applyEdits handles this via splice clamping.
     expect(validateEdits([], [{ start: 1, end: 1, content: "# Plan\nGoals" }])).toBeNull();
   });
 });
-
-// ── formatWithLineNumbers ──────────────────────────────────────────────────
 
 describe("formatWithLineNumbers", () => {
   test("formats a single line", () => {
@@ -153,7 +144,6 @@ describe("formatWithLineNumbers", () => {
     const resultLines = result.split("\n");
     expect(resultLines[0]).toBe("1| line1");
     expect(resultLines[8]).toBe("9| line9");
-    // Width is 1, so no leading spaces
     expect(resultLines[0]).not.toMatch(/^ /);
   });
 
@@ -161,7 +151,6 @@ describe("formatWithLineNumbers", () => {
     const content = Array.from({ length: 10 }, (_, i) => `line${i + 1}`).join("\n");
     const result = formatWithLineNumbers(content);
     const resultLines = result.split("\n");
-    // Width is 2, so single-digit lines get a leading space
     expect(resultLines[0]).toBe(" 1| line1");
     expect(resultLines[9]).toBe("10| line10");
   });
@@ -171,12 +160,9 @@ describe("formatWithLineNumbers", () => {
   });
 });
 
-// ── getPlanBackingPath ─────────────────────────────────────────────────────
-
 describe("getPlanBackingPath", () => {
   test("returns path inside data dir active/{project}/_active-plan.md", () => {
     const result = getPlanBackingPath("myproject");
-    // The test preload sandboxes the data dir; never compare against the real one.
     const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
     expect(dataDir).toBeTruthy();
     expect(result).toBe(path.join(dataDir, "active", "myproject", "_active-plan.md"));

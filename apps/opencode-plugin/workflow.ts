@@ -106,7 +106,6 @@ export function isPlanningAgent(
   return !!agentName && options.planningAgentSet.has(agentName);
 }
 
-/** A planning agent reviews plans; only non-planning agents receive an implementation handoff. */
 export function shouldStartImplementationForAgent(
   agentName: string | undefined,
   options: NormalizedWorkflowOptions,

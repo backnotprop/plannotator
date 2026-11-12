@@ -4,7 +4,6 @@ import {
   type V2ContextLike,
 } from "./v2-client";
 
-/** OpenCode's durable model selection associated with an agent. */
 export interface OpenCodeAgentModel {
   providerID: string;
   id: string;
@@ -26,7 +25,6 @@ interface OpenCodeClientLike {
   };
 }
 
-/** What the omitted agent switch would have applied to, used in the warning copy. */
 export type AgentSwitchDelivery = "feedback" | "plan-approval";
 
 export function resolveTargetAgent(agentSwitch?: string): string | undefined {
@@ -46,7 +44,6 @@ function warnAgentUnavailable(
   try {
     void client.app?.log?.({ level: "info", message: `[Plannotator] ${message}` });
   } catch {
-    // OpenCode logging is best-effort.
   }
 
   try {
@@ -57,7 +54,6 @@ function warnAgentUnavailable(
       (result as Promise<unknown>).catch(() => {});
     }
   } catch {
-    // Toast delivery is best-effort.
   }
 }
 
@@ -79,26 +75,12 @@ export async function resolveValidatedTargetAgent(input: {
       return targetAgent;
     }
   } catch {
-    // Treat validation failures as unavailable: better to omit the agent than
-    // send a stale/invalid target that OpenCode may reject.
   }
 
   warnAgentUnavailable(input.client, targetAgent, input.delivery ?? "feedback");
   return undefined;
 }
 
-/**
- * OpenCode 2 agent switch.
- *
- * `ctx.session.switchAgent` arrived with the same plugin-API generation as
- * native command execution, so it is duck-typed rather than imported: on a host
- * without it the plan is still approved and the caller is told the switch was
- * skipped. An agent's configured model is a separate durable session selection
- * in OpenCode, so this applies both selections in the same order as its clients.
- * A missing or failing model capability does not undo a successful agent switch.
- * Returns the agent actually switched to, or undefined when the session's agent
- * was left alone.
- */
 export async function switchV2SessionAgent(input: {
   ctx: V2ContextLike;
   sessionID: string;
