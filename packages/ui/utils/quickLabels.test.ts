@@ -1,12 +1,3 @@
-/**
- * Pure helpers behind Settings → Labels reordering and emoji editing (#1736).
- *
- * Failures this catches: a non-emoji (letters, several emoji) saved as a
- * label's emoji, and therefore prefixed onto every annotation the label
- * creates; a multi-code-point emoji (ZWJ sequence, flag, keycap, skin tone)
- * refused or cut apart; a move that drops or duplicates a label; the key
- * hint drifting from the digit the pickers apply.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   emojiFromFieldInput,

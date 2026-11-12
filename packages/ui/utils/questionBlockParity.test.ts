@@ -1,11 +1,7 @@
 /**
- * Parity between core's `findQuestionBlocks` (what a server uses to locate and
- * verify a question without the UI) and the blocks this package renders
- * (`parseMarkdownToBlocks` + `indexQuestionBlocks`). Both split the document
- * with the shared `@plannotator/core/markdown-structure` helpers; this test is
- * what fails if the two scans ever disagree about which `:::question` lines
- * open a block, where it ends, or which key (including the `-2` suffix) it
- * gets — the failure that would make a server reject an answer the UI sent.
+ * Parity between core's `findQuestionBlocks` (what a server uses to locate and verify a question
+ * without the UI) and the blocks this package renders (`parseMarkdownToBlocks` +
+ * `indexQuestionBlocks`).
  */
 import { describe, expect, test } from "bun:test";
 import { findQuestionBlocks, indexQuestionBlocks } from "@plannotator/core/question-block";
@@ -45,8 +41,6 @@ const uiView = (markdown: string, frontmatter?: boolean) => {
       key: question.key,
       directiveKind: question.directiveKind,
       startLine: block.startLine,
-      // A closed block ends on the `:::` after its body; an unclosed one ran to
-      // the last line.
       endLine: Math.min(block.startLine + bodyLines + 1, total),
     };
   });

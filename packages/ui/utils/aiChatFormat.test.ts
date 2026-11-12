@@ -1,16 +1,4 @@
-/**
- * Ask AI answer rendering: the sanitizer allowlist against what marked writes.
- *
- * What regresses if these fail:
- * - an answer's markdown loses its structure: DOMPurify drops every tag or
- *   attribute missing from CHAT_SANITIZE_CONFIG and keeps only the text, which
- *   is how GFM tables rendered as one run-together line (#2069);
- * - the allowlist is widened past markup (scripts, event handlers, styles).
- *
- * No DOM: happy-dom cannot host DOMPurify (see packages/ui/test-setup/
- * diagramSvg.ts), so this checks the allowlist against marked's own output,
- * the step DOMPurify runs on, instead of running DOMPurify.
- */
+/** Ask AI answer rendering: the sanitizer allowlist against what marked writes. */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { CHAT_SANITIZE_CONFIG, chatMarkdownToHtml, renderChatMarkdown } from './aiChatFormat';

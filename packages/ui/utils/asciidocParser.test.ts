@@ -40,7 +40,6 @@ describe('parseAsciidocToBlocks — listing blocks', () => {
     expect(types(blocks)).toEqual(['code']);
     expect(blocks[0].language).toBe('rust');
     expect(blocks[0].content).toBe('fn main() {}');
-    // Span covers the attribute line through the closing delimiter.
     expect(blocks[0].startLine).toBe(1);
     expect(blocks[0].sourceLineCount).toBe(4);
   });
@@ -365,7 +364,6 @@ describe('parseAsciidocToBlocks — real-world structure', () => {
   test('an author line without an email is consumed; a section right under the title is not', () => {
     expect(types(parse('= Title\nJane Doe\nv2.1\n\nBody.'))).toEqual(['heading', 'paragraph']);
     expect(parse('= Title\n== Section\nBody.').map((b) => b.content)).toEqual(['Title', 'Section', 'Body.']);
-    // Attribute entries end the lookup: a later directive is not an author line.
     expect(parse('= Title\n:icons: font\nifndef::icons[]\nendif::[]').map((b) => b.content)).toEqual([
       'Title',
       '`ifndef::icons[]`',

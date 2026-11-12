@@ -1,7 +1,6 @@
 /**
- * Share links and quick labels (#2626): a label's tip is the instruction the
- * agent gets with the label, so a link must carry it. It rides an optional
- * slot after the label flag, so links made before it keep decoding as before.
+ * Share links and quick labels: a label's tip is the instruction the agent gets with the label,
+ * so a link must carry it.
  */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation } from '../types';
@@ -24,7 +23,6 @@ describe('sharing quick labels', () => {
   });
 
   test('a link encoded before the tip slot still decodes to the same label', async () => {
-    // The pre-#2626 encoding: the flag is the last slot.
     const old: ShareableAnnotation[] = [['C', 'three retries', '🔍 Verify this', null, undefined, 1]];
     const payload = (await decompress(await compress({ p: '# Plan', a: old }))) as SharePayload;
     const [restored] = fromShareable(payload.a);

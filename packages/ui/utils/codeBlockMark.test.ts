@@ -30,8 +30,6 @@ describe.if(hasDom)('paintCodeBlockMark', () => {
     expect(mark.tagName).toBe('MARK');
     expect(mark.dataset.bindId).toBe('ann-1');
     expect(mark.className).toBe('annotation-highlight deletion');
-    // The point of moving children instead of flattening: the palette's
-    // colours survive being annotated (and being re-themed).
     expect(mark.querySelector('span[style*="#79c0ff"]')).not.toBeNull();
     expect(code.textContent).toBe('const x = 1');
   });

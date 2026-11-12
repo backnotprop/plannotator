@@ -1,18 +1,3 @@
-/**
- * Identity generator slot (utils/generateIdentity.ts) and its eager entry.
- *
- * What regresses if these fail:
- * - the built-in fallback stops producing the `adjective-noun-tater` shape
- *   synchronously (configStore persists the first name to the cookie during
- *   the first render-time settings read, so an async or malformed name would
- *   be a visible identity change);
- * - importing `identity-tater` no longer registers the full dictionary, which
- *   would silently move Plannotator's names onto the 16 x 16 pool;
- * - `configurePlannotatorUI({ identityGenerator })` is ignored.
- *
- * Bun shares one process across files: the generator is restored after each
- * test so files that rely on the dictionary keep it.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   FALLBACK_IDENTITY_POOL,
@@ -48,16 +33,12 @@ describe('fallback generator', () => {
 
 describe('identity-tater eager entry', () => {
   test('importing it registers the full dictionary generator', () => {
-    // The import at the top of this file already ran the side effect once;
-    // re-registering here makes the assertion independent of test order.
     setIdentityGenerator(generateTaterIdentity);
     expect(getIdentityGenerator()).toBe(generateTaterIdentity);
     expect(generateIdentity()).toMatch(TATER);
   });
 
   test('the dictionary generator draws from beyond the fallback pool', () => {
-    // 1,400+ adjectives against a 16-word pool: 64 draws all inside the pool
-    // has probability well under 1e-100, so this is deterministic in practice.
     const pool = new Set<string>(FALLBACK_IDENTITY_POOL.adjectives);
     const outside = Array.from({ length: 64 }, () => generateTaterIdentity()).some((name) => {
       const adjective = name.slice(0, name.indexOf('-'));

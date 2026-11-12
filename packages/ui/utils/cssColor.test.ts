@@ -1,12 +1,3 @@
-/**
- * The colour toolkit `mermaidTheme.ts` is built on.
- *
- * What regresses if these fail: a theme token written in a syntax the parser
- * mis-reads (an `oklch()` palette, an alpha hex like `#ffffff99`, a browser's
- * computed `color(srgb ...)`) would silently produce a wrong diagram colour or
- * a wrong contrast verdict, and the guard would then pass unreadable pairs.
- * No DOM required.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   compositeOver,
@@ -33,7 +24,6 @@ describe('parseCssColor', () => {
     expect(hex('white')).toBe('#ffffff');
     expect(hex('color(srgb 1 0 0)')).toBe('#ff0000');
     expect(hex('color(srgb-linear 1 1 1)')).toBe('#ffffff');
-    // oklch white / black are the anchors of the transform.
     expect(hex('oklch(1 0 0)')).toBe('#ffffff');
     expect(hex('oklch(0 0 0)')).toBe('#000000');
     // Plannotator's own dark background; the round trip through OKLab must
@@ -71,7 +61,6 @@ describe('contrast and mixing', () => {
     expect(contrastRatio(white, black)).toBeCloseTo(21, 5);
     expect(contrastRatio(black, white)).toBeCloseTo(21, 5);
     expect(contrastRatio(white, white)).toBeCloseTo(1, 5);
-    // #767676 on white is the canonical 4.54:1 AA boundary.
     expect(contrastRatio(parseCssColor('#767676')!, white)).toBeCloseTo(4.54, 1);
   });
 

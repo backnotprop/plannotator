@@ -1,12 +1,3 @@
-/**
- * Answers to `:::question` blocks in the three exporters.
- *
- * What regresses if this fails: answers get numbered as ordinary feedback
- * (the agent reads "Feedback on: <prompt>" instead of an answer), the count
- * line counts them, an answers-only session exports "No changes detected."
- * and the answers never reach the agent, or a document with unanswered
- * questions and no feedback stops exporting "No changes detected.".
- */
 import { describe, expect, test } from 'bun:test';
 import { indexQuestionBlocks, type QuestionAnswer } from '@plannotator/core/question-block';
 import { AnnotationType, type Annotation } from '../types';

@@ -1,13 +1,3 @@
-/**
- * The composer's token highlight ranges (DOM-free).
- *
- * What these catch: a chip painted over bytes that are no longer the token
- * (the caret would then drift from a highlight that means nothing), two
- * sources double-claiming the same bytes and producing nested or overlapping
- * spans, a stale range computed for an older text running past the end, and
- * the regression the merge exists to prevent — a single skill source no
- * longer behaving exactly like the pre-refactor loop.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   mentionTokenRanges,
@@ -38,7 +28,6 @@ const skill = (start: number, end: number, name: string): SkillReferenceToken =>
   entry: entry(name),
 });
 
-/** The substrings the overlay actually paints, in document order. */
 function painted(text: string, ranges: readonly ComposerTokenRange[]): string[] {
   return ranges.map((r) => text.slice(r.start, r.end));
 }
@@ -60,7 +49,6 @@ describe('mentionTokenRanges', () => {
     const text = '@Dana Ruiz and @Marcus Chen and @Dana Ruiz again';
     const ranges = mentions(text, [person('u1', 'Marcus Chen'), person('u2', 'Dana Ruiz')]);
     expect(painted(text, ranges)).toEqual(['@Dana Ruiz', '@Marcus Chen', '@Dana Ruiz']);
-    // Document order, whatever order the people were listed in.
     expect(ranges.map((r) => r.start)).toEqual([0, 15, 32]);
   });
 
@@ -80,8 +68,6 @@ describe('mentionTokenRanges', () => {
   });
 
   test('a deleted token is no longer a chip', () => {
-    // The person is still in the list; the body no longer names them, which
-    // is exactly what `survivingMentions` reports to the host.
     expect(mentions('never mind', [person('u1', 'Marcus Chen')])).toEqual([]);
   });
 
@@ -125,7 +111,6 @@ describe('mergeTokenRanges with both sources', () => {
 
   test('when two sources claim the same bytes the first group wins, and nothing nests', () => {
     const text = 'ping @Marcus Chen';
-    // A pathological skill token over the same span: priority decides.
     const ranges = mergeTokenRanges(text, [
       skillTokenRanges([skill(5, 17, 'anything')]),
       mentionTokenRanges(text, people),

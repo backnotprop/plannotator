@@ -1,7 +1,7 @@
 /**
- * The alert title-line grammar is a byte-level contract shared with host
- * editors (they write the bytes this parser reads), so each rule is pinned:
- * a change here must be a deliberate grammar change, not a drift.
+ * The alert title-line grammar is a byte-level contract shared with host editors (they write the
+ * bytes this parser reads), so each rule is pinned: a change here must be a deliberate grammar
+ * change, not a drift.
  */
 import { describe, expect, test } from 'bun:test';
 import { parseAlertTitleLine } from './alertTitle';

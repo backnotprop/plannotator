@@ -1,20 +1,3 @@
-/**
- * Theme-aware Mermaid mapping (utils/mermaidTheme.ts).
- *
- * What regresses if these fail:
- * - a diagram family (sequence, gitGraph, pie, ...) drops out of the mapping
- *   and silently falls back to Mermaid's built-in palette in one theme;
- * - the base theme stops following the resolved mode, so light palettes get
- *   Mermaid's dark derivations for everything the mapping leaves alone;
- * - the fallback contract breaks: a host without theme tokens would get a
- *   dynamic config (or a second `initialize`) instead of today's static one;
- * - the contrast guard stops holding, so a palette whose tokens are close in
- *   luminance ships unreadable labels or invisible edges. The sweep below runs
- *   the guard over every palette shipped in `packages/ui/themes`, in both
- *   modes, so a new palette cannot regress it either.
- *
- * No DOM required: the tokens are read from the theme CSS files as text.
- */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,15 +24,13 @@ import {
 const HEX = /^#[0-9a-f]{6}$/;
 
 /**
- * Every shipped palette, both modes. Reads the tokens straight out of the CSS
- * so a palette added later is swept automatically (by the contrast guard AND
- * by the shadow sweep below).
+ * Reads the tokens straight out of the CSS so a palette added later is swept automatically (by
+ * the contrast guard AND by the shadow sweep below).
  */
 const themesDir = join(import.meta.dir, '..', 'themes');
 const themeFiles = readdirSync(themesDir).filter((f) => f.endsWith('.css')).sort();
 expect(themeFiles.length).toBeGreaterThan(30);
 
-/** First rule whose selector list names `selector` (some files write `.theme-x,\n.theme-x.light {`). */
 function tokensFromCss(css: string, selector: string): MermaidThemeTokens | undefined {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
   for (const rule of stripped.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
@@ -62,7 +43,6 @@ function tokensFromCss(css: string, selector: string): MermaidThemeTokens | unde
   return undefined;
 }
 
-/** The Plannotator base palette, as `themes/plannotator.css` writes it. */
 const PLANNOTATOR_DARK: MermaidThemeTokens = {
   background: 'oklch(0.15 0.02 260)',
   foreground: 'oklch(0.90 0.01 260)',
@@ -101,10 +81,8 @@ const PLANNOTATOR_LIGHT: MermaidThemeTokens = {
 };
 
 /**
- * Every theme variable Mermaid documents per family (docs: "Theme Variables",
- * `theme-dark.js` / `theme-default.js` in 11.x). The mapping must set each one
- * explicitly so no family inherits a base-theme derivation from a colour the
- * palette never chose.
+ * The mapping must set each one explicitly so no family inherits a base-theme derivation from a
+ * colour the palette never chose.
  */
 const DOCUMENTED_VARIABLES = {
   general: [
@@ -200,7 +178,6 @@ describe('buildMermaidThemeVariables', () => {
     }
     expect((vars.xyChart as { plotColorPalette: string }).plotColorPalette.split(',')).toHaveLength(12);
     expect(vars.darkMode).toBe(true);
-    // Nothing handed to Mermaid may still be in a syntax its colour library cannot read.
     const flat = JSON.stringify(vars);
     expect(flat).not.toContain('oklch(');
     expect(flat).not.toContain('var(');
@@ -214,7 +191,6 @@ describe('buildMermaidThemeVariables', () => {
     expect(light.themeVariables.darkMode).toBe(false);
     expect(dark.themeVariables.fontFamily).toBe(PLANNOTATOR_DARK['font-sans']);
     expect('fontFamily' in light.themeVariables).toBe(false);
-    // Node fill is the card token, not a fixed slate, in both modes.
     expect(dark.themeVariables.nodeBkg).toBe(toHex(parseCssColor(PLANNOTATOR_DARK.card)!));
     expect(dark.themeVariables.nodeBkg).not.toBe(MERMAID_CONFIG.themeVariables!.mainBkg);
     expect(light.themeVariables.nodeBkg).toBe('#ffffff');
@@ -225,7 +201,6 @@ describe('buildMermaidThemeVariables', () => {
     expect(buildMermaidThemeVariables({}, 'dark')).toBeNull();
     expect(buildMermaidThemeVariables({ foreground: '#fff' }, 'dark')).toBeNull();
     expect(buildMermaidThemeVariables({ background: 'var(--x)', foreground: '#fff' }, 'dark')).toBeNull();
-    // Identity, not a copy: the fallback IS the pinned static config.
     expect(buildMermaidConfig(null)).toBe(MERMAID_CONFIG);
     const dynamic = buildMermaidConfig(buildMermaidThemeVariables(PLANNOTATOR_DARK, 'dark'));
     expect(dynamic.securityLevel).toBe('strict');
@@ -244,8 +219,8 @@ describe('buildMermaidThemeVariables', () => {
   test('an alpha muted-foreground is composited, never passed through with alpha', () => {
     const spec = buildMermaidThemeVariables({ background: '#000000', foreground: '#ffffff', 'muted-foreground': '#ffffff99' }, 'dark')!;
     expect(spec.themeVariables.lineColor).toMatch(HEX);
-    // #ffffff99 over black is #999999, a neutral grey; the guard may lift it
-    // toward the foreground but never re-introduces alpha or a hue.
+    // #ffffff99 over black is, a neutral grey; the guard may lift it toward the foreground but
+    // never re-introduces alpha or a hue.
     const c = parseCssColor(spec.themeVariables.lineColor as string)!;
     expect(c.r).toBeCloseTo(c.g, 2);
     expect(c.g).toBeCloseTo(c.b, 2);
@@ -263,9 +238,7 @@ describe('contrast guard', () => {
     const repaired = ensureContrast(grey, white, 4.5, [black, white]);
     const r = contrastRatio(repaired, white);
     expect(r).toBeGreaterThanOrEqual(4.5);
-    // Smallest step: not slammed all the way to the ink.
     expect(r).toBeLessThan(6);
-    // First ink cannot reach the ratio (white on white): falls through to the second.
     const flipped = ensureContrast(grey, white, 4.5, [white, black]);
     expect(contrastRatio(flipped, white)).toBeGreaterThanOrEqual(4.5);
   });
@@ -349,7 +322,6 @@ describe('contrast guard', () => {
           if (r < MERMAID_LINE_CONTRAST_MIN) failures.push(`${stroke} vs ${canvas}: ${r.toFixed(2)}`);
         }
         expect(failures).toEqual([]);
-        // The categorical scale is twelve distinct fills.
         const scale = new Set(Array.from({ length: 12 }, (_, i) => vars[`cScale${i}`]));
         expect(scale.size).toBe(12);
       });
@@ -358,14 +330,9 @@ describe('contrast guard', () => {
 });
 
 /**
- * Label wrap width (#2064). Mermaid 12 wraps node labels at 120 px (11 used
- * 200), which at Plannotator's 16 px labels splits about eight CJK characters
- * and short Latin labels. 140 is an owner-approved value, pinned on purpose.
- *
- * What regresses if these fail: one of the two `initialize` paths (the static
- * config the lazy loader and a host without theme tokens use, or the themed
- * config `applyMermaidTheme` passes) loses the width and labels wrap at
- * Mermaid's default again.
+ * What regresses if these fail: one of the two `initialize` paths (the static config the lazy
+ * loader and a host without theme tokens use, or the themed config `applyMermaidTheme` passes)
+ * loses the width and labels wrap at Mermaid's default again.
  */
 describe('label wrap width', () => {
   test('the owner-approved width is 140 px', () => {
@@ -396,7 +363,6 @@ describe('applyMermaidTheme', () => {
     __resetMermaidThemeForTests();
     try {
       const runtime = fakeRuntime();
-      // No tokens are defined in this process (no DOM, or a DOM without theme.css).
       expect(applyMermaidTheme(runtime, mermaidThemeKey('plannotator', 'dark'))).toBe('static');
       expect(applyMermaidTheme(runtime, mermaidThemeKey('plannotator', 'dark'))).toBe('unchanged');
       expect(applyMermaidTheme(runtime, mermaidThemeKey('github', 'light'))).toBe('static');
@@ -421,22 +387,7 @@ describe('applyMermaidTheme', () => {
   });
 });
 
-/**
- * Node drop shadow (the `dropShadow` theme variable).
- *
- * What regresses if these fail:
- * - the shipped look changes: Mermaid 12's neo shadow comes back at full
- *   strength (the grey halo), or disappears entirely;
- * - the shadow is derived in the wrong polarity, which on a dark page paints a
- *   black shadow on a near-black ground — a valid filter that renders nothing,
- *   the exact bug the lab found;
- * - a shadow amount stops reaching the runtime because the cache key ignores
- *   it, so the setting silently does nothing until the palette changes;
- * - the shadow leaks into a fill or a label colour (it is a paint-time filter
- *   and must touch nothing else).
- */
 describe('node shadow', () => {
-  /** The `rgba(r, g, b, a)` inside a `drop-shadow(x y blur rgba(...))`. */
   function shadowColor(filter: string): { color: RgbColor; alpha: number } {
     const m = /rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/u.exec(filter);
     if (!m) throw new Error(`no rgba in ${filter}`);
@@ -456,7 +407,6 @@ describe('node shadow', () => {
     expect(buildMermaidShadow(ground, 1)).toStartWith('drop-shadow(1px 2px 2px ');
     expect(buildMermaidShadow(ground, 0.7)).toStartWith('drop-shadow(0.79px 1.58px 1.58px ');
     expect(buildMermaidShadow(ground, 0)).toBe(false);
-    // Out of range is clamped, not trusted.
     expect(buildMermaidShadow(ground, 4)).toBe(buildMermaidShadow(ground, 1));
     expect(buildMermaidShadow(ground, -1)).toBe(false);
   });
@@ -472,12 +422,6 @@ describe('node shadow', () => {
     expect(spec.shadowAmount).toBe(0);
   });
 
-  /**
-   * Fill / label fingerprint: every variable the mapping produces EXCEPT the
-   * two shadow keys, at amount 0 against the shipped 70. The shadow is a
-   * paint-time filter; if a change to it ever moved a fill or a label colour,
-   * this is what catches it.
-   */
   const fingerprint = (vars: Record<string, unknown>) =>
     Object.entries(vars)
       .filter(([k]) => k !== 'dropShadow' && k !== 'nodeShadow')
@@ -507,7 +451,6 @@ describe('node shadow', () => {
     expect(shadowAmountFromKey('light:one-light')).toBe(DEFAULT_MERMAID_SHADOW_AMOUNT);
   });
 
-  /** Every shipped palette, both modes: a shadow at the default, in the direction that reads. */
   for (const file of themeFiles) {
     const css = readFileSync(join(themesDir, file), 'utf8');
     const id = file.replace(/\.css$/, '');
@@ -525,7 +468,6 @@ describe('node shadow', () => {
         const { color, alpha } = shadowColor(filter as string);
         const groundL = relativeLuminance(ground);
         if (isDarkBackground(ground)) {
-          // A shadow on a dark page LIFTS: darker than the ground is invisible.
           expect(relativeLuminance(color)).toBeGreaterThan(groundL);
           expect(alpha).toBeCloseTo(0.684, 3);
         } else {
@@ -534,7 +476,6 @@ describe('node shadow', () => {
         }
         // Never Mermaid's fixed grey: the tint comes from the palette.
         expect(filter as string).not.toContain('185, 185, 185');
-        // Fills and labels are identical with the shadow off: paint only.
         const off = buildMermaidThemeVariables(tokens, mode, { shadowAmount: 0 })!.themeVariables;
         expect(fingerprint(spec.themeVariables)).toBe(fingerprint(off));
       });

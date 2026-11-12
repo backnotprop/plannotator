@@ -27,8 +27,6 @@ const BEFORE_PUSH = [
   patch('src/gone.ts', '@@ -1,1 +1,1 @@', ['-old', '+new']),
 ].join('');
 
-// A teammate pushed: a.ts line 12 changed text, lines 10-11 unchanged, and
-// gone.ts left the diff entirely.
 const AFTER_PUSH = patch('src/a.ts', '@@ -10,4 +10,5 @@ function f() {', [
   ' const a = 1;',
   '-const b = 2;',
@@ -109,7 +107,6 @@ describe('restoring a PR draft against a changed patch', () => {
   });
 
   test('a common line whose own text survives but whose surroundings changed is outdated, not "still valid"', () => {
-    // Line 14 is a lone `}` in both diffs; the line above it changed.
     const onBrace = { ...line({ id: 'brace', lineStart: 14, lineEnd: 14 }) };
     const stamped = { ...onBrace, ...captureAnchor(onBrace, parseDiffToFiles(patch('src/a.ts', '@@ -12,3 +12,3 @@', [
       ' const b = 3;',
@@ -134,10 +131,8 @@ describe('restoring a PR draft against a changed patch', () => {
     const original = parseDiffToFiles(patch('src/a.ts', '@@ -20,4 +20,4 @@ function load() {', body));
     const stamped = { ...onReturn, ...captureAnchor(onReturn, original), anchorSnapshot: 's1' };
     expect(stamped.anchorContext?.hunk).toBe('function load() {');
-    // Same lines, same numbers — but the hunk is now inside save().
     const moved = parseDiffToFiles(patch('src/a.ts', '@@ -20,4 +20,4 @@ function save() {', body));
     expect(markOutdatedCodeAnnotations([stamped], moved, undefined, 's2')[0].outdated).toBe(true);
-    // Same function: still valid.
     expect(markOutdatedCodeAnnotations([stamped], original, undefined, 's2')[0].outdated).toBeUndefined();
   });
 
@@ -185,14 +180,11 @@ describe('what may be posted inline on a PR', () => {
   test('not when outdated, or when its PR is known to have moved to another snapshot', () => {
     expect(canPostInline({ ...line({ prUrl: A }), anchorSnapshot: 'sA' }, known, A)).toBe(true);
     expect(canPostInline({ ...line({ prUrl: B }), anchorSnapshot: 'sB' }, known, A)).toBe(true);
-    // Anchored on a diff of B we no longer see (B was pushed since).
     expect(canPostInline({ ...line({ prUrl: B }), anchorSnapshot: 'old' }, known, A)).toBe(false);
     expect(canPostInline({ ...line({ prUrl: A }), anchorSnapshot: 'sA', outdated: true }, known, A)).toBe(false);
   });
 
   test('a PR whose snapshot this page has not seen is trusted (after a reload only the on-screen PR is known)', () => {
-    // Regression (#1592): a valid comment on another PR was posted as Outdated
-    // after a tab reload, though that PR never changed.
     expect(canPostInline({ ...line({ prUrl: 'https://github.com/acme/widgets/pull/9' }), anchorSnapshot: 'x' }, known, A)).toBe(true);
   });
 
@@ -214,8 +206,7 @@ describe('viewed marks restored from a draft', () => {
   const files = parseDiffToFiles(AFTER_PUSH);
 
   test('after a push, a file still in the diff is not re-marked Viewed', () => {
-    // Regression (#1592): restoring after a push re-marked a.ts Viewed though
-    // the push changed it.
+    // Regression: restoring after a push re-marked a.ts Viewed though the push changed it.
     expect(restorableViewedFiles(['src/a.ts', 'src/gone.ts'], true, files)).toEqual(['src/gone.ts']);
   });
 

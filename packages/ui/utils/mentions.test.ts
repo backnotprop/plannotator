@@ -1,10 +1,3 @@
-/**
- * The `@` grammar as pure functions. These guard the three rules a host's
- * mention source depends on and that a refactor could silently break:
- * the word-boundary email guard, the users-only / not-already-tagged filter,
- * and the surviving-token rule that keeps the body and the reported ids from
- * ever disagreeing about who was named.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   applyMentionPick,
@@ -71,7 +64,6 @@ describe('mentionMatches', () => {
     const pi = person({ id: 'pi-1', label: 'Pi', detail: 'infra · idle', kind: 'agent' });
     expect(mentionMatches([marcus, bot, pi], trigger(''), new Set(), ['agent']).map((p) => p.id)).toEqual(['cred_1', 'pi-1']);
     expect(mentionMatches([marcus, bot, pi], trigger(''), new Set(), ['user', 'agent']).map((p) => p.id)).toEqual(['user_1', 'cred_1', 'pi-1']);
-    // "i" is in Pi's detail ("infra · idle") and in the bot's label; with matchDetail false only labels count.
     expect(mentionMatches([bot, pi], trigger('infra'), new Set(), ['agent']).map((p) => p.id)).toEqual(['pi-1']);
     expect(mentionMatches([bot, pi], trigger('infra'), new Set(), ['agent'], false).map((p) => p.id)).toEqual([]);
   });
@@ -115,7 +107,6 @@ describe('survivingMentions', () => {
   });
 
   test('with no longer tagged token, a tag survives exactly as the substring rule kept it', () => {
-    // The rule before: a token anywhere in the text. Nothing it kept may be dropped.
     const before = (text: string, tagged: readonly MentionPerson[]) => tagged.filter((p) => text.includes(mentionToken(p)));
     const ann = person({ id: 'ann', label: 'Ann' });
     const paren = person({ id: 'p', label: 'Review (Claude Code)' });

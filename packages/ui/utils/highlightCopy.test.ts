@@ -1,12 +1,8 @@
 /**
- * writeHighlightCopy: Ctrl+C / Cmd+C while a highlight stands in for the
- * person's selection (DOM-gated, DOM_TESTS=1).
- *
- * Failures to catch: the person's own selection (text selected in a field, or
- * anywhere in the page) loses to the highlight, a caret-only field (the empty
- * composer) copies nothing, a field that is not the composer (a reply box)
- * loses its own copy, another handler's copy is overwritten, or the copy
- * grows an html part (rich text is the toolbar button's alone, #2191).
+ * Failures to catch: the person's own selection (text selected in a field, or anywhere in the
+ * page) loses to the highlight, a caret-only field (the empty composer) copies nothing, a field
+ * that is not the composer (a reply box) loses its own copy, another handler's copy is
+ * overwritten, or the copy grows an html part.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { HIGHLIGHT_COMPOSER_ATTR, writeHighlightCopy } from './highlightCopy';
@@ -19,7 +15,6 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges();
 });
 
-/** A copy event fired at `target`, recording what a handler writes. */
 function copyAt(target: EventTarget, prevented = false) {
   const data = new Map<string, string>();
   const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
@@ -29,7 +24,6 @@ function copyAt(target: EventTarget, prevented = false) {
   return { event, data };
 }
 
-/** A field in the comment composer (CommentPopover's root), or, with `parent`, elsewhere. */
 function textarea(value: string, start: number, end: number, parent?: HTMLElement) {
   const area = document.createElement('textarea');
   area.value = value;

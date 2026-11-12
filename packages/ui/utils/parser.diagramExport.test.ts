@@ -1,12 +1,3 @@
-/**
- * The export's location line for a comment made on a rendered diagram part.
- *
- * What regresses: the agent reading the feedback sees `Feedback on:
- * "Approve?"` with no way to find the node in the fence — the part id and
- * the document line are the grep handles; or a malformed anchor from
- * another writer throws instead of being skipped; or every other
- * annotation's export changes.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { exportAnnotationEntry, exportAnnotations, exportLinkedDocAnnotations, parseMarkdownToBlocks } from './parser';
@@ -33,7 +24,6 @@ describe('exportAnnotations: diagram anchors', () => {
     };
     const out = exportAnnotations(blocks(), [ann]);
     expect(out).toContain('Feedback on: "Approve?"\nDiagram node Approve? (D), line 7\n> Rename this step');
-    // The fence's own line range still leads the heading.
     expect(out).toContain('(lines 5–9) Feedback on: "Approve?"');
   });
 
@@ -57,9 +47,8 @@ describe('exportAnnotations: diagram anchors', () => {
 });
 
 describe('the other two export paths carry the location line too', () => {
-  // What regresses: a folder / linked-doc annotate submit, and a single
-  // copied entry, lose `Diagram node Approve? (D), line 7` while the main
-  // export keeps it.
+  // What regresses: a folder / linked-doc annotate submit, and a single copied entry, lose
+  // `Diagram node Approve?
   const ann = (blockId: string): Annotation => ({
     id: 'd1',
     blockId,

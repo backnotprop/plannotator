@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { wordSpanAt } from './wordAtPoint';
 
-// Click-a-word highlights exactly the word under the pointer: these pin which
-// characters count as one word, with and without Intl.Segmenter.
 describe('wordSpanAt', () => {
   const word = (text: string, index: number, seg = true) => {
     const span = wordSpanAt(text, index, seg);

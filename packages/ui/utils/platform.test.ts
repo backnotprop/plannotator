@@ -1,8 +1,6 @@
 /**
- * rootPlatform decides which pages get the Linux-only font-feature rule
- * (#1961): desktop Linux must, and macOS, iOS, Windows, Android and ChromeOS
- * must not (their look stays as it was). Real navigator values, including the
- * ones that also say "Linux" (Android, ChromeOS).
+ * rootPlatform decides which pages get the Linux-only font-feature rule: desktop Linux must, and
+ * macOS, iOS, Windows, Android and ChromeOS must not (their look stays as it was).
  */
 import { expect, test } from 'bun:test';
 import { rootPlatform } from './platform';

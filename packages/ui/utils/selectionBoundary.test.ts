@@ -1,16 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { dropEmptyNodes, trimWhitespaceOnlyBoundaryNodes, type SelectedNodeLike } from './selectionBoundary';
 
-// Failure this guards: a triple-click leaves the selection's end boundary on the
-// NEXT block's text node at offset 0, so web-highlighter's splitText(0) hands the
-// painter an empty (or pure-indentation) boundary node. Wrapping that node in a
-// styled <mark> paints a visible sliver on the following line. A boundary node
-// with no non-whitespace character must never reach the painter, while
-// whitespace BETWEEN real nodes must survive, or genuine multi-node selections
-// lose their inter-node spacing.
-//
-// Lives here rather than in useAnnotationHighlighter.test.tsx because that suite
-// runs only with the browser test environment switched on and so guards nothing in CI.
+// Failure this guards: a triple-click leaves the selection's end boundary on the NEXT block's text
+// node at offset 0, so web-highlighter's splitText(0) hands the painter an empty (or
+// pure-indentation) boundary node.
 
 const nodes = (...texts: (string | null)[]): SelectedNodeLike[] =>
   texts.map((textContent) => ({ $node: { textContent } }));
@@ -69,10 +62,6 @@ describe('trimWhitespaceOnlyBoundaryNodes', () => {
   });
 });
 
-// Failure this guards: a selection over a highlight inside a highlight takes the
-// empty text nodes the library's own splits left in the inner wrapper, between
-// real nodes; wrapping them throws (useAnnotationHighlighter.reselectOverlap.test.tsx
-// drives the library itself).
 describe('dropEmptyNodes', () => {
   test('drops empty nodes between real ones, and keeps a space', () => {
     expect(texts(dropEmptyNodes(nodes('Stripe answers ', '', 'idempotency key', '', ' ', 'in flight')))).toEqual([

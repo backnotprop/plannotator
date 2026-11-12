@@ -1,17 +1,3 @@
-/**
- * Cross-file annotation scope.
- *
- * Regressions guarded:
- *  - The open document must sort first no matter where its path falls
- *    alphabetically; everything else is ordered by path so the list is stable
- *    across navigations (a creation-time or Map-insertion order would reshuffle
- *    the panel every time a file is opened).
- *  - Documents with no feedback must not produce empty groups: the view answers
- *    "where is my feedback", and empty headers would bury the real ones.
- *  - The default-scope rule: an open file with nothing on it while other files
- *    carry feedback is exactly the situation the feature exists for, so it must
- *    open on All files even though the stored preference says This file.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation } from '../types';
 import {
@@ -56,8 +42,6 @@ describe('groupAnnotationsByDocument', () => {
     expect(groups[2].annotations).toHaveLength(2);
   });
 
-  // A review of several files reads in the order the files were given: the
-  // open one keeps its place instead of jumping to the top.
   test('a fixed order (a bundle) wins over open-first and path order', () => {
     const groups = groupAnnotationsByDocument(
       [
@@ -88,7 +72,6 @@ describe('groupAnnotationsByDocument', () => {
   test('labels documents relative to the deepest containing root', () => {
     expect(documentLabel('/repo/docs/deep/notes.md', ['/repo'])).toBe('docs/deep/notes.md');
     expect(documentLabel('/repo/docs/deep/notes.md', ['/repo', '/repo/docs'])).toBe('deep/notes.md');
-    // No root contains it — the bare file name is still a usable handle.
     expect(documentLabel('/elsewhere/notes.md', ['/repo'])).toBe('notes.md');
   });
 
@@ -106,9 +89,6 @@ describe('groupAnnotationsByDocument', () => {
 
 describe('buildAnnotationDocumentGroups', () => {
   test('the pathless root document still forms a group, first and current', () => {
-    // Plan review: the open document is the plan, which has no path of its own.
-    // Keyed by path alone it contributed no group, so switching to All files
-    // hid every comment the reviewer had made on the plan in front of them.
     const groups = buildAnnotationDocumentGroups({
       cached: [['/repo/linked.md', [ann('l1')]]],
       current: {
@@ -122,8 +102,6 @@ describe('buildAnnotationDocumentGroups', () => {
     expect(groups.map((g) => g.label)).toEqual(['(this plan)', 'linked.md']);
     expect(groups[0].isCurrent).toBe(true);
     expect(groups[0].annotations.map((a) => a.id)).toEqual(['p1', 'p2']);
-    // `isCurrent` is what routes edit/delete to the live host state rather than
-    // to the cross-document store, which has no entry for a pathless document.
     expect(groups.filter((g) => g.isCurrent)).toHaveLength(1);
   });
 

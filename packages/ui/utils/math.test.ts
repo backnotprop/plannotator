@@ -1,28 +1,3 @@
-/**
- * Math renderer slot (utils/math.ts).
- *
- * What regresses if these fail:
- * - the empty slot no longer renders an addressable placeholder (annotation
- *   restore and block targeting key on the wrapper attributes), or leaks the
- *   TeX as markup instead of text;
- * - a filled slot no longer renders KaTeX SYNCHRONOUSLY in the same render
- *   (this is the whole basis of Plannotator's byte-identical first paint);
- * - the loader stops being idempotent or stops retrying after a rejection;
- * - the host loader seam is ignored;
- * - the security pin (`trust: false`, `throwOnError: false`) stops being applied
- *   to a host-registered renderer.
- *
- * No DOM required: everything renders through `renderToStaticMarkup`, which
- * is a single synchronous render pass (no effects), so "in the same render"
- * is exactly what it measures.
- *
- * Bun runs every test file in one process, so the slot is saved on entry and
- * restored after each test: other files (InlineMarkdown.test.ts, the DOM
- * first-paint test) rely on the registration they set up themselves.
- * `resetMathRenderer()` deliberately keeps a registered loader (0.34.0), so
- * the loader this file registers is dropped explicitly with
- * `setMathRendererLoader(null)` around every test.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -159,17 +134,12 @@ describe('loadMathRenderer', () => {
   });
 
   test('with no loader registered, the default path loads KaTeX', async () => {
-    // Guards the module split: the default lives in ./math-default-loader and
-    // is wired back in only through the null-loader branch.
     expect(await loadMathRenderer()).toBe(katex);
     expect(getMathRendererSource()).toBe('loader');
   });
 
   test('a registered loader is never backfilled by the default, even after it rejects', async () => {
-    // The observable that would regress if the default `import('katex')`
-    // became reachable while a host loader is registered: a host whose chunk
-    // failed would see KaTeX silently appear in the slot (and, in a chunking
-    // build, an unrequested chunk request). The slot must stay empty.
+    // The slot must stay empty.
     setMathRendererLoader(async () => {
       throw new Error('host chunk failed');
     });
@@ -192,11 +162,7 @@ describe('loadMathRenderer', () => {
 });
 
 describe('resetMathRenderer', () => {
-  // The bug this pins (0.33.0 adoption feedback): reset used to null the
-  // registered loader too, so a host test harness that reset the renderer
-  // between cases silently fell back to the package default `import('katex')`
-  // on the next math render. Reset means the renderer and its source, never
-  // the seam a host configured once at startup.
+  // Reset means the renderer and its source, never the seam a host configured once at startup.
   test('keeps the registered loader: the next load uses it, never the default', async () => {
     const hostRenderer: MathRenderer = {
       renderToString: (tex) => `<span class="host-math">${tex}</span>`,
@@ -254,9 +220,9 @@ describe('renderMathToHtml', () => {
     expect(renderMathToHtml('x', false)).toBeNull();
   });
 
-  // Deliberate security pin: `trust: false` and `throwOnError: false` are
-  // applied to EVERY renderer, including one a host registered, so document
-  // TeX can never widen what the renderer may emit.
+  // Deliberate security pin: `trust: false` and `throwOnError: false` are applied to EVERY
+  // renderer, including one a host registered, so document TeX can never widen what the renderer
+  // may emit.
   test('pins trust:false and throwOnError:false regardless of the registered renderer', () => {
     const seen: unknown[] = [];
     const spy: MathRenderer = {

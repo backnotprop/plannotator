@@ -1,11 +1,7 @@
 /**
- * What the agent reads for a comment on part of an image (#2100, the approved
- * prototype's text): the heading names the image as written and its line,
- * then `Image:` and `Region:` lines with the box in the image's own pixels,
- * then the comment. What regresses: the agent gets the image's quote with no
- * box (it cannot find the spot), the line label names the paragraph's span
- * instead of the image's line, a malformed region throws or prints junk, or a
- * src with markdown in it injects structure.
+ * What regresses: the agent gets the image's quote with no box (it cannot find the spot), the
+ * line label names the paragraph's span instead of the image's line, a malformed region throws
+ * or prints junk, or a src with markdown in it injects structure.
  */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation, type Block } from '../types';

@@ -1,7 +1,6 @@
 /**
- * `formatDraftAnnotationsForAsk` (#1748): the reviewer's unsubmitted
- * annotations as a plain list for an agent that answers a question, never in
- * the submitted-feedback shape it would carry out.
+ * `formatDraftAnnotationsForAsk`: the reviewer's unsubmitted annotations as a plain list for an
+ * agent that answers a question, never in the submitted-feedback shape it would carry out.
  */
 import { describe, expect, test } from 'bun:test';
 import { formatDraftAnnotationsForAsk, parseMarkdownToBlocks } from './parser';

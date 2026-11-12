@@ -1,11 +1,7 @@
 /**
- * `Annotation.mentions` is host data, not feedback: the ids a host's `@`
- * picker produced mean nothing to the coding agent reading the export, and
- * printing them would leak an opaque host identifier into the prompt.
- *
- * What this catches: an export helper that starts rendering the field — the
- * output of an annotation carrying `mentions` must stay byte-identical to the
- * same annotation without it, on all three helpers.
+ * `Annotation.mentions` is host data, not feedback: the ids a host's `@` picker produced mean
+ * nothing to the coding agent reading the export, and printing them would leak an opaque host
+ * identifier into the prompt.
  */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation } from '../types';

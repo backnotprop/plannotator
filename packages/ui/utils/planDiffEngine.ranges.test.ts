@@ -1,8 +1,6 @@
 /**
- * Source line ranges on PlanDiffBlock (oldStart/oldEnd/newStart/newEnd) and
- * the unchanged-run folding helper. Code review's rendered Markdown diff
- * names these lines in its gutter; plan review ignores them, so the other
- * fields must stay exactly what they were.
+ * Code review's rendered Markdown diff names these lines in its gutter; plan review ignores
+ * them, so the other fields must stay exactly what they were.
  */
 import { describe, expect, test } from 'bun:test';
 import { computePlanDiff, foldUnchangedPlanDiff, type PlanDiffBlock } from './planDiffEngine';
@@ -22,7 +20,6 @@ function withoutRanges(blocks: PlanDiffBlock[]) {
   return blocks.map(({ oldStart: _a, oldEnd: _b, newStart: _c, newEnd: _d, ...rest }) => rest);
 }
 
-/** Slice 1-based inclusive lines out of a text, to check a range points at the block. */
 function linesOf(text: string, start: number, end: number): string {
   return text.split('\n').slice(start - 1, end).join('\n');
 }
@@ -45,7 +42,6 @@ describe('computePlanDiff line ranges', () => {
     expect(ranges(blocks)).toEqual([
       { type: 'unchanged', oldStart: 1, oldEnd: 3, newStart: 1, newEnd: 3 },
       { type: 'modified', oldStart: 5, oldEnd: 5, newStart: 5, newEnd: 5 },
-      // A blank line diffLines kept as its own chunk: no lines on either side.
       { type: 'unchanged' },
       { type: 'removed', oldStart: 7, oldEnd: 7 },
       { type: 'unchanged', oldStart: 9, oldEnd: 9, newStart: 7, newEnd: 7 },
@@ -74,7 +70,6 @@ describe('computePlanDiff line ranges', () => {
 
   test('a document without a trailing newline', () => {
     const { blocks } = computePlanDiff('one\ntwo', 'one\ntwo\nthree');
-    // diffLines sees "two" (no newline) replaced by "two\nthree".
     expect(ranges(blocks)).toEqual([
       { type: 'unchanged', oldStart: 1, oldEnd: 1, newStart: 1, newEnd: 1 },
       { type: 'modified', oldStart: 2, oldEnd: 2, newStart: 2, newEnd: 3 },
@@ -84,7 +79,6 @@ describe('computePlanDiff line ranges', () => {
   test('leading and trailing blank lines are not part of a range', () => {
     const { blocks } = computePlanDiff('\n\nA\n\n\n', '\n\nA\n\nB\n\n');
     expect(ranges(blocks)).toEqual([
-      // "\n\nA\n\n": the two blank lines before A and after it are not counted.
       { type: 'unchanged', oldStart: 3, oldEnd: 3, newStart: 3, newEnd: 3 },
       { type: 'added', newStart: 5, newEnd: 5 },
       { type: 'unchanged' },
@@ -137,14 +131,11 @@ describe('foldUnchangedPlanDiff', () => {
     const { blocks } = computePlanDiff(oldText, newText);
     const segments = foldUnchangedPlanDiff(blocks);
 
-    // At the document start no context: everything before the last
-    // section-pair piece next to the change folds.
     expect(segments[0].kind).toBe('fold');
     const fold = segments[0] as Extract<(typeof segments)[number], { kind: 'fold' }>;
     expect(fold.headings).toEqual(['S1', 'S2', 'S3']);
     expect(fold.sectionCount).toBe(fold.pieces.length);
     expect(fold.newStart).toBe(1);
-    // The visible context piece directly before the change.
     const context = segments[1];
     expect(context.kind).toBe('block');
     if (context.kind === 'block') {
@@ -153,11 +144,9 @@ describe('foldUnchangedPlanDiff', () => {
     }
     expect(segments.at(-1)).toMatchObject({ kind: 'block', block: { type: 'modified' } });
 
-    // Pieces are the exact source text: fold + context concatenate back to the chunk.
     const unchanged = blocks[0];
     const pieces = [...fold.pieces.map((p) => p.content), context.kind === 'block' ? context.block.content : ''];
     expect(pieces.join('')).toBe(unchanged.content);
-    // Each piece's range points at its own lines.
     for (const piece of fold.pieces) {
       expect(linesOf(newText, piece.newStart!, piece.newEnd!)).toBe(piece.content.trim());
       expect(linesOf(oldText, piece.oldStart!, piece.oldEnd!)).toBe(piece.content.trim());
@@ -169,14 +158,12 @@ describe('foldUnchangedPlanDiff', () => {
     const newText = `First new.\n\n${sections(5)}\nLast new.\n`;
     const { blocks } = computePlanDiff(oldText, newText);
     const kinds = foldUnchangedPlanDiff(blocks).map((s) => (s.kind === 'fold' ? `fold:${s.sectionCount}` : s.block.type));
-    // 10 pieces (5 headings + 5 paragraphs): 1 context, 8 folded, 1 context.
     expect(kinds).toEqual(['modified', 'unchanged', 'fold:8', 'unchanged', 'modified']);
   });
 
   test('a run too short to fold stays whole and untouched', () => {
     const { blocks } = computePlanDiff('A.\n\nB.\n\nC old.\n', 'A.\n\nB.\n\nC new.\n');
     const segments = foldUnchangedPlanDiff(blocks, { minHidden: 2 });
-    // Two pieces before the change: one context, one hidden — under minHidden.
     expect(segments).toEqual([
       { kind: 'block', block: blocks[0], index: 0 },
       { kind: 'block', block: blocks[1], index: 1 },

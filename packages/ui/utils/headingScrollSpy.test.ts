@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { activeHeadingBinding, CONTENTS_ACTIVATION_OFFSET, type HeadingBinding } from './headingScrollSpy';
 
-/** A scroll element as the spy reads it: its offset and its sizes. */
 function viewportAt(scrollTop: number): HTMLElement {
   return { scrollTop, scrollHeight: 4000, clientHeight: 900 } as HTMLElement;
 }
@@ -11,9 +10,6 @@ function binding(itemIndex: number, top: number): HeadingBinding {
 }
 
 describe('activeHeadingBinding', () => {
-  // The Inbox e2e plan's headings: "Idempotency keys", then "Rollout" at a
-  // fractional top. A pick of Rollout scrolls to 1522.22 - 80, which the
-  // browser snaps to a whole pixel.
   const rollout = 1522.22;
   const bindings = [binding(0, 130), binding(3, 1433.05), binding(4, rollout), binding(5, 2061.31)];
 
