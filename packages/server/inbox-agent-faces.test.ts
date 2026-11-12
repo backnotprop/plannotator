@@ -117,6 +117,25 @@ test('the route: same-site reads, a checked write under the page session, and no
   expect(await route(new Request(new URL('http://localhost/api/inbox/pins')), new URL('http://localhost/api/inbox/pins'))).toBeNull();
 });
 
+test('the cap drops the oldest unnamed entries before a named one, and named entries alone stay bounded', () => {
+  const faces = file();
+  faces.change({ agent: 'ses_named', name: 'Retry worker' });
+  for (let i = 0; i < INBOX_AGENT_FACES_KEPT + 5; i++) faces.change({ agent: `ses_${i}`, face: 'glass' });
+  const kept = faces.wire().faces;
+  expect(Object.keys(kept).length).toBe(INBOX_AGENT_FACES_KEPT);
+  expect(kept.ses_named!.name).toBe('Retry worker');
+  expect(kept.ses_0).toBeUndefined();
+  expect(kept.ses_5).toBeUndefined();
+  expect(kept.ses_6).toBeDefined();
+
+  dir = join(mkdtempSync(join(tmpdir(), 'pn-agent-faces-')), 'inbox');
+  const named = file();
+  for (let i = 0; i < INBOX_AGENT_FACES_KEPT + 3; i++) named.change({ agent: `nam_${i}`, name: `Agent ${i}` });
+  const keys = Object.keys(named.wire().faces);
+  expect(keys.length).toBe(INBOX_AGENT_FACES_KEPT);
+  expect(keys[0]).toBe('nam_3');
+});
+
 test('a given name is kept beside the face, survives a restart, and a reset or blank name forgets it', () => {
   const faces = file();
   faces.change({ agent: 'lnc_1', sessions: ['ses_a', 'launch:lnc_1'], name: 'Retry worker' });

@@ -5,9 +5,9 @@
  *                            0600, written whole (temp, then rename)
  *
  * A file outside the store's JSONL, as pins are: a face is window furniture and never enters the event log, which
- * agents' cursors, the phone relay and search read. At most INBOX_AGENT_FACES_KEPT agents (the oldest choice goes),
- * so the file stays a few kilobytes however many sessions come and go; an ended agent keeps its face, so its old
- * threads still show it. The agent's own mark is stored only beside a name the person gave it (Rename… on its
+ * agents' cursors, the phone relay and search read. At most INBOX_AGENT_FACES_KEPT agents (the oldest unnamed choice
+ * goes first), so the file stays a few kilobytes however many sessions come and go; an ended agent keeps its face, so
+ * its old threads still show it. The agent's own mark is stored only beside a name the person gave it (Rename… on its
  * sidebar row), which lives in the same entry so a continued session keeps it as it keeps its face.
  */
 
@@ -62,12 +62,19 @@ function writeFile(inboxDirPath: string, faces: Record<string, InboxAgentFaceEnt
   renameSync(temp, file);
 }
 
-/** The latest `INBOX_AGENT_FACES_KEPT` entries (insertion order is choice order). */
+/**
+ * At most `INBOX_AGENT_FACES_KEPT` entries (insertion order is choice order): the oldest unnamed ones go first, and a
+ * named one goes, oldest first, only when named entries alone are over the cap.
+ */
 function capped(faces: Record<string, InboxAgentFaceEntry>): Record<string, InboxAgentFaceEntry> {
   const keys = Object.keys(faces);
-  if (keys.length <= INBOX_AGENT_FACES_KEPT) return faces;
+  const over = keys.length - INBOX_AGENT_FACES_KEPT;
+  if (over <= 0) return faces;
+  const unnamed = keys.filter((key) => !faces[key]!.name);
+  const dropped = new Set(unnamed.slice(0, over));
+  for (const key of keys) if (dropped.size < over && !dropped.has(key)) dropped.add(key);
   const out = Object.create(null) as Record<string, InboxAgentFaceEntry>;
-  for (const key of keys.slice(-INBOX_AGENT_FACES_KEPT)) out[key] = faces[key]!;
+  for (const key of keys) if (!dropped.has(key)) out[key] = faces[key]!;
   return out;
 }
 
