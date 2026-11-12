@@ -32,9 +32,9 @@ import { Tip } from './Tip';
 const AGENT_NAME: Record<InboxPromptHost, string> = { 'claude-code': 'Claude Code', pi: 'Pi', opencode: 'OpenCode' };
 
 /** The count shows from here; past `max` Save is refused. */
-export const PROMPT_COUNT_FROM = 3700;
-/** The guide instructions' count shows this close to their cap. */
-const GUIDE_COUNT_WITHIN = 400;
+export const PROMPT_COUNT_FROM = 8000;
+/** The guide instructions' count shows this close to their cap (12,000): from 11,000, as on the review page's guide launch. */
+const GUIDE_COUNT_WITHIN = 1000;
 
 type ReminderSlot = 'shared' | InboxPromptHost;
 type Slot = ReminderSlot | 'guide';

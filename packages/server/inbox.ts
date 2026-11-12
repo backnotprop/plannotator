@@ -2522,13 +2522,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The one-time sound dialog, claimed by the page that will show it: a
    * compare-and-set from `dialogDueFor` to `dialogShownFor`, so of several
-   * tabs (or a reload) only the first ever gets `show: true`. Only on this
-   * computer: a page that came through the tailnet (a phone, most likely)
-   * never shows it and leaves it for the next page opened here. The server is
-   * one process and this runs with no await, so two claims cannot interleave.
+   * tabs (or a reload) only the first ever gets `show: true`. This computer's
+   * page or its owner's on another device (owner ruling 2026-11-11), never a
+   * tailnet guest's. The server is one process and this runs with no await,
+   * so two claims cannot interleave.
    */
-  const claimSoundDialog = (via: RequestVia, load: string | null = null): boolean => {
-    if (via !== "local" || !soundState().dialog_due) return false;
+  const claimSoundDialog = (owner: boolean, load: string | null = null): boolean => {
+    if (!owner || !soundState().dialog_due) return false;
     // The line of one-time dialogs (shared/inbox/reveals.ts): 40 minutes apart, on any load.
     if (!lineFree("spaced", load)) return false;
     const { dialogDueFor, ...rest } = savedSound();
@@ -2612,11 +2612,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
-   * never both show it. Only on this computer (a page through the tailnet leaves it for the next page opened here).
+   * never both show it. This computer's page or its owner's on another device, never a tailnet guest's.
    * No await between the read and the write, so two claims cannot interleave.
    */
-  const claimListIntro = (via: RequestVia, load: string | null = null): boolean => {
-    if (via !== "local" || !listIntroState().due || !lineFree("spaced", load)) return false;
+  const claimListIntro = (owner: boolean, load: string | null = null): boolean => {
+    if (!owner || !listIntroState().due || !lineFree("spaced", load)) return false;
     const at = new Date().toISOString();
     // A one-time announcement: it keeps the line's day and spacing (shared/inbox/reveals.ts). A dev build never stamps
     // that clock.
@@ -3115,7 +3115,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * with Copy prompt; someone who saw it before (its `inboxBoardIntro.shownAt`) does not see it again. `show`: the page
    * draws the dialog. `key` (the page's own, kept with the stamp): the same page's retry after a lost answer gets
    * `show: true` again, without a write, while the feature is still undecided; any other key, window or device does not.
-   * `agent_note`: the agent note (a setup dialog), on this computer only: the line's gap, not an offer's Not now.
+   * `agent_note`: the agent note (a setup dialog), the owner's on any of their devices: the line's gap, not an offer's Not now.
    */
   const claimReveal = (
     id: RevealId | "agent_note",
@@ -3125,7 +3125,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     via: RequestVia = "local",
     agents: string[] | null = null,
   ): boolean => {
-    if (id === "agent_note") return claimAgentNote(via, load, agents);
+    if (id === "agent_note") return claimAgentNote(owner, load, agents);
     if (id === "snooze") return claimSnoozeIntro(owner, load);
     const undecided = lineOffers[id];
     if (!undecided || !owner || !snoozeIntroRelease) return false;
@@ -3168,8 +3168,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * unanswered is not shown again for the same agents, so it never takes another day (`revealAgentNoteNew`). A dev
    * build keeps no line: always yes.
    */
-  const claimAgentNote = (via: RequestVia, load: string | null, agents: string[] | null): boolean => {
-    if (via !== "local") return false;
+  const claimAgentNote = (owner: boolean, load: string | null, agents: string[] | null): boolean => {
+    if (!owner) return false;
     if (!snoozeIntroRelease) return true;
     const saved = loadConfig().inboxReveals;
     if (!revealAgentNoteNew(saved?.agentNote?.shownFor, agents) || !lineFree("setup", load)) return false;
@@ -3248,7 +3248,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ahead: owner && snoozeIntroRelease ? revealAhead(state, now) : [],
       // The star ask (reveals.ts `aside`): armed beside `next` while the line is free; it moves no one.
       aside: owner && snoozeIntroRelease ? revealAsideNow(state, now) : [],
-      setup: via === "local" && revealLineFree("setup", state, now),
+      // Day 0's setup asks: this computer's, and its owner's on their other devices (owner ruling 2026-11-11); never a guest's.
+      setup: owner && revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
       // How long until a date can change the line (reveals.ts `revealAgainAt`: the gap's end, a Not now's, a tenure),
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
@@ -4846,14 +4847,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return debugLog.accept(req);
     }
 
-    // The tailnet never widens the Inbox's exposure: pairing a phone and
-    // Phones' tailnet and Wi-Fi switches answer only on this computer (the
-    // window's own switch refuses `on` below).
-    if (via === "tailnet" && req.method === "POST" && (path === "/api/inbox/pairing" || path === "/api/inbox/tailnet" || path === "/api/inbox/lan")) {
-      return localOnly();
+    // Pairing a phone, its checks, and Phones' tailnet and Wi-Fi switches: this computer's, and its owner's
+    // from any of their own devices over the tailnet (owner ruling 2026-11-11); never a guest the allow list let in.
+    if (path === "/api/inbox/pairing" || path === "/api/inbox/pairing/checks" || (req.method === "POST" && (path === "/api/inbox/tailnet" || path === "/api/inbox/lan"))) {
+      if (!ownerOrLocal(req, via)) return localOnly();
     }
-    // What reached the pairing code, and step 1's checks of this computer, are this computer's own business too.
-    if (via === "tailnet" && (path === "/api/inbox/pairing" || path === "/api/inbox/pairing/checks")) return localOnly();
 
     // The onboarding tour's fixture and assets (inbox-tour.ts): read only, served from the binary on demand.
     const tourAnswer = await handleInboxTourRequest(req, path);
@@ -5362,18 +5360,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ ok: true, restarting: true });
       }
-      // What's new and its images (inbox-whats-new-images.ts) only read release
-      // notes, so they answer this computer and the owner over the tailnet; any
-      // other tailnet login is refused (`owner_only`, as voice and Feedback do).
-      // Fetching missing notes by a release's tag is limited to the versions
+      // What's new and its images (inbox-whats-new-images.ts) only read public release
+      // notes, so they answer every window: this computer, the owner over the tailnet
+      // and a login the allow list let in. Fetching missing notes by a release's tag is limited to the versions
       // this Inbox knows, the cached release list's included (inbox-updates.ts
       // fetchableVersion), and stays inside the update-notes folder of the
       // data directory. The releases panel (inbox-whats-new-releases.ts) asks
       // GitHub for the release list at most once a day.
       if (path === "/api/inbox/whats-new" || path === INBOX_WHATS_NEW_RELEASES_PATH || path === INBOX_WHATS_NEW_IMAGE_PATH) {
-        if (!ownerOrLocal(req, via)) {
-          throw new InboxError("owner_only", "Only this computer's owner can read What's new from this Inbox.");
-        }
         // A stored image of a release's notes: read only, never fetched here.
         if (path === INBOX_WHATS_NEW_IMAGE_PATH) return whatsNewImageRoute(req, url, dataDir);
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -5591,10 +5585,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.steps !== undefined && !owner) return localOnly();
         // Bro mode too (a line in what every agent here reads): the owner's to change.
         if (body.bro !== undefined && !owner) return localOnly();
-        // Floating reply drafts: the owner's (a guest's window never floats one).
-        if (body.float_drafts !== undefined && !owner) return localOnly();
-        // The Mark read warning: the owner's (a guest's warning offers no "Don't show this again").
-        if (body.mark_read_warning !== undefined && !owner) return localOnly();
         // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
         if (body.code_review !== undefined && !owner) return localOnly();
         // Shape too (the shape skill, the routes): the owner's to change.
@@ -5624,8 +5614,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ) {
             throw new InboxError("validation_error", "tailscale: { on: boolean, replace_exposed?: boolean }.", { field: "tailscale" });
           }
-          // Turning tailnet publishing on is a decision made on this computer.
-          if (value.on && via === "tailnet") return localOnly();
+          // Turning tailnet publishing on (Keep it on at every start, Replace a hand-made mapping): the owner's, from any of their devices.
+          if (value.on && !owner) return localOnly();
           tailscaleChange = { on: value.on, replaceExposed: value.replace_exposed === true };
         }
         // Every part is checked before anything is written, and the tailnet
@@ -5737,17 +5727,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const show = claimSoundDialog(via, revealLoadId(req.headers.get("x-plannotator-load")));
+        const show = claimSoundDialog(ownerOrLocal(req, via), revealLoadId(req.headers.get("x-plannotator-load")));
         return json({ show, sound: soundState() });
       }
 
-      // The one-time list options dialog (approval "inbox-list-options-intro"): the first page on this computer to
-      // ask gets `show: true`, once per machine; a page reached over the tailnet never claims it.
+      // The one-time list options dialog (approval "inbox-list-options-intro"): the first of the owner's pages to
+      // ask gets `show: true`, once per machine; a tailnet guest's page never claims it.
       if (path === "/api/inbox/list-intro") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        return json({ show: claimListIntro(via, revealLoadId(req.headers.get("x-plannotator-load"))), list_intro: listIntroState() });
+        return json({ show: claimListIntro(ownerOrLocal(req, via), revealLoadId(req.headers.get("x-plannotator-load"))), list_intro: listIntroState() });
       }
 
       // The one-time Snooze announcement (approval "inbox-snooze-announce"): the first page to ask gets `show: true`,
@@ -6227,7 +6217,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Rows has them on, read from config.json `inboxRows`; the repo's logo also with `logo=1`, a local file, while
       // GitHub is never turned on by the request: `pictureSources`), or a 404 and the window draws
       // the letters. POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
-      // guards as every window write. Window only: not on the phone's door, and never an agent's.
+      // guards as every window write. Every window (a tailnet guest's too: a picture is a logo), and a linked
+      // machine's window through the door; never an agent's.
       const projectPictureMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture$/.exec(path);
       if (projectPictureMatch) {
         const projectId = projectPictureMatch[1]!;
@@ -6235,7 +6226,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const project = store.project(projectId);
         if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
         if (req.method === "GET") {
-          if (!ownerOrLocal(req, via)) return localOnly();
           if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
             return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
           }
@@ -6261,8 +6251,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           });
         }
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
-        // A tailnet guest cannot see the picture, so it cannot set one either.
-        if (!ownerOrLocal(req, via)) return localOnly();
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.picture === null) {

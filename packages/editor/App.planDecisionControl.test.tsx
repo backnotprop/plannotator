@@ -442,17 +442,21 @@ describe.if(hasDom)("plan review decision control", () => {
   // What regresses (review of #2055): a refused or cancelled "Approve with a
   // note…" left its approve armed, so the button read Send Feedback while a
   // click posted /api/approve.
-  test("Approve with a note… cancelled at Agent Not Found: the primary then sends feedback", async () => {
+  // An OpenCode agent set to run after approval that OpenCode does not have
+  // never holds the approval up (it asked "Agent Not Found, approve anyway?"
+  // through 0.28.61): the approval posts at once with the note, and OpenCode
+  // approves without switching and says so in its own toast.
+  test("Approve with a note… with a missing OpenCode agent posts at once, the note riding it", async () => {
     agents = [{ id: "build", name: "build" }];
     await mount(planPayload({ origin: "opencode", approvalNotesSupported: true }));
     await act(async () => configStore.set("agentSwitch", { switchTo: "ghost" }));
     await settle();
     await writeNote("Approve with a note", "note sentinel foxtrot");
-    await waitFor(() => document.body.textContent?.includes("Agent Not Found"), "Agent Not Found");
-    expect(decisions).toHaveLength(0);
-    await act(async () => buttonWithText("Cancel")!.click());
-    await settle();
-    await expectPrimarySendsFeedback("note sentinel foxtrot", 0);
+    await waitFor(() => decisions.length > 0, "approve");
+    expect(decisions[0]!.endpoint).toBe("approve");
+    expect(JSON.stringify(decisions[0]!.body)).toContain("note sentinel foxtrot");
+    expect(decisions[0]!.body.agentSwitch).toBe("ghost");
+    expect(document.body.textContent).not.toContain("Agent Not Found");
   });
 
   test("Approve with a note… whose POST fails: the primary then sends feedback", async () => {
@@ -463,9 +467,7 @@ describe.if(hasDom)("plan review decision control", () => {
     await expectPrimarySendsFeedback("note sentinel golf", 1);
   });
 
-  // Agent Not Found's "Approve Anyway" must run the approve that raised it:
-  // from the discard row that is a bare approval, not one with the comments.
-  test("Agent Not Found on the discard row: Approve Anyway posts a bare approval", async () => {
+  test("the discard row with a missing OpenCode agent posts a bare approval at once", async () => {
     agents = [{ id: "build", name: "build" }];
     await mountWithComment({ origin: "opencode", approvalNotesSupported: true });
     await act(async () => configStore.set("agentSwitch", { switchTo: "ghost" }));
@@ -474,9 +476,6 @@ describe.if(hasDom)("plan review decision control", () => {
     await act(async () => menuItem("Approve, discard")!.click());
     await settle();
     await act(async () => buttonWithText("Discard & approve")!.click());
-    await waitFor(() => document.body.textContent?.includes("Agent Not Found"), "Agent Not Found");
-    expect(decisions).toHaveLength(0);
-    await act(async () => buttonWithText("Approve Anyway")!.click());
     await waitFor(() => decisions.length > 0, "approve");
     expect(decisions).toHaveLength(1);
     expect(decisions[0]!.endpoint).toBe("approve");
