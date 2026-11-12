@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
-import type { ComposeSessionsModel } from '../api';
+import type { ComposeSessionsModel, MachineView } from '../api';
 import { createInboxAgentFacesFile } from '../../shared/inbox/agent-faces';
 import { createInboxAgentFaces } from '../../server/inbox-agent-faces';
 
@@ -100,7 +100,7 @@ function Probe({ session }: { session: string }) {
 }
 
 /** The section with App.tsx's `renameAgent` in place. */
-function mount(rows: InboxListRow[] = [], phone = false) {
+function mount(rows: InboxListRow[] = [], phone = false, machines = machinesModel([])) {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
@@ -109,7 +109,7 @@ function mount(rows: InboxListRow[] = [], phone = false) {
     root!.render(
       <>
         <AgentsSection
-          machines={machinesModel([])}
+          machines={machines}
           rows={rows}
           machineId={null}
           agentId={null}
@@ -217,6 +217,25 @@ test.skipIf(!hasDom)('⋯ → Rename… → Enter keeps the name with the Inbox 
   expect(file.wire().faces).toEqual({});
   expect(document.querySelector('[data-probe-label]')!.getAttribute('data-probe-label')).toBe('');
   expect(said.at(-1)).toBe('Name reset to Fix login redirect.');
+});
+
+const SELF = `ibx_01K${'0'.repeat(22)}S`;
+const MAC = `ibx_01K${'0'.repeat(22)}M`;
+const view = (id: string, name: string): MachineView =>
+  ({ id, name, self: id === SELF, state: 'online', since: '2026-11-09T08:00:00.000Z', reason: null, version: '0.29.0', address: null, both_ways: true, waiting: 0, list_cursor: 1, snoozes: true, launch: true }) as MachineView;
+
+test.skipIf(!hasDom)("another machine's agent offers no Rename…: no ⋯ and no right-click menu; this machine's agent keeps both", async () => {
+  setInboxAgents([{ ...group([agent('ses_a')]), machine: SELF }, { ...group([agent('ses_m', { host: 'pi' })]), machine: MAC }]);
+  mount([], false, machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]));
+  await settle();
+  expect(row('ses_m').querySelector('[data-agent-more]')).toBeNull();
+  await act(async () => {
+    row('ses_m').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  });
+  await settle();
+  expect(document.querySelector('[data-agent-menu]')).toBeNull();
+  await openMore('ses_a');
+  expect(menuItems()).toContain('Rename…');
 });
 
 test.skipIf(!hasDom)('Escape keeps the old name, a name past 64 characters is refused, an empty name resets and keeps the face', async () => {

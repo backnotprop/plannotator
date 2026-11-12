@@ -7,12 +7,14 @@
  * copies the list when nothing is named (every read would draw again).
  */
 import { afterEach, expect, test } from 'bun:test';
-import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxAgentsGroup, InboxParticipant } from '@plannotator/core/inbox-types';
 import type { ComposeSessionsModel } from '../api';
 import { setAgentNames, withGivenLabels } from './agentNames';
 import { agentAsListed, agentIsNamed, withGivenNames } from '../agentsList';
 import { labelOf, sessionLabelsNow, setSessionLabels } from '../sessionLabels';
 import { withGivenSessionNames } from '../compose/useComposeSessions';
+import { machinesModel } from '../machines';
+import { threadSessions } from './model';
 
 afterEach(() => {
   setAgentNames(new Map());
@@ -74,4 +76,13 @@ test('the To picker’s and Send to another session’s sessions read the given 
   const model = { projects: [{ project: { id: 'p', name: 'billing-svc', root: '/b' }, sessions }] } as unknown as ComposeSessionsModel;
   expect(withGivenSessionNames(model, new Map())).toBe(model);
   expect(withGivenSessionNames(model, new Map([['ses_a', 'Retry worker']]))!.projects[0]!.sessions[0]!.label).toBe('Retry worker');
+});
+
+test('a thread with several sessions names a listed agent and an unlisted session by the given name', () => {
+  const who = (session: string): InboxParticipant => ({ host: 'claude-code', session });
+  setSessionLabels({ ses_a: 'Fix login', ses_gone: 'Old title' });
+  setAgentNames(new Map([['ses_a', 'Retry worker'], ['ses_gone', 'Ledger']]));
+  const listed = withGivenNames(groups(agent('ses_a', { label: 'Fix login' }), agent('ses_b', { label: 'Docs pass' })), new Map([['ses_a', 'Retry worker']]));
+  const names = threadSessions([who('ses_a'), who('ses_b'), who('ses_gone')], listed, machinesModel(null), [], null, sessionLabelsNow()).map((s) => s.name);
+  expect(names).toEqual(['Retry worker', 'Docs pass', 'Ledger']);
 });

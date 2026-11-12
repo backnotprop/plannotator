@@ -348,6 +348,8 @@ export function AgentsSection(props: AgentsSectionProps) {
           const captionOn = captions && !!machine && machineOn(machine.id);
           const away = machine ? isAway(machine) : false;
           const notice = machine && props.onMachineUpdate ? machineNotice(machine) : null;
+          // A given name stays on this Inbox and never reaches the machine an agent runs on: another machine's agents
+          // have no Rename….
           return (
             <div key={machine?.id ?? 'flat'} className="ib-agents-group" data-agents-machine={machine?.id ?? ''}>
               {machine && captions && (
@@ -380,7 +382,7 @@ export function AgentsSection(props: AgentsSectionProps) {
                   opens={entry.thread ? 'filter' : canMessage(entry) ? 'message' : 'none'}
                   onOpen={onOpen}
                   phone={props.phone === true}
-                  onRename={onRename}
+                  onRename={machine && !machine.self ? undefined : onRename}
                   announce={props.announce}
                 />
               ))}
