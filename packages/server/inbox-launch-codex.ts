@@ -35,7 +35,9 @@ import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "nod
 import { basename, dirname, join, resolve } from "node:path";
 import { INBOX_CODEX_HOST, INBOX_CODEX_NAME, INBOX_CODEX_QUEUE_MIN_VERSION, parseCodexCliVersion, type InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { codexThreadChoice, parseCodexModels } from "@plannotator/core/inbox-launch-choice";
 import { agentVersionRun, codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER_NAME, readCodexEntry } from "./inbox-agents";
+import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache, type LaunchChoiceLists } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { createCodexPermissions, CODEX_APPROVALS } from "./inbox-launch-codex-permission";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
@@ -240,6 +242,58 @@ export function codexTrustRoot(folder: string): string | null {
   }
 }
 
+export async function listCodexModels(codex: string, env: Readonly<Record<string, string>>, cwd: string, ms: number): Promise<LaunchChoiceLists | null> {
+  let proc: ReturnType<typeof Bun.spawn>;
+  try {
+    proc = Bun.spawn([codex, "app-server"], { cwd, env, stdin: "pipe", stdout: "pipe", stderr: "ignore", windowsHide: true });
+  } catch {
+    return null;
+  }
+  const stdin = proc.stdin as { write(text: string): void; flush?(): void; end(): void };
+  const send = (message: Rpc) => {
+    stdin.write(`${JSON.stringify(message)}\n`);
+    stdin.flush?.();
+  };
+  const timer = setTimeout(() => proc.kill("SIGKILL"), ms);
+  const data: unknown[] = [];
+  try {
+    send({ id: 1, method: "initialize", params: { clientInfo: { name: "plannotator", title: "Plannotator", version: "1.0.0" } } });
+    send({ method: "initialized" });
+    send({ id: 2, method: "model/list", params: {} });
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let pages = 0;
+    for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
+      buffer += decoder.decode(chunk, { stream: true });
+      for (let at = buffer.indexOf("\n"); at >= 0; at = buffer.indexOf("\n")) {
+        const line = buffer.slice(0, at);
+        buffer = buffer.slice(at + 1);
+        let message: Rpc;
+        try {
+          message = JSON.parse(line) as Rpc;
+        } catch {
+          continue;
+        }
+        if (message.id !== 2 + pages || typeof message.method === "string") continue;
+        if (!Array.isArray(message.result?.data)) return null;
+        data.push(...message.result.data);
+        const next = message.result.nextCursor;
+        if (typeof next !== "string" || !next || ++pages >= 5) return parseCodexModels({ data });
+        send({ id: 2 + pages, method: "model/list", params: { cursor: next } });
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    try {
+      stdin.end();
+    } catch {}
+    setTimeout(() => proc.kill("SIGKILL"), 2_000).unref?.();
+  }
+}
+
 // ── The process ──
 
 /** Why the Inbox ended a process (null on the process: it ended on its own). */
@@ -431,6 +485,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
     const config: Rpc = {
       ...codexTrustOverride(text, launch.folder, real, codexTrustRoot(real), codexWritesTrust(text)),
       ...(data ? { [`mcp_servers.${INBOX_MCP_SERVER_NAME}.env.PLANNOTATOR_DATA_DIR`]: data } : {}),
+      ...codexThreadChoice(launch).config,
     };
     return Object.keys(config).length > 0 ? config : null;
   };
@@ -524,12 +579,14 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
       const account = await request(p, "account/read", {}, readyMs).catch((): null => null);
       if (account && codexSignedOut(account)) return await fail(CODEX_SIGNED_OUT);
       const config = threadConfig(launch);
+      const model = codexThreadChoice(launch).model;
+      const chosen = { ...(model ? { model } : {}), ...(config ? { config } : {}) };
       let id: string;
       if (thread) {
-        await request(p, "thread/resume", { threadId: thread, ...(config ? { config } : {}) }, readyMs);
+        await request(p, "thread/resume", { threadId: thread, ...chosen }, readyMs);
         id = thread;
       } else {
-        const started = await request(p, "thread/start", { cwd: launch.folder, ...(config ? { config } : {}) }, readyMs);
+        const started = await request(p, "thread/start", { cwd: launch.folder, ...chosen }, readyMs);
         const made = started.thread?.id;
         if (typeof made !== "string" || !made) return await fail("Codex answered thread/start without a thread");
         id = made;
@@ -581,6 +638,15 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
     return root?.thread_name ?? root?.subject ?? "Inbox";
   };
 
+  let choiceKey: string | null = null;
+  const choiceLists = launchChoiceCache(async () => {
+    const e = await ctx.environment();
+    const path = e.which("codex");
+    if (!path) return null;
+    const home = homeEnv();
+    return listCodexModels(path, { ...codexSpawnEnv(e.env as LaunchEnv, dataDirArg()), ...(home ? { CODEX_HOME: home } : {}) }, ctx.homeDir, LAUNCH_CHOICES_RUN_MS);
+  });
+
   type ResumeResult = LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null };
   const nothing = (text: string): ResumeResult => ({ exitCode: 0, text, failure: null });
 
@@ -604,11 +670,14 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
       const version = parseCodexCliVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
       const shown = version?.join(".") ?? null;
       if (!shown || !versionAtLeast(shown, CODEX_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Codex ${shown ?? "?"} is older than ${CODEX_LAUNCH_MIN_VERSION}`, code: "too_old" };
+      choiceKey = `${path}@${shown}`;
       const home = homeEnv();
       const status = await e.run([path, "login", "status"], { timeoutMs: 10_000, ...(home ? { env: { CODEX_HOME: home } } : {}) });
       if (codexLoginStatusSignedOut(status)) return { ok: false, missing: false, reason: "Codex isn't signed in", code: "signed_out" };
       return { ok: true, version: shown };
     },
+
+    choices: () => choiceLists(choiceKey),
 
     /** Codex's modes are the person's own config: nothing to fix on the record. */
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
