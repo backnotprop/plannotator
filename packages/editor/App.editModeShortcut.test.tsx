@@ -1,14 +1,3 @@
-/**
- * Mod+E toggles the markdown edit session from the keyboard, in place (#1479).
- *
- * Both halves are exercised the way a real keypress reaches them: the enter
- * chord through the `document-view` scope's window listener, and the exit chord
- * bubbling out of CodeMirror's contentEditable — the case the chrome-shortcut
- * guard deliberately refuses to serve. Mounts the real App, so the capability
- * gates (`canEditMarkdown`, the `Done`/`Cancel` exit semantics) and the
- * Viewer ↔ editor scroll carry are the shipped ones.
- */
-
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -92,7 +81,6 @@ async function mount(plan: Record<string, unknown>): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fetchForPlan(plan);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -120,8 +108,6 @@ const findButton = (label: string): HTMLButtonElement | undefined =>
   Array.from(document.querySelectorAll("button"))
     .find((button) => button.textContent?.trim() === label);
 
-/** The toolstrip's Save control carries a width-reserving "Saving" ghost span
- *  in front of its live label, so `textContent` is never the label alone. */
 function saveLabel(): string | undefined {
   const button = Array.from(document.querySelectorAll("button"))
     .find((candidate) => candidate.textContent?.startsWith("Saving"));
@@ -165,8 +151,6 @@ describe.if(hasDom)("Mod+E edit-mode toggle", () => {
     const scroller = editorScroller();
     expect(scroller).not.toBeNull();
 
-    // The exit chord has to work from the focused editor: the event bubbles out
-    // of CodeMirror's contentEditable, which the chrome guard refuses.
     const content = document.querySelector<HTMLElement>(".cm-editor .cm-content");
     if (!content) throw new Error("CodeMirror content DOM did not render");
     await act(async () => { pressModE(content); });
@@ -180,11 +164,6 @@ describe.if(hasDom)("Mod+E edit-mode toggle", () => {
     const viewport = documentViewport();
     if (!viewport) throw new Error("Document viewport did not render");
 
-    // happy-dom has no layout, so a swapped child cannot clamp the container the
-    // way a real browser does (the jump #1479 reports). Record the writes
-    // instead: the contract is that the offset read before a swap is written
-    // back to the surface that scrolls once the new one has mounted. Which
-    // element that is, is pinned by `editScroll.test.ts`.
     const written: number[] = [];
     let current = 0;
     Object.defineProperty(viewport, "scrollTop", {
@@ -199,7 +178,6 @@ describe.if(hasDom)("Mod+E edit-mode toggle", () => {
     expect(document.querySelector(".cm-editor")).not.toBeNull();
     expect(written).toContain(480);
 
-    // Whatever the reader scrolled to in the editor is where the viewer lands.
     viewport.scrollTop = 260;
     written.length = 0;
     const content = document.querySelector<HTMLElement>(".cm-editor .cm-content");
@@ -230,9 +208,6 @@ describe.if(hasDom)("Mod+E edit-mode toggle", () => {
     const content = document.querySelector<HTMLElement>(".cm-editor .cm-content");
     if (!content) throw new Error("CodeMirror content DOM did not render");
 
-    // Mod+E dispatched from a textarea outside the editor (Ask AI box, an
-    // annotation comment mid-edit-session) must stay the field's own chord:
-    // the session may not commit-and-exit underneath it.
     const foreign = document.createElement("textarea");
     document.body.appendChild(foreign);
     try {
@@ -242,7 +217,6 @@ describe.if(hasDom)("Mod+E edit-mode toggle", () => {
       foreign.remove();
     }
 
-    // From inside CodeMirror's contenteditable the exit still fires.
     await act(async () => { pressModE(content); });
     expect(document.querySelector(".cm-editor")).toBeNull();
   });
@@ -274,16 +248,6 @@ describe.if(hasDom)("Mod+E edit-mode toggle", () => {
     if (!content) throw new Error("CodeMirror content DOM did not render");
     expect(saveLabel()).toBe("Saved");
 
-    // Dirty the buffer through the editor's own input pipeline: a
-    // document-changing dispatch on the mounted view. (Mutating the
-    // contentEditable's DOM and waiting on CodeMirror's MutationObserver is
-    // not viable under happy-dom: after CodeMirror's stop()/start() observer
-    // cycling, happy-dom intermittently never re-delivers records, so the
-    // mutation is lost no matter how long the test waits — the CI flake this
-    // replaced.) The view is resolved from CodeMirror's DOM back-reference —
-    // the same property EditorView.findFromDOM reads; @codemirror/view is not
-    // a dependency of this package, and both of the property's historical
-    // names are tried so a rename fails loudly here rather than silently.
     const backRef = content as unknown as {
       cmTile?: { view?: { state: { doc: { toString(): string } }; dispatch(spec: unknown): void } };
       cmView?: { view?: { state: { doc: { toString(): string } }; dispatch(spec: unknown): void } };
@@ -295,16 +259,12 @@ describe.if(hasDom)("Mod+E edit-mode toggle", () => {
         changes: { from: view.state.doc.toString().trimEnd().length, insert: "x" },
       });
     });
-    // The dirty flip lands through React state — poll (bounded) rather than
-    // racing a single macrotask, same settle pattern as mount().
     for (let attempt = 0; attempt < 40 && saveLabel() !== "Save"; attempt += 1) {
       await settle();
     }
     expect(saveLabel()).toBe("Save");
     expect(findButton("Cancel")).not.toBeUndefined();
 
-    // The two-step `Cancel → Discard?` refusal is deliberate: the chord refuses
-    // rather than committing, and never drops the buffer silently.
     await act(async () => { pressModE(content); });
     expect(document.querySelector(".cm-editor")).not.toBeNull();
     expect(findButton("Cancel")).not.toBeUndefined();

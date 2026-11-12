@@ -1,12 +1,3 @@
-/**
- * #1001: the side chat's document note, through the real chat hook, wired the
- * way App wires it (`askDocumentParams`). One chat across documents: the first
- * question carries nothing (the session is made from the document on screen),
- * a repeat on the same document adds nothing, a switch carries one short note
- * with the path, and only a question that reached the session moves the latch.
- *
- * Requires DOM (DOM_TESTS=1, preloaded via bunfig.toml).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

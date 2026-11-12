@@ -1,12 +1,3 @@
-/**
- * Permission-mode first-run scope (DOM_TESTS=1)
- *
- * The permission mode decides what happens to Claude Code's permissions after
- * a plan is APPROVED, so the one-time chooser belongs to plan review only. It
- * used to fire in every non-goal-setup Claude Code session, which put an
- * unrelated blocking dialog in front of annotate and archive reviewers.
- */
-
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -24,7 +15,6 @@ const App = appModule?.default as typeof import("./App")["default"];
 const originalFetch = globalThis.fetch;
 const originalEventSource = globalThis.EventSource;
 
-// Deliberate copy pin: the dialog's own heading is how this test identifies it.
 const DIALOG_HEADING = "New: Permission Mode Preservation";
 
 const memory = new Map<string, string>();
@@ -93,7 +83,6 @@ async function mount(plan: Record<string, unknown>): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fetchForPlan(plan);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);

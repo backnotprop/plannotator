@@ -11,8 +11,6 @@ interface CompactEditControlsProps {
   onExit: () => void;
 }
 
-/** Normal-flow mobile editing chrome. It deliberately avoids sticky/fixed
- * placement so the Plan keeps the page-scrolling Safari behavior. */
 export const CompactEditControls: React.FC<CompactEditControlsProps> = ({
   documentTitle,
   sourceBacked,

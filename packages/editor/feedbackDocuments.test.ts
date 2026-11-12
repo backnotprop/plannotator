@@ -1,16 +1,3 @@
-/**
- * Which heading each document's feedback lands under in the submitted export.
- *
- * Failures to catch:
- *  - The open document exported twice: once from the host's live state under
- *    the session heading and again from the linked-doc map, which also carries
- *    the open document (every folder session since at least 0.27.25).
- *  - The root document's comments vanishing while a linked document is open
- *    (plan review has no source path, so the stashed plan never reached the
- *    export), or landing under the linked heading instead of their own.
- *  - A folder session's documents described as "referenced in the plan".
- *  - The per-section counts disagreeing with what is printed.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation, type ImageAttachment } from '@plannotator/ui/types';
 import type { CachedDocState, FeedbackDocuments } from '@plannotator/ui/hooks/useLinkedDoc';
@@ -58,7 +45,6 @@ function doc(markdown: string, annotations: Annotation[]): CachedDocState {
 
 type Source = 'file' | 'folder' | null;
 
-/** What App's getCurrentFeedbackPayload hands the builder. */
 function submit(args: {
   annotateSource: Source;
   feedbackDocuments: FeedbackDocuments;
@@ -69,7 +55,6 @@ function submit(args: {
   const sections = resolveFeedbackSections({
     feedbackDocuments: args.feedbackDocuments,
     live: {
-      // App's allAnnotations: the active document's local rows plus externals.
       annotations: [...args.live.annotations, ...externals],
       globalAttachments: args.live.globalAttachments ?? [],
       blocks: parseMarkdownToBlocks(args.live.markdown),
@@ -98,7 +83,6 @@ function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
-/** Folder sessions: the root is the empty folder placeholder, stashed while a file is open. */
 const FOLDER_ROOT = { annotations: [], globalAttachments: [], markdown: '', isConverted: false, renderAs: 'markdown' as const };
 
 describe('folder session feedback export', () => {
@@ -114,11 +98,8 @@ describe('folder session feedback export', () => {
     expect(count(out, 'OPEN-INLINE')).toBe(1);
     expect(count(out, `## ${A_PATH}`)).toBe(1);
     expect(out).toContain('have 2 pieces of feedback');
-    // Nothing was said about the folder as a whole.
     expect(out).not.toContain('# Folder Feedback');
-    // A folder's files are not documents a plan referenced.
     expect(out).not.toContain('referenced in the plan');
-    // The payload opens on the heading, not a stray blank line.
     expect(out.startsWith('# Folder Document Feedback\n')).toBe(true);
   });
 
@@ -190,16 +171,12 @@ describe('folder session feedback export', () => {
   });
 });
 
-// A review of several files: the failure is the export following the order
-// the reviewer happened to open files in (or path order) instead of the
-// order the files were given for review.
 describe('bundle session feedback export', () => {
   test('files are exported in bundle order, a linked document after them, each once', () => {
     const LINKED = '/repo/docs/linked.md';
     const sections = resolveFeedbackSections({
       feedbackDocuments: {
         root: FOLDER_ROOT,
-        // Opened in this order: a linked document, then A, then B.
         documents: new Map([
           [LINKED, doc('# L\n\nLinked text.', [global('gl', 'LINKED-NOTE')])],
           [A_PATH, doc(A_TEXT, [inline('ia', A_TEXT, 'Alpha paragraph', 'A-NOTE')])],
@@ -256,7 +233,6 @@ describe('plain session with a linked document', () => {
     expect(out.indexOf('# Plan Feedback')).toBeLessThan(out.indexOf('PLAN-COMMENT'));
     expect(out.indexOf('PLAN-COMMENT')).toBeLessThan(out.indexOf('# Linked Document Feedback'));
     expect(out.indexOf(`## ${B_PATH}`)).toBeLessThan(out.indexOf('LINKED-COMMENT'));
-    // The plan comment keeps the plan's line number, not the linked doc's.
     expect(out).toContain('(line 3) Feedback on: "Plan paragraph"');
   });
 
@@ -278,14 +254,11 @@ describe('plain session with a linked document', () => {
   });
 });
 
-// #1701: the submit body's `annotations` drives the host's "N comments" and the
-// feedback archive's counts; it used to be the open document's comments only.
 describe('collectSubmittedAnnotations', () => {
   test("a folder session submits every document's comments, each tagged with its document", () => {
     const a = inline('a1', A_TEXT, 'Alpha paragraph', 'ON-A');
     const b = inline('b1', B_TEXT, 'Bravo paragraph', 'ON-B');
     const sections = resolveFeedbackSections({
-      // b.md is open; a.md was visited earlier.
       feedbackDocuments: { root: FOLDER_ROOT, documents: new Map([[A_PATH, doc(A_TEXT, [a])], [B_PATH, doc(B_TEXT, [b])]]) },
       live: { annotations: [b], globalAttachments: [], blocks: parseMarkdownToBlocks(B_TEXT) },
       externalAnnotations: [],
@@ -323,10 +296,6 @@ describe('collectSubmittedAnnotations', () => {
   });
 });
 
-// #1701 review: multi-message annotate-last built its entries from LOCAL
-// annotations only, so an agent / WebMCP comment reached neither the exported
-// feedback nor the submit body, and a session holding only such a comment
-// posted the "no feedback" sentence marked nothing-to-send.
 describe('mergeExternalsIntoMessageEntries', () => {
   const entry = (messageId: string, text: string, annotations: Annotation[]) =>
     ({ messageId, text, annotations, globalAttachments: [] as ImageAttachment[] });

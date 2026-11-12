@@ -1,16 +1,3 @@
-/**
- * Hover cards for issue / PR / MR links in a plan document (ui RefHoverCard,
- * the app's transport over GET /api/ref).
- *
- * Failures to catch: the plan app never asking for a card (no transport, or
- * the hover region not attached because the app's root was behind its loading
- * state at first render); a card that shows a loading or failure state to a
- * person without gh / glab (plan review must look exactly as before then); a
- * request made before anyone hovers; a route the server does not serve (an
- * older server, a remote session) being asked again on every hover.
- *
- * Run with DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -84,7 +71,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let refRequests: string[] = [];
 
-/** The `/api/ref` answer under test: a card, a quiet failure, or the route absent. */
 type RefAnswer = "card" | "cli_missing" | "absent";
 
 function responder(refAnswer: RefAnswer): typeof fetch {
@@ -124,7 +110,6 @@ async function settle(ms = 0): Promise<void> {
 async function mountApp(refAnswer: RefAnswer): Promise<HTMLAnchorElement> {
   refRequests = [];
   globalThis.fetch = responder(refAnswer);
-  // SAFETY: the App only uses EventSource's constructor, handlers and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -138,7 +123,6 @@ async function mountApp(refAnswer: RefAnswer): Promise<HTMLAnchorElement> {
   return link;
 }
 
-/** Rest the pointer on the link past the card's 400 ms delay, then let the answer land. */
 async function hover(link: HTMLAnchorElement): Promise<void> {
   await act(async () => {
     link.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
@@ -182,7 +166,6 @@ describe.if(hasDom)("plan review: hover cards for #refs", () => {
       link.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
     });
     await settle(450);
-    // Never a skeleton while the answer is on its way.
     expect(document.querySelector("[data-ref-card]")).toBeNull();
     await settle(20);
     expect(refRequests).toEqual([ISSUE_URL]);

@@ -50,8 +50,6 @@ describe("action-label responsive measurement", () => {
     };
     const modes: string[] = [];
 
-    // SAFETY: observeActionsLabelMode only reads getBoundingClientRect and passes
-    // the same object to this test's no-op ResizeObserver implementation.
     const disconnect = observeActionsLabelMode(
       element as HTMLElement,
       (mode) => modes.push(mode),

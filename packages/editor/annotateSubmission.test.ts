@@ -22,7 +22,6 @@ describe("annotate approval submission", () => {
     });
   });
 
-  // The notes have to anchor to the same message Send Feedback would target.
   test("carries the message scope so approval notes anchor like feedback", () => {
     const input = {
       draftGeneration: 4,
@@ -42,10 +41,8 @@ describe("annotate approval submission", () => {
       feedbackScope: "messages",
     });
 
-    // Omitted entirely when there is no message scope (ordinary file annotate).
     expect(buildAnnotateApprovalBody({ supported: true, ...input })).toEqual(input);
 
-    // Incapable transports still send nothing but the draft generation.
     expect(buildAnnotateApprovalBody({
       supported: false,
       ...input,
@@ -141,11 +138,6 @@ describe("annotate approval submission", () => {
     });
   });
 
-  // Regression: the export must parse each linked doc the same way the viewer
-  // rendered it. A config source (.yaml/.json/.toml/…) is ONE code block over
-  // the raw file, and a first-line `---` is real content (a multi-document
-  // YAML), not frontmatter. Each comment must name the lines it sits on: a
-  // block-span label reads `(lines 1–6)` for every comment in the file.
   test("keeps linked-doc line labels correct for config sources that open with ---", () => {
     const yaml = "---\napiVersion: v1\nkind: Service\n---\napiVersion: v1\nkind: ConfigMap\n";
     const comment = (id: string, quote: string, startOffset: number): Annotation => ({
@@ -158,10 +150,6 @@ describe("annotate approval submission", () => {
       originalText: quote,
       createdA: 1,
     });
-    // The SECOND `apiVersion: v1` (line 5): its stored offset names the
-    // line, not the quote's first occurrence (line 2). The highlighter stores
-    // this measured offset for a code document (Viewer.codeDocumentRepeatedLine
-    // drives a real selection to it).
     const linkedAnnotations = [
       comment("yaml-1", "kind: ConfigMap", yaml.indexOf("kind: ConfigMap")),
       comment("yaml-2", "apiVersion: v1", yaml.lastIndexOf("apiVersion: v1")),
@@ -233,10 +221,6 @@ describe("annotate approval submission", () => {
     expect(feedback).toContain("(line 5) ");
   });
 
-  // Guards the framing machinery the discard path still rides: a framed
-  // payload prefixes the zero-state sentence, an unframed one never does, and
-  // at zero content the frame is idempotent (the discard body stays
-  // byte-identical to the legacy zero payload).
   test("approval framing prefixes the zero-state sentence before the note", () => {
     const note: Annotation = {
       id: "global-note-1",
@@ -270,8 +254,6 @@ describe("annotate approval submission", () => {
     expect(approval.startsWith(ANNOTATE_NO_FEEDBACK_SENTENCE)).toBe(true);
     expect(approval).toContain("watch the migration");
 
-    // Idempotent at zero: the discard path (no annotations + framing) emits
-    // the sentence exactly once — byte-identical to the legacy zero payload.
     const discard = buildCompleteAnnotateFeedback({
       ...base,
       annotations: [],

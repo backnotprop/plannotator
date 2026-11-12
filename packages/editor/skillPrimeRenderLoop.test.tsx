@@ -15,16 +15,7 @@ import { useEditableDocuments } from './editableDocuments';
 
 const hasDom = typeof document !== 'undefined';
 
-// Regression for the skill-prime render loop: once a comment referenced a
-// human-only skill, App.tsx's priming effect re-fired every render (its deps
-// changed identity every render via useEditableDocuments' bare object
-// literal) and primeSkillContentsForExport kept answering "changed" for
-// content that had already landed — so every effect run bumped the
-// generation, which re-rendered, which re-fired the effect, unbounded.
-// This harness mirrors that exact wiring and asserts the commit count stays
-// flat while idle.
-
-const RENDER_CAP = 40; // keeps a regression from hanging the test run
+const RENDER_CAP = 40;
 
 let roots: Root[] = [];
 let containers: HTMLElement[] = [];
@@ -74,9 +65,6 @@ describe('skill-content priming effect', () => {
     function Harness() {
       renderCount.current++;
       const editableDocuments = useEditableDocuments();
-      // Mirrors App.tsx's getLinkedDocumentMarkdown → getDocAnnotations
-      // chain: a callback keyed on the hook's returned object ends up in the
-      // priming effect's dep array.
       const getDocAnnotations = React.useCallback(
         () => new Map<string, never>(),
         [editableDocuments],
@@ -99,16 +87,12 @@ describe('skill-content priming effect', () => {
     await act(async () => {
       root.render(<Harness />);
     });
-    // Let several idle microtask/effect cycles pass; a looping app keeps
-    // committing here, a fixed one is already settled.
     for (let i = 0; i < 5; i++) {
       await act(async () => {
         await Promise.resolve();
       });
     }
 
-    // Expected: initial render + the single generation bump when the skill
-    // content first lands. Anything near RENDER_CAP is the loop.
     expect(renderCount.current).toBeLessThanOrEqual(4);
   });
 });

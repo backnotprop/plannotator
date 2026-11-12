@@ -1,16 +1,8 @@
 import React from 'react';
 
-/**
- * The one transient banner a browser agent can show through `nudge_user`.
- * Not persisted, not exported, replaced by the next call, dismissible.
- * Rendered only while a message exists, so a session without an agent has
- * no DOM for it. Motion is opt-in through `motion-safe:` so reduced-motion
- * users see it appear without animation.
- */
 export interface AgentNudgeBannerProps {
   message: string;
   onDismiss: () => void;
-  /** Offered when the agent has comments in the panel and it is closed. */
   onShowComments?: () => void;
 }
 

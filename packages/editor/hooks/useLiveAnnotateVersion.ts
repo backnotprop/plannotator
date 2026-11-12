@@ -2,12 +2,6 @@ import { useCallback, useEffect, useRef } from 'react';
 import { noteServerSessionMismatch, withServerSession } from '@plannotator/ui/utils/serverSession';
 import type { VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
 
-/**
- * How long the open file must stay unchanged before its new text is saved as
- * a version (#2037). An agent often writes a file several times in a row;
- * one version per burst keeps the history readable and the diff on the
- * agent's whole edit.
- */
 export const LIVE_VERSION_SETTLE_MS = 750;
 
 export interface LiveAnnotateVersion {
@@ -22,16 +16,6 @@ interface SaveAnswer {
   versionInfo?: VersionInfo;
 }
 
-/**
- * Saves the session's own file as a version when it changed on disk and then
- * held still for {@link LIVE_VERSION_SETTLE_MS} (`POST /api/plan/versions`,
- * see packages/shared/annotate-live-version.ts). `schedule(hash)` is called
- * with the source hash of the text the editor now shows; the server saves the
- * file only while its bytes still have that hash. `onSaved` runs only for a
- * NEW version, and only for the latest request, so a slow answer never
- * replaces a newer one. Failures are silent: the text is already on screen,
- * and the next open saves the version anyway.
- */
 export function useLiveAnnotateVersion({
   enabled,
   onSaved,

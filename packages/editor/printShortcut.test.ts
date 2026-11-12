@@ -1,8 +1,3 @@
-/**
- * Cmd/Ctrl+P in plan review and annotate. Regression guarded: inside the VS
- * Code panel the page printing (and preventing the key) instead of VS Code's
- * Quick Open.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { shouldPrintOnKey } from './printShortcut';
 

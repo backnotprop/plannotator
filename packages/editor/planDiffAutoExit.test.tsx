@@ -1,15 +1,3 @@
-/**
- * usePlanDiffViewAutoExit + usePlanDiff integration (DOM_TESTS=1)
- *
- * Mirrors App.tsx's wiring: the diff-view active flag lives in the harness
- * (like App's isPlanDiffActive state), usePlanDiff tracks the active
- * document via docKey, and usePlanDiffViewAutoExit exits diff view when the
- * newly active document carries no baseline — the annotate-folder "diff view
- * stuck on after opening a history-less file" quirk. Also pins that a switch
- * to a baseline-carrying document does NOT exit, and that the HTML-surface
- * gate (active passed as false) suppresses the auto-exit entirely.
- */
-
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useCallback, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -196,8 +184,6 @@ describe('usePlanDiffViewAutoExit', () => {
     const harness = await mountHarness(true);
 
     await act(async () => harness.current().activate());
-    // hasPreviousVersion is always false here (nulls in), but the caller
-    // gates `active` off, so the html diff toggle must stay on.
     expect(harness.current().hasPreviousVersion).toBe(false);
     expect(harness.current().isPlanDiffActive).toBe(true);
   });
@@ -208,8 +194,6 @@ describe('usePlanDiffViewAutoExit', () => {
     await act(async () => harness.current().switchDoc(DOC_WITHOUT_BASELINE));
     expect(harness.current().isPlanDiffActive).toBe(false);
 
-    // Activating with no baseline immediately snaps back off — the stuck
-    // state can never establish itself.
     await act(async () => harness.current().activate());
     expect(harness.current().isPlanDiffActive).toBe(false);
   });

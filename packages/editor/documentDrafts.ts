@@ -1,14 +1,3 @@
-/**
- * Per-document draft copies (annotate-draft.ts on the server): the pure half.
- *
- * A plan review, or an annotate session (local file, folder, URL, last
- * message), saves each document it holds
- * comments on (other than its own root, which rides the session draft) under
- * that document's path, and merges a document's saved comments in the first
- * time the document is opened. These helpers decide what to send and what to
- * merge; useDocumentDrafts does the I/O.
- */
-
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
 import type { FeedbackDocuments } from '@plannotator/ui/hooks/useLinkedDoc';
 import { mergeExternalAnnotations } from './feedbackDocuments';
@@ -29,19 +18,6 @@ const serialize = (state: DocumentDraftState): string =>
 
 const EMPTY = serialize({ annotations: [], globalAttachments: [] });
 
-/**
- * The writes that bring the server's copies in line with the session.
- *
- *  - Only documents whose saved copy has been read (`loaded`) are written:
- *    writing one before its copy was merged in would replace comments from an
- *    earlier session with this session's subset.
- *  - A document is written only when it differs from what was last sent.
- *  - A document that was sent with content and has none now (its comments
- *    were deleted, in place or from the cross-file panel) is sent empty, which
- *    clears its copy. A document never sent with content is never sent empty.
- *  - `rootPath` (a single-file session's own file) is skipped: the session
- *    draft carries it.
- */
 export function planDocumentDraftWrites(input: {
   documents: ReadonlyMap<string, DocumentDraftState>;
   lastSent: ReadonlyMap<string, string>;
@@ -70,11 +46,6 @@ export function planDocumentDraftWrites(input: {
   return { writes, sent };
 }
 
-/**
- * What a document's saved copy adds to the comments the session already holds
- * for it: entries whose id the session does not hold (comments), and
- * attachments whose path it does not hold.
- */
 export function documentDraftAdditions(
   held: DocumentDraftState,
   saved: { annotations: unknown; globalAttachments: unknown },
@@ -92,20 +63,6 @@ export function documentDraftAdditions(
   return { annotations, globalAttachments };
 }
 
-/**
- * What the session draft (/api/draft) carries.
- *
- *  - Without per-document copies: the open document's live state, as it
- *    always was.
- *  - With them: the ROOT document's comments (the file under review, or a
- *    folder's own comments) even while another document is open, because
- *    that document has its own path copy. Plus every document the server
- *    keeps no path copy for (`unbackedPaths`: outside the session's roots,
- *    such as an Obsidian vault document; a symlink alias of the root) and a
- *    copy of the root opened through a self-link (`rootPath`), so those stay
- *    crash-recoverable as before. A restore puts them on the root, where the
- *    ones whose text is not there show as Unanchored and still export.
- */
 export function composeSessionDraft(input: {
   enabled: boolean;
   live: DocumentDraftState;

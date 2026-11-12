@@ -6,7 +6,6 @@ import {
   type AnnotateClientLeaseConfig,
 } from './annotateClientLease';
 
-/** Minimal fake EventSource — just enough to observe construction and close(). */
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   url: string;
@@ -132,7 +131,6 @@ describe('openAnnotateClientLeaseStream', () => {
     stream.close();
     expect(instance.closed).toBe(true);
 
-    // Calling close() again must not throw or reopen/reconstruct anything.
     expect(() => stream.close()).not.toThrow();
     expect(FakeEventSource.instances).toHaveLength(1);
   });

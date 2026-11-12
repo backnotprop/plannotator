@@ -1,11 +1,3 @@
-/**
- * The one-time "Plans now open in Clean" notice (owner, 2026-10-27: move
- * everyone to Clean once, "maybe give them a dialog notice"). Someone holding
- * only an old look marker with Grid stored sees the look chooser once more,
- * Clean preselected; Continue or Escape records the choice and it never shows
- * again. A Clean user and a first-run user never see it. The cookie-state
- * table itself is in packages/ui/config/gridEnabledSetting.test.ts.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -69,7 +61,6 @@ const stubFetch: typeof fetch = async (input) => {
 
 async function mountApp(): Promise<void> {
   globalThis.fetch = stubFetch;
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -109,7 +100,6 @@ describe.if(hasDom)("plan look: the one-time move to Clean", () => {
   beforeEach(() => {
     memory.clear();
     storageModule?.setStorageBackend(memoryBackend);
-    // One store per process: start every test from a page load that resolved Clean.
     configModule?.configStore.seed("gridEnabled", false);
     memory.clear();
   });
@@ -175,7 +165,6 @@ describe.if(hasDom)("plan look: the one-time move to Clean", () => {
     expect(dialog()?.getAttribute("data-plan-look-prompt")).toBe("moved");
     expect(option("Clean").getAttribute("aria-pressed")).toBe("true");
 
-    // The other tab: Grid + Continue.
     memory.set(GRID_KEY, "true");
     memory.set(V2_KEY, "resolved");
 

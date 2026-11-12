@@ -1,20 +1,3 @@
-/**
- * Phase-1 WebMCP catalog for plan review and every annotate surface:
- * `read_document`, `add_comments`, `update_comment`, `remove_comments`,
- * `reveal`, `nudge_user`, plus `list_documents` in folder sessions.
- *
- * `:::question` blocks and the human's answers are READABLE through
- * `read_document` (`questions`) and never writable: no tool answers a
- * question, and a comment an agent creates never carries `questionAnswer`
- * (owner decision 5: answers are the human's voice).
- *
- * The agent reads, comments and points; the human decides. No tool here
- * approves, denies, submits, closes, stages or marks anything, and the
- * catalog test pins that by name. The catalog takes an ADAPTER (getters and
- * actions over App state) and never imports from App.tsx, so it is
- * unit-testable with a fake adapter and no DOM, and a host can build the
- * same adapter over its own document state.
- */
 import { AnnotationType, type Annotation, type Block, type ImageRegion } from '@plannotator/ui/types';
 import { regionOf } from '@plannotator/ui/components/ImageRegions';
 import { generateId } from '@plannotator/ui/utils/generateId';
@@ -60,12 +43,7 @@ import {
   type OutlineEntry,
 } from './documentText';
 
-// ---------------------------------------------------------------------------
-// Adapter contract
-// ---------------------------------------------------------------------------
-
 export type SessionMode = 'plan' | 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'shared';
-/** `done`: the human finished with nothing to send (annotate Done). */
 export type SessionDecision = 'pending' | 'approved' | 'feedback-sent' | 'done' | 'exited';
 
 export interface DocumentSessionView {
@@ -79,25 +57,20 @@ export interface DocumentSessionView {
   sourceStale: boolean;
   editing: boolean;
   versions: { current: number; total: number } | null;
-  /** Live app: the in-app page (pathname + search) the human is on. */
   pageUrl: string | null;
 }
 
 export interface DocumentSnapshot {
-  /** Absolute path (folder / file sessions) or null. */
   path: string | null;
-  /** Document text, or null when the parent cannot see it (live app). */
   text: string | null;
   blocks: Block[];
   annotations: Annotation[];
-  /** Raw HTML of an html surface, for quote verification. */
   html?: string | null;
 }
 
 export interface SiblingDocument {
   path: string;
   title?: string;
-  /** The human is looking at this document right now. */
   open: boolean;
   annotations: Annotation[];
   composerOpen: boolean;
@@ -105,29 +78,18 @@ export interface SiblingDocument {
 
 export interface DocumentToolAdapter {
   getSession(): DocumentSessionView;
-  /** The document the human has open (root plan, or the active linked doc). */
   getDocument(): DocumentSnapshot;
-  /** Folder / linked-doc sessions: a sibling by path, fetching when not cached. Null when unknown or not a folder session. */
   readDocument(path: string): Promise<DocumentSnapshot | null>;
-  /** Documents other than the open one that the session knows (cache, file browser). */
   getSiblingDocuments(): SiblingDocument[];
-  /** Folder sessions: every document in the tree (paths the file browser shows). */
   listDocuments?(): Array<{ path: string; title?: string }>;
   getComposer(): { open: boolean; section?: string };
-  /** Mutations resolve false when the document is not the open one and the host cannot write to it. */
   addAnnotation(annotation: Annotation, path: string | null): boolean;
   updateAnnotation(id: string, patch: Partial<Annotation>, path: string | null): boolean;
   removeAnnotation(id: string, path: string | null): boolean;
-  /** Select + scroll to the annotation; navigates when `path` is another document. Resolves false when nothing could be revealed. */
   revealAnnotation(id: string, path: string | null): Promise<boolean> | boolean;
   revealSection(blockId: string, path: string | null): Promise<boolean> | boolean;
-  /** One transient banner, replaced by the next call. */
   showBanner(message: string): void;
 }
-
-// ---------------------------------------------------------------------------
-// Response shapes
-// ---------------------------------------------------------------------------
 
 export interface AnnotationView {
   id: string;
@@ -145,20 +107,11 @@ export interface AnnotationView {
   inReplyTo: string | null;
   replies: string[];
   pageUrl?: string;
-  /** Set on the human's answer to a question: that question's `key` (see `questions`). */
   answersQuestion?: string;
-  /** Set on a comment on part of an image (#2100): the image's src as written, its line, and the box in the image's own pixels. */
   imageRegion?: ImageRegion;
 }
 
-/**
- * One `:::question` block of the document, with the human's answer when
- * there is one. Read-only: no tool writes an answer. An answer whose
- * question is no longer in the document (the prompt was edited) is listed
- * with `q: null` and `orphaned: true`; it still goes out with the feedback.
- */
 export interface QuestionView {
-  /** "Question N" in document order; null for an orphaned answer. */
   q: number | null;
   key: string;
   kind: QuestionKind;
@@ -166,9 +119,7 @@ export interface QuestionView {
   context?: string;
   section: { id: string; title: string } | null;
   options: Array<{ label: string; description?: string; recommended: boolean; settled: boolean }>;
-  /** Recommended choice labels (the `Recommended:` line). */
   recommended: string[];
-  /** A `Recommended:` text that names no choice: the suggested answer. */
   suggested?: string;
   status: QuestionStatus;
   answer?: {
@@ -205,27 +156,14 @@ export const NUDGE_USER_MAX_CHARS = 280;
 export const MAX_COMMENTS_PER_CALL = 20;
 export const MAX_REMOVALS_PER_CALL = 50;
 export const MAX_OTHER_DOCUMENTS = 10;
-/** requestIds remembered for add_comments idempotency (oldest evicted first). */
 export const MAX_REMEMBERED_REQUESTS = 500;
-
-// ---------------------------------------------------------------------------
-// Persistent per-session state (survives catalog rebuilds)
-// ---------------------------------------------------------------------------
 
 export class DocumentToolState {
   readonly main: AnnotationChangeTracker;
   readonly siblings: ChangeTrackerSet;
-  /** Per-sibling read watermark. */
   readonly siblingRead = new Map<string, number>();
-  /** requestId -> what it created (idempotency). Bounded: see rememberRequest. */
   readonly requests = new Map<string, { id: string; path: string | null; anchoredBy: AnchoredBy }>();
 
-  /**
-   * Record a requestId, forgetting the oldest past MAX_REMEMBERED_REQUESTS
-   * (FIFO). Idempotency only has to hold across a retry of a recent call, so
-   * a bounded window is the whole contract; an unbounded map grew with every
-   * add_comments call for the life of the tab.
-   */
   rememberRequest(rid: string, created: { id: string; path: string | null; anchoredBy: AnchoredBy }): void {
     this.requests.delete(rid);
     this.requests.set(rid, created);
@@ -238,7 +176,6 @@ export class DocumentToolState {
   lastPageUrl: string | null = null;
   lastOpenPath: string | null = null;
   responses = 0;
-  /** Per-call scratch consumed by buildNudges. */
   current: { since?: number; truncated?: { nextOffset: number; args: Record<string, unknown> } } = {};
 
   constructor(readonly now: () => number = () => Date.now()) {
@@ -250,10 +187,6 @@ export class DocumentToolState {
 export function createDocumentToolState(now?: () => number): DocumentToolState {
   return new DocumentToolState(now);
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function isoTime(ms: number | undefined, fallback: number): string {
   const value = typeof ms === 'number' && Number.isFinite(ms) ? ms : fallback;
@@ -315,9 +248,7 @@ function viewOf(
   return view;
 }
 
-/** The document's questions and answers, in document order, then orphaned answers. */
 export function questionViews(blocks: readonly Block[], annotations: readonly Annotation[], outline: readonly OutlineEntry[]): QuestionView[] {
-  // The lines plan review shows as plain text stay in each question's context here too.
   const indexed = indexQuestionBlocks(blocks, { contractLines: false });
   const answers = collectQuestionAnswers(annotations);
   const seen = new Set<string>();
@@ -325,7 +256,6 @@ export function questionViews(blocks: readonly Block[], annotations: readonly An
   const answerView = (key: string): QuestionView['answer'] | undefined => {
     const stored = answers.get(key);
     if (!stored) return undefined;
-    // An answer quoting an older label of a choice reads as that choice.
     const question = questionsByKey.get(key);
     const a = question ? canonicalQuestionAnswer(question, stored) : stored;
     return {
@@ -387,7 +317,6 @@ function trackerFor(state: DocumentToolState, path: string | null, openPath: str
   return state.siblings.forPath(path);
 }
 
-/** Observe every document the adapter can see (idempotent, O(n)). */
 export function syncTrackers(adapter: DocumentToolAdapter, state: DocumentToolState): void {
   state.main.observe(adapter.getDocument().annotations);
   for (const sibling of adapter.getSiblingDocuments()) {
@@ -417,17 +346,10 @@ function otherDocumentActivity(adapter: DocumentToolAdapter, state: DocumentTool
 }
 
 export interface DocumentToolsetOptions {
-  /** Write tools are offered only while the human can still act (not read-only, not decided). */
   writable: boolean;
-  /** `list_documents` exists only in folder sessions. */
   folder: boolean;
-  /** Prefixed tool name for nudge actions (the registry prefixes at registration). */
   toolName: (bare: string) => string;
 }
-
-// ---------------------------------------------------------------------------
-// Hooks (nudges + watermark) shared by every tool
-// ---------------------------------------------------------------------------
 
 export function buildDocumentHooks(adapter: DocumentToolAdapter, state: DocumentToolState, toolName: (bare: string) => string): ToolsetHooks {
   return {
@@ -463,10 +385,6 @@ export function buildDocumentHooks(adapter: DocumentToolAdapter, state: Document
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// Tools
-// ---------------------------------------------------------------------------
 
 type ReadInput = {
   path?: string;
@@ -562,8 +480,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
         ? listed.map((a) => viewOf(a, snapshot.annotations, snapshot.blocks, outline, tracker, since, now()))
         : undefined;
 
-      // Read-only view of the question blocks and the human's answers. A
-      // document without questions gets no `questions` key at all.
       const questions = include.has('questions') ? questionViews(snapshot.blocks, snapshot.annotations, outline) : undefined;
 
       const agentComments = snapshot.annotations.filter(isAgentAnnotation).length;
@@ -665,9 +581,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
               continue;
             }
           }
-          // The comment this requestId created is gone: the human removed it
-          // (the annotations_removed nudge already said so). Re-creating it
-          // would undo the human, so a replay is a conflict, never a write.
           results.push({
             ok: false,
             index,
@@ -691,9 +604,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
           text: item.text,
           originalText: '',
           createdA: now(),
-          // Author and source both name the agent, exactly like an
-          // external-annotation comment names its tool: the panel then shows
-          // "browser-agent" instead of the human's name with "(me)".
           author: BROWSER_AGENT_SOURCE,
           source: BROWSER_AGENT_SOURCE,
         };
@@ -717,9 +627,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
             ...(parent.startMeta ? { startMeta: parent.startMeta } : {}),
             ...(parent.endMeta ? { endMeta: parent.endMeta } : {}),
             ...(parent.htmlAnchor ? { htmlAnchor: parent.htmlAnchor } : {}),
-            // A reply to a diagram comment is a diagram comment: without the
-            // anchor it would fall to text search and paint the node's label
-            // wherever the prose repeats it.
             ...(parent.diagramAnchor ? { diagramAnchor: parent.diagramAnchor } : {}),
             ...(parent.pageUrl ? { pageUrl: parent.pageUrl } : {}),
             ...(parent.diffContext ? { diffContext: parent.diffContext } : {}),
@@ -732,8 +639,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
             continue;
           }
           if (snapshot.blocks.length === 0 && snapshot.text === null) {
-            // Live app: the parent cannot see the page text; the bridge
-            // resolves the quote lazily and keeps the record until it does.
             annotation = { ...base, type: AnnotationType.COMMENT, originalText: item.quote.trim() };
             verified = false;
           } else if (session.surface === 'html' && snapshot.html) {
@@ -779,9 +684,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
           continue;
         }
         tracker.claimOwn(annotation);
-        // Observe the write now (the adapter overlays it on the committed
-        // list) so the returned view carries the new seq and the response's
-        // nudges reflect the mutation.
         syncTrackers(adapter, state);
         if (rid) state.rememberRequest(rid, { id: annotation.id, path, anchoredBy });
         created += 1;
@@ -821,9 +723,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
       const { snapshot, path, tracker } = target;
       const existing = snapshot.annotations.find((a) => a.id === input.id);
       if (!existing) return fail('not_found', 'no comment with that id');
-      // Ownership is the tracker's claim from this session, not the `source`
-      // stamp: the external-annotations API accepts any source, so a stamp
-      // alone would let another tool's findings become agent-editable.
       if (!tracker.isOwn(existing.id)) return fail('forbidden', 'only comments you created can be changed', { hint: NOT_OWNED_HINT });
       if (!adapter.updateAnnotation(input.id, { text: input.text }, path)) {
         return fail('not_available', 'that document is not open, so it cannot be written to', { hint: OPEN_FIRST_HINT });
@@ -850,9 +749,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
         path: PATH_PARAM,
       },
     },
-    // destructiveHint is not in today's WebMCP ToolAnnotations dictionary
-    // (issue #176); unknown members are ignored, so it costs nothing and is
-    // honest the day the hint lands. Do not "fix" it away.
     annotations: { destructiveHint: true },
     execute: async (input) => {
       syncTrackers(adapter, state);
@@ -866,8 +762,6 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
         if (!adapter.removeAnnotation(id, path)) {
           return { id, ok: false as const, error: { code: 'not_available' as const, message: 'that document is not open, so it cannot be written to', hint: OPEN_FIRST_HINT } };
         }
-        // The agent's own removal must not come back to it as "the human
-        // removed your comment" (the resolution signal).
         tracker.claimRemoved(id);
         return { id, ok: true as const };
       });

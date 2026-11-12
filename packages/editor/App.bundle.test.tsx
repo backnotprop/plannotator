@@ -1,12 +1,3 @@
-/**
- * A review of several files (annotate-bundle) in the editor: the first file
- * opens by itself, the switcher and the file list follow the given order
- * (never sorted), Next moves to the following file, and one Send Feedback
- * carries one section per file in bundle order with each comment once.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
-
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -66,7 +57,6 @@ class SilentEventSource {
 }
 
 const ROOT = "/tmp/bundle-review";
-// Given in this order on purpose: sorted by name, alpha would come first.
 const BETA = `${ROOT}/docs/beta.md`;
 const ALPHA = `${ROOT}/alpha.md`;
 const TEXT: Record<string, string> = {
@@ -74,7 +64,6 @@ const TEXT: Record<string, string> = {
   [ALPHA]: "# Alpha\n\nAlpha body text.\n",
 };
 
-/** A saved comment on each file, merged in when the file opens. */
 const savedComment = (path: string) => ({
   id: `saved-${path.endsWith("beta.md") ? "beta" : "alpha"}`,
   blockId: "",
@@ -148,7 +137,6 @@ async function mount(): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fakeFetch;
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -188,7 +176,6 @@ describe.if(hasDom)("annotate folder image bases", () => {
     for (const name of ["a", "b"] as const) {
       mkdirSync(join(directory, name, "images"), { recursive: true });
       writeFileSync(join(directory, name, "prd.md"), `# ${name}\n\n![fixture](images/p.png)\n`);
-      // Distinct file bytes catch a stale base after switching documents.
       writeFileSync(join(directory, name, "images/p.png"), png[name]);
     }
     return normalizeBrowserPath(directory);
@@ -256,8 +243,6 @@ describe.if(hasDom)("annotate folder image bases", () => {
     const images = host!.querySelectorAll<HTMLImageElement>('img[alt="fixture"]');
     expect(images).toHaveLength(1);
     const url = new URL(images[0].getAttribute("src")!, "http://localhost");
-    // Use native Bun Response for Bun.file bodies: happy-dom stringifies those
-    // blobs. The child reads the URL rendered by App through the real reader.
     const child = Bun.spawn([process.execPath, join(import.meta.dir, "testing/readImage.ts"), url.href], {
       stdout: "pipe", stderr: "pipe",
     });
@@ -306,13 +291,6 @@ describe.if(hasDom)("annotate folder image bases", () => {
   });
 });
 
-// --- Edit Mode against a real annotate server -------------------------------
-//
-// The capability comes from the server (`sourceSave` on /api/doc), so these
-// tests run the real Bun annotate server in bundle mode over temp files, as a
-// child process (testing/annotateBundleServer.ts) under a temp
-// PLANNOTATOR_DATA_DIR, and route the page's requests to it.
-
 interface RealBundle {
   dir: string;
   first: string;
@@ -358,7 +336,6 @@ async function startRealBundle(): Promise<RealBundle> {
     const method = (init?.method ?? "GET").toUpperCase();
     const body = typeof init?.body === "string" ? init.body : undefined;
     requests.push({ method, path: url.pathname, search: url.searchParams, body });
-    // Bun's own fetch: happy-dom replaces the global one.
     const answer = await Bun.fetch(`${server.url}${url.pathname}${url.search}`, {
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -381,7 +358,6 @@ async function startRealBundle(): Promise<RealBundle> {
 async function mountAgainstRealServer(): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -393,11 +369,9 @@ async function mountAgainstRealServer(): Promise<void> {
 const findButton = (label: string): HTMLButtonElement | undefined =>
   Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === label);
 
-/** The Save control carries a width-reserving "Saving" ghost span in front of its live label. */
 const saveButton = (): HTMLButtonElement | undefined =>
   Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Saving"));
 
-/** The mounted CodeMirror view, from its DOM back-reference (see App.editModeShortcut.test.tsx). */
 function editorView(): { state: { doc: { toString(): string } }; dispatch(spec: unknown): void } {
   const content = document.querySelector<HTMLElement>(".cm-editor .cm-content");
   if (!content) throw new Error("CodeMirror content DOM did not render");
@@ -459,19 +433,12 @@ describe.if(hasDom)("annotate bundle", () => {
     expect(docRequests()[0]).toBe(BETA);
     expect(switcherText()).toContain("beta.md");
     expect(document.querySelector('[aria-label="Previous file"]')?.hasAttribute("disabled")).toBe(true);
-    // The tab names the open file and its place (#2061); the header names it
-    // once, in the switcher.
     expect(document.title).toBe("beta.md (1 of 2) · acme/payments");
     expect(document.querySelector("[data-header-document-name]")).toBeNull();
 
-    // The Files tab lists exactly the bundle, unsorted (beta before alpha),
-    // labelled relative to the files' common directory.
     const items = Array.from(document.querySelectorAll<HTMLElement>(".file-tree-item")).map((el) => el.getAttribute("title"));
     expect(items).toEqual(["docs/beta.md", "alpha.md"]);
-    // The bundle's directory is never walked as a folder.
     expect(requests.some((r) => r.path === "/api/reference/files")).toBe(false);
-    // A bundle file has no in-document Close pill (it led to the folder's
-    // empty "choose a file" state); the switcher moves between the files.
     const closePills = Array.from(document.querySelectorAll("button")).filter(
       (button) => button.textContent?.trim() === "Close" && button.className.includes("text-[9px]"),
     );
@@ -487,7 +454,6 @@ describe.if(hasDom)("annotate bundle", () => {
     expect(switcherText()).toContain("alpha.md");
     expect(docRequests()).toContain(ALPHA);
     expect(document.title).toBe("alpha.md (2 of 2) · acme/payments");
-    // Both files' saved comments are in the session now.
     await waitFor(() => !!document.querySelector("[data-decision-primary]")?.textContent?.includes("Send Feedback"), "Send Feedback");
 
     await act(async () => {
@@ -499,7 +465,6 @@ describe.if(hasDom)("annotate bundle", () => {
       annotations: { id: string; documentPath?: string }[];
     };
 
-    // One section per file, in the order given (beta, then alpha), each comment once.
     const betaAt = body.feedback.indexOf(`## ${BETA}`);
     const alphaAt = body.feedback.indexOf(`## ${ALPHA}`);
     expect(betaAt).toBeGreaterThan(-1);
