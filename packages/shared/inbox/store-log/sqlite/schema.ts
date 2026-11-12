@@ -2,13 +2,15 @@
  * The Inbox's SQLite schema (Drizzle; design brief "The Inbox on SQLite", section 2). Not used by anyone yet:
  * only `sqlite-log.ts` opens it, and only when a test hands the store that log.
  *
- * Every table keeps today's full record as JSON (`record`) beside its columns, so a read can serve exactly
- * what it serves today; columns exist for what a query needs (by thread, by project, by seq). Ids are today's
+ * Each record is stored once: its latest line, as written (JSON), is its last `events` row, and the record's
+ * current row points at it by `seq` (kind, id and seq find it; of a line written twice, the last row). A read
+ * serves exactly what it serves today from that row; the current tables hold only the columns a query needs (by
+ * thread, by project, by seq; a message's subject and body for search). Ids are today's
  * prefixed ULIDs. `seq` is the store's one change counter. A deleted thread keeps a tombstone in `threads`
  * (id and `deleted_at`, no words); its messages, questions and the rest are really removed, as today.
  *
  * A start reads current state from these tables, never the change log: each record table has its latest line
- * (`seq`, joined to `events` for its time) and its first line's seq (`first_seq`, the order the store's maps keep),
+ * (`seq`, joined to `events` for its record, time and version) and its first line's seq (`first_seq`, the order the store's maps keep),
  * and what the store works out from the ORDER of lines (`../history.ts`) is kept as it happens: a thread's archive
  * line and moved address (`threads`), the names that route (`thread_names`), first-line hashtags (`message_tags`),
  * a card as the Board reads it and its last real change (`cards`), PR adds and removes (`thread_pull_events`).
@@ -80,7 +82,6 @@ export const projects = sqliteTable(
     key: text("key").notNull(),
     root: text("root").notNull(),
     name: text("name").notNull(),
-    record: text("record").notNull(),
     first_seq: integer("first_seq").notNull(),
     seq: integer("seq").notNull(),
     deleted_at: text("deleted_at"),
@@ -124,7 +125,6 @@ export const messages = sqliteTable(
     seq: integer("seq").notNull(),
     subject: text("subject"),
     body: text("body").notNull(),
-    record: text("record").notNull(),
   },
   (t) => [index("messages_thread").on(t.thread_id, t.first_seq), index("messages_seq").on(t.seq)],
 );
@@ -152,7 +152,6 @@ export const mentions = sqliteTable(
     target_actor_id: text("target_actor_id").notNull(),
     label: text("label"),
     wakes: integer("wakes", { mode: "boolean" }),
-    record: text("record").notNull(),
   },
   (t) => [primaryKey({ columns: [t.message_id, t.position] }), index("mentions_target").on(t.target_actor_id)],
 );
@@ -188,7 +187,6 @@ export const questions = sqliteTable(
     asked_by_actor_id: text("asked_by_actor_id"),
     first_seq: integer("first_seq").notNull(),
     seq: integer("seq").notNull(),
-    record: text("record").notNull(),
   },
   (t) => [index("questions_message").on(t.message_id), index("questions_thread").on(t.thread_id), index("questions_seq").on(t.seq)],
 );
@@ -216,8 +214,8 @@ export const answers = sqliteTable(
 );
 
 /**
- * The Board's cards, initiatives, steps, PRs and the person's annotations: columns, the record, its first and
- * latest seq. A steps or PR record the store does not read (an old or broken shape) is still kept, as the JSONL
+ * The Board's cards, initiatives, steps, PRs and the person's annotations: columns, the first and latest seq
+ * (the record is the `events` row at that seq). A steps or PR record the store does not read (an old or broken shape) is still kept, as the JSONL
  * keeps its line, so its columns may be empty.
  */
 export const cards = sqliteTable(
@@ -227,8 +225,6 @@ export const cards = sqliteTable(
     project_id: text("project_id").notNull(),
     first_seq: integer("first_seq").notNull(),
     seq: integer("seq").notNull(),
-    /** The latest line as written. */
-    record: text("record").notNull(),
     /** The card as the Board reads it (`cardAfter`: old shapes mapped, fields an older Inbox left out kept). */
     card: text("card").notNull(),
     /** The seq of the card's last real change (a drop's seen mark is not one): the Board's unread rule. */
@@ -239,19 +235,19 @@ export const cards = sqliteTable(
 
 export const initiatives = sqliteTable(
   "initiatives",
-  { id: text("id").primaryKey(), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  { id: text("id").primaryKey(), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull() },
   (t) => [index("initiatives_seq").on(t.seq)],
 );
 
 export const steps = sqliteTable(
   "steps",
-  { id: text("id").primaryKey(), thread_id: text("thread_id"), project_id: text("project_id"), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  { id: text("id").primaryKey(), thread_id: text("thread_id"), project_id: text("project_id"), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull() },
   (t) => [index("steps_thread").on(t.thread_id), index("steps_project").on(t.project_id), index("steps_seq").on(t.seq)],
 );
 
 export const threadPulls = sqliteTable(
   "thread_pulls",
-  { id: text("id").primaryKey(), thread_id: text("thread_id"), project_id: text("project_id"), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  { id: text("id").primaryKey(), thread_id: text("thread_id"), project_id: text("project_id"), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull() },
   (t) => [index("thread_pulls_thread").on(t.thread_id), index("thread_pulls_project").on(t.project_id), index("thread_pulls_seq").on(t.seq)],
 );
 
@@ -264,7 +260,7 @@ export const threadPullEvents = sqliteTable(
 
 export const annotations = sqliteTable(
   "annotations",
-  { id: text("id").primaryKey(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  { id: text("id").primaryKey(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull() },
   (t) => [index("annotations_thread").on(t.thread_id), index("annotations_seq").on(t.seq)],
 );
 
