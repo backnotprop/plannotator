@@ -104,9 +104,7 @@ const gitlabProvider: PRProvider<GitlabMRRef> = {
   fetchTree: fetchGlTree,
   upsertMarkedComment: upsertGlMarkedNote,
   upsertDescriptionSection: upsertGlDescriptionSection,
-  // GitLab has no file-level discussion: file comments ride the body (#1599).
-  submitReview: (runtime, ref, headSha, action, body, fileComments, fileLevelComments) =>
-    submitGlMRReview(runtime, ref, headSha, action, foldFileLevelComments(body, fileLevelComments), fileComments),
+  submitReview: submitGlMRReview,
 };
 
 const bitbucketProvider: PRProvider<BitbucketPRRef> = {
@@ -116,7 +114,6 @@ const bitbucketProvider: PRProvider<BitbucketPRRef> = {
   fetchContext: fetchBbPRContext,
   fetchFileContent: fetchBbFileContent,
   fetchFileBytes: fetchBbFileBytes,
-  // File comments fold into the body like GitLab (see the capability note).
   submitReview: (runtime, ref, headSha, action, body, fileComments, fileLevelComments) =>
     submitBbPRReview(runtime, ref, headSha, action, foldFileLevelComments(body, fileLevelComments), fileComments),
   fetchList: fetchBbPRList,

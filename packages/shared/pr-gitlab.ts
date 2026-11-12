@@ -7,11 +7,13 @@
 
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
 import { isAccessRefusal, markedCommentText, PRMarkedForbiddenError, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
 import { diffHunkLines, parseDiffToFiles } from "@plannotator/core/diff-files";
+import { foldFileLevelComments } from "./pr-github";
+import { postGlFileThreads } from "./pr-gitlab-file-threads";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -862,6 +864,7 @@ export async function submitGlMRReview(
   action: PRReviewAction,
   body: string,
   fileComments: PRReviewFileComment[],
+  fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
   if (!runtime.runCommandWithInput) {
     throw new Error("Runtime does not support stdin input; cannot submit MR review");
@@ -873,6 +876,9 @@ export async function submitGlMRReview(
   let reviewBodyPosted = false;
   let failedFileComments: PRReviewCommentFailure[] = [];
   let recoveryFile: string | undefined;
+  let reviewBodyError: string | undefined;
+  const threads = await postGlFileThreads(runtime, (endpoint, extra) => apiArgs(ref.host, endpoint, extra), mrEndpoint, headSha, fileLevelComments);
+  body = foldFileLevelComments(body, threads.folded);
 
   // Fetch base SHA for position context (needed for line comments)
   // We use the headSha passed in and derive baseSha from MR metadata
@@ -888,9 +894,12 @@ export async function submitGlMRReview(
     );
     if (noteResult.exitCode !== 0) {
       const msg = commandFailure(noteResult);
-      throw new Error(`Failed to post MR note: ${msg}`);
+      if (threads.posted === 0) throw new Error(`Failed to post MR note: ${msg}`);
+      reviewBodyError = `Failed to post MR note: ${msg}`;
+      console.error(`[plannotator] ${reviewBodyError}`);
+    } else {
+      reviewBodyPosted = true;
     }
-    reviewBodyPosted = true;
   }
 
   // 2. Post inline file comments as discussions with position
@@ -977,7 +986,7 @@ export async function submitGlMRReview(
       recoveryFile = savedTo ?? undefined;
       const suffix = savedTo ? ` (unposted bodies saved to ${savedTo})` : "";
 
-      if (errors.length === fileComments.length && !reviewBodyPosted) {
+      if (errors.length === fileComments.length && !reviewBodyPosted && threads.posted === 0) {
         // All failed and there was no review body — safe to throw because the
         // MR was not mutated. The client can replay the original request.
         throw new Error(
@@ -1025,7 +1034,7 @@ export async function submitGlMRReview(
       const message = error instanceof Error ? error.message : String(error);
       approvalError = `Failed to ${verb}: ${message}`;
     }
-    if (approval === "failed" && !reviewBodyPosted && failedFileComments.length === fileComments.length) {
+    if (approval === "failed" && !reviewBodyPosted && threads.posted === 0 && failedFileComments.length === fileComments.length) {
       // A decision refused before anything else landed changed nothing on the
       // MR: an error, like Bitbucket, so the review stays open with no retry
       // locked to it and the person can still comment or request changes.
@@ -1033,7 +1042,8 @@ export async function submitGlMRReview(
     }
   }
 
-  if (failedFileComments.length > 0 || approval === "failed") {
+  const bodyStillOwed = !!reviewBodyError;
+  if (failedFileComments.length > 0 || approval === "failed" || bodyStillOwed) {
     return {
       status: "partial",
       postedFileCommentCount: fileComments.length - failedFileComments.length,
@@ -1041,11 +1051,13 @@ export async function submitGlMRReview(
       reviewBodyPosted,
       approval,
       ...(approvalError ? { approvalError } : {}),
+      ...(reviewBodyError ? { reviewBodyError } : {}),
       ...(recoveryFile ? { recoveryFile } : {}),
       ...(postedAs ? { postedAs } : {}),
       retry: {
         action: approval === "failed" ? action : "comment",
         fileComments: failedFileComments.map((failure) => failure.comment),
+        ...(bodyStillOwed ? { body: body.trim() } : {}),
       },
     };
   }

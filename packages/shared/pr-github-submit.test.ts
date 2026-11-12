@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { githubErrorDetail, submitGhPRReview } from "./pr-github";
-import { submitPRReview } from "./pr-provider";
 import type { CommandResult, PRReviewFileComment, PRReviewFileLevelComment, PRRuntime } from "./pr-types";
 
 const REF = { platform: "github" as const, host: "github.com", owner: "o", repo: "r", number: 7 };
@@ -242,15 +241,6 @@ describe("GitHub refusal reasons reach the error", () => {
     expect(githubErrorDetail("gh: not found")).toBeUndefined();
     expect(githubErrorDetail(JSON.stringify({ id: 1 }))).toBeUndefined();
     expect(githubErrorDetail(JSON.stringify({ errors: ["x".repeat(1000)] }))!.length).toBeLessThanOrEqual(300);
-  });
-});
-
-describe("submitPRReview on GitLab", () => {
-  test("file-level comments are folded into the MR note", async () => {
-    const { runtime, calls } = ghRuntime((c) => (c.args.some((a) => a.endsWith("/notes")) ? ok("{}") : undefined));
-    const GL_REF = { platform: "gitlab" as const, host: "gitlab.com", projectPath: "o/r", iid: 7 };
-    await submitPRReview(runtime, GL_REF, "sha", "comment", "Body", [], [FILE_A]);
-    expect(calls[0].input.body).toBe("Body\n\n**src/a.ts:** Split this file.");
   });
 });
 

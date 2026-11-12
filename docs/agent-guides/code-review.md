@@ -136,7 +136,7 @@ Request changes, while the primary `Post Comments` keeps the plain comment flow 
 else is `400`, never a silent COMMENT), and `submitGhPRReview` maps it to `REQUEST_CHANGES` on the
 single create-review call AND on the pending-review → `/events` submit path (#1600), with the
 same `See inline comments.` placeholder COMMENT gets when the body is empty (GitHub requires a
-body on both). GitLab posts the note and discussions first, then in one GraphQL request appends you as a reviewer (`mergeRequestSetReviewers`, `APPEND`) and sets the reviewer state with
+body on both). A comment on a whole file goes on GitLab as its own file discussion (`position_type: "file"`, `postGlFileThreads` in `packages/shared/pr-gitlab-file-threads.ts`) before the note; one GitLab refuses (an older GitLab, a renamed file) rides the note as `**path:** text`, as on GitHub, and once a file thread went, a note that fails is a `partial` whose `retry.body` carries it. GitLab posts the note and discussions first, then in one GraphQL request appends you as a reviewer (`mergeRequestSetReviewers`, `APPEND`) and sets the reviewer state with
 the `mergeRequestRequestChanges` GraphQL mutation (a failure there is a `partial` whose retry is
 `request_changes` alone). GitLab before 18.9 has no `mergeRequestRequestChanges` and rejects the
 whole request with an `undefinedField` error on it, so nothing changes there: the review stays the
