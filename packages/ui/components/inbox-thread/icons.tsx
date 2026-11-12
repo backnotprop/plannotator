@@ -5,7 +5,7 @@
  */
 
 import type React from 'react';
-import { ClaudeIcon, CodexIcon, CursorIcon, OpenCodeIcon, PiIcon } from '../icons/AgentIcons';
+import { ClaudeIcon, CodexIcon, CursorIcon, GrokBotIcon, OpenCodeIcon, PiIcon } from '../icons/AgentIcons';
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 
 const PATHS = {
@@ -266,7 +266,10 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
     case 'claude-code':
     case 'claude':
     case 'claude-app':
+    case 'cloud-claude':
       return <ClaudeIcon />;
+    case 'cloud-grok':
+      return <GrokBotIcon />;
     case 'gemini':
     case 'qwen':
     case 'zed':
@@ -288,6 +291,12 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
       return <CodexIcon />;
     case 'cursor':
       return <CursorIcon />;
+    case 'cloud':
+      return (
+        <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z" />
+        </svg>
+      );
     case 'grok':
       // Grok Build: a plain letter G, drawn here (no brand asset in the repo).
       return (

@@ -806,15 +806,15 @@ test.skipIf(!hasDom)('a code another window replaced reads as replaced, not as t
   expect(el.querySelector('[data-pair-trouble]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('phones off (the released default): Devices is Over your tailnet only, and #settings/devices/pair opens no flow', async () => {
+test.skipIf(!hasDom)('phones off (the released default): Devices is Over your tailnet and Cloud agents, and #settings/devices/pair opens no flow', async () => {
   current = plainServer;
   const el = await renderApp('#settings/devices/pair');
   await until(() => el.querySelector('[data-settings-tailscale]') !== null, 'Over your tailnet');
+  await until(() => el.querySelector('[data-settings-cloud]') !== null, 'Cloud agents');
   expect(el.querySelector('[data-settings-phones]')).toBeNull();
   expect(el.querySelector('[data-pair-flow]')).toBeNull();
   expect(buttonText(el, 'Pair a phone')).toBeNull();
-  // Over your tailnet is the section's only group.
-  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => g.hasAttribute('data-settings-tailscale'))).toEqual([true]);
+  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => (g.hasAttribute('data-settings-tailscale') ? 'tailnet' : g.hasAttribute('data-settings-cloud') ? 'cloud' : 'other'))).toEqual(['tailnet', 'cloud']);
 });
 
 test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section opens with ‹ Settings, which goes back to the list', async () => {

@@ -18,6 +18,7 @@ import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
+import type { InboxCloudWake } from "./inbox-cloud";
 import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
@@ -434,6 +435,9 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   cline: "Cline",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
+  cloud: "Cloud agent",
+  "cloud-claude": "Claude Code routine",
+  "cloud-grok": "Grok Bot",
 };
 
 /**
@@ -611,6 +615,7 @@ export interface InboxMessage {
    * step 6: older records lack it.
    */
   delivery?: InboxDelivery | null;
+  cloud_wake?: InboxCloudWake | null;
   /**
    * On a person's reply or message not yet delivered: the person pressed
    * Send now in the Inbox, and when. The session's connection then delivers

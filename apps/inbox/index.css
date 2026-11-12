@@ -26,6 +26,7 @@
 @source "../../packages/inbox/prs/**/*.tsx";
 /* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
 @source "../../packages/inbox/agents/**/*.tsx";
+@source "../../packages/inbox/cloud/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
@@ -50,6 +51,7 @@
 /* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
 @import "../../packages/inbox/agents/agents.css";
 @import "../../packages/inbox/agents/iconDialog.css";
+@import "../../packages/inbox/cloud/cloud.css";
 /* A phone's composer card and its picker sheet (components/BottomSheet.tsx, PhoneReplyRecipient.tsx, compose/PhoneToSheet.tsx). */
 @import "../../packages/inbox/phoneComposer.css";
 
