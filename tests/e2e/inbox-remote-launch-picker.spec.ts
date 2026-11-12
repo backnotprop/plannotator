@@ -546,8 +546,11 @@ test("6. Mac mini still asleep: \"+\" names it once where its last read is held,
   const card = fresh.locator('.ib-ncd');
   await expect(card).toBeVisible();
   await card.locator('[data-new-card-project]').click();
-  await expect(fresh.locator('.ib-pm .ib-pmi')).toHaveCount(2);
-  expect((await fresh.locator('.ib-pm .ib-pmi').allInnerTexts()).sort()).toEqual(['billing-svc', 'web-app']);
+  // MacBook's own projects (web-app, billing-svc, and case 2's notes-local), never Mac mini's billing-svc or infra.
+  const own = projects.filter((p) => p.machine === macbook.id).map((p) => p.name).sort();
+  expect(own).toContain('web-app');
+  await expect(fresh.locator('.ib-pm .ib-pmi')).toHaveCount(own.length);
+  expect((await fresh.locator('.ib-pm .ib-pmi').allInnerTexts()).sort()).toEqual(own);
   await fresh.locator('.ib-pm .ib-pmi').filter({ hasText: 'billing-svc' }).click();
   await card.locator('[data-new-card-title]').fill('Retry the 409 with the same key');
   const made = fresh.waitForResponse((r) => new URL(r.url()).pathname === '/api/inbox/cards' && r.request().method() === 'POST');
