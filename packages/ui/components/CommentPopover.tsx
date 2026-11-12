@@ -1041,6 +1041,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {mentionSource?.renderNotice?.(mentionChipPeople)}
             <MentionAutocompleteMenu id={mentionListboxId} menu={mentionAc.menu} onSelect={mentionAc.select} />
           </div>
+          {images.some((image) => image.kind === 'file') && (
+            <ul className="pn-cbox-files" aria-label="Attached files">
+              {images.filter((image) => image.kind === 'file').map((file) => (
+                <li key={file.path} className="pn-cbox-file" title={file.name}>
+                  <Icon name="doc" size={13} />
+                  <span className="pn-cbox-file-name">{file.name}</span>
+                  <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setImages((prev) => prev.filter((i) => i.path !== file.path))}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {/* Screen order is Tab order: the tools, the bin, then Comment at the right end. */}
           <div className="pn-cbox-row">
             {quickLookGoodButton}

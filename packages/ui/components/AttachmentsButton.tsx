@@ -80,6 +80,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
 }) => {
   const hostUpload = useContext(CommentUploadContext);
   const anyFile = hostUpload?.files === true;
+  const pictures = images.filter((image) => image.kind !== 'file');
   const [pending, setPending] = useState<PendingPicture | null>(null);
   const pendingAbort = useRef<AbortController | null>(null);
   const isPending = pending !== null;
@@ -270,7 +271,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
 
   const handleClearAll = (e: React.MouseEvent) => {
     e.stopPropagation();
-    images.forEach(img => onRemove(img.path));
+    pictures.forEach(img => onRemove(img.path));
   };
 
   // Determine annotator props
@@ -290,35 +291,29 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
         className="group relative flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
       >
         {/* Show stacked thumbnails if we have images */}
-        {images.length > 0 ? (
+        {pictures.length > 0 ? (
           <>
             <div className="relative flex items-center">
-              {images.slice(0, 3).map((img, idx) => (
+              {pictures.slice(0, 3).map((img, idx) => (
                 <div
                   key={img.path}
                   className="relative w-5 h-5 rounded border border-background"
                   style={{ marginLeft: idx > 0 ? '-6px' : 0, zIndex: 3 - idx }}
                 >
-                  {img.kind === 'file' ? (
-                    <span className="w-5 h-5 rounded bg-muted flex items-center justify-center text-[8px] font-semibold uppercase" aria-hidden="true">
-                      {(/\.([a-z0-9]{1,4})$/i.exec(img.name)?.[1] ?? 'file').slice(0, 3)}
-                    </span>
-                  ) : (
-                    <img
-                      src={getImageSrc(img.path)}
-                      alt={img.name}
-                      loading="lazy"
-                      className="w-5 h-5 rounded object-cover"
-                    />
-                  )}
+                  <img
+                    src={getImageSrc(img.path)}
+                    alt={img.name}
+                    loading="lazy"
+                    className="w-5 h-5 rounded object-cover"
+                  />
                 </div>
               ))}
-              {images.length > 3 && (
+              {pictures.length > 3 && (
                 <div
                   className="relative w-5 h-5 rounded bg-muted border border-background flex items-center justify-center text-[9px] font-medium"
                   style={{ marginLeft: '-6px', zIndex: 0 }}
                 >
-                  +{images.length - 3}
+                  +{pictures.length - 3}
                 </div>
               )}
             </div>
