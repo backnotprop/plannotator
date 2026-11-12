@@ -953,6 +953,7 @@ export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes, rea
       stdout: "pipe",
       stderr: "pipe",
       detached: group,
+      windowsHide: true,
     });
   } catch {
     return { stdout: "", stderr: `${cli}: not found`, exitCode: 127 };

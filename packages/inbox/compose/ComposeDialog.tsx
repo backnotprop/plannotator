@@ -39,6 +39,7 @@ import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFi
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { PhoneToSheet } from './PhoneToSheet';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
+import { useLaunchChoice } from './useLaunchChoice';
 import { unpluggedDrive } from './homeFolders';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
 import { TrustDetails } from './TrustDetails';
@@ -479,7 +480,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
     const projects: MachineLaunchProject[] = [...machineGroups.groups.filter((g) => !g.asleep), ...machineGroups.groups.filter((g) => g.asleep)].flatMap((g) => g.projects);
     return { agents, projects, ...(offered?.scratch && !pulls ? { scratch: offered.scratch } : {}) };
   }, [model?.launch, pulls, onlyProjects?.join(), box, linkScratch, grouped, machineGroups, there.reads]);
-  const canStart = !!launch && launch.agents.length > 0 && (launch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
+  // A fresh Inbox has no projects yet: its scratch folder is where a first agent starts (the start block names it).
+  const startLaunch = useMemo(() => (launch && launch.projects.length === 0 && launch.scratch ? { ...launch, projects: [scratchProject(launch.scratch.root)] } : launch), [launch]);
+  const canStart = !!startLaunch && startLaunch.agents.length > 0 && (startLaunch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
   // The launch block of the machine a pick is on: this computer's, or that machine's last good read.
   const blockOf = (machine: string | null) => (machine ? there.reads.get(machine)?.launch : model?.launch);
   const start: (ComposeStart & { machine: string | null }) | null = useMemo(() => {
@@ -507,14 +510,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Add agent: the default start, once the launch block is read, unless the person chose To already.
   const launchPicked = useRef(false);
   useEffect(() => {
-    if (!request.launch || launchPicked.current || startPick || chosen || !launch || !canStart) return;
-    const project = defaultStartProject(launch, current);
+    if (!request.launch || launchPicked.current || startPick || chosen || !startLaunch || !canStart) return;
+    const project = defaultStartProject(startLaunch, current);
     if (!project) return;
     launchPicked.current = true;
-    const agent = launch.agents.find((a) => a.agent === request.launch!.agent) ?? launch.agents[0]!;
+    const agent = startLaunch.agents.find((a) => a.agent === request.launch!.agent) ?? startLaunch.agents[0]!;
     setStartPick({ agent: agent.agent, projectId: project.id, machine: (project as MachineLaunchProject).machine ?? null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.launch, launch, canStart, startPick, chosen, current]);
+  }, [request.launch, startLaunch, canStart, startPick, chosen, current]);
   // "+" on a project row and Add agent: an agent that machine doesn't have (or none started yet) becomes its first,
   // once its block is read.
   useEffect(() => {
@@ -533,6 +536,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const startAsleep = !!startMachine && startMachine.state === 'offline';
   const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
+  const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone);
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
   // trusted folder, home, a guest): plain Send. Its facts follow the pick by a read, so a press can come before them.
   const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
@@ -802,7 +806,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       if (document.activeElement !== textRef.current) trustCircleRef.current?.focus();
       return;
     }
-    if (picker || folderMenu || reviewMenu) {
+    if (picker || folderMenu || reviewMenu || launchChoice.open) {
+      launchChoice.close();
       setPicker(false);
       setFolderMenu(false);
       setReviewMenu(false);
@@ -919,6 +924,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
                     : { agent: start.agent, project_id: start.project.id }),
                 // The press is the consent, to what it was offered: the server refuses a folder that changed since.
                 ...(trust ? { trust: { folder: trust.folder, facts: trustFacts } } : {}),
+                ...launchChoice.send,
               },
             }
           : { host: target!.host, session: target!.session },
@@ -1359,6 +1365,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <span className="ib-cp-startin">
           <span className="ib-cp-in">in</span>
           {folderButton('ib-cp-tobtn', 15)}
+          {launchChoice.button('ib-cp-tobtn')}
         </span>
       )}
       {(boxPull || (linkOnly && !linkScratch)) && (target || start) && !phone && <span className="ib-cp-rvfrompull">· from the pull request</span>}
@@ -1400,6 +1407,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     <div className="ib-cp-startline" data-compose-start-line="">
       <span>New {start.name} session in</span>
       {folderButton('ib-cp-startlineb', 13)}
+      {launchChoice.button('ib-cp-startlineb')}
     </div>
   );
   // A phone's Skills button, as the reply box has it: it types the `/` the skill list opens on.
@@ -1422,7 +1430,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     void fetchSkillCatalog().then((catalog) => (catalog.length > 0 ? slash() : none()));
   };
 
-  const toStart = launch && canStart && launch.projects.length > 0 ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null;
+  const toStart = startLaunch && canStart && startLaunch.projects.length > 0 ? { launch: startLaunch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null;
   const pickStart = (picked: ComposeStart) => {
     setToFilled(false);
     setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
@@ -1763,6 +1771,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       ) : (
         picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} />
       )}
+      {launchChoice.menu()}
       {folderMenu && start && launch && (
         <FolderMenu
           projects={launch.projects}

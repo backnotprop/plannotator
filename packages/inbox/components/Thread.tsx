@@ -24,13 +24,14 @@ import { noteReviews, rangeWord } from '../contextNotes/model';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
+import { LaunchChoiceMeta } from './LaunchChoiceMeta';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
-import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode } from '../api';
+import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { awayLine, outboxLine } from '../machines';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
@@ -81,6 +82,8 @@ import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { createTypedSaves, isTypedChange } from '../typedAnswers';
+import { conflictRevision, onPickConflict } from '../pickConflict';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote, DraftStamp, unsentWords } from './DraftLabel';
@@ -1260,7 +1263,18 @@ export interface ThreadPaneProps {
    */
   sent: { at: string; checked_at: string | null; read_by?: string; recipients?: InboxSentRecipient[] } | null;
   /** The thread's questions changed through a pick (the response's questions for that message). */
-  onQuestions: (messageId: string, questions: InboxQuestion[]) => void;
+  /** `stateKept`: every question kept its state (only words typed in an answer changed): nothing outside the pane moved. */
+  onQuestions: (messageId: string, questions: InboxQuestion[], stateKept?: boolean) => void;
+  /**
+   * A Send's answer carried the thread as a read of it answers now (`thread_read`): the window draws the sent reply
+   * from it and reads only the list after. False: not drawn (the person moved on, or no such read), so `onChanged` reads.
+   */
+  onSentRead?: (model: ThreadModel) => Promise<boolean>;
+  /**
+   * Mark read is drawn (the header's Read pressed) but its write and the reads after it have not landed: the line
+   * under the header ("Read … N questions were closed …") waits for them, so it never shows half of what it says.
+   */
+  readPending?: boolean;
   /** The questions (`<message id>/<key>`) with an answer saving, each time they change; none: the last one landed, or the pane closed. */
   onPickSaves?: (ids: ReadonlySet<string>, paneClosed?: boolean) => void;
   /** Something was written (a Send, resolve): read the thread and the list again. */
@@ -1724,7 +1738,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -1849,11 +1863,24 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   onPickSavesNow.current = onPickSaves;
   /** The pane closed: the window holds no read for its saves; a save still out says only when the last has landed. */
   const paneGone = useRef(false);
+  /** Words typed in an answer, waiting for their pause (typedAnswers.ts); a click, Send, blur, close or the page going saves them. */
+  const [typedSaves] = useState(() => createTypedSaves());
   const [pickQueue] = useState(() =>
-    createPickQueue((ids) => {
-      if (!paneGone.current || ids.size === 0) onPickSavesNow.current?.(ids);
-    }),
+    createPickQueue(
+      (ids) => {
+        if (!paneGone.current || ids.size === 0) onPickSavesNow.current?.(ids);
+      },
+      { flush: () => typedSaves.flushAll(), waiting: () => typedSaves.size() > 0, has: (id) => typedSaves.has(id) },
+    ),
   );
+  /** Each question's answer as the person last left it here (saved or not): what the next change is compared with. */
+  const lastAnswers = useRef(new Map<string, QuestionAnswer | null>());
+  /**
+   * The newest revision each question's saves (or a refusal) said the Inbox holds. Never cleared as the pane moves to
+   * another thread, unlike `revisions`: words saved as a thread closes run after the move. Ids are unique, and a
+   * revision only grows.
+   */
+  const landedRevisions = useRef(new Map<string, number>());
   /** Questions replaced under an answer being saved, until the person has read that (`acknowledgeStale`). */
   const replacedSaves = useRef(new Set<string>());
   const revisions = useRef(new Map<string, number>());
@@ -3133,6 +3160,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     sendContents.current = null;
     revisions.current.clear();
     savedQuestions.current.clear();
+    lastAnswers.current.clear();
   }, [thread.thread_id]);
 
   // The "↓ N new" pill while new messages the person has not seen are below
@@ -3965,14 +3993,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** A wait said an answer was not saved: its error shows, or (nothing said why) this one. Never a silent stop. */
   const pickNotSaved = () => setError((current) => current ?? 'The pick was not saved.');
 
-  const pick = (messageId: string, key: string, answer: QuestionAnswer | null) => {
-    const id = `${messageId}/${key}`;
-    setPending((current) => new Map(current).set(id, answer));
-    setError(null);
-    // Read when the save starts, never when the answer changed: the save running now raises the revision.
-    pickQueue.put(id, async () => {
-      const known = questionById(id);
-      const revision = Math.max(revisions.current.get(id) ?? 0, known?.revision ?? 0);
+  /**
+   * The save of one answer, run by the queue. `keepalive`: started as the page hides or goes, so it outlives the page.
+   * `knownAtPick`: the question as drawn when the person answered, for a save that runs after the pane moved to
+   * another thread (the thread closing saves the words waiting there).
+   */
+  const answerSave = (messageId: string, key: string, answer: QuestionAnswer | null, knownAtPick: InboxQuestion | undefined, options: { keepalive?: boolean } = {}) => async (): Promise<boolean> => {
+      const id = `${messageId}/${key}`;
+      // Read when the save starts, never when the answer changed: the save running now raises the revision.
+      const known = questionById(id) ?? knownAtPick;
+      let revision = Math.max(revisions.current.get(id) ?? 0, landedRevisions.current.get(id) ?? 0, known?.revision ?? 0);
       /**
        * The words stay on the card: held for another machine (linked machines), it applies when that machine takes it;
        * not saved, they are still the person's answer, and the next wait saves them.
@@ -3980,18 +4010,46 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       let kept = false;
       try {
         // `unsentOnly`: a save that lands after its question went with a reply never reopens what the agent has.
-        const result = await inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true });
+        let result: Awaited<ReturnType<typeof inboxApi.pick>>;
+        for (let tries = 0; ; tries += 1) {
+          try {
+            result = await inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true, keepalive: options.keepalive && tries === 0 });
+            break;
+          } catch (cause) {
+            // Another window's answer landed first (pickConflict.ts holds the rule): this one goes again on top of it,
+            // or the Inbox's is drawn. Either way quietly: never the refusal's raw words.
+            const conflict = onPickConflict(cause, tries);
+            if (!conflict) throw cause;
+            const now = conflictRevision(cause)!;
+            landedRevisions.current.set(id, Math.max(landedRevisions.current.get(id) ?? 0, now));
+            // A newer answer of it is waiting: that one decides, and goes at the revision the Inbox holds now.
+            if (pickQueue.hasNewer(id) || typedSaves.has(id)) return true;
+            if (conflict.action === 'retry') {
+              revision = now;
+              continue;
+            }
+            lastAnswers.current.delete(id);
+            await onChanged();
+            return true;
+          }
+        }
         for (const q of result.questions) {
           revisions.current.set(`${q.message_id}/${q.key}`, q.revision);
+          landedRevisions.current.set(`${q.message_id}/${q.key}`, Math.max(landedRevisions.current.get(`${q.message_id}/${q.key}`) ?? 0, q.revision));
           savedQuestions.current.set(`${q.message_id}/${q.key}`, q);
         }
         savesLanded.current += 1;
+        // Only words changed (each question's state as before): what the list and drafts show did not move.
+        const stateKept = result.questions.every((q) => {
+          const was = questionById(`${q.message_id}/${q.key}`);
+          return !!was && was.state === q.state;
+        });
         // A Send waiting on this save reads the thread right after it, before
         // React draws the saved picks: give it the saved questions now, or it
         // sends a stale revision (refused) or leaves out a note just saved.
         const latest = threadRef.current;
         threadRef.current = { ...latest, messages: latest.messages.map((m) => (m.id === messageId ? { ...m, questions: result.questions } : m)) };
-        onQuestions(messageId, result.questions);
+        onQuestions(messageId, result.questions, stateKept);
         return true;
       } catch (cause) {
         if (cause instanceof InboxHeldError) {
@@ -4004,7 +4062,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           settleHeldPicks(outboxNow.current);
           return true;
         }
-        const newer = pickQueue.hasNewer(id);
+        const newer = pickQueue.hasNewer(id) || typedSaves.has(id);
         // The agent replaced the question meanwhile: reading the thread again redraws it as Replaced. The words have
         // nowhere to go: the toast says so, and a Send stops at the stale guard, even with no answer saved on it.
         if (isSuperseded(cause)) {
@@ -4037,8 +4095,76 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           return next;
         });
       }
-    });
   };
+
+  const pick = (messageId: string, key: string, answer: QuestionAnswer | null) => {
+    const id = `${messageId}/${key}`;
+    const known = questionById(id);
+    const before = lastAnswers.current.has(id) ? lastAnswers.current.get(id) : (known?.answer ?? null);
+    lastAnswers.current.set(id, answer);
+    setPending((current) => new Map(current).set(id, answer));
+    setError(null);
+    const save = answerSave(messageId, key, answer, known);
+    // Typing ("Other…", a text answer, a note): saved once the typing pauses (typedAnswers.ts).
+    if (isTypedChange(before, answer, known?.suggested_text ?? null)) {
+      typedSaves.type(id, () => pickQueue.put(id, save));
+      return;
+    }
+    // A click: this answer carries the words typed in it, and any words waiting in another answer go now too.
+    typedSaves.drop(id);
+    typedSaves.flushAll();
+    pickQueue.put(id, save);
+  };
+
+  /**
+   * The page hides or goes (a closed tab, a reload, a phone switching apps) with words waiting for their pause: each
+   * is saved now with a keepalive request, so it outlives the page. One whose question has no save out starts at once
+   * through the line (its answer read as ever when the page stays); one with a save still out cannot wait for it, so
+   * it also goes on its own, naming the revision that save makes.
+   */
+  const saveTypedOnLeave = () => {
+    for (const { id } of typedSaves.take()) {
+      const answer = lastAnswers.current.get(id) ?? null;
+      const slash = id.indexOf('/');
+      const messageId = id.slice(0, slash);
+      const key = id.slice(slash + 1);
+      const known = questionById(id);
+      if (!pickQueue.busy(id)) {
+        pickQueue.put(id, answerSave(messageId, key, answer, known, { keepalive: true }));
+        continue;
+      }
+      const revision = Math.max(revisions.current.get(id) ?? 0, landedRevisions.current.get(id) ?? 0, known?.revision ?? 0) + 1;
+      pickQueue.put(id, answerSave(messageId, key, answer, known));
+      void inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true, keepalive: true }).catch(() => {});
+    }
+  };
+  const saveTypedOnLeaveNow = useRef(saveTypedOnLeave);
+  saveTypedOnLeaveNow.current = saveTypedOnLeave;
+  useEffect(() => {
+    const onHide = () => saveTypedOnLeaveNow.current();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') onHide();
+    };
+    window.addEventListener('pagehide', onHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
+  // Leaving an answer's field (a click elsewhere, Tab) saves its words now, as the reply box's draft is.
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+    const onFocusOut = (event: FocusEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.('fieldset[data-question-key]') && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) typedSaves.flushAll();
+    };
+    section.addEventListener('focusout', onFocusOut);
+    return () => section.removeEventListener('focusout', onFocusOut);
+  }, [typedSaves]);
+  // The pane moving to another thread, or closing: the words waiting go now, before anything of the next thread.
+  useLayoutEffect(() => () => typedSaves.flushAll(), [thread.thread_id, typedSaves]);
 
   const answersOf = (message: InboxMessageWire): Map<string, QuestionAnswer> => {
     const out = new Map<string, QuestionAnswer>();
@@ -4845,12 +4971,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       total = requests.length;
       /** The reply that handed the thread over (approval "inbox-tag-handoff"), for the toast's Undo. */
       let handedReply: InboxMessageWire | null = null;
-      for (const request of requests) {
+      /** The thread as the last reply's answer brought it (that reply asks for it on this Inbox's own threads). */
+      let sentRead: ThreadModel | null = null;
+      for (const [index, request] of requests.entries()) {
         if (request.input.words) wordsKey = request.input.idempotency_key;
         postingTo = request.input.to;
-        const answer = await inboxApi.reply(request.messageId, request.input);
+        const last = index === requests.length - 1;
+        const answer = await inboxApi.reply(request.messageId, last && !machine ? { ...request.input, with_thread: true } : request.input);
         const written = answer.reply as InboxMessageWire | null;
         if (written?.handoff && !answer.replayed) handedReply = written;
+        if (last) sentRead = answer.thread_read ?? null;
         went += 1;
       }
       done = true;
@@ -4875,7 +5005,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         });
       }
       if (!options.stayFull) setFull(false);
-      await onChanged();
+      // The answer brought the thread with the reply in it: drawn now, no read of the thread after it.
+      if (!(sentRead && onSentRead && (await onSentRead(sentRead)))) await onChanged();
       await reloadFiles();
       // The reply and where it is now sit at the foot of the thread.
       requestAnimationFrame(() => {
@@ -6409,6 +6540,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 <span data-launch-full="">Full permissions</span>
               </>
             )}
+            <LaunchChoiceMeta launch={launched} />
           </div>
         )}
         {confirmDelete && launched && (
@@ -6484,7 +6616,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </div>
         )}
-        {readAt !== null && !resolved && (
+        {readAt !== null && !resolved && !readPending && (
           <div className="ib-readline" data-read-line="">
             <Icon name="checkCircle" size={16} />
             <div>

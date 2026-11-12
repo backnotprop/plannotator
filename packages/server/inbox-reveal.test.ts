@@ -537,6 +537,34 @@ describe("the Checklist reveal at day 6", () => {
   });
 });
 
+describe('"Set the rules" (Rules for your agents): last of the later group', () => {
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { list_view: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
+
+  test("two days' use and ten threads: next, shown once (a second tab gets no), and Not now is final and holds the next dialog back", async () => {
+    const w = await world({ threads: 10, config: decided });
+    expect(await w.next()).toBe("agent_rules");
+    expect((await w.claim("agent_rules", "rules-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.agent_rules.shownAt).toMatch(/^\d{4}-/);
+    expect((await w.claim("agent_rules", "rules-key-2")).show).toBe(false);
+    expect((await w.post("/api/inbox/reveal", { id: "agent_rules", answer: "not_now" })).status).toBe(200);
+    expect(w.saved().inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("agent_rules", "rules-key-3")).show).toBe(false);
+  });
+
+  for (const [name, options] of [
+    ["nine threads", { threads: 9, config: decided }],
+    ["day 1 of use", { threads: 10, days: 1, config: decided }],
+    ["rules already set for one agent", { threads: 10, config: { ...decided, prompts: { inbox: { runtimes: { pi: { rules: "Keep messages short." } } } } } }],
+  ] as const) {
+    test(`never for ${name}`, async () => {
+      const w = await world(options);
+      expect(await w.next()).toBeNull();
+      expect((await w.claim("agent_rules")).show).toBe(false);
+    });
+  }
+});
+
 describe("over the tailnet", () => {
   test("a guest is never armed and never claims; the owner's phone claims", async () => {
     const w = await world({ tailnet: "owner" });

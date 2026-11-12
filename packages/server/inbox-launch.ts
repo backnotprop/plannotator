@@ -84,6 +84,9 @@ import { createDriveList } from "./inbox-drives";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
+import { LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
+import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
+import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
@@ -119,7 +122,18 @@ export type InboxLaunchTarget = (
   | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }
 ) & {
   trust?: InboxLaunchTrust;
+  choice?: InboxLaunchChoice;
 };
+
+function choiceOfTarget(value: Record<string, unknown>): { choice?: InboxLaunchChoice } {
+  try {
+    const choice = parseLaunchChoice(value, null);
+    return choice.model || choice.effort ? { choice } : {};
+  } catch (error) {
+    const field = error instanceof LaunchChoiceError ? error.field : "model";
+    throw new InboxError("validation_error", (error as Error).message, { field: `to.launch.${field}` });
+  }
+}
 
 /** The reading a press was made on, or nothing when the press came without one. */
 function trustOfTarget(value: Record<string, unknown>): { trust?: InboxLaunchTrust } {
@@ -259,7 +273,9 @@ export function createInboxLaunch(options: {
       ? json({ error: "Hidden folders aren't listed.", code: "folder_hidden" }, 422)
       : refused === "system"
         ? json({ error: "System folders aren't listed.", code: "folder_system" }, 422)
-        : json({ error: "That isn't a full path.", code: "folder_bad_path" }, 422);
+        : refused === "home_only"
+          ? json({ error: "Only folders inside the home folder.", code: "folder_outside_home" }, 422)
+          : json({ error: "That isn't a full path.", code: "folder_bad_path" }, 422);
   const slowAnswer = (name: string): Response => json({ error: `${name} isn't responding.`, code: "folder_slow", drive: name }, 504);
 
   /**
@@ -1250,6 +1266,21 @@ ${result.text}`);
         if (config().scratchDir !== (path ? resolve(path) : null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
         return json({ launch: settingsState() });
       }
+      if ("settings_file" in body) {
+        // Checked now so a typo is said here rather than at the next start.
+        const raw = body.settings_file;
+        if (raw !== null && typeof raw !== "string") throw new InboxError("validation_error", "settings_file: a file path, or null.", { field: "settings_file" });
+        const typed = (raw ?? "").trim();
+        if (typed && !(typed === "~" || typed.startsWith("~/") || isAbsolute(typed))) throw new InboxError("validation_error", "Give a full path, such as ~/.claude/gateway.json.", { field: "settings_file" });
+        if (typed) {
+          const path = claudeSettingsFilePath(typed, options.homeDir);
+          const read = readClaudeSettingsFile(path, options.displayFolder(path));
+          if (!read.ok) throw new InboxError("validation_error", read.text.replace(/ Fix it in Settings → Agents, or clear it there\.$/, ""), { field: "settings_file" });
+        }
+        saveConfig({ inboxLaunch: { settingsFile: typed || undefined } as { settingsFile?: string } });
+        if (config().settingsFile !== (typed || null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
+        return json({ launch: settingsState() });
+      }
       if (typeof body.full_permissions !== "boolean") throw new InboxError("validation_error", "full_permissions: a boolean.", { field: "full_permissions" });
       saveConfig({ inboxLaunch: { fullPermissions: body.full_permissions } });
       if (config().fullPermissions !== body.full_permissions) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
@@ -1544,7 +1575,7 @@ ${result.text}`);
       if (!enabled()) return null;
       const value = (to as { launch: unknown }).launch as Record<string, unknown> | null;
       const host = value && typeof value === "object" && typeof value.agent === "string" && Object.hasOwn(hosts, value.agent) ? hosts[value.agent]! : null;
-      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!) };
+      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
       // "Another folder on <machine>…": a folder under home that is not a project yet (`~/…`).
       // `create: true` (Create a folder): its last folder may not be there yet; the Send makes it.
       if (host && typeof value!.folder === "string" && value!.project_id === undefined && value!.scratch === undefined) {
@@ -1555,15 +1586,15 @@ ${result.text}`);
           if (!repo || repo.kind !== "repo" || (clone.branch !== undefined && (typeof clone.branch !== "string" || clone.branch.startsWith("-") || !/^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$/.test(clone.branch)))) {
             throw new InboxError("validation_error", "to.launch.clone: { url: an https or ssh git URL, branch? }.", { field: "to.launch.clone" });
           }
-          return { agent: host.agent, folder: value!.folder, clone: { url: clone.url as string, ...(typeof clone.branch === "string" ? { branch: clone.branch } : {}) }, ...trustOfTarget(value!) };
+          return { agent: host.agent, folder: value!.folder, clone: { url: clone.url as string, ...(typeof clone.branch === "string" ? { branch: clone.branch } : {}) }, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
         }
-        return { agent: host.agent, folder: value!.folder, ...(value!.create === true ? { create: true as const } : {}), ...trustOfTarget(value!) };
+        return { agent: host.agent, folder: value!.folder, ...(value!.create === true ? { create: true as const } : {}), ...trustOfTarget(value!), ...choiceOfTarget(value!) };
       }
       if (!host || typeof value!.project_id !== "string") {
         const agent = hostList.map((h) => `"${h.agent}"`).join(" | ");
         throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id }, { agent: ${agent}, folder } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
       }
-      return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!) };
+      return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
     },
 
     /**
@@ -1648,6 +1679,14 @@ ${result.text}`);
         }
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
+      // Lists not read yet (a slow CLI) check the tokens only: a slow CLI never refuses the start.
+      const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+      if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
+      if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
+        throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
+      }
+      const model = target.choice?.model;
+      const effort = target.choice?.effort;
       const id = inboxId("lch");
       // How it starts, fixed for this launch (the host's `startOf`: for Claude Code the switch, the person's own
       // setup with this folder's settings, and the last finished shell read, however old; the start reads the
@@ -1708,8 +1747,17 @@ ${result.text}`);
         ...(start.full ? { full_permissions: true } : {}),
         ...(start.ownMode ? { own_mode: true } : {}),
         ...(start.bypass ? { bypass_available: true } : {}),
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
+      if (host.choices) {
+        try {
+          writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
+        } catch {
+          // Only where the menu starts: never worth failing a Send.
+        }
+      }
       // C1c: the next clone on this machine goes where this one went.
       if (launch.clone) {
         try {
@@ -1802,7 +1850,11 @@ ${result.text}`);
           }
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
-          return ok.ok ? [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}) }] : [];
+          if (!ok.ok) return [];
+          const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
+          return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),
       );
       // Why the others can't start now, for a linked machine's window to say with this machine's name (remote launch).
@@ -1996,6 +2048,7 @@ async function chooseFolderInFinder(): Promise<string | null> {
     await Bun.sleep(600);
     return stub === "" ? null : stub;
   }
+  // windows-hide-guard: macOS only (osascript).
   const child = Bun.spawn(["/usr/bin/osascript", "-e", "activate", "-e", 'POSIX path of (choose folder with prompt "Pick a folder to start the agent in")'], {
     stdin: "ignore",
     stdout: "pipe",
