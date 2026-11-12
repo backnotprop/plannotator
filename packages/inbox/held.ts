@@ -207,7 +207,19 @@ export function refreshHeldRows(shown: readonly InboxListSection[], latest: read
     changed = true;
     return { ...section, threads };
   });
+  const answered = open ? answeredOpenRow(shown, fresh, open) : null;
+  if (answered) return settleThread(sections, latest, answered);
   return changed ? sections : (shown as InboxListSection[]);
+}
+
+const ON_YOU: ReadonlySet<string> = new Set(['stopped', 'holding', 'waiting']);
+
+function answeredOpenRow(shown: readonly InboxListSection[], fresh: ReadonlyMap<string, InboxListRow>, open: OpenThread): string | null {
+  const drawnIn = shown.find((section) => section.threads.some((row) => row.thread_id === open.threadId));
+  const drawn = drawnIn?.threads.find((row) => row.thread_id === open.threadId);
+  const next = fresh.get(open.threadId);
+  if (!drawnIn || !drawn || !next || !next.sent || !ON_YOU.has(drawnIn.id) || ON_YOU.has(groupOf(next))) return null;
+  return isOpenRow(next, open) && !hasNewAgentActivity(drawn, next) ? open.threadId : null;
 }
 
 /** The list's own order within a section (packages/shared/inbox/list.ts): newest first, ties on the thread id. */

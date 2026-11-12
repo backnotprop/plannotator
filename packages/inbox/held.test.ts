@@ -337,6 +337,18 @@ describe('the open thread', () => {
     expect(refreshHeldRows(shown, bySection(asked, other)).find((s) => s.id === 'new')!.threads[0]).toBe(openShown);
   });
 
+  test('the person answers the open thread\'s questions and sends: its row leaves Waiting on you at once; Mark read and another row\'s change still wait for the settle', () => {
+    const waiting = { ...r('open', 'billing-svc', 1, 'waiting', 0), unread: false } as InboxListRow;
+    const onScreen = bySection(waiting, other);
+    const sentRow = { ...waiting, section: 'sent', last_at: at(3), sent: { at: at(3), checked_at: null } } as InboxListRow;
+    expect(ids(refreshHeldRows(onScreen, bySection(sentRow, other), OPEN))).toEqual(['new:other', 'sent:open']);
+    expect(ids(refreshHeldRows(onScreen, bySection(sentRow, other)))).toEqual(['waiting:open', 'new:other']);
+    expect(ids(refreshHeldRows(onScreen, bySection({ ...waiting, section: 'quiet' } as InboxListRow, other), OPEN))).toEqual(['waiting:open', 'new:other']);
+    const answeredElsewhere = { ...r('other', 'docs-site', 0, 'waiting', 0) } as InboxListRow;
+    const twoWaiting = bySection(waiting, answeredElsewhere);
+    expect(ids(refreshHeldRows(twoWaiting, bySection(waiting, { ...answeredElsewhere, section: 'quiet' }), OPEN))).toEqual(['waiting:open,other']);
+  });
+
   test('closed before the arrival was seen: it settles unread, in New, or in Waiting when it asks', () => {
     expect(ids(settleOwn(shown, bySection(arrived, other), undefined, closedAs(arrived)))).toEqual(['new:open,other']);
     const settled = settleOwn(shown, bySection(asked, other, elsewhere), undefined, closedAs(asked));
