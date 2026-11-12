@@ -163,6 +163,7 @@ afterEach(() => {
   }
 });
 
+// Never await a real timer in these tests: fake timers never fire it and bun's per-test timeout cannot either, so it would hang.
 async function wait(ms: number) {
   await act(async () => {
     await settle();

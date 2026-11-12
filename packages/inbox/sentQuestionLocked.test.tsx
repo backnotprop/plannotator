@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 
+// The real Inbox runs in its own process: happy-dom's Response cannot be served from this one.
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
 type World = { project: string; sentMulti: string };
