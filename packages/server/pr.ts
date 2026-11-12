@@ -61,7 +61,7 @@ const bunCommandRuntime: PRRuntime = {
       env: childEnv(options?.env),
       stdout: "pipe",
       stderr: "pipe",
-      ...(group ? { detached: true } : {}),
+      detached: group,
       windowsHide: true,
     });
     const stop = () => refRunnerKill((sig) => (group ? process.kill(-proc.pid, sig) : proc.kill(sig)));
