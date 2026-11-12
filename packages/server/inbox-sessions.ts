@@ -189,7 +189,6 @@ interface SeenSession {
    * thread is not known to have ended. Its id, for that check.
    */
   wakeOnly?: string;
-  /** A paired cloud agent (packages/server/inbox-cloud-wake.ts): live for as long as it stays paired. */
   pinned?: boolean;
 }
 
@@ -664,10 +663,6 @@ export function createInboxLiveSessions(options: {
     sessions.set(session, entry);
   };
 
-  /**
-   * A paired cloud agent (packages/server/inbox-cloud-wake.ts): live in its project while it stays paired, under its
-   * name (`label`), so New message's To lists it. `root` null unpins it (Remove).
-   */
   const pinCloud = (session: string, root: string | null, name: string, host = "cloud"): void => {
     if (root === null) {
       if (sessions.get(session)?.pinned) sessions.delete(session);

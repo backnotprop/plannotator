@@ -1273,13 +1273,11 @@ export interface SearchRequest {
 }
 
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
-/** GET /api/inbox/cloud-agents: the paired cloud agents, and the projects one may work in (most recent first). */
 export interface CloudAgentsModel {
   agents: InboxCloudAgentView[];
   projects: { id: string; name: string }[];
 }
 
-/** Send a test's answer: whether a run started, its link, and the plain words to show. */
 export interface CloudAgentTest {
   started: boolean;
   run_url?: string;
@@ -2184,7 +2182,6 @@ export const inboxApi = {
   pairingChecks: (fresh = false) => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>(inboxUrl(`/pairing/checks${fresh ? '?fresh=1' : ''}`)),
   devices: () => get<{ devices: PairedDevice[] }>(inboxUrl('/devices')),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(inboxUrl(`/devices/${encodeURIComponent(id)}/revoke`), {}),
-  /** Settings → Devices, Cloud agents (packages/server/inbox-cloud-agents.ts): never the address or the key back. */
   cloudAgents: () => get<CloudAgentsModel>(inboxUrl('/cloud-agents')),
   pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; url: string; key: string; project_id: string | null }) =>
     post<CloudAgentsModel & { agent: InboxCloudAgentView }>(inboxUrl('/cloud-agents'), fields),

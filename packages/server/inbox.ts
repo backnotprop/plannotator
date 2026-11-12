@@ -610,7 +610,6 @@ export interface InboxServerOptions {
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
   /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
   t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number };
-  /** The cloud wake (inbox-cloud-wake.ts): tests pass a clock, a short minute and time limit, and a log. */
   cloudWake?: { now?: () => number; gapMs?: number; timeoutMs?: number; retryMs?: number; log?: (line: string) => void };
 }
 
@@ -682,7 +681,6 @@ export interface InboxServer {
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
   t3Wake: InboxT3Wake;
-  /** The cloud wake (inbox-cloud-wake.ts): tests ask it to look again. */
   cloudWake: InboxCloudWaker;
   /** Shape's watch of the boards: tests read how many windows it reads the store for. */
   shapeWatchers: () => number;
@@ -4159,8 +4157,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.t3Wake,
   });
 
-  // Paired cloud agents (Settings → Devices): the person's messages to one are POSTed to its webhook
-  // (inbox-cloud-agents.ts, inbox-cloud-wake.ts). Its address and key stay in their 0600 file.
   const cloudAgents = createInboxCloudAgents({
     store,
     dataDir,
@@ -5456,7 +5452,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         return json({ account: await codexAccount.read() });
       }
-      // Paired cloud agents (Settings → Devices): the owner's alone; the address and key never come back.
       if (path === "/api/inbox/cloud-agents" || path.startsWith("/api/inbox/cloud-agents/")) {
         if (!ownerOrLocal(req, via)) return localOnly();
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);

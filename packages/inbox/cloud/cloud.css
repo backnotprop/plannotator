@@ -1,4 +1,3 @@
-/* Settings → Devices → Cloud agents (cloud/CloudAgents.tsx) and a cloud agent's line in a thread (cloud/CloudWakeLine.tsx). */
 .ib-cl-agent { border-bottom: 1px solid var(--ib-hair); }
 .ib-cl-agent:last-child { border-bottom: 0; }
 .ib-cl-agent > .ib-prow { border-bottom: 0; }
@@ -19,7 +18,6 @@
 .ib-cl-paired .ib-cl-test { padding: 0; }
 .ib-cl-seg { align-self: flex-start; max-width: 100%; overflow-x: auto; }
 .ib-cl-where { margin-top: -2px; }
-/* The thread's line under the person's message to a cloud agent. */
 .ib-delivered[data-cloud-wake] .ib-dl-text a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 @media (pointer: coarse) {
   .ib-cl-sub .ib-btn, .ib-cl-row .ib-btn { min-height: 40px; }

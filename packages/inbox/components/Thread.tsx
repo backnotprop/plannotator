@@ -1745,7 +1745,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const root = thread.messages[0]!;
   // A thread the person started (compose) is about the agent it is addressed to, never the person.
   const startedTo = root.started_by_person && root.to ? root.to : null;
-  // A paired cloud agent is named by the name its wakes carry (packages/inbox/cloud/), not "Cloud agent".
   const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
   const addresseeName = (host: string) => (isInboxCloudHost(host) && cloudName ? cloudName : hostName(host));
   const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
@@ -5125,7 +5124,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
   const heldHandoff = last.author.kind === 'person' && !!last.handoff && !last.handoff.settled_at && !last.handoff.undone_at;
-  // A message to a paired cloud agent (packages/inbox/cloud/): its own line, from the wake the Inbox wrote on it.
   const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || isInboxCloudHost(lastTo?.host)) ? last : null;
   const delivered: DeliveryLine | null = cloudLast
     ? null

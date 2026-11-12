@@ -6462,11 +6462,6 @@ export class InboxStore {
     return withdrawn;
   }
 
-  /**
-   * Where a person message's cloud wake stands (packages/server/inbox-cloud-wake.ts): written before and after each
-   * webhook POST, so every window shows the same line and a wake that may have gone is never sent twice. A `started`
-   * wake also records the delivery. No write when nothing changed.
-   */
   recordCloudWake(messageId: string, wake: InboxCloudWake, session?: string, host = "cloud"): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message || message.author.kind !== "person") throw new InboxError("message_not_found", `No message ${messageId}.`);

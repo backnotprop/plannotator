@@ -570,18 +570,12 @@ const opencodeRig = (R: Rand): Rig => {
   };
 };
 
-/*
- * Grok Bot (a paired Grok Bot routine; the owner, 2026-11-11: "Yes, with the glance animation"): still, and now and
- * then its eyes glance to a side and back, like the glance on x.ai/bot. One gesture, nothing else: no idle drift, no
- * blink, and the eyes do not follow the pointer, so a list of rows stays calm.
- */
 const grokRig = (R: Rand): Rig => {
   const u = px(60);
   const side = () => (R() < 0.5 ? -1 : 1);
   return {
     parts: { body: { sel: '[data-p="body"]' }, eyes: { sel: '[data-p="eyes"]' } },
     life: () => undefined,
-    // Now and then: the first glance a few seconds in, then one every 8 to 20 s, each icon on its own seed.
     gap: (first) => (first ? 3000 + 7000 * R() : 8000 + 12000 * R()),
     lean: 1,
     acts: [
