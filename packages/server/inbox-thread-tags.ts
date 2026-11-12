@@ -6,7 +6,7 @@
  *
  *   POST /api/inbox/threads/:id/tags   `{ tag: "ini_…", on: boolean }`: Add tag, untick, Remove from; `{ tags }`, the thread's tags
  *
- * The person's marks live in `inbox/thread-tags.json`, outside the event log (shared/inbox/thread-tags.ts): agents,
+ * The person's marks live in `inbox/tags.json`, outside the event log (shared/inbox/thread-tags.ts): agents,
  * the MCP, search and the phone's event stream never see them. The list model carries the live tags (`tags`) and
  * each row's (`row.tags`), and a change tells every window (`event: tags`, as `event: pins`). The device door does
  * not forward it, and a linked machine's forward never carries it.

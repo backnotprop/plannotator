@@ -770,7 +770,7 @@ const ERROR_STATUS: Record<string, number> = {
   config_not_saved: 500,
   // pins.json from a newer Plannotator: kept as it is (packages/shared/inbox/pins.ts).
   pins_newer: 409,
-  thread_tags_newer: 409,
+  tags_newer: 409,
   // Artifact pins (packages/shared/inbox/artifact-pins.ts): a key that is not one of the thread's artifacts, and a file from a newer Plannotator.
   artifact_not_found: 404,
   artifact_pins_newer: 409,

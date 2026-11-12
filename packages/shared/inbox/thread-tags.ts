@@ -2,7 +2,7 @@
  * Plannotator Inbox: the tags the person put on a thread or took off it
  * (approval "inbox-thread-tags", step 1).
  *
- *   inbox/thread-tags.json   { v: 1, marks: [{ thread_id, tag, on, seq, at }] }, 0600, written whole (temp, then rename)
+ *   inbox/tags.json   { v: 1, marks: [{ thread_id, tag, on, seq, at }] }, 0600, written whole (temp, then rename)
  *
  * A tag is an initiative record (`ini_` id, initiatives in the event log); this
  * file holds only the person's own marks on threads, one per (thread, tag), the
@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 
-export const INBOX_THREAD_TAGS_FILE = "thread-tags.json";
+export const INBOX_TAGS_FILE = "tags.json";
 
 export interface InboxThreadTagMark {
   thread_id: string;
@@ -34,7 +34,7 @@ export interface InboxThreadTagMark {
 }
 
 function fileOf(inboxDirPath: string): string {
-  return join(inboxDirPath, INBOX_THREAD_TAGS_FILE);
+  return join(inboxDirPath, INBOX_TAGS_FILE);
 }
 
 /** The marks on disk. A file that does not parse (or a newer version's) reads as none; a bad entry is skipped, and of two for one pair the later one stays. */
@@ -59,37 +59,43 @@ export function readInboxThreadTags(inboxDirPath: string): InboxThreadTagMark[] 
   return [...byPair.values()];
 }
 
-/** What thread-tags.json holds before a write (as pins.json): a newer version's file is never written over. */
-function fileState(inboxDirPath: string): "missing" | "ok" | "bad" | "newer" {
+/**
+ * What tags.json holds before a write (as pins.json): a newer version's file is never written over. `rest` is
+ * what else a version-1 file keeps beside `marks` (a later Plannotator's tag colours), written back as it was.
+ */
+function fileState(inboxDirPath: string): { state: "missing" | "ok" | "bad" | "newer"; rest: Record<string, unknown> } {
+  const none = {};
   let raw: string;
   try {
     raw = readFileSync(fileOf(inboxDirPath), "utf8");
   } catch (e) {
-    return (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "missing" : "bad";
+    return { state: (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "missing" : "bad", rest: none };
   }
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
-    return "bad";
+    return { state: "bad", rest: none };
   }
-  const file = value as { v?: unknown; marks?: unknown } | null;
-  if (!file || typeof file !== "object" || Array.isArray(file)) return "bad";
-  if (typeof file.v === "number" && file.v > 1) return "newer";
-  return file.v === 1 && Array.isArray(file.marks) ? "ok" : "bad";
+  const file = value as ({ v?: unknown; marks?: unknown } & Record<string, unknown>) | null;
+  if (!file || typeof file !== "object" || Array.isArray(file)) return { state: "bad", rest: none };
+  if (typeof file.v === "number" && file.v > 1) return { state: "newer", rest: none };
+  if (file.v !== 1 || !Array.isArray(file.marks)) return { state: "bad", rest: none };
+  const { v: _v, marks: _marks, ...rest } = file;
+  return { state: "ok", rest };
 }
 
 /**
  * Write the marks whole (owner-only). None removes the file. A file a newer
  * Plannotator wrote is refused; one that cannot be read is moved aside first
- * (`thread-tags.json.unreadable-<time>`), as pins.json is.
+ * (`tags.json.unreadable-<time>`), as pins.json is.
  */
 export function writeInboxThreadTags(inboxDirPath: string, marks: readonly InboxThreadTagMark[]): void {
   const file = fileOf(inboxDirPath);
-  const state = fileState(inboxDirPath);
-  if (state === "newer") throw new InboxError("thread_tags_newer", "thread-tags.json was written by a newer Plannotator; update Plannotator to change tags.");
+  const { state, rest } = fileState(inboxDirPath);
+  if (state === "newer") throw new InboxError("tags_newer", "tags.json was written by a newer Plannotator; update Plannotator to change tags.");
   if (state === "bad") renameSync(file, `${file}.unreadable-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-  if (marks.length === 0) {
+  if (marks.length === 0 && Object.keys(rest).length === 0) {
     try {
       unlinkSync(file);
     } catch {
@@ -99,7 +105,7 @@ export function writeInboxThreadTags(inboxDirPath: string, marks: readonly Inbox
   }
   const temp = `${file}.${process.pid}.tmp`;
   const wire = marks.map((m) => ({ thread_id: m.thread_id, tag: m.tag, on: m.on, seq: m.seq, at: m.at }));
-  writeFileSync(temp, `${JSON.stringify({ v: 1, marks: wire })}\n`, { mode: 0o600 });
+  writeFileSync(temp, `${JSON.stringify({ ...rest, v: 1, marks: wire })}\n`, { mode: 0o600 });
   chmodSync(temp, 0o600);
   renameSync(temp, file);
 }

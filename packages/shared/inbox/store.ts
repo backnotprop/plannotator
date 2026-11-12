@@ -7786,7 +7786,7 @@ export class InboxStore {
   // ─────────────────────────── thread tags ───────────────────────────
   // A tag is an initiative (approval "inbox-thread-tags", step 1): the same
   // records, with the Board on or off. A thread is in a tag when the person
-  // put it there (Add tag: a mark in thread-tags.json), or typed `#Name` in
+  // put it there (Add tag: a mark in tags.json), or typed `#Name` in
   // their own words in it and did not take it out after (a removal mark wins
   // over a `#Name` typed before it, not over one typed after). An agent's
   // `#Name` and a card's initiative put no thread in a tag, and a mark moves
@@ -7825,7 +7825,7 @@ export class InboxStore {
   }
 
   /**
-   * Read thread-tags.json and keep the marks of threads that exist and of tags that were ever made (a deleted
+   * Read tags.json and keep the marks of threads that exist and of tags that were ever made (a deleted
    * thread or project ends in a reload, so every load is where a mark can outlive its thread). Called at the end
    * of every load.
    */

@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor } from "@plannotator/core/inbox-types";
 import { InboxStore } from "./store";
-import { INBOX_THREAD_TAGS_FILE } from "./thread-tags";
+import { INBOX_TAGS_FILE } from "./thread-tags";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -129,7 +129,7 @@ test("an archived or snoozed thread keeps its tags; a deleted thread leaves the 
   expect(store.threadTags(snoozed.thread_id)).toEqual([release.id]);
   store.deleteThread(gone.thread_id);
   expect(store.threadTags(gone.thread_id)).toEqual([]);
-  const file = JSON.parse(readFileSync(join(dir, "inbox", INBOX_THREAD_TAGS_FILE), "utf8")) as { marks: { thread_id: string }[] };
+  const file = JSON.parse(readFileSync(join(dir, "inbox", INBOX_TAGS_FILE), "utf8")) as { marks: { thread_id: string }[] };
   expect(file.marks.map((m) => m.thread_id).sort()).toEqual([archived.thread_id, snoozed.thread_id].sort());
 });
 
@@ -154,7 +154,7 @@ test("a mark moves no Board card, and a card's initiative set by an agent tags n
 test("a marks file from a newer Inbox reads as none and is never written over", () => {
   const { dir, release, thread, reopen } = world();
   const t = thread();
-  const file = join(dir, "inbox", INBOX_THREAD_TAGS_FILE);
+  const file = join(dir, "inbox", INBOX_TAGS_FILE);
   const newer = `${JSON.stringify({ v: 2, marks: [{ thread_id: t.thread_id, tag: release.id, on: true, seq: 1, at: "x", colour: "red" }] })}\n`;
   writeFileSync(file, newer);
   const after = reopen();
@@ -162,4 +162,17 @@ test("a marks file from a newer Inbox reads as none and is never written over", 
   expect(() => after.setThreadTag(t.thread_id, release.id, true)).toThrow();
   expect(readFileSync(file, "utf8")).toBe(newer);
   expect(existsSync(file)).toBe(true);
+});
+
+test("what else a version-1 file holds beside the marks (a later version's tag colours) is kept through every write", () => {
+  const { dir, release, thread, reopen } = world();
+  const t = thread();
+  const file = join(dir, "inbox", INBOX_TAGS_FILE);
+  writeFileSync(file, `${JSON.stringify({ v: 1, marks: [], looks: { [release.id]: { colour: "#7a9e7e", rows: true } } })}\n`);
+  const store = reopen();
+  store.setThreadTag(t.thread_id, release.id, true);
+  store.setThreadTag(t.thread_id, release.id, false);
+  const kept = JSON.parse(readFileSync(file, "utf8")) as { v: number; looks: unknown };
+  expect(kept.v).toBe(1);
+  expect(kept.looks).toEqual({ [release.id]: { colour: "#7a9e7e", rows: true } });
 });

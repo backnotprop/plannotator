@@ -1,7 +1,7 @@
 /**
  * Thread tags (approval "inbox-thread-tags", step 1) through the Inbox's real doors on a running Inbox (temp data dir,
  * loopback): Add tag and untick through `POST /api/inbox/threads/:id/tags`, the list's `tags` and each row's
- * `row.tags`, kept in `inbox/thread-tags.json` (0600) outside the event log across a restart, the window's guards,
+ * `row.tags`, kept in `inbox/tags.json` (0600) outside the event log across a restart, the window's guards,
  * `event: tags` to windows only, a tag made and renamed with the Board off, and agents never seeing any of it.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -88,7 +88,7 @@ describe("thread tags", () => {
     expect(server.store.cursor()).toBe(cursor);
     expect(server.store.changesSince(cursor)).toEqual([]);
     expect(((await (await tagThread(server, a.thread_id, windows.id, false)).json()) as Json).tags).toEqual([release.id]);
-    const file = join(dataDir, "inbox", "thread-tags.json");
+    const file = join(dataDir, "inbox", "tags.json");
     expect(statSync(file).mode & 0o777).toBe(0o600);
     // Renamed, the tag keeps its threads.
     expect((await post(server, `/api/inbox/initiatives/${release.id}`, { op: "rename", name: "Ship 0.29" })).status).toBe(200);
