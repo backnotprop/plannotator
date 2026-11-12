@@ -13,6 +13,12 @@
  *   from the base branch up, the lowest open one marked "Lands next"; a Board
  *   chip only when the Board is on and a card links it; Reply at the foot goes
  *   into the review thread. No merge button.
+ * - A single open PR opens its launchpad instead (PullLaunchpad.tsx, approval
+ *   "pr-launchpad"): the ways into it (guided review, the diff, the review
+ *   thread; its Shape board and System only while those are on), then its
+ *   details. Starting a review is this view's: the New review box, filled in
+ *   with the PR. A Reviews row about one open PR opens it, also once an agent
+ *   reviewed that PR (`reviewRowLaunchpad`, the owner's answer, 2026-11-09).
  *
  * - System (approval "system-inbox", screens 3, 4a and 4b; only while `systemShown`): the System button beside the
  *   filter mark lists the drawn projects; one opens its drawing in the pane (`&system=`), with the open PRs that
@@ -25,7 +31,7 @@ import { reviewBoxPull, type ReviewBoxPull } from '../compose/reviewBox';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
+import { InboxApiError, inboxApi, type InboxShapeSummary, type ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { RowAgentTiles } from '../components/RowAgents';
@@ -54,9 +60,12 @@ import {
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
 import { ReviewsList } from './ReviewsList';
-import { reviewRowProjects, reviewRowsIn } from './reviewsModel';
+import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
+import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
+import { usePhoneHeadFit } from '../headFit';
+import { useInboxTextSize } from '../textSize';
 import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
 import { askRiskPlaces, placesWord, riskPlaceCount } from '../contextNotes/model';
 import { RiskFilter } from './RiskFilter';
@@ -96,6 +105,11 @@ export interface PullsPageProps {
   projects: readonly ProjectFolder[];
   projectNames: ReadonlyMap<string, string>;
   phone: boolean;
+  /**
+   * The open PR's pane covers the list: a window too narrow for both side by side (App.tsx `useStack`, stack.ts), the
+   * rule a thread follows. It then leads with `‹ Reviews` and drops Close, as a covering thread leads with `‹ Inbox`.
+   */
+  stacked?: boolean;
   /** Reviews' thread open beside the list: the page draws only the list, and the window the thread (the Inbox's own pane). */
   threadId?: string | null;
   /** Beside that thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. */
@@ -112,6 +126,11 @@ export interface PullsPageProps {
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
+  /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
+  onOpenGuide?: (threadId: string, messageId: string) => void;
+  /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape door. */
+  shapes?: ReadonlyMap<string, InboxShapeSummary> | null;
+  onOpenShape?: (shape: InboxShapeSummary) => void;
   /** System's button and drawing; absent while System does not show. */
   system?: PullsSystem | null;
   /**
@@ -252,7 +271,13 @@ export function PullsPage(given: PullsPageProps) {
             projectNames={props.projectNames}
             selected={props.threadId ?? open?.stack.id ?? null}
             phone={phone}
-            onOpen={(row) => (row.reviewed && row.thread_id ? props.onOpenThread(row.thread_id) : props.onOpenStack(row.stacks[0]?.id ?? null))}
+            onOpen={(row) => {
+              // One open PR opens its launchpad, reviewed or not; else a review its thread, a listed stack its page.
+              const launchpad = reviewRowLaunchpad(row);
+              if (launchpad) props.onOpenStack(launchpad);
+              else if (row.reviewed && row.thread_id) props.onOpenThread(row.thread_id);
+              else props.onOpenStack(row.stacks[0]?.id ?? null);
+            }}
             onNew={props.onNew}
           />
         )}
@@ -408,6 +433,9 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   }, [stack.id, phone]);
   const forge = forgeName(stack);
   const many = open.length > 1;
+  // A phone's bar gives way as a thread's header does (headFit.ts; the launchpad's bar too).
+  const bar = useRef<HTMLDivElement>(null);
+  usePhoneHeadFit(bar, phone, [!!props.stacked, stack.id, useInboxTextSize()].join('|'));
   // A thread that only named the PR isn't a review of it: the page's rows say so, the stack stays Open, not reviewed.
   const mentioned = !!link && !ended && props.state.reviews?.rows.find((row) => row.stacks.some((s) => s.id === stack.id))?.reviewed === false;
   // One review thread at a time: the picker opens only while there is none, or its agent has ended.
@@ -444,49 +472,10 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   const projects = stackProjects(model, stack);
   const judged = stackRisk(stack, judgments);
   const riskFailure = stackRiskFailure(stack, judgments, riskFailed);
-  return (
-    <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
-      <div className="ib-pr-bar">
-        {phone && (
-          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to reviews">
-            <Icon name="back" />
-          </button>
-        )}
-        <a className="ib-pr-ext" href={(many ? top : (start ?? top)).url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
-          <Icon name="external" size={15} />
-          {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
-        </a>
-        <span className="ib-sp" />
-        {!phone && (
-          <Tip content="Close">
-            <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Close the stack">
-              <Icon name="x" />
-            </button>
-          </Tip>
-        )}
-      </div>
-      <div className="ib-pr-body">
-        <h2 id={titleId} ref={heading} tabIndex={-1} className="ib-pr-h" dir="auto">
-          {stackTitle(stack, model.links)}
-        </h2>
-        <div className="ib-pr-meta">
-          <span dir="auto">{stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`}</span>
-          {stack.layers.length > 1 && <span>{plural(stack.layers.length, pullNounWord(stack.platform))}</span>}
-          {phone && next && (
-            <span data-pulls-lands-next-head="">
-              Lands next: <span className="ib-pr-num">{inboxPullLabel(next)}</span>
-            </span>
-          )}
-          {card && props.onOpenCard && (
-            <Tip content="Open its card on the Board">
-              <button type="button" className="ib-pr-chip" onClick={() => props.onOpenCard!(card.id)} data-pulls-card={card.id}>
-                <Icon name="board" size={13} />
-                <span className="ib-pr-chip-k">Board</span>
-                <span dir="auto">{card.title}</span>
-              </button>
-            </Tip>
-          )}
-        </div>
+  // How the agent ranked the PR's risk against the person's rules (pulls/risk.ts): under the title, on both pages.
+  const riskLines =
+    riskFailure || judged ? (
+      <>
         {riskFailure && (
           <p className="ib-pr-riskline" data-pulls-risk-line="failed">
             <span className="ib-risk" data-risk="failed">
@@ -517,6 +506,73 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             )}
           </p>
         )}
+      </>
+    ) : null;
+  // One open PR opens its launchpad; a stack of several keeps this page.
+  if (stack.layers.length === 1 && start) {
+    return (
+      <PullLaunchpad
+        stack={stack}
+        pr={start}
+        link={link}
+        mentioned={mentioned}
+        phone={phone}
+        stacked={!phone && !!props.stacked}
+        now={now}
+        heading={heading}
+        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: (opener) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener) } : null}
+        shapes={props.shapes ?? null}
+        system={!!props.system}
+        risk={riskLines}
+        onClose={props.onClose}
+        onDiff={() => props.onReview(stack.id, start.key, 'layer')}
+        onThread={props.onOpenThread}
+        onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
+        onShape={(shape) => props.onOpenShape?.(shape)}
+        foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}
+      />
+    );
+  }
+  return (
+    <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
+      <div ref={bar} className="ib-pr-bar">
+        <PullPaneBack phone={phone} stacked={!phone && !!props.stacked} onClose={props.onClose} />
+        <a className="ib-pr-ext" href={(many ? top : (start ?? top)).url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
+          <Icon name="external" size={15} />
+          {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
+        </a>
+        <span className="ib-sp" />
+        {!phone && !props.stacked && (
+          <Tip content="Close">
+            <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Close the stack">
+              <Icon name="x" />
+            </button>
+          </Tip>
+        )}
+      </div>
+      <div className="ib-pr-body">
+        <h2 id={titleId} ref={heading} tabIndex={-1} className="ib-pr-h" dir="auto">
+          {stackTitle(stack, model.links)}
+        </h2>
+        <div className="ib-pr-meta">
+          <span dir="auto">{stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`}</span>
+          {stack.layers.length > 1 && <span>{plural(stack.layers.length, pullNounWord(stack.platform))}</span>}
+          {phone && next && (
+            <span data-pulls-lands-next-head="">
+              Lands next: <span className="ib-pr-num">{inboxPullLabel(next)}</span>
+            </span>
+          )}
+          {card && props.onOpenCard && (
+            <Tip content="Open its card on the Board">
+              <button type="button" className="ib-pr-chip" onClick={() => props.onOpenCard!(card.id)} data-pulls-card={card.id}>
+                <Icon name="board" size={13} />
+                <span className="ib-pr-chip-k">Board</span>
+                <span dir="auto">{card.title}</span>
+              </button>
+            </Tip>
+          )}
+        </div>
+        {riskLines}
         {link && <ThreadLine link={link} ended={ended} mentioned={mentioned} now={now} />}
         {(primary || openDiff) && (
           <div className="ib-pr-actions">
@@ -595,6 +651,12 @@ function Layer({ layer, stack, next, now, layerRisk, layerFailed, onReview }: { 
       <span className="ib-pr-lmain">
         <span className="ib-pr-l1">
           <span className="ib-pr-num">{inboxPullLabel(layer)}</span>
+          {/* Whose move it is on this PR (Your review, Approved, ...): it sits with the PR's number, not alone at the row's end. */}
+          {pill && (
+            <span className="ib-pr-pill" data-tone={pill.tone}>
+              {pill.text}
+            </span>
+          )}
           <span className="ib-pr-lt" dir="auto">
             {layer.title}
           </span>
@@ -628,11 +690,6 @@ function Layer({ layer, stack, next, now, layerRisk, layerFailed, onReview }: { 
           )}
         </span>
       </span>
-      {pill && (
-        <span className="ib-pr-pill" data-tone={pill.tone}>
-          {pill.text}
-        </span>
-      )}
     </>
   );
   return (
