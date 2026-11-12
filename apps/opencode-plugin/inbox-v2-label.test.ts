@@ -1,15 +1,3 @@
-/**
- * Session labels on OpenCode 2 (approval "inbox-session-label"): the session's
- * own title reaches the Inbox on the wake's polls, and a rename reaches it
- * without a lookup. The failures this catches: the default title drawn as if
- * someone chose it; a lookup that fails blanking a known title; a child
- * session's rename landing on its root; a title kept after it was removed.
- *
- * The host is a fake with an event stream; the Inbox is a recorder of polls, so
- * this needs no build. `session.renamed` is the event the V2 schema defines
- * (`SessionEvent.Renamed`, `{ sessionID, title }`); `session.updated` is the
- * older one (`{ sessionID, info }`).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -75,7 +63,6 @@ async function until(what: string, check: () => boolean): Promise<void> {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** Two wakes' worth of world: a recorded Inbox, and a fake host whose answers the test changes. */
 async function world(options: { events?: boolean; title?: string; failing?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-oc2-label-"));
   roots.push(root);
@@ -121,13 +108,11 @@ async function world(options: { events?: boolean; title?: string; failing?: bool
   await registerInboxOpenCode2({ transform: (fn) => void (apply = fn) }, v2 as never, connection, async (sessionID) => ({ root: sessionID }), { signal: stop.signal });
   let tool: { execute: (input: unknown, context: { sessionID: string }) => Promise<unknown> } | null = null;
   apply!({ add: (definition) => (tool = definition as never) });
-  // The session is watched from its first tool call, as in a real session.
   const watch = (sessionID: string) => tool!.execute({ action: "nothing" }, { sessionID });
   await watch("ses_root");
   return { labels, polls, events, host, watch };
 }
 
-/** A poll of the running wake that carries `label`; the wake long-polls a recorder that answers at once. */
 const sees = (labels: unknown[], label: unknown) => until(`a poll with ${JSON.stringify(label)}`, () => labels.at(-1) === label);
 
 describe.skipIf(process.platform === "win32")("the wake's polls", () => {
@@ -139,10 +124,8 @@ describe.skipIf(process.platform === "win32")("the wake's polls", () => {
     await sees(labels, "Fix login redirect");
     events.emit({ type: "session.updated", data: { sessionID: "ses_root", info: { title: "Migrate auth tokens" } } });
     await sees(labels, "Migrate auth tokens");
-    // The older event carries the whole session: a default title there is no title.
     events.emit({ type: "session.updated", data: { sessionID: "ses_root", info: { title: "New session - 2026-11-01T10:42:07.123Z" } } });
     await sees(labels, "");
-    // The events keep it current: no poll asks the host again.
     expect(host.gets).toBe(asked);
   });
 
@@ -156,7 +139,6 @@ describe.skipIf(process.platform === "win32")("the wake's polls", () => {
     const { labels, polls, events, host, watch } = await world();
     await sees(labels, "");
     events.emit({ type: "session.renamed", data: { sessionID: "ses_other", title: "A subagent's task" } });
-    // Events are read in order, so this one showing means that one was read.
     events.emit({ type: "session.renamed", data: { sessionID: "ses_root", title: "The root" } });
     await sees(labels, "The root");
     expect(labels).not.toContain("A subagent's task");
@@ -169,7 +151,6 @@ describe.skipIf(process.platform === "win32")("the wake's polls", () => {
   });
 
   test("a rename that lands while the lookup is out wins over the lookup's older answer", async () => {
-    // Nothing known yet, so each poll asks; the next lookup then stays out until released.
     const { labels, events, host } = await world({ title: "Named before the rename", failing: true });
     await sees(labels, "");
     let release = () => {};

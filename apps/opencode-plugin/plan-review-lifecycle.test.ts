@@ -57,7 +57,6 @@ async function expectRejectedWith(
   }
 }
 
-/** The `plannotator sessions` entries this process's in-process servers hold. */
 function listedEntries(): string[] {
   try {
     return readdirSync(join(process.env.PLANNOTATOR_DATA_DIR!, "sessions", "opencode"));
@@ -95,7 +94,6 @@ describe("OpenCode embedded plan-review lifetime", () => {
     expect(firstUrl).toBe(`http://localhost:${port}`);
     const shownPlan = await fetch(`${firstUrl}/api/plan`);
     expect(shownPlan.status).toBe(200);
-    // #1057: submit_plan delivers an approval's notes, so the tab offers them.
     expect(((await shownPlan.json()) as { approvalNotesSupported?: boolean }).approvalNotesSupported).toBe(true);
     for (let i = 0; i < 100 && listedEntries().length === 0; i++) await Bun.sleep(20);
     expect(listedEntries()).toEqual([`${process.pid}-${port}.json`]);

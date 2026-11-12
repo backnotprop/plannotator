@@ -5,7 +5,6 @@ import {
   resolveAnnotatedMessageAgent,
 } from "./message-agent";
 
-// #1612: feedback on a message must be answered by the agent that wrote it.
 describe("resolveAnnotatedMessageAgent", () => {
   const messages = [
     { messageId: "latest", agent: "build" },
@@ -18,7 +17,6 @@ describe("resolveAnnotatedMessageAgent", () => {
 
   test("without a selection the agent is known only when every candidate agrees", () => {
     expect(resolveAnnotatedMessageAgent(messages, {})).toBeUndefined();
-    // The no-picker case: one candidate, and the UI sends no selection id.
     expect(resolveAnnotatedMessageAgent([{ messageId: "only", agent: "agent-engineer" }], {}))
       .toBe("agent-engineer");
   });
@@ -68,9 +66,6 @@ describe("resolveAddressableAgent", () => {
     })).toBe("agent-engineer");
   });
 
-  // OpenCode 1 rejects a prompt naming an unknown agent ("Agent not found"),
-  // which would lose the feedback; hidden agents write messages (compaction)
-  // but must never be addressed.
   test("drops unlisted, hidden and subagent names, and a failed listing", async () => {
     const cases: Array<[string, unknown[] | Error]> = [
       ["agent-engineer", [{ name: "build", mode: "primary" }]],

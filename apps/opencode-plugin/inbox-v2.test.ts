@@ -1,20 +1,3 @@
-/**
- * The OpenCode 2 connection to the Plannotator Inbox, proved on the REAL
- * OpenCode 2: the installed `opencode2` serving with this plugin installed
- * from its packed tarball (the installed-package path of
- * `fixtures/v2-installed-smoke.ts`, through a throwaway registry), against a
- * real Inbox (`plannotator inbox --background` under a temp data dir; the
- * compiled binary when PLANNOTATOR_INBOX_TEST_BINARY names one). The model is
- * a scripted OpenAI-compatible endpoint (tests/helpers/scripted-model.ts)
- * configured as an OpenCode provider: OpenCode sends it exactly what it would
- * send a provider, so the proofs read the tool list and the wake turn from
- * those requests, and OpenCode's own event stream shows how the wake was
- * admitted. The person's Send goes through the window's route. No mocks.
- *
- * Runs where OPENCODE2_BIN and OPENCODE_PLUGIN_TARBALL name the host and the
- * packed plugin (the "OpenCode 2 installed package" CI job); skipped otherwise.
- * INBOX_PROOF_DIR=<dir> keeps a transcript per proof under <dir>/opencode2/.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -46,7 +29,6 @@ const opencodeBin = process.env.OPENCODE2_BIN;
 const tarball = process.env.OPENCODE_PLUGIN_TARBALL;
 const packageJson = JSON.parse(readFileSync(path.join(import.meta.dir, "package.json"), "utf8")) as { name: string; version: string };
 const AUTH = { Authorization: `Basic ${Buffer.from("opencode:plannotator-proof").toString("base64")}` };
-/** A cold runner installs the plugin in about 47 s (the smoke's measurement). */
 const PLUGIN_TIMEOUT_MS = 300_000;
 
 let stubs: string[] = [];
@@ -90,7 +72,6 @@ interface OpenCodeHost {
   stop(): Promise<void>;
 }
 
-/** `opencode2 serve` in the world, with the packed plugin installed through a throwaway registry and the scripted model as its provider. */
 async function openOpenCode(
   w: InboxWorld,
   m: ScriptedModel,
@@ -109,13 +90,11 @@ async function openOpenCode(
         });
       }
       if (pathname === "/plugin.tgz") return new Response(Bun.file(path.resolve(tarball!)));
-      // The plugin has no runtime dependencies: nothing else is served.
       return new Response("not found", { status: 404 });
     },
   });
   const registryUrl = `http://127.0.0.1:${npmRegistry.port}`;
   const port = await freePort();
-  // One OpenCode home per world, so the second server reuses the installed plugin.
   const xdg = path.join(w.root, "opencode");
   for (const dir of ["config", "data", "cache"]) mkdirSync(path.join(xdg, dir), { recursive: true });
   const server = Bun.spawn([opencodeBin!, "serve", "--hostname", "127.0.0.1", "--port", String(port)], {
@@ -187,7 +166,6 @@ async function openOpenCode(
     await stop();
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n--- opencode2 stderr ---\n${await stderr}`);
   }
-  // OpenCode's own event stream, kept for the proofs.
   void (async () => {
     try {
       const response = await fetch(`${url}/api/event`, { headers: { ...AUTH, "x-opencode-directory": directory }, signal: stopEvents.signal });
@@ -210,12 +188,10 @@ async function openOpenCode(
           try {
             events.push(JSON.parse(data) as OpenCodeEvent);
           } catch {
-            // Not an event.
           }
         }
       }
     } catch {
-      // Stopped.
     }
   })();
   return host;
@@ -230,7 +206,6 @@ async function newSession(host: OpenCodeHost): Promise<string> {
   return (await host.api<{ data: { id: string } }>("POST", "/api/session", {})).data.id;
 }
 
-/** The person types into the session (OpenCode's default admission). */
 async function type(host: OpenCodeHost, sessionID: string, text: string): Promise<void> {
   await host.api("POST", `/api/session/${sessionID}/prompt`, { text });
 }
@@ -239,12 +214,10 @@ async function idle(host: OpenCodeHost, sessionID: string): Promise<void> {
   await host.api("POST", `/api/experimental/session/${sessionID}/wait`, {});
 }
 
-/** Every model request whose last message is an Inbox wake, by its first line. */
 function wakeRequests(m: ScriptedModel): string[] {
   return m.requests.map((request) => lastMessage(request)).filter((last) => last.role === "user" && last.text.startsWith("Plannotator Inbox: ")).map((last) => last.text);
 }
 
-/** Rows OpenCode admitted into the session carrying the Inbox's source. */
 function wakeRows(host: OpenCodeHost, sessionID: string): Record<string, unknown>[] {
   return host.events
     .filter((event) => event.type === "session.inbox.enqueued" && event.data?.sessionID === sessionID)
@@ -254,7 +227,7 @@ function wakeRows(host: OpenCodeHost, sessionID: string): Record<string, unknown
 
 function model(script: (request: ScriptedRequest) => ScriptedTurn | null): ScriptedModel {
   const m = startScriptedModel((request) => {
-    if (request.tools.length === 0) return { text: "Refund webhook 409" }; // the title request
+    if (request.tools.length === 0) return { text: "Refund webhook 409" };
     const own = script(request);
     if (own) return own;
     const last = lastMessage(request);
@@ -320,7 +293,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     expect(tool.description).toContain("Plannotator Inbox: <title> (<reply id>)");
     w.proof(`Inbox running (port ${registry(w).port}), switch on for opencode: plannotator_inbox sent with actions ${JSON.stringify(actions)}`);
 
-    // The reminder: one fixed system line from the first request, the same bytes on the next one.
     const systemOf = (request: (typeof m.requests)[number]) => request.messages.filter((message) => message.role === "system" || message.role === "developer").map((message) => messageText(message.content)).join("\n");
     expect(systemOf(sent).split(INBOX_REMINDER_TEXT)).toHaveLength(2);
     const second = m.requests.length;
@@ -352,7 +324,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     const withTool = await turn();
     expect(withTool.tools).toContain("plannotator_inbox");
     const entry = withTool.toolBytes.plannotator_inbox!;
-    // The request grows by the tool's entry and the comma before it, nothing else.
     expect(withTool.bodyBytes - without.bodyBytes).toBe(entry + 1);
     expectMeasuredCost("opencode", withTool.toolJson.plannotator_inbox!);
     w.proof(`OpenCode 2 request without the tool: ${without.bodyBytes} bytes; with it: ${withTool.bodyBytes} bytes; the plannotator_inbox entry: ${entry} bytes`);
@@ -363,7 +334,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     worlds.push(w);
     knob(w, true);
     startInbox(w);
-    // Seed 20 rounds as another agent would, over the Inbox's /mcp; the person answers each through the window's route.
     const mcp = async (name: string, args: Record<string, unknown>) => {
       const response = await fetch(`http://127.0.0.1:${registry(w).port}/mcp`, {
         method: "POST",
@@ -439,7 +409,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     expect(t.messages[0]?.author).toMatchObject({ kind: "agent", host: "opencode", name: "OpenCode", session });
     w.proof(`> plannotator_inbox send_message from OpenCode session ${session}\nthread ${asked.thread_id}: author ${JSON.stringify(t.messages[0]?.author)}\n`);
 
-    // The person works in the session; the reply waits.
     await type(host, session, "Refactor the webhook handler.");
     await waitFor("the person's turn at the model", () => m.requests.some((request) => lastMessage(request).text === "Refactor the webhook handler."), 60_000);
     const words = "Retry with the same key.\n\nAnd log the 409 body.";
@@ -452,14 +421,12 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
 
     const wake = await waitFor("the wake turn at the model", () => wakeRequests(m)[0], 60_000);
     const lines = wake.split("\n");
-    // A plain reply in a thread with no short name: the subject stays out of the wake (#2464).
     expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
     expect(wake).not.toContain(SUBJECT);
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
     const reply = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)!;
     expect(wake).toContain(`\n[Thread ${asked.thread_id}: 2 messages, `);
     expect(wake).toContain(words);
-    // The stored body keeps the still-open sentence; the wake's details line says it instead.
     expect(reply.body).toContain("still open");
     expect(wake).not.toContain("still open");
     expect(lines.at(-1)).toBe(INBOX_WAKE_CLOSING_LINE);
@@ -474,7 +441,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     expect(row?.sent?.checked_at).toBe(delivered.at);
     w.proof(`thread shows: Delivered to OpenCode, ${delivered.at} (reply.delivery ${JSON.stringify(delivered)})`);
 
-    // The person types into the wake's own turn: theirs from here; nothing is interrupted or sent again.
     await type(host, session, "Actually, hold off on that.");
     await Bun.sleep(1_000);
     wakeTurn.release();
@@ -494,7 +460,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     knob(w, true);
     startInbox(w);
     const personTurn = gate();
-    // In B the agent lists its threads through the tool (read_thread's "N threads in <project>."), then its turn is held.
     const listed = (text: string) => /\b\d+ threads? in /.test(text);
     const m = model((request) => {
       const last = lastMessage(request);
@@ -502,7 +467,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
       if (last.role === "tool" && listed(last.text)) return { text: "Refactoring.", hold: personTurn.promise };
       return null;
     });
-    // A and B share one OpenCode home and database: one session, two processes.
     const a = await openOpenCode(w, m);
     const session = await newSession(a);
     await type(a, session, "Ask the person what to do on a 409.");
@@ -511,7 +475,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     const asked = sentFrom(m);
     const b = await openOpenCode(w, m);
 
-    // The person works in B (its turn held at the model); A sits idle.
     await type(b, session, "Refactor the webhook handler.");
     await waitFor("B's held turn at the model", () => m.requests.some((request) => lastMessage(request).role === "tool" && listed(lastMessage(request).text)), 60_000);
     const replyId = await personSends(w, asked.message_id, "Retry with the same key.");
@@ -537,7 +500,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     worlds.push(w);
     knob(w, true);
     startInbox(w);
-    // The scripted model does what the wake asks: when it says to name the thread, its reply passes `thread`.
     const m = model((request) => {
       const last = lastMessage(request);
       const wake = /^Plannotator Inbox: .* \((msg_[^)]+)\)$/.exec(last.text.split("\n", 1)[0] ?? "");
@@ -547,7 +509,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     });
     const host = await openOpenCode(w, m);
     const session = await newSession(host);
-    // A run makes the session's wake (and its poll) start.
     await type(host, session, "hello");
     await waitFor("the first model turn", () => m.requests.some((request) => request.tools.length > 0), 60_000);
     await idle(host, session);
@@ -605,7 +566,6 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     await idle(host, session);
     w.proof(`submit_plan opened the review on port ${planPort}; after Approve the model got:\n${result.text}`);
 
-    // Prompt caching: every later plan-agent request carries the same reminder bytes.
     const later = m.requests.filter((request) => request.tools.includes("submit_plan")).map((request) => request.messages.filter((message) => message.role === "user").map((message) => messageText(message.content)).filter((text) => text.includes("Plan Mode - System Reminder")));
     for (const reminders of later) expect(reminders).toEqual([reminder]);
   }, 900_000);

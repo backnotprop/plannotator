@@ -1,11 +1,3 @@
-/**
- * OpenCode 2's Inbox reminder on one request (`addInboxReminder`, server.ts).
- * The failures this guards: the line on a request that has no
- * plannotator_inbox (it would name a tool the agent lacks), on a subagent or a
- * title request, twice, or with different bytes from one request to the next
- * (which would move the cached prefix). The real-host proof is
- * inbox-v2.test.ts.
- */
 import { describe, expect, test } from "bun:test";
 import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE } from "@plannotator/shared/inbox/connection";
 import { addInboxReminder, openCode2InboxReminder } from "./server";
@@ -33,8 +25,6 @@ describe("addInboxReminder", () => {
     expect(first.system).toEqual(second.system);
   });
 
-  // The failure: a host without session.prompt registers the tool without the
-  // wake, and a line saying "Their reply comes back here" would be untrue there.
   test("a host that cannot deliver a reply as a turn gets the read-it-later wording", async () => {
     expect(openCode2InboxReminder({ session: { prompt: () => undefined } })).toBe(INBOX_REMINDER_TEXT);
     expect(openCode2InboxReminder({ session: {} })).toBe(INBOX_REMINDER_TEXT_NO_WAKE);
@@ -45,7 +35,6 @@ describe("addInboxReminder", () => {
     expect(event.system[0]!.text).not.toContain(INBOX_REMINDER_TEXT);
   });
 
-  // #2194: a config.json without a usable prompts.inbox changes nothing; with one, the person's text replaces the line.
   test("prompts.inbox: unset gives today's bytes on both hosts; set, it replaces the line", async () => {
     const wake = { session: { prompt: () => undefined } };
     for (const config of [{}, { prompts: { review: { denied: "Check." } } }, { prompts: { inbox: { reminder: " ", runtimes: { pi: { reminder: "Pi." } } } } }]) {
@@ -66,8 +55,6 @@ describe("addInboxReminder", () => {
     expect(event.system[0]!.text).not.toContain(INBOX_REMINDER_TEXT);
   });
 
-  // A short custom text the prompt already holds elsewhere ("Be concise.") is still added, once, at the end;
-  // the built-in line keeps today's rule (found anywhere: not added again).
   test("a short custom text the prompt already contains is added once at the end; the built-in line keeps its check", async () => {
     const custom = "Be concise.";
     const event = request("build", undefined, "You are OpenCode. Be concise.");

@@ -7,11 +7,6 @@ import { handleAnnotateCommand, handleAnnotateLastCommand, handleReviewCommand }
 import { OpenCodePromptDeliveryError } from "./prompt-delivery-error";
 import { getReviewDeniedSuffix } from "@plannotator/shared/prompts";
 
-// Inject the annotate-server stub through CommandDeps rather than
-// `mock.module`. Bun's module mocks are process-global and cannot be unset,
-// so a `mock.module("@plannotator/server/annotate", ...)` here would leak the
-// stub into every other suite (it previously broke packages/server tests that
-// boot the real annotate server). Dependency injection keeps it local.
 const startAnnotateServerMock = mock(async (_options: any) => ({
   port: 0,
   url: "http://localhost",
@@ -23,7 +18,6 @@ const startAnnotateServerMock = mock(async (_options: any) => ({
 const tempDirs: string[] = [];
 
 function makeTempDir(): string {
-  // realpath: macOS tmpdir is a symlink, and git reports the resolved toplevel.
   const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "plannotator-opencode-commands-")));
   tempDirs.push(dir);
   return dir;
@@ -90,9 +84,6 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
   });
 
   test("forwards the flag base into the diff AND the server options", async () => {
-    // Failure caught: a base computed into the patch but not into the server
-    // payload (or vice versa) — a mixed-base review; plus the explicit/pinned
-    // bits being dropped on the OpenCode embedded path.
     process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
     const repoDir = initGitRepo();
     git(repoDir, ["checkout", "-q", "-b", "develop"]);
@@ -122,14 +113,10 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     expect(options.initialBase).toBe("develop");
     expect(options.initialBaseExplicit).toBe(true);
     expect(options.openStatePinned).toBe(true);
-    // The empty-config default (since-base) is base-relative, so the seed
-    // requests it explicitly rather than promoting.
     expect(options.diffType).toBe("since-base");
   });
 
   test("a base that does not resolve refuses to start a session", async () => {
-    // Failure caught: the probe being skipped on this host, letting a typo'd
-    // base open a mislabelled merge-base→HEAD diff.
     process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
     const repoDir = initGitRepo();
     const deps: any = makeDeps();
@@ -150,7 +137,6 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
   });
 
   test("a directory selects another repo while feedback stays in the invoking session", async () => {
-    // Catch cwd leakage on the embedded path and delivery into the wrong session.
     process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
     const caller = initGitRepo("caller");
     const target = initGitRepo("target");
@@ -183,11 +169,8 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     await handleReviewCommand({ properties: { arguments: "./missing-directory", sessionID: "original-session" } }, deps as any);
     expect(deps.startReviewServer).not.toHaveBeenCalled();
     expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain("does not exist");
-    // app.log never reaches the TUI, so the refusal must also be toasted.
     expect(deps.client.tui.showToast.mock.calls.map((call: any[]) => call[0].body.message).join("\n")).toContain("does not exist");
 
-    // Prose that names no directory keeps the pre-directory behavior (#1483):
-    // the invoking repo is reviewed and the ignored words are reported.
     await handleReviewCommand({ properties: { arguments: "please review my changes", sessionID: "original-session" } }, deps as any);
     const proseOptions = deps.startReviewServer.mock.calls[0]?.[0];
     expect(proseOptions.rawPatch).toContain("caller-only");
@@ -215,10 +198,6 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     expect(deps.client.tui.showToast).not.toHaveBeenCalled();
   });
 
-  // Feedback made only of PR description / PR comment / editor comments has
-  // an empty `annotations` (those ride only in `feedback`). It must be
-  // delivered like any feedback; only the server-marked platform status post
-  // goes through without the suffix.
   test("zero-annotation feedback gets the suffix; the platform status post does not", async () => {
     const previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
     process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
@@ -277,9 +256,6 @@ describe("handleAnnotateCommand", () => {
     expect(startAnnotateServerMock.mock.calls[0]?.[0].approvalNotesSupported).toBe(false);
   });
 
-  // Several existing file paths are one review of all of them (the shared
-  // bundle rule): the failure is the old ambiguity error, or a prompt that
-  // names only one of the files.
   test("several file paths open one bundle session, and the prompt names every file", async () => {
     const projectRoot = makeTempDir();
     const spec = path.join(projectRoot, "spec.md");
@@ -532,9 +508,6 @@ describe("handleAnnotateLastCommand", () => {
   });
 });
 
-// #1612, embedded runtime: feedback is answered by the agent that wrote the
-// annotated message (or, for a file, the agent the user is talking to), not by
-// OpenCode's default agent.
 describe("annotate feedback agent routing (embedded runtime)", () => {
   const MESSAGES = [
     { info: { role: "user", id: "u1", agent: "agent-engineer" }, parts: [{ type: "text", text: "q" }] },
@@ -591,9 +564,6 @@ describe("annotate feedback agent routing (embedded runtime)", () => {
     expect(deps.client.session.prompt.mock.calls[0]?.[0].body.agent).toBe("agent-engineer");
   });
 
-  // #1701: the editor's bare Done posts the zero-state sentence marked
-  // nothingToSend. Neither command may turn it into a feedback prompt (on
-  // OpenCode 1 that would be a feedback turn riding the command's message).
   test("a Done with nothing to send prompts nothing", async () => {
     const projectRoot = makeTempDir();
     writeFileSync(path.join(projectRoot, "plan.md"), "# Plan\n");
@@ -608,15 +578,9 @@ describe("annotate feedback agent routing (embedded runtime)", () => {
   });
 });
 
-// OpenCode 1, embedded runtime: the session URL must reach a VISIBLE surface.
-// `app.log` only lands in OpenCode's log file and the server's ready line goes
-// to stderr, so before 0.28.1 a remote/SSH reviewer running a slash command
-// never saw the URL at all (plan review already toasted it). Failure caught: a
-// command whose onReady stops toasting.
 describe("embedded commands toast the session URL", () => {
   const REMOTE_URL = "http://remote.example.test:19432";
 
-  /** Call the server's ready hook the way the real server does, in remote mode. */
   function readyThenDecide(decision: Record<string, unknown>) {
     return mock(async (options: any) => {
       await options.onReady(REMOTE_URL, true, 19432);
@@ -635,8 +599,6 @@ describe("embedded commands toast the session URL", () => {
   }
 
   async function withoutBrowser(run: () => Promise<void>): Promise<void> {
-    // Remote mode never opens a browser, but the ready file and the skip flag
-    // are read from the environment: pin both for the duration of the test.
     const skip = process.env.PLANNOTATOR_SKIP_BROWSER_OPEN;
     const readyFile = process.env.PLANNOTATOR_READY_FILE;
     const dataDir = process.env.PLANNOTATOR_DATA_DIR;

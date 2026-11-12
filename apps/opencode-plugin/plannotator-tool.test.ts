@@ -26,13 +26,6 @@ const HOST_CONTROL = path.join(import.meta.dir, "..", "..", "packages", "shared"
 const ANNOTATE_TARGET = path.join(import.meta.dir, "..", "..", "packages", "shared", "annotate-target.ts");
 const isWindows = process.platform === "win32";
 
-// ---------------------------------------------------------------------------
-// A stand-in `plannotator` CLI: a real loopback server with the REAL host
-// control guards (bearer token, Host header), a ready file like the CLI's, and
-// a test-only route that plays the reviewer's decision. `behavior` picks what
-// the host-control paths answer: a current CLI, an older one without them, or
-// a current one with host control turned off (remote mode).
-// ---------------------------------------------------------------------------
 type StubBehavior = "current" | "older" | "disabled" | "disabled-remote" | "fail" | "slowfail" | "slowready" | "nobundle" | "targets";
 
 function writeStub(root: string, behavior: StubBehavior): string {
@@ -148,14 +141,12 @@ async function waitFor<T>(read: () => T | undefined | null | false, ms = 8_000):
   }
 }
 
-/** The fake OpenCode 2 context the real launch path runs against. */
 function makeHost(root: string, options: { parents?: Record<string, string> } = {}) {
   const prompts: Array<{ sessionID: string; text: string; delivery?: unknown }> = [];
   const prompt = mock(async (input: { sessionID: string; text: string; delivery?: unknown }) => {
     prompts.push({ sessionID: input.sessionID, text: input.text, delivery: input.delivery });
     return {};
   });
-  // Session-URL notices (`session.synthetic`), as an OpenCode 2 host takes them.
   const notices: Array<{ sessionID: string; text: string }> = [];
   const synthetic = mock(async (input: { sessionID: string; text: string }) => {
     notices.push({ sessionID: input.sessionID, text: input.text });
@@ -215,8 +206,6 @@ async function decide(port: number, outcome: unknown): Promise<void> {
   await fetch(`http://127.0.0.1:${port}/test/decide`, { method: "POST", body: JSON.stringify(outcome) });
 }
 
-// Sandbox every run: the launch path reads config and may resolve the data
-// dir; nothing here may touch the real ~/.plannotator or ~/.config/opencode.
 const SANDBOX_KEYS = ["HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "PLANNOTATOR_DATA_DIR", "PLANNOTATOR_BIN"] as const;
 let saved: Record<string, string | undefined> = {};
 let root = "";
@@ -256,8 +245,6 @@ describe("registration", () => {
   }
   const deps = (): PlannotatorToolDeps => ({ registry: new OpenCodeLaunchRegistry(), launch: async () => {} });
 
-  // Failure caught: a forked or drifted contract (another name, a stale
-  // schema without list/close, a hand-written description).
   test("registers the shared contract itself, not a copy", async () => {
     const { added, domain } = toolDomain();
     expect(await registerPlannotatorTool(domain, { session: { prompt: async () => ({}) } }, deps())).toBe(true);
@@ -267,8 +254,6 @@ describe("registration", () => {
     expect(added[0]!.input).toBe(PLANNOTATOR_TOOL_INPUT_SCHEMA);
   });
 
-  // Failure caught: a tool whose decisions could never come back (no
-  // session.prompt), or a throw inside an older host's draft without `add`.
   test("registers nothing where the decision cannot be delivered or the draft has no add", async () => {
     const noPrompt = toolDomain();
     expect(await registerPlannotatorTool(noPrompt.domain, { session: {} }, deps())).toBe(false);
@@ -306,7 +291,6 @@ describe("registration", () => {
     return added;
   }
 
-  /** Run `fn` with PLANNOTATOR_AGENT_TOOL set (or unset), restoring it after. */
   async function withAgentToolEnv<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
     const saved = process.env.PLANNOTATOR_AGENT_TOOL;
     if (value === undefined) delete process.env.PLANNOTATOR_AGENT_TOOL;
@@ -319,17 +303,12 @@ describe("registration", () => {
     }
   }
 
-  // Failure caught: the tool registered only for some workflows, or setup
-  // wiring that never reaches it, once the user turned it on.
   for (const workflow of ["plan-agent", "manual"] as const) {
     test(`${workflow}: plugin setup registers the plannotator tool when it is turned on`, async () => {
       expect(await withAgentToolEnv("1", () => setupAddedTools(workflow))).toContain(PLANNOTATOR_TOOL_NAME);
     });
   }
 
-  // Failure caught: the owner's default (off on OpenCode 2) regresses, or the
-  // config key / env var stops deciding it. PLANNOTATOR_DATA_DIR is the
-  // sandbox beforeEach set up, so config.json here is a temp file.
   test("off by default; agentTool in config.json turns it on; the env var wins over the file", async () => {
     await withAgentToolEnv(undefined, async () => {
       expect(await setupAddedTools("plan-agent")).not.toContain(PLANNOTATOR_TOOL_NAME);
@@ -349,7 +328,6 @@ describe("calls answered without opening anything", () => {
     expect(await runPlannotatorTool({ action: "annotate" }, { sessionID: "ses_a" }, deps)).toContain("Invalid plannotator call");
     expect(await runPlannotatorTool({ action: "reply", session: "pn-abcdef", comment: "c1", text: "done" }, { sessionID: "ses_a" }, deps))
       .toContain("Invalid plannotator call");
-    // `last` reads the main session's messages, which a subagent did not write.
     expect(await runPlannotatorTool({ action: "last" }, { sessionID: "ses_child" }, deps)).toBe(PLANNOTATOR_TOOL_SUBAGENT_LAST_TEXT);
     expect(launch).not.toHaveBeenCalled();
   });
@@ -362,8 +340,6 @@ describe("calls answered without opening anything", () => {
       .toContain("No open Plannotator review pn-abcdef from this conversation");
   });
 
-  // Failure caught: `close all` reporting a plan review it can never close
-  // (noise the agent may act on); an explicit plan id still explains why.
   test("close all skips plan reviews silently; an explicit plan id says why", async () => {
     const host = makeHost(root);
     const plan = host.registry.begin("ses_a", "plan", "Plan");
@@ -374,8 +350,6 @@ describe("calls answered without opening anything", () => {
     plan.end();
   });
 
-  // Failure caught: a nested subagent's reviews owned by its own session
-  // (decision delivered where nobody reads it, invisible to the main agent).
   test("a subagent's session resolves to its root session", async () => {
     const host = makeHost(root, { parents: { ses_grandchild: "ses_child", ses_child: "ses_a" } });
     expect(await resolveRootSession(host.ctx, "ses_grandchild")).toEqual({ root: "ses_a", subagent: true });
@@ -384,8 +358,6 @@ describe("calls answered without opening anything", () => {
 });
 
 describe("tool arguments", () => {
-  // Failure caught: a target with spaces split into prose words, or a review
-  // base/directory that parseReviewArgs would split.
   test("an annotate target stays one argument; review words are quoted for the string parser", () => {
     const annotate = toolLaunchRequest({ action: "annotate", target: "my notes.md", gate: true, options: { markdown: true } });
     expect(annotate).toMatchObject({ ok: true, command: "plannotator-annotate" });
@@ -405,9 +377,6 @@ describe("tool arguments", () => {
 });
 
 describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", () => {
-  // Failure caught: the tool waiting on the whole review (it must return once
-  // the page is up), a target re-split, a decision that never names the
-  // session id, or one delivered to another session.
   test("annotate opens, returns at once with the session id and url, and the decision arrives later", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root);
@@ -421,7 +390,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(run!.argv).toEqual(["annotate", "my notes.md", "--json", "--gate"]);
     expect(run!.token?.length).toBeGreaterThanOrEqual(32);
 
-    // list sees it (with the server's unsent count); another session does not.
     const list = await runPlannotatorTool({ action: "list" }, { sessionID: "ses_a" }, host.toolDeps);
     expect(list).toContain(`${id} · annotate · my notes.md · http://localhost:`);
     expect(list).toContain("open · unsent: 2");
@@ -438,8 +406,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     await waitFor(() => host.registry.openFor("ses_a").length === 0);
   }, 30_000);
 
-  // Failure caught: a gate the agent opened that is approved with nothing
-  // attached sends no message, leaving the agent waiting forever.
   test("a bare approval of a gate the tool opened is delivered", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root);
@@ -449,9 +415,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(delivered.text).toBe(`Plannotator: notes.md (${sessionIdOf(text)}) — Approved.`);
   }, 30_000);
 
-  // Failure caught (a real report): two open reviews of a QUESTIONS.md in
-  // different folders, and a bare approval headed only "QUESTIONS.md", so the
-  // agent acted on the other file. Each decision must name its own full path.
   test("two same-named files: subjects are told apart and each decision names its own path", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "targets");
     for (const folder of ["releases-2026-09-20", "releases-2026-10-04"]) {
@@ -467,7 +430,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(newText).toContain(`Target: ${newPath}`);
     expect(newText).toContain("Opened releases-2026-10-04/QUESTIONS.md in Plannotator");
 
-    // The record's target (the CLI's) is named; without one, the ready line's.
     await decide(portOf(oldText), { decision: "annotated", feedback: "Fix Q1.", annotationCount: 1, target: oldPath });
     await waitFor(() => host.prompts[0]);
     await decide(portOf(newText), { decision: "approved" });
@@ -476,9 +438,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(approval.text).toBe(`Plannotator: releases-2026-10-04/QUESTIONS.md (${sessionIdOf(newText)}) — Approved.\nTarget: ${newPath}`);
   }, 30_000);
 
-  // Failure caught: a list of files opened as one file, split again, reordered,
-  // unnamed in the result/list/heading, or an older CLI's ambiguity error
-  // shown raw instead of the update text.
   test("a list target opens one bundle review, named, listed, and headed", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root);
@@ -500,9 +459,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
       .toBe(PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT);
   }, 30_000);
 
-  // Failure caught (#1719): feedback on a PR that is not a platform post (only
-  // description notes, so zero line annotations) headed or framed as a posted
-  // review; or a real platform post framed as a change request.
   test("review headings follow the platform flag, never the annotation count", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root);
@@ -513,17 +469,14 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     const delivered = await waitFor(() => host.prompts[0]);
     expect(delivered.text.split("\n")[0]).toBe(`Plannotator: PR #12 (${id}) — Changes requested.`);
     expect(delivered.text).toContain("Clarify the description.");
-    expect(delivered.text.trim().endsWith("Clarify the description.")).toBe(false); // the change-request suffix follows
+    expect(delivered.text.trim().endsWith("Clarify the description.")).toBe(false);
 
     const posted = await runPlannotatorTool({ action: "review", target: pr }, { sessionID: "ses_a" }, host.toolDeps);
     await decide(portOf(posted), { decision: "annotated", approved: false, isPRMode: true, platform: true, feedback: "Review posted to GitHub.", annotationCount: 2 });
     const second = await waitFor(() => host.prompts[1]);
-    // The shared outcome, so Pi and OpenCode name the platform post the same way.
     expect(second.text).toBe(`Plannotator: PR #12 (${sessionIdOf(posted)}) — ${PLANNOTATOR_OUTCOME_REVIEW_POSTED}.\n\nReview posted to GitHub.`);
   }, 30_000);
 
-  // Failure caught: a subagent's review owned by (and delivered to) the
-  // subagent's own session, where nobody reads it after it finished.
   test("a subagent's review belongs to the root session: decision there, listed there", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root, { parents: { ses_child: "ses_a" } });
@@ -536,12 +489,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(delivered.text.split("\n")[0]).toBe(`Plannotator: local changes (${id}) — Changes requested · 1 comment.`);
   }, 30_000);
 
-  // Failure caught (0.28.5 smoke, live on OpenCode 2.0.22): a BACKGROUND
-  // subagent's review posted its session-URL notice into the root session,
-  // which was idle. The pending row was then promoted ALONE as a model turn
-  // when the root next woke, and the model answered "Plannotator session
-  // ready: <url>". The notice belongs to the calling session, mid-turn in its
-  // own tool call; the root receives only the decision.
   test("a subagent's notice goes to its own session, never the root that gets the decision", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root, { parents: { ses_child: "ses_a" } });
@@ -556,8 +503,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(host.notices.some((notice) => notice.sessionID === "ses_a")).toBe(false);
   }, 30_000);
 
-  // Unchanged for the main session: its own tool call is the open turn the
-  // notice is promoted in.
   test("a main-session tool call posts its notice into that session", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root);
@@ -566,8 +511,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     await decide(portOf(text), { decision: "dismissed" });
   }, 30_000);
 
-  // Failure caught: a URL that arrives after the tool answered "starting"
-  // lands in a session whose turn may be over: the same idle-session leak.
   test("a server that comes up after the starting answer posts no notice", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "slowready");
     const host = makeHost(root);
@@ -579,14 +522,11 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(text).toContain("Plannotator is starting for notes.md");
     const id = sessionIdOf(text);
     const launch = await waitFor(() => host.registry.openFor("ses_a").find((open) => open.id === id && open.port));
-    // The URL is known (the tool's list shows it), but nothing was posted.
     await Bun.sleep(100);
     expect(host.notices).toEqual([]);
     await decide(launch.port!, { decision: "dismissed" });
   }, 30_000);
 
-  // Failure caught: the agent told "starting, wait" and then never told the
-  // review did not open, so it waits forever.
   test("a failure after the starting answer is sent to the session", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "slowfail");
     const host = makeHost(root);
@@ -603,8 +543,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(delivered.text).toContain("File not found: missing.md");
   }, 30_000);
 
-  // Failure caught: close that deletes nothing but leaves the review open, a
-  // closed review that still sends a decision, or one that keeps listing.
   test("close goes through /api/host/close with the launch token; nothing is delivered", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root);
@@ -621,8 +559,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(host.prompts).toHaveLength(0);
   }, 30_000);
 
-  // Failure caught: TERM sent to a server that is not proven an older
-  // Plannotator (remote mode turns host close off: the review must survive).
   test("host close turned off leaves the review running; an older CLI is stopped", async () => {
     const errors = spyOn(console, "error");
     try {
@@ -631,7 +567,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     const text = await runPlannotatorTool({ action: "annotate", target: "notes.md" }, { sessionID: "ses_a" }, host.toolDeps);
     const id = sessionIdOf(text);
     const refused = await runPlannotatorTool({ action: "close", session: id }, { sessionID: "ses_a" }, host.toolDeps);
-    // Not remote mode: say what is true (a server started without a host token).
     expect(refused).toContain(`Could not close notes.md (${id}): its server has host close turned off`);
     const port = portOf(text);
     expect((await fetch(`http://127.0.0.1:${port}/nothing`)).status).toBe(404);
@@ -649,15 +584,12 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     const olderId = sessionIdOf(older);
     const stopped = await runPlannotatorTool({ action: "close", session: olderId }, { sessionID: "ses_a" }, host.toolDeps);
     expect(stopped).toContain(`Closed notes.md (${olderId}): any unsent comments stay saved as a draft.`);
-    // The close hides it from the list at once; the stopped child exits a
-    // moment later, and only then is its exit logged. Wait for that line.
     expect(host.registry.openFor("ses_a")).toHaveLength(0);
     const closedLine = `The agent closed notes.md (${olderId})`;
     await waitFor(() => errors.mock.calls.some((call) => String(call[0]).includes(closedLine)));
     const olderPort = portOf(older);
     await expect(fetch(`http://127.0.0.1:${olderPort}/nothing`)).rejects.toThrow();
     expect(host.prompts).toHaveLength(0);
-    // The agent's own close is not logged as a CLI failure.
     const logged = errors.mock.calls.map((call) => String(call[0]));
     expect(logged.some((line) => /exited with code/.test(line))).toBe(false);
     expect(logged.some((line) => line.includes(`The agent closed notes.md (${olderId})`))).toBe(true);
@@ -666,19 +598,15 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     }
   }, 30_000);
 
-  // Failure caught: a startup error reported as "opened", or swallowed.
   test("the CLI's startup error is the tool result", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "fail");
     const host = makeHost(root);
     const text = await runPlannotatorTool({ action: "annotate", target: "missing.md" }, { sessionID: "ses_a" }, host.toolDeps);
     expect(text).toBe("Plannotator could not start: File not found: missing.md");
     await waitFor(() => host.registry.openFor("ses_a").length === 0);
-    // The tool result reports it; no slash-command failure notice as well.
     expect(host.notices).toHaveLength(0);
   }, 30_000);
 
-  // Failure caught: slash-command reviews missing from list ("opened in this
-  // conversation" covers them) or their decisions not naming the id.
   test("a slash command's review is listed and its decision names its id", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "current");
     const host = makeHost(root);
@@ -692,8 +620,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     expect(host.registry.openFor("ses_a")).toHaveLength(0);
   }, 30_000);
 
-  // Failure caught: `. notes.md` opens notes.md alone (the CLI drops the
-  // stray "."), but the subject came from the typed words: "2 files: ., notes.md".
   test("a slash command is named by what the CLI opened, not the typed words", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "targets");
     const host = makeHost(root);
@@ -709,8 +635,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
     ]);
   }, 30_000);
 
-  // Failure caught: the tool's bundle `Files:` line naming the words it was
-  // given (bare names) while the slash command's names absolute paths.
   test("a tool bundle names files in its subject and full paths in its Files and Target lines", async () => {
     process.env.PLANNOTATOR_BIN = writeStub(root, "targets");
     const host = makeHost(root);
@@ -728,8 +652,6 @@ describe.skipIf(isWindows)("the tool through the real launch path (stub CLI)", (
 });
 
 describe("host close answers", () => {
-  // Failure caught: an older CLI's app page or an uncoded 404 read as closed,
-  // or a coded "turned off" 404 read as older (which would TERM it).
   test("only a JSON count is a close; only an uncoded 404 or the app page is older", () => {
     expect(classifyHostCloseAnswer({ status: 200, text: '{"unsentAnnotations":3}' })).toEqual({ kind: "closed", unsent: 3 });
     expect(classifyHostCloseAnswer({ status: 200, text: "<!doctype html><html>" })).toEqual({ kind: "older" });

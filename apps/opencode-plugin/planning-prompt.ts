@@ -1,4 +1,3 @@
-/** Planning instructions shared by the OpenCode 1 and OpenCode 2 adapters. */
 export function getPlanningPrompt(): string {
   return `## Plannotator — Plan Review
 

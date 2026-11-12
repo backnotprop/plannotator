@@ -9,29 +9,10 @@ if (!opencodeBin || !pluginTarball) {
   throw new Error("Usage: bun fixtures/v2-installed-smoke.ts <opencode2-bin> <packed-plugin.tgz>");
 }
 
-// OpenCode 2 installs the configured plugin through the throwaway registry below before the
-// plugin can appear in /api/plugin, and it answers its status endpoint only once the server
-// has finished booting. On a warm macOS dev box that is ~0.8s to healthy and ~6s to activated;
-// on a cold Linux CI runner the measured numbers are ~9s and ~47s. These budgets are sized for
-// the slow path with headroom — the job's own timeout is the real backstop against a genuine
-// hang.
-//
-// The status endpoint moved: current OpenCode 2 serves /api/info (upstream 13453f2da,
-// "refactor(protocol): consolidate server status", removed /api/health), while older builds
-// only have /api/health. The readiness poll tries them newest first, so the smoke runs against
-// either.
 const STATUS_ENDPOINTS = ["/api/info", "/api/health"] as const;
 const HEALTH_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_HEALTH_TIMEOUT_MS", 120_000);
 const PLUGIN_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_PLUGIN_TIMEOUT_MS", 300_000);
-// Per-request cap so one wedged request can never swallow the whole budget: the loop has to
-// keep polling (and keep reporting) instead of blocking on a single fetch that never settles.
 const REQUEST_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_REQUEST_TIMEOUT_MS", 15_000);
-// The reclaim that takes the three command names back from the markdown stubs
-// runs on a bounded schedule AFTER setup, with its last tick landing about
-// 15.5s in (RECLAIM_SCHEDULE_MS in native-commands.ts). Reading ownership once,
-// the instant the plugin activates, races that window and reports a shadowing
-// failure that a moment later is not one. This budget has to clear the final
-// tick with headroom.
 const COMMAND_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_COMMAND_TIMEOUT_MS", 30_000);
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const PROGRESS_INTERVAL_MS = 15_000;
@@ -50,11 +31,6 @@ mkdirSync(path.join(root, "config"), { recursive: true });
 mkdirSync(path.join(root, "data"), { recursive: true });
 mkdirSync(path.join(root, "cache"), { recursive: true });
 
-// Reproduce a NORMAL install: scripts/install.sh (and the package postinstall)
-// write the three markdown stubs into ~/.config/opencode/commands, which is
-// exactly where OpenCode 2's own ConfigCommandPlugin scans. Without them the
-// sandbox is a shape no user has, and the contest between the config-loaded
-// stubs and the plugin's native definitions never happens here.
 const stubsDir = path.join(root, "config", "opencode", "commands");
 mkdirSync(stubsDir, { recursive: true });
 const stubSource = path.join(import.meta.dir, "..", "commands");
@@ -62,8 +38,6 @@ for (const entry of readdirSync(stubSource)) {
   if (entry.endsWith(".md")) copyFileSync(path.join(stubSource, entry), path.join(stubsDir, entry));
 }
 
-// Set when the host is known to ship the post-#44765 command API, including the
-// stable @opencode/cli used in CI. Older V2 hosts can still exercise the fallback.
 const expectNativeCommands = process.env.PLANNOTATOR_SMOKE_EXPECT_NATIVE === "1";
 
 const env = {
@@ -253,11 +227,6 @@ async function waitForPlugin(url: string): Promise<unknown> {
       typeof plugin === "string" ? plugin === "plannotator" : plugin.id === "plannotator"
     );
     if (entry) {
-      // A plugin whose setup threw still LISTS here. Without this check the
-      // smoke passed on a plugin that took the whole command registration down
-      // with it, which is the exact failure a wrong capability probe produces.
-      // Plugin.Info carries status/error at the TOP level; `state` is read as a
-      // fallback only, so this keeps working whichever shape the host serves.
       const info = typeof entry === "string" ? undefined : entry;
       const status = info?.status ?? info?.state?.status;
       if (status === "failed") {
@@ -289,7 +258,6 @@ interface CommandOwnership {
   owners: Array<{ name: string; native: boolean }>;
 }
 
-/** One read of /api/command, classified by which definition owns each name. */
 async function readCommandOwnership(url: string): Promise<CommandOwnership> {
   const response = await fetch(`${url}/api/command`, {
     headers: { ...authHeaders(), "x-opencode-directory": encodeURIComponent(process.cwd()) },
@@ -315,23 +283,6 @@ async function readCommandOwnership(url: string): Promise<CommandOwnership> {
   return { body, missing, shadowed, owners };
 }
 
-/**
- * Assert the three slash commands resolve, and report WHICH definition owns
- * each name.
- *
- * Ownership is readable from the description: the plugin's native definitions
- * and the markdown stubs' frontmatter deliberately differ (pinned by
- * native-commands.test.ts), so a stub description means the config-loaded
- * command won the name. On a `next` host that is correct and expected; on a
- * host with the post-#44765 command API it is the shadowing bug, which is what
- * PLANNOTATOR_SMOKE_EXPECT_NATIVE makes fatal.
- *
- * This POLLS rather than reading once. Activation is not the end of the story:
- * the reclaim runs on its own bounded schedule afterwards, so an immediate read
- * under PLANNOTATOR_SMOKE_EXPECT_NATIVE reported a shadowing bug the reclaim
- * had simply not got to yet. Called only after /api/plugin reports the plugin
- * loaded, so the loop is waiting on the reclaim and nothing else.
- */
 async function checkCommands(url: string): Promise<void> {
   const deadline = Date.now() + COMMAND_TIMEOUT_MS;
   let lastReport = Date.now();
@@ -367,8 +318,6 @@ async function checkCommands(url: string): Promise<void> {
   }
 }
 
-// A stuck teardown used to turn a failing smoke into a multi-minute CI wall-clock burn that
-// hid the diagnostics behind the job timeout. Every step here is bounded and escalates.
 async function shutdown(): Promise<void> {
   server.kill();
   if (await withTimeout(server.exited.then(() => true), SHUTDOWN_TIMEOUT_MS, false) === false) {
@@ -376,7 +325,6 @@ async function shutdown(): Promise<void> {
     server.kill("SIGKILL");
     await withTimeout(server.exited.then(() => true), SHUTDOWN_TIMEOUT_MS, false);
   }
-  // `true` closes connections the in-flight plugin install may still be holding open.
   await withTimeout(Promise.resolve(registry.stop(true)), SHUTDOWN_TIMEOUT_MS, undefined);
 }
 

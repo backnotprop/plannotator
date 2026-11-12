@@ -9,9 +9,6 @@ import {
 
 const DIRECTORY = "/home/dev/.opencode/plan";
 
-// Copied byte for byte from anomalyco/opencode packages/core/src/plugin/plan.ts.
-// `enter` as every OpenCode 2 release sends it (v2.0.0 through v2.1.x; read in
-// the 2.0.19 and 2.1.2 binaries too), since dbd47702b2 (2026-09-02).
 const OPENCODE2_ENTER = `<system-reminder>
 You are in Plan mode. Discuss the plan with the user directly in the conversation. Do not create or update plan files unless the user explicitly asks you to; when they do, write them only in:
 ${DIRECTORY}
@@ -21,7 +18,6 @@ Do not modify any other files or ask a subagent to do so.
 You remain in Plan mode until the user switches agents. If the user asks you to implement changes, do not do so. Tell them they need to switch agents.
 </system-reminder>`;
 
-// `enter` before dbd47702b2 (pre-2.0 builds).
 const PRE_2_0_ENTER = `<system-reminder>
 You are in Plan mode. You may optionally create or update plan documents in:
 ${DIRECTORY}
@@ -31,12 +27,10 @@ Do not modify any other files or ask a subagent to do so.
 You remain in Plan mode until the user switches agents. If the user asks you to implement changes, do not do so. Tell them they need to switch agents.
 </system-reminder>`;
 
-// `leave`, unchanged across those versions.
 const OPENCODE2_LEAVE = `<system-reminder>
 You are NO LONGER in Plan mode. The previous Plan restrictions no longer apply. Any Plan mode instructions from earlier in this conversation are no longer active.
 </system-reminder>`;
 
-// OpenCode 1's packages/opencode/src/session/prompt/plan.txt (v1.18.34), first lines.
 const OPENCODE1_STRICT = `<system-reminder>
 # Plan Mode - System Reminder
 
@@ -110,7 +104,6 @@ describe("OpenCode 2's Plan mode reminder (#2101)", () => {
     expect(textOf(first[3])).toBe(OPENCODE2_LEAVE);
     expect(textOf(first[4])).toBe("Now the next step.");
 
-    // Running it again (another plugin, a retry) changes nothing.
     const again = JSON.stringify(first);
     replacePlanModeReminders(first);
     expect(JSON.stringify(first)).toBe(again);

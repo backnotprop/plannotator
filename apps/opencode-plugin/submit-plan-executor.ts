@@ -27,7 +27,6 @@ export interface SubmitPlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
-  /** The reviewer only answered the plan's questions: `plan.answered`. */
   answersOnly?: boolean;
 }
 
@@ -123,7 +122,6 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
   try {
     unlinkSync(backingPath);
   } catch {
-    // The approved plan may already have been removed.
   }
 
   const targetAgent = await host.resolveTargetAgent({
@@ -145,7 +143,6 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           : "Plan approved. Plan mode remains active; no implementation has been requested.",
       });
     } catch {
-      // The session can still be busy while the tool result is being delivered.
     }
   }
 

@@ -1,9 +1,5 @@
 #!/usr/bin/env bun
 
-// Stand-in for the `plannotator` binary in CLI-bridge annotate tests: records
-// its argv and stdin, then prints the decision record the test asked for, the
-// way `opencode-annotate-last` / `annotate --json` do.
-
 import { writeFileSync } from "node:fs";
 
 const stdin = await Bun.stdin.text();

@@ -1,16 +1,3 @@
-/**
- * OpenCode 2 and a newer Plannotator (owner approval "reload-hosts"):
- *  - the wake's poll reports what this service loaded and what is on disk
- *    (`plugin: { version, on_disk }`), and a plugin generation folder deleted
- *    under it (the install script clears OpenCode's cache) makes the Inbox say
- *    `opencode2 reload`;
- *  - the plugin's setup returns a cleanup, which OpenCode 2 calls when it
- *    unloads the generation (`opencode2 reload`, a plugin update, an hour
- *    idle): it ends the Inbox wakes, so an unloaded generation stops polling.
- * A real Inbox under a temp data dir; the OpenCode 2 host is a fake that
- * streams events from `event.subscribe` (the real-host proof of the same rows
- * is in the PR's sandbox runs). No real OpenCode, no model.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,7 +40,6 @@ afterEach(async () => {
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** An OpenCode 2 event stream the test feeds, ending when the subscriber's signal aborts. */
 function eventStream() {
   const queue: unknown[] = [];
   let wake: (() => void) | null = null;
@@ -114,11 +100,9 @@ describe("openCodePluginReporter", () => {
     const report = openCodePluginReporter(file, "0.28.30", () => now);
     expect(report()).toEqual({ version: "0.28.30", on_disk: "0.28.30" });
     rmSync(dir, { recursive: true, force: true });
-    // Read at most every 2 s: the cached answer first, then the folder is gone.
     expect(report()).toEqual({ version: "0.28.30", on_disk: "0.28.30" });
     now += 2_000;
     expect(report()).toEqual({ version: "0.28.30", on_disk: null });
-    // No loaded version: nothing to report.
     expect(openCodePluginReporter(file, null)()).toBeNull();
   });
 });
@@ -153,7 +137,6 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 reload signals over a 
     expect(upToDate).toMatchObject({ plugin: "0.28.30", outdated: null });
     w.proof("listed: plugin 0.28.30, up to date");
 
-    // The install script clears OpenCode's cache: the folder the service loaded is gone.
     rmSync(generation, { recursive: true, force: true });
     clock += 2_000;
     const stale = await waitFor(
@@ -170,7 +153,6 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 reload signals over a 
       restart_claude_code?: number;
     };
     expect(list.restart_agents).toEqual({ total: 1, runtimes: { opencode: 1 } });
-    // An older window reads Claude Code's count only: unchanged.
     expect(list.restart_claude_code).toBe(0);
     w.proof("generation deleted: opencode2 reload; restart_agents counts it");
   }, 60_000);
@@ -197,7 +179,6 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 reload signals over a 
         },
       },
     };
-    // Count the wake's bridge polls, before and after the cleanup.
     const original = InboxAgentConnection.prototype.bridge;
     let polls = 0;
     InboxAgentConnection.prototype.bridge = function (this: InboxAgentConnection, ...args: Parameters<typeof original>) {
@@ -216,7 +197,6 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 reload signals over a 
       const entry = await openCodeSession(w, "ses_cleanup");
       return entry ? entry : null;
     });
-    // This checkout's own package.json, read from beside the source: what the service loaded.
     expect(listed.plugin).toBe(packageVersion);
     expect(polls).toBeGreaterThan(0);
 

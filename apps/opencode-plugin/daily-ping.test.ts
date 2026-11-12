@@ -1,9 +1,3 @@
-/**
- * The OpenCode plugin's daily ping wiring, against a loopback receiver in a
- * temp data dir: plan review (runEmbeddedPlanReview), code review, annotate and
- * annotate-last each send their tool's ping; a local build (no release CI mark
- * in `dist/`) is a dev build.
- */
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -112,7 +106,6 @@ describe("the daily ping in the OpenCode plugin", () => {
   });
 
   test("code review", async () => {
-    // Code review needs a repository to review.
     for (const args of [["init", "-q"], ["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-q", "--allow-empty", "-m", "initial"]]) {
       expect(spawnSync("git", args, { cwd: root, env: { PATH: process.env.PATH ?? "", HOME: root } }).status).toBe(0);
     }

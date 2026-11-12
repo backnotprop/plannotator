@@ -50,8 +50,6 @@ describe("embedded annotate prompt delivery", () => {
     });
   });
 
-  // #1612: the embedded /plannotator-last delivery carries the agent that
-  // wrote the annotated message, and stays unnamed when that is unknown.
   test("names the resolved agent, and omits the key when there is none", async () => {
     const named = { app: { log: mock(() => {}) }, session: { prompt: mock(async (_input: any) => {}) } };
     await deliverEmbeddedAnnotateMessagePrompt({

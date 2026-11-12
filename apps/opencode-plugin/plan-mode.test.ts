@@ -11,7 +11,6 @@ describe("normalizeEditPermission", () => {
   });
 
   test("converts 'deny' string to wildcard object", () => {
-    // Triggered by `tools: { edit: false }` or `permission: { edit: "deny" }`
     expect(normalizeEditPermission("deny")).toEqual({ "*": "deny" });
   });
 
@@ -29,13 +28,9 @@ describe("normalizeEditPermission", () => {
   });
 
   test("merging with '*.md': 'allow' preserves deny-all + md-allow", () => {
-    // This is the main scenario fixed by this function:
-    // user has tools: { edit: false } which produces permission.edit = "deny",
-    // and we need to merge in "*.md": "allow" without string-spreading.
     const base = normalizeEditPermission("deny");
     const merged = { ...base, "*.md": "allow" };
     expect(merged).toEqual({ "*": "deny", "*.md": "allow" });
-    // Crucially, no char-index keys like "0", "1", "2", "3"
     expect(Object.keys(merged)).not.toContain("0");
   });
 });

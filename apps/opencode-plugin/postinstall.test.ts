@@ -4,10 +4,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-// The postinstall must copy for an installed package and stay out of the
-// developer's real OpenCode config inside this monorepo. Every test works in
-// temp dirs and passes XDG_CONFIG_HOME / HOME explicitly; nothing here may read
-// or write the real ~/.config.
 const postinstall = require("./scripts/postinstall.cjs") as {
   OVERRIDE_ENV: string;
   shouldCopy(packageDir: string, env: Record<string, string | undefined>): { copy: boolean; reason: string };
@@ -32,7 +28,6 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A package directory shaped like the published tarball, with the script in it. */
 function fakePackage(packageDir: string, { withSkill = true } = {}): void {
   mkdirSync(path.join(packageDir, "commands"), { recursive: true });
   mkdirSync(path.join(packageDir, "scripts"), { recursive: true });
@@ -56,7 +51,6 @@ function listFiles(dir: string): string[] {
 }
 
 function runtime(): string {
-  // npm and pnpm run the postinstall under node; fall back to bun if absent.
   return Bun.which("node") ?? process.execPath;
 }
 
@@ -71,9 +65,7 @@ describe("postinstall decision", () => {
   test("skips the workspace checkout", () => {
     expect(postinstall.shouldCopy("/home/u/plannotator/apps/opencode-plugin", {})).toEqual({ copy: false, reason: "workspace" });
     expect(postinstall.shouldCopy("C:\\src\\plannotator\\apps\\opencode-plugin", {}).copy).toBe(false);
-    // A directory merely named like node_modules is not one.
     expect(postinstall.shouldCopy("/home/u/my_node_modules/apps/opencode-plugin", {}).copy).toBe(false);
-    // The real package directory in this repo.
     expect(postinstall.shouldCopy(import.meta.dir, {}).copy).toBe(false);
   });
 
@@ -82,7 +74,6 @@ describe("postinstall decision", () => {
     expect(postinstall.shouldCopy("/src/plannotator/apps/opencode-plugin", env("1"))).toEqual({ copy: true, reason: "forced" });
     expect(postinstall.shouldCopy("/src/plannotator/apps/opencode-plugin", env("true")).copy).toBe(true);
     expect(postinstall.shouldCopy("/p/node_modules/@plannotator/opencode", env("0"))).toEqual({ copy: false, reason: "disabled" });
-    // Unrecognized values fall through to the path check.
     expect(postinstall.shouldCopy("/p/node_modules/@plannotator/opencode", env("maybe")).copy).toBe(true);
     expect(postinstall.shouldCopy("/src/plannotator/apps/opencode-plugin", env("")).copy).toBe(false);
   });
@@ -154,7 +145,6 @@ describe("postinstall copy", () => {
     const root = tempDir();
     const packageDir = path.join(root, "node_modules", "@plannotator", "opencode");
     fakePackage(packageDir);
-    // XDG_CONFIG_HOME is a FILE, so every mkdir under it fails.
     const blocker = path.join(root, "blocker");
     writeFileSync(blocker, "");
 

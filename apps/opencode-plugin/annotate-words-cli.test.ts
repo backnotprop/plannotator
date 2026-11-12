@@ -1,17 +1,3 @@
-/**
- * OpenCode 2 `/plannotator-annotate` against the REAL plannotator CLI
- * (apps/hook/server/index.ts), end to end through `runNativeCommand`.
- *
- * Found in the 0.28.6 release smoke: `/plannotator-annotate . notes.md` opened
- * nothing and showed nothing. The plugin passed the words as ONE argument
- * (`annotate ". notes.md" --json`), which the real CLI reads as one path
- * ("File not found: . notes.md"); the stub CLI the earlier test used split
- * that argument itself, so it could not catch it. And the failure only went
- * to the log, which OpenCode 2 discards.
- *
- * Every run sandboxes HOME, the XDG dirs and PLANNOTATOR_DATA_DIR in a temp
- * directory; nothing touches the real ~/.plannotator or ~/.config/opencode.
- */
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +12,6 @@ let root = "";
 let savedBin: string | undefined;
 
 beforeAll(() => {
-  // The CLI imports the built HTML; API-only tests need just a stub.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
@@ -38,8 +23,6 @@ beforeEach(() => {
   for (const dir of ["home", "config", "cache", "data", "pn"]) mkdirSync(path.join(root, dir));
   writeFileSync(path.join(root, "notes.md"), "# Notes\n\nHello.\n");
   writeFileSync(path.join(root, "my notes.md"), "# My notes\n");
-  // The real CLI, with its environment sandboxed inside the wrapper so the
-  // test process's own environment is never touched beyond PLANNOTATOR_BIN.
   const env = {
     HOME: path.join(root, "home"),
     XDG_CONFIG_HOME: path.join(root, "config"),
@@ -67,7 +50,6 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** A fake OpenCode 2 context: transcript notices and prompts are recorded. */
 function makeHost() {
   const prompts: Array<{ sessionID: string; text: string }> = [];
   const notices: Array<{ sessionID: string; text: string; description?: string; resume?: boolean }> = [];
@@ -106,7 +88,6 @@ async function waitFor<T>(read: () => T | undefined | null | false, ms = 20_000)
   }
 }
 
-/** Run the slash command with `words`, wait for the page, and answer with feedback. */
 async function openAndSendFeedback(words: string) {
   const host = makeHost();
   const running = runNativeCommand("plannotator-annotate", { sessionID: "ses_a", prompt: { text: words } }, host.deps);
@@ -128,8 +109,6 @@ async function openAndSendFeedback(words: string) {
 }
 
 describe.skipIf(process.platform === "win32")("OpenCode 2 /plannotator-annotate words through the real CLI", () => {
-  // Failure caught: the words passed as one argument, which the real CLI
-  // reads as the path ". notes.md" (opened nothing).
   for (const words of [". notes.md", "notes.md .", "please notes.md"]) {
     test(`"${words}" opens notes.md`, async () => {
       const { host, plan } = await openAndSendFeedback(words);
@@ -140,7 +119,6 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 /plannotator-annotate 
     }, 30_000);
   }
 
-  // Failure caught: splitting breaking a path with spaces, quoted or not.
   test("a path with spaces opens whether quoted beside prose or typed alone unquoted", async () => {
     const quoted = await openAndSendFeedback('"my notes.md" please');
     expect(quoted.plan.filePath).toBe(path.join(root, "my notes.md"));
@@ -148,8 +126,6 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 /plannotator-annotate 
     expect(bare.plan.filePath).toBe(path.join(root, "my notes.md"));
   }, 60_000);
 
-  // Failure caught: a failed command visible nowhere (OpenCode 2 discards the
-  // log), or reported as a prompt that starts a model turn.
   test("a CLI failure is a transcript notice that starts no turn", async () => {
     const host = makeHost();
     await runNativeCommand("plannotator-annotate", { sessionID: "ses_a", prompt: { text: "nothere.md" } }, host.deps);
@@ -163,8 +139,6 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 /plannotator-annotate 
     expect(notice.text.startsWith(notice.description!)).toBe(true);
   }, 30_000);
 
-  // `./` is an explicit path to a folder, so beside a file it is a second
-  // target: the CLI's ambiguity error, which the person now sees.
   test("./ beside a file is the CLI's ambiguity error, shown in the transcript", async () => {
     const host = makeHost();
     await runNativeCommand("plannotator-annotate", { sessionID: "ses_a", prompt: { text: "./ notes.md" } }, host.deps);

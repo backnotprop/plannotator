@@ -1,9 +1,3 @@
-/**
- * The Plannotator OpenCode plugin inside an `opencode serve` that
- * Plannotator's Ask AI started (`PLANNOTATOR_ASK_AI_CHILD=1`, set by
- * `askAiChildEnv`): it registers nothing, so the agent answering a question
- * gets no submit_plan, planning prompts, Inbox or agent tool.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,7 +9,6 @@ const KEYS = ["PLANNOTATOR_ASK_AI_CHILD", "PLANNOTATOR_DATA_DIR", "PLANNOTATOR_I
 const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
 let dataDir = "";
 beforeEach(() => {
-  // A temp data dir (the plugin reads config.json), the Inbox and agent tools at their defaults.
   dataDir = mkdtempSync(join(tmpdir(), "plannotator-opencode-ask-ai-"));
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   process.env.PLANNOTATOR_INBOX_CONNECT = "0";
@@ -30,7 +23,6 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-/** An OpenCode 2 context that records every tool and session hook the plugin registers. */
 function v2Context() {
   const registered: string[] = [];
   const context = {

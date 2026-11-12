@@ -1,9 +1,3 @@
-/**
- * #1701, OpenCode CLI bridge end to end: the plugin runs the REAL plannotator
- * CLI (`annotate <file> --json`), the editor's bare Done is posted the way the
- * UI posts it, and the session must receive no prompt. Real feedback through
- * the same path still arrives, so the test cannot pass by never prompting.
- */
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +10,6 @@ const roots: string[] = [];
 let stubs: string[] = [];
 
 beforeAll(() => {
-  // The CLI imports the built HTML; API-only tests need just a stub.
   stubs = stubHookDistHtml();
 });
 afterAll(() => {
