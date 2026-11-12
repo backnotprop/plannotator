@@ -69,8 +69,7 @@ import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
-import { dispatchInboxFrame, type InboxEventHandlers } from './eventFrames';
-export { dispatchInboxFrame, type InboxEventHandlers };
+export { dispatchInboxFrame, openInboxEventFrames, subscribeInboxEvents, type InboxEventHandlers } from './eventFrames';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
 import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
@@ -98,7 +97,6 @@ import type {
   InboxWindowPermission,
 } from '@plannotator/core/inbox-types';
 
-import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
 
 /**
@@ -233,6 +231,8 @@ export interface MachineView {
   message_deletions?: boolean;
   /** Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing. */
   snooze_old?: boolean;
+  /** The marks it takes for its own threads and agents (approval "inbox-linked-marks"; `machineTakes`). Absent from an older Inbox. */
+  marks?: string[];
   /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
   update?: MachineUpdateView | null;
 }
@@ -328,6 +328,11 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
+  /**
+   * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
+   * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
+   */
+  tags?: InboxInitiative[];
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -1246,7 +1251,8 @@ const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encod
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self);
-  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? [])];
+  // Starred rows too: another machine's archived star is in no section here.
+  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? []), ...(model.pins ?? [])];
   // This Inbox's own rows and projects first, every id in them (a row's delivery and message ids too): a linked
   // machine's row with the same id never takes one over. Two linked machines naming one id leave it contested.
   rememberLocal(localIdsIn(model));
@@ -2185,13 +2191,18 @@ export const inboxApi = {
     if (query.limit) params.set('limit', String(query.limit));
     return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal);
   },
-  pin: (threadId: string, pinned: boolean) =>
-    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pin`), { pinned }),
-  /** Put the pins in this order (Move up, Move down): pins it does not name keep their place after them; a named thread not pinned now is skipped. */
-  pinOrder: (order: readonly string[]) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { order }),
-  /** Unpin's Undo: pin this one thread again at its old index, with the time it was first pinned. */
+  /** Star or unstar, on the thread's own machine (approval "inbox-linked-marks"). */
+  pin: (threadId: string, pinned: boolean) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(threadUrl(threadId, '/pin'), { pinned }),
+  /**
+   * Put one machine's stars in this order (Move up, Move down), on that machine: pins it does not name keep their place
+   * after them; a named thread not pinned now is skipped.
+   */
+  pinOrder: (order: readonly string[]) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(order[0])), { order }),
+  /** Unpin's Undo, on the thread's own machine: pin this one thread again at its old index there, with the time it was first pinned. */
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
-    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { restore }),
+    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(restore.thread_id)), { restore }),
+  /** Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. */
+  setThreadTag: (threadId: string, tag: string, on: boolean) => post<{ tags: string[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/tags`), { tag, on }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
@@ -2434,7 +2445,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2444,62 +2455,6 @@ export interface InboxEventFrame {
   id: string | null;
 }
 
-/**
- * Open the server's event stream for this tab: every named frame, unparsed,
- * after `cursor`. EventSource reconnects on its own and resumes from the last
- * event id. Answers the close.
- */
-export function openInboxEventFrames(cursor: number, onFrame: (frame: InboxEventFrame) => void, win?: InboxEventWindow): () => void {
-  // `machines=1`: other machines' records and states ride this one stream in frames of their own (never this
-  // Inbox's seq). An older Inbox ignores it; with nothing linked only the `machines` snapshot comes.
-  const query = new URLSearchParams({ cursor: String(cursor), machines: '1' });
-  if (win) {
-    query.set('window', win.id);
-    query.set('permission', win.permission);
-    query.set('origin', win.origin);
-  }
-  const source = new EventSource(inboxUrl(`/events?${query}`));
-  for (const name of INBOX_EVENT_FRAMES) {
-    source.addEventListener(name, (event) => {
-      const message = event as MessageEvent<string>;
-      onFrame({ name, data: typeof message.data === 'string' ? message.data : '', id: message.lastEventId || null });
-    });
-  }
-  return () => source.close();
-}
-
-
-/**
- * The server's event stream: `onRecord` for every store line after the
- * cursor (the line, for the notifications), `onStatus` for restart-to-update.
- *
- * The Inbox tabs of one origin share ONE stream (sharedEvents.ts): the tab
- * holding a Web Lock opens it and passes every frame on over a
- * BroadcastChannel, so a browser never holds one HTTP/1.1 connection per tab
- * (Chrome allows six per host; a seventh tab would stall). Where Web Locks or
- * BroadcastChannel is missing, or there is no window to name, this tab opens
- * its own stream exactly as before.
- */
-export function subscribeInboxEvents(
-  cursor: number,
-  handlers: InboxEventHandlers,
-  /** This window, so the server counts it (and what its browser allows) while the stream is open. */
-  win?: InboxEventWindow,
-): () => void {
-  if (win && sharedInboxEventsSupported()) {
-    return subscribeSharedInboxEvents(cursor, handlers, win, browserSharedEventsEnv({ open: openInboxEventFrames, dispatch: dispatchInboxFrame }));
-  }
-  // A window's own stream beats too: the same silence watch, reopening this tab's stream.
-  if (win && typeof document !== 'undefined') {
-    return subscribeOwnInboxEvents(cursor, handlers, win, {
-      open: openInboxEventFrames,
-      dispatch: dispatchInboxFrame,
-      lifecycle: { document, window },
-      isVisible: () => document.visibilityState === 'visible',
-    });
-  }
-  return openInboxEventFrames(cursor, (frame) => dispatchInboxFrame(frame, handlers), win);
-}
 
 // ───────────────────────────── Shape ─────────────────────────────
 

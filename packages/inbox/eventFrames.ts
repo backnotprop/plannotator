@@ -1,6 +1,7 @@
 import type { InboxHealth, InboxNotifyReach, InboxRestartAgents } from '@plannotator/core/inbox-types';
-import { idsIn, localIdsIn, type InboxEvent, type InboxEventFrame, type MachineRecordFrame, type MachineView, type OutboxView, type TailscaleSettings, type UpdateCheckFailing } from './api';
-import { rememberLocal, rememberMachine } from './inboxUrl';
+import { idsIn, INBOX_EVENT_FRAMES, localIdsIn, type InboxEvent, type InboxEventFrame, type InboxEventWindow, type MachineRecordFrame, type MachineView, type OutboxView, type TailscaleSettings, type UpdateCheckFailing } from './api';
+import { inboxUrl, rememberLocal, rememberMachine } from './inboxUrl';
+import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
 
@@ -14,6 +15,7 @@ export interface InboxEventHandlers {
   onAsk?: (threadId: string) => void;
   onPins?: () => void;
   onArtifactPins?: () => void;
+  onTags?: () => void;
   onShow?: (threadId: string, windowId: string) => void;
   onSnoozes?: () => void;
   onThreadPulls?: (threadIds: string[]) => void;
@@ -78,6 +80,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();
+      return;
+    case 'tags':
+      handlers.onTags?.();
       return;
     case 'show':
       try {
@@ -212,4 +217,36 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       }
       return;
   }
+}
+
+export function openInboxEventFrames(cursor: number, onFrame: (frame: InboxEventFrame) => void, win?: InboxEventWindow): () => void {
+  const query = new URLSearchParams({ cursor: String(cursor), machines: '1' });
+  if (win) {
+    query.set('window', win.id);
+    query.set('permission', win.permission);
+    query.set('origin', win.origin);
+  }
+  const source = new EventSource(inboxUrl(`/events?${query}`));
+  for (const name of INBOX_EVENT_FRAMES) {
+    source.addEventListener(name, (event) => {
+      const message = event as MessageEvent<string>;
+      onFrame({ name, data: typeof message.data === 'string' ? message.data : '', id: message.lastEventId || null });
+    });
+  }
+  return () => source.close();
+}
+
+export function subscribeInboxEvents(cursor: number, handlers: InboxEventHandlers, win?: InboxEventWindow): () => void {
+  if (win && sharedInboxEventsSupported()) {
+    return subscribeSharedInboxEvents(cursor, handlers, win, browserSharedEventsEnv({ open: openInboxEventFrames, dispatch: dispatchInboxFrame }));
+  }
+  if (win && typeof document !== 'undefined') {
+    return subscribeOwnInboxEvents(cursor, handlers, win, {
+      open: openInboxEventFrames,
+      dispatch: dispatchInboxFrame,
+      lifecycle: { document, window },
+      isVisible: () => document.visibilityState === 'visible',
+    });
+  }
+  return openInboxEventFrames(cursor, (frame) => dispatchInboxFrame(frame, handlers), win);
 }

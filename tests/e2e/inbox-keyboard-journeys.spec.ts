@@ -363,7 +363,7 @@ test('S1: deep work in one thread, a detour, and back', async () => {
   await press(']', ']', '[');
   await expect.poll(fileName).toContain(world.files.planPage);
   await focusHeld();
-  // On an HTML page the first Escape leaves Annotate for Interact (the viewer's own layer); then full screen goes.
+  // An HTML page in Annotate takes one Escape to Interact first (the viewer's own layer); then full screen goes.
   for (let i = 0; i < 3 && (await page.locator('[data-attachment-pane][data-full-view]').count()) > 0; i++) await press('Escape');
   await viewIs('side');
   await press('Escape');
