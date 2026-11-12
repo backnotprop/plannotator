@@ -12,7 +12,11 @@ export function useCloudAgentsGate(enabled: boolean, section: string | null): Cl
     if (!enabled) return;
     let live = true;
     inboxApi.cloudAgents().then(
-      (model) => live && setGate({ shown: model.available !== false || model.agents.length > 0, count: model.agents.length }),
+      (model) => {
+        if (!live) return;
+        const agents = Array.isArray(model?.agents) ? model.agents : null;
+        setGate({ shown: agents !== null && (model.available !== false || agents.length > 0), count: agents?.length ?? 0 });
+      },
       () => live && setGate({ shown: false, count: 0 }),
     );
     return () => {
