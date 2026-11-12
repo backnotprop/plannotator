@@ -71,9 +71,9 @@ export function useSidebarMenu(aside: RefObject<HTMLElement | null>, enabled = t
   };
 }
 
-/** The items the menu offers, as the sidebar reads top to bottom: the logo, the top stack, Tags, Agents, the bottom stack, the Settings row's buttons. */
+/** The items the menu offers, as the sidebar reads top to bottom: the logo, the top stack, Starred, Tags, Agents, Projects, the bottom stack, the Settings row's buttons. */
 export function sidebarMenuItems(layout: InboxSidebarLayout, drawn: ReadonlySet<InboxSidebarItem>): InboxSidebarItem[] {
-  const order: InboxSidebarItem[] = ['logo', ...layout.top, 'tags', 'agents', ...layout.bottom, 'shortcuts', 'theme'];
+  const order: InboxSidebarItem[] = ['logo', ...layout.top, 'starred', 'tags', 'agents', 'projects', ...layout.bottom, 'shortcuts', 'theme'];
   return order.filter((item) => drawn.has(item) && inboxSidebarHideable(item));
 }
 

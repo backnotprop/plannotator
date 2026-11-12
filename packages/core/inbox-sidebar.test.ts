@@ -123,6 +123,22 @@ describe('Agents: a section between the stacks that hides and never moves', () =
   });
 });
 
+describe('Starred and Projects: sections between the stacks that hide and never move', () => {
+  for (const id of ['starred', 'projects'] as const) {
+    test(`${id}: shown by default and by a layout saved before it was an item; hides, saves, never moves; no preset hides it`, () => {
+      expect([...D.top, ...D.bottom]).not.toContain(id);
+      expect(inboxSidebarRead({ top: [...D.top], bottom: [...D.bottom], hidden: ['feedback'] })!.hidden).not.toContain(id);
+      const hidden = inboxSidebarSetShown(D, id, false);
+      expect(hidden).toEqual(layout([...D.top], [...D.bottom], [id]));
+      expect(inboxSidebarCheck(hidden)).toEqual(hidden);
+      expect(inboxSidebarSetShown(hidden, id, true)).toEqual(D);
+      expect(inboxSidebarRead({ top: [id, ...D.top], bottom: [...D.bottom], hidden: [] })).toEqual(D);
+      expect(inboxSidebarMove(D, id, 'top', 0)).toEqual(D);
+      for (const preset of ['default', 'all-top', 'minimal'] as const) expect(INBOX_SIDEBAR_PRESETS[preset].layout.hidden).not.toContain(id);
+    });
+  }
+});
+
 describe('showing and hiding', () => {
   const cases: [string, InboxSidebarItem, boolean, InboxSidebarItem[]][] = [
     ['Feedback hides', 'feedback', false, ['feedback']],
