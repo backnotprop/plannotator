@@ -16,8 +16,9 @@
  * stands). The memory is per store, in this process: an Inbox restart forgets
  * it, so a session may hear a hint once more after one.
  *
- * The older "choices have no pictures" advice keeps its own rule and words;
- * it uses the same memory (`picture_choices`), so a session hears it once.
+ * The older "choices have no pictures" advice is not one of these: it keeps
+ * its own rule and words (inbox-picture-choices.ts) and is said on every send
+ * it holds for.
  */
 
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
@@ -25,7 +26,7 @@ import { INBOX_THREAD_PULLS_REMOVED_MS, inboxPullUrlsIn, inboxThreadPullText, pa
 import { blankCode } from "@plannotator/shared/inbox/message-images";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
-export type InboxHintKind = "attach_pull" | "question_options" | "picture_choices";
+export type InboxHintKind = "attach_pull" | "question_options";
 
 /** At most this many (session, hint) marks kept per store; the oldest go first. */
 const MAX_SAID = 20_000;
@@ -67,7 +68,7 @@ const SHORT_MERGE_REQUEST = /(?<![\w/.!-])[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+!
  * link, `owner/repo#12` and a bare `#12` (each may be an issue, and `pulls`
  * refuses a bare one). Pure; never throws.
  */
-export function pullsNamedInBody(body: string): InboxThreadPullRef[] {
+export function pullsNamedInBody(body: string, projectHost?: string | null): InboxThreadPullRef[] {
   if (typeof body !== "string" || (!body.includes("https://") && !body.includes("!"))) return [];
   const text = blankCode(body)
     .split("\n")
@@ -75,7 +76,7 @@ export function pullsNamedInBody(body: string): InboxThreadPullRef[] {
     .join("\n");
   const found: { index: number; ref: InboxThreadPullRef }[] = [];
   const take = (index: number, value: string) => {
-    const ref = parseInboxThreadPullRef(value);
+    const ref = parseInboxThreadPullRef(value, projectHost);
     if (!("error" in ref) && !found.some((other) => other.ref.key === ref.key)) found.push({ index, ref });
   };
   for (const url of inboxPullUrlsIn(text)) take(text.indexOf(url), url);
@@ -89,8 +90,8 @@ export function pullsNamedInBody(body: string): InboxThreadPullRef[] {
  * with this send's `pulls`), and not one somebody took off it in the last 7
  * days (read_thread's "Removed by" lines: never asked back).
  */
-export function pullsNotAttached(store: InboxStore, threadId: string, body: string, now: number): InboxThreadPullRef[] {
-  const named = pullsNamedInBody(body);
+export function pullsNotAttached(store: InboxStore, threadId: string, body: string, now: number, projectHost?: string | null): InboxThreadPullRef[] {
+  const named = pullsNamedInBody(body, projectHost);
   if (named.length === 0) return [];
   const known = new Set([
     ...store.threadPulls(threadId).map((pull) => pull.pull),
@@ -137,12 +138,12 @@ export const QUESTION_OPTIONS_HINT =
  */
 export function quietHint(
   store: InboxStore,
-  sent: { session: string | null | undefined; threadId: string; body: string; replayed: boolean; now: number },
+  sent: { session: string | null | undefined; threadId: string; body: string; replayed: boolean; now: number; projectHost?: string | null },
 ): { kind: "attach_pull" | "question_options"; line: string } | null {
   if (sent.replayed || !sent.session?.trim()) return null;
   try {
     if (!hintSaid(store, sent.session, "attach_pull")) {
-      const refs = pullsNotAttached(store, sent.threadId, sent.body, sent.now);
+      const refs = pullsNotAttached(store, sent.threadId, sent.body, sent.now, sent.projectHost);
       if (refs.length > 0) {
         noteHintSaid(store, sent.session, "attach_pull");
         return { kind: "attach_pull", line: attachPullText(refs) };

@@ -108,6 +108,7 @@ import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext,
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
+import { launchTurnErrorNote, writeLaunchNote } from "./inbox-launch-host";
 
 const AVAILABLE_TTL_MS = 30_000;
 const HOST_TTL_MS = 10_000;
@@ -178,6 +179,14 @@ interface Memo {
    * would undo the Stop); the person's next reply does, and takes it along.
    */
   heldReply: string | null;
+  /**
+   * The session's last turn ended in an error it wrote down (`LaunchHost.turnError`), while it is idle: the run line
+   * says it couldn't answer, with Try again. `noted`: the entry whose note is in the thread (one per entry).
+   * `tried`: the entry Try again sent the message past, which stands for nothing any more.
+   */
+  turnError?: { key: string; at: number } | null;
+  turnErrorNoted?: string | null;
+  turnErrorTried?: string | null;
   /** Clone from a git URL: the reply that started the clone again last (once per reply, as a respawn). */
   cloneFor?: string | null;
   /** When the running clone began: its percent shows only after a few seconds (E2). */
@@ -639,6 +648,7 @@ export function createInboxLaunch(options: {
       waitingSince: memo.waitingSince,
       respawnFailed: respawnFailedOf(memo),
       respawnUntrusted: respawnUntrustedOf(memo),
+      turnErrorAt: memo.turnError ? memo.turnError.at : null,
       stoppedByPersonAt: memo.stoppedAt,
       stoppedNote: host.stoppedNote?.(launch) ?? null,
       connector: host.connector,
@@ -687,6 +697,38 @@ export function createInboxLaunch(options: {
   };
 
   /**
+   * A launched session whose host writes its failed turns down (Claude Code): once it is idle, the error its last turn
+   * ended in becomes one note in the thread, from the session, in the words Codex's and Pi's failed turns use, and the
+   * run line's "couldn't answer" with Try again. A turn that runs, or a last turn that ended well, clears the line;
+   * the note stays. Only a session this Inbox started, never one it did not.
+   */
+  const watchTurnError = (root: InboxMessage) => {
+    const launch = root.launch!;
+    const host = hostOf(launch);
+    const session = inboxLaunchedSession(root);
+    if (!host?.turnError || launch.error || !session || session.startsWith("launch:") || root.to?.session !== session) return;
+    const memo = memoOf(launch);
+    const live = liveOf(host, root, memo);
+    const was = memo.turnError ?? null;
+    // Not connected (stopped, or not yet back): the stopped line says what it is. A turn runs: its end decides.
+    let found = !live || live.busy === true ? null : host.turnError(launch, session);
+    if (found && found.key === memo.turnErrorTried) found = null;
+    memo.turnError = found ? { key: found.key, at: found.at } : null;
+    if (found && memo.turnErrorNoted !== found.key) {
+      memo.turnErrorNoted = found.key;
+      startLog(launch.id, `${launch.agent} ${session}: the turn ended with an error: ${found.text.slice(0, 2000)}`);
+      log(`Inbox launch ${launch.id}: a ${host.name} turn ended with an error: ${found.text.slice(0, 200)}`);
+      writeLaunchNote(
+        { store, onChange: options.onChange },
+        root,
+        { author: { host: launch.agent, session, name: host.name }, body: launchTurnErrorNote(host.name, found.text), key: `${launch.agent}-error-${launch.id}-${found.key}`, turnError: true },
+        log,
+      );
+    }
+    if ((was?.key ?? null) !== (memo.turnError?.key ?? null)) options.onChange();
+  };
+
+  /**
    * Look at every launch: respawn a stopped session someone wrote to, and,
    * only while a window watches (`watched`), keep each host's check and
    * view fresh where a line could change. An agent with no host is skipped.
@@ -696,6 +738,7 @@ export function createInboxLaunch(options: {
     const all = roots().filter((root) => !root.launch!.deleted_at && hostOf(root.launch!));
     if (all.length === 0) return;
     for (const root of all) maybeRespawn(root);
+    for (const root of all) watchTurnError(root);
     for (const host of hostList) stateOf(host).permissions.sweep();
     if (!watched) return;
     for (const host of hostList) {
@@ -1475,6 +1518,11 @@ ${result.text}`);
   const tryAgain = (root: InboxMessage, host: LaunchHost): void => {
     const launch = root.launch!;
     const memo = memoOf(launch);
+    // A turn that ended in an error: the person's message it was for goes to the session once more.
+    if (!launch.error && memo.turnError && runOfRoot(root)?.turn_error) {
+      sendAgain(root, memo);
+      return;
+    }
     // A reply's respawn that did not take: respawn once more (the session exists; a new start would make a second).
     if (!launch.error && launch.session_ref && root.to && respawnFailedOf(memo)) {
       respawn(root, host, memo.respawn!.for);
@@ -1490,6 +1538,32 @@ ${result.text}`);
     }
     // The start never ran (untrusted, failed): Try again is its first real start, never "Starting … again".
     void run(store.settleLaunch(root.id, { error: null }), host, false);
+  };
+
+  /**
+   * Try again on a turn that ended in an error: the person's latest message the session took goes to it again
+   * (`store.sendAgain`), unless something of theirs still waits for it (that goes in anyway). The error's entry
+   * stands for nothing after this: the line goes until the session's next turn ends.
+   */
+  const sendAgain = (root: InboxMessage, memo: Memo): void => {
+    const session = inboxLaunchedSession(root)!;
+    if (store.pendingReplies(session, { tags: true }).length === 0) {
+      const last = store
+        .threadMessageIds(root.thread_id)
+        .map((id) => store.message(id))
+        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && m.delivery?.session === session)
+        .at(-1);
+      if (!last) throw new InboxError("validation_error", "That launch did not fail.");
+      store.sendAgain(last.id, session);
+    }
+    memo.turnErrorTried = memo.turnError?.key ?? null;
+    memo.turnError = null;
+    // "Starting <agent> again…" until its turn begins.
+    memo.busySeen = false;
+    memo.startedAt = now();
+    memo.again = true;
+    log(`Inbox launch ${root.launch!.id}: Try again sent the message to ${session} again`);
+    options.onChange();
   };
 
   const realOrSelf = (path: string) => {
@@ -1684,6 +1758,10 @@ ${result.text}`);
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
+      }
+      const modelEfforts = target.choice?.model ? lists?.model_efforts?.[target.choice.model] : undefined;
+      if (target.choice?.effort && modelEfforts && !modelEfforts.includes(target.choice.effort)) {
+        throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
       const model = target.choice?.model;
       const effort = target.choice?.effort;

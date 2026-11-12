@@ -86,6 +86,7 @@ export interface InboxAgentSession {
  * polls (live, no grace). `busy` null when the connection does not say.
  */
 export interface InboxRecipientConnection {
+  polls?: true;
   busy: boolean | null;
   idle_since: string | null;
   /** Send now can be offered: the connection said it can deliver into a running turn. */
@@ -191,6 +192,7 @@ interface SeenSession {
    * thread is not known to have ended. Its id, for that check.
    */
   wakeOnly?: string;
+  pinned?: boolean;
 }
 
 /**
@@ -353,6 +355,7 @@ export function createInboxLiveSessions(options: {
    * session never "ends" for want of a poll: only `dead` ends it.
    */
   wakeOnlyStatus?: (session: string) => "alive" | "dead" | null;
+  pollsItself?: (session: string) => boolean;
   /** The items of a session the Inbox wakes itself that may not have reached it (a `codex queue` that ran out of time). */
   uncertainItemsOf?: (session: string) => string[];
   /** Each poll, with the sessions its conversation continues (nearest first): the agent icons' faces link it (inbox-agent-faces.ts). */
@@ -592,7 +595,7 @@ export function createInboxLiveSessions(options: {
 
   const isLive = (entry: SeenSession) =>
     entry.wakeOnly !== undefined
-      ? now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
+      ? (entry.pinned === true || now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS) && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
       : entry.holding > 0 || now() - entry.lastSeen <= INBOX_SESSION_LIVE_MS;
 
   /**
@@ -671,6 +674,33 @@ export function createInboxLiveSessions(options: {
     if (root !== null) entry.root = root;
     if (typeof projectPath === "string" && projectPath) entry.cwd = projectPath;
     sessions.set(session, entry);
+  };
+
+  const pinCloud = (session: string, root: string | null, name: string, host = "cloud"): void => {
+    if (root === null) {
+      if (sessions.get(session)?.pinned) sessions.delete(session);
+      return;
+    }
+    const at = now();
+    const known = sessions.get(session);
+    sessions.set(session, {
+      host,
+      root,
+      startedAt: known?.startedAt ?? at,
+      lastSeen: at,
+      holding: 0,
+      busy: null,
+      idleSince: null,
+      sendNow: false,
+      cwd: null,
+      folder: null,
+      plugin: null,
+      engine: null,
+      tags: true,
+      label: name,
+      wakeOnly: session,
+      pinned: true,
+    });
   };
 
   /** How a session the Inbox wakes itself is connected: it takes the item as its next turn; nothing else is known. */
@@ -993,9 +1023,11 @@ export function createInboxLiveSessions(options: {
   const connectionOf = (asked: string): InboxRecipientConnection | null => {
     // A session whose conversation goes on under another id is connected as that one is.
     const stand = standInOf(asked);
-    if (!stand) return options.wakeOnlyStatus?.(asked) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(asked) } : null;
+    const polls = options.pollsItself?.(asked) ? { polls: true as const } : {};
+    if (!stand) return options.wakeOnlyStatus?.(asked) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(asked), ...polls } : null;
     const { session, entry } = stand;
     return {
+      ...polls,
       busy: entry.busy,
       idle_since: entry.busy === false && entry.idleSince !== null ? iso(entry.idleSince) : null,
       send_now: entry.sendNow,
@@ -1090,7 +1122,7 @@ export function createInboxLiveSessions(options: {
     extra: (host: InboxToolHostId) => { installed: string | null; update_command: string | null },
   ): Partial<Record<InboxToolHostId, InboxHostSessions>> => {
     const out: Partial<Record<InboxToolHostId, InboxHostSessions>> = {};
-    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
+    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes"];
     for (const [session, entry] of [...sessions].sort((a, b) => b[1].startedAt - a[1].startedAt)) {
       if (!isLive(entry) || !(hosts as readonly string[]).includes(entry.host)) continue;
       const host = entry.host as InboxToolHostId;
@@ -1350,6 +1382,7 @@ export function createInboxLiveSessions(options: {
     pollStarted,
     stateChanged,
     seenWakeOnly,
+    pinCloud,
     liveFor,
     askerLive,
     pendingOf,

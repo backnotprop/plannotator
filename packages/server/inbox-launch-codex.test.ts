@@ -182,6 +182,34 @@ describe("Codex through the launch engine, against the fake codex", () => {
     expect(t.fake.rpc("thread/start")).toHaveLength(1);
   }, 30_000);
 
+  test("model and effort: Codex's own list with each model's levels; a pick goes on thread/start and again on thread/resume; a level the model lacks is refused", async () => {
+    const t = setup();
+    const choices = await until("the lists", async () => (await t.launch.composeBlock())!.agents.find((a) => a.agent === "codex")?.choices);
+    expect(choices).toMatchObject({ models: ["gpt-6.1-sol", "gpt-5.5"], efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], effort_word: "Effort" });
+    expect(choices.model_efforts!["gpt-5.5"]).toEqual(["low", "medium", "high", "xhigh"]);
+
+    const refused = t.launch.target({ launch: { agent: "codex", project_id: t.project.id, model: "gpt-5.5", effort: "ultra" } })!;
+    await expect(t.launch.prepare(refused, { name: "Tidy", body: "Hi", resolveProject: async () => t.project })).rejects.toThrow("gpt-5.5 takes effort low, medium, high, xhigh. Nothing was sent.");
+
+    const target = t.launch.target({ launch: { agent: "codex", project_id: t.project.id, model: "gpt-5.5", effort: "high" } })!;
+    const prepared = await t.launch.prepare(target, { name: "Tidy", body: "A SLOW job.", resolveProject: async () => t.project });
+    const root = t.store.startPersonThread({ project_id: t.project.id, body: "A SLOW job.", to: prepared.to, idempotency_key: "send-choice", thread_name: "Tidy", launch: prepared.launch }).message;
+    t.launch.begin(root);
+    const thread = await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(t.store.message(root.id)!.launch).toMatchObject({ model: "gpt-5.5", effort: "high" });
+    const [started] = t.fake.rpc("thread/start");
+    expect(started!.params.model).toBe("gpt-5.5");
+    expect(started!.params.config.model_reasoning_effort).toBe("high");
+    expect((await t.launch.composeBlock())!.agents.find((a) => a.agent === "codex")!.choices!.last).toEqual({ model: "gpt-5.5", effort: "high" });
+
+    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
+    await t.stopRoute(t.store.message(root.id)!.launch!.id);
+    t.store.sendReply(root.id, { words: "Go on.", idempotency_key: "reply-1" });
+    const resumed = await until("resumed", () => t.fake.rpc("thread/resume").find((call) => call.params.threadId === thread));
+    expect(resumed.params.model).toBe("gpt-5.5");
+    expect(resumed.params.config.model_reasoning_effort).toBe("high");
+  }, 30_000);
+
   test("Codex that refuses a second turn gets the reply steered into the running one", async () => {
     const t = setup({ state: { refuseSecondTurn: true } });
     const root = await t.send("A SLOW job.");
@@ -217,6 +245,8 @@ describe("Codex through the launch engine, against the fake codex", () => {
     );
     expect(note.body).toBe("Codex's turn ended with an error: Your access token could not be refreshed. Please log out and sign in again.");
     expect(note.author).toMatchObject({ host: "codex", name: "Codex" });
+    // Marked for the window's notification ("Codex couldn't answer").
+    expect(note.turn_error).toBe(true);
   });
 
   test("an approval is the permission card, and Allow once answers accept", async () => {

@@ -4,7 +4,8 @@
  * with options that carry no pros, cons or prototype. The failures these
  * guard: a hint on a message that is right (the PR is on the thread, the
  * link is an issue or sits in code, the question has trade-offs), a session
- * told twice, two hints on one send, and a hint on a refused send.
+ * told twice, two hints on one send, and a hint on a refused send. The
+ * picture-choices advice is not a quiet hint: it is said every time.
  *
  * A real store in a temp dir and send_message's own handler; no Inbox
  * server, no network.
@@ -30,12 +31,12 @@ const keys = (body: string) => pullsNamedInBody(body).map((ref) => ref.key);
 
 type Result = { content: { text: string }[]; isError?: boolean; structuredContent?: Record<string, unknown> };
 
-function world() {
+function world(projectHost?: InboxMcpContext["projectHost"]) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-hints-")));
   roots.push(root);
   const store = InboxStore.open(join(root, "data"));
   const project = store.ensureProject({ name: "api", root: join(root, "api") });
-  const context = { store, baseUrl: () => "http://localhost:1/", resolveProject: async () => project } as unknown as InboxMcpContext;
+  const context = { store, baseUrl: () => "http://localhost:1/", resolveProject: async () => project, projectHost } as unknown as InboxMcpContext;
   const server = createInboxMcpServer(context) as unknown as { _registeredTools: Record<string, { handler: (input: Record<string, unknown>, ctx: unknown) => Promise<Result> }> };
   const send = async (session: string, input: Record<string, unknown>) => {
     const result = await server._registeredTools.send_message!.handler({ project_path: project.root, agent_session: session, agent_host: "claude-code", ...input }, {});
@@ -98,6 +99,17 @@ test("no PR line when the PR is passed in pulls now, is already on the thread, o
   expect((await w.send("ses_a", { body: "And https://github.com/acme/api/pull/99.", thread: "new" })).last).toContain("acme/api#99");
 });
 
+test("in a project on a self-hosted GitLab, send_message's short group/project!n lands on that host, and the same words in the body ask nothing", async () => {
+  const w = world(async (projectId) => (projectId === w.project.id ? "gitlab.acme.dev" : null));
+  const sent = await w.send("ses_a", { body: "Opened acme/web!7.", pulls: ["acme/web!7"] });
+  expect(sent.lines).toHaveLength(1);
+  expect(sent.lines[0]).toContain("PRs: Added https://gitlab.acme.dev/acme/web/-/merge_requests/7.");
+  const threadId = String(sent.result.structuredContent!.thread_id);
+  expect(w.store.threadPulls(threadId).map((p) => p.url)).toEqual(["https://gitlab.acme.dev/acme/web/-/merge_requests/7"]);
+  expect(keys("acme/web!7")).toEqual(["gitlab.com/acme/web#7:pull"]);
+  expect(pullsNamedInBody("acme/web!7", "gitlab.acme.dev").map((ref) => ref.key)).toEqual(["gitlab.acme.dev/acme/web#7:pull"]);
+});
+
 test("one hint a send: the PR line first, the question line on a later send that still qualifies, each once", async () => {
   const w = world();
   const both = await w.send("ses_a", { body: `Opened ${PR}.\n\n${BARE}` });
@@ -122,10 +134,11 @@ test("no hint on a refused send, a replay, or a send with no session; a refused 
   expect((await w.send("", { body: BARE, thread: "anon" })).lines).toHaveLength(1);
 });
 
-test("the picture-choices advice is said once to a session", async () => {
+test("the picture-choices advice is said on every send it holds for, in any session", async () => {
   const w = world();
   const pictured = (prompt: string) => ["- A: ![a](designs/a.png)", "- B: ![b](designs/b.png)", "", ":::question", prompt, "", "- [ ] A", "    Pros: calm", "- [ ] B", ":::"].join("\n");
   expect((await w.send("ses_a", { body: pictured("Which theme?") })).result.content[0]!.text).toContain("choices have no pictures");
-  expect((await w.send("ses_a", { body: pictured("Which icon set?"), thread: "icons" })).result.content[0]!.text).not.toContain("choices have no pictures");
+  expect((await w.send("ses_a", { body: pictured("Which icon set?"), thread: "icons" })).result.content[0]!.text).toContain("choices have no pictures");
   expect((await w.send("ses_b", { body: pictured("Which font?"), thread: "fonts" })).result.content[0]!.text).toContain("choices have no pictures");
+  expect((await w.send("", { body: pictured("Which grid?"), thread: "grids" })).result.content[0]!.text).toContain("choices have no pictures");
 });

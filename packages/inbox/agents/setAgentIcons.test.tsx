@@ -425,7 +425,7 @@ test.if(hasDom)('a previewed icon: the back control and Close keep the icon the 
   act(() => cells()[0]!.click());
   await settle();
   await useIt();
-  expect(faces.agentFaceOf('ses_a')).toBe(picked);
+  expect(faces.agentFaceOf('ses_a') as string).toBe(picked);
   expect(document.querySelector('dialog[data-dialog="agent-icon"][open]')).toBeNull();
   for (const s of OUTSIDE) expect(drawn(at(host, s))).toContain(picked.slice(4));
 });

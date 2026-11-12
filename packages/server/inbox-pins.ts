@@ -23,8 +23,10 @@
  * reads `pins` with the list, and carries both writes (`POST threads/:id/pin`
  * and `POST pins`, each under an `idempotency_key`: inbox-devices.ts, contract
  * 7.65, approval "inbox-starred-pills"), which tell the windows as a window's
- * own write does. A linked machine's forward never carries them (`local` in
- * inbox-outbox.ts): a star stays on the computer that holds it.
+ * own write does. A star lives on the thread's own machine (approval
+ * "inbox-linked-marks"): a linked machine's window sends both writes here
+ * through its forward (`set` in inbox-outbox.ts), and reads the stars back
+ * from this Inbox's list.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";

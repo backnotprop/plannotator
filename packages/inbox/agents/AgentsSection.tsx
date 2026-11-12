@@ -1,6 +1,9 @@
-import { memo, useCallback, useMemo, useRef, type ReactNode } from 'react';
-import type { InboxListRow } from '@plannotator/core/inbox-types';
-import { useInboxAgents } from '../agentsList';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ContextMenu } from '@base-ui/react/context-menu';
+import { Menu } from '@base-ui/react/menu';
+import type { InboxAgent, InboxListRow } from '@plannotator/core/inbox-types';
+import { agentAsListed, agentIsNamed, useInboxAgents } from '../agentsList';
+import { ProjectNameField } from '../components/ProjectRow';
 import { Icon } from '../icons';
 import { awayLine, isAway, machineNotice, type MachinesModel } from '../machines';
 import type { MachineView } from '../api';
@@ -8,7 +11,7 @@ import { MachineSidebarWord } from '../components/MachineUpdate';
 import { Tip } from '../components/Tip';
 import { AgentMark } from './AgentMark';
 import { GOGGLES_FRAME, GOGGLES_LENSES, GOGGLES_MOUTH } from './goggles';
-import { agentFacts, agentHostName, agentsGroups, type AgentEntry } from './model';
+import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry } from './model';
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
@@ -25,6 +28,10 @@ import { agentFacts, agentHostName, agentsGroups, type AgentEntry } from './mode
  * agent filters the list to its threads, as a machine's caption does, and opens none of them; a second click shows
  * everything again. An agent with no thread in the window has nothing to filter: a click messages it (New message).
  * Its hover card says where and when it started, and its project.
+ *
+ * Its menu is a project row's (ProjectRow.tsx): ⋯ on hover, keyboard focus and while open (always on a phone, where
+ * the menu is a sheet), and the same menu on a right-click. Rename… turns the row into the project rename field; an
+ * empty name, like Reset name, goes back to the agent's own name (agents/agentNames.ts).
  *
  * Its data is the list's `agents` (agentsList.ts): drawing the section is what makes the window read the list again
  * on `event: deliveries` with `agents`.
@@ -56,6 +63,15 @@ export interface AgentsSectionProps {
   onAddMachine?: () => void;
   /** Wraps a navigation (closes the phone sheet first). */
   pick: (go: () => void) => () => void;
+  /** A phone: ⋯ always shown, the menu a sheet from the bottom edge, no right-click. */
+  phone?: boolean;
+  /**
+   * Rename… and Reset name: a name for the agent, or null for its own again (`own`: the name it then shows). Resolves
+   * true once the name is kept. Absent: no menu.
+   */
+  onRename?: (agent: InboxAgent, name: string | null, own: string) => Promise<boolean>;
+  /** Says a line in the window's live region (the rename field's refusals). */
+  announce?: (text: string) => void;
 }
 
 /** The Plannotator goggles, one shape in the current colour (the heading's grey), for both themes. */
@@ -110,10 +126,100 @@ type AgentOpens = 'filter' | 'message' | 'none';
  * its machine, the selection): the window draws on every read and keystroke, and a full section is 40 rows a machine.
  */
 const AgentRow = memo(
-  function AgentRow(props: { entry: AgentEntry; machine: MachineView | null; on: boolean; away: boolean; opens: AgentOpens; onOpen: (entry: AgentEntry, opener: HTMLElement) => void }) {
+  function AgentRow(props: {
+    entry: AgentEntry;
+    machine: MachineView | null;
+    on: boolean;
+    away: boolean;
+    opens: AgentOpens;
+    onOpen: (entry: AgentEntry, opener: HTMLElement) => void;
+    phone: boolean;
+    onRename?: (entry: AgentEntry, name: string | null) => Promise<boolean>;
+    announce?: (text: string) => void;
+  }) {
     const { entry, machine, on, away } = props;
-    return (
-      <div className="ib-sbagent" data-sidebar-agent={entry.agent.id} data-agent-state={entry.agent.state}>
+    const [menuOpen, setMenuOpen] = useState(false);
+    const [contextOpen, setContextOpen] = useState(false);
+    const [renaming, setRenaming] = useState(false);
+    const more = useRef<HTMLButtonElement>(null);
+    // Rename… picked: the closing menu leaves focus to the field. The field closed: ⋯ takes it.
+    const toField = useRef(false);
+    const backToMore = useRef(false);
+    const [portal, setPortal] = useState<HTMLElement | null>(null);
+    useLayoutEffect(() => setPortal(more.current?.closest<HTMLElement>('.pn-inbox') ?? null), [renaming]);
+    useEffect(() => {
+      if (renaming || !backToMore.current) return;
+      backToMore.current = false;
+      more.current?.focus();
+    }, [renaming]);
+    const onRename = props.onRename;
+    const named = agentIsNamed(entry.agent);
+    const row = (children: ReactNode) => (
+      <div
+        className="ib-sbagent"
+        data-sidebar-agent={entry.agent.id}
+        data-agent-state={entry.agent.state}
+        data-menu={menuOpen || contextOpen ? '' : undefined}
+        data-renaming={renaming ? '' : undefined}
+        data-agent-named={named ? '' : undefined}
+      >
+        {children}
+      </div>
+    );
+    const doneRenaming = (refocus: boolean) => {
+      toField.current = false;
+      backToMore.current = refocus;
+      setRenaming(false);
+    };
+    if (renaming && onRename) {
+      return row(
+        <ProjectNameField
+          name={entry.name}
+          folder={agentRowName(agentAsListed(entry.agent), entry.thread)}
+          label="Agent name"
+          emptyResets
+          announce={props.announce}
+          others={[]}
+          onCancel={doneRenaming}
+          onSave={async (name) => {
+            // Empty on an agent with no given name: nothing to save.
+            const saved = name === '' && !named ? true : await onRename(entry, name === '' ? null : name);
+            if (saved) doneRenaming(true);
+            return saved;
+          }}
+        />,
+      );
+    }
+    const act = (action: 'rename' | 'reset') => {
+      setMenuOpen(false);
+      setContextOpen(false);
+      if (action === 'rename') {
+        toField.current = true;
+        setRenaming(true);
+        return;
+      }
+      void onRename?.(entry, null);
+    };
+    const items = (
+      <>
+        {/* The popup is named by the agent already (aria-label): the title is for the eye only. */}
+        <div className="ib-pm-title" dir="auto" aria-hidden="true">
+          {entry.name}
+        </div>
+        <Menu.Item className="ib-pmi" label="Rename…" onClick={() => act('rename')} data-agent-action="rename">
+          <Icon name="pen" size={15} />
+          Rename…
+        </Menu.Item>
+        {named && (
+          <Menu.Item className="ib-pmi" label="Reset name" onClick={() => act('reset')} data-agent-action="reset">
+            <Icon name="replay" size={15} />
+            Reset name
+          </Menu.Item>
+        )}
+      </>
+    );
+    const content = (
+      <>
         <Tip content={<AgentTip entry={entry} machine={machine} />} side="right" align="start">
           <button
             type="button"
@@ -133,7 +239,36 @@ const AgentRow = memo(
           </button>
         </Tip>
         <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} />
-      </div>
+        {onRename && (
+          <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
+            <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${entry.name} options`} data-agent-more={entry.agent.id}>
+              <Icon name="dots" size={16} />
+            </Menu.Trigger>
+            <Menu.Portal container={portal ?? undefined}>
+              {props.phone && <Menu.Backdrop className="ib-pm-scrim" />}
+              <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4} data-phone={props.phone ? '' : undefined}>
+                <Menu.Popup className="ib-pm" aria-label={entry.name} data-agent-menu={entry.agent.id} finalFocus={() => !toField.current}>
+                  {items}
+                </Menu.Popup>
+              </Menu.Positioner>
+            </Menu.Portal>
+          </Menu.Root>
+        )}
+      </>
+    );
+    if (props.phone || !onRename) return row(content);
+    return (
+      <ContextMenu.Root onOpenChange={setContextOpen}>
+        <ContextMenu.Trigger render={row(content)} />
+        <ContextMenu.Portal container={portal ?? undefined}>
+          <ContextMenu.Positioner className="ib-pm-pos">
+            {/* Focus goes back to the row's ⋯, never the page (the field takes it after Rename…). */}
+            <ContextMenu.Popup className="ib-pm" aria-label={entry.name} data-agent-menu={entry.agent.id} finalFocus={() => (toField.current ? false : more.current)}>
+              {items}
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
     );
   },
   (a, b) =>
@@ -146,7 +281,10 @@ const AgentRow = memo(
     a.on === b.on &&
     a.away === b.away &&
     a.opens === b.opens &&
-    a.onOpen === b.onOpen,
+    a.onOpen === b.onOpen &&
+    a.phone === b.phone &&
+    a.onRename === b.onRename &&
+    a.announce === b.announce,
 );
 
 export function AgentsSection(props: AgentsSectionProps) {
@@ -172,6 +310,14 @@ export function AgentsSection(props: AgentsSectionProps) {
   const openNow = useRef(open);
   openNow.current = open;
   const onOpen = useCallback((entry: AgentEntry, opener: HTMLElement) => openNow.current(entry, opener), []);
+  // One callback for every row, as `onOpen`. `own`: the row's name without the given one.
+  const renameNow = useRef(props.onRename);
+  renameNow.current = props.onRename;
+  const canRename = props.onRename !== undefined;
+  const onRename = useMemo(
+    () => (canRename ? (entry: AgentEntry, name: string | null) => renameNow.current?.(entry.agent, name, agentRowName(agentAsListed(entry.agent), entry.thread)) ?? Promise.resolve(false) : undefined),
+    [canRename],
+  );
   return (
     // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
     // background"). Closed: its heading only. Open: its heading carries Add agent and Add machine.
@@ -202,6 +348,8 @@ export function AgentsSection(props: AgentsSectionProps) {
           const captionOn = captions && !!machine && machineOn(machine.id);
           const away = machine ? isAway(machine) : false;
           const notice = machine && props.onMachineUpdate ? machineNotice(machine) : null;
+          // A given name stays on this Inbox and never reaches the machine an agent runs on: another machine's agents
+          // have no Rename….
           return (
             <div key={machine?.id ?? 'flat'} className="ib-agents-group" data-agents-machine={machine?.id ?? ''}>
               {machine && captions && (
@@ -225,7 +373,18 @@ export function AgentsSection(props: AgentsSectionProps) {
                 </div>
               )}
               {rows.map((entry) => (
-                <AgentRow key={entry.agent.id} entry={entry} machine={machine} on={agentOn(entry)} away={away} opens={entry.thread ? 'filter' : canMessage(entry) ? 'message' : 'none'} onOpen={onOpen} />
+                <AgentRow
+                  key={entry.agent.id}
+                  entry={entry}
+                  machine={machine}
+                  on={agentOn(entry)}
+                  away={away}
+                  opens={entry.thread ? 'filter' : canMessage(entry) ? 'message' : 'none'}
+                  onOpen={onOpen}
+                  phone={props.phone === true}
+                  onRename={machine && !machine.self ? undefined : onRename}
+                  announce={props.announce}
+                />
               ))}
             </div>
           );
