@@ -213,10 +213,11 @@ describe("initiatives: an agent's card names one", () => {
     store.createCard({ project_id: project.id, by: AGENT, title: "Once", idempotency_key: "k", initiative_name: "Ghost" });
     expect(store.initiatives()).toEqual([]);
 
-    // A refused note (the last check) leaves no initiative either, on create and on a later write.
-    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", notes: "n".repeat(4001), initiative_name: "Ghost" }))).toBe("validation_error");
+    // A refused note (the last check: notes take any length, never a bidi control) leaves no initiative either, on create and on a later write.
+    const refusedNote = "n\u202Eo";
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", notes: refusedNote, initiative_name: "Ghost" }))).toBe("validation_error");
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Kept" });
-    expect(refusal(() => store.updateCard(card.id, { by: AGENT, notes: "n".repeat(4001), initiative_name: "Ghost" }))).toBe("validation_error");
+    expect(refusal(() => store.updateCard(card.id, { by: AGENT, notes: refusedNote, initiative_name: "Ghost" }))).toBe("validation_error");
     expect(store.initiatives()).toEqual([]);
 
     expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative_name: "x".repeat(41) }))).toBe("validation_error");

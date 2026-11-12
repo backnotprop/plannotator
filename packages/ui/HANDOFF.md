@@ -1858,6 +1858,8 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 
 ## Publishing & versioning
 
+- **Unreleased: core 0.25.30 (cloud agents; 0.25.29 is reserved by another branch).** New `exports` subpath `./inbox-cloud` (cloud agent presets, the wake's words and body, the setup Settings shows). `./inbox-types` gains `cloud_wake` on a message. No export removed or renamed. ui pins core `0.25.30` exactly; bun.lock changes only the two core version lines. Publish core first.
+- **Unreleased: core 0.25.28 (limits removed; 0.25.24–0.25.27 are taken or reserved by other branches).** No `exports` subpath added, removed or renamed; no export removed. Behaviour changes a host may notice: `parseQuestionAnswer` keeps `text`, `other` and `note` whole and no longer cuts `selected` labels or their count; `parseQuestionBlock` takes a block of any length and keeps every choice (no 20 cap). `MAX_QUESTION_BODY_CHARS`, `MAX_QUESTION_CHOICES`, `MAX_QUESTION_SELECTED_CHARS`, `MAX_QUESTION_OTHER_CHARS`, `MAX_QUESTION_TEXT_CHARS` and `MAX_QUESTION_NOTE_CHARS` keep their values but are `@deprecated` and no longer applied. `inboxStoredAgentName` keeps a name whole. `INBOX_TAGS_MAX`, `INBOX_ACTION_NOTE_MAX`, `INBOX_CARD_NOTES_MAX` and `INBOX_CARD_REASON_MAX` are now `Infinity`. `GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS` is 12,000 (was 2,000). New: `isSecretEnvPath` in `./annotatable`, and `documentRenderKindForPath` answers `"code"` for a `.env` file. A host that checks answers or picks against these caps itself must stop cutting at them. ui pins core `0.25.28` exactly; bun.lock changes only the two core version lines. Publish core first.
 - **Unreleased: core 0.25.23 (#3086, the Call tree).** Core adds one `exports` subpath, `./call-tree` (`plannotator.callTree/1`: the Call tree document, re-rooting at a hunk's function, its rows and search; browser-safe, no imports). Additive: nothing removed or renamed. ui does not import it; ui pins core `0.25.23` exactly only so `smoke:package` matches the source manifest. bun.lock changes only the two core version lines. Publish core 0.25.23 before the next ui.
 - **Unreleased: ui 0.63.0 + core 0.25.22: publish core first, then ui.** ui pins `@plannotator/core` `0.25.22` exactly. Versions only: both are what `main` already holds since ui 0.62.0 and core 0.25.21 went to npm (2026-11-10). No `exports` subpath is added, removed or renamed in either package, and no export is removed. The only `package.json` edits are the two versions and the core pin. Every section below still headed "unreleased" and not marked ui 0.63.0 shipped in ui 0.62.0 or earlier.
   - **ui 0.63.0 is a minor, and not additive**: a host that does nothing gets new behaviour (1 to 4 below).
@@ -2920,6 +2922,11 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`AnnotationToolbar` `showDelete?: boolean`**: shows Delete on a `commentOnly` toolbar. Absent: Delete follows `commentOnly` as before.
 - A host that passes neither sees no change.
 
+## Comments on a question card's words: `Viewer` `questionTextComments` (unreleased; additive, opt-in, no core change)
+
+- **`Viewer` `questionTextComments?: boolean`** (default `false`), with `textComments` (and `answerOnly`, not `readOnly`): `QuestionBlock` cards are no longer wrapped `annotation-exclude`, so their prompt, context and each choice's label and description take the comment-only toolbar, its composer and highlights like any other words. The card's chrome (eyebrow, tags, footer, Other, a picture choice's picture) stays excluded inside `QuestionBlock`, and a host's own `renderQuestionCard` card stays wrapped. A plain click or tap on a choice still picks it in one press; `QuestionBlock`'s existing click guard cancels the pick after a drag or while a selection shows. A comment is an ordinary `COMMENT` row from `onAddAnnotation`: it never answers the question.
+- A host that does not pass it sees no change. The Plannotator Inbox passes it (approval `inbox-annotate-own-and-questions`).
+
 ## Shape: dark contrast (unreleased; additive)
 
 Shape boards can now show any picture: a file on this computer or a web picture, which `plannotator shape update` copies into the board's `files/` (#2756). The board itself still names only `files/<name>`. Nothing changes in the allowlist or in how `resolveSrc` / `assetUrl` resolve a picture.
@@ -3091,3 +3098,10 @@ Pinned by `components/Viewer.clickAWord.test.tsx`, `hooks/useClickWord.test.tsx`
 - **The answer's text.** `QuestionAnswer.other` may hold line breaks (it always could from decision mode's textarea). core's `formatQuestionAnswerLines` (and so `formatQuestionAnswersSection` and ui's `exportAnnotations`) now quotes a multi-line Other under `Answer: Other:` as `> line` lines, indented two spaces under its `- Other:` bullet when there are several picks, the way a multi-line note is quoted. A one-line Other prints byte for byte as before. `formatQuestionAnswerText` (`Annotation.text`) and the panel row stay one line.
 
 Pinned by `components/blocks/QuestionBlock.test.tsx` ("an Other answer of several lines") and core's `question-block.test.ts`.
+
+## `InlineImageTagsContext`: an `<img>` tag inside a line renders as a picture (unreleased; additive, opt-in, no core change)
+
+An `<img>` tag inside a table cell or a sentence is not an HTML block, so `InlineMarkdown` printed it as text. GitHub writes every resized screenshot that way, and PR authors put before/after pairs in tables.
+
+- **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
+- **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.

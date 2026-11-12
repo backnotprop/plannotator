@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { InboxRun } from '@plannotator/core/inbox-types';
+import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
 import { whenTime } from '../format';
@@ -20,6 +21,7 @@ const shownCommand = (command: string) => command.replace(/^cd .*? && /, '');
 
 const STOP_TIP = 'Stops the session. Commands it started in the background keep running.';
 
+
 /**
  * A launched thread's run line (UX screens 05, 06, 08, 09, 11, 12, 14, 15): one
  * quiet line under the latest message, in place of the delivery line, saying
@@ -34,8 +36,8 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
  * `canOpen`: this window can open Terminal on this launch (the thread's rule: on the Inbox's computer, with
  * a session or a folder to trust). `canReaddress`: the waiting message can go to another session (Send to
  * another session is shown under the line). `guest`: a tailnet guest's page
- * (`tailnetGuest`), which gets no Stop or Try again (the server answers both `owner_only`), and whose stopped line
- * never says a reply starts it again.
+ * (`tailnetGuest`), which gets Stop and Cancel as any page does, and no Try again (starting an agent is the
+ * owner's: the server answers it `owner_only`).
  */
 /**
  * `machine`: another machine's thread (remote launch): Stop, Try again and Trust folder go to that machine;
@@ -113,7 +115,7 @@ export function RunLine({
     else setError('Could not copy; select the command and copy it.');
   };
 
-  const stop = guest ? null : (
+  const stop = (
     <Tip content={STOP_TIP}>
       <button type="button" className="ib-run-btn" disabled={busy !== null} onClick={() => void act('stop')} data-run-stop="">
         Stop
@@ -169,7 +171,7 @@ export function RunLine({
         </>
       );
       bar = clone?.pct ?? null;
-      actions = guest ? null : (
+      actions = (
         <button type="button" className="ib-run-btn" disabled={busy !== null} onClick={() => void act('stop')} data-run-clone-cancel="">
           Cancel
         </button>
@@ -248,7 +250,7 @@ export function RunLine({
     case 'clone_cancelled':
       // E7.
       icon = 'stop';
-      text = guest ? `The clone was cancelled. Nothing was kept on ${where}.` : `You cancelled the clone. Nothing was kept on ${where}. Your reply starts it again.`;
+      text = guest ? `The clone was cancelled. Nothing was kept on ${where}. Your reply starts it again.` : `You cancelled the clone. Nothing was kept on ${where}. Your reply starts it again.`;
       actions = guest ? null : (
         <button type="button" className="ib-run-btn" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
           Clone again
@@ -291,11 +293,9 @@ export function RunLine({
       break;
     case 'stopped':
       icon = 'stop';
-      // `cause`: the host's words for a stop that was not the person's (`LaunchHost.stoppedNote`). A guest's reply never
-      // starts it again (the server's rule), and the Stop was never theirs.
-      text = guest
-        ? `${name} stopped. Your reply waits for it.`
-        : run.stopped_by_person && run.since
+      // `cause`: the host's words for a stop that was not the person's (`LaunchHost.stoppedNote`). Anyone's reply starts it again.
+      text =
+        run.stopped_by_person && run.since
           ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
           : run.cause
             ? `${name} stopped. ${run.cause}`
@@ -303,6 +303,19 @@ export function RunLine({
       break;
     case 'failed':
       icon = 'warn';
+      if (run.turn_error) {
+        text = (
+          <>
+            <b>
+              {/* The agent's own error is the note above: the line says only that it couldn't answer, and that the message is kept. */}
+              {name} {INBOX_TURN_FAILED_WORDS}.
+            </b>{' '}
+            {kept}
+          </>
+        );
+        actions = retry('Try again');
+        break;
+      }
       // E10: a cloned repo that brings hooks, MCP servers or settings starts once the person trusts it (decision 4a).
       if (clone?.brings && clone.brings.length > 0 && run.untrusted && run.trust) {
         text = (

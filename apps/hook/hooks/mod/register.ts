@@ -86,7 +86,18 @@
 
 import { AUTO_RELOAD_ARGS, AUTO_RELOAD_COMMAND, hidesReloadOutput } from './auto-reload'
 import { PlannotatorMod } from './controller'
-import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled, resolvePlanReviewEnabled } from './enabled'
+import {
+  isVsCodePanelSession,
+  promptOriginKind,
+  resolveAgentToolEnabled,
+  resolveClaudeModEnabled,
+  resolveInboxReminderCustom,
+  resolveInboxReminderEnabled,
+  resolveInboxReminderRules,
+  resolveInboxToolEnabled,
+  resolvePlanReviewEnabled,
+  VSCODE_PANEL_ENTRYPOINT,
+} from './enabled'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
   claudeTranscriptPaths,
@@ -293,6 +304,9 @@ interface Allowed {
   inboxReminder: boolean
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
+  inboxReminderRules: string | null
+  /** A chat panel of Claude Code's VS Code extension (`isVsCodePanelSession`): not interactive, a person reading it. */
+  panel: boolean
 }
 
 // One plugin instance per Claude Code process.
@@ -395,7 +409,7 @@ async function plainReminderAgain($: Engine): Promise<void> {
   if (!reminderWithThreadsSet) return
   reminderWithThreadsSet = false
   if (!allowed) return
-  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom))).catch(() => undefined)
+  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
 }
 
 /**
@@ -569,6 +583,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
+      title: () => title.generatedTitle() ?? '',
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
       ...(options.healed ? { healed: true } : {}),
@@ -689,11 +704,34 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
   )
 }
 
+/**
+ * Whether this non-interactive session is a chat panel of Claude Code's VS
+ * Code extension (`isVsCodePanelSession` in enabled.ts). Each variable is
+ * named as a literal (env-get-literal.test.ts).
+ */
+async function vsCodePanelSessionOf($: Engine): Promise<boolean> {
+  const entrypoint = await $.env.get('CLAUDE_CODE_ENTRYPOINT')
+  // Read the rest only for the panel's entrypoint: every other session decides on the first read.
+  if (entrypoint !== VSCODE_PANEL_ENTRYPOINT) return false
+  return isVsCodePanelSession(
+    {
+      entrypoint,
+      claudecode: await $.env.get('CLAUDECODE'),
+      childSession: await $.env.get('CLAUDE_CODE_CHILD_SESSION'),
+      sessionTag: await $.env.get('PLANNOTATOR_SESSION_TAG'),
+    },
+    String(await $.session.id()),
+  )
+}
+
 /** Whether the mod runs here (on unless the user turned it off) and where its data dir is; null: stay inert. */
 async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promise<Allowed | null> {
   // A person at the prompt is what makes a later plugin turn mean anything;
-  // `-p` and SDK runs keep the classic, blocking flows.
-  if (!e.isInteractive) return null
+  // `-p` and SDK runs keep the classic, blocking flows. The one SDK host with
+  // a person reading it is the VS Code extension's chat panel, which shows a
+  // plugin's turn (#3111): there the mod runs as in the terminal.
+  const panel = !e.isInteractive && (await vsCodePanelSessionOf($))
+  if (!e.isInteractive && !panel) return null
   // A `claude` Plannotator's Ask AI started (`isAskAiChild` in packages/shared/child-env.ts).
   if ((await $.env.get('PLANNOTATOR_ASK_AI_CHILD')) === '1') return null
   const dataDir = await resolveDataDir(
@@ -723,6 +761,8 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminder: resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
+    inboxReminderRules: resolveInboxReminderRules(configText),
+    panel,
   }
 }
 
@@ -809,7 +849,7 @@ export function register(on: On) {
       // holds it again after the summary replaced the first prompt's copy. Unset
       // when the reminder is off (a value inherited from a parent Claude Code
       // must not speak for this session).
-      await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom))).catch(() => undefined)
+      await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
     } finally {
       // Decided (or inert): a first prompt the engine may already be raising
       // gets its context now, without waiting for the commands and tools below.
@@ -885,7 +925,7 @@ export function register(on: On) {
   on('session.compact', async ($: Engine, e: any, next: Next) => {
     if (e?.trigger !== 'precompute' && !e?.agentId && reminderOn() && allowed && inboxToolName) {
       try {
-        const reminder = inboxReminderEnvValue(true, inboxToolName, allowed.inboxReminderCustom)
+        const reminder = inboxReminderEnvValue(true, inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules)
         if (reminder) {
           const threads = await readSessionThreads(
             hostOf($, allowed.debugPath),
@@ -1076,7 +1116,7 @@ export function register(on: On) {
     const ref = {
       fromUs: !!origin && origin.kind === 'plugin' && origin.name === PLUGIN_NAME,
       ...(typeof e.turnId === 'string' ? { turnId: e.turnId } : {}),
-      ...(origin && typeof origin.kind === 'string' ? { originKind: origin.kind } : {}),
+      ...(origin && typeof origin.kind === 'string' ? { originKind: promptOriginKind(origin.kind, !!allowed?.panel) } : {}),
     }
     if (live) instance.onPromptSubmitting(ref)
     // The Inbox reminder (#2243): the conversation's first prompt here carries
@@ -1107,7 +1147,7 @@ export function register(on: On) {
         const recorded = resumed && !state.delivered && !isMeta && !command ? await reminderRecorded($, sessionId) : false
         const carries = inboxFirstPromptContext({ delivered: state.delivered, resumed, recorded, isMeta, command })
         const texts: string[] = []
-        if (carries?.reminder) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName))
+        if (carries?.reminder) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName, { rules: settings.inboxReminderRules }))
         if (carries?.threads) {
           const threads = await withinMs($, SESSION_THREADS_RESUME_MS, async () =>
             readSessionThreads(hostOf($, settings.debugPath), settings.dataDir, sessionId, await inboxProjectFolderOf($), toolName),

@@ -139,9 +139,10 @@ const whoKey = (groups: readonly InboxAgentsGroup[] | null): string =>
 /**
  * The agents while `on` (the list is filtered to one agent; null otherwise), drawn again only when who they are
  * changes (`whoKey`), never for a poll: the window (App) reads this, and must not draw the list on every list read.
- * Heard through `onInboxAgentsSet`, so it does not make `event: deliveries` with `agents` read the list again.
+ * Heard through `onInboxAgentsSet`, so it does not make `event: deliveries` with `agents` read the list again. A
+ * thread with several sessions finds its agents in it too (Thread.tsx, `threadSessions`).
  */
-function useInboxAgentsWho(on: boolean): readonly InboxAgentsGroup[] | null {
+export function useInboxAgentsWho(on: boolean): readonly InboxAgentsGroup[] | null {
   const [groups, setGroups] = useState<readonly InboxAgentsGroup[] | null>(() => (on ? current : null));
   useEffect(() => {
     if (!on) {

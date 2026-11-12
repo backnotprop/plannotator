@@ -74,7 +74,7 @@ export function noteRecord(batch: RecordBatch, event: InboxEvent | null): void {
 }
 
 /** The one thread a record can change, or null when it can change any (or cannot be placed). */
-function threadOfRecord(event: InboxEvent): string | null {
+export function threadOfRecord(event: InboxEvent): string | null {
   const id = (value: unknown) => (typeof value === 'string' && value !== '' ? value : null);
   switch (event.kind) {
     case 'message':
