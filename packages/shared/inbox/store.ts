@@ -230,6 +230,11 @@ export interface InboxSendInput {
    * prefix, so a `perm:` author is always the Inbox's own permission card.
    */
   permission?: boolean;
+  /**
+   * Server only (launch's notes): the note a launched session's failed turn leaves (`InboxMessage.turn_error`).
+   * No agent's own call sets it.
+   */
+  turn_error?: boolean;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -1181,6 +1186,12 @@ export class InboxStore {
    */
   private routeThread(projectId: string, name: string | null): string | null {
     return name === null ? null : this.newestOpen(projectId, this.rootsNamed(projectId, name));
+  }
+
+  /** The open thread a message with this `thread` name and no reply_to would join in the project, or null. */
+  threadRoutedBy(projectId: string, name: unknown): string | null {
+    const checked = checkInboxThreadName(name);
+    return checked.ok ? this.routeThread(projectId, checked.name) : null;
   }
 
   /**
@@ -4127,6 +4138,7 @@ export class InboxStore {
         ? { from_project: { name: input.from_project.name, root: input.from_project.root } }
         : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
+      ...(input.turn_error === true ? { turn_error: true as const } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
     };

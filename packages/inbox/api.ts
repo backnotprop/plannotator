@@ -5,7 +5,7 @@
  * writing into a store it did not read.
  */
 
-import type { InboxCloudAgentView, InboxCloudPreset } from '@plannotator/core/inbox-cloud';
+import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
@@ -135,7 +135,7 @@ function noteReplySent(words: string): void {
   for (const listener of replyListeners) listener(lastReply);
 }
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline' | 'openclaw';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline' | 'openclaw' | 'hermes';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
@@ -1331,6 +1331,7 @@ export interface SearchRequest {
 export interface CloudAgentsModel {
   agents: InboxCloudAgentView[];
   projects: { id: string; name: string }[];
+  available?: boolean;
 }
 
 export interface CloudAgentTest {
@@ -2247,8 +2248,11 @@ export const inboxApi = {
   devices: () => get<{ devices: PairedDevice[] }>(inboxUrl('/devices')),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(inboxUrl(`/devices/${encodeURIComponent(id)}/revoke`), {}),
   cloudAgents: () => get<CloudAgentsModel>(inboxUrl('/cloud-agents')),
-  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; url: string; key: string; project_id: string | null }) =>
-    post<CloudAgentsModel & { agent: InboxCloudAgentView }>(inboxUrl('/cloud-agents'), fields),
+  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; project_id: string | null }) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl('/cloud-agents'), fields),
+  newCloudPairing: (session: string) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/pairing`), {}),
+  setCloudWake: (session: string, url: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/wake`), { url, key }),
   testCloudAgent: (session: string) => post<CloudAgentsModel & { test: CloudAgentTest }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/test`), {}),
   rekeyCloudAgent: (session: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/key`), { key }),
   removeCloudAgent: (session: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/remove`), {}),
