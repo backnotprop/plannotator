@@ -24,7 +24,7 @@ import { readInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { T3Credentials } from "@plannotator/t3-code/auth";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
-import { type FakeT3, startFakeT3 } from "../../../tests/helpers/fake-t3";
+import { type FakeT3, startFakeT3, T3_THREAD_ID_FORMS } from "../../../tests/helpers/fake-t3";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 import { fillInboxToolArguments, inboxHostSessionFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 
@@ -94,7 +94,7 @@ async function serverTools(server: InboxServer): Promise<string[]> {
 }
 
 describe("the T3 thread as the shim's session", () => {
-  test("T3CODE_THREAD_ID comes after the Plannotator tag and before every other host's variable; only a UUID counts", () => {
+  test("T3CODE_THREAD_ID comes after the Plannotator tag and before every other host's variable; any id T3 gives a thread counts", () => {
     const t3 = { host: "t3", session: THREAD, name: "T3 Code" };
     expect(inboxHostSessionFromEnv(T3_CLAUDE)).toEqual(t3);
     expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `t3:${THREAD}` })).toEqual(t3);
@@ -102,8 +102,13 @@ describe("the T3 thread as the shim's session", () => {
     expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, CODEX_THREAD_ID: CODEX_THREAD, PI_SESSION_ID: "pi-1" })).toEqual(t3);
     // DSH stands down beside Claude's markers, as before.
     expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, DSH_SHELL: "1", DSH_SESSION_ID: "session-s" })).toEqual(t3);
-    // Threads T3 made through MCP, delegated or forked, are not UUIDs: no session, never a guess.
-    for (const id of [`mcp:${THREAD}`, "thread:mcp:abc:1", `${THREAD}:fork`, "", "not-a-uuid"]) {
+    // A launched, scheduled, delegated or provider thread is the thread too: T3 takes a send into each.
+    for (const id of Object.values(T3_THREAD_ID_FORMS)) {
+      expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, T3CODE_THREAD_ID: id })).toEqual({ ...t3, session: id });
+      expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `t3:${id}` })).toEqual({ ...t3, session: id });
+    }
+    // Nothing T3 would give a thread: no session, never a guess.
+    for (const id of ["", " ", `:${THREAD}`, `${THREAD} `, `${THREAD}\nPI_SESSION_ID=x`, "thread/../x", `a${"b".repeat(1024)}`]) {
       expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, T3CODE_THREAD_ID: id })).toBeNull();
       expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `t3:${id}` })).toBeNull();
     }
@@ -125,7 +130,7 @@ describe("the T3 thread as the shim's session", () => {
     expect(fill({ body: "hi", agent_host: "t3" }, claude)).toMatchObject({ agent_session: "ses_OWN", agent_host: "t3" });
   });
 
-  test("a T3 Claude's shim (--t3) sends as its thread, and the person's reply reaches T3 once under the item's request id", async () => {
+  test.each(Object.entries(T3_THREAD_ID_FORMS))("a T3 Claude's shim (--t3) in a thread of the %s form sends as its thread, and the person's reply reaches T3 once under the item's request id", async (_form, THREAD) => {
     const box = scratch();
     const t3 = startFakeT3({ threads: [THREAD] });
     fakes.push(t3);
@@ -133,7 +138,7 @@ describe("the T3 thread as the shim's session", () => {
     const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null });
     servers.push(server);
 
-    const client = await shim(box.dataDir, box.project, ["--t3"], T3_CLAUDE);
+    const client = await shim(box.dataDir, box.project, ["--t3"], { ...T3_CLAUDE, T3CODE_THREAD_ID: THREAD });
     expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(await serverTools(server));
     // The agent names itself claude-code, as Claude in T3 may: still the thread.
     const result = await client.callTool({ name: "send_message", arguments: { body: "Ship the worker today?", agent_host: "claude-code", idempotency_key: "t3-1" } });
@@ -168,7 +173,7 @@ describe("nothing changes for Claude Code users not on T3", () => {
   }, 60_000);
 
   test("a --t3 entry outside a T3 thread lists no tools, refuses a call, and never starts or reaches the Inbox", async () => {
-    for (const agent of [INTERACTIVE_CLAUDE, {}, { ...INTERACTIVE_CLAUDE, T3CODE_THREAD_ID: `mcp:${THREAD}` }]) {
+    for (const agent of [INTERACTIVE_CLAUDE, {}, { ...INTERACTIVE_CLAUDE, T3CODE_THREAD_ID: `:${THREAD}` }]) {
       const box = scratch();
       const client = await shim(box.dataDir, box.project, ["--t3"], agent);
       expect((await client.listTools()).tools).toEqual([]);
@@ -186,6 +191,7 @@ describe("nothing changes for Claude Code users not on T3", () => {
     expect(inboxT3EntryIdle(false, INTERACTIVE_CLAUDE)).toBe(false);
     expect(inboxT3EntryIdle(true, INTERACTIVE_CLAUDE)).toBe(true);
     expect(inboxT3EntryIdle(true, T3_CLAUDE)).toBe(false);
+    expect(inboxT3EntryIdle(true, { ...T3_CLAUDE, T3CODE_THREAD_ID: T3_THREAD_ID_FORMS.delegated })).toBe(false);
     // An SDK session that is not T3's (claude -p, another SDK app): the flag's entry stays idle there too.
     expect(inboxT3EntryIdle(true, { ...T3_CLAUDE, T3CODE_THREAD_ID: undefined })).toBe(true);
   });

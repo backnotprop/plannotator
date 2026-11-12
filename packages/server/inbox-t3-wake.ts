@@ -283,6 +283,9 @@ export function createInboxT3Wake(options: {
   };
 
   const keyOf = (item: InboxMessage, session: string) => `${store.deliveryIdOf(item, session)}.${session}`;
+  // An item id has no dot; a T3 thread id may, and may end in another thread's id (a native id that does).
+  const itemOfKey = (key: string) => key.slice(0, key.indexOf("."));
+  const sessionOfKey = (key: string) => key.slice(key.indexOf(".") + 1);
 
   const deliverOne = async (link: Link, item: InboxMessage, session: string): Promise<void> => {
     const id = store.deliveryIdOf(item, session);
@@ -462,11 +465,11 @@ export function createInboxT3Wake(options: {
     noteToolCall: (session) => {
       if (!isT3ThreadId(session) || !dead.delete(session)) return;
       // Back: what waited on a retry goes now too.
-      for (const key of [...retryAt.keys()]) if (key.endsWith(`.${session}`)) retryAt.delete(key);
+      for (const key of [...retryAt.keys()]) if (sessionOfKey(key) === session) retryAt.delete(key);
       void sweep();
     },
     uncertain: (session, itemId) => refused.has(`${itemId}.${session}`),
-    uncertainItems: (session) => [...refused].filter((key) => key.endsWith(`.${session}`)).map((key) => key.slice(0, key.indexOf("."))),
+    uncertainItems: (session) => [...refused].filter((key) => sessionOfKey(key) === session).map(itemOfKey),
     sweep,
     stop: () => {
       stopped = true;

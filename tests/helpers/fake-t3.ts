@@ -37,6 +37,19 @@ export interface FakeT3 {
   stop(): void;
 }
 
+/**
+ * One thread id of each form T3 Code gives a thread, as T3 forms them: an app thread (a UUID), an agent's
+ * t3_thread_launch (`mcp:launch:` and a SHA-256), a scheduled task's run, a delegated task (its command id
+ * URI-encoded, a task name's parentheses left as `encodeURIComponent` leaves them) and a provider-native thread.
+ */
+export const T3_THREAD_ID_FORMS = {
+  app: "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+  launched: `mcp:launch:${"516a2801f994e37f7b141931e19a9c846af2dbc38866a7a8b1ddc2fd079ce967"}`,
+  scheduled: "thread:project:9b2e4c1a-0d3f-4e5a-8b6c-7d8e9f0a1b2c:3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+  delegated: "thread:delegated-task:command%3Amcp%3Aafafed4f-6fe6-436b-a561-273f0b6a0791%3Adelegate-task%3Afix-(part-2)",
+  provider: `thread:provider:claudeAgent:native-thread:${encodeURIComponent(`pending:${"a".repeat(280)}`)}`,
+} as const;
+
 export type T3RuntimeMode = "approval-required" | "auto-accept-edits" | "auto" | "full-access";
 export type T3Access = "read-only" | T3RuntimeMode;
 const RANK: Record<T3RuntimeMode, number> = { "approval-required": 0, "auto-accept-edits": 1, auto: 2, "full-access": 3 };

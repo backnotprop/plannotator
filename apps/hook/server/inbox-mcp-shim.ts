@@ -94,16 +94,16 @@ export interface InboxHostSession {
  * The agent session this process belongs to, from the environment it
  * inherited, or null. `PLANNOTATOR_SESSION_TAG` (`<host>:<session id>`, set by
  * the Claude Code mod in every process its session starts) comes first; then
- * `T3CODE_THREAD_ID`, which T3 Code sets for the Claude it runs (a UUID; a
- * thread T3 made through MCP, a delegated or a forked one has another form and
- * names no session); then
+ * `T3CODE_THREAD_ID`, which T3 Code sets for the Claude it runs (a UUID, or
+ * the id T3 derives for a launched, scheduled, delegated or provider thread:
+ * `isT3ThreadId`); then
  * `PI_SESSION_ID`, which Pi sets on each bash tool call; then
  * `CODEX_THREAD_ID`, which Codex sets in the commands its shell runs; Qwen's;
  * last `DSH_SESSION_ID`, DeepSeek Harness's, only beside `DSH_SHELL=1` (its
  * MCP client strips every `DSH_*` variable, so this is a DSH model shell's
  * `plannotator inbox call`). Anything
  * malformed or naming another host is ignored, never guessed at (a Codex
- * session is a thread id, a UUID).
+ * session is a thread id, a UUID; a T3 one any id T3 gives a thread).
  */
 export function inboxHostSessionFromEnv(env: Record<string, string | undefined>): InboxHostSession | null {
   const tag = env.PLANNOTATOR_SESSION_TAG;
@@ -113,10 +113,9 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
     const session = tag.slice(colon + 1);
     if (
       Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) &&
-      isInboxSessionId(session) &&
+      (host === INBOX_T3_HOST ? isT3ThreadId(session) : isInboxSessionId(session)) &&
       (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) &&
-      (host !== INBOX_QWEN_HOST || isQwenSessionId(session)) &&
-      (host !== INBOX_T3_HOST || isT3ThreadId(session))
+      (host !== INBOX_QWEN_HOST || isQwenSessionId(session))
     ) {
       return { host, session, name: INBOX_SESSION_HOST_NAMES[host]! };
     }
@@ -378,7 +377,7 @@ export const INBOX_T3_ENTRY_REFUSAL = "This plannotator-inbox entry (plannotator
 
 /**
  * An entry added with `--t3` that runs outside a T3 Code thread: no
- * T3CODE_THREAD_ID holding a UUID. It reads nothing else (no settings, no
+ * T3CODE_THREAD_ID holding a T3 thread id. It reads nothing else (no settings, no
  * Claude Code version), so an entry without the flag never changes.
  */
 export function inboxT3EntryIdle(t3Flag: boolean, env: Record<string, string | undefined>): boolean {

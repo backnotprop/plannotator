@@ -16,7 +16,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
 import { t3CeilingOfScope, t3GrantModeOf } from "./inbox-t3-wake";
-import { type FakeT3, startFakeT3, type T3Access, type T3RuntimeMode, t3ScopeOf } from "../../tests/helpers/fake-t3";
+import { type FakeT3, startFakeT3, type T3Access, type T3RuntimeMode, T3_THREAD_ID_FORMS, t3ScopeOf } from "../../tests/helpers/fake-t3";
 
 const THREAD = "00000000-0000-4000-8000-000000000001";
 const OTHER = "00000000-0000-4000-8000-000000000002";
@@ -476,3 +476,48 @@ test("a reply moved back to the T3 thread that took its stop notice goes in as i
   expect(w.t3.sends[1]!.clientRequestId).not.toBe(w.t3.sends[0]!.clientRequestId);
   expect((await message()).delivery).toMatchObject({ session: THREAD });
 }, 30_000);
+
+describe("every form of id T3 gives a thread", () => {
+  const FORMS = Object.entries(T3_THREAD_ID_FORMS);
+
+  test.each(FORMS)("a %s thread is promised a wake, and the reply goes in once under the item's request id", async (_form, id) => {
+    const w = await world({ threads: [id] });
+    const sent = await w.send("Ship the worker today?", id);
+    expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    expect((await w.thread(sent.thread_id)).messages[0]).toMatchObject({ author: { host: "t3", session: id }, wakes: true });
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toEqual([expect.objectContaining({ threadId: id, mode: "queue", clientRequestId: `plannotator-inbox-${replyId}` })]);
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: id });
+    expect(w.server.t3Wake.status(id)).toBe("alive");
+  });
+
+  test("a thread the person tags with @ is woken whatever its form", async () => {
+    const tagged = T3_THREAD_ID_FORMS.provider;
+    const w = await world({ threads: [THREAD, tagged] });
+    await w.send("I can take the infra part.", tagged);
+    const sent = await w.send("Which runner?");
+    const response = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/messages/${sent.message_id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: w.server.serverSession, idempotency_key: "k1", words: "The ARM one; check it with the other thread.", tags: [{ host: "t3", session: tagged }] }),
+    });
+    expect(response.status).toBe(200);
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends.map((call) => call.threadId).sort()).toEqual([THREAD, tagged].sort());
+  });
+
+  test("a send held for one thread is that thread's alone, though another thread's id ends in its id", async () => {
+    // A provider's native id may end in `.<uuid>`: the held send keyed `<item>.<that id>` is not the UUID thread's.
+    const suffixed = `thread:provider:codex:native-thread:resumed.${THREAD}`;
+    const w = await world({ threads: [THREAD, suffixed] });
+    const asked = await w.send("Which cache?", suffixed);
+    w.t3.state.fail = "capability_denied: approved for read-only access";
+    const held = await w.reply(asked.message_id, "The edge one.");
+    await w.server.t3Wake.sweep();
+    expect(w.server.t3Wake.uncertainItems(suffixed)).toEqual([held]);
+    expect(w.server.t3Wake.uncertainItems(THREAD)).toEqual([]);
+  });
+});

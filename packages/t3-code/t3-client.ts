@@ -119,7 +119,7 @@ export class T3Client implements T3Rpc {
 
 export class T3Thread {
   constructor(readonly rpc: T3Rpc, readonly id: string) {
-    if (!id.trim() || id.length > 256 || /[\s\u0000-\u001f]/.test(id)) throw new Error("An explicit T3 thread ID is required.");
+    if (!id.trim() || id.length > 1024 || /[\s\u0000-\u001f]/.test(id)) throw new Error("An explicit T3 thread ID is required.");
   }
 
   async read(args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T3ThreadRead> {
