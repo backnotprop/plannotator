@@ -17,7 +17,7 @@ import type { DshInboxAgent, DshToolDefinition } from "./inbox";
 import type { DshUserMessage } from "./plan-review";
 import { applyPlannotator } from "./plugin";
 import { dshDecision } from "./reviews";
-import { DSH_COMMANDS, type DshCommandDefinition } from "./tool";
+import { commandRequest, DSH_COMMANDS, type DshCommandDefinition } from "./tool";
 
 const FAKE_CLI = join(import.meta.dir, "fixtures", "fake-cli.ts");
 const roots: string[] = [];
@@ -413,5 +413,21 @@ describe("dshDecision", () => {
     expect(dshDecision(approved, review).send).toBe(false);
     expect(dshDecision(approved, { ...review, gate: true })).toEqual({ send: true, text: "Plannotator: local changes (pn-abc123) — Approved.\n\nLGTM" });
     expect(dshDecision({ decision: "dismissed", message: "", noop: true }, { ...review, gate: true }).send).toBe(false);
+  });
+});
+
+describe("commandRequest", () => {
+  // The failure: the words were split the way a shell splits a command, so on
+  // Windows every backslash in a typed path was dropped and the review opened
+  // on `C:devfeature` — a directory nobody has.
+  test("a typed Windows path reaches the CLI whole", () => {
+    expect(commandRequest(DSH_COMMANDS.review, "C:\\dev\\feature")).toMatchObject({
+      ok: true,
+      args: ["C:\\dev\\feature"],
+    });
+    expect(commandRequest(DSH_COMMANDS.review, '"C:\\My Work\\feature" --base main')).toMatchObject({
+      ok: true,
+      args: ["C:\\My Work\\feature", "--base", "main"],
+    });
   });
 });

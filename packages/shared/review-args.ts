@@ -302,7 +302,13 @@ function isReviewUrl(value: string): boolean {
   return value.startsWith("http://") || value.startsWith("https://");
 }
 
-function tokenizeReviewArgs(input: string): string[] {
+/**
+ * The words in a review command's argument text: whitespace separates and
+ * quotes group, while a backslash is an ordinary character, so a typed Windows
+ * path (`C:\dev\feature`) stays whole. Exported for a host that passes the
+ * words themselves on to the CLI (apps/dsh-plugin).
+ */
+export function tokenizeReviewArgs(input: string): string[] {
   const raw = input.trim();
   if (!raw) return [];
 
