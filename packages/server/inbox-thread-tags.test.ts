@@ -75,14 +75,15 @@ describe("thread tags", () => {
     expect(((await (await fetch(url(server, "/api/inbox/settings"))).json()) as Json).board).toEqual({ on: false });
     const release = await makeTag(server, "Release");
     const windows = await makeTag(server, "Windows");
-    expect((await list(server)).tags?.map((t) => t.name)).toEqual(["Release", "Windows"]);
+    expect((await list(server)).tags?.map((t) => t.name).sort()).toEqual(["Release", "Windows"]);
     expect(await rowTags(server, a.thread_id)).toEqual([]);
     const cursor = server.store.cursor();
     const added = await tagThread(server, a.thread_id, release.id, true);
     expect(added.status).toBe(200);
     expect(((await added.json()) as Json).tags).toEqual([release.id]);
     await tagThread(server, a.thread_id, windows.id, true);
-    expect(await rowTags(server, a.thread_id)).toEqual([release.id, windows.id]);
+    // Two tags made in the same millisecond list in id order (the Board's rule), so the order is not checked here.
+    expect((await rowTags(server, a.thread_id))?.sort()).toEqual([release.id, windows.id].sort());
     // A mark writes no store line: no cursor moves, no agent hears of it.
     expect(server.store.cursor()).toBe(cursor);
     expect(server.store.changesSince(cursor)).toEqual([]);
@@ -95,11 +96,11 @@ describe("thread tags", () => {
     servers.splice(servers.indexOf(server), 1);
     const again = (await start(dataDir)).server;
     expect(await rowTags(again, a.thread_id)).toEqual([release.id]);
-    expect((await list(again)).tags?.map((t) => t.name)).toEqual(["Ship 0.29", "Windows"]);
+    expect((await list(again)).tags?.map((t) => t.name).sort()).toEqual(["Ship 0.29", "Windows"]);
     // Deleted, the tag leaves the list's `tags` and every row.
     await post(again, `/api/inbox/initiatives/${release.id}`, { op: "delete" });
     expect(await rowTags(again, a.thread_id)).toEqual([]);
-    expect((await list(again)).tags?.map((t) => t.name)).toEqual(["Windows"]);
+    expect((await list(again)).tags?.map((t) => t.name).sort()).toEqual(["Windows"]);
   });
 
   test("the person's #Name in a reply tags the thread; an agent's does not; agents never read a tag", async () => {
