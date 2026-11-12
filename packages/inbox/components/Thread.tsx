@@ -24,7 +24,7 @@ import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
 import { replyViewingOf } from '../replyViewing';
-import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
+import { AttachmentTiles, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
@@ -52,7 +52,7 @@ import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
 import { reviewOpenPlan } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
-import { MessageMenu, ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
+import { ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
 import { CloudWakeLine } from '../cloud/CloudWakeLine';
 import { isInboxCloudHost } from '@plannotator/core/inbox-cloud';
@@ -84,6 +84,9 @@ import { attachmentImageUrl, readableVersion } from '../attachments';
 import { usePickSave } from '../data/actions/picks';
 import { sameThreadFiles, useThreadAttachments } from '../data/queries/files';
 import { MessageView } from '../parts/MessageView';
+import { drawMessageHead } from '../parts/MessageHead';
+import { drawMessageBody } from '../parts/MessageBodyView';
+import type { MessageActs } from '../parts/messageActs';
 import { useSendReply } from '../data/actions/send';
 import { replyLanded, unconfirmed, UNCONFIRMED_MS, type UnconfirmedSend } from '../data/actions/sendLanded';
 import { personReplies, useDrawSend, useSendsDrawn } from '../data/actions/sendDraw';
@@ -96,7 +99,6 @@ import {
   CLOSED_ROUTE,
   LEAVE,
   RouteChoice,
-  SessionEndedMark,
   askerCanEnd,
   askerHasEnded,
   isRedirected,
@@ -110,7 +112,7 @@ import {
 import { ReaskNote } from './ReaskNote';
 import { TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
-import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
+import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
 import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
 import { ReplySummary } from './ReplySummary';
@@ -147,8 +149,7 @@ import { TAG_TOKEN_CLASS } from './ComposerField';
 import { HostMark } from '../icons';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import { ActionChecklist, type ActionMark } from './ActionChecklist';
-import { actionForBlock } from '../actions';
+import { type ActionMark } from './ActionChecklist';
 import { Tip } from './Tip';
 import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
 import { arrowQuotesWhole, quoteToSend, selectedWordsIn } from '../replyQuote';
@@ -4771,7 +4772,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // The copy menus (CopyMenus.tsx): the header's ⋯ and each open message's.
   /** The newest of what a message's handlers call: a message that did not draw again still reaches these (parts/MessageView.tsx). */
-  const newest = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, setHeaderOpen, closeHeaderOnEscape };
+  const quoteAtPress = (messageId: string) => {
+    const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(messageId)}"] .ib-msg`) ?? null;
+    quoteWordsAtPress.current = { id: messageId, words: selectedWordsIn(article) };
+  };
+  const tryPrototype = (messageId: string, key: string) => setProto({ messageId, key });
+  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype };
   const acts = useRef(newest);
   acts.current = newest;
   const copyHost: CopyMenuHost = {
@@ -5364,76 +5370,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           const questions = message.questions ?? [];
           // Nothing left to answer: every question is sent or was superseded.
           const allSent = questions.length > 0 && questions.every((q) => q.state !== 'open' && q.state !== 'picked');
-          const replacedCard = (key: string, number: number) => {
-            const q = questions.find((x) => x.key === key);
-            const replacement = q ? replacementOf(thread.messages, q) : null;
-            if (!q || !replacement) return undefined;
-            const answer = pending.has(`${message.id}/${key}`) ? (pending.get(`${message.id}/${key}`) ?? null) : q.answer;
-            return <ReplacedQuestionCard question={q} number={number} total={questions.length} replacement={replacement} answer={answer} onJump={(target) => acts.current.jumpTo(target)} refRepo={threadRefRepo} />;
-          };
-          const replacesLine = (key: string) => {
-            const q = questions.find((x) => x.key === key);
-            const old = q ? replacedBy(thread.messages, q) : [];
-            return old.length > 0 ? <ReplacesLine old={old} onJump={(target) => acts.current.jumpTo(target)} /> : null;
-          };
-          // An agent message with files says so in its header (design record
-          // "inbox-attachments-header", variant Count): a count in the "to you"
-          // line opens the same tiles as the foot, in a band under the sender.
           const messageFiles = isAgent && (message.attachments?.length ?? 0) > 0 ? attachments.filter((a) => a.message_id === message.id) : [];
           const fileCount = isAgent ? Math.max(message.attachments?.length ?? 0, messageFiles.length) : 0;
           const filesOpen = fileCount > 0 && headerOpen.has(message.id);
           const bandId = `ib-hatts-${message.id}`;
-          const count =
-            fileCount > 0 ? (
-              <AttachmentsCount
-                messageId={message.id}
-                count={fileCount}
-                changed={changedCount(messageFiles)}
-                open={filesOpen}
-                controls={bandId}
-                onToggle={() => acts.current.setHeaderOpen(message.id, !filesOpen)}
-                onKeyDown={(event) => acts.current.closeHeaderOnEscape(message.id)(event)}
-              />
-            ) : null;
-          // The open message's head is the folded line (design record
-          // "inbox-polish", item 5): one row, the same 24 px mark and name in
-          // the same place, so opening a message moves nothing the person
-          // clicked. Only the third column changes (where it was sent, to
-          // whom, the attachments count) and the body appears below. In a
-          // multi-message thread the fold button lies under the row as its
-          // hit area: the row holds buttons of its own (the count, Reply), and
-          // a button cannot hold them. The row's text is hidden from screen
-          // readers there, since the button's label says it.
-          const hide = one ? undefined : true;
-          // A reply that tags agents names them after its owner ("to Claude Code · tagged Pi, Codex").
-          // A hand-off's stop notice to the former owner is not a tag the person typed (approval "inbox-tag-handoff").
           const sentTags = messageTags(message).filter((t) => !t.handed_away);
           const ownerOfSent = message.to ?? (askedBy(message)?.author.kind === 'agent' ? askedBy(message)!.author : null);
-          const toLabel = isAgent ? 'you' : message.to ? toName(message, message.to) : recipientName(askedBy(message));
-          const ended = isAgent && askerEnded && message.id === asking?.message.id;
           const tagNames = sentTags.map((t) => tagName(t, ownerOfSent && 'host' in ownerOfSent ? ownerOfSent.host : null, ownerOfSent && 'session' in ownerOfSent ? ownerOfSent.session : null)).join(', ');
-          const toWords = (
-            <>
-              to {toLabel}
-              {ended && <SessionEndedMark />}
-              {sentTags.length > 0 && (
-                <span data-tagged-names="">
-                  {' · tagged '}
-                  {tagNames}
-                </span>
-              )}
-              {/* Sent with compose's Board chip on (approval "inbox-compose-board-chip"): a quiet mark, never the agent's block. */}
-              {!isAgent && message.board_request === true && (
-                <span className="ib-m-board" data-board-request="">
-                  <span className="ib-to-sep">·</span>
-                  <Icon name="board" />
-                  <span aria-hidden="true">Board</span>
-                  <span className="ib-sr">Board tracking asked</span>
-                </span>
-              )}
-            </>
-          );
-          const foldLabel = `${nameSaid}, ${time}${isNew ? ', new' : ''}. Fold this message`;
           const revealed = revealedId === message.id;
           before.push(
             <article
@@ -5451,86 +5394,35 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             >
               <ArmScope arms={arms} id={message.id}>
               <MessageView
-                data={{ message, copy: [thread.thread_id, thread.subject, phone], head: [one, isNew, revealed, time, fullWhen, name, nameSaid, authorLabel, nameTip, multiAgent ? headFolder(message, thread, taggable) : thread.project.name], to: [toLabel, ended, tagNames], files: [fileCount, filesOpen, fileCount > 0 ? changedCount(messageFiles) : 0], live: liveMessage(message) }}
-                draw={() => (
-              <MessageMenu
-                {...copyHost}
-                newest={newestCopyHost}
-                message={message}
-                head={(more) => (
-                  <div className="ib-fline ib-is-open" data-open-head="" data-revealed={revealed ? '' : undefined}>
-                    {!one && (
-                      <button
-                        type="button"
-                        className="ib-fl-hit"
-                        data-fold-head=""
-                        aria-expanded={true}
-                        aria-label={foldLabel}
-                        onClick={() => acts.current.toggleMessage(message.id)}
-                      />
-                    )}
-                    <span className="ib-a11y-skip" aria-hidden={hide}>
-                      {isAgent ? (
-                        <AuthorMark author={message.author} big />
-                      ) : (
-                        <span className="ib-mk ib-big">
-                          <Icon name="reply" />
-                        </span>
-                      )}
-                    </span>
-                    <Tip content={authorLabel || named ? nameTip : one ? name : null} cut={!authorLabel && !named}>
-                      {authorLabel ? (
-                        labelledAuthorName({ agent: name, label: authorLabel, open: true, hidden: hide, onFold: one ? undefined : () => acts.current.toggleMessage(message.id) })
-                      ) : (
-                        <span className="ib-fl-nm ib-who" aria-hidden={hide} data-session-name={named ? '' : undefined} onClick={named && !one ? () => acts.current.toggleMessage(message.id) : undefined}>
-                          <bdi>{name}</bdi>
-                          {named && !hide && <span className="ib-sr">, {kind}</span>}
-                        </span>
-                      )}
-                    </Tip>
-                    {/* The project gives way first; "to you", the session-ended mark and the count never shrink (the row wraps instead). */}
-                    <span className="ib-fl-meta">
-                      <span className="ib-fl-in" aria-hidden={hide}>
-                        in <bdi>{multiAgent ? headFolder(message, thread, taggable) : thread.project.name}</bdi>{' '}
-                      </span>
-                      <span className="ib-fl-to" aria-hidden={hide}>
-                        <span className="ib-to-sep">·</span> <span className="ib-to">{toWords}</span>
-                      </span>
-                      {count && <span className="ib-fl-files">{count}</span>}
-                    </span>
-                    <span className="ib-fl-chips" />
-                    <span className="ib-fl-tm">
-                      {isNew && <span className="ib-newtag">New</span>}
-                      <Tip content={fullWhen}>
-                        <span data-full-when="">{time}</span>
-                      </Tip>
-                      {/* The person's own messages take ↩ too (approval "inbox-reply-quote"): the reply quotes them. */}
-                      {liveMessage(message) && (isAgent || (!isInboxNote(message) && !message.ack_of)) && (
-                        <Tip content="Reply">
-                          <button
-                            type="button"
-                            className="ib-mut"
-                            onPointerDown={() => {
-                              const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(message.id)}"] .ib-msg`) ?? null;
-                              quoteWordsAtPress.current = { id: message.id, words: selectedWordsIn(article) };
-                            }}
-                            onClick={() => acts.current.replyToMessage(message)}
-                            aria-label="Reply"
-                            data-message-reply={message.id}
-                          >
-                            <Icon name="reply" size={15} />
-                          </button>
-                        </Tip>
-                      )}
-                      {more}
-                    </span>
-                  </div>
-                )}
-              />
-                )}
+                data={{
+                  message,
+                  phone,
+                  one,
+                  isNew,
+                  revealed,
+                  time,
+                  fullWhen,
+                  name,
+                  nameSaid,
+                  nameTip,
+                  named,
+                  kind,
+                  authorLabel,
+                  folder: multiAgent ? headFolder(message, thread, taggable) : thread.project.name,
+                  toLabel: isAgent ? 'you' : message.to ? toName(message, message.to) : recipientName(askedBy(message)),
+                  ended: isAgent && askerEnded && message.id === asking?.message.id,
+                  tagNames: sentTags.length > 0 ? tagNames : null,
+                  fileCount,
+                  filesOpen,
+                  changed: fileCount > 0 ? changedCount(messageFiles) : 0,
+                  live: liveMessage(message),
+                  acts,
+                  copy: newestCopyHost,
+                }}
+                draw={drawMessageHead}
               />
               <div className="ib-msg" data-revealed={revealed ? '' : undefined}>
-                {count && (
+                {fileCount > 0 && (
                   <div className="ib-hatts" id={bandId} role="region" aria-label="Attachments in this message" hidden={!filesOpen} onKeyDown={closeHeaderOnEscape(message.id)} data-header-band={message.id}>
                     {filesOpen && (
                       <>
@@ -5565,57 +5457,29 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     message,
                     answers: answersOf(message),
                     footers: questions.map((q) => footerFor(message)(q.key)),
-                    replaced: questions.map((q) => (q.message_id ? [replacementOf(thread.messages, q), pending.get(`${message.id}/${q.key}`), replacedBy(thread.messages, q)] : null)),
+                    replaced: questions.map((q) => {
+                      const key = `${message.id}/${q.key}`;
+                      return [replacementOf(thread.messages, q), pending.has(key) ? (pending.get(key) ?? null) : undefined, replacedBy(thread.messages, q)] as const;
+                    }),
                     readOnly: !isAgent || !liveMessage(message) || questions.length === 0 || allSent,
-                    sent: message.author.kind === 'person' ? [sentAnswersByReply.get(message.id), sentActionsByReply.get(message.id), allFiles, personMessageIds] : null,
-                    thread: [thread, codeReview, codeReview && isAgent && hasReview ? (reviewOfNote.get(message.id) ?? null) : undefined, threadRefRepo, name],
-                    comments: (isAgent || !isInboxNote(message)) && liveMessage(message) ? [messageComments.get(message.id) ?? NO_ANNOTATIONS, commentsList?.at ?? null, revealedComment, !!onSide] : null,
+                    live: liveMessage(message),
+                    sentAnswers: message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined,
+                    sentActions: message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined,
+                    files: message.author.kind === 'person' ? allFiles : null,
+                    personMessageIds: message.author.kind === 'person' ? personMessageIds : null,
+                    root: thread.project.root,
+                    repo: thread.project.repo ?? null,
+                    codeReview,
+                    notes: codeReview && isAgent && hasReview ? reviewOfNote.has(message.id) : null,
+                    refRepo: threadRefRepo,
+                    name,
+                    comments: (isAgent || !isInboxNote(message)) && liveMessage(message) ? (messageComments.get(message.id) ?? NO_ANNOTATIONS) : null,
+                    openComment: commentsList?.at ?? null,
+                    revealedComment,
+                    side: !!onSide,
+                    acts,
                   }}
-                  draw={() => (
-                    <MessageBody
-                      message={message}
-                      sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
-                      sentActions={message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined}
-                      replyFiles={message.author.kind === 'person' ? { files: allFiles, personMessageIds, onOpen: (file, version) => acts.current.openFromReply(file, version) } : undefined}
-                      onJumpQuestion={(target) => acts.current.jumpTo(target)}
-                      projectRoot={thread.project.root}
-                      openInFiles={codeReview}
-                      {...(codeReview && isAgent && hasReview ? { contextNotes: reviewOfNote.has(message.id) ? { onOpen: (note: InboxNoteBlock) => acts.current.noteChips(message.id).onOpen?.(note) } : {} } : {})}
-                      repo={thread.project.repo ?? null}
-                      onOpenAttachment={(attachment) => acts.current.openFromMessage(attachment)}
-                      onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
-                      onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(message.id, key, image, choice)}
-                      onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
-                      readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
-                      answers={answersOf(message)}
-                      onPick={(key, answer) => acts.current.pick(message.id, key, answer)}
-                      footerFor={footerFor(message)}
-                      renderReplacedCard={replacedCard}
-                      renderReplacesLine={replacesLine}
-                      renderActions={
-                        isAgent && (message.actions?.length ?? 0) > 0
-                          ? {
-                              recordFor: (block) => actionForBlock(message.body, message.actions, block),
-                              render: (records) => <ActionChecklist actions={records} agent={name} refRepo={threadRefRepo} readOnly={!liveMessage(message)} onMark={(action, mark) => acts.current.markAction(message.id, action.key, mark)} />,
-                            }
-                          : undefined
-                      }
-                      comments={
-                        (isAgent || !isInboxNote(message)) && liveMessage(message)
-                          ? {
-                              annotations: messageComments.get(message.id) ?? NO_ANNOTATIONS,
-                              onSave: (annotation) => acts.current.saveMessageComment(message.id, annotation),
-                              onUnanchored: (report) => acts.current.noteUnanchored(report),
-                              onPainted: () => acts.current.repaintHits(message.id),
-                              onOpen: (id) => acts.current.openListAt(id),
-                              openId: commentsList?.at ?? null,
-                              revealed: revealedComment,
-                              onSide: onSide ? (...args: Parameters<NonNullable<typeof onSide>>) => acts.current.onSide?.(...args) : undefined,
-                            }
-                          : undefined
-                      }
-                    />
-                  )}
+                  draw={drawMessageBody}
                 />
                 </>
                 )}

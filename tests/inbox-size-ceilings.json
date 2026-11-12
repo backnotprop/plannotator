@@ -1,6 +1,6 @@
 {
   "packages/inbox/App.tsx": 7345,
-  "packages/inbox/components/Thread.tsx": 6315,
+  "packages/inbox/components/Thread.tsx": 6179,
   "packages/inbox/components/AttachmentPane.tsx": 3248,
   "packages/inbox/api.ts": 2531,
   "packages/inbox/pulls/pullReviewKept.test.tsx": 2302,

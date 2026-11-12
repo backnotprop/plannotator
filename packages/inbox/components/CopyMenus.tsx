@@ -38,11 +38,6 @@ export interface CopyMenuHost {
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
   /** A phone: ⋯ always shown, the menu a sheet from the bottom edge, no right-click. */
   phone: boolean;
-  /**
-   * The pane's host as it is now. A message's head draws again only when what it shows changed (parts/MessageView.tsx),
-   * not with every message that arrives, so its copies read the thread, its link and its toast from here when pressed.
-   */
-  newest?: { readonly current: CopyMenuHost };
 }
 
 /** The message as the toast and the menu's name say it: "Claude Code, 7:34 PM" (`short`: a long agent name cut, for the toast). */
@@ -51,8 +46,7 @@ function who(message: InboxMessageWire, short = false): string {
   return `${short ? shortAgentName(name) : name}, ${whenTime(message.created_at)}`;
 }
 
-function useCopies(drawn: CopyMenuHost) {
-  const host = () => drawn.newest?.current ?? drawn;
+function useCopies(host: () => CopyMenuHost) {
   const say = (ok: boolean, lead: string, detail: string, speech?: string) =>
     host().onToast?.(ok ? { icon: 'check', lead, detail, ...(speech && speech !== `${lead}. ${detail}` ? { speech } : {}) } : { icon: 'warn', lead: "Couldn't copy" });
   const named = (lead: string, message: InboxMessageWire) => say(true, lead, who(message, true), `${lead}. ${who(message)}`);
@@ -88,9 +82,9 @@ function usePortal<T extends HTMLElement>() {
  * One open message's menu: its ⋯ (handed to `head` to place after Reply) and,
  * off a phone, a right-click on the head line `head` draws.
  */
-export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement }) {
-  const { message, phone } = props;
-  const copies = useCopies(props);
+export function MessageMenu(props: { phone: boolean; newest: { readonly current: CopyMenuHost }; message: InboxMessageWire; head: (more: ReactElement) => ReactElement }) {
+  const { message, phone, newest } = props;
+  const copies = useCopies(() => newest.current);
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -285,7 +279,7 @@ export function ThreadMore(
   const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
   const markReadKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
   const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
-  const copies = useCopies(props);
+  const copies = useCopies(() => props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
