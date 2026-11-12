@@ -78,7 +78,7 @@ import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } 
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
-import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
+import { appliedFilter, filterListSections, localDay, pickCount, settledHeldRead, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, withoutRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
@@ -208,7 +208,7 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
-import { hearAgentFacesEvent, readAgentFaces } from './agents/agentFaces';
+import { hearAgentFacesEvent, keepAgentName, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -247,7 +247,7 @@ import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
@@ -1263,6 +1263,18 @@ function Inbox() {
   }, [thread]);
   const routeRef = useRef(route);
   routeRef.current = route;
+  /**
+   * Threads opened while their row was bold, since the list last settled: the list filter's Not seen leaves their rows
+   * where they are (listFilter.ts `filterListSections`), as the list holds still while a thread is open (settle.ts),
+   * so the look that unbolds a row never takes it out of a Not seen list. A settle keeps only the thread open then.
+   */
+  const [heldRead, setHeldRead] = useState<ReadonlySet<string>>(() => new Set());
+  const settleHeldRead = useCallback(() => setHeldRead((current) => settledHeldRead(current, routeRef.current.thread)), []);
+  useEffect(() => {
+    const open = route.thread;
+    if (!open || !shownRowOf(shownRef.current, open)?.unread) return;
+    setHeldRead((current) => (current.has(open) ? current : new Set(current).add(open)));
+  }, [route.thread]);
   // The full-window review is open (set where it is worked out, below), for the Escape ladder.
   const reviewPaneOpenRef = useRef(false);
   // The review a link on a Shape board opened (approval "review-show-me", q-db7db55f): with Code review on it shows the
@@ -1581,9 +1593,10 @@ function Inbox() {
       snoozeMoved.current.clear();
       const groups = listGroups(next);
       setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
+      settleHeldRead();
       sortedWhole();
     },
-    [armSlide, cancelSettle, sortedWhole],
+    [armSlide, cancelSettle, sortedWhole, settleHeldRead],
   );
   useEffect(() => cancelSettle, [cancelSettle]);
 
@@ -1676,7 +1689,10 @@ function Inbox() {
               : groups
             : withoutRows(refreshHeldRows(current, groups, heldOpen()), gone),
       );
-      if (adopt) sortedWhole(keep);
+      if (adopt) {
+        sortedWhole(keep);
+        settleHeldRead();
+      }
       setLoadError(null);
       return next;
     } catch (cause) {
@@ -1684,7 +1700,7 @@ function Inbox() {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, [armSlide, sortedWhole, queryClient]);
+  }, [armSlide, sortedWhole, queryClient, settleHeldRead]);
   /**
    * The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this
    * window's clock). With no thread open only the rows whose snooze changed move (held.ts `snoozeChangedRows`), each
@@ -4372,6 +4388,18 @@ function Inbox() {
     return true;
   };
 
+  /** An agent row's Rename… and Reset name, kept with its face (agents/agentFaces.ts); the live region says it as for a project. */
+  const renameAgent = async (agent: InboxAgent, name: string | null, own: string): Promise<boolean> => {
+    try {
+      await keepAgentName(agent, name);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The name did not change.'));
+      return false;
+    }
+    say(name === null ? `Name reset${own ? ` to ${own}` : ''}.` : `Renamed to ${name}.`);
+    return true;
+  };
+
   /**
    * The project menu's Set picture… (approval "inbox-letter-marks"): the picture kept by the Inbox, then the list read
    * again, so every project mark shows it. A refused picture (not an image, too big) says why in the toast.
@@ -5185,6 +5213,8 @@ function Inbox() {
   const filterMachine = route.page === 'inbox' && route.machine ? (machines.all.find((m) => m.id === route.machine) ?? null) : null;
   /** Every row the window has (every section, the snoozed too): where an agent's threads are found. */
   const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // Where a thread with several sessions finds their agents (agents/model.ts `threadSessions`).
+  const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
   const projectNames = useMemo(
@@ -5206,9 +5236,9 @@ function Inbox() {
   const listFilterApplied = useMemo(() => appliedFilter(listFilterPicks, listFilterScoped), [listFilterPicks, listFilterScoped]);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now()),
+    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay],
+    [filterList, listFilterApplied, listFilterDay, heldRead],
   );
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {
@@ -7360,6 +7390,11 @@ function Inbox() {
               return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
             })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
+            agentContext={threadAgentContext}
+            // A session's name in the thread's header filters the list to that agent, as the sidebar's agent does,
+            // and keeps this thread on screen (the person is reading it); a second click shows everything again.
+            agentFilter={route.page === 'inbox' ? (route.agent ?? null) : null}
+            onAgentFilter={(agentId) => leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: route.page === 'inbox' ? route.thread : null })}
             // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
             onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}
@@ -7643,6 +7678,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onAgentRename={guestPage ? undefined : renameAgent}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.

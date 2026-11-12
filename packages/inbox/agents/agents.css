@@ -31,6 +31,19 @@
 .pn-inbox .ib-agents-body[data-flat] .ib-sbagent .am-btn { left: 7px; }
 .pn-inbox .ib-sbagent .am-btn:focus-visible { outline-offset: -2px; }
 .pn-inbox .ib-sbagent:is(:has(> .am-btn:hover), :has(> .am-btn[data-fan-open])) .ib-proj:not(.ib-on) { background: var(--ib-side-hover); }
+/* Its menu, a project row's (inbox.css .ib-pmore): ⋯ on hover, keyboard focus or while the menu is open, at the row's
+   middle; the name gives it room. Rename…: the project field in the row's own height. */
+.pn-inbox .ib-sbagent .ib-pmore { top: 50%; transform: translateY(-50%); }
+.pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]) .ib-pmore { opacity: 1; }
+.pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]):has(> .ib-pmore) .ib-proj { padding-right: 32px; }
+.pn-inbox .ib-sbagent[data-menu] .ib-proj:not(.ib-on) { background: var(--ib-side-menu); color: var(--foreground); }
+.pn-inbox .ib-sbagent[data-menu] .ib-pmore { color: var(--foreground); }
+.pn-inbox .ib-sbagent[data-renaming] { padding: 3px 0; }
+/* A screen that cannot hover: ⋯ always shown, as a project row's. */
+@media (hover: none) {
+  .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; }
+  .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj { padding-right: 32px; }
+}
 /* The one spacing rule of the sidebar's sections, for a section that is one block: its heading 2 px under a closed
    section with no row left, and the next heading 2 px under it while it is closed (closed, it draws no row at all). */
 .pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-agentsec > .ib-secrow { margin-top: 2px; }
@@ -56,6 +69,9 @@
   .pn-inbox .ib-agents-cap .ib-proj, .pn-inbox .ib-sbagent .ib-proj { height: 44px; }
   .pn-inbox .ib-agents-cap .ib-proj { font-size: var(--ib-fs-13, 13px); }
   .pn-inbox .ib-sbagent .ib-proj { font-size: var(--ib-fs-15, 15px); }
+  /* ⋯ always shown, a 44 px target at the row's end (a project row's on a phone). */
+  .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; right: 0; }
+  .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj, .pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]):has(> .ib-pmore) .ib-proj { padding-right: 46px; }
 }
 
 /* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */

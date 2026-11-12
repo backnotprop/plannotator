@@ -191,6 +191,7 @@ interface SeenSession {
    * thread is not known to have ended. Its id, for that check.
    */
   wakeOnly?: string;
+  pinned?: boolean;
 }
 
 /**
@@ -592,7 +593,7 @@ export function createInboxLiveSessions(options: {
 
   const isLive = (entry: SeenSession) =>
     entry.wakeOnly !== undefined
-      ? now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
+      ? (entry.pinned === true || now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS) && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
       : entry.holding > 0 || now() - entry.lastSeen <= INBOX_SESSION_LIVE_MS;
 
   /**
@@ -671,6 +672,33 @@ export function createInboxLiveSessions(options: {
     if (root !== null) entry.root = root;
     if (typeof projectPath === "string" && projectPath) entry.cwd = projectPath;
     sessions.set(session, entry);
+  };
+
+  const pinCloud = (session: string, root: string | null, name: string, host = "cloud"): void => {
+    if (root === null) {
+      if (sessions.get(session)?.pinned) sessions.delete(session);
+      return;
+    }
+    const at = now();
+    const known = sessions.get(session);
+    sessions.set(session, {
+      host,
+      root,
+      startedAt: known?.startedAt ?? at,
+      lastSeen: at,
+      holding: 0,
+      busy: null,
+      idleSince: null,
+      sendNow: false,
+      cwd: null,
+      folder: null,
+      plugin: null,
+      engine: null,
+      tags: true,
+      label: name,
+      wakeOnly: session,
+      pinned: true,
+    });
   };
 
   /** How a session the Inbox wakes itself is connected: it takes the item as its next turn; nothing else is known. */
@@ -1090,7 +1118,7 @@ export function createInboxLiveSessions(options: {
     extra: (host: InboxToolHostId) => { installed: string | null; update_command: string | null },
   ): Partial<Record<InboxToolHostId, InboxHostSessions>> => {
     const out: Partial<Record<InboxToolHostId, InboxHostSessions>> = {};
-    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
+    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes"];
     for (const [session, entry] of [...sessions].sort((a, b) => b[1].startedAt - a[1].startedAt)) {
       if (!isLive(entry) || !(hosts as readonly string[]).includes(entry.host)) continue;
       const host = entry.host as InboxToolHostId;
@@ -1350,6 +1378,7 @@ export function createInboxLiveSessions(options: {
     pollStarted,
     stateChanged,
     seenWakeOnly,
+    pinCloud,
     liveFor,
     askerLive,
     pendingOf,

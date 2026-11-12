@@ -352,6 +352,12 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     const list = aims.current.get(target);
     return list ? { recipients: list } : {};
   };
+  /**
+   * Per thread: the message the reply quotes (approval "inbox-reply-quote"; null: none any more); each save of that
+   * thread names it, so the draft comes back quoting it. No entry: the save names none, and the draft keeps its own.
+   */
+  const quotes = useRef(new Map<string, { of: string; words?: string } | null>());
+  const quoteOf = (target: string): { quote?: { of: string; words?: string } | null } => (quotes.current.has(target) ? { quote: quotes.current.get(target) ?? null } : {});
 
   const generationOf = (target: string) => generations.current.get(target) ?? 0;
   const bump = (target: string) => generations.current.set(target, generationOf(target) + 1);
@@ -530,7 +536,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         let answer: { draft: InboxReplyDraft | null };
         sentWords.current.set(target, text);
         try {
-          answer = await storeRef.current.save(target, { body: text, base: baseOf(target), baseBody: baseBody ?? null, files: ops, ...aimOf(target) }, { keepalive: false });
+          answer = await storeRef.current.save(target, { body: text, base: baseOf(target), baseBody: baseBody ?? null, files: ops, ...aimOf(target), ...quoteOf(target) }, { keepalive: false });
         } catch (cause) {
           if (codeOf(cause) === 'validation_error') {
             // Refused: not saved. For its size (the Inbox's own limit, a `body:` refusal) the line above the box
@@ -664,7 +670,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       const ops = composeReplyDraftFileOps(carried.get(next.threadId) ?? NO_FILE_OPS, next.ops);
       // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
       void storeRef.current
-        .save(next.threadId, { body: next.text, base: baseOf(next.threadId), baseBody: lastWords.current, files: ops, ...aimOf(next.threadId) }, { keepalive: true })
+        .save(next.threadId, { body: next.text, base: baseOf(next.threadId), baseBody: lastWords.current, files: ops, ...aimOf(next.threadId), ...quoteOf(next.threadId) }, { keepalive: true })
         .catch(() => {});
       sentWords.current.set(next.threadId, next.text);
       keptAlive.current = { threadId: next.threadId, text: next.text, ops, generation: generationOf(next.threadId) };
@@ -967,7 +973,15 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     aims.current.set(current.current, recipients ? [...recipients] : []);
   }, []);
 
-  return { ...state, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, heldOf, withMyChanges, settle, aim };
+  /**
+   * The message the reply quotes (null: none): the open thread's next saves name it. The caller saves the box's words
+   * after it, so a draft already kept learns it too.
+   */
+  const quote = useCallback((value: { of: string; words?: string } | null) => {
+    quotes.current.set(current.current, value ? { ...value } : null);
+  }, []);
+
+  return { ...state, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, heldOf, withMyChanges, settle, aim, quote };
 }
 
 /** The thread's draft in the store (null: none), or undefined when it could not be read. */

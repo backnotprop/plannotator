@@ -1,7 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxAgentId, InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { inboxApi, type ComposeSessionsModel } from '../api';
-import { CLINE_APPLIES, DSH_APPLIES, OTHER_HARNESSES, harnessPanel, hostMcpSnippet, type ConnectContext } from '../harnesses';
+import { HERMES_APPLIES } from '@plannotator/core/inbox-hermes';
+import { CLINE_APPLIES, DSH_APPLIES, OPENCLAW_APPLIES, OTHER_HARNESSES, harnessPanel, hostMcpSnippet, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import {
   CLAUDE_PLUGIN_INSTALL,
@@ -271,6 +272,12 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
       } else if (row.id === 'cline') {
         setTurnedOn((current) => new Set([...current, row.id]));
         setSaid(`${row.label}'s Inbox tool is on. ${CLINE_APPLIES}`);
+      } else if (row.id === 'openclaw') {
+        setTurnedOn((current) => new Set([...current, row.id]));
+        setSaid(`${row.label}'s Inbox tool is on. ${OPENCLAW_APPLIES}`);
+      } else if (row.id === 'hermes') {
+        setTurnedOn((current) => new Set([...current, row.id]));
+        setSaid(`${row.label}'s Inbox tool is on. ${HERMES_APPLIES}`);
       } else {
         setSaid(`${row.label} is connected. Its next session reaches the Inbox.`);
       }

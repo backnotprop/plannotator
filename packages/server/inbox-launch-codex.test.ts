@@ -217,6 +217,8 @@ describe("Codex through the launch engine, against the fake codex", () => {
     );
     expect(note.body).toBe("Codex's turn ended with an error: Your access token could not be refreshed. Please log out and sign in again.");
     expect(note.author).toMatchObject({ host: "codex", name: "Codex" });
+    // Marked for the window's notification ("Codex couldn't answer").
+    expect(note.turn_error).toBe(true);
   });
 
   test("an approval is the permission card, and Allow once answers accept", async () => {
