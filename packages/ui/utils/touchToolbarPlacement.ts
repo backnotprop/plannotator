@@ -22,6 +22,10 @@
  * the screen) it rests at the bottom edge. While the selection is scrolled
  * out of sight it is hidden, not stuck to an edge.
  *
+ * A selection whose END the finger was moving (`prefer: 'above'`) puts the
+ * toolbar above first, over the menu's band, when both fit there: below, it
+ * would cover the end handle's way on and the lines the finger drags it to.
+ *
  * Default: off, so a host that does not opt in (Workspaces) keeps the
  * toolbar's desktop placement everywhere, exactly as before. Plannotator's
  * plan review, annotate, code review and Inbox pass true. With it on, nothing
@@ -121,6 +125,8 @@ export function placeTouchToolbar(input: {
   mode: 'center-above' | 'top-right';
   margin?: number;
   insets?: Partial<ViewportEdgeInsets>;
+  /** `above`: try above the selection first (a selection whose end handle the finger was moving). */
+  prefer?: 'above';
 }): TouchToolbarPosition {
   const { anchor, toolbar, viewport, mode } = input;
   const margin = input.margin ?? TOUCH_TOOLBAR_EDGE_MARGIN;
@@ -153,6 +159,12 @@ export function placeTouchToolbar(input: {
 
   // iOS's menu goes below a selection that starts near the top: sit under it.
   const nearTop = anchor.top - bounds.top < IOS_MENU_ROOM_ABOVE;
+  // Away from the end handle: above the band where iOS draws its menu, when
+  // the menu and the toolbar both fit there.
+  if (input.prefer === 'above' && !nearTop) {
+    const above = anchor.top - TOUCH_TOOLBAR_GAP_ABOVE - IOS_MENU_CLEARANCE - toolbar.height;
+    if (above >= minTop && above <= maxTop) return { ...base, top: above, placement: 'above' };
+  }
   const gaps = nearTop ? [TOUCH_TOOLBAR_GAP_BELOW + IOS_MENU_CLEARANCE, TOUCH_TOOLBAR_GAP_BELOW] : [TOUCH_TOOLBAR_GAP_BELOW];
   for (const gap of gaps) {
     const below = anchor.bottom + gap;
