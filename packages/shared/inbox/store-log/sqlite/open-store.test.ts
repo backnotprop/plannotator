@@ -15,8 +15,8 @@ import { INBOX_PROJECTS_DIR, MESSAGES_FILE } from "../../schema";
 import { InboxStore } from "../../store";
 import { everyRead } from "../reads";
 import { writeInboxWorld } from "../world";
-import { JSONL_ENTRIES } from "./move-files";
-import { openInboxStore, resolveInboxSqlite } from "./open-store";
+import { JSONL_ENTRIES, jsonlEntriesPresent } from "./move-files";
+import { inboxImportDelayFromEnv, openInboxStore, resolveInboxSqlite } from "./open-store";
 import { INBOX_RETURN_PARTIAL, returnToJsonl } from "./return-to-files";
 import { INBOX_DB_FILE } from "./sqlite-log";
 
@@ -50,9 +50,16 @@ function tree(dir: string): Record<string, string> {
 test("the switch reads PLANNOTATOR_INBOX_SQLITE first, then config's inboxSqlite; off by default", () => {
   expect(resolveInboxSqlite({}, {})).toBe(false);
   expect(resolveInboxSqlite({ inboxSqlite: true }, {})).toBe(true);
+  expect(resolveInboxSqlite({ inboxSqlite: false }, {})).toBe(false);
   expect(resolveInboxSqlite({ inboxSqlite: true }, { PLANNOTATOR_INBOX_SQLITE: "0" })).toBe(false);
-  expect(resolveInboxSqlite({}, { PLANNOTATOR_INBOX_SQLITE: "on" })).toBe(true);
+  expect(resolveInboxSqlite({ inboxSqlite: false }, { PLANNOTATOR_INBOX_SQLITE: "on" })).toBe(true);
   expect(resolveInboxSqlite({ inboxSqlite: "yes" }, { PLANNOTATOR_INBOX_SQLITE: "maybe" })).toBe(false);
+});
+
+test("the move's test knobs (a hold, a hard stop) do nothing outside the test sandbox", () => {
+  const knobs = { PLANNOTATOR_INBOX_IMPORT_DELAY_MS: "8000", PLANNOTATOR_INBOX_IMPORT_STOP_AT: "load" };
+  expect(inboxImportDelayFromEnv(knobs)).toBeUndefined();
+  expect(inboxImportDelayFromEnv({ ...knobs, PLANNOTATOR_TEST_SANDBOX: "1" })).toBeFunction();
 });
 
 test("off, with no database: today's store, and not one byte on disk changes", async () => {
@@ -79,7 +86,10 @@ test(
     expect(reads(on.store)).toEqual(files);
     // Storage: the database file counts, once, and the backup with it.
     const usage = on.store.diskUsage();
-    expect(usage.database).toBe(statSync(join(inbox, INBOX_DB_FILE)).size + (existsSync(join(inbox, `${INBOX_DB_FILE}-wal`)) ? statSync(join(inbox, `${INBOX_DB_FILE}-wal`)).size : 0) + (existsSync(join(inbox, `${INBOX_DB_FILE}-shm`)) ? statSync(join(inbox, `${INBOX_DB_FILE}-shm`)).size : 0));
+    // What it holds: at most the file and its log on disk, and more than nothing.
+    const onDisk = ["", "-wal"].reduce((sum, suffix) => sum + (existsSync(join(inbox, `${INBOX_DB_FILE}${suffix}`)) ? statSync(join(inbox, `${INBOX_DB_FILE}${suffix}`)).size : 0), 0);
+    expect(usage.database).toBeGreaterThan(0);
+    expect(usage.database).toBeLessThanOrEqual(onDisk);
     expect(usage.backups).toHaveLength(1);
     expect(usage.backups![0]).toMatchObject({ kind: "jsonl", date: now().toISOString().slice(0, 10) });
     expect(usage.backups![0]!.bytes).toBeGreaterThan(0);
@@ -140,7 +150,7 @@ test("a way back whose files would read differently never happens: the database 
   expect(back).toMatchObject({ status: "kept_db", reason: "mismatch" });
   expect(existsSync(join(inbox, INBOX_DB_FILE))).toBe(true);
   expect(existsSync(join(inbox, INBOX_RETURN_PARTIAL))).toBe(false);
-  for (const entry of JSONL_ENTRIES) expect(existsSync(join(inbox, entry))).toBe(false);
+  expect(jsonlEntriesPresent(inbox)).toEqual([]);
   // Nothing was lost meanwhile: the database still serves the same, and a later way back goes through.
   const off = await openInboxStore(dataDir, { sqlite: false, now });
   expect(off.moved).toMatchObject({ status: "returned" });

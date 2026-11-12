@@ -1,0 +1,143 @@
+name: Inbox on SQLite (compiled binary)
+
+# The Plannotator Inbox's SQLite storage, proven on the compiled binary of each
+# OS rather than `bun test` against sources (scripts/inbox-sqlite-proof/run.ts):
+# a new install turned on to SQLite, the move of a JSONL Inbox and the way back,
+# the move's second process (the binary running itself) again and again, two
+# starters through a long move, hard kills at every step of the move and at
+# random moments, and (Linux only) one 100,000-message move for the timing.
+#
+# The binaries are compiled once on Linux for release.yml's targets
+# (cross-compiled), without the release mark: a CI binary never pings. Then
+# each OS runs its own. windows.yml calls this workflow, so it is part of the full tier the release dispatches on
+# main and requires green before a tag (.agents/skills/release/SKILL.md).
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Inbox on SQLite (compile the binaries)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the apps
+        run: bun run --cwd apps/review build && bun run build:hook
+
+      - name: Compile the binaries for the release's targets
+        run: |
+          mkdir -p .local/bin
+          for pair in bun-linux-x64-baseline:plannotator-linux-x64 bun-linux-arm64:plannotator-linux-arm64 bun-windows-x64-baseline:plannotator-win32-x64.exe bun-windows-arm64:plannotator-win32-arm64.exe bun-darwin-arm64:plannotator-darwin-arm64 bun-darwin-x64:plannotator-darwin-x64; do
+            bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target="${pair%%:*}" \
+              --define '__CLI_VERSION__="0.0.0-dev"' --outfile ".local/bin/${pair#*:}"
+          done
+          ls -la .local/bin
+
+      - name: Keep the binaries for each OS
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inbox-sqlite-binaries
+          path: .local/bin
+          retention-days: 3
+
+  proof:
+    name: Inbox on SQLite (compiled binary, ${{ matrix.name }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            binary: plannotator-win32-x64.exe
+            big: ""
+          - name: Linux
+            os: ubuntu-24.04
+            binary: plannotator-linux-x64
+            big: "--big"
+          - name: macOS
+            os: macos-latest
+            binary: plannotator-darwin-arm64
+            big: ""
+          - name: Windows ARM64
+            os: windows-11-arm
+            binary: plannotator-win32-arm64.exe
+            big: ""
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            binary: plannotator-linux-arm64
+            big: ""
+          - name: macOS Intel
+            os: macos-15-intel
+            binary: plannotator-darwin-x64
+            big: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      # The proof generates Inboxes and reads the disk from source; only the binary serves.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Get this OS's binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: inbox-sqlite-binaries
+          path: .local/bin
+
+      - name: Make the binary runnable
+        env:
+          ASSET: ${{ matrix.binary }}
+        run: chmod +x ".local/bin/$ASSET"
+
+      - name: Prove the Inbox on SQLite with the compiled binary
+        env:
+          BINARY: .local/bin/${{ matrix.binary }}
+          BIG: ${{ matrix.big }}
+          PROOF_KEEP_DIR: ${{ runner.temp }}/inbox-sqlite-proof
+        run: bun scripts/inbox-sqlite-proof/run.ts "$BINARY" $BIG
+
+      - name: Keep the scratch Inboxes of a failed proof
+        if: failure()
+        continue-on-error: true
+        env:
+          KEEP: ${{ runner.temp }}/inbox-sqlite-proof
+        run: |
+          [ -f "$KEEP/scratch.txt" ] || exit 0
+          cd "$KEEP"
+          # A relative archive name: GNU tar on Windows reads "D:" in a path as a remote host.
+          while read -r dir; do [ -d "$dir" ] && tar -czf "$(basename "$dir").tgz" -C "$(dirname "$dir")" "$(basename "$dir")" || true; done < scratch.txt
+
+      - name: Upload the scratch Inboxes of a failed proof
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inbox-sqlite-proof-${{ matrix.name }}
+          path: ${{ runner.temp }}/inbox-sqlite-proof/*.tgz
+          retention-days: 3

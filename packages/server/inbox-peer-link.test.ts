@@ -40,7 +40,7 @@ interface DoorScript {
 }
 
 function door(script: DoorScript) {
-  const stats = { events: 0, threads: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[] };
+  const stats = { events: 0, threads: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[], eventAsks: [] as string[] };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -56,6 +56,7 @@ function door(script: DoorScript) {
       }
       if (route === "events") {
         stats.events += 1;
+        stats.eventAsks.push(url.search);
         const since = req.headers.get("last-event-id");
         stats.lastEventId.push(since);
         if (script.eventsHang) return new Promise<Response>(() => {});
@@ -379,6 +380,36 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.snoozes).toBe(false);
     peer.acceptList({ cursor: 4, sections: [], snoozes: true });
     expect(peer.list!.snoozes).toBe(true);
+  });
+
+  test("a star moves no record: the stream asks for `pins`, and a `pins` frame reads the list again before the windows hear it", async () => {
+    const told: string[] = [];
+    let pinsAtTold: string[] = [];
+    const d = door({
+      cursor: 3,
+      frames: ["event: pins\ndata: {}\n\n"],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a" }] }], marks: ["star"], pins: d.stats.threads > 1 ? [{ thread_id: "msg_a" }] : [] }),
+    });
+    const { peer } = link(d.url, {
+      onReread: (event) => {
+        told.push(event);
+        pinsAtTold = peer.list!.pins;
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("pins")).toBe("1");
+    expect(told).toEqual(["pins"]);
+    expect(pinsAtTold).toEqual(["msg_a"]);
+  });
+
+  test("a machine's stars and the marks it takes come from its list; an older Inbox's list says no marks", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 3, sections: [], pins: [{ thread_id: "msg_a" }] });
+    expect(peer.list!.marks).toEqual([]);
+    peer.acceptList({ cursor: 4, sections: [], marks: ["star", 7], pins: [{ thread_id: "msg_b" }, { title: "no id" }] });
+    expect(peer.list!.marks).toEqual(["star"]);
+    expect(peer.list!.pins).toEqual(["msg_b"]);
   });
 
   test("one fetch in flight at a time: refreshes during it make one more, never several at once (F5)", async () => {

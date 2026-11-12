@@ -1,4 +1,5 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { useThreadArmed } from '../threadArmed';
 import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
@@ -192,6 +193,8 @@ import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { inboxTileShortcuts } from '../shortcuts/grid.shortcuts';
+import { gridStep, type GridKey } from '../gridMove';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
@@ -618,7 +621,8 @@ export function MessageBody({
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
-  const { initiatives: tagInitiatives } = useInitiativeTags();
+  // With the Board off, a tag's list in the Inbox (`#tag=ini_…`, approval "inbox-thread-tags").
+  const { initiatives: tagInitiatives, href: tagHref } = useInitiativeTags();
   const linkFiles = useCallback(
     (text: string) =>
       linkHashtags(
@@ -626,8 +630,9 @@ export function MessageBody({
           ? linkReplyFeedback(text, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
           : text,
         tagInitiatives,
+        tagHref,
       ),
-    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives],
+    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives, tagHref],
   );
   // The feedback the Send wrote after the person's words ("# Feedback on the attached files"…): a block of
   // its own, its headings at text size (replyFeedback.ts; display only). The person's own message only.
@@ -686,17 +691,17 @@ export function MessageBody({
   // A sent tag's preview: hover or focus, or a first tap on a touch screen (InitiativePeek).
   const tagPeek = useInitiativePeek(bodyRef);
   const { tapOpens } = tagPeek;
-  // A hashtag's link opens the Board in this window (the markdown renderer opens links in a new tab).
+  // A hashtag's link opens the Board (with the Board off, the tag's list) in this window (the markdown renderer opens links in a new tab).
   const openHashtag = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
       const target = event.target as Element | null;
       // The preview is portaled: its own links are plain in-app links.
       if (target?.closest?.('[data-tag-peek]')) return;
-      const link = target?.closest?.('a[href^="#board&initiative="]');
+      const link = target?.closest?.('a[href^="#board&initiative="], a[href^="#tag="]');
       if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      if (tapOpens(link)) return;
+      if (link.getAttribute('href')!.startsWith('#board&') && tapOpens(link)) return;
       window.location.hash = link.getAttribute('href')!;
     },
     [tapOpens],
@@ -1128,8 +1133,9 @@ export function MessageBody({
     />
   );
 
-  // Here and not through the Viewer's onSelectAnnotation: on a touch screen the highlighter does not listen (the
-  // system's selection is the person's, ui's useAnnotationHighlighter), so a tap would reach nothing.
+  // Here and not through the Viewer's onSelectAnnotation, so a tap opens a highlight the same way on every screen. (On a
+  // touch screen the highlighter does listen here: no onHostDraft, so it paints a finger's selection itself once the
+  // selection is finished, and keeps it selected; ui's useAnnotationHighlighter.)
   const openHighlight = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as Element;
     const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
@@ -1800,6 +1806,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const htmlArmed = useThreadArmed(thread.thread_id);
   const launchAct = async <T,>(action: () => Promise<T>, done?: string | ((result: T) => { lead: string; detail?: string })) => {
     setLaunchError(null);
     try {
@@ -3907,6 +3914,30 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       },
     },
   });
+  // Arrow keys between a message's tiles (shortcuts/grid.shortcuts.ts `inboxTileShortcuts`). Not under a file in full
+  // screen, a guide or Artifacts: a tile behind them can still hold focus, and there ← → step the file.
+  const tileList = (target: Element | null) => (target && sectionRef.current?.contains(target) && target.matches('[data-attachment-id]') ? target.closest('.ib-tiles') : null);
+  useShortcutScope({
+    scope: inboxTileShortcuts,
+    handlers: {
+      move: {
+        when: (event) => {
+          if (event.defaultPrevented || event.isComposing || paneCovered || modalOpen()) return false;
+          const list = tileList(keyTarget(event));
+          return !!list && list.querySelectorAll('[data-attachment-id]').length > 1;
+        },
+        handle: (event) => {
+          const target = keyTarget(event);
+          const tiles = [...(tileList(target)?.querySelectorAll<HTMLElement>('[data-attachment-id]') ?? [])];
+          const from = tiles.indexOf(target as HTMLElement);
+          const to = from < 0 ? null : gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
+          const next = to === null ? null : tiles[to];
+          next?.focus({ preventScroll: true });
+          next?.scrollIntoView?.({ block: 'nearest' });
+        },
+      },
+    },
+  });
 
   // Another window (or a phone's Send) saved, sent or discarded this thread's draft, or this one did:
   // its copy here follows. A box with no edits since its last save or read takes the new words (or
@@ -5357,10 +5388,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       : lastTo
         ? deliveryLine({
             name: last.delivery ? toName(last, last.delivery) : last.to ? toName(last, last.to) : hostName(lastTo.host),
-            deliveredAt: last.delivery?.at ?? null,
+            deliveredAt: last.delivery?.at ?? (recipientConnection?.polls ? (sent?.checked_at ?? null) : null),
             time: whenTime,
             // A Codex reply whose `codex queue` ran out of time may not have gone: saved, not queued.
-            wakes: !uncertainItem(recipientConnection, last.id),
+            wakes: !recipientConnection?.polls && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
@@ -5382,7 +5413,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
   const heldHandoff = last.author.kind === 'person' && !!last.handoff && !last.handoff.settled_at && !last.handoff.undone_at;
-  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || isInboxCloudHost(lastTo?.host)) ? last : null;
+  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || (isInboxCloudHost(lastTo?.host) && !recipientConnection?.polls && !last.delivery)) ? last : null;
   const delivered: DeliveryLine | null = cloudLast
     ? null
     : heldHandoff && deliveredNow
@@ -7234,6 +7265,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
                     openIn={openIn}
                     newestId={newestFileId}
+                    newestKeycap={!file}
                   />
                 )}
                 {message.guide &&
@@ -7867,6 +7899,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         // A full screen opened over another file beside the thread goes back to that file: a comment not saved yet waits as the full screen file's draft.
         exitLeavesFor={fullExitFile && fullExitFile !== openAttachment.id ? (allFiles.find((a) => a.id === fullExitFile)?.name ?? 'that file') : null}
         phone={phone}
+        armedStart={htmlArmed.armedStart}
+        onArmed={htmlArmed.onArmed}
         openIn={openIn}
         steps={optionSet ? optionSet.steps : steps}
         allSteps={steps}

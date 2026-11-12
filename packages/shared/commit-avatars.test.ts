@@ -32,6 +32,8 @@ describe("classifyAvatarRemote", () => {
 
   test("returns null for opaque hosts and unparseable urls", () => {
     expect(classifyAvatarRemote("git@git.internal.example:owner/repo.git")).toBeNull();
+    // Bitbucket has no CLI to ask: its remote must never reach the GitLab path and run glab against bitbucket.org.
+    expect(classifyAvatarRemote("git@bitbucket.org:ws/repo.git")).toBeNull();
     expect(classifyAvatarRemote("")).toBeNull();
   });
 });

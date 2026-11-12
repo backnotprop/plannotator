@@ -14,8 +14,10 @@ import { Icon } from '../icons';
 import { DECISIONS_POST_TO_WORDS, decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
 import { inboxApi, type DecisionsPostTo } from '../api';
 import { RefMarkIcon } from '../board/RefMark';
-import { useThreadPulls } from '../threadPulls/ThreadPulls';
+import { canPostDecisionsOn, useThreadPulls } from '../threadPulls/ThreadPulls';
 import { Tip } from './Tip';
+import { useThreadTags } from '../threadTags';
+import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
 
@@ -244,7 +246,7 @@ export interface ThreadMoreLaunch {
  * its room), with every read action (`markRead`, `moveBack` on a thread marked read, `markUnread`; markRead.ts
  * `canMarkUnread`), then Snooze, which swaps the menu in place for "‹ Snooze until" and its times (H opens it there:
  * `snoozeRequest`), and Unsnooze; then a divider, Pin thread in its own group (only when the Inbox keeps pins: `pin`
- * is absent on an older one). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
+ * is absent on an older one) with Add tag (its tags swap in place; only when the Inbox keeps tags, approval "inbox-thread-tags"). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
  * archived one; the owner, 2026-11-01: move it into the ⋯). None has a key. Request guided review (`requestGuide`)
  * has its own group above Archive, on desktop and in the phone sheet alike, only where the thread offers it.
  */
@@ -280,6 +282,10 @@ export function ThreadMore(
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
+  // Add tag's list, swapped in as Snooze's times are (approval "inbox-thread-tags").
+  const [tagView, setTagView] = useState(false);
+  const tags = useThreadTags();
+  const tagging = !!tags?.can(thread.thread_id);
   // Only a new request opens it: the menu mounting again (J/K into a thread) keeps it shut.
   const seenRequest = useRef(snoozeRequest);
   useEffect(() => {
@@ -295,7 +301,8 @@ export function ThreadMore(
   const exportBack = useRef(false);
   // The thread's PRs for the Post group: read while the menu is open (the PR button keeps them current otherwise).
   const { answer: pullsAnswer } = useThreadPulls(thread.thread_id, open && exportOffered && !!postDecisions);
-  const linked = pullsAnswer?.pulls ?? [];
+  // Only the PRs decisions can post on (a Bitbucket PR is refused by the server, so it gets no row).
+  const linked = (pullsAnswer?.pulls ?? []).filter(canPostDecisionsOn);
   // Where to post (config.json `inboxDecisionsPostTo`): read when the menu opens, saved on a pick.
   const [postTo, setPostTo] = useState<DecisionsPostTo | null>(null);
   const postOffered = open && exportOffered && !!postDecisions;
@@ -314,14 +321,16 @@ export function ThreadMore(
   }, [postOffered]);
   // Back from the times: focus goes to Snooze again, not to the item now at its old index.
   const backed = useRef(false);
+  const tagBack = useRef(false);
   const popup = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (view !== null || exportView || !backed.current) return;
+    if (view !== null || exportView || tagView || !backed.current) return;
     backed.current = false;
-    const item = exportBack.current ? '[data-thread-export-item]' : '[data-thread-snooze-item]';
+    const item = exportBack.current ? '[data-thread-export-item]' : tagBack.current ? '[data-add-tag-item]' : '[data-thread-snooze-item]';
     exportBack.current = false;
+    tagBack.current = false;
     return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>(item));
-  }, [view, exportView]);
+  }, [view, exportView, tagView]);
   useLayoutEffect(() => {
     if (!exportView) return;
     return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>('[data-decision-export]'));
@@ -470,12 +479,13 @@ export function ThreadMore(
         </Menu.Item>
       )}
       {unsnoozeItem}
-      {leadItems && pin && <Menu.Separator className="ib-pm-sep" />}
+      {leadItems && (pin || tagging) && <Menu.Separator className="ib-pm-sep" />}
       {pinItem}
+      <AddTagItem threadId={thread.thread_id} onOpen={() => setTagView(true)} />
     </>
   );
   // Whether anything leads the menu (the divider before Copy thread).
-  const leads = leadItems || !!pin;
+  const leads = leadItems || !!pin || tagging;
   return (
     <Menu.Root
       modal={false}
@@ -485,6 +495,7 @@ export function ThreadMore(
         if (!next) {
           setView(null);
           setExportView(false);
+          setTagView(false);
         }
       }}
     >
@@ -514,6 +525,22 @@ export function ThreadMore(
                   }}
                   onPick={snooze.onPick}
                   onClose={() => setOpen(false)}
+                />
+              </>
+            ) : tagView && tagging ? (
+              <>
+                {phone && (
+                  <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                    {thread.subject ?? '(no subject)'}
+                  </div>
+                )}
+                <AddTagList
+                  threadId={thread.thread_id}
+                  onBack={() => {
+                    backed.current = true;
+                    tagBack.current = true;
+                    setTagView(false);
+                  }}
                 />
               </>
             ) : exportView && exportOffered ? (

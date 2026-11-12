@@ -44,6 +44,9 @@ import {
   INBOX_CODEX_HOST,
   INBOX_CODEX_NAME,
   INBOX_HOST_NAMES,
+  INBOX_MUSE_HOST,
+  INBOX_MUSE_NAME,
+  INBOX_MUSE_SESSION_ENV,
   INBOX_QWEN_HOST,
   INBOX_QWEN_NAME,
   INBOX_QWEN_SESSION_ENV,
@@ -128,6 +131,8 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
   if (isCodexThreadId(codex)) return { host: INBOX_CODEX_HOST, session: codex, name: INBOX_CODEX_NAME };
   const qwen = env[INBOX_QWEN_SESSION_ENV];
   if (isQwenSessionId(qwen)) return { host: INBOX_QWEN_HOST, session: qwen, name: INBOX_QWEN_NAME };
+  const muse = env[INBOX_MUSE_SESSION_ENV];
+  if (isInboxSessionId(muse)) return { host: INBOX_MUSE_HOST, session: muse, name: INBOX_MUSE_NAME };
   // DeepSeek Harness sets DSH_SESSION_ID with DSH_SHELL=1 in every model shell. Only there: the person's own
   // terminal in DSH Web gets DSH_SESSION_ID without DSH_SHELL, and whatever runs in it is not that session.
   // Last, and only when no other agent's marker is there: every process started from a DSH shell inherits

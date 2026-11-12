@@ -38,6 +38,7 @@ export * from "./inbox-open-in";
 export * from "./inbox-delivery";
 export * from "./inbox-codex";
 export * from "./inbox-qwen";
+export * from "./inbox-muse";
 export * from "./inbox-t3";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
@@ -434,11 +435,13 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
   cline: "Cline",
+  muse: "Muse Code",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
   cloud: "Cloud agent",
   "cloud-claude": "Claude Code routine",
   "cloud-grok": "Grok Bot",
+  "cloud-muse": "Muse by Meta",
 };
 
 /**
@@ -1779,6 +1782,11 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   pinned_at?: string | null;
   /**
+   * The live tags the thread is in (approval "inbox-thread-tags"), `ini_` ids, oldest tag first; absent when none.
+   * Like `pinned_at`, only on the list model the window and the phone read, never on anything an agent reads.
+   */
+  tags?: string[];
+  /**
    * The thread is snoozed (approval "inbox-snooze"; the rules are core's
    * inbox-snooze.ts), or null. Like `pinned_at`, only on the list model the
    * window and the phone read, never on anything an agent reads. Additive:
@@ -2464,6 +2472,7 @@ export type InboxAgentId =
   | "pi"
   | "opencode"
   | "dsh"
+  | "muse"
   | "openclaw"
   | "hermes"
   | "claude-app";
@@ -2481,6 +2490,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "pi",
   "opencode",
   "dsh",
+  "muse",
   "openclaw",
   "hermes",
   "claude-app",
@@ -2499,6 +2509,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   pi: "Pi",
   opencode: "OpenCode",
   dsh: "DeepSeek Harness",
+  muse: "Muse Code",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
   "claude-app": "Claude app",
@@ -3216,6 +3227,14 @@ export type InboxDraftFile = InboxUpload & { pasted?: InboxDraftPasted };
 /** The longest pasted-text preview a draft keeps, and the longest `lead`. */
 export const INBOX_DRAFT_PASTED_PREVIEW_MAX = 200;
 export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
+
+/**
+ * The marks a person sets on an agent or a thread that a linked machine may send to this Inbox, the one that owns it
+ * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
+ * rows only once this Inbox takes it; an older Inbox says none.
+ */
+export const INBOX_LINKED_MARKS = ["star"] as const;
+export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
