@@ -26,9 +26,10 @@ export interface ThreadRowMenuProps {
   onSnoozeBlocked?: (row: InboxListRow) => void;
   /**
    * Whether a thread is pinned to the sidebar (approval "inbox-pinned-threads"): Pin thread or Unpin
-   * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins): no item.
+   * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins), or null for a row whose machine
+   * takes no star from this one: no item.
    */
-  pinnedOf?: (threadId: string) => boolean;
+  pinnedOf?: (row: InboxListRow) => boolean | null;
   onAction: (row: InboxListRow, action: RowMenuAction) => void;
   /** The row whose menu is open (its muted background), or null when it closes. */
   onTarget: (threadId: string | null) => void;
@@ -106,7 +107,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     longPress: true,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
-  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target))) : [];
+  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target))) : [];
   const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
   const pinning = actions.filter((a) => a === 'pin' || a === 'unpin');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
