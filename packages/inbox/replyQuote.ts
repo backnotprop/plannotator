@@ -49,6 +49,16 @@ export function selectedWordsIn(root: Element | null): string | null {
   return words.length > SELECTED_MAX ? words.slice(0, SELECTED_MAX) : words;
 }
 
+/**
+ * ↩ with nothing selected quotes the message only when an agent wrote after it: then the reply could be read as an
+ * answer to that later message. The newest agent message, followed only by the person's own messages or the Inbox's
+ * notes, is the one a plain reply answers anyway, so its ↩ is a plain Reply, as is ↩ on the person's newest message.
+ */
+export function arrowQuotesWhole(messages: readonly InboxMessageWire[], id: string): boolean {
+  const at = messages.findIndex((m) => m.id === id);
+  return at >= 0 && messages.slice(at + 1).some((m) => m.author.kind === 'agent');
+}
+
 /** The quote the reply carries to the Inbox, with the quoted message's time as this window shows it. */
 export function quoteToSend(quote: InboxReplyQuote | null, messages: readonly InboxMessageWire[], time: (iso: string) => string): { of: string; words?: string; time?: string } | undefined {
   if (!quote) return undefined;

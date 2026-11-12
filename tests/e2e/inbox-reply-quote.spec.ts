@@ -33,13 +33,16 @@ type Wire = { id: string; body: string; author: { kind: string }; quote?: { of: 
 const pane = (page: Page) => page.locator('section.ib-pane');
 const box = (page: Page) => pane(page).locator('textarea:not([data-question-other])');
 
-async function openAll(page: Page, ids: string[]) {
-  const expand = page.getByRole('button', { name: 'Expand all messages' });
-  if (await expand.isVisible()) await expand.click();
-  for (const id of ids) {
-    const fold = page.locator(`[data-message-article="${id}"] [data-fold-head]`);
-    if (await fold.isVisible()) await fold.click();
-  }
+/**
+ * Opens a message the thread drew folded (an older one lands as a one-line fold) until its ↩ shows. Only a folded
+ * article's head is pressed: an open message's head folds it again.
+ */
+async function openMessage(page: Page, id: string) {
+  await expect(async () => {
+    const folded = page.locator(`[data-message-article="${id}"][data-folded] [data-fold-head]`);
+    if ((await folded.count()) > 0) await folded.first().click();
+    await expect(page.locator(`[data-message-reply="${id}"]`)).toBeVisible({ timeout: 1000 });
+  }).toPass();
 }
 
 test('reply with a quote: the line in the box, the lead the agent reads, the sent line that goes back', async ({ browser }) => {
@@ -72,7 +75,7 @@ test('reply with a quote: the line in the box, the lead the agent reads, the sen
     const page = await context.newPage();
     await page.goto(`${url}/#thread=${first.thread_id}`);
     await expect(page.locator(`[data-message-article="${second.message_id}"]`)).toBeVisible();
-    await openAll(page, [first.message_id]);
+    await openMessage(page, first.message_id);
 
     // A plain Reply: no line.
     await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
@@ -80,6 +83,7 @@ test('reply with a quote: the line in the box, the lead the agent reads, the sen
     await expect(pane(page).locator('[data-reply-quote]')).toHaveCount(0);
 
     // ↩ on the older message: the line, in the box, naming it.
+    await openMessage(page, first.message_id);
     await page.locator(`[data-message-reply="${first.message_id}"]`).click();
     const line = pane(page).locator(`.ib-rbox [data-reply-quote="${first.message_id}"]`);
     await expect(line).toBeVisible();
@@ -124,6 +128,7 @@ test('reply with a quote: the line in the box, the lead the agent reads, the sen
     expect(selected.body).toContain('\n> linked the terms page\n\nWhich terms?');
 
     // × takes it away: the reply is the words typed, nothing more.
+    await openMessage(page, first.message_id);
     await page.locator(`[data-message-reply="${first.message_id}"]`).click();
     await expect(pane(page).locator('.ib-rbox [data-reply-quote]')).toBeVisible();
     await pane(page).getByRole('button', { name: 'Remove quote' }).click();

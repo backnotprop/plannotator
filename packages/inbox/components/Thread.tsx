@@ -165,7 +165,7 @@ import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
 import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
-import { flashQuoteWords, quoteToSend, REPLY_QUOTE_WORDS, selectedWordsIn } from '../replyQuote';
+import { arrowQuotesWhole, flashQuoteWords, quoteToSend, REPLY_QUOTE_WORDS, selectedWordsIn } from '../replyQuote';
 import { ReactionTray, justReacted, reactionSpeech } from './ReactionTray';
 import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
@@ -5622,8 +5622,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /**
    * The Reply arrow on a message: the pill aims at that message's agent, and the words stay. On an older message the
-   * box quotes it; with words selected in the message, those words (approval "inbox-reply-quote"). On the newest
-   * message with nothing selected it is a plain Reply, as before (a quote there is dropped).
+   * box quotes it; with words selected in the message, those words (approval "inbox-reply-quote"). With nothing
+   * selected, on a message no agent wrote after (`arrowQuotesWhole`), it is a plain Reply, as before (a quote there is dropped).
    */
   const replyToMessage = (message: InboxMessageWire) => {
     const pressed = quoteWordsAtPress.current;
@@ -5631,7 +5631,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(message.id)}"] .ib-msg`) ?? null;
     const words = (pressed?.id === message.id ? pressed.words : null) ?? selectedWordsIn(article);
     if (words) setQuote({ of: message.id, words });
-    else if (message.id !== lastNonNote(thread.messages)?.id) setQuote({ of: message.id });
+    else if (arrowQuotesWhole(thread.messages, message.id)) setQuote({ of: message.id });
     else if (quoteRef.current) setQuote(null);
     if (words) window.getSelection()?.removeAllRanges();
     const session = message.author.kind === 'agent' ? (message.author.session ?? null) : null;

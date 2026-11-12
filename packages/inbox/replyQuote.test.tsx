@@ -152,6 +152,18 @@ test.skipIf(!hasDom)('a plain Reply (the footer, or ↩ on the newest message) h
   expect('quote' in replies()[0]!.body).toBe(false);
 });
 
+test.skipIf(!hasDom)("↩ on the agent's newest message after the person's own reply, or on that reply, is a plain Reply", async () => {
+  const mine = message(M3, { kind: 'person' }, 12, 'One more thing.', { reply_to: M2 });
+  const el = await render(threadOf(FIRST, LATER, mine));
+  await arrow(el, M2);
+  expect(line(el)).toBeNull();
+  await arrow(el, M3);
+  expect(line(el)).toBeNull();
+  // An agent message with another agent message after it is still quoted.
+  await arrow(el, M1);
+  expect(line(el)?.getAttribute('data-reply-quote')).toBe(M1);
+});
+
 test.skipIf(!hasDom)('↩ on an older message: the line names it in the box, and Send carries it with its time', async () => {
   const el = await render(threadOf(FIRST, LATER));
   await arrow(el, M1);
