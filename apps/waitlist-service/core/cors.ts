@@ -4,8 +4,6 @@ const BASE_CORS_HEADERS = {
   "Access-Control-Max-Age": "86400",
 };
 
-// Defaults target the hosted plannotator.ai site. Override ALLOWED_ORIGINS in
-// wrangler.toml or via `wrangler secret put` for self-hosted deployments.
 export function getAllowedOrigins(envValue?: string): string[] {
   if (envValue) {
     return envValue.split(",").map((o) => o.trim()).filter(Boolean);

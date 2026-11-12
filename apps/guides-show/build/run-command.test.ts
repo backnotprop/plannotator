@@ -8,7 +8,6 @@ test('collects output and the exit code', async () => {
 
 test('kills a command past its time limit, grandchildren holding the pipes included', async () => {
   const started = Date.now();
-  // The shell's background sleep keeps stdout open after the shell itself is killed.
   const r = await runCommand(['sh', '-c', 'sleep 30 & sleep 30'], { timeoutMs: 200 });
   expect(r.timedOut).toBe(true);
   expect(Date.now() - started).toBeLessThan(5000);

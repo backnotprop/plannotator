@@ -1,21 +1,3 @@
-/**
- * Shared-guide request handling (contract: adr/implementation/guide-share-hosting.md §1, §2, §4).
- *
- * Pure `(Request, context) → Response`: no bindings, no runtime globals beyond
- * WebCrypto and `URL`, so the Cloudflare Worker runs it over an R2 store and
- * the tests over an in-memory one. Routes:
- *
- *   POST    /api/g          create  → 201 { id, url, deleteToken, expiresAt? }
- *   GET     /api/g/<id>     body    → ciphertext (text/plain) or snapshot JSON
- *   DELETE  /api/g/<id>     delete  → 204 (Authorization: Bearer <deleteToken>)
- *   OPTIONS /api/g*         CORS preflight
- *   GET     /g/<id>         page    → the pinned viewer over the guide (plain) or
- *                                     the encrypted shell that fetches /api/g/<id>
- *
- * The request origin is the host: pages pin `<origin>/v1/` as the viewer base
- * and `<origin>/g/<id>` as their canonical URL. Uploaders never send a base URL.
- */
-
 import {
   FALLBACK_STYLE,
   createGuideHtml,
@@ -27,23 +9,17 @@ import {
 } from '@plannotator/core/guide-format';
 import { isStoredGuideExpired, type GuideStore, type SharedGuideMode, type StoredGuideMeta, type StoredGuideViewerPin } from './storage';
 
-/** Cap on the stored body (the ciphertext or the snapshot JSON). The downloadable file has no cap; the host must. */
 export const MAX_SHARED_GUIDE_BYTES = 25 * 1024 * 1024;
 
-/** Longest `ttlSeconds` accepted at create (10 years). Absent = never expires; this only keeps the arithmetic sane. */
 export const MAX_SHARED_GUIDE_TTL_SECONDS = 10 * 365 * 24 * 60 * 60;
 
 export interface GuideShareContext {
   readonly store: GuideStore;
-  /** The host's own bundled viewer build, used when an upload carries no pin. */
   readonly viewerManifest: Omit<GuideViewerAssets, 'baseUrl'>;
-  /** Where store failures are reported (default `console.error`); the response never carries the store's own message. */
   readonly logError?: (message: string, error: unknown) => void;
-  /** Injectable clock for expiry tests. */
   readonly now?: () => Date;
 }
 
-/** Path prefixes this handler owns; hosts route these here and keep everything else (viewer assets, landing) to themselves. */
 export function isGuideShareRoute(pathname: string): boolean {
   return pathname === '/g' || pathname.startsWith('/g/') || pathname === '/api/g' || pathname.startsWith('/api/g/');
 }
@@ -55,17 +31,10 @@ const CORS_HEADERS: Readonly<Record<string, string>> = {
   'Access-Control-Max-Age': '86400',
 };
 
-/**
- * The CORS headers every `/api/g*` response carries, exported so a host can
- * answer for the handler with the same contract when it refuses a request
- * before dispatch (the Worker's rate-limited create).
- */
 export const GUIDE_SHARE_CORS_HEADERS = CORS_HEADERS;
 
-/** Guide ids are 16 random bytes as unpadded base64url: exactly 22 URL-safe characters. Anything else is unknown, not malformed. */
 const ID_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
-/** Viewer pin paths are relative to the host's `/v1/`: plain nested filenames only, never absolute, never traversing. */
 const VIEWER_PATH_PATTERN = /^[A-Za-z0-9._\-\/]+$/;
 const INTEGRITY_PATTERN = /^sha(256|384|512)-[A-Za-z0-9+\/]+={0,2}$/;
 const PAGE_CACHE_CONTROL = 'public, max-age=300';
@@ -79,9 +48,6 @@ export async function handleGuideShareRequest(req: Request, ctx: GuideShareConte
     if (page) return await handlePage(req, url, page[1], ctx);
     return notFoundPage(url);
   } catch (error) {
-    // A store that throws (R2 outage, disk full) is a host failure, never a
-    // reviewer-facing outcome; say so plainly and do not cache it. The store's
-    // own message (paths, bucket errors) stays in the host's log.
     (ctx.logError ?? defaultLogError)(`guides.show: ${req.method} ${path} failed`, error);
     if (path.startsWith('/api/')) return json({ error: 'internal error' }, 500, { ...CORS_HEADERS, 'Cache-Control': 'no-store' });
     return htmlPage(errorPage(url, 'Something went wrong', 'This guide could not be served right now. Try again in a moment.'), 500, { 'Cache-Control': 'no-store' });
@@ -91,10 +57,6 @@ export async function handleGuideShareRequest(req: Request, ctx: GuideShareConte
 function defaultLogError(message: string, error: unknown): void {
   console.error(message, error instanceof Error ? error.message : String(error));
 }
-
-// ---------------------------------------------------------------------------
-// /api/g*
-// ---------------------------------------------------------------------------
 
 async function handleApi(req: Request, url: URL, ctx: GuideShareContext): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -119,8 +81,6 @@ interface CreateBody {
 }
 
 async function handleCreate(req: Request, url: URL, ctx: GuideShareContext): Promise<Response> {
-  // Refuse to read a body that cannot possibly fit before buffering it. The
-  // JSON envelope around `data` is small, so twice the cap is a generous bound.
   const declared = Number(req.headers.get('Content-Length'));
   if (Number.isFinite(declared) && declared > MAX_SHARED_GUIDE_BYTES * 2) {
     return json({ error: 'too large', maxBytes: MAX_SHARED_GUIDE_BYTES }, 413, CORS_HEADERS);
@@ -196,10 +156,6 @@ async function handleDelete(req: Request, id: string, ctx: GuideShareContext): P
   return new Response(null, { status: 204, headers: noStore });
 }
 
-// ---------------------------------------------------------------------------
-// /g/<id>
-// ---------------------------------------------------------------------------
-
 async function handlePage(req: Request, url: URL, id: string, ctx: GuideShareContext): Promise<Response> {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return new Response('method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
@@ -229,7 +185,6 @@ function renderShellPage(viewer: GuideViewerAssets, hosted: { url: string }, pay
   return createGuideShellHtml({ viewer, hosted, payloadUrl });
 }
 
-/** The host serves the viewer from its own origin; `createGuideHtml` refuses anything but https (or http on localhost), which is the deployment invariant, not a request-time choice. */
 function viewerAssetsFor(url: URL, pin: Omit<GuideViewerAssets, 'baseUrl'>): GuideViewerAssets {
   return { ...pin, baseUrl: `${url.origin}/v1/` };
 }
@@ -242,14 +197,9 @@ async function lookup(id: string, ctx: GuideShareContext): Promise<{ body: strin
   if (!ID_PATTERN.test(id)) return null;
   const found = await ctx.store.get(id);
   if (!found) return null;
-  // Stores may drop expired guides lazily; the handler never serves one either way.
   if (isStoredGuideExpired(found.meta, (ctx.now ?? (() => new Date()))().getTime())) return null;
   return found;
 }
-
-// ---------------------------------------------------------------------------
-// Validation helpers
-// ---------------------------------------------------------------------------
 
 type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -297,11 +247,6 @@ function bearerToken(req: Request): string | null {
   return match ? match[1] : null;
 }
 
-// ---------------------------------------------------------------------------
-// Ids, tokens, hashing (WebCrypto only)
-// ---------------------------------------------------------------------------
-
-/** `n` random bytes as unpadded base64url (16 bytes → 22 chars). */
 export function randomBase64url(n: number): string {
   const bytes = new Uint8Array(n);
   crypto.getRandomValues(bytes);
@@ -326,10 +271,6 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-// ---------------------------------------------------------------------------
-// Responses
-// ---------------------------------------------------------------------------
-
 function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers } });
 }
@@ -341,8 +282,6 @@ function bad(message: string): Response {
 function htmlPage(html: string | null, status: number, headers: Record<string, string> = {}): Response {
   return new Response(html, {
     status,
-    // A plain guide's id is the whole capability; never let a click on the
-    // guide's PR link (or any outbound link) hand it to a third party as Referer.
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', ...headers },
   });
 }
@@ -352,12 +291,6 @@ function notFoundPage(url: URL, headOnly = false): Response {
   return htmlPage(headOnly ? null : html, 404, { 'Cache-Control': 'public, max-age=60' });
 }
 
-/**
- * The failure page names the host it is served from (`url.host`): a self-host
- * is not guides.show. It wears core's `.pgr-fallback` styling so a missing
- * guide reads as part of the same product; the fallback's delayed reveal is
- * overridden because there is no viewer coming to replace this article.
- */
 function errorPage(url: URL, title: string, message: string): string {
   const host = escapeHtmlText(url.host);
   return `<!doctype html>

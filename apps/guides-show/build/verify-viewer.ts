@@ -1,16 +1,4 @@
 /// <reference types="bun-types" />
-/**
- * Check that a published viewer is whole on the live site.
- *   bun build/verify-viewer.ts [--base https://guides.show/v1/]
- *
- * HEADs every file of the local build (dist/viewer: the entry JS and CSS, the
- * worker, every chunks/ file and asset) under the base URL and fails when any
- * does not answer 200, then checks the entry JS carries the immutable cache and
- * open CORS headers exported guides rely on. A file whose size on the site
- * differs from the local one also fails (a different file under the same key).
- * Each request gives up after 15 s. Read only: it never writes.
- * Run after deploy:viewer, so a partial publish fails the workflow.
- */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { ViewerManifest } from './manifest-plugin';
@@ -34,16 +22,12 @@ function walk(dir: string, prefix = ''): string[] {
 }
 
 const files = walk(dist).filter((f) => f !== 'manifest.json');
-// The manifest names what exported guides load; each must be in the build.
 for (const rel of [manifest.js, manifest.css, ...Object.values(manifest.langs)]) {
   if (!files.includes(rel)) { console.error(`manifest names ${rel}, which is not in dist/viewer`); process.exit(1); }
 }
 
 console.log(`checking ${files.length} files under ${base}`);
 const FETCH_TIMEOUT_MS = 15_000;
-// The size comes from the HEAD's Content-Length. When it is missing or does
-// not match, the body of a GET is counted before anything is reported, so a
-// proxy that drops the header on HEAD can neither hide nor fake a mismatch.
 const head = async (url: string): Promise<HeadResult> => {
   const res = await fetch(url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   const length = res.headers.get('content-length');

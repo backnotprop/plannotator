@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { clampConcurrency, existingFromGet, findMissing, publishViewer, RETRY_DELAYS_MS, runPool, uploadPlan, withRetry } from './viewer-upload';
 
 const entries = { js: 'viewer.AAA.js', css: 'viewer.BBB.css' };
-// readdirSync order on the runner that failed in v0.28.30: the entry JS came before most chunks.
 const files = ['viewer.AAA.js', 'chunks/z.1.js', 'worker.W.js', 'viewer.BBB.css', 'chunks/a.2.js', 'fonts/x.woff2'];
 const noWait = { sleep: async () => {} };
 
@@ -159,8 +158,6 @@ describe('publishViewer', () => {
   });
 });
 
-// What wrangler 4.129 prints for `r2 object get <bucket/key> --file <tmp> --remote`
-// (the banner and messages are its own strings; see wrangler-dist/cli.js).
 const BANNER = '\n ⛅️ wrangler 4.129.0\n───────────────────\nResource location: remote \n\n';
 const DOWNLOADING = 'Downloading "v1/viewer.AAA.js" from "guides-show-viewer".\n';
 const LOGS = '🪵  Logs were written to "/home/runner/.config/.wrangler/logs/wrangler-2026-10-24_10-00-00_000.log"\n';

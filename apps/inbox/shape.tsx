@@ -1,9 +1,3 @@
-/**
- * The standalone Shape page (packages/inbox/shape/standalone/ShapePage.tsx):
- * what `plannotator shape open` serves to a person who does not use the
- * Plannotator Inbox. Built beside the window into dist/ (build:hook copies it
- * to apps/hook/dist/shape.html), with the window's plugins and aliases.
- */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
@@ -14,14 +8,12 @@ import { sceneFrameFromHash, setSceneFrame } from '@plannotator/ui/components/sh
 import './shape.css';
 
 configurePlannotatorUI({
-  // No settings server here: the theme is the person's Plannotator theme (its cookie), else the system's.
   serverSync: () => {},
   componentTooltips: true,
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
   skillCatalogTransport: async () => [],
 });
 
-// `plannotator shape frame` opens `#shape=<id>&frame=<scene>&at=<time>`: that scene, still, at that moment.
 setSceneFrame(sceneFrameFromHash(window.location.hash));
 
 const rootElement = document.getElementById('root');

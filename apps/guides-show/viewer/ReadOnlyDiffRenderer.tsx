@@ -6,22 +6,6 @@ import type { GuideDiffRendererProps } from '@plannotator/guide-viewer/host';
 const EMPTY_ANNOTATIONS: never[] = [];
 const noop = () => {};
 
-/**
- * The portable viewer's diff renderer: Plannotator's own `AllFilesCodeView`
- * in `readOnly` mode. Same component the in-app guide uses, so the diff panes
- * are byte-identical; the read-only switch only removes surfaces that need the
- * review server or mutate review state (decision record D2, D4).
- *
- * Display settings come from configStore defaults (or whatever the host
- * seeded) — never cookies, since the viewer installs an in-memory backend.
- */
-/**
- * Below Tailwind's `lg` (1024px) the diff pane is at most ~430px wide (a phone
- * has ~350px, a portrait tablet shares the row with the chapter column), so a
- * two-column diff gets under 220px per side and is unreadable; force unified
- * there. The setting itself is untouched: widen the window past 1024px and the
- * configured style applies again. Desktop layouts are unaffected.
- */
 const NARROW_VIEWPORT = '(max-width: 1023px)';
 
 function useNarrowViewport(): boolean {
@@ -77,5 +61,4 @@ export const ReadOnlyDiffRenderer: React.FC<GuideDiffRendererProps> = (props) =>
   );
 };
 
-/** The guide chain forwards no extra props to a read-only renderer. */
 export const getReadOnlyDiffRendererProps = (): Record<string, never> => ({});

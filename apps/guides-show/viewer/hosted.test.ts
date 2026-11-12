@@ -1,9 +1,3 @@
-/**
- * The hosted boot helpers are pure enough to test without a browser: the
- * error mapping (which card a reader sees) and the viewer pin rebuilt from
- * the DOM (which decides whether the client-side download opens at all).
- * The full boot path is covered by the headless smoke, not here.
- */
 import { describe, expect, test } from 'bun:test';
 import { FIXTURE_V1_PR } from '@plannotator/core/guide-format-fixtures';
 import { GUIDE_HOSTED_META_NAME, GUIDE_PAYLOAD_META_NAME, guideExportFilename, readEmbeddedGuideSnapshot } from '@plannotator/core/guide-format';
@@ -77,7 +71,6 @@ describe('loadHostedEncryptedSnapshot', () => {
 describe('readViewerAssetsFromDocument + buildPortableGuideFile', () => {
   const SCRIPT_URL = 'https://guides.show/v1/viewer.abc123.js';
 
-  /** A DOM-free stand-in: elements are attribute bags, selectors are matched by tag + rel/type. */
   function hostedDocument(overrides: { cssHref?: string } = {}): ViewerDocumentLike {
     const el = (attrs: Record<string, string>) => ({ getAttribute: (name: string) => attrs[name] ?? null });
     const link = el({ rel: 'stylesheet', href: overrides.cssHref ?? 'https://guides.show/v1/viewer.def456.css', integrity: 'sha384-css' });

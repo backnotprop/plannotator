@@ -1,11 +1,3 @@
-/**
- * The code-review diagram engine's entry (see build.ts and
- * packages/review-editor/utils/diagramEngineContract.ts). Never imported by
- * the review page's own graph: the page imports the BUILT file by URL.
- *
- * Read-only: the Markdown preview comments on rendered text, not on diagram
- * parts, so no composer, no comment rail and no Ask AI here.
- */
 import React from 'react';
 import { MermaidBlock } from '@plannotator/ui/components/MermaidBlock';
 import { GraphvizBlock } from '@plannotator/ui/components/GraphvizBlock';

@@ -1,25 +1,3 @@
-/**
- * The `plannotator` agent tool and the `/plannotator-review`,
- * `/plannotator-annotate` and `/plannotator-last` commands on DeepSeek
- * Harness. The tool is the shared contract (packages/shared/plannotator-tool.ts,
- * the one Pi and OpenCode 2 register), registered with `ctx.tools.register`;
- * the commands with `ctx.commands.register`. Both open reviews through
- * reviews.ts: the call returns once the page is up, and the person's decision
- * arrives later in the session as a new turn (`agent.followup`). Nothing waits
- * inside a tool call for a person.
- *
- * The tool follows the agent tool switch (`PLANNOTATOR_AGENT_TOOL`, then
- * config `agentTool`, then AGENT_TOOL_DEFAULTS.dsh, off: DSH sends every
- * tool's definition with each request), read once at plugin load. The
- * commands do not depend on it: they cost the model nothing. Neither is
- * registered in the `headless`, `sdk`, `sdk-minimal` or `acp` profiles, whose
- * client did not ask for turns of ours; there the shared skills still run the
- * CLI.
- *
- * Plan review is not part of the tool: it stays on `exit_plan_mode`
- * (plan-review.ts).
- */
-
 import { loadConfig, resolveAgentTool, type PlannotatorConfig } from "../../packages/shared/config";
 import { annotateTargetWords, parseAnnotateArgs } from "../../packages/shared/annotate-args";
 import {
@@ -44,18 +22,15 @@ import { DSH_LAST_SUBJECT, DSH_LOCAL_CHANGES_SUBJECT, DshReviews, dshStartFailur
 
 export const DSH_AGENT_TOOL_HOST = "dsh";
 
-/** The commands, by name (DSH's command names: lowercase, `[a-z][a-z0-9_-]*`). */
 export const DSH_COMMANDS = {
   review: "plannotator-review",
   annotate: "plannotator-annotate",
   last: "plannotator-last",
 } as const;
 
-/** `last` from a subagent: it reads the main session's messages, which the subagent did not write. */
 export const DSH_SUBAGENT_LAST_TEXT =
   'Invalid plannotator call: action "last" annotates the main session\'s last message and is not available to a subagent.';
 
-/** `ctx.commands` (CommandRegistry): only `register`. */
 export interface DshCommandsService {
   register(definition: DshCommandDefinition): unknown;
 }
@@ -71,13 +46,9 @@ export interface DshCommandDefinition {
 
 export interface DshNativeDeps {
   env?: NodeJS.ProcessEnv;
-  /** Plannotator's config (default: config.json in the data dir). */
   config?: PlannotatorConfig;
-  /** The program to run instead of the resolved binary (tests: a fake CLI). */
   command?: string[];
-  /** How often a launch looks for the page (tests). */
   pollMs?: number;
-  /** How long a call waits for the page before answering "starting" (tests). */
   readyWaitMs?: { review: number; other: number };
 }
 
@@ -94,30 +65,25 @@ function warnOf(ctx: DshInboxContext) {
     try {
       ctx.logger?.warn?.(format, ...args);
     } catch {
-      // Logging is best-effort.
     }
   };
 }
 
-/** Whether this DSH profile takes turns of ours (not `headless`, `sdk`, `sdk-minimal` or `acp`). */
 export function profileTakesTurns(ctx: DshInboxContext): boolean {
   const profile = service<{ name?: unknown }>(ctx, "profileContext");
   return !(typeof profile?.name === "string" && DSH_NO_WAKE_PROFILES.includes(profile.name));
 }
 
-/** DSH's home as the running profile resolved it (`profileContext.home`), for `last`. */
 export function dshHomeOf(ctx: DshInboxContext): string | undefined {
   const home = service<{ home?: unknown }>(ctx, "profileContext")?.home;
   return typeof home === "string" && home ? home : undefined;
 }
 
-/** The DSH session id of an agent: its session header id, else the agent id. */
 function sessionIdOf(agent: DshInboxAgent): string {
   const id = agent.session?.header?.id;
   return typeof id === "string" && id ? id : agent.id;
 }
 
-/** The subject of a tool call's review. */
 export function toolSubject(call: PlannotatorToolInput): string {
   const targets = plannotatorToolTargets(call);
   switch (call.action) {
@@ -130,12 +96,10 @@ export function toolSubject(call: PlannotatorToolInput): string {
   }
 }
 
-/** A command's words: shell-style quoting when it reads as one, else split on whitespace. */
 function commandWords(raw: string): string[] {
   return simpleShellCommandWords(raw) ?? raw.trim().split(/\s+/).filter(Boolean);
 }
 
-/** One slash command's review, or the error the person sees. */
 export function commandRequest(
   name: (typeof DSH_COMMANDS)[keyof typeof DSH_COMMANDS],
   rawInput: string,
@@ -170,7 +134,6 @@ export function commandRequest(
     }
     case DSH_COMMANDS.review: {
       const words = commandWords(raw).filter((word) => word !== "--json");
-      // A review's gate is the plugin's (deliver a bare approval), never passed on.
       const gate = words.includes("--gate");
       const args = words.filter((word) => word !== "--gate");
       let target: string | undefined;
@@ -188,23 +151,14 @@ export function commandRequest(
   }
 }
 
-/** What the plugin registers: the reviews they share, and a way to register each part in a context. */
 export interface DshNative {
   readonly reviews: DshReviews;
-  /** Whether the agent tool switch put the tool on (read once, at plugin load). */
   readonly toolOn: boolean;
-  /** Register the `plannotator` tool in `ctx` (an `inject(['agents', 'tools'])` child). */
   registerTool(ctx: DshInboxContext): void;
-  /** Register the commands in `ctx` (an `inject(['agents', 'commands'])` child). */
   registerCommands(ctx: DshInboxContext): void;
   dispose(): void;
 }
 
-/**
- * The tool and commands for this DSH process, or null in a profile that takes
- * no turns of ours. `binary` is the plugin's `binary` config, resolved for
- * each launch (`resolveBinary`).
- */
 export function createDshNative(
   ctx: DshInboxContext,
   options: { resolveBinary: () => string | undefined; dataDir: string },
@@ -229,8 +183,6 @@ export function createDshNative(
     ...(deps.readyWaitMs && { readyWaitMs: deps.readyWaitMs }),
   });
 
-  // The decision and `list`/`close` belong to the top-level session; the review runs in the CALLER's
-  // folder (a DSH subagent can have its own working directory, e.g. a worktree).
   const owning = (agents: DshAgentsService, agent: DshInboxAgent) => {
     const root = rootAgentOf(agents, agent);
     return { root, subagent: root !== agent, cwd: sessionCwd(ctx as DshContext, agent as never) };
@@ -337,7 +289,6 @@ export function createDshNative(
   };
 }
 
-/** Put a decision into a live session as a new turn; throws when it cannot. */
 function deliverTo(agents: DshAgentsService | undefined, owner: string, text: string): void {
   const agent = agents?.get(owner);
   if (!agent) throw new Error("the session is not live in this DSH");

@@ -1,27 +1,6 @@
-/**
- * DSH plan review through Plannotator.
- *
- * DSH's `exit_plan_mode` asks for the review on the Agent-scoped
- * `user-questions/request` waterfall: one question whose `intent.kind` is
- * "plan-review", the plan markdown in `detail`, and the approving option's
- * label in `intent.approve`. This listener answers it by running
- * `plannotator dsh-plan` and maps the decision onto the answer DSH's plan mode
- * reads (DSH packages/plan/plan-mode):
- *   approve          → the approve label alone (DSH leaves plan mode)
- *   approve + notes  → the approve label, then the composed notes message
- *                      steered into the agent as a user message (the answer
- *                      itself has no room for notes)
- *   keep planning    → no label and the composed feedback as `custom` text
- * A request that is not a plan review, and every failure of ours (no CLI, a
- * non-zero exit, unreadable output), goes to `next()`, so DSH's own review
- * card still works. An aborted request (turn cancelled) stops the CLI and
- * rejects, as DSH expects of an answerer.
- */
-
 import { randomUUID } from "node:crypto";
 import { resolvePlannotatorBinary, runDshPlan, type DshPlanResult } from "./cli";
 
-/** The subset of DSH's question shapes this plugin reads. */
 export interface DshQuestion {
   id: string;
   detail?: string;
@@ -43,7 +22,6 @@ export interface DshQuestionRequest {
   signal?: AbortSignal;
 }
 
-/** A DSH user message, built as `createUserMessage` from dsh-llm builds it. */
 export interface DshUserMessage {
   readonly id: string;
   readonly role: "user";
@@ -56,7 +34,6 @@ export interface DshLogger {
   warn?(format: string, ...args: unknown[]): void;
 }
 
-/** The subset of the Cordis context this plugin uses. */
 export interface DshContext {
   on(
     event: "user-questions/request",
@@ -64,7 +41,6 @@ export interface DshContext {
     options?: { prepend?: boolean },
   ): unknown;
   get?(name: string): unknown;
-  /** Runs `execute` now; the disposer it returns runs when the plugin unloads. */
   effect?(execute: () => () => void): unknown;
   logger?: DshLogger;
 }
@@ -77,7 +53,6 @@ export interface ResolvedConfig {
 export interface PlanReviewDeps {
   resolveBinary?: (configured?: string) => string | undefined;
   run?: typeof runDshPlan;
-  /** Aborted when the plugin unloads; an open review then goes back to DSH. */
   unloadSignal?: AbortSignal;
 }
 
@@ -86,7 +61,6 @@ function anySignal(...signals: (AbortSignal | undefined)[]): AbortSignal | undef
   return present.length > 1 ? AbortSignal.any(present) : present[0];
 }
 
-/** The single plan-review question of a request, or undefined for anything else. */
 export function planReviewQuestion(request: DshQuestionRequest | undefined): (DshQuestion & { detail: string; intent: { kind: "plan-review"; approve: string } }) | undefined {
   const questions = request?.questions;
   if (!Array.isArray(questions) || questions.length !== 1) return undefined;
@@ -96,7 +70,6 @@ export function planReviewQuestion(request: DshQuestionRequest | undefined): (Ds
   return question as DshQuestion & { detail: string; intent: { kind: "plan-review"; approve: string } };
 }
 
-/** The session's current directory, else the directory it started in. */
 export function sessionCwd(ctx: DshContext, agent: DshAgent | undefined): string | undefined {
   if (!agent) return undefined;
   try {
@@ -104,7 +77,6 @@ export function sessionCwd(ctx: DshContext, agent: DshAgent | undefined): string
     const current = workingDirectory?.get?.(agent.session);
     if (typeof current === "string" && current) return current;
   } catch {
-    // The service may be absent or not ready; the header still names the project.
   }
   const original = agent.session?.header?.cwd;
   return typeof original === "string" && original ? original : undefined;
@@ -119,7 +91,6 @@ export function createUserMessage(text: string): DshUserMessage {
   });
 }
 
-/** The answer DSH's plan mode reads for one decision. */
 export function answerFor(question: { id: string; intent: { approve: string } }, result: DshPlanResult): DshAnswer {
   if (result.approved) return { answers: [{ id: question.id, selected: [question.intent.approve] }] };
   const custom = result.message ?? result.feedback;
@@ -135,7 +106,6 @@ export function createPlanReviewListener(ctx: DshContext, config: ResolvedConfig
     try {
       ctx.logger?.warn?.(format, ...args);
     } catch {
-      // Logging is best-effort.
     }
   };
 
@@ -156,14 +126,12 @@ export function createPlanReviewListener(ctx: DshContext, config: ResolvedConfig
         plan: question.detail,
         cwd: sessionCwd(ctx, request.agent),
         signal: anySignal(request.signal, deps.unloadSignal),
-        // Remote sessions open no browser: the URL the CLI prints is the way in.
         onStderr: (chunk) => {
           for (const line of chunk.split(/\r?\n/)) {
             if (URL_RE.test(line)) {
               try {
                 ctx.logger?.info?.("plannotator: %s", line.trim());
               } catch {
-                // Logging is best-effort.
               }
             }
           }
@@ -186,10 +154,6 @@ export function createPlanReviewListener(ctx: DshContext, config: ResolvedConfig
   };
 }
 
-/**
- * The plugin config from the profile's cordis patch: `{ binary?, planReview? }`.
- * A wrong type or an unknown key fails plugin load instead of being ignored.
- */
 export function resolveConfig(config: unknown): ResolvedConfig {
   if (config === undefined || config === null) return { planReview: true };
   if (typeof config !== "object" || Array.isArray(config)) {

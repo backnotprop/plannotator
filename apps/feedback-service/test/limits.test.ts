@@ -1,10 +1,3 @@
-/**
- * The client (packages/core/product-feedback.ts, used by the Inbox and the
- * CLI) checks a person's input before sending, so they see "too long" before
- * the round trip. Its limits must be the Worker's: a client that allows more
- * would send what the Worker refuses, one that allows less would refuse what
- * it accepts.
- */
 import { expect, test } from "bun:test";
 import * as client from "../../../packages/core/product-feedback";
 import * as worker from "../core/validation";
@@ -24,7 +17,6 @@ test("every payload the client builds is one the Worker accepts", () => {
     { version: "0.28.33", os: client.feedbackOsName("darwin"), surface: "cli" },
   );
   expect(worker.normalizeFeedback(payload)).toEqual({ message: "works", category: "bug", contact: "@me", version: "0.28.33", os: "macOS", surface: "cli", agents: null });
-  // A source run's version and an unknown platform are labels too.
   const dev = client.productFeedbackPayload({ message: "x" }, { version: "dev", os: client.feedbackOsName("sunos"), surface: "inbox" });
   expect(() => worker.normalizeFeedback(dev)).not.toThrow();
   expect(Object.keys(dev).sort()).toEqual(["message", "os", "surface", "version"]);
@@ -33,7 +25,6 @@ test("every payload the client builds is one the Worker accepts", () => {
 test("the client's agent names are ones the Worker keeps as they are", () => {
   const names = ["Claude Code", "Codex", "Pi", "OpenCode", "Qwen Code", "DeepSeek Harness", "T3 Code", "Windsurf / Devin", "Gemini CLI"];
   const payload = client.productFeedbackPayload({ message: "x" }, { version: "dev", os: "macOS", surface: "inbox", agents: names });
-  // The client caps at the Worker's limit, so the Worker drops nothing the client sent.
   expect(payload.agents).toEqual(names.slice(0, client.FEEDBACK_AGENTS_MAX));
   expect(worker.normalizeFeedback(payload).agents).toBe(payload.agents!.join(", "));
 });

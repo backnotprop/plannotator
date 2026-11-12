@@ -1,20 +1,3 @@
-/**
- * End to end against a real Cline CLI: the built plugin in a scratch Cline
- * home, a fake OpenAI-compatible model on loopback (no key, no paid call), and
- * a scratch Inbox in this process. The Cline session shows up in the Inbox's
- * New message picker, and a New message to it starts a real turn there: the
- * fake model receives the wake text, and the Inbox records the delivery.
- *
- * Opt-in: Cline is never installed by the test suite. Point CLINE_E2E_BIN at a
- * Cline CLI binary (the npm package `cline`, installed into a scratch prefix)
- * to run it; otherwise it is skipped. macOS and Linux (it gives the TUI a pty
- * with `script`). Every Cline process gets the scratch HOME, its own hub port,
- * and stub `open` / `xdg-open` first on PATH, so nothing reaches the real
- * ~/.cline or opens a browser; the hub it starts is stopped at the end.
- *
- *   CLINE_E2E_BIN=/path/to/cline /tmp/overnight/bt.sh apps/cline-plugin/cline-e2e.test.ts
- */
-
 import { afterAll, expect, test } from "bun:test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -33,7 +16,6 @@ afterAll(() => {
     try {
       cleanup();
     } catch {
-      // Best effort.
     }
   }
 });
@@ -58,7 +40,6 @@ async function until<T>(check: () => T | null | undefined | Promise<T | null | u
   return null;
 }
 
-/** The last user message's text in a chat completions request. */
 function lastUser(body: { messages?: { role?: string; content?: unknown }[] }): string {
   for (const message of [...(body.messages ?? [])].reverse()) {
     if (message.role !== "user") continue;
@@ -78,13 +59,11 @@ test.skipIf(!RUNS)(
     const dataDir = join(root, "plannotator");
     const stubs = join(root, "stubs");
     for (const dir of [home, project, dataDir, stubs]) mkdirSync(dir, { recursive: true });
-    // Nothing a Cline notice or link could run opens a browser.
     for (const name of ["open", "xdg-open"]) {
       writeFileSync(join(stubs, name), "#!/bin/sh\nexit 0\n");
       chmodSync(join(stubs, name), 0o755);
     }
 
-    // The fake model: every request recorded, a plain text answer streamed back.
     const requests: { at: number; user: string }[] = [];
     const model = Bun.serve({
       hostname: "127.0.0.1",
@@ -103,7 +82,6 @@ test.skipIf(!RUNS)(
     cleanups.push(() => inbox.stop());
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { cline: true } }));
 
-    // The plugin as Cline loads it: one built file in the scratch home's plugins folder.
     const built = await Bun.build({ entrypoints: [join(import.meta.dir, "index.ts")], target: "node" });
     expect(built.success).toBe(true);
     mkdirSync(join(home, ".cline", "plugins"), { recursive: true });
@@ -125,8 +103,6 @@ test.skipIf(!RUNS)(
     expect(auth.status).toBe(0);
     cleanups.push(() => void spawnSync(CLINE!, ["hub", "stop"], { env, timeout: 10_000 }));
 
-    // The interactive TUI on a pty (`script`), its first turn the prompt; it then stays open and idle.
-    // Its stdin is a real pipe kept open by `sleep` (`script` refuses a socket, which is what a "pipe" stdio is here).
     const quoted = [CLINE!, "-i", "-c", project, "first turn"].map((word) => `'${word.replace(/'/g, `'\\''`)}'`).join(" ");
     const pty: ChildProcess = spawn(
       "/bin/sh",

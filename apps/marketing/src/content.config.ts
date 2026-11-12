@@ -17,7 +17,6 @@ const docs = defineCollection({
 });
 
 const blog = defineCollection({
-  // The Inbox post is not in the collection until launch (src/lib/inbox-launch.ts).
   loader: glob({
     pattern: INBOX_LAUNCHED ? '**/*.md' : ['**/*.md', `!${INBOX_POST_ID}.md`],
     base: './src/content/blog',

@@ -1,22 +1,3 @@
-/**
- * Write the viewer pin module Plannotator's export path embeds
- * (`@plannotator/core/guide-viewer-manifest`). The module is GENERATED and
- * gitignored, never committed: its hashes move with every viewer change, so a
- * committed copy made every open PR that touched the viewer conflict with the
- * next one to merge.
- *   bun build/sync-manifest.ts               # from dist/viewer/manifest.json (run build:viewer first)
- *   bun build/sync-manifest.ts --if-missing  # postinstall: write the fallback pin only when no pin exists
- * Every build that ships a pin (release binaries, the OpenCode and Pi packages,
- * the guides.show Worker, @plannotator/core's tarball, the VS Code extension)
- * runs `bun run build:viewer-pin` first, so it pins the viewer built from its
- * own commit; on release tags, release.yml refuses to publish unless guides.show
- * serves the pinned entry files. A checkout that has not built the viewer gets
- * the fallback pin (`fallback-viewer-pin.json`): v0.28.36's viewer, already
- * published on guides.show, so typecheck, tests and local exports work and an
- * unbuilt pin never points at a missing file. It carries no grammar chunk map
- * (those are only modulepreload hints), and `fallback-viewer-pin.test.ts`
- * freezes its values.
- */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { GUIDE_LANGUAGE_IDS } from '../../../packages/core/guide-format';
@@ -29,9 +10,6 @@ const fallback = path.resolve(import.meta.dirname, 'fallback-viewer-pin.json');
 const target = path.resolve(import.meta.dirname, '../../../packages/core/guide-viewer-manifest.ts');
 
 function render(pin: ViewerPin, origin: string): string {
-  // Every grammar chunk is built and published, but the pin only lists the ids
-  // `detectGuideLanguages` can produce: those are the only modulepreload hints
-  // an export can ever emit, and the rest would just bloat this file.
   const langs = Object.entries(pin.langs ?? {})
     .filter(([lang]) => GUIDE_LANGUAGE_IDS.includes(lang))
     .sort(([a], [b]) => a.localeCompare(b))

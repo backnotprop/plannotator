@@ -1,18 +1,10 @@
-// A per-IP throttle kept in the Worker isolate's memory only. The IP is the
-// key of an in-memory map that forgets it after the window; it is never
-// written to the database or the logs. Each isolate counts on its own, so
-// this is a soft limit; the Cloudflare rate-limit binding (wrangler.toml) is
-// the shared one.
-
 export interface Throttle {
-  /** Counts one request for `key`; false once `key` is over the limit in the window. */
   allow(key: string): boolean;
 }
 
 export interface ThrottleOptions {
   limit: number;
   windowMs: number;
-  /** Keys held at most; the oldest is forgotten first. Bounds the isolate's memory. */
   maxKeys?: number;
   now?: () => number;
 }

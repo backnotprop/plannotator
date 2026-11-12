@@ -1,14 +1,3 @@
-/**
- * The owner's rule for this Worker: the public endpoint can only submit,
- * never read, and never change or remove what is already stored. This test
- * reads every code file in the package, wherever it sits (all of
- * apps/feedback-service but test/, node_modules/ and wrangler's .wrangler/),
- * so a new folder cannot hide a read route, and fails on any SQL verb but
- * INSERT, any D1 read method, any second statement, and any route but
- * POST /feedback. It also walks the imports from wrangler's `main` (what
- * wrangler bundles): every one stays in this package's code, which the
- * scan covers. The only .sql file is schema.sql, the migration.
- */
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -58,7 +47,6 @@ describe("the Worker only ever inserts", () => {
         const typeOnly = Boolean(m[2]);
         const spec = (m[3] ?? m[4] ?? m[5] ?? m[6])!;
         if (!spec.startsWith(".")) {
-          // A package would bundle code this guard never reads; types only are erased.
           expect(typeOnly, `${file} imports the package "${spec}"`).toBe(true);
           continue;
         }
@@ -95,17 +83,13 @@ describe("the Worker only ever inserts", () => {
     const schema = sqlFiles.find((s) => s.file === "schema.sql")!.text.replace(/--[^\n]*/g, "");
     const table = /CREATE TABLE IF NOT EXISTS feedback \(([\s\S]*?)\n\);/.exec(schema)![1]!;
     const columns = table.split("\n").map((line) => /^\s*([a-z_]+)\s/.exec(line)?.[1]).filter((c): c is string => !!c);
-    // Every field the Worker validates is written: a column left out of the INSERT is a field silently dropped.
     expect([...written].sort()).toEqual(columns.filter((c) => c !== "id").sort());
-    // A database made before a column existed gets it from its migration, so the deployed one has it too.
     const added = sqlFiles.filter((s) => s.file.startsWith("migrations/")).map((s) => /ADD COLUMN ([a-z_]+)/.exec(s.text)![1]!);
     expect(added).toContain("agents");
     for (const column of added) expect(columns, `the schema has ${column}`).toContain(column);
   });
 
   test("no SQL verb but INSERT appears anywhere in the source, comments included", () => {
-    // A JavaScript method call (`map.delete(key)`, `text.replace(re, "")`) is not SQL: a word right after a
-    // `.` is skipped. Everything else counts, comments and strings included.
     const banned = /(?<!\.)\b(select|update|delete|replace|drop|alter|upsert|truncate|pragma|attach|vacuum|returning|create)\b|\bon\s+conflict\b|\bor\s+ignore\b/i;
     for (const { file, text } of sources) {
       expect(banned.exec(text)?.[0] ?? null, `${file} contains a banned SQL word`).toBeNull();
@@ -125,15 +109,11 @@ describe("the Worker only ever inserts", () => {
     for (const { file, sql } of prepared) {
       expect(file).toBe("stores/d1.ts");
       expect(sql).toMatch(/^INSERT INTO feedback \([a-z_, ]+\) VALUES \((\?, )*\?\)$/);
-      // No `${...}` interpolation into SQL: values go through bind().
       expect(sql).not.toContain("${");
-      // As many placeholders as columns.
       const columns = /\(([^)]*)\)/.exec(sql)![1]!.split(",").length;
       expect(sql.match(/\?/g)!.length).toBe(columns);
     }
-    // The second is the first without `agents` (a table the migration has not reached), nothing else.
     expect(prepared[1]!.sql).toBe(prepared[0]!.sql.replace("agents, ", "").replace("?, ?)", "?)"));
-    // Every `.prepare(` call is one of the template ones above (no string-built SQL).
     const calls = sources.reduce((n, { text }) => n + (text.match(/\.prepare\(/g)?.length ?? 0), 0);
     expect(calls).toBe(2);
   });

@@ -1,9 +1,4 @@
 /// <reference types="bun-types" />
-/**
- * Local stand-in for guides.show: serves dist/viewer under /v1/ with the same
- * headers the Worker sends (immutable cache, CORS for file:// documents).
- *   bun build/serve-local.ts [--port 8787]
- */
 import path from 'node:path';
 import { viewerAssetHeaders, viewerKeyFromPath } from '../worker/index';
 const args = process.argv.slice(2);

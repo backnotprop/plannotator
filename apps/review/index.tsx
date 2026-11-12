@@ -12,9 +12,6 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    {/* Worker-pool syntax highlighting — tokenization off the main thread
-        (diffshub parity). Pierre's CodeView/FileDiff pick the pool up from
-        context automatically. */}
     <ReviewWorkerPoolProvider>
       <App />
     </ReviewWorkerPoolProvider>

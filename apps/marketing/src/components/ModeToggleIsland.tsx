@@ -65,7 +65,6 @@ export default function ModeToggleIsland() {
         className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         title="Toggle theme"
       >
-        {/* Sun - visible in light mode */}
         <svg
           className="w-4 h-4 hidden light:block"
           fill="none"
@@ -76,7 +75,6 @@ export default function ModeToggleIsland() {
           <circle cx="12" cy="12" r="4" />
           <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
         </svg>
-        {/* Moon - visible in dark mode */}
         <svg
           className="w-4 h-4 light:hidden"
           fill="none"

@@ -1,23 +1,3 @@
-/**
- * Builds code review's diagram engine as three files beside the single-file
- * review page (owner approval "review-diagrams-on-demand"):
- *
- *   dist/diagram-engine/engine.js    ui's DiagramBlock path (React layer,
- *                                     renderer slot, sanitizer, anchors)
- *   dist/diagram-engine/mermaid.js   the Mermaid runtime (ELK, its own KaTeX)
- *   dist/diagram-engine/graphviz.js  @viz-js/viz (Emscripten, wasm inlined)
- *
- * The review page never carries any of them (tests/entry-assets.test.ts): the
- * review server serves them under content-hashed URLs and the page imports
- * the engine by URL only when a Markdown preview or a guide overview holds a
- * diagram fence. Run after the page build (`vite build` empties dist/).
- *
- * The engine shares React and ui's stateful modules with the page instead of
- * bundling copies (DIAGRAM_ENGINE_SHARED_MODULES): each import of one of them
- * becomes a module that reads the page's instance from the host object the
- * page installs before the import. The runtimes are fetched by the engine
- * from the host's `runtimeUrls`, so the page never names them either.
- */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -28,8 +8,6 @@ import {
   DIAGRAM_ENGINE_SHARED_MODULES,
 } from '../../../packages/review-editor/utils/diagramEngineContract';
 
-// Vite's module ids use `/` on every platform; every path compared with one
-// goes through normalizePath, or nothing matches on Windows.
 const here = normalizePath(import.meta.dir);
 const repoRoot = normalizePath(path.resolve(here, '../../..'));
 const uiRoot = normalizePath(path.join(repoRoot, 'packages/ui'));
@@ -39,14 +17,12 @@ const HOST = `globalThis[${JSON.stringify(DIAGRAM_ENGINE_HOST_KEY)}]`;
 const VIRTUAL = '\0pn-diagram-host:';
 
 const BARE_SHARED = new Set<string>(DIAGRAM_ENGINE_SHARED_MODULES.filter((key) => !key.startsWith('ui:')));
-/** Absolute path of a ui file (no extension) → its shared key. */
 const UI_SHARED = new Map<string, string>(
   DIAGRAM_ENGINE_SHARED_MODULES.filter((key) => key.startsWith('ui:')).map((key) => [normalizePath(path.join(uiRoot, key.slice(3))), key]),
 );
 
 const stripExt = (id: string) => id.replace(/\?.*$/, '').replace(/\.(tsx?|jsx?|mjs)$/, '');
 
-/** Imports of the shared modules read the page's instances from the host. */
 function hostModules(): Plugin {
   return {
     name: 'pn-diagram-host-modules',
@@ -63,10 +39,6 @@ function hostModules(): Plugin {
     load(id) {
       if (!id.startsWith(VIRTUAL)) return null;
       const key = JSON.stringify(id.slice(VIRTUAL.length));
-      // A CommonJS package's namespace (react) carries its exports on
-      // `default`; an ES module's carries them directly. Both are merged so a
-      // named import finds either. Named imports resolve against
-      // `__pnHostModule` (Rollup's syntheticNamedExports).
       return {
         code: [
           `const host = ${HOST};`,
@@ -82,9 +54,6 @@ function hostModules(): Plugin {
   };
 }
 
-/** The renderer slots' default `import('mermaid')` / `import('@viz-js/viz')`
- * become imports of the URLs the page hands over. Exactly one site each, or
- * the build fails (a moved import must not silently bundle a runtime). */
 function runtimeUrls(): Plugin {
   const sites: Record<string, { runtime: 'mermaid' | 'graphviz'; pattern: RegExp }> = {
     [normalizePath(path.join(uiRoot, 'utils/mermaid.ts'))]: { runtime: 'mermaid', pattern: /(?<![`'"])import\(\s*['"]mermaid['"]\s*\)/g },
@@ -111,8 +80,6 @@ function runtimeUrls(): Plugin {
   };
 }
 
-/** Code review never edits a diagram's source (no `onSave`), so the Source
- * pane and its CodeMirror (~280 KB) stay out of the engine. */
 function noSourcePane(): Plugin {
   const pane = normalizePath(path.join(uiRoot, 'components/diagram/DiagramSourcePane'));
   const STUB = '\0pn-diagram-no-source-pane';
@@ -131,13 +98,6 @@ function noSourcePane(): Plugin {
   };
 }
 
-/** The proof the sharing is complete. The engine must not carry a second
- * copy of a stateful ui module: the config store and its settings, cookie
- * storage, the theme registry, the identity and math slots, or any
- * repository module that defines a React context (its consumers would read
- * an empty copy, not the page's provider). The engine's own context
- * (anchorClaims) is provided and read inside the engine only. React and the
- * runtimes must not be bundled either. */
 function guardBundle(): Plugin {
   const ownContexts = new Set([normalizePath(path.join(uiRoot, 'components/diagram/anchorClaims.ts'))]);
   const stateful = [
@@ -180,7 +140,6 @@ function guardBundle(): Plugin {
   };
 }
 
-/** The runtimes are dependencies of packages/ui; resolve them from there. */
 function runtimeFromUi(): Plugin {
   const importer = path.join(uiRoot, 'utils/mermaid.ts');
   return {
@@ -193,10 +152,6 @@ function runtimeFromUi(): Plugin {
   };
 }
 
-/** Mermaid typesets `$$` labels through its own `import("katex")`. Here that
- * import goes to ui's mermaid-math-slot, which renders with the PAGE's math
- * renderer (shared `ui:utils/math`, filled by the page's math-eager), so the
- * runtime file carries no second KaTeX. */
 function mermaidKatexFromPage(): Plugin {
   const slot = normalizePath(path.join(uiRoot, 'utils/mermaid-math-slot.ts'));
   return {
@@ -209,8 +164,6 @@ function mermaidKatexFromPage(): Plugin {
   };
 }
 
-/** Vite keeps whitespace in an ES library build; these files are served to
- * a browser, never consumed by another bundler, so minify them fully. */
 function minifyChunks(): Plugin {
   return {
     name: 'pn-diagram-minify',
@@ -241,7 +194,6 @@ async function buildOne(name: string, entry: string, plugins: PluginOption[]) {
     plugins,
     build: {
       target: 'esnext',
-      // Minified by minifyChunks (Vite keeps whitespace in an ES library).
       minify: false,
       outDir,
       emptyOutDir: false,

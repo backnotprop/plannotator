@@ -20,8 +20,6 @@ function faviconPlugin(): Plugin {
       });
     },
     generateBundle() {
-      // The .ico is what the page links (the tab takes its hand-pixelled 16 or
-      // 32 frame); favicon.png stays for anything that still links that URL.
       this.emitFile({
         type: 'asset',
         fileName: 'favicon.ico',
@@ -47,11 +45,7 @@ export default defineConfig({
   plugins: [faviconPlugin(), react(), tailwindcss()],
   resolve: {
     alias: {
-      // Drop the dead Oniguruma WASM (~622 KB base64). See
-      // build/shiki-wasm-stub.ts.
       'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
-      // Highlights, Pierre's second highlighter (WASM), never runs: Plannotator
-      // highlights with Shiki. See build/pierre-highlights-stub.ts.
       '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@': path.resolve(__dirname, '.'),

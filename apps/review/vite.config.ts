@@ -35,12 +35,7 @@ export default defineConfig({
   plugins: [demoFileContentPlugin(), react(), tailwindcss(), katexWoff2Only(), packedApp()],
   resolve: {
     alias: {
-      // Drop the dead Oniguruma WASM (~622 KB base64, inlined twice here: main
-      // thread + worker). See build/shiki-wasm-stub.ts. `resolve.alias` is
-      // shared with the worker build below; `plugins` would not be.
       'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
-      // Highlights, Pierre's second highlighter (WASM), never runs: Plannotator
-      // highlights with Shiki. See build/pierre-highlights-stub.ts.
       '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@': path.resolve(__dirname, '.'),
@@ -51,14 +46,8 @@ export default defineConfig({
       '@plannotator/review-editor': path.resolve(__dirname, '../../packages/review-editor/App.tsx'),
     }
   },
-  // The Pierre highlight worker (?worker&inline) contains a dynamic
-  // import("shiki/wasm") branch (aliased to a stub above, but still a dynamic
-  // import edge); iife (Vite's default worker format) can't code-split, so
-  // emit the worker as ES with dynamic imports collapsed into the single
-  // inlined bundle.
   worker: {
     format: 'es',
-    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
     plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: {
       output: {

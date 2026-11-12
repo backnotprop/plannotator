@@ -3,7 +3,6 @@ import type { GuideStore, StoredGuideMeta } from '../core/storage';
 import { MemoryGuideStore } from './memory';
 import { R2GuideStore, type R2GuideBucket } from './r2';
 
-/** Minimal R2 stand-in: string objects keyed by name. */
 class FakeBucket implements R2GuideBucket {
   readonly objects = new Map<string, string>();
   async put(key: string, value: string) {
@@ -51,7 +50,6 @@ describe.each(harnesses)('$name GuideStore', ({ make }) => {
     expect(await store.get('id-2')).toBeNull();
     await store.delete('id-1');
     expect(await store.get('id-1')).toBeNull();
-    // Deleting twice is not an error (the handler already answered 204 once).
     await store.delete('id-1');
   });
 
@@ -64,7 +62,6 @@ describe.each(harnesses)('$name GuideStore', ({ make }) => {
     expect(await store.get('id-1')).toBeNull();
     if (objects) expect(objects.size).toBe(0);
     now = Date.parse('2026-08-15T12:30:00.000Z');
-    // Gone for good, not merely hidden while expired.
     expect(await store.get('id-1')).toBeNull();
   });
 });

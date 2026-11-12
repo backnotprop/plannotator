@@ -1,12 +1,3 @@
-/**
- * @plannotator/dsh's `plannotator` tool and `/plannotator-*` commands against
- * a fake DeepSeek Harness host and a fake `plannotator` CLI
- * (fixtures/fake-cli.ts, which opens no port and no browser). DSH is never
- * installed or run; each test has its own scratch data dir.
- *
- * Run: bun test apps/dsh-plugin/tool.test.ts
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,13 +67,11 @@ function alive(pid: number): boolean {
   }
 }
 
-/** A fake DSH process with one project, the services the plugin uses, and the plugin loaded into it. */
 function loadPlugin(options: {
   config?: PlannotatorConfig;
   env?: NodeJS.ProcessEnv;
   profile?: string;
   mode?: "fail" | "hang" | "late-fail" | "crash";
-  /** The CLI ignores SIGTERM: only SIGKILL stops it. */
   ignoreTerm?: boolean;
   readyWaitMs?: { review: number; other: number };
 } = {}) {
@@ -134,10 +123,8 @@ function loadPlugin(options: {
   const unload = () => {
     for (const dispose of effects.splice(0)) dispose();
   };
-  // Unloading stops every child the plugin still owns (SIGTERM, then SIGKILL).
   unloads.push(unload);
   if (options.ignoreTerm) {
-    // A broken SIGKILL path must fail the test, not leave this test's own SIGTERM-proof children running.
     unloads.push(() => {
       for (const call of readCalls(logDir)) if (alive(call.pid)) process.kill(call.pid, "SIGKILL");
     });
@@ -157,7 +144,6 @@ function loadPlugin(options: {
     unload,
     calls: () => readCalls(logDir),
     decide: (id: string, record: Record<string, unknown>) => writeFileSync(join(logDir, `decide-${id}.json`), JSON.stringify({ v: 1, ...record })),
-    /** Review folders still on disk. */
     folders: () => (existsSync(join(dataDir, "dsh")) ? readdirSync(join(dataDir, "dsh")) : []),
     tool: (name: string) => tools.find((tool) => tool.name === name),
     command: (name: string) => commands.find((command) => command.name === name),
@@ -167,9 +153,6 @@ function loadPlugin(options: {
 const sessionOf = (text: string) => /Session: (pn-[0-9a-f]{6})/.exec(text)?.[1] as string;
 
 describe("the plannotator tool switch", () => {
-  // The failure: DSH sends every tool's definition with each request, so a
-  // tool that turns itself on costs every session tokens the owner did not agree to.
-  // (plannotator_inbox's own default off is guarded in inbox.test.ts.)
   test("off by default: the plannotator tool is not registered; the commands are", () => {
     const dsh = loadPlugin();
     expect(dsh.tools.map((tool) => tool.name)).toEqual([]);
@@ -196,7 +179,6 @@ describe("non-blocking reviews", () => {
     const other = dsh.add(new FakeAgent("session-other", dsh.project));
     const sub = dsh.add(new FakeAgent("session-sub", dsh.project, { parentSession: "session-main", origin: "subagent" }));
 
-    // The fake CLI never exits until the test decides: a tool that waited for it would hang here.
     const result = (await dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: sub })) as { text: string };
     const id = sessionOf(result.text);
     expect(result.text).toContain("Opened notes.md in Plannotator: http://localhost:9/");
@@ -204,7 +186,6 @@ describe("non-blocking reviews", () => {
     expect(main.followups).toEqual([]);
     expect(dsh.folders()).toEqual([id]);
 
-    // The CLI ran as DSH, for the top-level session (a subagent's review belongs to the session it works for).
     const [call] = dsh.calls();
     expect(call!.subcommand).toBe("annotate");
     expect(call!.args).toEqual(["notes.md"]);
@@ -249,7 +230,6 @@ describe("non-blocking reviews", () => {
 });
 
 describe("whose review it is", () => {
-  // The failure: a subagent working in its own folder (a worktree) has the parent's folder reviewed instead.
   test("a subagent's review runs in the subagent's folder; its decision still goes to the top-level session", async () => {
     const dsh = loadPlugin({ config: { agentTool: true } });
     const worktree = join(dsh.root, "worktree");
@@ -266,7 +246,6 @@ describe("whose review it is", () => {
     expect(sub.followups).toEqual([]);
   }, 15_000);
 
-  // The failure: one session lists, or closes, a review another session is waiting on.
   test("another session can neither list nor close a review", async () => {
     const dsh = loadPlugin({ config: { agentTool: true } });
     const main = dsh.add(new FakeAgent("session-main", dsh.project));
@@ -283,8 +262,6 @@ describe("whose review it is", () => {
 });
 
 describe("stopping a review", () => {
-  // The failure: a cancelled call leaves a CLI running that nobody owns (it ignored SIGTERM), or the call
-  // settles while its child still runs.
   test("cancelling the call while the page is starting stops the child (SIGKILL when SIGTERM is ignored) before the call settles", async () => {
     const dsh = loadPlugin({ config: { agentTool: true }, mode: "hang", ignoreTerm: true });
     const main = dsh.add(new FakeAgent("session-main", dsh.project));
@@ -297,7 +274,6 @@ describe("stopping a review", () => {
     expect(main.followups).toEqual([]);
   }, 15_000);
 
-  // The failure: a plugin reload or DSH quitting leaves review servers running with nothing to deliver to.
   test("unloading the plugin stops an open review (SIGKILL when SIGTERM is ignored) and sends nothing", async () => {
     const dsh = loadPlugin({ config: { agentTool: true }, ignoreTerm: true });
     const main = dsh.add(new FakeAgent("session-main", dsh.project));
@@ -309,7 +285,6 @@ describe("stopping a review", () => {
     expect(main.followups).toEqual([]);
   }, 15_000);
 
-  // The failure: a review whose page never comes up cannot be closed, and lists as "starting" forever.
   test("close stops a review still starting", async () => {
     const dsh = loadPlugin({ config: { agentTool: true }, mode: "hang", readyWaitMs: { review: 100, other: 100 } });
     const main = dsh.add(new FakeAgent("session-main", dsh.project));
@@ -325,7 +300,6 @@ describe("stopping a review", () => {
 });
 
 describe("no decision coming", () => {
-  // The failure: the agent was told to end its turn and wait, and the review died: it waits forever.
   test("a review that answered 'starting' and then fails sends a 'Did not open' turn", async () => {
     const dsh = loadPlugin({ config: { agentTool: true }, mode: "late-fail", readyWaitMs: { review: 100, other: 100 } });
     const main = dsh.add(new FakeAgent("session-main", dsh.project));
@@ -348,9 +322,6 @@ describe("no decision coming", () => {
 });
 
 describe("a CLI gone right after its page came up", () => {
-  // The failure: the call answers "ready" for a child that already exited, while the exit found no
-  // answer yet and sent nothing, so the agent waits for a decision that never comes. The race is
-  // timing-dependent, so it is opened ten times.
   test("every 'ready' answer is followed by a message; the rest answer a failure", async () => {
     const dsh = loadPlugin({ config: { agentTool: true }, mode: "crash", env: { FAKE_CLI_DELAY_MS: "0" } });
     const main = dsh.add(new FakeAgent("session-main", dsh.project));
@@ -372,8 +343,6 @@ describe("a CLI gone right after its page came up", () => {
 });
 
 describe("failures", () => {
-  // The failure: a command whose CLI fails is reported as opened, so the person
-  // and the agent wait for a decision that never comes, or a dead review lingers.
   test("a command with a bad path answers the CLI's error; nothing is left open and nothing is sent later", async () => {
     const dsh = loadPlugin({ mode: "fail" });
     const main = dsh.add(new FakeAgent("session-main", dsh.project));
@@ -406,8 +375,6 @@ describe("failures", () => {
 
 describe("dshDecision", () => {
   const review = { kind: "review" as const, subject: "local changes", id: "pn-abc123", gate: false };
-  // The failure: an LGTM interrupts the agent with a turn it has nothing to do for,
-  // or a gated review's approval, which the agent was told to wait for, never arrives.
   test("a bare approval is sent only for a gated review; a close never is", () => {
     const approved = { surface: "review", decision: "approved", message: "LGTM", noop: true };
     expect(dshDecision(approved, review).send).toBe(false);

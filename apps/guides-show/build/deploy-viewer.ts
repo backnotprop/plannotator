@@ -1,27 +1,4 @@
 /// <reference types="bun-types" />
-/**
- * Upload a built viewer to the guides.show R2 bucket — ADD-ONLY.
- *   bun build/deploy-viewer.ts [--bucket guides-show-viewer] [--dry-run] [--local] [--concurrency 1-4]
- *
- * Wrangler 4 targets LOCAL storage for `r2 object` commands unless --remote is
- * passed, so this script passes --remote by default and --local on request.
- *
- * Every file under dist/viewer is content-hashed, so a key can only ever map
- * to one byte sequence; uploading the same key twice is a no-op by
- * construction, and nothing is ever deleted (decision record D8). The two
- * entry files are additionally verified against any existing object before
- * upload: a hash collision with different bytes aborts the deploy.
- *
- * Uploads go in a fixed order (chunks and assets, then the entry CSS, then
- * the entry JS, then the manifest) with up to 4 at a time, and each failed
- * upload is retried 4 times (1, 2, 4, 8 s) before the run fails, so a failed
- * run never leaves a live entry pointing at missing files. The order, retry
- * and pool live in viewer-upload.ts.
- *
- * `manifest.json` is a build artifact for producers (Plannotator embeds it at
- * build time); it is published under /meta/<version>/manifest.<builtAt>.json,
- * never under the immutable /v1/ tree.
- */
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -53,16 +30,10 @@ function walk(dir: string, prefix = ''): string[] {
 const CONTENT_TYPES: Record<string, string> = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.map': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const ctype = (f: string) => CONTENT_TYPES[path.extname(f)] ?? 'application/octet-stream';
 
-/** One wrangler call, killed after WRANGLER_TIMEOUT_MS (a hung call then fails and is retried). */
 function wrangler(argv: string[]) {
   return runCommand(['bunx', 'wrangler', ...argv], { cwd: path.resolve(import.meta.dirname, '..'), timeoutMs: WRANGLER_TIMEOUT_MS });
 }
 
-/**
- * The object's bytes, or null when the key does not exist (`existingFromGet`
- * decides). Retried; a failure that lasts aborts the deploy. The temp file is
- * removed whatever happened, a failed or partial download included.
- */
 async function existingBytes(key: string): Promise<Uint8Array | null> {
   return withRetry(async () => {
     const tmp = path.join(tmpdir(), `guides-show-verify-${process.pid}-${Math.random().toString(36).slice(2)}`);
@@ -84,11 +55,9 @@ async function put(key: string, file: string, contentType: string, cacheControl?
 }
 
 const files = walk(dist).filter((f) => f !== 'manifest.json');
-// Assets first, then the entry CSS, then the entry JS (see viewer-upload.ts).
 const steps = uploadPlan(files, manifest);
 console.log(`viewer build ${manifest.js} → r2://${bucket}/v1/ (${files.length} files, ${concurrency} at a time)${dryRun ? ' [dry run]' : ''}${local ? ' [local]' : ''}`);
 
-// Immutability guard on the entry files: same key must mean same bytes.
 for (const entry of [manifest.js, manifest.css]) {
   let existing: Uint8Array | null = null;
   try {

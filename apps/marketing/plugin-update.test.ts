@@ -2,8 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { READ_PLUGIN_UPDATE_QUERY } from './src/lib/plugin-update';
 import { readFileSync } from 'node:fs';
 
-// The install script opens https://plannotator.ai/plugin-update/?state=…&from=…&to=…
-// The page reads that query in the browser with this exact source text.
 const read = new Function(`return (${READ_PLUGIN_UPDATE_QUERY});`)() as (search: string) => {
   state: string;
   from: string | null;
@@ -28,7 +26,6 @@ describe('plugin-update page query', () => {
 });
 
 describe('plugin-update page route', () => {
-  // The installer may open the page with or without the trailing slash.
   const handlerSource = readFileSync(new URL('./cloudfront/url-rewrite.js', import.meta.url), 'utf8');
   const handler = new Function(`${handlerSource}; return handler;`)() as (event: { request: { uri: string } }) => { uri?: string };
   test('resolves with and without a trailing slash', () => {

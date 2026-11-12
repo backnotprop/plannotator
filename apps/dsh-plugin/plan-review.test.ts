@@ -1,10 +1,3 @@
-/**
- * @plannotator/dsh plugin tests: the plan-review listener against a fake DSH
- * context and a stub `plannotator` (a temp shell script printing fixed JSON).
- *
- * Run: bun test apps/dsh-plugin/plan-review.test.ts
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +25,6 @@ function tempDir(): string {
   return dir;
 }
 
-/** A stub CLI that records its stdin, origin and cwd, then runs `body`. */
 function stubCli(body: string): { binary: string; dir: string } {
   const dir = tempDir();
   const binary = join(dir, "plannotator");
@@ -49,7 +41,6 @@ function stubCli(body: string): { binary: string; dir: string } {
 
 const printJson = (value: unknown) => `printf '%s\\n' '${JSON.stringify(value)}'`;
 
-/** A fake Cordis context: captures the listener apply() registers. */
 function fakeContext(workingDirectory?: string) {
   const warnings: string[] = [];
   let listener: ((request: DshQuestionRequest, next: () => Promise<DshAnswer>) => Promise<DshAnswer>) | undefined;
@@ -71,7 +62,6 @@ function fakeContext(workingDirectory?: string) {
     get prepended() {
       return prepended;
     },
-    /** What Cordis does when the plugin unloads: run the effect disposers. */
     unload() {
       for (const dispose of disposers.splice(0).reverse()) dispose();
     },
@@ -102,8 +92,6 @@ function planReviewRequest(overrides: Partial<DshQuestionRequest> = {}) {
 }
 
 describe("plan-review listener", () => {
-  // Catches: the plugin swallowing ordinary ask_user_question requests (or
-  // approval prompts) that DSH's own answerers must handle.
   test("anything that is not a plan review goes to next()", async () => {
     const { binary, dir } = stubCli(printJson({ approved: true }));
     const fake = fakeContext();
@@ -115,8 +103,6 @@ describe("plan-review listener", () => {
     expect(existsSync(join(dir, "call.txt"))).toBe(false);
   });
 
-  // Catches: approving with the wrong label (DSH reads exactly intent.approve
-  // and no custom text as approval), or a plain approval steering a message.
   posixOnly("an approval answers with the approve label and steers nothing", async () => {
     const cwd = tempDir();
     const { binary, dir } = stubCli(printJson({ approved: true }));
@@ -127,7 +113,6 @@ describe("plan-review listener", () => {
     expect(await fake.listen(request)).toEqual({ answers: [{ id: "plan-review", selected: ["Approve"] }] });
     expect(steered).toEqual([]);
     expect(JSON.parse(readFileSync(join(dir, "stdin.json"), "utf8")).plan).toBe("# Plan\n\n1. Do it.\n");
-    // The review's project root is the DSH session's current directory.
     const [sub, origin, envCwd, processCwd] = readFileSync(join(dir, "call.txt"), "utf8").trim().split("|");
     expect(sub).toBe("dsh-plan");
     expect(origin).toBe("dsh");
@@ -135,7 +120,6 @@ describe("plan-review listener", () => {
     expect(processCwd).toBe(realpathSync(cwd));
   });
 
-  // Catches: approval notes being dropped (DSH's answer has no field for them).
   posixOnly("an approval with notes approves, then steers the composed message", async () => {
     const { binary } = stubCli(printJson({ approved: true, feedback: "n", message: "Plan approved with notes! n" }));
     const fake = fakeContext();
@@ -148,8 +132,6 @@ describe("plan-review listener", () => {
     expect(steered[0].content).toEqual([{ type: "text", text: "Plan approved with notes! n" }]);
   });
 
-  // Catches: sending the raw feedback instead of the composed prompt, or
-  // selecting a label (DSH then reads it as an approval attempt).
   posixOnly("a denial keeps planning with the composed message as custom text", async () => {
     const { binary } = stubCli(printJson({ approved: false, feedback: "raw", message: "YOUR PLAN WAS NOT APPROVED. raw" }));
     const fake = fakeContext();
@@ -162,8 +144,6 @@ describe("plan-review listener", () => {
     expect(steered).toEqual([]);
   });
 
-  // Catches: a missing CLI, a crash or garbage output leaving the plan
-  // unreviewable instead of falling back to DSH's own card.
   posixOnly("a missing binary, a non-zero exit and unreadable output all go to next()", async () => {
     const missing = join(tempDir(), "no-such-plannotator");
     const failing = stubCli("echo 'boom' >&2; exit 3").binary;
@@ -176,8 +156,6 @@ describe("plan-review listener", () => {
     }
   });
 
-  // Catches: a cancelled turn leaving the review server (and its port) running,
-  // or the listener falling back to DSH's card for a request that is gone.
   posixOnly("an abort stops the CLI and rejects with the abort reason", async () => {
     const { binary, dir } = stubCli('echo $$ > "$(dirname "$0")/pid"; exec sleep 30');
     const fake = fakeContext();
@@ -200,15 +178,11 @@ describe("plan-review listener", () => {
     const startedAt = Date.now();
     controller.abort(reason);
 
-    // The listener settles only once the child has exited, so a prompt
-    // rejection means the 30-second sleep was killed.
     await expect(pending).rejects.toBe(reason);
     expect(Date.now() - startedAt).toBeLessThan(5_000);
     expect(nextCalled).toBe(false);
   });
 
-  // Catches: disabling the plugin mid-review leaving the CLI and its server
-  // running with nobody to answer, and the plan stuck without a review.
   posixOnly("unloading the plugin stops an open review and hands it back to DSH", async () => {
     const { binary, dir } = stubCli('echo $$ > "$(dirname "$0")/pid"; exec sleep 30');
     const fake = fakeContext();
@@ -236,8 +210,6 @@ describe("plan-review listener", () => {
 });
 
 describe("resolveConfig", () => {
-  // Catches: a typo'd or mistyped key silently disabling nothing (DSH's own
-  // plugins fail at load on bad config).
   test("rejects wrong types and unknown keys, defaults plan review on", () => {
     expect(resolveConfig(undefined)).toEqual({ planReview: true });
     expect(resolveConfig({ binary: " /x/plannotator " })).toEqual({ binary: "/x/plannotator", planReview: true });
@@ -249,8 +221,6 @@ describe("resolveConfig", () => {
 });
 
 describe("resolvePlannotatorBinary", () => {
-  // Catches: DSH Desktop (whose PATH lacks ~/.local/bin) never finding a CLI
-  // the install script put there.
   posixOnly("config, then PLANNOTATOR_BIN, then PATH, then ~/.local/bin", () => {
     const home = tempDir();
     const installed = join(home, ".local", "bin", "plannotator");

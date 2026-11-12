@@ -1,31 +1,7 @@
-/**
- * guides.show viewer entry — mounts a portable Guided Review from the snapshot
- * embedded in the exported HTML (`#plannotator-guided-review`), or, on a hosted
- * encrypted page (`<meta name="plannotator-guided-review-payload">`), from the
- * ciphertext it fetches and opens with the key in the URL fragment.
- *
- * Boot order is load-bearing:
- *   1. install a settings backend BEFORE anything reads a setting (configStore
- *      seeds defaults on first read). localStorage when the browser allows it,
- *      so the reader's light/dark choice survives a reload; memory otherwise.
- *      Never cookies: on `file://` they either fail or leak into the reader's
- *      other pages,
- *   2. read + parse the snapshot (embedded first; else the encrypted hosted
- *      path — see ./hosted.tsx),
- *   3. try to prepare a worker (fetch → blob); fall back to main thread,
- *   4. render the same guide chain the review app renders. Hosted pages
- *      (either mode) add a client-side "Download portable guide" control.
- *
- * Decision record: adr/decisions/007-portable-guided-reviews-20260815.md.
- * Hosting contract: adr/implementation/guide-share-hosting.md (section 6).
- */
 import './review-styles.css';
 import './portable.css';
 import React, { Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
-// setStorageBackend directly (not configurePlannotatorUI): the configure barrel
-// statically imports every host seam and their UI, which drags markdown/math
-// renderers into a bundle that never uses them.
 import { setStorageBackend } from '@plannotator/ui/utils/storage';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
@@ -37,9 +13,6 @@ import { ReadOnlyDiffRenderer, getReadOnlyDiffRendererProps } from './ReadOnlyDi
 import { PortableWorkerPool, preparePortableWorkerFactory } from './portablePool';
 import { HostedDownloadButton, loadHostedEncryptedSnapshot, readHostedPage } from './hosted';
 
-// 1. Settings: localStorage if usable (private mode / disabled storage throw
-//    on access), else memory for the life of the page. Keys are namespaced so
-//    a hosted guides.show page never collides with anything else on the origin.
 const memory = new Map<string, string>();
 const PREFIX = 'pgr:';
 const local = (() => {
@@ -58,9 +31,6 @@ setStorageBackend({
   removeItem: (key) => { if (local) local.removeItem(PREFIX + key); else memory.delete(key); },
 });
 
-// The overview diagram's engine loads only for a guide that has one (its own
-// chunk; see OverviewDiagram.tsx). HTML pictures are not drawn yet: the chain
-// shows its note for them.
 const OverviewDiagram = lazy(() => import('./OverviewDiagram'));
 function renderOverviewDiagram(diagram: GuideOverviewDiagram): React.ReactNode | null {
   if (diagram.kind !== 'mermaid') return null;
@@ -70,7 +40,6 @@ function renderOverviewDiagram(diagram: GuideOverviewDiagram): React.ReactNode |
     </Suspense>
   );
 }
-/** A chapter's diagram (format version 5): Mermaid, one drawing id per chapter; an HTML picture is not drawn (nothing shows). */
 function renderChapterDiagram(diagram: GuideOverviewDiagram, index: number): React.ReactNode | null {
   if (diagram.kind !== 'mermaid') return null;
   return (
@@ -112,12 +81,6 @@ function ErrorCard({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-/**
- * "Made with Plannotator" → plannotator.ai. Portable pages send no referrer
- * (`<meta name="referrer" content="no-referrer">`), so the `ref` query is the
- * only attribution the destination gets. Plain text, muted, no icon: it must
- * read as a credit, not a call to action, next to the guide's own controls.
- */
 function BrandLink() {
   return (
     <a
@@ -134,9 +97,6 @@ function BrandLink() {
 }
 
 function App({ snapshot, workerFactory, hosted }: { snapshot: GuideSnapshot; workerFactory: (() => Worker) | null; hosted: boolean }) {
-  // Only a hosted page offers the download: a downloaded file IS the export.
-  // The attribution link is on every guides.show-rendered page (portable and
-  // hosted); the in-app review UI composes its own header and never sees this.
   const headerActions = (
     <>
       <BrandLink />
@@ -166,10 +126,6 @@ async function boot() {
   const page = readHostedPage(document);
   const hosted = page.hostedUrl !== null;
 
-  // 2. Snapshot. Embedded when present (downloaded file, or a hosted plain
-  //    page); otherwise the hosted encrypted path fetches it. In dev (no
-  //    exported document) fall back to a fixture so the viewer can be
-  //    iterated on with `vite`.
   let parsed = readEmbeddedGuideSnapshot(document);
   const encrypted = !parsed && page.payloadUrl !== null;
   if (!parsed && !encrypted && import.meta.env.DEV) {
@@ -177,17 +133,10 @@ async function boot() {
     parsed = { ok: true, value: FIXTURE_V1_PR };
   }
 
-  // The exported document paints a plain fallback ground until we mount; from
-  // here on the theme owns the body background.
   document.body.classList.remove('pgr-fallback-body');
   const root = createRoot(rootEl);
   const shell = (children: React.ReactNode, palette: string | undefined) => (
     <React.StrictMode>
-      {/* `system` follows the OS live (ThemeProvider watches prefers-color-scheme);
-          a stored choice from the header toggle wins over it (readThemePairCookies
-          via the storage backend above). Keyed on the palette: the encrypted path
-          learns the guide's palette only after the fetch, and the provider reads
-          its default once. */}
       <ThemeProvider key={palette ?? ''} defaultTheme="system" defaultColorTheme={palette ?? 'plannotator'}>
         <TooltipProvider>{children}</TooltipProvider>
       </ThemeProvider>
@@ -197,8 +146,6 @@ async function boot() {
     root.render(shell(<div className="min-h-screen bg-background text-foreground"><GuideSectionSkeleton /></div>, palette));
 
   if (encrypted && page.payloadUrl) {
-    // Hosted encrypted page: the host stamped WHERE the ciphertext is; the key
-    // is ours alone (URL fragment, never sent). Skeleton while it travels.
     skeleton(undefined);
     const loaded = await loadHostedEncryptedSnapshot(page.payloadUrl, location.hash);
     switch (loaded.kind) {
@@ -230,13 +177,8 @@ async function boot() {
   }
   const palette = parsed.value.theme?.palette;
 
-  // 3. Worker (best effort). Preparing it means fetching the worker script and
-  //    probing how this browser lets us construct one, so show the guide's
-  //    own loading state meanwhile instead of the plain-text fallback.
   skeleton(palette);
   const workerFactory = await preparePortableWorkerFactory();
-  // 4. Render. Observable for smoke tests and support: which highlighting path
-  //    this page took, and whether it is a hosted page.
   document.documentElement.dataset.pgrHighlighter = workerFactory ? 'worker' : 'main-thread';
   if (hosted) document.documentElement.dataset.pgrHosted = encrypted ? 'encrypted' : 'plain';
   root.render(shell(<App snapshot={parsed.value} workerFactory={workerFactory} hosted={hosted} />, palette));

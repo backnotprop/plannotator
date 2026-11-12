@@ -10,22 +10,18 @@ export const DEFAULT_PASTE_MAX_SIZE = 5 * 1024 * 1024;
 
 const DEFAULT_OPTIONS: PasteOptions = {
   maxSize: DEFAULT_PASTE_MAX_SIZE,
-  ttlSeconds: 7 * 24 * 60 * 60, // 7 days
+  ttlSeconds: 7 * 24 * 60 * 60,
 };
 
 const ID_PATTERN = /^\/api\/paste\/([A-Za-z0-9]{6,16})$/;
 
-/**
- * Generate a short URL-safe ID (8 chars, ~47.6 bits of entropy).
- * Uses Web Crypto with rejection sampling to avoid modulo bias.
- */
 function generateId(): string {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  const limit = 256 - (256 % chars.length); // 248 — largest multiple of 62 that fits in a byte
+  const limit = 256 - (256 % chars.length);
   const id: string[] = [];
   while (id.length < 8) {
-    const bytes = new Uint8Array(16); // oversample to minimize rounds
+    const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
     for (const b of bytes) {
       if (b < limit) {
@@ -83,10 +79,6 @@ export class PasteError extends Error {
   }
 }
 
-/**
- * Shared HTTP request handler for the paste service.
- * Both Bun and Cloudflare targets delegate to this after wiring up their store.
- */
 export async function handleRequest(
   request: Request,
   store: PasteStore,

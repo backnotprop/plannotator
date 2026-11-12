@@ -203,8 +203,6 @@ const diagramShell = readFileSync(
 
 describe("plannotator-visual-explainer diagram shell", () => {
   test("visual-explainer path points at the shell reference", () => {
-    // Failure caught: the shell reference rotting — the path stops telling the
-    // agent to read it, and hand-rolled shells regress the caption overlap.
     expect(skill).toContain("references/diagram-shell.md");
   });
 
@@ -215,18 +213,12 @@ describe("plannotator-visual-explainer diagram shell", () => {
   });
 
   test("viewport rule pins the positioned clip container", () => {
-    // Deliberate contract pin (#1546): an absolutely-positioned canvas escapes
-    // a static viewport's overflow, painting the zoomed diagram over the
-    // caption. The reference viewport rule must keep both declarations.
     const rule = diagramShell.match(/\.mermaid-viewport\s*\{([^}]*)\}/)?.[1] ?? "";
     expect(rule).toMatch(/position:\s*relative/);
     expect(rule).toMatch(/overflow:\s*hidden/);
   });
 
   test("canvas stays absolutely positioned", () => {
-    // Failure caught: the canvas losing absolute positioning, which would put
-    // the zoomed SVG back in flow and push the caption down the page instead
-    // of panning inside the viewport.
     const rule = diagramShell.match(/\.mermaid-canvas\s*\{([^}]*)\}/)?.[1] ?? "";
     expect(rule).toMatch(/position:\s*absolute/);
   });

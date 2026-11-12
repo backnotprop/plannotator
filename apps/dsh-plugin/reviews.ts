@@ -1,26 +1,3 @@
-/**
- * The reviews the DSH plugin opens without blocking: the `plannotator` tool's
- * annotate, review and last, and the `/plannotator-*` commands (tool.ts).
- *
- * Each review is a `plannotator` CLI child the plugin starts and owns, not the
- * tool call or command that asked for it. The call waits only until the page
- * is up (the CLI's ready file), bounded, and answers with the URL; the session
- * then ends its turn. When the person decides, the CLI writes its decision to
- * the host result file (`PLANNOTATOR_HOST_RESULT_FILE`, composed from the
- * `dsh` prompts) and exits, and the plugin sends it to the session that opened
- * the review as a new turn, `agent.followup(...)` (through `deliver`). Nothing
- * here waits inside a tool call for a person.
- *
- * Each review has a folder `<data dir>/dsh/<pn-id>/` (0700) for its ready and
- * result files, removed once the decision is delivered. `list` and `close`
- * see only the reviews the asking session opened. Close stops the plugin's own
- * child with SIGTERM, then SIGKILL a second later (the CLI keeps the
- * reviewer's draft), whether its page is up or still starting: the CLI's host
- * close needs the session-bridge token, which comes with "Ask this session".
- *
- * No key or token is involved: these launches carry no session bridge yet.
- */
-
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -44,61 +21,40 @@ import {
 
 export type DshReviewKind = "annotate" | "review" | "last";
 
-/** The subject of a review of the session's own working tree (no target typed). */
 export const DSH_LOCAL_CHANGES_SUBJECT = "local changes";
 
-/** The subject of `last`. */
 export const DSH_LAST_SUBJECT = "your last message";
 
-/** One review to open. */
 export interface DshReviewRequest {
   kind: DshReviewKind;
-  /** The CLI's arguments after the subcommand (`annotate <these>`). */
   args: string[];
-  /** How it is named until the CLI says what it opened. */
   subject: string;
-  /** Deliver a bare approval too: the agent was told to wait for the sign-off. */
   gate: boolean;
-  /** The session that gets the decision, lists and closes it (the top-level agent's id). */
   owner: string;
-  /** That session's DSH session id (its header id): `last` reads its log, and the CLI tags its children with it. */
   sessionId: string;
-  /** The session's working directory: the review's project root. */
   cwd?: string;
 }
 
-/** What `open` saw by the time it answered. */
 export type DshReviewStart =
   | { state: "ready"; id: string; subject: string; url: string; target?: PlannotatorTarget }
-  /** Still starting when the wait ran out: the decision still arrives, or a message saying it did not open. */
   | { state: "starting"; id: string; subject: string }
   | { state: "failed"; message: string };
 
 export interface DshReviewsOptions {
-  /** The program and the arguments before the subcommand (`[binary]`; tests pass a fake CLI). */
   command: () => string[] | undefined;
-  /** Plannotator's data dir: where each review's folder goes. */
   dataDir: string;
-  /** The environment the CLI starts from (default process.env). */
   env?: NodeJS.ProcessEnv;
-  /** DSH's home (`profileContext.home`), so `last` finds the session's log; else the CLI's default. */
   dshHome?: () => string | undefined;
-  /** Put a decision into the session as a new turn. Throws when it cannot (the session is gone). */
   deliver(owner: string, text: string): void;
-  /** One line for DSH's log. */
   log(message: string): void;
-  /** How long a call waits for the page before answering "starting" (a review prepares a diff). */
   readyWaitMs?: { review: number; other: number };
-  /** How often the ready file is looked at while waiting. */
   pollMs?: number;
   now?: () => number;
 }
 
-/** The Claude Code mod's and OpenCode's waits. */
 const READY_WAIT_MS = { review: 45_000, other: 15_000 };
 const STDOUT_LIMIT = 4 * 1024 * 1024;
 const STDERR_LIMIT = 16 * 1024;
-/** How long a child has after SIGTERM before SIGKILL (OpenCode's `requestTermination`). */
 const KILL_AFTER_MS = 1000;
 
 interface Review {
@@ -107,18 +63,14 @@ interface Review {
   readonly dir: string;
   readonly child: ChildProcess;
   readonly startedAt: number;
-  /** Settles once the child has exited (or never started). */
   readonly gone: Promise<void>;
   subject: string;
   baseSubject: string;
   url?: string;
   port?: number;
   target?: PlannotatorTarget;
-  /** The call that opened it has answered (ready, starting, failed or aborted). */
   answered: boolean;
-  /** The call that opened it answered "starting". */
   answeredStarting: boolean;
-  /** Its decision was delivered (or logged) when the child exited. */
   decided: boolean;
   closedByAgent: boolean;
   exited: boolean;
@@ -127,7 +79,6 @@ interface Review {
   stderr: string;
 }
 
-/** The CLI's host result record (apps/hook/server/host-result.ts): the fields read here. */
 interface HostResult {
   surface?: string;
   decision: string;
@@ -167,14 +118,6 @@ function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-/**
- * What a decision sends to the session, worded as the Claude Code mod and T3
- * word it: `Plannotator: <subject> (pn-…) — <outcome>.`, its Target line, then
- * the composed message. A Close, a Done with nothing to send and a bare
- * approval send nothing (only logged), except a bare approval of a gated
- * review, which the agent waits for. A review posted to the PR platform is
- * sent (`Review posted`).
- */
 export function dshDecision(
   record: HostResult,
   review: { kind: DshReviewKind; subject: string; id: string; gate: boolean; target?: PlannotatorTarget },
@@ -203,7 +146,6 @@ export function dshDecision(
   return { send: true, text: body ? `${heading}\n\n${body}` : heading };
 }
 
-/** The message a review that answered "starting" sends once its CLI fails after all. */
 export function dshLateFailureText(subject: string, id: string, message: string): string {
   return [
     plannotatorDecisionHeading(subject, id, "Did not open"),
@@ -213,7 +155,6 @@ export function dshLateFailureText(subject: string, id: string, message: string)
   ].join("\n");
 }
 
-/** The message a review whose page opened sends when its CLI stops without a decision. */
 export function dshEndedText(subject: string, id: string, detail: string): string {
   return [
     plannotatorDecisionHeading(subject, id, "Ended with no decision"),
@@ -223,12 +164,10 @@ export function dshEndedText(subject: string, id: string, detail: string): strin
   ].join("\n");
 }
 
-/** The words a startup failure is reported with: an older CLI's refusal of several files gets the update text. */
 export function dshStartFailureText(message: string): string {
   return message === PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT ? message : `Plannotator could not start: ${message}`;
 }
 
-/** The variables a child must not inherit from the DSH process: they name another session or launch. */
 const INHERITED_LAUNCH_VARIABLES = [
   "DSH_SESSION_ID",
   "DSH_SHELL",
@@ -271,11 +210,6 @@ export class DshReviews {
     throw new Error("could not allocate a Plannotator session id");
   }
 
-  /**
-   * Start one review and answer once its page is up, its start failed, or the
-   * wait ran out. Never waits for the person. An abort of `signal` while it
-   * waits stops the child and rejects with the signal's reason.
-   */
   async open(request: DshReviewRequest, signal?: AbortSignal): Promise<DshReviewStart> {
     if (this.disposed) return { state: "failed", message: "the Plannotator plugin is unloading" };
     if (signal?.aborted) throw abortReason(signal);
@@ -296,7 +230,6 @@ export class DshReviews {
       PLANNOTATOR_READY_FILE: join(dir, "ready.jsonl"),
       PLANNOTATOR_HOST_RESULT_FILE: join(dir, "result.json"),
       PLANNOTATOR_HOST_REVIEW_ID: id,
-      // DSH's process environment is shared by every session: name this one explicitly.
       PLANNOTATOR_SESSION_TAG: `dsh:${request.sessionId}`,
       DSH_SESSION_ID: request.sessionId,
       ...(dshHome && { DSH_HOME: dshHome }),
@@ -349,7 +282,6 @@ export class DshReviews {
     });
     child.once("error", (error) => {
       review.startError = error;
-      // A child that never started emits no `close`.
       if (child.pid === undefined) markGone();
     });
     child.once("close", (code) => {
@@ -367,8 +299,6 @@ export class DshReviews {
         review.answered = true;
         this.reviews.delete(id);
         if (!review.exited) rmSync(dir, { recursive: true, force: true });
-        // Gone already: a page that came up and went with a decision was answered by that decision;
-        // one that went without a decision did not open for the agent (`settle` sent nothing, since this call had not answered).
         if (review.decided && review.url) return this.readyStart(review, review.url);
         return { state: "failed", message: this.failureOf(review) };
       }
@@ -380,7 +310,6 @@ export class DshReviews {
         review.answered = true;
         review.closedByAgent = true;
         this.stop(review);
-        // Settled only once the child is gone (DSH's tool contract: a tool settles after its own work is quiet).
         await review.gone;
         throw abortReason(signal);
       }
@@ -397,7 +326,6 @@ export class DshReviews {
     return { state: "ready", id: review.id, subject: review.subject, url, ...(review.target !== undefined && { target: review.target }) };
   }
 
-  /** SIGTERM the plugin's own child, then SIGKILL if it is still there a second later. False when it is already gone. */
   private stop(review: Review): boolean {
     if (review.exited || review.child.pid === undefined) return false;
     review.child.kill("SIGTERM");
@@ -409,7 +337,6 @@ export class DshReviews {
     return true;
   }
 
-  /** Read the ready file once: the url, port and full target, once the CLI wrote them. */
   private readReady(review: Review): void {
     if (review.url) return;
     let text: string;
@@ -427,7 +354,6 @@ export class DshReviews {
         const target = value.target;
         if (typeof target === "string" || (Array.isArray(target) && target.every((item) => typeof item === "string"))) {
           review.target = target as PlannotatorTarget;
-          // Named by what the CLI opened, not the typed words. A review typed with no target stays "local changes".
           const kind = review.request.kind;
           if (kind !== "last" && !(kind === "review" && review.request.subject === DSH_LOCAL_CHANGES_SUBJECT)) {
             review.baseSubject = plannotatorTargetSubject(kind, review.target) ?? review.baseSubject;
@@ -436,12 +362,10 @@ export class DshReviews {
         }
         return;
       } catch {
-        // A partly written line: read it next time.
       }
     }
   }
 
-  /** Tell the owner's same-named open reviews apart by enough of their paths. */
   private relabel(owner: string): void {
     const open = this.openFor(owner);
     const subjects = plannotatorDistinctSubjects(open.map((review) => ({ subject: review.baseSubject, ...(review.target !== undefined && { target: review.target }) })));
@@ -457,9 +381,7 @@ export class DshReviews {
     return text ? text.split(/\r?\n/).slice(-6).join("\n") : `plannotator exited with code ${review.child.exitCode ?? "unknown"} before opening the page`;
   }
 
-  /** The child exited: send its decision (or say it did not open), then forget it. */
   private settle(review: Review, code: number | null): void {
-    // A page that came up just before the exit still counts as opened.
     this.readReady(review);
     this.reviews.delete(review.id);
     if (this.disposed || review.closedByAgent) {
@@ -474,17 +396,13 @@ export class DshReviews {
       review.decided = true;
       message = dshDecision(record, { kind: request.kind, subject: review.subject, id, gate: request.gate, ...(review.target !== undefined && { target: review.target }) });
     } else if (!review.answered || (!review.url && !review.answeredStarting)) {
-      // The call that opened it reports this failure itself (it has not answered yet, or answered "failed").
       rmSync(review.dir, { recursive: true, force: true });
       return;
     } else if (!review.url) {
-      // It answered "starting": the agent waits, so say it did not open.
       message = { send: true, text: dshLateFailureText(review.subject, id, this.failureOf(review)) };
     } else if (review.stdout.trim()) {
-      // A CLI older than this plugin writes no result file here: its stdout is the feedback.
       message = { send: true, text: `${plannotatorDecisionHeading(review.subject, id, "Feedback", review.target)}\n\n${review.stdout.trim()}` };
     } else {
-      // The page opened and the CLI went without a decision (it crashed, or was killed): the agent was told to wait.
       const detail = review.stderr.trim().split(/\r?\n/).slice(-6).join("\n") || `it exited with code ${code ?? "unknown"}`;
       message = { send: true, text: dshEndedText(review.subject, id, detail) };
     }
@@ -497,17 +415,14 @@ export class DshReviews {
       this.options.deliver(request.owner, message.text);
       rmSync(review.dir, { recursive: true, force: true });
     } catch (error) {
-      // The decision is kept on disk for the person.
       this.options.log(`could not send the decision of ${review.subject} (${id}) to its session (${error instanceof Error ? error.message : String(error)}); it is kept in ${review.dir}`);
     }
   }
 
-  /** The reviews `owner` opened that are still open. */
   private openFor(owner: string): Review[] {
     return [...this.reviews.values()].filter((review) => review.request.owner === owner && !review.closedByAgent);
   }
 
-  /** `list`'s text for `owner`. */
   list(owner: string): string {
     const now = this.now();
     const sessions: PlannotatorSessionSummary[] = this.openFor(owner).map((review) => {
@@ -519,14 +434,12 @@ export class DshReviews {
         ...(review.url && { url: review.url }),
         ageMs: now - review.startedAt,
         state: !review.url ? "starting" : existsSync(join(review.dir, "result.json")) ? "decided" : "open",
-        // The CLI's unsent count needs host control (the session-bridge token), which these launches do not carry yet.
         unsent: null,
       };
     });
     return plannotatorToolListText(sessions);
   }
 
-  /** `close`'s text for `owner`: one review by id, or "all". */
   close(owner: string, session: string): string {
     const open = this.openFor(owner);
     const targets = session === "all" ? open : open.filter((review) => review.id === session);
@@ -534,7 +447,6 @@ export class DshReviews {
     const outcomes: PlannotatorCloseOutcome[] = targets.map((review) => {
       const { id, subject } = review;
       if (existsSync(join(review.dir, "result.json"))) return { id, subject, closed: false, reason: "decided" };
-      // Still starting or open, the child is the plugin's own: stop it (SIGTERM, then SIGKILL; the CLI keeps the draft).
       if (!this.stop(review)) return { id, subject, closed: false, reason: "failed", detail: "its server process is gone" };
       review.closedByAgent = true;
       return { id, subject, closed: true, unsent: null };
@@ -542,14 +454,12 @@ export class DshReviews {
     return plannotatorToolCloseText(outcomes);
   }
 
-  /** The plugin unloads: stop every open review (the CLI keeps each draft); nothing more is sent. */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     for (const review of this.reviews.values()) this.stop(review);
   }
 
-  /** How many reviews are open (tests). */
   get size(): number {
     return this.reviews.size;
   }

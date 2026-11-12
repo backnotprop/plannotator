@@ -2,10 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Videos are uploaded by hand to the site's bucket, and the deploy's sync
-// excludes them so --delete keeps them. A video put back in public/ would play
-// in dev but never reach the bucket (the sync skips it), and a sync without the
-// excludes would delete every video on the next deploy.
 const VIDEO = /\.(mp4|webm|mov|m4v)$/i;
 const here = import.meta.dir;
 

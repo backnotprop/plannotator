@@ -1,17 +1,3 @@
-/**
- * The Qwen Code integration files the installers copy, checked for the
- * things that break Qwen users without failing anywhere else:
- * - the extension's plan-review hook must reach `plannotator` on
- *   exit_plan_mode with a timeout Qwen reads as milliseconds (a value under
- *   1000 is seconds, so a review would be cut off) and name the origin;
- * - the extension must carry no skills: Qwen prefixes extension skills with
- *   the extension name, which would add `/plannotator:plannotator-review`
- *   next to the `/plannotator-review` the installers put in $QWEN_HOME/skills;
- * - each Qwen skill must keep its blocking command out of the shell tool's
- *   foreground limit, and must not use a POSIX env prefix (Qwen on Windows
- *   runs the shell tool under cmd or PowerShell; detection reads Qwen's own
- *   variables instead).
- */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -28,13 +14,10 @@ function hooks(): Record<string, HookGroup[]> {
   return JSON.parse(readFileSync(join(extensionDir, "hooks", "hooks.json"), "utf8")).hooks;
 }
 
-// Each released version of the extension folder, by its tree hash.
 const EXTENSION_TREE_HASHES: Record<string, string> = {
   "1.0.0": "df0905f26b1717f8ad89aa6b4235fb48e1e6b9bdcf6c282f29f07285eaa5efaa",
 };
 
-// Paths and contents of every file under extension/ (line endings as LF, so
-// a Windows checkout hashes the same).
 function extensionTreeHash(): string {
   const hash = createHash("sha256");
   const files = (readdirSync(extensionDir, { recursive: true }) as string[])
@@ -55,12 +38,6 @@ describe("Qwen Code extension", () => {
   });
 
   test("a change to the extension comes with a new version", () => {
-    // The installers update an installed extension only when its version
-    // differs (`qwen extensions update` is version-based too), so a change
-    // without a new version never reaches installed users. Bump "version"
-    // in qwen-extension.json and add its hash here. Keep the manifest's name,
-    // displayName and description: Qwen asks for consent again on an update
-    // that changes them, and the installers' update reads no input.
     const manifest = JSON.parse(readFileSync(join(extensionDir, "qwen-extension.json"), "utf8"));
     expect({ version: manifest.version, hash: extensionTreeHash() }).toEqual({
       version: manifest.version,
@@ -75,15 +52,11 @@ describe("Qwen Code extension", () => {
     const hook = group!.hooks[0];
     expect(hook.type).toBe("command");
     expect(hook.command).toBe("plannotator");
-    // >= 1000 is milliseconds in Qwen; ask for at least a day.
     expect(hook.timeout).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000);
     expect(hook.env?.PLANNOTATOR_ORIGIN).toBe("qwen-code");
   });
 
   test("every hook timeout is read the same by old and new Qwen", () => {
-    // Qwen before 2026-09-12 read every command-hook timeout as milliseconds;
-    // newer Qwen reads 1000 or more as milliseconds and less as seconds. So a
-    // value under 1000 (e.g. 5) is 5 ms on an older Qwen.
     for (const groups of Object.values(hooks())) {
       for (const group of groups) {
         for (const hook of group.hooks) {

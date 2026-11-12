@@ -7,17 +7,6 @@ import { viewerManifestPlugin } from './build/manifest-plugin';
 import { readOnlyStubsPlugin } from './build/read-only-stubs-plugin';
 import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 
-/**
- * The portable Guided Review viewer — a MULTI-FILE build (never single-file):
- *   - `viewer.<hash>.js` / `viewer.<hash>.css`: what an exported HTML pins,
- *   - one chunk per Shiki grammar/theme (Rollup splits Shiki's lazy loaders
- *     automatically once dynamic imports are not inlined — see the Phase 2
- *     spike in adr/implementation/portable-guided-reviews.md),
- *   - the highlight worker as its own file, fetched at runtime,
- *   - fonts as files.
- * `base: './'` keeps every reference relative, so the tree can be served from
- * any origin/prefix; the exported HTML pins the absolute entry URLs.
- */
 export default defineConfig({
   root: __dirname,
   base: './',
@@ -25,23 +14,14 @@ export default defineConfig({
   server: { port: 3011 },
   resolve: {
     alias: {
-      // Same as apps/review: drop the dead Oniguruma WASM. resolve.alias is
-      // shared with the worker build; plugins would not be.
       'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
-      // Highlights, Pierre's second highlighter (WASM), never runs: Plannotator
-      // highlights with Shiki. See build/pierre-highlights-stub.ts.
       '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
-      // Read-only hosts never render the annotation composer, comment popover
-      // or reviewer identity — stub them at build time so their dependency
-      // tails (markdown/sanitizer, base-ui dialogs, the username wordlist)
-      // stay out of the CDN entry. The app's own import graph is untouched.
       'katex/dist/katex.min.css': path.resolve(__dirname, 'viewer/stubs/empty.css'),
     },
   },
   worker: {
     format: 'es',
-    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
     plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: { output: { inlineDynamicImports: true, entryFileNames: 'worker.[hash].js' } },
   },

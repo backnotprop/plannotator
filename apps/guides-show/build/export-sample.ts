@@ -1,8 +1,3 @@
-/**
- * Write sample exported guides against a built viewer, for smoke tests.
- *   bun build/export-sample.ts [--base http://localhost:8787/v1/] [--out dist/samples]
- * Reads dist/viewer/manifest.json; emits one HTML per fixture.
- */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createGuideHtml, guideExportFilename } from '../../../packages/core/guide-format';

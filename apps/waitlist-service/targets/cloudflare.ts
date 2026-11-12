@@ -15,14 +15,12 @@ export default {
     const allowed = getAllowedOrigins(env.ALLOWED_ORIGINS);
     const cors = corsHeaders(origin, allowed);
 
-    // If the origin isn't allowed, fail before touching the DB.
     if (Object.keys(cors).length === 0 && request.method !== "GET") {
       return new Response("Forbidden", { status: 403 });
     }
 
     const store = new D1WaitlistStore(env.WAITLIST_DB);
 
-    // Cloudflare populates request.cf with the geo + connection info.
     const cf = (request as unknown as { cf?: IncomingRequestCfProperties }).cf;
     const ip = request.headers.get("CF-Connecting-IP");
 

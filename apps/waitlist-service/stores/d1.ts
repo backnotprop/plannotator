@@ -5,10 +5,6 @@ import type {
 } from "../core/storage";
 import type { NormalizedSignup } from "../core/validation";
 
-// Shape of rows in the `waitlist` D1 table. The `name`, `role`, `tools`, and
-// `use_cases` columns predate the current form design — we left them in
-// place so historical rows aren't lost, but we no longer write to them
-// (the prototype's signup form doesn't collect them).
 interface WaitlistRow {
   id: number;
   email: string;
@@ -45,10 +41,6 @@ export class D1WaitlistStore implements WaitlistStore {
   constructor(private db: D1Database) {}
 
   async insert(signup: NormalizedSignup, ctx: SignupContext): Promise<boolean> {
-    // The legacy `name` column is `NOT NULL` in the live D1 schema, so we
-    // bind a literal empty string rather than dropping the column (which
-    // would require a destructive migration). The rest of the columns are
-    // populated from the normalized signup.
     const result = await this.db
       .prepare(
         `INSERT INTO waitlist
@@ -75,7 +67,6 @@ export class D1WaitlistStore implements WaitlistStore {
   }
 
   async bumpRateLimit(ip: string, day: string): Promise<number> {
-    // RETURNING lets us do the upsert + read in a single round-trip.
     const row = await this.db
       .prepare(
         `INSERT INTO rate_limit (ip, day, hits) VALUES (?, ?, 1)

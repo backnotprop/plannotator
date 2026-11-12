@@ -1,12 +1,5 @@
-// The key the per-IP limits count by. IPv4: the address. IPv6: its /64, since
-// one host usually holds a whole /64 and could rotate through it. Used only in
-// memory and as a rate-limit key; never stored.
-
-/** The first four 16-bit groups of an IPv6 address, or null when it is not one. */
 function ipv6Prefix64(ip: string): string | null {
   const address = ip.split("%")[0]!.toLowerCase();
-  // Only plain IPv6. An address with an IPv4 part (::ffff:1.2.3.4) keeps its whole self:
-  // its /64 would be shared by every IPv4 caller.
   if (!/^[0-9a-f:]+$/.test(address) || !address.includes(":")) return null;
   const halves = address.split("::");
   if (halves.length > 2) return null;
@@ -21,7 +14,6 @@ function ipv6Prefix64(ip: string): string | null {
   return first4.map((g) => g.replace(/^0+(?=.)/, "")).join(":");
 }
 
-/** The limit key for a caller IP: an IPv6 address's /64, anything else as given. */
 export function limitKey(ip: string): string {
   const prefix = ipv6Prefix64(ip);
   return prefix === null ? ip : `${prefix}::/64`;

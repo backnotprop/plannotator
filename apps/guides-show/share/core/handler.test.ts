@@ -60,7 +60,6 @@ describe('share handler: create', () => {
     expect(body.headers.get('Cache-Control')).toBe('public, max-age=300');
     expect(parseGuideSnapshot(await body.json()).ok).toBe(true);
 
-    // The token is stored hashed, never in the clear.
     const stored = await ctx.store.get(created.id);
     expect(stored?.meta.deleteTokenHash).toBe(await sha256Hex(created.deleteToken));
     expect(stored?.meta.bytes).toBe(new TextEncoder().encode(JSON.stringify(FIXTURE_V1_LOCAL)).byteLength);
@@ -111,7 +110,6 @@ describe('share handler: create', () => {
     const res = await post(ctx, { mode: 'encrypted', data: 'a'.repeat(MAX_SHARED_GUIDE_BYTES + 1) });
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'too large', maxBytes: MAX_SHARED_GUIDE_BYTES });
-    // A declared Content-Length far over the cap is refused before the body is read.
     const early = await call(ctx, '/api/g', { method: 'POST', body: '{}', headers: { 'Content-Length': String(MAX_SHARED_GUIDE_BYTES * 3) } });
     expect(early.status).toBe(413);
     expect(ctx.store.size).toBe(0);
@@ -141,15 +139,12 @@ describe('share handler: pages', () => {
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
     const html = await res.text();
     expect(html).toContain(`<meta property="og:title" content="${FIXTURE_V1_LOCAL.guide.title}">`);
-    // The id of a plain guide is the whole capability: no outbound click may leak the page URL as Referer.
     expect(res.headers.get('Referrer-Policy')).toBe('no-referrer');
-    // og:site_name is the serving host, so a self-host does not unfurl as guides.show.
     expect(html).toContain(`<meta property="og:site_name" content="${new URL(ORIGIN).host}">`);
     expect(html).toContain(`<meta name="${GUIDE_HOSTED_META_NAME}" content="${created.url}">`);
     expect(html).toContain(`<link rel="canonical" href="${created.url}">`);
     expect(html).not.toContain(GUIDE_PAYLOAD_META_NAME);
     expect(html).toContain(`id="${GUIDE_SNAPSHOT_SCRIPT_ID}"`);
-    // Viewer assets come from THIS host's /v1/, using the bundled manifest when the upload carried no pin.
     expect(html).toContain(`src="${ORIGIN}/v1/${MANIFEST.js}" integrity="${MANIFEST.jsIntegrity}"`);
     expect(html).toContain(`href="${ORIGIN}/v1/${MANIFEST.css}"`);
   });
@@ -173,7 +168,6 @@ describe('share handler: pages', () => {
     expect(html).toContain(`src="${ORIGIN}/v1/viewer.pinned.js" integrity="sha384-pinnedjs"`);
     expect(html).toContain(`href="${ORIGIN}/v1/chunks/typescript.abc.js"`);
     expect(html).not.toContain(MANIFEST.js);
-    // A different host origin renders against ITS /v1/, not the uploader's.
     const elsewhere = await handleGuideShareRequest(new Request(`http://localhost:8788/g/${created.id}`), ctx);
     const local = await elsewhere.text();
     expect(local).toContain('src="http://localhost:8788/v1/viewer.pinned.js"');
@@ -190,7 +184,6 @@ describe('share handler: pages', () => {
       expect(html).toContain('class="pgr-fallback"');
       expect(html).toContain('<meta name="robots" content="noindex">');
     }
-    // A self-host's failure page is not branded guides.show.
     const selfHosted = await handleGuideShareRequest(new Request('https://guides.example.com:8443/g/doesnotexist0000000000'), ctx);
     const selfHtml = await selfHosted.text();
     expect(selfHtml).toContain('<a href="/">guides.example.com:8443</a>');
