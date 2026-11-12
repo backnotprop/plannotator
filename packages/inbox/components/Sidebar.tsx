@@ -3,7 +3,7 @@ import { inboxSidebarShown, type InboxSidebarItem } from '@plannotator/core/inbo
 import { useSidebarLayout } from '../sidebarLayout';
 import { drawnSidebarItems } from '../sidebarItems';
 import { SidebarMenu, useSidebarMenu } from './SidebarMenu';
-import type { InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxRowSnoozed } from '@plannotator/core/inbox-snooze';
 import { restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from '../restartAgents';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -12,7 +12,7 @@ import type { ProjectFolder } from '../api';
 import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
-import { pinnedState } from '../pins';
+import { pinEnds, pinnedState } from '../pins';
 import { starPopping } from '../starPop';
 import type { MachinesModel } from '../machines';
 import { AgentsSection, GogglesMark } from '../agents/AgentsSection';
@@ -133,6 +133,11 @@ export interface SidebarProps {
   projectCanStart?: (project: ProjectFolder, machine: string | null, machineLaunch: boolean | null | undefined) => boolean;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
+  /**
+   * An agent row's Rename… and Reset name (agents/AgentsSection.tsx): a name, or null for its own (`own`). Resolves
+   * true once it is kept. Absent: agent rows have no menu.
+   */
+  onAgentRename?: (agent: InboxAgent, name: string | null, own: string) => Promise<boolean>;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -723,8 +728,8 @@ export function Sidebar(props: SidebarProps) {
                   row={row}
                   project={props.projectNames?.get(row.project.id)}
                   on={pinOn(row)}
-                  first={index === 0}
-                  last={index === pins.length - 1}
+                  first={pinEnds(pins, index).first}
+                  last={pinEnds(pins, index).last}
                   phone={phone}
                   onOpen={pick(() => props.onOpenPin?.(row))}
                   onAction={(action) => {
@@ -801,6 +806,10 @@ export function Sidebar(props: SidebarProps) {
             onAddAgent={(opener) => (props.onAddAgent ?? props.onCompose)?.(opener)}
             onAddMachine={props.onAddMachine}
             pick={pick}
+            phone={phone}
+            // The sheet stays open on a phone: the field is in it.
+            onRename={props.onAgentRename}
+            announce={props.announce}
           />
         )}
         {sheetSection('projects',

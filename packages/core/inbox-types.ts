@@ -434,9 +434,11 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   t3: "T3 Code",
   cline: "Cline",
   openclaw: "OpenClaw",
+  hermes: "Hermes Agent",
   cloud: "Cloud agent",
   "cloud-claude": "Claude Code routine",
   "cloud-grok": "Grok Bot",
+  "cloud-muse": "Muse by Meta",
 };
 
 /**
@@ -454,7 +456,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "codex", "qwen", "t3"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes", "codex", "qwen", "t3"] as const;
 
 /** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
 export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
@@ -643,6 +645,12 @@ export interface InboxMessage {
    * Additive.
    */
   sent_again_to?: string | null;
+  /**
+   * The Inbox's note for a launched session's turn that ended in an error ("<Agent>'s turn ended with an error: …",
+   * Claude Code, Codex and Pi): the window notifies for it ("<project>: <agent> couldn't answer"). Written only by
+   * the Inbox itself, never by an agent's call. Absent otherwise. Additive.
+   */
+  turn_error?: true;
   /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
@@ -2462,6 +2470,7 @@ export type InboxAgentId =
   | "opencode"
   | "dsh"
   | "openclaw"
+  | "hermes"
   | "claude-app";
 
 export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
@@ -2478,6 +2487,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "opencode",
   "dsh",
   "openclaw",
+  "hermes",
   "claude-app",
 ];
 
@@ -2495,6 +2505,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   opencode: "OpenCode",
   dsh: "DeepSeek Harness",
   openclaw: "OpenClaw",
+  hermes: "Hermes Agent",
   "claude-app": "Claude app",
 };
 
@@ -2510,6 +2521,10 @@ export function inboxElsewhereText(moved: { agent: InboxAgentId; path: string | 
   const label = INBOX_AGENT_LABELS[moved.agent];
   const why = `${moved.agent === "qwen" ? "this Inbox has another QWEN_HOME, so it" : "this Inbox"} looks in ${moved.now ?? "another file"}`;
   return `${label} is connected in ${moved.path ?? "another file"}, but ${why}. Plannotator left both as they are; Settings → Agents shows it off here, and turning it on moves it.`;
+}
+
+export function inboxGrantText(grant: { agent: InboxAgentId; setting: string; undo: string }): string {
+  return `Plannotator turned on ${INBOX_AGENT_LABELS[grant.agent]}'s ${grant.setting}, so your replies can start a turn in the session that asked. To turn it off: ${grant.undo}`;
 }
 
 /** What one `plannotator inbox` run did to the agents on this computer. */
@@ -2547,6 +2562,7 @@ export interface InboxConnectReport {
    * packages/server/inbox-qwen-trust.ts). Absent from older Inboxes.
    */
   trusted?: InboxAgentId[];
+  granted?: { agent: InboxAgentId; setting: string; undo: string }[];
   /** Why registering as a trusted sender failed this run, said once per reason. */
   trust_failed?: { agent: InboxAgentId; reason: string }[];
 }
@@ -2760,7 +2776,7 @@ export interface InboxAgentsModel {
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw";
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw" | "hermes";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2852,7 +2868,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw" | "hermes";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -3055,6 +3071,7 @@ export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number
   // Cline sends every tool's JSON Schema with each request too; not measured on a real Cline, so Pi's stands in.
   cline: INBOX_TOOL_COST_NOW,
   openclaw: INBOX_TOOL_COST_NOW,
+  hermes: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */
@@ -3199,6 +3216,14 @@ export type InboxDraftFile = InboxUpload & { pasted?: InboxDraftPasted };
 /** The longest pasted-text preview a draft keeps, and the longest `lead`. */
 export const INBOX_DRAFT_PASTED_PREVIEW_MAX = 200;
 export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
+
+/**
+ * The marks a person sets on an agent or a thread that a linked machine may send to this Inbox, the one that owns it
+ * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
+ * rows only once this Inbox takes it; an older Inbox says none.
+ */
+export const INBOX_LINKED_MARKS = ["star"] as const;
+export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
@@ -3735,11 +3760,27 @@ export const INBOX_AGENT_FACE_SESSIONS_MAX = 16;
 /** The longest agent or session id an entry takes. */
 export const INBOX_AGENT_FACE_ID_MAX = 200;
 
-/** One agent's face. */
+/** One agent's face, and the name the person gave it. */
 export interface InboxAgentFaceEntry {
-  face: Exclude<InboxAgentFace, "agent">;
+  /** `agent` (its own mark) only beside a `name`: an entry is kept for a face, a name, or both. */
+  face: InboxAgentFace;
   /** Every session id this agent was or is (never its key itself), oldest first. */
   sessions: string[];
+  /**
+   * The name the person gave it (Rename… on its sidebar row): the window's name for it everywhere, over its own
+   * title. Display only: never sent to an agent. Absent: none given. An older Plannotator drops an entry that has a
+   * name and no face when it reads the file, and keeps the face of one with both.
+   */
+  name?: string;
+}
+
+/** The longest name an agent can be given, in characters (code points), as a project's. */
+export const INBOX_AGENT_NAME_MAX = INBOX_PROJECT_NAME_MAX;
+
+/** A given name as an entry keeps it, by a project name's rules (`checkInboxProjectName`); null for none or a refused one. */
+export function cleanInboxAgentName(value: unknown): string | null {
+  const checked = checkInboxProjectName(value);
+  return checked.ok ? checked.name : null;
 }
 
 /** One uploaded picture the Inbox keeps ("Your own…"): its hash, its type (sniffed from the bytes), when it was added (ms). */
@@ -3773,8 +3814,14 @@ export function readInboxAgentIcons(value: unknown): InboxAgentIcon[] {
   return out.slice(0, INBOX_AGENT_ICONS_KEPT * 2);
 }
 
-/** `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), or this browser's faces from before (`adopt`). */
-export type InboxAgentFaceChange = { agent: string; sessions?: string[]; face: InboxAgentFace } | { adopt: Record<string, InboxAgentFace> };
+/**
+ * `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), one agent's given name (null: back to its own),
+ * or this browser's faces from before (`adopt`).
+ */
+export type InboxAgentFaceChange =
+  | { agent: string; sessions?: string[]; face: InboxAgentFace }
+  | { agent: string; sessions?: string[]; name: string | null }
+  | { adopt: Record<string, InboxAgentFace> };
 
 const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= INBOX_AGENT_FACE_ID_MAX && value.trim() === value;
 
@@ -3790,9 +3837,11 @@ export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFa
   const out = Object.create(null) as Record<string, InboxAgentFaceEntry>;
   if (!value || typeof value !== "object" || Array.isArray(value)) return out;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const entry = raw as { face?: unknown; sessions?: unknown } | null;
-    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face) || entry.face === "agent") continue;
-    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key) };
+    const entry = raw as { face?: unknown; sessions?: unknown; name?: unknown } | null;
+    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face)) continue;
+    const name = cleanInboxAgentName(entry.name);
+    if (entry.face === "agent" && !name) continue;
+    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key), ...(name ? { name } : {}) };
   }
   return out;
 }

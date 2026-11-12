@@ -43,6 +43,7 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'dsh', name: 'DeepSeek Harness' },
   { host: 'cline', name: 'Cline' },
   { host: 'openclaw', name: 'OpenClaw' },
+  { host: 'hermes', name: 'Hermes Agent' },
 ];
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
@@ -845,7 +846,7 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness, Cline and OpenClaw send every tool&apos;s definition with each request, so they start
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness, Cline, OpenClaw and Hermes Agent send every tool&apos;s definition with each request, so they start
           off.
         </p>
         {env !== null && (
@@ -991,7 +992,7 @@ const LEDE: Record<SettingsSection, string> = {
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
-  devices: 'Your phone, browsers on your other devices, and cloud agents the Inbox wakes.',
+  devices: 'Your phone, and browsers on your other devices.',
   machines: 'Your other computers with Plannotator. Each keeps its own Inbox; this one shows their threads too.',
   voice: 'Speak a reply instead of typing it.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
@@ -1367,7 +1368,7 @@ export function SettingsPage(props: SettingsPageProps) {
         in {tildePath(store?.dir ?? settings.store_dir ?? settings.store?.dir ?? '', settings.home)}: messages, attached files as they were sent, and annotations.
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
-      <p className="ib-lede">Browsers on your other devices, and cloud agents the Inbox wakes.</p>
+      <p className="ib-lede">Browsers on your other devices.</p>
     ) : section && LEDE[section] ? (
       <p className="ib-lede">{LEDE[section]}</p>
     ) : null;
