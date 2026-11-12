@@ -123,6 +123,7 @@ import {
   type InboxQuestionState,
   type InboxRowDelivery,
 } from "@plannotator/core/inbox-types";
+import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { inboxActivity, type InboxActivitySource } from "./activity";
@@ -5640,10 +5641,11 @@ export class InboxStore {
       throw new InboxError("validation_error", "annotation.filePath: a global comment is on the whole review, on no file.", { field: "annotation.filePath" });
     }
     const text = fields.text;
-    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+    const images = this.commentPictures(fields.images);
+    if (!(images && (text === undefined || text === "")) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
-    const kept = guideCommentFields(fields, "general");
+    const kept = guideCommentFields({ ...fields, images: undefined }, "general");
     if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const existing = this.annotations.get(id);
     if (existing && (!existing.guide || existing.message_id !== message.id || existing.guide.scope !== "general")) {
@@ -5663,7 +5665,7 @@ export class InboxStore {
       version: guide.sha256,
       guide: { title: guide.title, file: "", side: "new", line_start: 0, line_end: 0, scope: "general" },
       // The review app's general comment: no file, no lines, whatever the client sent for them.
-      annotation: { ...kept, scope: "general", filePath: "", lineStart: 0, lineEnd: 0, side: "new" },
+      annotation: { ...kept, ...(images ? { images } : {}), scope: "general", filePath: "", lineStart: 0, lineEnd: 0, side: "new" },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
@@ -5710,11 +5712,13 @@ export class InboxStore {
     // A deletion's words are the ones selected; it may carry none of its own.
     const text = fields.text;
     const noText = text === undefined || text === null || text === "";
-    if (!(deletion && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
+    const pictured = Array.isArray(fields.images) && fields.images.length > 0;
+    if (!((deletion || pictured) && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
-    // A comment on a message's words is words: no images, no element or page it points at, no reply thread.
-    for (const field of ["images", "elementContext", "pageUrl", "inReplyTo"] as const) {
+    // A comment on a message's words points at no element or page and starts no reply thread.
+    const images = this.commentPictures(fields.images);
+    for (const field of ["elementContext", "pageUrl", "inReplyTo"] as const) {
       const value = fields[field];
       if (value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)) throw new InboxError("validation_error", `annotation.${field}: a comment on a message's text takes none.`, { field: `annotation.${field}` });
     }
@@ -5740,7 +5744,7 @@ export class InboxStore {
       path: message.id,
       version: INBOX_ANNOTATION_CURRENT,
       message: { at: message.created_at },
-      annotation: { ...withoutExportLocation(fields), ...(diagramAnchor ? { diagramAnchor } : {}) },
+      annotation: { ...withoutExportLocation({ ...fields, images: undefined }), ...(images ? { images } : {}), ...(diagramAnchor ? { diagramAnchor } : {}) },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
@@ -6138,6 +6142,33 @@ export class InboxStore {
     const out = new Set<string>();
     for (const draft of this.replyDrafts.values()) for (const id of inboxReplyDraftFileIds(draft)) out.add(id);
     return out;
+  }
+
+  commentPictureUploadIds(): Set<string> {
+    const out = new Set<string>();
+    for (const record of this.annotations.values()) {
+      if (record.sent_reply_id !== null || record.removed_at !== null) continue;
+      for (const id of inboxCommentPictureUploads(record.annotation)) out.add(id);
+    }
+    return out;
+  }
+
+  private commentPictures(images: unknown): { path: string; name: string }[] | undefined {
+    if (images === undefined || images === null || (Array.isArray(images) && images.length === 0)) return undefined;
+    const field = "annotation.images";
+    if (!Array.isArray(images) || images.length > INBOX_COMMENT_PICTURES_MAX) {
+      throw new InboxError("validation_error", `${field}: at most ${INBOX_COMMENT_PICTURES_MAX} pictures, each { path, name }.`, { field });
+    }
+    return images.map((image, index) => {
+      const { path, name } = (image && typeof image === "object" ? image : {}) as { path?: unknown; name?: unknown };
+      const picture = inboxCommentPicture(path);
+      if (!picture || typeof name !== "string" || name.trim() === "" || name.length > 200) {
+        throw new InboxError("validation_error", `${field}[${index}]: { path: "<upload id>/<file name>", name } of a picture you uploaded.`, { field });
+      }
+      const upload = readInboxUpload(this.dir, picture.upload_id);
+      if (!upload || upload.kind !== "image") throw new InboxError("upload_not_found", `${field}[${index}]: that picture is no longer here; add it again.`, { field });
+      return { path: path as string, name: inboxViewingText(name, 200) || "image" };
+    });
   }
 
   /** Bytes Decision data's kept lines take on disk (Settings → Storage). */
