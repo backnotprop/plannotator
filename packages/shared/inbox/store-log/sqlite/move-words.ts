@@ -26,7 +26,7 @@ export const INBOX_UPGRADE_WAIT_MAX_MS = 10 * 60_000;
 export function storeMoveNote(moved: InboxImportOutcome | InboxReturnOutcome): Record<string, unknown> {
   switch (moved.status) {
     case "imported":
-      return { status: moved.status, lines: moved.lines, ms: moved.ms, ...moved.phases };
+      return { status: moved.status, lines: moved.lines, ms: moved.ms, apart: moved.apart, ...moved.phases };
     case "returned":
       return { status: moved.status, lines: moved.lines, ms: moved.ms };
     case "kept_files":

@@ -39,6 +39,7 @@ import {
   type ForgeRefChecks,
   type ForgeRefPerson,
 } from '@plannotator/core/forge-ref-card';
+import { FORGE_SPECS } from '@plannotator/core/forge-refs';
 import { loadRefCard, refCardTarget } from '../utils/refCard';
 import { RenderedMarkdown } from './RenderedMarkdown';
 import { tooltipContainerOf } from './HostTitle';
@@ -73,11 +74,11 @@ function timeAgo(iso: string, now = Date.now()): string {
 }
 
 const fmt = (n: number) => n.toLocaleString();
-const forgeName = (p: ForgeRef['platform']) => (p === 'gitlab' ? 'GitLab' : 'GitHub');
+const forgeName = (p: ForgeRef['platform']) => FORGE_SPECS[p].name;
 
 /** "Issue", "Pull request", "Merge request". */
 export function refKindName(ref: Pick<ForgeRef, 'platform' | 'kind'>): string {
-  return ref.kind === 'issue' ? 'Issue' : ref.platform === 'gitlab' ? 'Merge request' : 'Pull request';
+  return ref.kind === 'issue' ? 'Issue' : FORGE_SPECS[ref.platform].pullName;
 }
 
 const FAILURE_TEXT: Record<ForgeRefCardError, (forge: string, cli: string) => string> = {
@@ -88,6 +89,18 @@ const FAILURE_TEXT: Record<ForgeRefCardError, (forge: string, cli: string) => st
   rate_limited: (forge) => `${forge} asked for a short break. Details come back in a minute.`,
   unavailable: () => "Details couldn't load right now.",
 };
+
+/** Bitbucket has no CLI: Plannotator reads it with an API token, so its failures say so. */
+const BITBUCKET_FAILURE_TEXT: Partial<Record<ForgeRefCardError, string>> = {
+  unsupported: 'Details show for Bitbucket Cloud pull requests in the Inbox.',
+  signed_out: "Plannotator couldn't sign in to Bitbucket. Check its API token setup to see details here.",
+  not_found: "Your Bitbucket API token can't see this one, or it doesn't exist.",
+};
+
+function failureText(error: ForgeRefCardError, platform: ForgeRef['platform']): string {
+  if (platform === 'bitbucket') return BITBUCKET_FAILURE_TEXT[error] ?? FAILURE_TEXT[error]('Bitbucket', 'Bitbucket');
+  return FAILURE_TEXT[error](forgeName(platform), platform === 'gitlab' ? 'glab' : 'gh');
+}
 
 type Tone = 'open' | 'merged' | 'closed' | 'neutral';
 
@@ -414,7 +427,7 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
             {refKindName(target)} {forgeRefLabel(target)}
           </div>
           <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
-            {FAILURE_TEXT[error](forge, target.platform === 'gitlab' ? 'glab' : 'gh')}
+            {failureText(error, target.platform)}
           </p>
         </div>
         {footer()}

@@ -1,10 +1,10 @@
 
 export const INBOX_CLOUD_HOST = "cloud";
 
-export const INBOX_CLOUD_HOSTS = { "claude-routine": "cloud-claude", "grok-bot": "cloud-grok", other: INBOX_CLOUD_HOST } as const;
+export const INBOX_CLOUD_HOSTS = { "claude-routine": "cloud-claude", "grok-bot": "cloud-grok", muse: "cloud-muse", other: INBOX_CLOUD_HOST } as const;
 
 export function isInboxCloudHost(host: unknown): boolean {
-  return host === "cloud" || host === "cloud-claude" || host === "cloud-grok";
+  return host === "cloud" || host === "cloud-claude" || host === "cloud-grok" || host === "cloud-muse";
 }
 
 export const INBOX_CLOUD_WAKE_GAP_MS = 60_000;
@@ -13,14 +13,26 @@ export const INBOX_CLOUD_WAKE_TIMEOUT_MS = 15_000;
 
 export const INBOX_CLOUD_TEXT_MAX = 60_000;
 
-export const INBOX_CLOUD_PRESETS = ["claude-routine", "grok-bot", "other"] as const;
+export const INBOX_CLOUD_PRESETS = ["claude-routine", "grok-bot", "muse", "other"] as const;
 export type InboxCloudPreset = (typeof INBOX_CLOUD_PRESETS)[number];
 
 export const INBOX_CLOUD_PRESET_NAMES: Readonly<Record<InboxCloudPreset, string>> = {
   "claude-routine": "Claude Code routine",
   "grok-bot": "Grok Bot routine",
+  muse: "Muse by Meta",
   other: "Other",
 };
+
+export const INBOX_CLOUD_PRESET_LABELS: Readonly<Record<InboxCloudPreset, string>> = {
+  "claude-routine": "Claude Code",
+  "grok-bot": "Grok Bot",
+  muse: "Muse",
+  other: "Other",
+};
+
+export function inboxCloudPresetWakes(preset: InboxCloudPreset): boolean {
+  return preset !== "muse";
+}
 
 export function inboxCloudHostOf(preset: InboxCloudPreset): string {
   return INBOX_CLOUD_HOSTS[preset];
@@ -197,6 +209,7 @@ export function inboxCloudWakeLine(wake: InboxCloudWake, time: (iso: string) => 
 }
 
 export const INBOX_CLOUD_SETUP_PAGE = "https://plannotator.ai/inbox/cloud-agent.md";
+export const INBOX_CLOUD_MUSE_PAGE = "https://plannotator.ai/inbox/muse.md";
 
 export type InboxCloudSetup =
   | { kind: "message"; message: string }
@@ -219,5 +232,6 @@ export function inboxCloudSetup(preset: InboxCloudPreset, pairing: string, relay
       instructions: `On every run, follow the instructions at ${INBOX_CLOUD_SETUP_PAGE} to read and answer my Plannotator Inbox. A wake's text in the routine-fire-payload block is my message from the Inbox: act on it.`,
     };
   }
-  return { kind: "message", message: `Set up Plannotator Inbox for me by following the instructions at ${INBOX_CLOUD_SETUP_PAGE}\n\nPairing: ${pairing}` };
+  const page = preset === "muse" ? INBOX_CLOUD_MUSE_PAGE : INBOX_CLOUD_SETUP_PAGE;
+  return { kind: "message", message: `Set up Plannotator Inbox for me by following the instructions at ${page}\n\nPairing: ${pairing}` };
 }

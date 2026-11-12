@@ -10,6 +10,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import type { InboxCardRef } from "@plannotator/core/inbox-types";
 import { inboxCardMarkRef } from "@plannotator/core/inbox-types";
 import { CARD_MARK_FAILURE_MS, CARD_MARK_FRESH_MS, CARD_MARK_REFRESH_MS, createCardMarks, githubMarksQuery } from "./inbox-card-marks";
@@ -128,7 +129,7 @@ describe("the marks reader", () => {
     expect(forge.graphql().map((c) => c.args[c.args.indexOf("--hostname") + 1])).toEqual(["github.corp.example"]);
   });
 
-  test("GitLab through the hover cards' lookup; Bitbucket has no reader and is unknown without running anything", async () => {
+  test("GitLab and Bitbucket pull requests through the hover cards' lookup; a Bitbucket issue is unknown without running anything", async () => {
     const asked: string[] = [];
     const refCards: RefCards = {
       async get(href) {
@@ -140,10 +141,12 @@ describe("the marks reader", () => {
     const marks = createCardMarks({ run: forge.run, refCards });
     const mr: InboxCardRef = { kind: "pr", source: "gitlab", ref: "grp/proj!7", url: "https://gitlab.com/grp/proj/-/merge_requests/7" };
     const bb: InboxCardRef = { kind: "pr", source: "bitbucket", ref: "ws/repo#2", url: "https://bitbucket.org/ws/repo/pull-requests/2" };
-    const out = await marks.marks([mr, bb]);
+    const bbIssue: InboxCardRef = { kind: "issue", source: "web", ref: "bitbucket.org/ws/repo/issues/3", url: "https://bitbucket.org/ws/repo/issues/3" };
+    const out = await marks.marks([mr, bb, bbIssue]);
     expect(out.get(mr.url)!.state).toBe("merged");
-    expect(out.get(bb.url)!.state).toBe("unknown");
-    expect(asked).toEqual([mr.url]);
+    expect(out.get(bb.url)!.state).toBe("merged");
+    expect(out.get(bbIssue.url)!.state).toBe("unknown");
+    expect(asked).toEqual([mr.url, bb.url]);
     expect(forge.calls).toEqual([]);
   });
 
@@ -206,7 +209,16 @@ async function world(board: boolean) {
   const forge = scriptedGh({
     "acme/widgets": { 12: pr("MERGED", "vite 8"), 13: pr("CLOSED", "abandoned"), 14: pr("OPEN", "Delivery ticks"), 15: pr("MERGED", "electron-forge 7"), 11: issue("OPEN", "Icon") },
   });
-  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: forge.run, phones: false, board });
+  // A stand-in for the Bitbucket Cloud API: pull request 7 is merged.
+  const bitbucketRefReader = async (ref: { workspace: string; repo: string; number: number }) => {
+    if (ref.number !== 7) throw Object.assign(new Error("not found"), { status: 404 });
+    return {
+      platform: "bitbucket", kind: "pull", repo: `${ref.workspace}/${ref.repo}`, number: 7, url: "https://bitbucket.org/ws/r/pull-requests/7",
+      title: "Shipped on Bitbucket", state: "merged", author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+      comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+    } satisfies ForgeRefCardData;
+  };
+  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: forge.run, bitbucketRefReader, phones: false, board });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
@@ -253,7 +265,7 @@ describe("POST /api/inbox/cards/marks", () => {
     // A merged PR linked through `ref` is context, never the card's own.
     const context = w.make("Context only", [], ["acme/widgets#12"]);
     const unknown = w.make("Unknown repo", ["acme/gone#3"]);
-    const bitbucket = w.make("No reader", ["https://bitbucket.org/ws/r/pull-requests/7"]);
+    const bitbucket = w.make("Merged on Bitbucket", ["https://bitbucket.org/ws/r/pull-requests/7"]);
     const review = w.make("In review", ["acme/widgets#12"]);
     store.updateCard(review.id, { by: { kind: "agent", host: "codex", session: "s", name: "Codex" }, column: "in_review", you: "merge" });
     const parked = w.make("Parked", ["acme/widgets#12"]);
@@ -264,7 +276,7 @@ describe("POST /api/inbox/cards/marks", () => {
     const ids = all.map((card) => card.id);
     expect((await w.post({ cards: ids })).status).toBe(200);
     const column = (id: string) => store.card(id)!.column;
-    expect(all.map((card) => column(card.id))).toEqual(["done", "todo", "todo", "todo", "todo", "todo", "todo", "done", "backlog", "dropped"]);
+    expect(all.map((card) => column(card.id))).toEqual(["done", "todo", "todo", "todo", "todo", "todo", "done", "done", "backlog", "dropped"]);
     const shipped = store.card(review.id)!;
     expect(shipped).toMatchObject({ you: null, auto_shipped: { prs: ["https://github.com/acme/widgets/pull/12"] } });
     expect(store.cardHistory(review.id)[0]).toMatchObject({ kind: "auto_shipped" });

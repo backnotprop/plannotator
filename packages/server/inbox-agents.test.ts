@@ -419,6 +419,26 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     expect(fake.calls()).toHaveLength(1);
   });
 
+  test("Hermes Agent's wake switch: turned on by the run says which setting and how to undo it; already on, hermes is not run and nothing is said", async () => {
+    fake.install("hermes");
+    const plugin = join(fake.home, ".hermes", "plugins", "plannotator");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(join(plugin, "plugin.yaml"), readFileSync(join(import.meta.dir, "..", "..", "apps", "hermes-plugin", "plugin.yaml")));
+    writeFileSync(join(fake.home, ".hermes", "config.yaml"), "plugins:\n  entries:\n    plannotator:\n      allow_gateway_injection: true\n");
+    const already = await connect();
+    expect(already.added).toEqual(["hermes"]);
+    expect(fake.calls()).toEqual([]);
+    expect(formatConnectReport(already).join("\n")).not.toContain("allow_gateway_injection");
+
+    rmSync(join(dataDir, "inbox", "agents.json"), { force: true });
+    writeFileSync(join(fake.home, ".hermes", "config.yaml"), "plugins:\n  entries: {}\n");
+    const changed = await connect();
+    expect(fake.calls()).toHaveLength(1);
+    expect(formatConnectReport(changed)).toContain(
+      "Plannotator turned on Hermes Agent's plugins.entries.plannotator.allow_gateway_injection, so your replies can start a turn in the session that asked. To turn it off: hermes config set plugins.entries.plannotator.allow_gateway_injection false",
+    );
+  });
+
   test("Hermes Agent without the plugin is left to the person with the one-line install, and hermes is never run", async () => {
     fake.install("hermes");
     mkdirSync(join(fake.home, ".hermes"), { recursive: true });
