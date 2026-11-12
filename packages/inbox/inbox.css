@@ -4250,6 +4250,11 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* Settings → Agents' "Scratch folders" path, while it is changed. */
 .ib-agrow .ib-agpath { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-agrow .ib-agpath:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+/* Settings → Agents' one-line rows (LaunchSettingsFile.tsx). */
+.ib-agrow .ib-aglv { display: flex; align-items: center; gap: 4px 10px; min-width: 0; }
+.ib-agrow .ib-aglv > .ib-agval { display: block; min-width: 0; max-width: 100%; }
+.ib-agrow .ib-aglv > .ib-agpath { flex: 1 1 200px; width: auto; }
+.ib-agrow .ib-aghint { flex: none; }
 .ib-agrow .ib-agsub { grid-column: 2 / 4; margin-top: -2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; color: var(--muted-foreground); }
 .ib-agrow .ib-agsub.ib-agwarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
 .pn-inbox .ib-agrow .ib-agsub svg.ib-ic { width: 13px; height: 13px; margin-top: 2px; flex: none; }
@@ -4273,6 +4278,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
   .ib-agrow .ib-agv { grid-column: 1 / 2; grid-row: 2; }
   .ib-agrow .ib-agr { grid-column: 2; grid-row: 1 / 3; }
   .ib-agrow .ib-agsub { grid-column: 1 / 3; }
+  .ib-agrow .ib-aglv { flex-wrap: wrap; }
   .ib-aghead { padding: 11px 12px 4px; flex-wrap: wrap; }
   .ib-aghead .ib-agvia { flex-basis: 100%; order: 3; margin-left: 40px; margin-top: -4px; }
 }
@@ -4732,6 +4738,18 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 /* To as a sentence: "New Claude Code session ▾ in <project> ▾". */
 .ib-cp-startin { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .ib-cp-in { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+/* Compose's model and effort button and menu (compose/LaunchChoiceMenu.tsx). */
+.pn-inbox .ib-cp-tobtn.ib-cp-lchbtn { align-self: center; gap: 4px; height: 30px; padding: 5px 7px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.pn-inbox .ib-cp-tobtn.ib-cp-lchbtn:hover, .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn[aria-expanded="true"] { color: var(--foreground); }
+.ib-cp-lchbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cp-picker.ib-cp-lch { left: auto; right: 14px; width: min(400px, calc(100% - 28px)); }
+.ib-cp-lchcols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 1px solid var(--ib-line); }
+.ib-cp-list.ib-cp-lchcol { grid-template-columns: minmax(0, 1fr) 16px; }
+.pn-inbox .ib-cp-opt.ib-cp-lchopt { width: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); text-align: left; cursor: pointer; }
+.pn-inbox .ib-cp-opt.ib-cp-lchopt:hover, .pn-inbox .ib-cp-opt.ib-cp-lchopt:focus-visible { background: color-mix(in oklch, var(--muted) 80%, transparent); outline: none; }
+:root.light .pn-inbox .ib-cp-opt.ib-cp-lchopt:is(:hover, :focus-visible) { background: var(--muted); }
+.ib-cp-lchopt .ib-cp-op { display: flex; gap: 0.4em; align-items: baseline; }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
@@ -5746,6 +5764,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-tg-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 2px 12px 8px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); min-width: 0; }
 .ib-tg-mode > svg { flex: none; }
 .ib-tg-mode > span { min-width: 0; overflow-wrap: anywhere; }
+/* Long words (many tags, long names) wrap beside the icon instead of leaving it on a line of its own. */
+.ib-tg-mode > span[data-tag-mode-words] { max-width: calc(100% - 20px); }
 .ib-tg-mode b { font-weight: 550; color: var(--foreground); }
 .ib-tg-mode-opt { display: inline-flex; align-items: center; gap: 6px; }
 .pn-inbox .ib-tg-mode-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 550; color: var(--primary); cursor: pointer; border-radius: 4px; }
@@ -7866,6 +7886,51 @@ dialog.ib-dlg.ib-thc[open] { animation: ib-thc-in 240ms cubic-bezier(0.23, 1, 0.
 .pm-fold[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
 .pm-osec { border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); padding: 12px 16px 4px; }
 .pm-osec h3 { margin: 0 0 8px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--muted-foreground); }
+.ar-empty { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.ar-ic { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.ar-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ar-l { font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; }
+.ar-slot + .ar-slot { border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); }
+.ar-who { display: inline-flex; align-items: center; gap: 7px; font-size: var(--ib-fs-13, 13px); font-weight: 550; }
+.pm-rem-body { border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); }
+dialog.ib-dlg.ar-ed { width: 500px; }
+.ar-ed .ib-bi-text { padding-top: 22px; }
+.pn-inbox .ar-area { margin-top: 14px; min-height: 104px; font-size: var(--ib-fs-14, 14px); }
+.ar-lbl { margin: 12px 0 6px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ar-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 9px; background: color-mix(in oklch, var(--muted) 80%, transparent); }
+.pn-inbox .ar-seg button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; }
+.pn-inbox .ar-seg button[aria-pressed="true"] { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.ib-bi-text .ar-quiet { margin: 10px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); line-height: 1.45; }
+.ib-bi-text .pm-err { font-size: var(--ib-fs-12-5, 12.5px); }
+@media (pointer: coarse) {
+  .pn-inbox .ar-area { font-size: max(16px, var(--ib-fs-16, 16px)); }
+}
+.ib-ri-stage { display: flex; flex-direction: column; gap: 10px; width: 400px; max-width: 100%; margin: 0 auto; transition: opacity 400ms ease-out; }
+.ib-ri-stage[data-fading] { opacity: 0; }
+.ib-ri-rules { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; min-height: 24px; }
+.ib-ri-rule { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px 0 7px; border-radius: 999px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 550; white-space: nowrap; background: color-mix(in oklch, var(--primary) 14%, var(--card)); color: var(--primary); box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 26%, transparent); opacity: 0; transform: translateY(6px) scale(0.96); transition: opacity 320ms ease-out, transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ib-ri-rule[data-on] { opacity: 1; transform: none; }
+.ib-ri-msgs { position: relative; height: 120px; }
+.ib-ri-card { position: absolute; left: 0; right: 0; overflow: hidden; padding: 9px 11px; border-radius: 9px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 60%, transparent), 0 6px 14px -8px oklch(0 0 0 / 0.35); transition: opacity 380ms ease-out, transform 480ms cubic-bezier(0.65, 0, 0.35, 1); }
+.ib-ri-update { top: 0; height: 34px; opacity: 0.75; transform: scale(0.95) translateY(-4px); }
+.ib-ri-update[data-gone] { opacity: 0; transform: scale(0.9) translateY(-10px); }
+.ib-ri-main { top: 14px; }
+.ib-ri-head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.ib-ri-t { width: 46%; height: 5px; border-radius: 3px; background: var(--bi-bar); }
+.ib-ri-when { width: 14%; height: 4px; margin-left: auto; border-radius: 2px; background: var(--bi-bar2); }
+.ib-ri-lines { display: flex; flex-direction: column; }
+.ib-ri-lines b { display: block; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--bi-bar2); transition: opacity 300ms ease-out, height 480ms cubic-bezier(0.65, 0, 0.35, 1), margin 480ms cubic-bezier(0.65, 0, 0.35, 1); }
+.ib-ri-lines b:first-child { margin-top: 0; }
+.ib-ri-lines b[data-cut] { height: 0; margin-top: 0; opacity: 0; }
+.ib-ri-ask { display: flex; align-items: center; gap: 6px; height: 20px; margin-top: 9px; padding: 0 8px; border-radius: 6px; background: color-mix(in oklch, var(--bi-amber) 22%, transparent); opacity: 0; transform: translateY(4px); transition: opacity 320ms ease-out, transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ib-ri-ask[data-on] { opacity: 1; transform: none; }
+.ib-ri-ask i { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--bi-amber); }
+.ib-ri-ask b { width: 30%; height: 4px; border-radius: 2px; background: var(--bi-amber); }
+.ib-bi-phone .ar-seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; box-sizing: border-box; }
+.ib-bi-phone .ib-ri-rule { font-size: var(--ib-fs-11, 11px); padding: 0 8px 0 6px; }
+@media (prefers-reduced-motion: reduce) {
+  .ib-ri-stage, .ib-ri-rule, .ib-ri-card, .ib-ri-lines b, .ib-ri-ask { transition: none; }
+}
 .pm-oitem { padding: 0 0 14px; }
 .pm-ohead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; font-size: var(--ib-fs-13-5, 13.5px); }
 .pm-ohead b { font-weight: 500; }
@@ -10829,6 +10894,31 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 :root.dark .pn-inbox .ib-rclose, .dark .pn-inbox .ib-rclose { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
 .pn-inbox .ib-rclose:hover { background: var(--muted); color: var(--foreground); }
 .pn-inbox .ib-rclose:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* Reply with a quote (approval "inbox-reply-quote"): one quiet line over the words naming the message they answer.
+   Muted text on the box's own ground: no bar, no well, no outline. Up to two lines on a computer, one on a phone.
+   Its right end stays clear of the close chevron. */
+.ib-rquote { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 8px; align-items: start; padding: 12px 44px 0 16px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+.ib-rquote-ic { margin-top: 3px; color: var(--muted-foreground); flex: none; }
+.ib-rquote-t { min-width: 0; }
+.ib-rquote-clip { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.ib-rquote-src { display: inline-flex; align-items: center; gap: 6px; vertical-align: -3px; }
+:is(.ib-rquote-nm, .ib-squote-nm) { color: var(--foreground); font-weight: 500; }
+.ib-rquote-tm { color: var(--muted-foreground); white-space: nowrap; }
+.ib-rquote-one { display: flex; align-items: center; gap: 7px; min-width: 0; }
+:is(.ib-rquote-w, .ib-squote-w) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-rquote-x { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-top: -2px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
+.ib-rquote-x:hover { background: var(--muted); color: var(--foreground); }
+.ib-rquote-x:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* With a quote over them the words start closer to it (the field and its mirror move together). */
+.ib-pfoot .ib-rbox:has(> .ib-rquote) .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding-top: 8px; }
+.ib-fcomp-quote .ib-rquote { padding: 4px 4px 0 2px; }
+/* A sent reply's quote: the same line on one row; a press goes to the original. */
+.ib-squote { display: flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; margin: 0 0 4px; padding: 2px 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); text-align: start; cursor: pointer; }
+.ib-squote-src { display: inline-flex; gap: 6px; flex: none; white-space: nowrap; }
+.ib-squote:hover .ib-squote-nm { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in oklch, var(--foreground) 35%, transparent); }
+.ib-squote:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+/* The quoted words in the original, tinted for a moment after that press (replyQuote.ts `flashQuoteWords`). */
+::highlight(ib-quote-words) { background-color: color-mix(in oklch, var(--primary) 24%, transparent); }
 /* "Not saved …" on its own line over the row, in full, wrapping inside the box (a computer). */
 .ib-rnote { padding: 2px 16px 0; font-size: var(--ib-fs-12-5, 12.5px); overflow-wrap: anywhere; transition: opacity 160ms ease-out; }
 /* Fades in when it comes. */
@@ -10907,6 +10997,8 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
   .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding: 13px 52px 6px 14px; }
   .ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file { flex-basis: 100%; max-width: none; }
   .pn-inbox .ib-rclose { top: 4px; right: 4px; width: 44px; height: 44px; }
+  .ib-rquote { padding: 12px 52px 0 14px; }
+  .ib-rquote-x { width: 32px; height: 32px; margin: -6px -6px 0 0; }
   /* The line over the row: what goes with the reply at the left, who gets it at the right; 44 px tall. */
   .ib-rline { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 4px; }
   .ib-rline[data-empty] { display: none; }

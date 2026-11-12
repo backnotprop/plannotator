@@ -53,3 +53,6 @@ export const PreserveResolvedVideosContext = createContext(false);
  * working. Absent (false), they are dropped as before.
  */
 export const ResolvedResponsiveImagesContext = createContext(false);
+
+/** With a resolver, an inline `<img>` (table cell, sentence) renders through it; only src, alt, width, height are read. */
+export const InlineImageTagsContext = createContext(false);

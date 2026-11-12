@@ -415,6 +415,16 @@ describe("launch resolution", () => {
     expect(() => resolveLaunchProfile("skill:does-not-exist")).toThrow(/not available/);
   });
 
+  test("a skill too long for the prompt is kept and listed: the agent is told to read its SKILL.md whole", () => {
+    const dir = writeSkill(join(home, ".claude", "skills"), "long-review", `# Long\n\n${"check every line. ".repeat(2_000)}`);
+    writeCuration(["long-review"]);
+    expect(loadReviewProfiles().map((p) => p.id)).toContain("skill:long-review");
+    const profile = resolveLaunchProfile("skill:long-review");
+    expect(profile.id).toBe("skill:long-review");
+    expect(profile.instructions).toContain(`read all of ${join(dir, "SKILL.md")}`);
+    expect(profile.instructions.length).toBeLessThan(1_000);
+  });
+
   test("a curated skill with an empty body throws (could not be loaded)", () => {
     writeSkill(join(home, ".claude", "skills"), "blank", "");
     writeCuration(["blank"]);

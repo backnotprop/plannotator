@@ -82,7 +82,7 @@ import {
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
-import { getServerPorts, isRemoteSession } from "./server/network.ts";
+import { getServerPorts, isRemoteSession, isSshDetectedRemote } from "./server/network.ts";
 import { sessionOpenedMessage } from "./session-opened.ts";
 import {
 	claimSessionEventBus,
@@ -451,9 +451,11 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	// last, plan review). Listeners register once here; each command binds a bridge to its ctx.
 	const sessionBridgeHub = createPiSessionBridgeHub(pi);
 	// Off in remote mode: anyone who can reach the session URL could otherwise
-	// type into this agent session (same reasoning as the agent terminal).
+	// type into this agent session (same reasoning as the agent terminal). A
+	// remote session only SSH turned on keeps it, answered only for its own
+	// tunnel (the AI runtime's peer endpoints serve every other address).
 	const sessionBridgeFor = (ctx: ExtensionContext, origin: PiSessionIdentity) =>
-		isRemoteSession() ? undefined : sessionBridgeHub.createBridge(ctx, origin);
+		isRemoteSession() && !isSshDetectedRemote() ? undefined : sessionBridgeHub.createBridge(ctx, origin);
 	/**
 	 * The open reviews (tool, slash commands, plan review), each with a `pn-`
 	 * session id and the Pi session that opened it: what the `plannotator`

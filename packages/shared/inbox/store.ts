@@ -1,35 +1,17 @@
 /**
- * Plannotator Inbox store: per-project append-only JSONL under
- * `${dataDir}/inbox/`, read whole at start and kept in memory.
+ * Plannotator Inbox store: the record log (`store-log/log.ts`; today per-project
+ * append-only JSONL under `${dataDir}/inbox/`, `store-log/jsonl-log.ts`), read
+ * whole at start and kept in memory.
  *
- * One writer: the Inbox server process. Every change appends ONE line, a full
- * snapshot of the record, in a single append-mode write; the in-memory view is
- * updated from that same line and every subscriber is told, in seq order. A
- * line that does not parse is skipped on read (a torn last line after a
- * crash); before the first append to a file whose last line is torn, a newline
- * is appended first so the fragment stays its own unreadable line and the new
- * line stays whole.
+ * One writer: the Inbox server process. Every change is ONE line, a full
+ * snapshot of the record, persisted through the log; the in-memory view is
+ * updated from that same line and every subscriber is told, in seq order.
  *
  * The rules (picks, Send, idempotency) live here so the window's API and the
  * MCP tools share them. See schema.ts for the layout.
  */
 
-import {
-  appendFileSync,
-  chmodSync,
-  closeSync,
-  existsSync,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  readSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-  statSync,
-} from "node:fs";
+import { appendFileSync, chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
 import {
@@ -109,7 +91,6 @@ import {
   inboxAgentName,
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
-  INBOX_TAGS_MAX,
   INBOX_THREAD_NAME_MAX,
   INBOX_SESSION_ID_PATTERN,
   type InboxParticipant,
@@ -124,11 +105,14 @@ import {
   type InboxQuestionState,
   type InboxRowDelivery,
 } from "@plannotator/core/inbox-types";
+import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
 import { inboxWakeQuote } from "./wake-quote";
+import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
+import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
@@ -140,6 +124,7 @@ import {
   INBOX_LIVE_QUOTE_MAX,
   INBOX_LIVE_URL_MAX,
   INBOX_MESSAGE_COMMENT_QUOTE_MAX,
+  isInboxId,
   INBOX_MESSAGE_COMMENT_TEXT_MAX,
   isInboxAnnotationId,
   isInboxAnnotationVersion,
@@ -183,7 +168,6 @@ import {
   inboxCardColumnIndex,
   inboxCardColumnOf,
   readInboxCard,
-  isInboxCardSeenOnlyChange,
   isInboxCardSentWaiting,
   normalizeInboxCardNotes,
   inboxCardHistory,
@@ -213,7 +197,6 @@ import {
 } from "@plannotator/core/inbox-types";
 import type { InboxActivityModel } from "@plannotator/core/inbox-types";
 import {
-  inboxHashtags,
   inboxInitiativeBareName,
   inboxInitiativeJoinKey,
   inboxInitiativeNameKey,
@@ -225,24 +208,12 @@ import {
   type InboxInitiative,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
-import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
-import {
-  ANNOTATIONS_FILE,
-  CARDS_FILE,
-  INITIATIVES_FILE,
-  LEGACY_DECISIONS_FILE,
-  INBOX_PROJECTS_DIR,
-  SEQ_FLOOR_FILE,
-  STEPS_FILE,
-  PULLS_FILE,
-  InboxError,
-  inboxDir,
-  MESSAGES_FILE,
-  parseInboxLine,
-  PROJECT_FILE,
-  QUESTIONS_FILE,
-} from "./schema";
+import { InboxError, inboxDir } from "./schema";
+import type { InboxLog, InboxLogFactory, InboxLogState, InboxStoreBackup } from "./store-log/log";
+import { agentNamesHere, archiveSeqAfter, cardAfter, firstLineName, firstLineTagKeys, movesAddress, pullEventOf, threadNameIndexKey } from "./store-log/history";
+import { jsonlInboxLog } from "./store-log/jsonl-log";
 
 /** The local person, the only picker on a local Inbox. */
 export const INBOX_PERSON: InboxPicker = { id: "person", name: null };
@@ -419,6 +390,14 @@ export interface InboxReplyInput {
    */
   handoff?: { to: InboxAddressee; label?: string | null; from: { host: string | null; session: string; wakes: boolean; label?: string | null } | null };
   /**
+   * The message this reply quotes (approval "inbox-reply-quote"): `{ of, words?, time? }`, `of` a message of the
+   * same thread, `words` the words the person selected in it (absent: the whole message), `time` the quoted
+   * message's time as the person's window shows it ("10:04 AM"; absent or not a time: this Inbox's own). The lead
+   * the agent reads goes in front of the person's words. Only with words: a reply without any carries no quote.
+   * Absent (an older window, or no quote): nothing changes.
+   */
+  quote?: unknown;
+  /**
    * The person's verdict on the review this reply answers (code review in the
    * Inbox: Approve or Send feedback in the review's header). Only on a reply
    * to a message whose guide is a review; the server passes it only while the
@@ -470,6 +449,10 @@ export interface InboxDiskUsage {
   dir: string;
   bytes: number;
   projects: InboxProjectUsage[];
+  /** A log kept in one file (SQLite, behind its switch): that file's bytes, counted in `bytes` once instead of each project's lines. */
+  database?: number;
+  /** The dated backups a move left (SQLite, behind its switch), counted in `bytes`: Settings → Storage lists each with Remove. */
+  backups?: InboxStoreBackup[];
 }
 
 /**
@@ -595,14 +578,13 @@ function tagOf(message: InboxMessage, session: string): InboxTag | null {
 
 /**
  * The tags a Send asked for, as the server resolved them: each session once,
- * in the order typed, at most INBOX_TAGS_MAX, never the reply's owner (who
+ * in the order typed, any number, never the reply's owner (who
  * gets it anyway), each entry shaped exactly (fail closed: anything else is
  * a validation error, nothing written).
  */
 export function normalizeInboxTags(value: unknown, owner: string | null): InboxTag[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new InboxError("validation_error", "tags: a list of tagged sessions.", { field: "tags" });
-  if (value.length > INBOX_TAGS_MAX) throw new InboxError("validation_error", `tags: at most ${INBOX_TAGS_MAX} sessions.`, { field: "tags" });
   const out: InboxTag[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
@@ -612,8 +594,8 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
     }
     if (host !== null && (typeof host !== "string" || host.length > 64)) throw new InboxError("validation_error", "tags: host a string or null.", { field: "tags" });
     if (typeof wakes !== "boolean") throw new InboxError("validation_error", "tags: wakes true or false.", { field: "tags" });
-    if (name !== undefined && name !== null && (typeof name !== "string" || name.length > 80)) {
-      throw new InboxError("validation_error", "tags: name a short string.", { field: "tags" });
+    if (name !== undefined && name !== null && typeof name !== "string") {
+      throw new InboxError("validation_error", "tags: name a string.", { field: "tags" });
     }
     if (label !== undefined && label !== null && (typeof label !== "string" || label.length > 120 || /[\u0000-\u001f\u007f]/.test(label))) {
       throw new InboxError("validation_error", "tags: label a short line.", { field: "tags" });
@@ -647,31 +629,6 @@ export const INBOX_SUPERSEDES_MAX = 100;
 
 // `<name>-<6 hex of the root>`: in project-key.ts, so the Shape store files under the same keys without loading this store.
 export { inboxProjectKey };
-
-/**
- * The highest seq in an older store's decisions.jsonl (Decisions were removed
- * in 2026-10; the file is kept on disk and its records are never read), or 0.
- * Read leniently: only each line's `seq` counts.
- */
-function legacySeqFloor(path: string): number {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    return 0;
-  }
-  let high = 0;
-  for (const raw of text.split("\n")) {
-    if (!raw.trim()) continue;
-    try {
-      const seq = (JSON.parse(raw) as { seq?: unknown }).seq;
-      if (typeof seq === "number" && Number.isSafeInteger(seq) && seq > high) high = seq;
-    } catch {
-      // A torn line: skipped, as the store skips one.
-    }
-  }
-  return high;
-}
 
 /**
  * What a list row's delivery (`InboxListRow.delivery`) reads about the live
@@ -788,6 +745,7 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
 const SEND_APPENDED_HEADINGS: ReadonlySet<string> = new Set([
   `## ${INBOX_ACTIONS_HEADING}`,
   `# ${INBOX_MESSAGE_FEEDBACK_TITLE}`,
+  `# ${INBOX_OWN_MESSAGE_FEEDBACK_TITLE}`,
   `# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`,
   `# ${INBOX_GUIDE_FEEDBACK_TITLE}`,
 ]);
@@ -931,7 +889,6 @@ export class InboxStore {
   private readonly tagThreads = new Map<string, { latest: Map<string, number>; order: string[] }>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
-  private readonly tornFiles = new Set<string>();
   private readonly listeners = new Set<InboxListener>();
   /** Told when a thread's reply draft is saved or deleted (no store line is written for it). */
   private readonly replyDraftListeners = new Set<(threadId: string) => void>();
@@ -964,15 +921,18 @@ export class InboxStore {
    */
   private readonly previewLines = new WeakMap<InboxMessage, { asks: string; text: string | null }>();
   private readonly now: () => Date;
+  /** Where the records are kept (`store-log/log.ts`). */
+  private readonly log: InboxLog;
 
-  private constructor(dataDir: string, now: () => Date) {
+  private constructor(dataDir: string, now: () => Date, log: InboxLogFactory) {
     this.dir = inboxDir(dataDir);
     this.now = now;
+    this.log = log(this.dir);
   }
 
-  /** Read the store under `dataDir` (created owner-only when missing). */
-  static open(dataDir: string, options: { now?: () => Date } = {}): InboxStore {
-    const store = new InboxStore(dataDir, options.now ?? (() => new Date()));
+  /** Read the store under `dataDir` (created owner-only when missing). `log`: where records are kept; today's JSONL by default. */
+  static open(dataDir: string, options: { now?: () => Date; log?: InboxLogFactory } = {}): InboxStore {
+    const store = new InboxStore(dataDir, options.now ?? (() => new Date()), options.log ?? jsonlInboxLog);
     store.load();
     return store;
   }
@@ -987,51 +947,21 @@ export class InboxStore {
     } catch {
       // Best effort (Windows, a filesystem without modes).
     }
-    this.seq = Math.max(this.seq, this.readSeqFloor());
+    const contents = this.log.read();
+    this.seq = Math.max(this.seq, contents.seqFloor);
     this.replyDrafts.clear();
     this.replyDraftRemovals.clear();
     for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
-    const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
-    const lines: InboxLine[] = [];
-    // The Board's initiatives: one file for every project, on the same seq.
-    this.readLines(join(this.dir, INITIATIVES_FILE), lines);
-    if (!existsSync(projectsDir)) {
+    if (contents.state) this.restore(contents.state);
+    else {
+      const lines = contents.lines;
       lines.sort((a, b) => a.seq - b.seq);
       for (const line of lines) this.apply(line);
-      this.loadPins();
-      this.loadArtifactPins();
-      this.loadSnoozes();
-      return;
     }
-    for (const key of readdirSync(projectsDir)) {
-      const folder = join(projectsDir, key);
-      // Decisions were removed (2026-10): an older store's decisions.jsonl is
-      // left on disk and never applied, but its seqs still count, so a seq is
-      // never handed out twice.
-      this.seq = Math.max(this.seq, legacySeqFloor(join(folder, LEGACY_DECISIONS_FILE)));
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE]) this.readLines(join(folder, name), lines);
-    }
-    lines.sort((a, b) => a.seq - b.seq);
-    for (const line of lines) this.apply(line);
     this.repairUnsentAnswers();
     this.loadPins();
     this.loadArtifactPins();
     this.loadSnoozes();
-  }
-
-  /** One store file's lines into `into` (none when it is missing); a torn last line is noted for the next append. */
-  private readLines(path: string, into: InboxLine[]): void {
-    let text: string;
-    try {
-      text = readFileSync(path, "utf8");
-    } catch {
-      return;
-    }
-    if (text.length > 0 && !text.endsWith("\n")) this.tornFiles.add(path);
-    for (const raw of text.split("\n")) {
-      const line = parseInboxLine(raw);
-      if (line) into.push(line);
-    }
   }
 
   /**
@@ -1062,6 +992,11 @@ export class InboxStore {
     if (line && line.kind === "question") this.latest.set(key, { ...line, record });
   }
 
+  /**
+   * One line, replayed in seq order (at start from today's JSONL, and as each write lands). What depends on the
+   * order of lines (an archive line, a moved address, a name, a card's last real change, a PR event, a first
+   * line's tags) is worked out by `store-log/history.ts`, the same rules the SQLite log keeps in its tables.
+   */
   private apply(line: InboxLine): void {
     this.changes += 1;
     if (line.seq > this.seq) this.seq = line.seq;
@@ -1070,48 +1005,111 @@ export class InboxStore {
     if (previous && previous.seq > line.seq) return;
     this.latest.set(id, line);
     switch (line.kind) {
+      case "message": {
+        const record = line.record;
+        const prev = previous?.kind === "message" ? previous.record : undefined;
+        const archive = archiveSeqAfter(prev?.resolved_at, this.resolvedSeq.get(record.id) ?? null, record, line.seq);
+        if (archive === null) this.resolvedSeq.delete(record.id);
+        else this.resolvedSeq.set(record.id, archive);
+        if (movesAddress(prev, record)) this.readdressed.add(record.id);
+        // A thread the person started routes by name only once an AGENT names it (sendMessage):
+        // indexed at that line, in seq order, so later sends with the name join it and a replay
+        // routes the same. A name the person typed, or compose's suggestion, never routes another
+        // session's send into the person's thread (`personNamed`, for de-duplication only).
+        if (agentNamesHere(prev, record)) this.indexName(record.project_id, record.thread_name!, record.id);
+        const first = !this.messageSeq.has(record.id);
+        this.placeMessage(record, line.seq, first);
+        if (first) {
+          const named = firstLineName(record);
+          if (named) this.indexThreadName(record.project_id, named, record.id);
+          for (const key of firstLineTagKeys(record)) this.indexTag(key, record.thread_id, line.seq);
+        }
+        break;
+      }
+      case "card": {
+        // Cards are their own records: nothing here touches routing or the list.
+        const { card, heard } = cardAfter(this.cards.get(line.record.id), line.record);
+        if (heard) this.cardHeardSeq.set(card.id, line.seq);
+        this.cards.set(card.id, card);
+        break;
+      }
+      case "thread_pull":
+        // A thread's PRs (approval "inbox-pr-binding"): nothing here touches routing, the list's sections, unread or notifications.
+        if (isInboxThreadPullRecord(line.record)) {
+          const event = pullEventOf(this.pullsById.get(line.record.id), line.record, line.seq);
+          this.placeThreadPull(line.record);
+          if (event) {
+            const events = this.pullEvents.get(line.record.thread_id);
+            if (events) events.push(event);
+            else this.pullEvents.set(line.record.thread_id, [event]);
+          }
+        }
+        break;
+      default:
+        this.placeRecord(line);
+    }
+  }
+
+  /**
+   * A log's current state taken as it is (the SQLite log reads it from its tables): each record's latest line in
+   * the order the records began, and the order-dependent facts the log kept as they happened. Leaves exactly what
+   * `apply` over every line would (the every-read test holds it to that), without reading any history.
+   */
+  private restore(state: InboxLogState): void {
+    this.changes += 1;
+    for (const { line: latest, firstSeq } of state.records) {
+      if (latest.seq > this.seq) this.seq = latest.seq;
+      this.latest.set(`${latest.kind}:${latest.id}`, latest);
+      // A latest line that fails its check (steps, PRs, initiatives): the record before it stays, as in `apply`.
+      const kept = state.kept?.get(`${latest.kind}:${latest.id}`);
+      const line = kept ? ({ ...latest, record: kept } as InboxLine) : latest;
+      switch (line.kind) {
+        case "message":
+          this.placeMessage(line.record, firstSeq, true);
+          break;
+        case "card": {
+          const kept = state.cards.get(line.record.id) ?? { card: cardAfter(undefined, line.record).card, heardSeq: line.seq };
+          this.cards.set(kept.card.id, kept.card);
+          this.cardHeardSeq.set(kept.card.id, kept.heardSeq);
+          break;
+        }
+        case "thread_pull":
+          if (isInboxThreadPullRecord(line.record)) this.placeThreadPull(line.record);
+          break;
+        default:
+          this.placeRecord(line);
+      }
+    }
+    for (const [rootId, seq] of state.archiveSeq) this.resolvedSeq.set(rootId, seq);
+    for (const rootId of state.readdressed) this.readdressed.add(rootId);
+    for (const { projectId, name, rootId, routes } of state.names) this.indexThreadName(projectId, { name, routes }, rootId);
+    for (const { key, threadId, seq } of state.tags) this.indexTag(key, threadId, seq);
+    for (const [threadId, events] of state.pullEvents) this.pullEvents.set(threadId, [...events]);
+  }
+
+  /** A message's latest record in memory; `first`: its first line, at `firstSeq` (its place in the thread and the log). */
+  private placeMessage(record: InboxMessage, firstSeq: number, first: boolean): void {
+    this.messages.set(record.id, record);
+    this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
+    if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
+    if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
+    if (!first) return;
+    this.messageSeq.set(record.id, firstSeq);
+    this.noteAgentMessage(record, firstSeq);
+    const members = this.threadMembers.get(record.thread_id);
+    if (members) members.push(record.id);
+    else this.threadMembers.set(record.thread_id, [record.id]);
+  }
+
+  /** A record whose latest line is all there is to it: a project, question, annotation, steps or initiative. */
+  private placeRecord(line: InboxLine): void {
+    switch (line.kind) {
       case "project":
         this.projectsById.set(line.record.id, line.record);
         this.projectsByRoot.set(line.record.root, line.record);
         this.projectLabels = null;
         this.projectGroups = null;
         break;
-      case "message": {
-        // The archive line: the root line whose resolved_at differs from the one before it.
-        const before = previous?.kind === "message" ? previous.record.resolved_at : null;
-        if (line.record.resolved_at == null) this.resolvedSeq.delete(line.record.id);
-        else if (before !== line.record.resolved_at || !this.resolvedSeq.has(line.record.id)) this.resolvedSeq.set(line.record.id, line.seq);
-        if (previous?.kind === "message" && line.record.started_by_person && previous.record.to && line.record.to && previous.record.to.session !== line.record.to.session) {
-          this.readdressed.add(line.record.id);
-        }
-        // A thread the person started routes by name only once an AGENT names it (sendMessage):
-        // indexed at that line, in seq order, so later sends with the name join it and a replay
-        // routes the same. A name the person typed, or compose's suggestion, never routes another
-        // session's send into the person's thread (`personNamed`, for de-duplication only).
-        if (
-          previous?.kind === "message" &&
-          line.record.started_by_person &&
-          line.record.thread_name &&
-          line.record.named_by?.kind === "agent" &&
-          previous.record.named_by?.kind !== "agent"
-        ) {
-          this.indexName(line.record.project_id, line.record.thread_name, line.record.id);
-        }
-        this.messages.set(line.record.id, line.record);
-        this.threadLines.set(line.record.thread_id, (this.threadLines.get(line.record.thread_id) ?? 0) + 1);
-        if (line.record.wakes === true && line.record.author.kind === "agent" && line.record.author.session) this.wakingSessions.add(line.record.author.session);
-        if (line.record.launch !== undefined && line.record.thread_id === line.record.id) this.launchedRootIds.add(line.record.id);
-        if (!this.messageSeq.has(line.record.id)) {
-          this.messageSeq.set(line.record.id, line.seq);
-          this.noteAgentMessage(line.record, line.seq);
-          const members = this.threadMembers.get(line.record.thread_id);
-          if (members) members.push(line.record.id);
-          else this.threadMembers.set(line.record.thread_id, [line.record.id]);
-          this.indexRoot(line.record);
-          this.indexTags(line.record, line.seq);
-        }
-        break;
-      }
       case "question": {
         this.questions.set(line.record.id, line.record);
         const ids = this.messageQuestions.get(line.record.message_id);
@@ -1121,24 +1119,6 @@ export class InboxStore {
       }
       case "annotation":
         this.setAnnotation(line.record);
-        break;
-      case "card":
-        // Cards are their own records: nothing here touches routing or the list.
-        // A card stored before columns v2 reads in the v2 columns (readInboxCard: the migration table, never a rewrite).
-        {
-          let card = readInboxCard(line.record);
-          const prev = this.cards.get(card.id);
-          // A card in Done holds every PR it links (marked or not: a released Inbox wrote no `via`), with any
-          // list it had; a later line without the field keeps what the card had. So a card shipped and moved back
-          // before the upgrade, or by an older Inbox that carried a stale list along, is not moved to Done again.
-          if (card.column === "done") card = { ...card, done_prs: inboxCardDonePrs(card, card.done_prs ?? prev?.done_prs) };
-          else if (card.done_prs === undefined && prev?.done_prs) card = { ...card, done_prs: prev.done_prs };
-          // An Inbox from before initiatives writes a card without the field: the card keeps its initiative
-          // (only the person sets one, and that Inbox has no way to).
-          if (line.record.initiative === undefined && prev?.initiative) card = { ...card, initiative: prev.initiative };
-          if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
-          this.cards.set(card.id, card);
-        }
         break;
       case "steps":
         // Steps are their own records: nothing here touches routing, the list, unread or notifications.
@@ -1150,33 +1130,25 @@ export class InboxStore {
           ids.add(line.record.id);
         }
         break;
-      case "thread_pull":
-        // A thread's PRs (approval "inbox-pr-binding"): nothing here touches routing, the list's sections, unread or notifications.
-        if (isInboxThreadPullRecord(line.record)) this.applyThreadPull(line.record, line.seq);
-        break;
       case "initiative":
         // The Board's initiatives (approval "board-initiatives"): read by the Board only.
         if (isInboxInitiativeRecord(line.record)) this.initiativesById.set(line.record.id, line.record);
         break;
+      default:
+        break;
     }
   }
 
-  /** Note a root's routing keys, from its first line only. */
-  private indexRoot(message: InboxMessage): void {
-    if (message.thread_id !== message.id) return;
-    // A thread the person started: its compose name (typed, or the suggestion) routes nothing:
-    // it is noted only so no other thread takes the same name.
-    if (message.author.kind !== "agent") {
-      if (message.started_by_person && message.thread_name) {
-        const key = `${message.project_id}\0${inboxThreadNameKey(message.thread_name)}`;
-        const roots = this.personNamed.get(key);
-        if (roots) roots.push(message.id);
-        else this.personNamed.set(key, [message.id]);
-      }
-      return;
-    }
-    const name = message.thread_name ?? null;
-    if (name !== null) this.indexName(message.project_id, name, message.id);
+  /**
+   * A root's name from its first line (`firstLineName`): an agent's routes; one the person gave (typed, or
+   * compose's suggestion) routes nothing and is noted only so no other thread takes the same name.
+   */
+  private indexThreadName(projectId: string, named: { name: string; routes: boolean }, rootId: string): void {
+    if (named.routes) return this.indexName(projectId, named.name, rootId);
+    const key = threadNameIndexKey(projectId, named.name);
+    const roots = this.personNamed.get(key);
+    if (roots) roots.push(rootId);
+    else this.personNamed.set(key, [rootId]);
   }
 
   /**
@@ -1193,7 +1165,7 @@ export class InboxStore {
 
   /** Add a root under a thread name; the last one added is the newest of that name. */
   private indexName(projectId: string, name: string, rootId: string): void {
-    const key = `${projectId}\0${inboxThreadNameKey(name)}`;
+    const key = threadNameIndexKey(projectId, name);
     const roots = this.namedThreads.get(key);
     if (roots) roots.push(rootId);
     else this.namedThreads.set(key, [rootId]);
@@ -1692,7 +1664,7 @@ export class InboxStore {
       }
       record = { ...rest, merged_into: head };
     }
-    this.write(join(this.projectFolder(project), PROJECT_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at: this.stamp(),
@@ -1940,7 +1912,9 @@ export class InboxStore {
       const target = id ? this.messages.get(id) : undefined;
       return target && latest && target.id !== latest.id && target.author.kind === "agent" && target.author.session === session ? target : null;
     };
-    const target = (message.reask?.length ?? 0) > 0 ? null : (own(message.reply_to) ?? (answered.size === 1 ? own([...answered][0]) : null));
+    const found = (message.reask?.length ?? 0) > 0 ? null : (own(message.reply_to) ?? (answered.size === 1 ? own([...answered][0]) : null));
+    // A reply that quotes this very message says so in its own words (approval "inbox-reply-quote"): not twice.
+    const target = found && message.quote?.of === found.id ? null : found;
     const stillOpen = this.stillOpenWritten.get(message.id);
     return {
       messages,
@@ -3817,7 +3791,7 @@ export class InboxStore {
 
   /**
    * What the store takes on disk, per project and per thread, read from the
-   * files themselves (Settings' "Stored on this machine"). A thread's bytes
+   * log and the files themselves (Settings' "Stored on this machine"). A thread's bytes
    * are the lines of its messages and their questions; a project's are its
    * whole folder, so they include the project line and any torn fragment.
    */
@@ -3827,11 +3801,13 @@ export class InboxStore {
     // Every blob once in the total; a project and a thread count each blob they use once.
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
     let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes() + this.decisionLinesBytes();
+    // A log in one file is counted as that file (its lines still size each project and thread), plus its backups.
+    const inOneFile = this.log.stored?.();
+    if (inOneFile) total += inOneFile.bytes + inOneFile.backups.reduce((sum, backup) => sum + backup.bytes, 0);
     // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
     for (const stored of this.allProjects()) {
       const head = this.canonicalProjectId(stored.id);
       const project = head === stored.id ? stored : (this.combinedInto(head).find((member) => member.id === stored.id) ?? stored);
-      const folder = this.projectFolder(project);
       const perThread = new Map<string, number>();
       let bytes = 0;
       const projectBlobs = new Set<string>();
@@ -3844,32 +3820,22 @@ export class InboxStore {
         perThread.set(threadId, threadBytes);
       }
       for (const sha256 of projectBlobs) bytes += blobSizes.get(sha256) ?? 0;
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, LEGACY_DECISIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE]) {
-        let text: string;
-        try {
-          text = readFileSync(join(folder, name), "utf8");
-        } catch {
-          continue;
-        }
-        bytes += Buffer.byteLength(text);
-        total += Buffer.byteLength(text);
-        // The project line, an older store's decisions file and the cards count for the project, not a thread.
-        if (name === PROJECT_FILE || name === LEGACY_DECISIONS_FILE || name === CARDS_FILE) continue;
-        for (const raw of text.split("\n")) {
-          const line = parseInboxLine(raw);
-          if (!line) continue;
-          const messageId =
-            line.kind === "message"
-              ? line.record.id
-              : line.kind === "question" || line.kind === "annotation"
-                ? line.record.message_id
-                : line.kind === "steps" || line.kind === "thread_pull"
-                  ? line.record.thread_id
-                  : null;
-          const threadId = messageId ? this.messages.get(messageId)?.thread_id : undefined;
-          if (!threadId) continue;
-          perThread.set(threadId, (perThread.get(threadId) ?? 0) + Buffer.byteLength(raw) + 1);
-        }
+      const onDisk = this.log.usage(project);
+      bytes += onDisk.bytes;
+      // Each project's lines are the total's on JSONL; in one file, that file was counted above.
+      if (!inOneFile) total += onDisk.bytes;
+      for (const { line, bytes: lineBytes } of onDisk.lines) {
+        const messageId =
+          line.kind === "message"
+            ? line.record.id
+            : line.kind === "question" || line.kind === "annotation"
+              ? line.record.message_id
+              : line.kind === "steps" || line.kind === "thread_pull"
+                ? line.record.thread_id
+                : null;
+        const threadId = messageId ? this.messages.get(messageId)?.thread_id : undefined;
+        if (!threadId) continue;
+        perThread.set(threadId, (perThread.get(threadId) ?? 0) + lineBytes);
       }
       const threads = [...perThread.entries()]
         .map(([threadId, threadBytes]) => ({ thread_id: threadId, subject: this.threadSubject(threadId), bytes: threadBytes }))
@@ -3887,7 +3853,12 @@ export class InboxStore {
       });
     }
     projects.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
-    return { dir: this.dir, bytes: total, projects };
+    return { dir: this.dir, bytes: total, projects, ...(inOneFile ? { database: inOneFile.bytes, backups: inOneFile.backups } : {}) };
+  }
+
+  /** Settings → Storage's Remove on a dated backup (SQLite only): false when there is no such backup. */
+  removeBackup(name: string): boolean {
+    return this.log.removeBackup?.(name) ?? false;
   }
 
   // ─────────────────────────── writing ───────────────────────────
@@ -3896,17 +3867,13 @@ export class InboxStore {
     return this.now().toISOString();
   }
 
-  private write(file: string, line: InboxLine): void {
-    const prefix = this.tornFiles.has(file) ? "\n" : "";
-    try {
-      appendFileSync(file, `${prefix}${JSON.stringify(line)}\n`, { mode: 0o600 });
-    } catch (error) {
-      // A failed append may have left part of the line (disk full): the next
-      // append starts on a fresh line so it cannot be glued to the fragment.
-      this.tornFiles.add(file);
-      throw error;
-    }
-    this.tornFiles.delete(file);
+  /** Persist one line through the log (`project`: the record's; null for an initiative), then apply it and tell every subscriber. */
+  private write(project: InboxProject | null, line: InboxLine): void {
+    this.log.append(line, project);
+    this.applyAndTell(line);
+  }
+
+  private applyAndTell(line: InboxLine): void {
     this.apply(line);
     for (const listener of this.listeners) {
       try {
@@ -3917,14 +3884,10 @@ export class InboxStore {
     }
   }
 
-  private projectFolder(project: InboxProject): string {
-    return join(this.dir, INBOX_PROJECTS_DIR, project.key);
-  }
-
   private appendMessage(message: InboxMessage, at: string): void {
     const project = this.projectsById.get(message.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${message.project_id}.`);
-    this.write(join(this.projectFolder(project), MESSAGES_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at,
@@ -3937,7 +3900,7 @@ export class InboxStore {
   private appendQuestion(record: InboxQuestionRecord, at: string): void {
     const project = this.projectsById.get(record.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${record.project_id}.`);
-    this.write(join(this.projectFolder(project), QUESTIONS_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at,
@@ -3957,7 +3920,7 @@ export class InboxStore {
     // projects (the second project.json would replace the first).
     const taken = new Set([...this.projectsById.values()].map((p) => p.key));
     let key = inboxProjectKey(input.name, input.root);
-    const inUse = (candidate: string) => taken.has(candidate) || existsSync(join(this.dir, INBOX_PROJECTS_DIR, candidate));
+    const inUse = (candidate: string) => taken.has(candidate) || this.log.keyTaken(candidate);
     for (let length = 12; inUse(key) && length <= 64; length += 13) key = inboxProjectKey(input.name, input.root, length);
     if (inUse(key)) key = `${inboxProjectKey(input.name, input.root)}-${inboxId("prj").slice(-6).toLowerCase()}`;
     const project: InboxProject = {
@@ -3967,22 +3930,9 @@ export class InboxStore {
       root: input.root,
       created_at: at,
     };
-    const folder = this.projectFolder(project);
-    mkdirSync(folder, { recursive: true, mode: 0o700 });
     const line: InboxLine = { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "project", id: project.id, record: project };
-    // The first line, written whole: temp file then rename (a rename appends later lines through write()).
-    const path = join(folder, PROJECT_FILE);
-    const temp = `${path}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(line)}\n`, { mode: 0o600 });
-    renameSync(temp, path);
-    this.apply(line);
-    for (const listener of this.listeners) {
-      try {
-        listener(line);
-      } catch {
-        // see write()
-      }
-    }
+    this.log.createProject(project, line);
+    this.applyAndTell(line);
     return this.labeled(project);
   }
 
@@ -4006,7 +3956,7 @@ export class InboxStore {
     if ((project.display_name ?? null) === displayName) return this.labeled(project);
     const { display_name: _previous, ...rest } = project;
     const record: InboxProject = displayName === null ? rest : { ...rest, display_name: displayName };
-    this.write(join(this.projectFolder(project), PROJECT_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at: this.stamp(),
@@ -4957,8 +4907,11 @@ export class InboxStore {
           )
           .flatMap((m) => this.questionRecords(m.id))
       : this.questionRecords(message.id);
+    // A quote goes in front of the person's words (approval "inbox-reply-quote"), so the agent reads what they answer.
+    const quoted = this.planQuote(message, input, words);
+    const quotedWords = quoted ? `${quoted.lead}\n\n${words.trim()}` : words;
     // The picks first, then the annotations as Plannotator's feedback text.
-    const replyParts = { questions: [], sent: [], earlier: [], messages: groups, replyTo: message.id, words, stillOpen };
+    const replyParts = { questions: [], sent: [], earlier: [], messages: groups, replyTo: message.id, words: quotedWords, stillOpen };
     const replyBody = composeInboxReplyBody(replyParts);
     const actionsSection = this.stagedActionsSection(message, actionsSent, stillOpen);
     const body = [withInboxActionsSection(replyBody, actionsSection), feedback]
@@ -5018,6 +4971,7 @@ export class InboxStore {
       ...(verdict ? { review_verdict: verdict } : {}),
       ...(viewing ? { viewing } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
+      ...(quoted ? { quote: quoted.quote } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer
@@ -5038,6 +4992,49 @@ export class InboxStore {
     // The person's words as typed: never the picks, the action items or the feedback the Send adds.
     this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
+  }
+
+  /**
+   * A reply's quote (`InboxReplyInput.quote`, approval "inbox-reply-quote"), checked before anything is written: the
+   * quote to keep on the reply and the lead its words open with. Null without one, or when the reply carries no words
+   * of the person's (a quote rides their words only). Whose message it is, as the agent reading it is told: "your"
+   * when the session the reply goes to wrote it, "my" for the person's own, else the other agent named by its host.
+   */
+  private planQuote(message: InboxMessage, input: InboxReplyInput, words: string): { quote: { of: string; words?: string }; lead: string } | null {
+    const raw = input.quote;
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw !== "object" || Array.isArray(raw)) throw new InboxError("validation_error", "quote: { of, words? }.", { field: "quote" });
+    const { of, words: selected, time } = raw as Record<string, unknown>;
+    if (typeof of !== "string" || !isInboxId("msg", of)) throw new InboxError("validation_error", "quote.of: a message id.", { field: "quote.of" });
+    const target = this.messages.get(of);
+    if (!target || target.thread_id !== message.thread_id || isAckNote(target)) {
+      throw new InboxError("validation_error", "quote.of: a message of this thread.", { field: "quote.of" });
+    }
+    if (selected !== undefined && (typeof selected !== "string" || selected.trim() === "" || selected.length > INBOX_MESSAGE_COMMENT_QUOTE_MAX)) {
+      throw new InboxError("validation_error", `quote.words: the words selected, at most ${INBOX_MESSAGE_COMMENT_QUOTE_MAX} characters.`, { field: "quote.words" });
+    }
+    if (words.trim() === "") return null;
+    const to = input.handoff ? input.handoff.to : (input.to ?? (message.author.kind === "person" && message.to ? message.to : undefined));
+    const session = to?.session ?? (message.author.kind === "agent" ? (message.author.session ?? null) : null);
+    const whose: InboxReplyQuoteWhose =
+      target.author.kind === "person"
+        ? { kind: "mine" }
+        : session !== null && target.author.session === session
+          ? { kind: "yours" }
+          : { kind: "theirs", name: target.author.host && Object.hasOwn(INBOX_HOST_NAMES, target.author.host) ? INBOX_HOST_NAMES[target.author.host]! : "another agent" };
+    // A message that is only questions: its first question's own words.
+    const excerpt =
+      typeof selected === "string"
+        ? selected
+        : inboxReplyQuoteExcerpt(target) || (this.questionRecords(target.id).sort((a, b) => a.position - b.position)[0]?.prompt ?? "");
+    const lead = inboxReplyQuoteLead({
+      whose,
+      id: target.id,
+      time: inboxReplyQuoteTime(time) || whenTime(target.created_at),
+      text: excerpt,
+      selected: typeof selected === "string",
+    });
+    return { quote: { of: target.id, ...(typeof selected === "string" ? { words: selected } : {}) }, lead };
   }
 
   /**
@@ -5642,10 +5639,11 @@ export class InboxStore {
       throw new InboxError("validation_error", "annotation.filePath: a global comment is on the whole review, on no file.", { field: "annotation.filePath" });
     }
     const text = fields.text;
-    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+    const images = this.commentPictures(fields.images);
+    if (!(images && (text === undefined || text === "")) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
-    const kept = guideCommentFields(fields, "general");
+    const kept = guideCommentFields({ ...fields, images: undefined }, "general");
     if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const existing = this.annotations.get(id);
     if (existing && (!existing.guide || existing.message_id !== message.id || existing.guide.scope !== "general")) {
@@ -5665,7 +5663,7 @@ export class InboxStore {
       version: guide.sha256,
       guide: { title: guide.title, file: "", side: "new", line_start: 0, line_end: 0, scope: "general" },
       // The review app's general comment: no file, no lines, whatever the client sent for them.
-      annotation: { ...kept, scope: "general", filePath: "", lineStart: 0, lineEnd: 0, side: "new" },
+      annotation: { ...kept, ...(images ? { images } : {}), scope: "general", filePath: "", lineStart: 0, lineEnd: 0, side: "new" },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
@@ -5682,8 +5680,9 @@ export class InboxStore {
    * the person selected, or a comment on a rendered diagram part, with
    * `diagramAnchor` and the part's label as `originalText`, or a Delete on
    * selected words (`type` "DELETION", no words of its own needed; approval
-   * "inbox-toolbar-delete"). Only an agent's
-   * message takes one, and only while it can be answered (an archive closes
+   * "inbox-toolbar-delete"). An agent's message takes one, and the person's own
+   * (approval "inbox-annotate-own-and-questions"), never one of the Inbox's own notes (a set-aside or reopened
+   * note, a 👍, a Tidy note); only while it can be answered (an archive closes
    * the messages before its line). The
    * record's key is the message: `path` is its id, `version` "current", and
    * `message` names it. Sent with the reply like an attachment's annotation.
@@ -5691,8 +5690,8 @@ export class InboxStore {
   saveMessageAnnotation(messageId: string, annotation: unknown): InboxAnnotationRecord {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-    if (message.author.kind !== "agent") {
-      throw new InboxError("annotation_not_allowed", "annotation: only an agent's message takes comments; this one is yours.", { field: "message_id" });
+    if (message.author.kind !== "agent" && (message.author.kind !== "person" || isInboxNote(message))) {
+      throw new InboxError("annotation_not_allowed", "annotation: one of the Inbox's own notes takes no comments.", { field: "message_id" });
     }
     if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
       throw new InboxError("validation_error", "annotation: an object.", { field: "annotation" });
@@ -5712,11 +5711,13 @@ export class InboxStore {
     // A deletion's words are the ones selected; it may carry none of its own.
     const text = fields.text;
     const noText = text === undefined || text === null || text === "";
-    if (!(deletion && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
+    const pictured = Array.isArray(fields.images) && fields.images.length > 0;
+    if (!((deletion || pictured) && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
-    // A comment on a message's words is words: no images, no element or page it points at, no reply thread.
-    for (const field of ["images", "elementContext", "pageUrl", "inReplyTo"] as const) {
+    // A comment on a message's words points at no element or page and starts no reply thread.
+    const images = this.commentPictures(fields.images);
+    for (const field of ["elementContext", "pageUrl", "inReplyTo"] as const) {
       const value = fields[field];
       if (value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)) throw new InboxError("validation_error", `annotation.${field}: a comment on a message's text takes none.`, { field: `annotation.${field}` });
     }
@@ -5742,7 +5743,7 @@ export class InboxStore {
       path: message.id,
       version: INBOX_ANNOTATION_CURRENT,
       message: { at: message.created_at },
-      annotation: { ...withoutExportLocation(fields), ...(diagramAnchor ? { diagramAnchor } : {}) },
+      annotation: { ...withoutExportLocation({ ...fields, images: undefined }), ...(images ? { images } : {}), ...(diagramAnchor ? { diagramAnchor } : {}) },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
@@ -5905,7 +5906,7 @@ export class InboxStore {
   private appendAnnotation(record: InboxAnnotationRecord, at: string): void {
     const project = this.projectsById.get(record.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${record.project_id}.`);
-    this.write(join(this.projectFolder(project), ANNOTATIONS_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at,
@@ -5977,7 +5978,7 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     if (ops) {
       // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
@@ -6001,7 +6002,7 @@ export class InboxStore {
         this.deleteReplyDraft(threadId);
         return null;
       }
-      return this.writeReplyDraft(threadId, existing, body, after, given);
+      return this.writeReplyDraft(threadId, existing, body, after, given, quote);
     }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
@@ -6033,14 +6034,22 @@ export class InboxStore {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files, given);
+    return this.writeReplyDraft(threadId, existing, body, files, given, quote);
   }
 
   /**
    * Write a thread's draft whole, its `updated_at` strictly later than the last one's. `recipients`: who the reply
-   * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own.
+   * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own. `quote`: the
+   * message the reply quotes; null takes it away, undefined keeps the draft's own.
    */
-  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[], recipients: readonly string[] | null = null): InboxReplyDraft {
+  private writeReplyDraft(
+    threadId: string,
+    existing: InboxReplyDraft | null,
+    body: string,
+    files: readonly InboxDraftFile[],
+    recipients: readonly string[] | null = null,
+    quote: InboxReplyQuote | null | undefined = undefined,
+  ): InboxReplyDraft {
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
     const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
@@ -6054,6 +6063,9 @@ export class InboxStore {
     };
     const aimed = recipients ?? existing?.recipients ?? [];
     if (aimed.length > 0) draft.recipients = [...aimed];
+    // The quote (approval "inbox-reply-quote"): a save that names one sets it, `null` takes it away, absent keeps it.
+    const quoted = quote === undefined ? (existing?.quote ?? null) : quote;
+    if (quoted) draft.quote = { ...quoted };
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.changes += 1;
@@ -6142,6 +6154,33 @@ export class InboxStore {
     return out;
   }
 
+  commentPictureUploadIds(): Set<string> {
+    const out = new Set<string>();
+    for (const record of this.annotations.values()) {
+      if (record.sent_reply_id !== null || record.removed_at !== null) continue;
+      for (const id of inboxCommentPictureUploads(record.annotation)) out.add(id);
+    }
+    return out;
+  }
+
+  private commentPictures(images: unknown): { path: string; name: string }[] | undefined {
+    if (images === undefined || images === null || (Array.isArray(images) && images.length === 0)) return undefined;
+    const field = "annotation.images";
+    if (!Array.isArray(images) || images.length > INBOX_COMMENT_PICTURES_MAX) {
+      throw new InboxError("validation_error", `${field}: at most ${INBOX_COMMENT_PICTURES_MAX} pictures, each { path, name }.`, { field });
+    }
+    return images.map((image, index) => {
+      const { path, name } = (image && typeof image === "object" ? image : {}) as { path?: unknown; name?: unknown };
+      const picture = inboxCommentPicture(path);
+      if (!picture || typeof name !== "string" || name.trim() === "" || name.length > 200) {
+        throw new InboxError("validation_error", `${field}[${index}]: { path: "<upload id>/<file name>", name } of a picture you uploaded.`, { field });
+      }
+      const upload = readInboxUpload(this.dir, picture.upload_id);
+      if (!upload || upload.kind !== "image") throw new InboxError("upload_not_found", `${field}[${index}]: that picture is no longer here; add it again.`, { field });
+      return { path: path as string, name: inboxViewingText(name, 200) || "image" };
+    });
+  }
+
   /** Bytes Decision data's kept lines take on disk (Settings → Storage). */
   private decisionLinesBytes(): number {
     try {
@@ -6170,32 +6209,9 @@ export class InboxStore {
     const project = this.projectsById.get(root.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
     const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
-    const folder = this.projectFolder(project);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepDecisionLines((question) => messageIds.has(question.message_id));
-    this.keepSeqFloor();
-    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE, PULLS_FILE]) {
-      const path = join(folder, name);
-      let text: string;
-      try {
-        text = readFileSync(path, "utf8");
-      } catch {
-        continue;
-      }
-      const kept = text.split("\n").filter((raw) => {
-        const line = parseInboxLine(raw);
-        if (!line) return false;
-        if (line.kind === "message") return line.record.thread_id !== threadId;
-        if (line.kind === "question") return !messageIds.has(line.record.message_id);
-        if (line.kind === "annotation") return line.record.thread_id !== threadId;
-        if (line.kind === "steps") return line.record.thread_id !== threadId;
-        if (line.kind === "thread_pull") return line.record.thread_id !== threadId;
-        return true;
-      });
-      const temp = `${path}.${process.pid}.tmp`;
-      writeFileSync(temp, kept.length > 0 ? `${kept.join("\n")}\n` : "", { mode: 0o600 });
-      renameSync(temp, path);
-    }
+    this.log.deleteThread(project, threadId, messageIds, this.seq);
     this.reload(markups);
   }
 
@@ -6205,8 +6221,7 @@ export class InboxStore {
     if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
     const markups = this.markupsOf((record) => record.project_id === projectId);
     this.keepDecisionLines((question) => question.project_id === projectId);
-    this.keepSeqFloor();
-    rmSync(this.projectFolder(project), { recursive: true, force: true });
+    this.log.deleteProject(project, this.seq);
     this.reload(markups);
   }
 
@@ -6314,7 +6329,6 @@ export class InboxStore {
     this.pullEvents.clear();
     this.initiativesById.clear();
     this.tagThreads.clear();
-    this.tornFiles.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
     const attachmentIds = new Set<string>();
@@ -6347,26 +6361,6 @@ export class InboxStore {
       } catch {
         // A listener's failure never fails the deletion.
       }
-    }
-  }
-
-  /**
-   * Keep the highest seq across a deletion: the lines removed may hold it,
-   * and an agent's cursor already past it must never see that number again.
-   */
-  private keepSeqFloor(): void {
-    const path = join(this.dir, SEQ_FLOOR_FILE);
-    const temp = `${path}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify({ seq: this.seq })}\n`, { mode: 0o600 });
-    renameSync(temp, path);
-  }
-
-  private readSeqFloor(): number {
-    try {
-      const value = JSON.parse(readFileSync(join(this.dir, SEQ_FLOOR_FILE), "utf8")) as { seq?: unknown };
-      return typeof value.seq === "number" && Number.isSafeInteger(value.seq) && value.seq > 0 ? value.seq : 0;
-    } catch {
-      return 0;
     }
   }
 
@@ -6439,8 +6433,8 @@ export class InboxStore {
     const seq = this.messageSeq.get(message.id) ?? 0;
     // A New message, or a reply the person sent to another session, is
     // settled only by its delivery to the session it names, never by another
-    // agent's read; so is a reply that tags agents.
-    if (!message.to && !hasTags(message) && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
+    // agent's read; so is a reply that tags agents. One sent again (`sendAgain`) waits whatever was read.
+    if (!message.to && !hasTags(message) && message.sent_again_to !== session && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
     return true;
   }
 
@@ -7116,6 +7110,32 @@ export class InboxStore {
     return next;
   }
 
+  /**
+   * Try again on a launched session's turn that ended in an error: the person's message that session took goes to
+   * it once more, as a new delivery (no `delivery`, no old mark or claim on it, the Claude Code mod's included), and
+   * waits for it as it did before it went in. Only a message of the person's that `session` itself took.
+   */
+  sendAgain(messageId: string, session: string): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message || message.author.kind !== "person" || isInboxNote(message) || message.delivery?.session !== session) {
+      throw new InboxError("message_not_found", `No message ${messageId} that session took.`);
+    }
+    const claims = [join(this.dir, "claims", message.id), join(this.dir, "claims", inboxClaimName(message.id, session))];
+    if (/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(session)) claims.push(join(this.dir, "..", "claude-code-mod", session, "inbox", "claims", message.id));
+    for (const claim of claims) {
+      try {
+        rmSync(claim, { recursive: true, force: true });
+      } catch {
+        // A leftover claim: that session reports the message instead of delivering it.
+      }
+    }
+    const at = this.stamp();
+    const { delivery: _delivered, ...rest } = message;
+    const again: InboxMessage = { ...rest, sent_again_to: session, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
+    this.appendMessage(again, at);
+    return again;
+  }
+
   /** Whether a message of this session came through a waking connection: only such a session can be called ended. */
   hasWakingMessage(session: string): boolean {
     return this.wakingSessions.has(session);
@@ -7331,13 +7351,7 @@ export class InboxStore {
     };
     const project = this.projectsById.get(root.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
-    this.write(join(this.projectFolder(project), STEPS_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "steps", id: record.id, record });
-    // An older Inbox never reads steps.jsonl: the floor keeps it from handing out this seq again.
-    try {
-      this.keepSeqFloor();
-    } catch {
-      // Best effort: the line is written; only a downgrade would read the floor.
-    }
+    this.write(project, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "steps", id: record.id, record });
     return { record, changed: true };
   }
 
@@ -7351,23 +7365,12 @@ export class InboxStore {
   // change. Silent: nothing that routes, lists unread or notifies reads it.
   // Who may change it is the server's to check; the store keeps what it is told.
 
-  private applyThreadPull(record: InboxThreadPull, seq: number): void {
-    const prev = this.pullsById.get(record.id);
+  /** A PR record's latest line in memory (its event, if any, is `apply`'s: `pullEventOf`). */
+  private placeThreadPull(record: InboxThreadPull): void {
     this.pullsById.set(record.id, record);
     let ids = this.pullIdsByThread.get(record.thread_id);
     if (!ids) this.pullIdsByThread.set(record.thread_id, (ids = new Set()));
     ids.add(record.id);
-    const live = record.removed_at === undefined;
-    const wasLive = prev ? prev.removed_at === undefined : false;
-    // A state line changes neither: it is no event.
-    if (prev && live === wasLive && (!live || prev.added_at === record.added_at)) return;
-    let events = this.pullEvents.get(record.thread_id);
-    if (!events) this.pullEvents.set(record.thread_id, (events = []));
-    events.push(
-      live
-        ? { seq, at: record.added_at, op: "add", pull: record.pull, by: record.added_by }
-        : { seq, at: record.removed_at!, op: "remove", pull: record.pull, by: record.removed_by! },
-    );
   }
 
   /** The thread a thread or message id names, or thread_not_found. */
@@ -7488,7 +7491,6 @@ export class InboxStore {
     }
     const project = this.projectsById.get(root.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
-    const file = join(this.projectFolder(project), PULLS_FILE);
     const at = this.now().toISOString();
     const by: InboxThreadPullActor = input.by.kind === "agent" ? { ...input.by, session: input.by.session.trim() } : { kind: "person" };
     const added: InboxThreadPull[] = [];
@@ -7509,22 +7511,14 @@ export class InboxStore {
         head: prev?.head ?? null,
         read_at: prev?.read_at ?? null,
       };
-      this.write(file, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id, record });
+      this.write(project, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id, record });
       added.push(record);
     }
     const removed: InboxThreadPull[] = [];
     for (const pull of toRemove) {
       const record: InboxThreadPull = { ...pull, removed_by: by, removed_at: at };
-      this.write(file, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
+      this.write(project, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
       removed.push(record);
-    }
-    if (added.length > 0 || removed.length > 0) {
-      // An older Inbox never reads pulls.jsonl: the floor keeps it from handing out these seqs again.
-      try {
-        this.keepSeqFloor();
-      } catch {
-        // Best effort: the lines are written; only a downgrade would read the floor.
-      }
     }
     return { thread_id: root.id, added, already, removed, missing, pulls: this.threadPulls(root.id) };
   }
@@ -7547,12 +7541,7 @@ export class InboxStore {
     if (!project) return null;
     const at = this.now().toISOString();
     const record: InboxThreadPull = { ...prev, state: read.state, title, base, head, read_at: at };
-    this.write(join(this.projectFolder(project), PULLS_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
-    try {
-      this.keepSeqFloor();
-    } catch {
-      // Best effort, as above.
-    }
+    this.write(project, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
     return record;
   }
 
@@ -7643,13 +7632,7 @@ export class InboxStore {
   }
 
   private appendInitiative(record: InboxInitiative, at: string): void {
-    this.write(join(this.dir, INITIATIVES_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "initiative", id: record.id, record });
-    // An older Inbox never reads initiatives.jsonl: the floor keeps it from handing out this seq again.
-    try {
-      this.keepSeqFloor();
-    } catch {
-      // Best effort: the line is written; only a downgrade would read the floor.
-    }
+    this.write(null, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "initiative", id: record.id, record });
   }
 
   /** A new initiative, named `name` (the person's; an agent makes one only through a card's `initiative_name`). */
@@ -7822,7 +7805,7 @@ export class InboxStore {
   private appendCard(card: InboxCard, at: string): void {
     const project = this.projectsById.get(card.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${card.project_id}.`);
-    this.write(join(this.projectFolder(project), CARDS_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at,
@@ -7831,12 +7814,6 @@ export class InboxStore {
       // Every line since v2 says so: a line without it is read through the pre-v2 map (readInboxCardColumns).
       record: { ...card, cols: INBOX_CARD_COLS_VERSION },
     });
-    // An older Inbox never reads cards.jsonl: the floor keeps it from handing out a card's seq again.
-    try {
-      this.keepSeqFloor();
-    } catch {
-      // Best effort: the line is written; only a downgrade would read the floor.
-    }
   }
 
   /** The thread roots `ids` (thread or message ids) name, each in `projectId`. */
@@ -8177,21 +8154,17 @@ export class InboxStore {
     return next;
   }
 
-  /** Hashtags: the tags in a message's body, indexed to its thread (`tagThreads`). Code holds no tag. */
-  private indexTags(message: InboxMessage, seq: number): void {
-    if (typeof message.body !== "string" || !message.body.includes("#")) return;
-    for (const key of new Set(inboxHashtags(message.body).map((tag) => tag.key))) {
-      if (!key) continue;
-      let entry = this.tagThreads.get(key);
-      if (!entry) this.tagThreads.set(key, (entry = { latest: new Map(), order: [] }));
-      if ((entry.latest.get(message.thread_id) ?? -1) >= seq) continue;
-      entry.latest.set(message.thread_id, seq);
-      entry.order.push(message.thread_id);
-      if (entry.order.length > 2 * entry.latest.size + 16) {
-        // Keep each thread's last entry only, in order.
-        const seen = new Set<string>();
-        entry.order = entry.order.reverse().filter((id) => !seen.has(id) && !!seen.add(id)).reverse();
-      }
+  /** Hashtags: one tag of a message's first line (`firstLineTagKeys`), indexed to its thread at `seq` (`tagThreads`). Code holds no tag. */
+  private indexTag(key: string, threadId: string, seq: number): void {
+    let entry = this.tagThreads.get(key);
+    if (!entry) this.tagThreads.set(key, (entry = { latest: new Map(), order: [] }));
+    if ((entry.latest.get(threadId) ?? -1) >= seq) return;
+    entry.latest.set(threadId, seq);
+    entry.order.push(threadId);
+    if (entry.order.length > 2 * entry.latest.size + 16) {
+      // Keep each thread's last entry only, in order.
+      const seen = new Set<string>();
+      entry.order = entry.order.reverse().filter((id) => !seen.has(id) && !!seen.add(id)).reverse();
     }
   }
 
@@ -8277,17 +8250,7 @@ export class InboxStore {
     const card = this.cards.get(id);
     if (!card) return [];
     const project = this.projectsById.get(card.project_id);
-    let text = "";
-    try {
-      if (project) text = readFileSync(join(this.projectFolder(project), CARDS_FILE), "utf8");
-    } catch {
-      // No file to read (removed under us): the card as it stands is all there is.
-    }
-    const lines: { seq: number; card: InboxCard }[] = [];
-    for (const raw of text.split("\n")) {
-      const line = parseInboxLine(raw);
-      if (line?.kind === "card" && line.record.id === id) lines.push({ seq: line.seq, card: line.record });
-    }
+    const lines = project ? this.log.cardLines(project, id) : [];
     lines.sort((a, b) => a.seq - b.seq);
     // A line an Inbox from before initiatives wrote has no `initiative`: the card kept its own (as apply reads it).
     for (let i = 0; i < lines.length; i++) {
