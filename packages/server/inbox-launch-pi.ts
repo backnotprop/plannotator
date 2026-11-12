@@ -307,7 +307,7 @@ interface PiSessionRecord {
  */
 function processListing(ps: string): string | null {
   try {
-    const run = Bun.spawnSync([ps, "-A", "-ww", "-o", "pid=,ppid=,command="], { env: childEnv(), stdout: "pipe", stderr: "ignore" });
+    const run = Bun.spawnSync([ps, "-A", "-ww", "-o", "pid=,ppid=,command="], { env: childEnv(), stdout: "pipe", stderr: "ignore", windowsHide: true });
     return run.exitCode === 0 ? run.stdout.toString() : null;
   } catch {
     return null;
@@ -554,7 +554,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     const argv = piArgv(path, session, name);
     let proc: ReturnType<typeof Bun.spawn>;
     try {
-      proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       return { ok: false, cancelled: false, missing: false, text: piCause(text), output: text };
