@@ -20,6 +20,7 @@ const stateLabels: Record<PRItem['state'], string> = {
 
 interface PRSelectorProps {
   mrNumberLabel: string;
+  numberPrefix: string;
   prTitle: string;
   currentNumber: number;
   onSelect: (url: string) => void;
@@ -28,7 +29,7 @@ interface PRSelectorProps {
 
 const HIDE_MERGED_PR_KEY = 'plannotator-pr-list-hide-merged';
 
-export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, disabled }: PRSelectorProps) {
+export function PRSelector({ mrNumberLabel, numberPrefix, prTitle, currentNumber, onSelect, disabled }: PRSelectorProps) {
   const [prs, setPrs] = useState<PRItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
@@ -135,7 +136,7 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center justify-between gap-2">
             <span className={`font-mono ${isSelected ? 'text-foreground font-medium' : 'text-foreground/80'}`}>
-              #{item.number}
+              {numberPrefix}{item.number}
             </span>
             <span className={`text-[10px] ${stateColors[item.state]}`}>
               {stateLabels[item.state]}

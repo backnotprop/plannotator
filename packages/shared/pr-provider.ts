@@ -18,6 +18,7 @@
 
 import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhRequestedReviewers, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList, fetchGhPRTree, upsertGhDescriptionSection, upsertGhMarkedComment } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview, fetchGlTree, upsertGlDescriptionSection, upsertGlMarkedNote } from "./pr-gitlab";
+import { fetchGlMRList, fetchGlMRStack } from "./pr-gitlab-stack";
 import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList, fetchBbTree } from "./pr-bitbucket";
 import { ensureGhPRAccess, ghScopedRuntime } from "./pr-github-account";
 import type { PRMarkedCommentInput, PRMarkedResult, PRMarkedSectionInput } from "./pr-marked";
@@ -102,6 +103,8 @@ const gitlabProvider: PRProvider<GitlabMRRef> = {
   fetchFileContent: fetchGlFileContent,
   fetchFileBytes: fetchGlFileBytes,
   fetchTree: fetchGlTree,
+  fetchStack: fetchGlMRStack,
+  fetchList: fetchGlMRList,
   upsertMarkedComment: upsertGlMarkedNote,
   upsertDescriptionSection: upsertGlDescriptionSection,
   // GitLab has no file-level discussion: file comments ride the body (#1599).

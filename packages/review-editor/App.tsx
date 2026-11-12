@@ -5980,6 +5980,7 @@ const ReviewApp: React.FC = () => {
                 </span>
                 <PRSelector
                   mrNumberLabel={mrNumberLabel}
+                  numberPrefix={getPRPlatformCapabilities(prMetadata).numberPrefix}
                   prTitle={prMetadata.title}
                   currentNumber={getPRNumber(prMetadata)}
                   onSelect={handlePRSwitch}
