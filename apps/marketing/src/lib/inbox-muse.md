@@ -45,7 +45,7 @@ It works when it exits 0 and prints one line of JSON with your `name`. The perso
 | Code | What it means and what to do |
 |---|---|
 | `invalid_pairing` | The string is cut off or changed, or has spaces or line breaks in it. Ask the person to copy the whole message from Plannotator's Settings again. |
-| `pairing_removed` | The person removed you, or made a new pairing. Ask them to pair you again in Plannotator's Settings (Devices, Cloud agents) and send you the new message. |
+| `pairing_removed` | The person removed you, or made a new pairing. Ask them to pair you again in Plannotator's Settings (Agents, Cloud agents) and send you the new message. |
 | `pairing_without_relay` | The string was made while their computer could not reach the relay. Ask them for a new pairing. |
 | `relay_unreachable` | Your computer cannot reach the relay address in the string. Tell the person which host, and that your web access must allow it. |
 | `computer_asleep` | The person's computer is asleep or offline. The string is fine: keep it (do not delete it), tell the person, and run this step again later. |

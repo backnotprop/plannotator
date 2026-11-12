@@ -16,6 +16,7 @@ import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox
 import type { TestResult } from '../notify';
 import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, reachText, testMissHint } from '../notifyStatus';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
+import { CloudAgentsSection } from '../cloud/CloudAgents';
 import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
@@ -832,9 +833,12 @@ function AgentsSection({
 }) {
   if (agents && onAgents) {
     return (
-      <section className="ib-sgroup" aria-label="Agents">
-        <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
-      </section>
+      <>
+        <section className="ib-sgroup" aria-label="Agents">
+          <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
+        </section>
+        <CloudAgentsSection />
+      </>
     );
   }
   const env = settings.inbox_tool.env;
@@ -880,6 +884,7 @@ function AgentsSection({
         <p>Agents on this computer reach the Inbox at 127.0.0.1, and it keeps its port between runs when it can.</p>
         <div className="ib-card ib-card-pad">{context && <ConnectPicker harnesses={HARNESSES} initial="other" context={context} compact />}</div>
       </section>
+      <CloudAgentsSection />
     </>
   );
 }

@@ -43,7 +43,7 @@ Otherwise it prints one line `<code>: <what is wrong>`:
 | Code | What it means and what to do |
 |---|---|
 | `invalid_pairing` | The string is cut off or changed, or has spaces or line breaks in it. Ask the person to copy it again, whole. |
-| `pairing_removed` | The person removed you, or made a new pairing. Ask them for the new one (Settings, Devices, Cloud agents, New pairing). |
+| `pairing_removed` | The person removed you, or made a new pairing. Ask them for the new one (Settings, Agents, Cloud agents, New pairing). |
 | `pairing_without_relay` | The string was made while their computer could not reach the relay. Ask them for a new pairing. |
 | `relay_unreachable` | This machine cannot reach the relay address in the string. Claude Code routine: ask the person to add the hosts Plannotator's Settings showed under Network access, Allowed domains. Other platforms: the network blocks it; tell the person which host. |
 | `computer_asleep` | The person's computer is asleep or offline. The setup is fine; try again later. |
@@ -57,8 +57,8 @@ Pick what your platform has. Be honest with the person about which one you set u
 
 **A wake (best).** The person's Inbox calls your webhook each time they write to you, with the thread id and their words.
 
-- **Claude Code routine:** the routine needs an API trigger. Tell the person: "In the routine on claude.ai/code: Edit, add an API trigger, Generate token. Then in Plannotator Settings, Devices, Cloud agents, press Add wake address and paste the Fire URL and the token." Routines cannot run more often than once an hour on a schedule, so the wake is the way.
-- **Grok Bot:** add a webhook trigger to the routine that does this work (if there is none, create a routine named "Plannotator Inbox" whose instruction is: "Follow https://plannotator.ai/inbox/cloud-agent.md, steps 1 to 5."). Then tell the person: "Open this routine in the Grok Bot desktop app, Webhook section. In Plannotator Settings, Devices, Cloud agents, press Add wake address and paste POST to and the key." Do not ask them to send you the key.
+- **Claude Code routine:** the routine needs an API trigger. Tell the person: "In the routine on claude.ai/code: Edit, add an API trigger, Generate token. Then in Plannotator Settings, Agents, Cloud agents, press Add wake address and paste the Fire URL and the token." Routines cannot run more often than once an hour on a schedule, so the wake is the way.
+- **Grok Bot:** add a webhook trigger to the routine that does this work (if there is none, create a routine named "Plannotator Inbox" whose instruction is: "Follow https://plannotator.ai/inbox/cloud-agent.md, steps 1 to 5."). Then tell the person: "Open this routine in the Grok Bot desktop app, Webhook section. In Plannotator Settings, Agents, Cloud agents, press Add wake address and paste POST to and the key." Do not ask them to send you the key.
 - **Grok Bot also needs one rule**, or a woken run stops and waits for approval. Tell the person: "In Grok Bot, open Settings, General, Auto-review, and under Custom Rules add an Allow automatically rule for running plannotator inbox call in this routine." (Some versions show it as Settings, General, Bot, Auto-review.)
 
 **Polling (no webhook).** `signal_url` answers `{"signal":"..."}`; the value changes when the person writes in one of your threads. Read it with `curl -fsS "$SIGNAL_URL"`. At most 20 reads a minute.

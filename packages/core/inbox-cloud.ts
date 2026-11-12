@@ -1,10 +1,17 @@
 
 export const INBOX_CLOUD_HOST = "cloud";
 
-export const INBOX_CLOUD_HOSTS = { "claude-routine": "cloud-claude", "grok-bot": "cloud-grok", muse: "cloud-muse", other: INBOX_CLOUD_HOST } as const;
+export const INBOX_CLOUD_HOSTS = {
+  "claude-routine": "cloud-claude",
+  "grok-bot": "cloud-grok",
+  muse: "cloud-muse",
+  hermes: "cloud-hermes",
+  openclaw: "cloud-openclaw",
+  other: INBOX_CLOUD_HOST,
+} as const;
 
 export function isInboxCloudHost(host: unknown): boolean {
-  return host === "cloud" || host === "cloud-claude" || host === "cloud-grok" || host === "cloud-muse";
+  return (Object.values(INBOX_CLOUD_HOSTS) as unknown[]).includes(host);
 }
 
 export const INBOX_CLOUD_WAKE_GAP_MS = 60_000;
@@ -13,20 +20,24 @@ export const INBOX_CLOUD_WAKE_TIMEOUT_MS = 15_000;
 
 export const INBOX_CLOUD_TEXT_MAX = 60_000;
 
-export const INBOX_CLOUD_PRESETS = ["claude-routine", "grok-bot", "muse", "other"] as const;
+export const INBOX_CLOUD_PRESETS = ["claude-routine", "grok-bot", "muse", "hermes", "openclaw", "other"] as const;
 export type InboxCloudPreset = (typeof INBOX_CLOUD_PRESETS)[number];
 
 export const INBOX_CLOUD_PRESET_NAMES: Readonly<Record<InboxCloudPreset, string>> = {
   "claude-routine": "Claude Code routine",
   "grok-bot": "Grok Bot routine",
   muse: "Muse by Meta",
+  hermes: "Hermes Agent",
+  openclaw: "OpenClaw",
   other: "Other",
 };
 
 export const INBOX_CLOUD_PRESET_LABELS: Readonly<Record<InboxCloudPreset, string>> = {
   "claude-routine": "Claude Code",
   "grok-bot": "Grok Bot",
-  muse: "Muse",
+  muse: "Muse by Meta",
+  hermes: "Hermes",
+  openclaw: "OpenClaw",
   other: "Other",
 };
 
@@ -164,7 +175,7 @@ export function inboxRetryAfterMs(header: string | null, now: number): number {
 }
 
 export function inboxCloudAnswer(preset: InboxCloudPreset, status: number, retryAfter: string | null, body: unknown, now: number): InboxCloudAnswer {
-  const ok = preset === "other" ? status >= 200 && status < 300 : status === 200;
+  const ok = preset === "claude-routine" || preset === "grok-bot" ? status === 200 : status >= 200 && status < 300;
   if (ok) {
     const url = body && typeof body === "object" ? (body as { claude_code_session_url?: unknown }).claude_code_session_url : undefined;
     return typeof url === "string" && /^https:\/\/claude\.ai\/[A-Za-z0-9/_\-.?=&]+$/.test(url) ? { kind: "started", run_url: url } : { kind: "started" };

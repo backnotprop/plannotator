@@ -23,14 +23,14 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-function stubRoutine() {
+function stubRoutine(status = 200) {
   const seen: Record<string, unknown>[] = [];
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(req) {
       seen.push((await req.json()) as Record<string, unknown>);
-      return Response.json({ ok: true });
+      return Response.json({ ok: true }, { status });
     },
   });
   cleanups.push(() => server.stop(true));
@@ -76,8 +76,8 @@ async function world() {
     answers.push(text);
     return { status: response.status, json: JSON.parse(text) as Record<string, any> };
   };
-  const pair = async (preset = "grok-bot", name = "Nightly fixer") => {
-    const hook = stubRoutine();
+  const pair = async (preset = "grok-bot", name = "Nightly fixer", status = 200) => {
+    const hook = stubRoutine(status);
     const answer = await fetch(`${base}/api/inbox/cloud-agents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -154,6 +154,20 @@ describe("the agent door", () => {
     expect(readFileSync(cloudAgentsPath(w.dataDir), "utf8")).not.toContain(KEY);
     // Its old messages stay.
     expect((await w.thread(threadId)).messages.map((m) => m.body)).toContain("Found the flaky test. Fix it now?");
+  });
+
+  test("Hermes or OpenClaw on a server pairs like Other: it posts under its own kind, and a webhook that answers 202 counts as woken", async () => {
+    const w = await world();
+    for (const preset of ["hermes", "openclaw"] as const) {
+      const { agent, pairing, hook } = await w.pair(preset, `Server ${preset}`, 202);
+      const sent = await w.door(pairing.token, "send_message", { body: "Nightly run finished.", idempotency_key: `s-${preset}` });
+      const threadId = sent.result!.structuredContent!.thread_id as string;
+      const posted = (await w.thread(threadId)).messages[0]!;
+      expect(posted.author).toEqual({ kind: "agent", host: `cloud-${preset}`, session: agent.session, name: `Server ${preset}` });
+      await w.call(`/api/inbox/messages/${posted.id}/reply`, { words: "Thanks.", idempotency_key: `r-${preset}` });
+      await until(() => hook.seen.length === 1);
+      await until(async () => (await w.thread(threadId)).messages.some((message) => message.cloud_wake?.state === "started"));
+    }
   });
 
   test("an agent token opens no route but its own tools, and a phone's or a stranger's token does not open the agent door", async () => {

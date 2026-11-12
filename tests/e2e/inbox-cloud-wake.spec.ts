@@ -72,7 +72,7 @@ test.afterAll(async () => {
 
 test('pair a routine, send a test, write to it from New message: the thread says it woke, with the run link', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 860 });
-  await page.goto(`${url}#settings/devices`);
+  await page.goto(`${url}#settings/agents`);
   const section = page.locator('[data-settings-cloud]');
   await section.locator('[data-cloud-pair-start]').click();
   const form = section.locator('[data-cloud-pair-form]');
