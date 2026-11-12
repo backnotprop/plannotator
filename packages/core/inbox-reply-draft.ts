@@ -224,6 +224,11 @@ export interface ReplyDraftSaveInput {
    * empty list: none chosen. Absent: the draft keeps the recipients it has (a host or page that does not send them).
    */
   recipients?: readonly string[];
+  /**
+   * The message the reply quotes (approval "inbox-reply-quote"): null, none any more. Absent: the draft keeps the
+   * quote it has (a host or page that does not send one).
+   */
+  quote?: { of: string; words?: string } | null;
 }
 
 /**

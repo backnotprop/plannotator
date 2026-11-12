@@ -18,7 +18,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
@@ -190,6 +190,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   world = { root, url: started.stdout.trim(), agents, context, page, threads, files, outside: [] };
   page.on('request', (request) => {
     const url = new URL(request.url());
+    // A blob: address is a picture already in the page (a big photo being shrunk): nothing leaves.
+    if (url.protocol === 'blob:') return;
     if (url.host !== new URL(world.url).host || url.pathname.startsWith('/__')) world.outside.push(request.url());
   });
 });
@@ -304,6 +306,57 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
   await shot(page, 'board-dark');
   await page.emulateMedia({ colorScheme: 'light' });
   await page.evaluate(() => (location.hash = ''));
+});
+
+test('a phone photo over 512 KB is shrunk in the window, its proportions kept, and sent quickly on a poor link', async () => {
+  test.setTimeout(120_000);
+  const { page, context } = world;
+  // A 4:3 photo of noise (it barely compresses): a few MB, as a phone's.
+  const photo = join(world.root, 'pictures', 'phone-photo.jpg');
+  const base64 = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2400;
+    canvas.height = 1800;
+    const ctx = canvas.getContext('2d')!;
+    const data = ctx.createImageData(canvas.width, canvas.height);
+    for (let i = 0; i < data.data.length; i++) data.data[i] = i % 4 === 3 ? 255 : (Math.random() * 256) | 0;
+    ctx.putImageData(data, 0, 0);
+    const blob = await new Promise<Blob>((done) => canvas.toBlob((b) => done(b!), 'image/jpeg', 0.95));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let out = '';
+    for (let at = 0; at < bytes.length; at += 0x8000) out += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+    return btoa(out);
+  });
+  writeFileSync(photo, Buffer.from(base64, 'base64'));
+  expect(statSync(photo).size).toBeGreaterThan(2 * 1024 * 1024);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 400, downloadThroughput: 50_000, uploadThroughput: 50_000 });
+  try {
+    const id = (await agentIds(page))[1]!;
+    const before = await sidebarMark(page, id).locator('[data-agent-mark]').getAttribute('data-face');
+    const panel = await openOwn(page, id);
+    const chooser = page.waitForEvent('filechooser');
+    await panel.locator('.am-own-up').click();
+    const started = Date.now();
+    await (await chooser).setFiles(photo);
+    await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0, { timeout: 20_000 });
+    expect(Date.now() - started).toBeLessThan(20_000);
+    await expect(sidebarMark(page, id).locator('[data-agent-mark]')).not.toHaveAttribute('data-face', before ?? '');
+    const face = (await sidebarMark(page, id).locator('[data-agent-mark]').getAttribute('data-face'))!;
+    expect(face).toMatch(/^own:[0-9a-f]{64}$/);
+    const kept = await page.evaluate(async (hash) => {
+      const blob = await (await fetch(`/api/inbox/agent-icons/${hash}`)).blob();
+      const img = new Image();
+      img.src = URL.createObjectURL(blob);
+      await img.decode();
+      return { size: blob.size, type: blob.type, width: img.naturalWidth, height: img.naturalHeight };
+    }, face.slice(4));
+    expect(kept).toMatchObject({ type: 'image/jpeg', width: 256, height: 192 });
+    expect(kept.size).toBeLessThan(512 * 1024);
+  } finally {
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await cdp.detach();
+  }
 });
 
 test('a picture is shown as uploaded: its own shape, scaled to fit the tile, nothing cropped, no tile colour', async () => {

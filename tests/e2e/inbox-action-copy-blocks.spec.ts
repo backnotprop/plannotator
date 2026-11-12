@@ -14,10 +14,11 @@
  *  - the owner's own case, a command written as prose ("Run in Terminal on
  *    this MacBook: npm publish …"), draws it as a code block with a copy
  *    button that copies the command alone;
- *  - dragging a selection across an action item's why, and across a question
- *    card's prompt, leaves the selection in place after mouseup, on a desktop
- *    and on a phone viewport (touch emulation), so Cmd+C or the copy menu
- *    works.
+ *  - dragging a selection across an action item's why leaves the selection in
+ *    place after mouseup, on a desktop and on a phone viewport (touch
+ *    emulation), so Cmd+C or the copy menu works; a drag across a question
+ *    card's prompt opens the comment toolbar (its words take comments, approval
+ *    "inbox-annotate-own-and-questions"), and Cmd+C still copies them.
  *
  * Build the binary first (see inbox.spec.ts). PNGs land in
  * <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/action-copy-blocks/.
@@ -211,7 +212,7 @@ test('the owner\'s "Run in Terminal on this MacBook: …" line draws its command
   }
 });
 
-test('desktop: a drag across the why, and across a question prompt, keeps its selection and Cmd+C copies it; a plain click still toggles the row', async ({ browser }) => {
+test('desktop: a drag across the why keeps its selection and Cmd+C copies it; a question prompt\'s words copy with Cmd+C too; a plain click still toggles the row', async ({ browser }) => {
   const { context, page } = await desktop(browser, 'light');
   try {
     const card = await openThread(page, npmThread);
@@ -225,9 +226,13 @@ test('desktop: a drag across the why, and across a question prompt, keeps its se
     await page.screenshot({ path: join(proofDir, 'desktop-selection-light.png') });
 
     const prompt = page.locator('section.ib-pane [data-question-key] [data-question-part="prompt"]').first();
+    // The prompt takes comments as the message's words do: the drag opens the comment toolbar, and Cmd+C copies the words.
     await dragAcross(page, prompt);
-    await page.waitForTimeout(300);
-    expect(await selected(page)).toContain('Tag 0.29');
+    await expect(page.locator('.annotation-toolbar')).toBeVisible();
+    await page.keyboard.press('ControlOrMeta+c');
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('Tag 0.29');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.annotation-toolbar')).toHaveCount(0);
 
     // A click with no selection still does what it did: the row's toggle closes and opens it.
     await page.evaluate(() => window.getSelection()?.removeAllRanges());

@@ -1,13 +1,13 @@
 {
-  "packages/inbox/App.tsx": 8249,
-  "packages/inbox/components/Thread.tsx": 7753,
-  "packages/inbox/components/AttachmentPane.tsx": 3265,
-  "packages/inbox/api.ts": 2734,
+  "packages/inbox/App.tsx": 8231,
+  "packages/inbox/components/Thread.tsx": 7733,
+  "packages/inbox/components/AttachmentPane.tsx": 3248,
+  "packages/inbox/api.ts": 2531,
   "packages/inbox/pulls/pullReviewKept.test.tsx": 2302,
-  "packages/inbox/compose/ComposeDialog.tsx": 1969,
+  "packages/inbox/compose/ComposeDialog.tsx": 1945,
   "packages/inbox/components/InboxList.tsx": 1934,
   "packages/inbox/tour/Tour.tsx": 1847,
-  "packages/inbox/pulls/pullReview.test.tsx": 1702,
+  "packages/inbox/pulls/pullReview.test.tsx": 1670,
   "packages/inbox/board/BoardPage.tsx": 1528,
   "packages/inbox/accountsSection.test.tsx": 1501
 }

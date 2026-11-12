@@ -152,7 +152,7 @@ for (const size of [14, 15]) {
           expect(m.subject!).toBeGreaterThanOrEqual(SUBJECT_FLOOR - 0.5);
           // No keyboard hints on a phone.
           expect(m.kbds).toBe(0);
-          // The read button and the clock are in the ⋯ sheet, not the bar.
+          // The read action and Snooze are in the ⋯ sheet, not the bar.
           await expect(head.locator('[data-mark-read], [data-mark-unread], [data-thread-snooze]')).toHaveCount(0);
           // Whatever gave way keeps its name.
           await expect(pane.locator('[data-artifacts-button]')).toHaveAccessibleName('Artifacts, 11');

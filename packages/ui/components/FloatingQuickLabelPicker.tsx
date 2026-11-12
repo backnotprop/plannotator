@@ -18,7 +18,7 @@ const VIEWPORT_PADDING = 12;
 function computePosition(
   anchorEl: HTMLElement,
   cursorHint?: { x: number; y: number },
-): { top: number; left: number; flipAbove: boolean } {
+): { top: number; left: number; flipAbove: boolean; maxHeight: number } {
   const rect = anchorEl.getBoundingClientRect();
 
   // Vertical: use anchor rect for above/below decision + placement
@@ -40,7 +40,12 @@ function computePosition(
   // Clamp to viewport
   left = Math.max(VIEWPORT_PADDING, Math.min(left, window.innerWidth - PICKER_WIDTH - VIEWPORT_PADDING));
 
-  return { top, left, flipAbove };
+  // Height: what the chosen side leaves on screen, so a long list scrolls
+  // inside the picker instead of running past the window's edge.
+  const room = flipAbove ? rect.top - GAP - VIEWPORT_PADDING : window.innerHeight - top - VIEWPORT_PADDING;
+  const maxHeight = Math.max(120, Math.min(480, room));
+
+  return { top, left, flipAbove, maxHeight };
 }
 
 export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> = ({
@@ -49,7 +54,7 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
   onSelect,
   onDismiss,
 }) => {
-  const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean } | null>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean; maxHeight: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const quickLabels = useMemo(() => getQuickLabels(), []);
 
@@ -138,7 +143,8 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
         }
       `}</style>
 
-      <div className="bg-popover border border-border/60 rounded-lg shadow-xl overflow-hidden">
+      {/* Any number of labels: a long list scrolls inside the picker instead of running off the screen. */}
+      <div className="bg-popover border border-border/60 rounded-lg shadow-xl overflow-x-hidden overflow-y-auto overscroll-contain" style={{ maxHeight: position.maxHeight }}>
         <QuickLabelDropdown labels={quickLabels} onSelect={onSelect} animate />
       </div>
     </div>,

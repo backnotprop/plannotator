@@ -187,7 +187,7 @@ describe("POST /api/inbox/projects/:id/picture", () => {
 });
 
 describe("over the tailnet", () => {
-  test("a guest the owner allowed can neither read nor set a picture (403 local only); the owner can", async () => {
+  test("a guest the owner allowed reads and sets a picture as the owner does (owner ruling 2026-11-11: a picture is a logo)", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
     const GUEST = "guest@example.com";
@@ -198,16 +198,14 @@ describe("over the tailnet", () => {
     const at = `http://127.0.0.1:${listener}${w.path}`;
 
     const read = await fetch(at, { headers: headers(GUEST) });
-    expect(read.status).toBe(403);
-    expect((await errorOf(read)).code).toBe("local_only");
+    expect(read.status).toBe(200);
+    expect(read.headers.get("content-type")).toBe("image/svg+xml");
     const write = await fetch(at, { method: "POST", headers: headers(GUEST), body: JSON.stringify({ serverSession: w.server.serverSession, picture: dataUrl(PNG, "image/png") }) });
-    expect(write.status).toBe(403);
-    expect((await errorOf(write)).code).toBe("local_only");
-    // The repo logo still shows: the guest's write changed nothing.
-    expect((await w.get()).headers.get("content-type")).toBe("image/svg+xml");
+    expect(write.status).toBe(200);
+    expect((await w.get()).headers.get("content-type")).toBe("image/png");
 
     const owner = await fetch(at, { headers: headers(OWNER) });
     expect(owner.status).toBe(200);
-    expect(owner.headers.get("content-type")).toBe("image/svg+xml");
+    expect(owner.headers.get("content-type")).toBe("image/png");
   });
 });

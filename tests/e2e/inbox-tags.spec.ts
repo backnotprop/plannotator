@@ -350,8 +350,10 @@ test('the thread head shows the agents in the thread overlapping, the row beside
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.tags.ids.t3}`);
   const head = page.locator('[data-thread-participants]');
-  await expect(head).toHaveText('Claude Code and Pi');
-  await expect(head.locator('[data-tag-stack]')).toHaveAttribute('data-tag-stack', '2');
+  // Two sessions: a Claude Code mark, a Pi mark and "2 sessions" (inbox-thread-sessions.spec.ts opens it).
+  await expect(head).toHaveText('2 sessions');
+  await expect(head).toHaveAttribute('data-thread-sessions', '2');
+  await expect(head.locator('[data-pile]')).toHaveAttribute('data-pile', '2');
   await shot(page, '6-thread-head-desktop', { clip: { selector: '.ib-pbody > .ib-tmeta[data-thread-meta]', pad: 40 } });
   const row = page.locator(`.ib-lbody [data-thread-id="${world.tags.ids.t3}"]`).first();
   await expect(row.locator('[data-row-agents]')).toHaveAttribute('data-row-agents', '2');

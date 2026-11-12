@@ -39,7 +39,7 @@ import { agentVersionRun, codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { createCodexPermissions, CODEX_APPROVALS } from "./inbox-launch-codex-permission";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchDelivery, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
+import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchDelivery, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
 /** The first Codex CLI a launch starts: the Codex wake's floor (`codex queue`), so every Codex reply path is there. */
 export const CODEX_LAUNCH_MIN_VERSION = INBOX_CODEX_QUEUE_MIN_VERSION;
@@ -58,8 +58,6 @@ const REQUEST_MS = 30_000;
 const INTERRUPT_MS = 5_000;
 /** How long Stop waits for the process to end after its stdin closed, before it signals it. */
 const STOP_MS = 5_000;
-/** The longest error text a turn's error note quotes. */
-const NOTE_ERROR_MAX = 300;
 /** The longest question title a Cancel note quotes. */
 const NOTE_TITLE_MAX = 80;
 /** The longest line the app-server may write (a turn's whole command output can be one line): past it, the process is ended. */
@@ -105,10 +103,7 @@ export function codexLoginStatusSignedOut(result: { exitCode: number; stdout: st
 }
 
 /** The thread note for a turn that failed: Codex's own words, one line. */
-export function codexTurnErrorNote(error: string): string {
-  const shown = launchNoteText(error, NOTE_ERROR_MAX);
-  return shown ? `Codex's turn ended with an error: ${shown}` : "Codex's turn ended with an error.";
-}
+export const codexTurnErrorNote = (error: string): string => launchTurnErrorNote("Codex", error);
 
 /** The thread note for a question the Inbox answered Cancel. */
 export function codexQuestionNote(title: unknown): string {
@@ -356,10 +351,10 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
     });
 
   /** One note from the thread in the launch's thread (a failed turn, a question answered Cancel). */
-  const note = (launchId: string, thread: string, body: string, key: string) => {
+  const note = (launchId: string, thread: string, body: string, key: string, turnError = false) => {
     const root = threads?.rootOf(launchId);
     if (!threads || !root) return;
-    writeLaunchNote(threads, root, { author: { host: INBOX_CODEX_HOST, session: thread, name: INBOX_CODEX_NAME }, body, key }, ctx.log);
+    writeLaunchNote(threads, root, { author: { host: INBOX_CODEX_HOST, session: thread, name: INBOX_CODEX_NAME }, body, key, turnError }, ctx.log);
   };
 
   /** A server request no card can show: Cancel at once, and one note in the thread saying so. */
@@ -408,7 +403,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
           const text = typeof turn.error?.message === "string" ? turn.error.message : (p.turnError ?? "");
           if (existsSync(ctx.launchDir(p.launchId))) ctx.startLog(p.launchId, `codex ${p.thread}: the turn ended with an error: ${text.slice(0, 2000)}`);
           ctx.log(`Inbox launch ${p.launchId}: a Codex turn ended with an error: ${text.slice(0, 200)}`);
-          note(p.launchId, p.thread, codexTurnErrorNote(text), `codex-error-${p.launchId}-${String(turn.id ?? "")}-${++notes}`);
+          note(p.launchId, p.thread, codexTurnErrorNote(text), `codex-error-${p.launchId}-${String(turn.id ?? "")}-${++notes}`, true);
         }
         p.turnError = null;
         threads?.onChange();
@@ -453,7 +448,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
     const argv = [path, "app-server"];
     let proc: ReturnType<typeof Bun.spawn>;
     try {
-      proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       return { ok: false, cancelled: false, missing: false, text: codexCause(text), output: text };

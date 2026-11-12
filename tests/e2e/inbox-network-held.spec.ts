@@ -4,7 +4,7 @@
  *
  * Against the compiled binary (build it first, see inbox.spec.ts), in a scratch Inbox:
  *  - every write held unanswered: keys typed in "Other…", a pick, Send (busy at once, the words kept) and Mark read
- *    (pressed at once) all draw within a few frames;
+ *    (the ⋯ menu offers Move back at once) all draw within a few frames;
  *  - budgets, counted from the requests the page makes: 60 keys in "Other…" make at most 2 requests and no list or
  *    drafts read; clicking through five threads whose reads are slow reads only the last (the others given up), and
  *    going back to one of them draws it before its read answers; one Send reads the thread no more than once after
@@ -131,13 +131,14 @@ test('every write held unanswered: typing, a pick, Send and Mark read still draw
   await expect(box).toHaveValue('ok go');
   await expect(other).toHaveValue(words);
 
-  // Mark read on another thread: pressed at once.
+  // Mark read on another thread, from the ⋯ menu: read at once, its write still held.
   await page.evaluate((id) => (location.hash = `#thread=${encodeURIComponent(id)}`), T[1]!);
-  await expect(page.locator(`${pane(T[1]!)} [data-mark-read]:not([disabled])`)).toBeVisible();
-  const readMs = await paintMs(page, () => page.locator(`${pane(T[1]!)} [data-mark-read]`).click(), `return document.querySelector('${pane(T[1]!)} [data-mark-read]')?.getAttribute('aria-pressed') === 'true'`);
-  expect(readMs).toBeGreaterThanOrEqual(0);
-  expect(readMs).toBeLessThan(250);
-  expect(held.length).toBeGreaterThan(0);
+  const more = page.locator(`${pane(T[1]!)} [data-thread-more]`);
+  await more.click();
+  await page.locator('[data-thread-menu] [data-thread-read-item]').click();
+  await more.click();
+  await expect(page.locator('[data-thread-menu] [data-thread-move-back-item]')).toBeVisible({ timeout: 1000 });
+  await expect.poll(() => held.some((r) => r.url().endsWith(`/threads/${T[1]}/read`))).toBe(true);
   await context.close();
 });
 
@@ -207,11 +208,13 @@ test('a Mark read the Inbox refuses puts the row back and shows its own error', 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await open(context, T[5]!);
   await page.route('**/api/inbox/threads/*/read', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'The disk is full.', code: 'internal_error' }) }));
-  const button = page.locator(`${pane(T[5]!)} [data-mark-read]`);
-  await expect(button).toBeEnabled();
-  await button.click();
+  const more = page.locator(`${pane(T[5]!)} [data-thread-more]`);
+  await more.click();
+  await page.locator('[data-thread-menu] [data-thread-read-item]').click();
   await expect(page.locator('.ib-tlead', { hasText: 'The disk is full.' })).toBeVisible();
-  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await more.click();
+  await expect(page.locator('[data-thread-menu] [data-thread-read-item]')).toBeVisible();
+  await expect(page.locator('[data-thread-menu] [data-thread-move-back-item]')).toHaveCount(0);
   await context.close();
 });
 

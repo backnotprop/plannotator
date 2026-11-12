@@ -26,7 +26,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const FAKE_AGENT_BINS = ["codex", "gemini", "qwen", "devin", "amp", "cline", "pi", "opencode", "dsh", "cursor-agent", "kiro-cli"] as const;
+export const FAKE_AGENT_BINS = ["codex", "gemini", "qwen", "devin", "amp", "cline", "pi", "opencode", "dsh", "openclaw", "hermes", "cursor-agent", "kiro-cli"] as const;
 export type FakeAgentBin = (typeof FAKE_AGENT_BINS)[number];
 
 export interface FakeAgents {

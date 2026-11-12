@@ -19,7 +19,8 @@
  *  - Mark read moves a thread to Quiet ("Read"), and an agent's new message
  *    brings it back to the top;
  *  - Mark read on a thread an agent is stopped on warns, and Z undoes it;
- *  - the row's hover action, and its Undo;
+ *  - the row's hover action, and its Undo; on a touch tablet (no hover) no
+ *    action shows and one tap opens the thread;
  *  - the toast's × and a swipe close it early, its Undo with it (Z no longer
  *    undoes), a short drag springs back, and the longest one-line toasts stay
  *    one line with the ×.
@@ -176,6 +177,23 @@ test.afterAll(async () => {
   }
 });
 
+
+/** The thread header's ⋯ More, its read action: Mark read, or Move back to the top on a thread marked read. */
+async function readAction(page: Page): Promise<string> {
+  await page.locator('section.ib-pane [data-thread-more]').click();
+  const item = page.locator('[data-thread-menu] :is([data-thread-read-item], [data-thread-move-back-item])').first();
+  const label = ((await item.textContent()) ?? '').trim();
+  await page.locator('[data-thread-menu]').press('Escape');
+  await expect(page.locator('[data-thread-menu]')).toHaveCount(0);
+  return label;
+}
+
+/** Choose the ⋯ menu's Mark read (or Move back to the top). */
+async function chooseRead(page: Page, which: 'read' | 'move-back' = 'read'): Promise<void> {
+  await page.locator('section.ib-pane [data-thread-more]').click();
+  await page.locator(which === 'read' ? '[data-thread-menu] [data-thread-read-item]' : '[data-thread-menu] [data-thread-move-back-item]').click();
+}
+
 test('the list before: Stopped, Waiting, then New', async () => {
   const { page, threads } = world;
   await page.goto(world.url);
@@ -323,11 +341,9 @@ test('the foot after a pick: the buttons on the left, the draft status at the ro
 test('Mark read moves the thread to Quiet ("Read"); a new agent message brings it back to the top', async () => {
   const { page, threads } = world;
   await page.locator(`.ib-lbody [data-thread-id="${threads.search}"]`).click();
-  const head = page.locator('[data-mark-read]');
-  await expect(head).toHaveAttribute('aria-pressed', 'false');
-  await head.click();
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
-  await expect(head).toHaveAccessibleName('Read');
+  expect(await readAction(page)).toBe('Mark read');
+  await chooseRead(page);
+  await expect.poll(() => readAction(page)).toBe('Move back to the top');
   await expect(page.locator('[data-read-line]')).toContainText('It stays out of the top until Codex writes again.');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Moves to Quiet');
   await shot('05-thread-read');
@@ -347,7 +363,7 @@ test('Mark read moves the thread to Quiet ("Read"); a new agent message brings i
 test('Mark read on a thread an agent is stopped on warns with Reply; Z undoes it', async () => {
   const { page, threads } = world;
   await page.locator(`.ib-lbody [data-thread-id="${threads.worker}"]`).click();
-  await expect(page.locator('[data-mark-read]')).toHaveAttribute('aria-pressed', 'false');
+  expect(await readAction(page)).toBe('Mark read');
   await page.locator('body').press('e');
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast).toContainText('Claude Code was stopped');
@@ -365,11 +381,10 @@ test('Mark read on a thread an agent is stopped on warns with Reply; Z undoes it
   // The list sits beside the thread, so the window's center is not the pane's.
   expect(Math.abs(paneBox!.x + paneBox!.width / 2 - viewport.width / 2)).toBeGreaterThan(40);
   expect(Math.abs(viewport.height - (toastBox!.y + toastBox!.height) - 16)).toBeLessThanOrEqual(1);
-  await expect(page.locator('[data-mark-read]')).toHaveAttribute('aria-pressed', 'true');
   await shot('07-stopped-warning', ['light', 'dark']);
   await page.locator('body').press('z');
-  await expect(page.locator('[data-mark-read]')).toHaveAttribute('aria-pressed', 'false');
   await expect(toast).toHaveCount(0);
+  expect(await readAction(page)).toBe('Mark read');
   await page.keyboard.press('Escape');
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
 });
@@ -377,11 +392,16 @@ test('Mark read on a thread an agent is stopped on warns with Reply; Z undoes it
 test('the toast closes early: the × (focus back, Z no longer undoes), a mouse swipe past 40%; a short drag springs back; long one-line toasts keep one line', async () => {
   const { page, threads } = world;
   await page.locator(`.ib-lbody [data-thread-id="${threads.worker}"]`).click();
-  const head = page.locator('[data-mark-read]');
-  await expect(head).toHaveAttribute('aria-pressed', 'false');
+  // Mark read from the ⋯ menu by keyboard: Enter opens it on its first item, Mark read; Enter chooses it, and focus
+  // goes back to ⋯.
+  const head = page.locator('section.ib-pane [data-thread-more]');
+  expect(await readAction(page)).toBe('Mark read');
   await head.focus();
   await page.keyboard.press('Enter');
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-thread-menu] [data-thread-read-item]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked read');
+  await expect(head).toBeFocused();
   const toast = page.locator('[data-inbox-toast]');
   await toast.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => undefined));
   const close = toast.locator('[data-toast-dismiss]');
@@ -510,8 +530,8 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
   });
   expect(tight).toEqual({ wrapped: true, tight: true, height: 40, kbd: 'none', keys: 'Z', back: false });
 
-  // Focus moves from Mark read onto the × (the toast sits at the end of the page, past the thread, so this
-  // stands in for the Tabs); Enter on it: the toast goes, focus is back on Mark read, and Z has nothing to undo.
+  // Focus moves from ⋯ onto the × (the toast sits at the end of the page, past the thread, so this
+  // stands in for the Tabs); Enter on it: the toast goes, focus is back on ⋯, and Z has nothing to undo.
   await close.focus();
   await expect(close).toBeFocused();
   await shot('09-toast-close-focused', ['light', 'dark']);
@@ -520,13 +540,12 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
   await expect(head).toBeFocused();
   await page.locator('body').press('z');
   await page.waitForTimeout(400);
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
+  expect(await readAction(page)).toBe('Move back to the top');
 
-  // Move it back (Undo), then swipe that toast away with the mouse: a short drag springs back first.
-  await head.click();
-  await expect(head).toHaveAttribute('aria-pressed', 'false');
-  await head.click();
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
+  // Move it back, mark it read again, then swipe that toast away with the mouse: a short drag springs back first.
+  await chooseRead(page, 'move-back');
+  await expect.poll(() => readAction(page)).toBe('Mark read');
+  await chooseRead(page);
   await expect(toast).toContainText('Claude Code was stopped');
   await toast.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => undefined));
   const box = (await toast.boundingBox())!;
@@ -558,11 +577,11 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
   await expect(page.locator('[data-toast-ghost]')).toHaveCount(0);
   await page.locator('body').press('z');
   await page.waitForTimeout(400);
-  await expect(head).toHaveAttribute('aria-pressed', 'true');
+  expect(await readAction(page)).toBe('Move back to the top');
 
   // Put it back for the tests after this one.
-  await head.click();
-  await expect(head).toHaveAttribute('aria-pressed', 'false');
+  await chooseRead(page, 'move-back');
+  await expect.poll(() => readAction(page)).toBe('Mark read');
   await page.keyboard.press('Escape');
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
 });
@@ -593,4 +612,31 @@ test('the row hover action marks read without opening the thread, in place; its 
   await expect(button).toHaveClass(/\bib-u\b/);
   expect(await sectionOf(page, threads.news)).toBe('new');
   expect(world.errors).toEqual([]);
+});
+
+test('on a touch tablet (820 by 1180, no hover) a row shows no hover action and one tap opens its thread', async ({ browser }: { browser: Browser }) => {
+  // iPadOS Safari takes the first tap on a row as a hover when that hover shows a button, and drops the click, so
+  // "Mark read" showing on the tap meant two taps to open. Chromium never drops the click, so this checks the cause:
+  // a pointer resting on the row (`:hover`) shows no action where the screen cannot hover.
+  const { threads } = world;
+  const context = await browser.newContext({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true, colorScheme: 'light' });
+  try {
+    const page = await context.newPage();
+    await page.goto(world.url);
+    expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
+    const row = page.locator(`.ib-lbody [data-row="${threads.news}"]`);
+    const button = row.locator('[data-thread-id]');
+    await expect(button).toHaveClass(/\bib-u\b/);
+    // The row offers Mark read (the action is drawn), but a hover does not show it.
+    await expect(row.locator('[data-row-mark-read]')).toHaveCount(1);
+    await row.hover();
+    expect(await row.evaluate((el) => el.matches(':hover'))).toBe(true);
+    await expect(row.locator('[data-row-mark-read]')).toBeHidden();
+    await expect(row.locator('.ib-t').first()).toBeVisible();
+    await button.tap();
+    await expect(page.locator('section.ib-pane')).toBeVisible();
+    await expect(row.locator('[data-row-mark-read]')).toBeHidden();
+  } finally {
+    await context.close();
+  }
 });

@@ -78,7 +78,7 @@ const ready = { ...UPDATE, state: 'ready' };
 let update: typeof UPDATE | null = null;
 
 /** The routes the real gate refuses a guest and answers the owner (inbox-tailnet-owner.test.ts). */
-const guestRefused = (path: string) => path.startsWith('/api/inbox/agents') || path.startsWith('/api/inbox/update') || path.startsWith('/api/inbox/cards/marks') || path.startsWith('/api/inbox/whats-new');
+const guestRefused = (path: string) => path.startsWith('/api/inbox/agents') || path.startsWith('/api/inbox/update') || path.startsWith('/api/inbox/cards/marks');
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string; type: string }> {
   return new Promise((done, fail) => {

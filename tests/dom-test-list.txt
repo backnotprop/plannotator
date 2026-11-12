@@ -9,6 +9,7 @@ packages/ui/annotationDraftPersistence.test.tsx
 packages/ui/codeAnnotationDraftPersistence.test.tsx
 packages/ui/utils/richClipboard.test.ts
 packages/ui/components/Viewer.richCopy.test.tsx
+packages/ui/components/Viewer.questionTextComments.test.tsx
 packages/ui/components/html-viewer/htmlRichCopy.test.tsx
 packages/ui/components/html-viewer/srcdoc.test.ts
 packages/ui/components/html-viewer/htmlPinpointProtocol.test.tsx
@@ -146,12 +147,14 @@ packages/inbox/endedSession.test.tsx
 packages/inbox/listRowEnded.test.tsx
 packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
+packages/inbox/replyQuote.test.tsx
 packages/inbox/phoneComposer.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/decisionAsk.test.tsx
 packages/inbox/decisionData.test.tsx
 packages/inbox/settingsStorageActivity.test.tsx
 packages/inbox/composeTrust.test.tsx
+packages/inbox/composeFirstStart.test.tsx
 packages/inbox/composeEscape.test.tsx
 packages/inbox/openInTerminal.test.tsx
 packages/inbox/runTrustHowto.test.tsx
@@ -176,6 +179,7 @@ packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
+packages/inbox/threadSessionsHeader.test.tsx
 packages/inbox/taterMark.test.tsx
 packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
@@ -347,7 +351,14 @@ packages/review-editor/components/AllFilesCodeView.hostLineNotes.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
+packages/ui/utils/highlightCopy.test.ts
+packages/ui/components/Viewer.highlightCopy.test.tsx
+packages/ui/components/CodeFilePopout.highlightCopy.test.tsx
+packages/ui/components/plan-diff/PlanCleanDiffView.highlightCopy.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.highlightCopy.test.tsx
+packages/review-editor/components/ToolbarHost.highlightCopy.test.tsx
 packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
+packages/inbox/rowLongPress.test.tsx
 packages/review-editor/components/AllFilesCodeView.changeNavigation.test.tsx
 packages/review-editor/components/MarkdownFilePreview.test.tsx
 packages/review-editor/components/guide/overviewDiagram.test.tsx
@@ -692,7 +703,11 @@ packages/inbox/phoneSidebarSheet.test.tsx
 packages/inbox/composerDrag.test.tsx
 packages/inbox/agents/ownAgentIcons.test.tsx
 packages/inbox/agents/setAgentIcons.test.tsx
+packages/inbox/agents/agentRename.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
 packages/inbox/paneRetention.test.tsx
+packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx
+packages/review-editor/components/PRMediaScope.test.tsx
+packages/ui/components/InlineMarkdown.imgTags.test.tsx

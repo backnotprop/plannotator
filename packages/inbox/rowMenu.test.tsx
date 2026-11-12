@@ -718,14 +718,23 @@ test.skipIf(!hasDom)("with a thread open: Snooze from another row moves only tha
   expect((await serverSections()).get(ids.waiting)).toBe('waiting');
 });
 
-test.skipIf(!hasDom)("Snooze from the open thread's header clock: its row leaves for the Snoozed band at once and the thread stays open, saying until when", async () => {
+/** The open thread's ⋯ More, swapped to Snooze's times. */
+async function headerSnooze() {
+  await act(async () => {
+    document.querySelector<HTMLElement>('section.ib-pane [data-thread-more]')!.click();
+  });
+  await until(() => !!document.querySelector('[data-thread-menu] [data-thread-snooze-item]'), 'Snooze in the ⋯ menu');
+  await act(async () => {
+    document.querySelector<HTMLElement>('[data-thread-menu] [data-thread-snooze-item]')!.click();
+  });
+}
+
+test.skipIf(!hasDom)("Snooze from the open thread's ⋯ menu: its row leaves for the Snoozed band at once and the thread stays open, saying until when", async () => {
   await renderApp(`#thread=${ids.waiting}`);
-  await until(() => !!document.querySelector('section.ib-pane [data-thread-snooze]'), 'the header clock');
+  await until(() => !!document.querySelector('section.ib-pane [data-thread-more]'), 'the header ⋯');
   await until(() => !!rowButton(ids.waiting), 'the open row');
   const before = placedRows();
-  await act(async () => {
-    document.querySelector<HTMLElement>('section.ib-pane [data-thread-snooze]')!.click();
-  });
+  await headerSnooze();
   await snoozeTomorrow('[data-thread-snooze-menu]');
   await until(() => !rowButton(ids.waiting), 'the row to leave');
   expect(placedRows()).toEqual(before.filter((id) => id !== ids.waiting));
@@ -736,15 +745,13 @@ test.skipIf(!hasDom)("Snooze from the open thread's header clock: its row leaves
 
 test.skipIf(!hasDom)('Snooze the open thread, then Unsnooze in it: its row comes back between the same neighbours at once, the band as it was', async () => {
   await renderApp(`#thread=${ids.waiting}`);
-  await until(() => !!document.querySelector('section.ib-pane [data-thread-snooze]'), 'the header clock');
+  await until(() => !!document.querySelector('section.ib-pane [data-thread-more]'), 'the header ⋯');
   await until(() => !!rowButton(ids.waiting), 'the open row');
   const before = placedRows();
   // Another test's world may have left a snooze: the band's count, not its absence.
   const band = () => snoozedBand()?.textContent ?? null;
   const bandBefore = band();
-  await act(async () => {
-    document.querySelector<HTMLElement>('section.ib-pane [data-thread-snooze]')!.click();
-  });
+  await headerSnooze();
   await snoozeTomorrow('[data-thread-snooze-menu]');
   await until(() => !rowButton(ids.waiting), 'the row to leave');
   await until(() => !!document.querySelector('section.ib-pane [data-unsnooze]'), 'Unsnooze in the thread');

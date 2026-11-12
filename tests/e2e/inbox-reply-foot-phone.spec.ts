@@ -292,8 +292,8 @@ test('the sheet: Skip them skips them, Review opens the list, and a long agent n
   const list = page.getByRole('dialog', { name: '3 comments', exact: true });
   await expect(list).toBeVisible();
   const place = list.locator('[data-annotation-row="on-message"] .ib-af');
-  // The Inbox keeps 40 characters of a name: "Codex (northwind-industries-holdings…'s message, 3:49 PM", still wider than a 320 px row.
-  await expect(place).toHaveText(/^Codex \(northwind-industries-holdings…'s message, \d/);
+  // The Inbox keeps the whole name: "Codex (northwind-industries-holdings platform reviewer)'s message, 3:49 PM", far wider than a 320 px row.
+  await expect(place).toHaveText(/^Codex \(northwind-industries-holdings platform reviewer\)'s message, \d/);
   const drawn = await place.evaluate((el) => {
     const style = getComputedStyle(el);
     return { height: el.getBoundingClientRect().height, line: parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.6, align: style.textAlign };
