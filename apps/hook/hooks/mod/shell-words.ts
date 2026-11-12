@@ -8,8 +8,10 @@
  *
  * An unterminated quote keeps what it opened (the rest of the line is one word).
  *
- * With `windows`, a backslash is an ordinary character everywhere, so a typed
- * `C:\Users\me\plan.md` stays whole; quotes still group words with spaces.
+ * With `windows`, a backslash and a single quote are ordinary characters
+ * everywhere, so a typed `C:\Users\me\O'Brien\plan.md` stays whole; only
+ * double quotes group words with spaces, as on a Windows command line. The
+ * words are split here, once, so Git Bash and PowerShell get the same argv.
  */
 export function splitShellWords(input: string, options: { windows?: boolean } = {}): string[] {
   const words: string[] = []
@@ -38,7 +40,7 @@ export function splitShellWords(input: string, options: { windows?: boolean } = 
       continue
     }
 
-    if (char === "'" || char === '"') {
+    if (char === '"' || (char === "'" && !options.windows)) {
       quote = char
       inWord = true
       continue
