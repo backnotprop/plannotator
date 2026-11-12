@@ -265,7 +265,7 @@ async function runPairedCall(
   refused: (code: string, message: string, exit?: number) => number,
 ): Promise<number> {
   const pairing = decodeInboxAgentPairing(deps.env.PLANNOTATOR_PAIRING);
-  if (!pairing) return refused("invalid_pairing", "PLANNOTATOR_PAIRING is not a whole pairing string from the Inbox (it starts with plannotator-pairing-). Copy it again from the person's Inbox, all of it, with no spaces or line breaks.", 2);
+  if (!pairing) return refused("invalid_pairing", "PLANNOTATOR_PAIRING is not a whole pairing string from the Inbox: it is cut off or changed, or has spaces or line breaks in it. Ask the person to copy it again, whole (it starts with plannotator-pairing-).", 2);
   const door = deps.env.PLANNOTATOR_PAIRING_DOOR ? loopbackDoor(deps.env.PLANNOTATOR_PAIRING_DOOR) : null;
   if (deps.env.PLANNOTATOR_PAIRING_DOOR && !door) return refused("pairing_door_needed", "PLANNOTATOR_PAIRING_DOOR must be the Inbox's address on this computer (http://127.0.0.1:<port>). Unset it to go through the relay.", 2);
   if (!door && !pairing.relay) {
