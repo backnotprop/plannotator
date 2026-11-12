@@ -35,6 +35,7 @@ function writeStartingMarkdownView(view: MarkdownFileView): void {
 /** Why a file's view cannot change while it holds the edit session. */
 export const MARKDOWN_VIEW_EDITING_REASON = 'Finish editing first';
 
+/** Reads composedPath()[0]: at window level `target` is retargeted to a shadow host, hiding the Pierre editor's contenteditable. */
 export function isTypingKeyEvent(event: KeyboardEvent): boolean {
   const origin = (event.composedPath?.()[0] ?? event.target) as EventTarget | null;
   return isTypingTarget(origin) || (origin as HTMLElement | null)?.tagName === 'SELECT';

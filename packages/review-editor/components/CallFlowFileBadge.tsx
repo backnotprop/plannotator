@@ -11,6 +11,7 @@ import { CallFlowRawView } from './CallFlowRawView';
 import { splitCallFlowFilePath } from '../utils/callFlowPresentation';
 
 const CLOSE_DELAY_MS = 250;
+// Hover intent: scrolling drags headers under a still pointer, and without a delay each badge would pop the Lens.
 const OPEN_DELAY_MS = 100;
 const SCROLL_SETTLE_MS = 160;
 

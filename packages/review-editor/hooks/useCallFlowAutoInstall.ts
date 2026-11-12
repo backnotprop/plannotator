@@ -6,6 +6,7 @@ import {
 } from '@plannotator/shared/call-flow-languages';
 import type { CallFlowInstallController } from './useCallFlowInstall';
 
+/** Targets are recorded before the request starts, so a failed POST or install cannot cause a render-driven retry loop. */
 export function useCallFlowAutoInstall(
   enabled: boolean,
   consentAcknowledged: boolean,

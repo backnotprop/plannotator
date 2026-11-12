@@ -125,6 +125,8 @@ const PierreDiffContent = React.memo(({
         enableGutterUtility: true,
         onGutterUtilityClick,
         onLineSelectionEnd,
+        // A defined `selectedLines` puts Pierre in controlled-selection mode, so a second drag never repaints without a handler;
+        // spread conditionally so other surfaces keep no such key.
         ...(onLineSelectionChange ? { onLineSelectionChange } : {}),
         // Pierre's renderer-options builder drops onToken* before it evaluates
         // shouldUseTokenTransformer, so passing the handlers alone never wraps tokens (no
@@ -334,6 +336,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 }) => {
   const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout });
   useWorkerPoolThemeSync(pierreTheme.syntaxTheme);
+  // containerRef must be the OverlayScrollbars viewport (the scrolling element), not its host.
   const { ref: containerRef, viewport, onViewportReady } =
     useOverlayViewport<HTMLDivElement>();
   const splitSurfaceRef = useRef<HTMLDivElement>(null);
@@ -393,7 +396,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
 
-  // Parse patch into FileDiffMetadata for @pierre/diffs FileDiff component.
+  // Parse patch into FileDiffMetadata for @pierre/diffs FileDiff. Pierre defaults an unset cacheKey to the
+  // file name and caches by it alone, so two diffs of one path must carry distinct keys.
   const fileDiff = useMemo(() => {
     const parsed = getSingularPatch(patch);
     parsed.cacheKey = `${filePath}#${hashString(patch)}`;

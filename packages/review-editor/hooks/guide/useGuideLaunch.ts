@@ -74,6 +74,7 @@ export function useGuideLaunch(
   const piOptions = markerModels('pi', PI_FALLBACK);
   const copilotOptions = markerModels('copilot', COPILOT_FALLBACK);
 
+  // A stale saved model id falls back to the catalog's first entry rather than POSTing a dead id.
   const effectiveModel = (saved: string, options: GuideModelOption[]): string =>
     options.some((o) => o.value === saved) ? saved : (options[0]?.value ?? saved);
 

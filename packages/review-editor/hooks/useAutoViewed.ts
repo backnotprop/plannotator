@@ -63,6 +63,7 @@ export function useAutoViewed({
   }
   useEffect(() => () => batcherRef.current?.dispose(), []);
 
+  // A file parked at the bottom keeps accruing dwell but reportVisibleFile only runs on scroll: retry once the dwell has elapsed.
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearRetry = useCallback(() => {
     if (retryRef.current !== null) {

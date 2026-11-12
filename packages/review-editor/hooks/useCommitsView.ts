@@ -56,6 +56,7 @@ export function useCommitsView({
     const generation = ++generationRef.current;
     const setBusy = before ? setIsLoadingMore : setIsLoading;
     setBusy(true);
+    // A page-1 fetch supersedes in-flight paging, whose generation-skipped `finally` never clears its flag ("Show more" would stick).
     if (!before) setIsLoadingMore(false);
     setError(null);
     try {

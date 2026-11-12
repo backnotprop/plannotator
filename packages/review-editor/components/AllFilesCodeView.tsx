@@ -409,12 +409,14 @@ function markdownPreviewFileDiff(full: FileDiffMetadata): FileDiffMetadata {
   };
 }
 
+// Slack for auto-mark-viewed: a file can stop being active (+50px rule) while a sliver is still on screen.
 const SCROLLED_PAST_EPSILON_PX = 8;
 
 type HeaderMetricsTarget = { setMetrics(metrics?: Partial<VirtualFileMetrics>, force?: boolean): void };
 const isHeaderMetricsTarget = (value: unknown): value is HeaderMetricsTarget =>
   typeof value === 'object' && value !== null && typeof (value as HeaderMetricsTarget).setMetrics === 'function';
 
+// Must equal FileHeader's fixed outer height (--panel-header-h) so virtualization reserves exactly the header's space.
 const PANEL_HEADER_HEIGHT = 33;
 const COMPACT_PANEL_HEADER_HEIGHT = 44;
 // Pierre's own 'line-info' default metric is also 32, so passing it is redundant today — kept
@@ -1081,7 +1083,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     onAllCollapsedChange?.(allCollapsed);
   }, [onAllCollapsedChange, allCollapsed]);
 
-  // Force CodeView to re-render an item's slots (header included) WITHOUT otherwise mutating it.
+  // Force CodeView to re-render an item's slots without mutating it: Pierre republishes slot portals
+  // only on mount/updateItem, so the stable renderCustomHeader would not see external state changes.
   const refreshItem = useCallback((itemId: string) => {
     const handle = viewerRef.current;
     const item = handle?.getItem(itemId);
@@ -1194,6 +1197,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     refreshEditSessionMarkers();
   }, [annotations, refreshEditSessionMarkers]);
 
+  // Augment applies wait for scroll idle: the grown item's corrective scrollTo() would kill wheel momentum mid-gesture.
   const pendingAugmentAppliesRef = useRef(new Map<string, () => void>());
   const augmentFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScrollTsRef = useRef(0);
@@ -1303,11 +1307,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             augmentState.set(itemId, { status: 'done', controller, generation });
             return;
           }
+          // Never clobber an active edit session's document: the editor mutates item.fileDiff in place.
           if (itemId === editSession.editingItemIdRef.current) {
             augmentState.set(itemId, { status: 'done', controller, generation });
             return;
           }
 
+          // cacheKey must change when the contents do, or the worker/highlight caches serve the stale partial AST.
           augmented.cacheKey = `${generation}::${itemId}#full`;
           if (previewAppliedRef.current.has(itemId)) {
             fullDiffsRef.current.set(itemId, augmented);

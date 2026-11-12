@@ -172,6 +172,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       stageError={state.stageError}
       prUrl={state.prMetadata?.url}
       prDiffScope={state.prDiffScope}
+      // Debounced: marks from the raw query mid-debounce mismatch ids and re-walk every item per keystroke.
       searchQuery={state.isSearchPending ? '' : state.debouncedSearchQuery}
       searchMatches={state.searchMatches}
       activeSearchMatchId={state.activeSearchMatchId}

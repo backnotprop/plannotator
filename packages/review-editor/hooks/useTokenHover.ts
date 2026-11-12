@@ -99,6 +99,7 @@ export function useTokenHover(
   const [engaged, setEngaged] = useState(false);
 
   const modifierHeldRef = useRef(false);
+  // Kept even when the gate rejected it: a key press fires no pointer event, so park-then-hold-modifier would do nothing.
   const lastEnterRef = useRef<{ request: CodeNavRequest; element: HTMLElement } | null>(null);
   /** Pointer is inside the card, so a key release must not close it. */
   const pointerInCardRef = useRef(false);
@@ -299,6 +300,7 @@ export function useTokenHover(
       notifyGate(true);
       if (pending) beginHover(pending.request, pending.element);
     };
+    // No typing guard: a release always disarms, or a card armed while focus was elsewhere outlives the key.
     const onKeyUp = (event: KeyboardEvent) => {
       if (isModKeyHeld(event) || !modifierHeldRef.current) return;
       modifierHeldRef.current = false;
@@ -307,6 +309,7 @@ export function useTokenHover(
       clearDwell();
       startGrace();
     };
+    // Cmd+Tab reports no keyup, so without this the key reads as held forever.
     const onBlur = () => {
       if (modifierHeldRef.current) notifyGate(false);
       modifierHeldRef.current = false;

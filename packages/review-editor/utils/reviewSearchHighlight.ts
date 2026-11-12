@@ -29,6 +29,7 @@ export function getSearchRoots(root: ParentNode): ParentNode[] {
   return roots;
 }
 
+// Lets the idle path (every scroll frame without search) skip the shadow-root walk: only nodes marked here need clearing.
 const markedItemNodes = new WeakSet<HTMLElement>();
 
 export function clearSearchHighlights(root: ParentNode) {

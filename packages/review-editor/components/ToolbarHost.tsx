@@ -90,6 +90,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     chooser: !!selectionActions && !askOnly,
   });
 
+  // The composer textarea takes focus after a drag, so the browser's copy has nothing; Ctrl+C copies the selected code.
   const selectedCode = toolbar.toolbarState?.tokenSelection?.fullText || toolbar.selectedOriginalCode;
   useHighlightCopy(toolbar.toolbarState ? selectedCode : null);
 

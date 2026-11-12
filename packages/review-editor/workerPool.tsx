@@ -17,6 +17,7 @@ const poolOptions: WorkerPoolOptions = {
 
 const highlighterOptions: WorkerInitializationRenderOptions = {
   preferredHighlighter: 'shiki-js',
+  // The worker's render options, not per-component ones, decide token wrapping; without this code-nav silently no-ops.
   useTokenTransformer: true,
   langs: ['typescript', 'tsx', 'javascript', 'json', 'css', 'html', 'python', 'go', 'rust', 'sh', 'yaml', 'markdown'],
 };

@@ -72,6 +72,7 @@ export const GuideGenerating: React.FC<GuideGeneratingProps> = ({ job, onCancel 
         </button>
       </div>
 
+      {/* LiveLogViewer needs a bounded parent: an auto-height wrapper would grow with the log forever. */}
       {showActivity && (
         <div className="mt-3 h-[300px] max-w-[760px]">
           <LiveLogViewer content={logContent} isLive className="h-full" />

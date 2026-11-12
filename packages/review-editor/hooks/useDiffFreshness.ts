@@ -16,6 +16,7 @@ export function useDiffFreshness({
 }: {
   enabled: boolean;
   resetKey: string;
+  // Echoed on every probe so the server answers per client: a client on a moved snapshot goes stale even if the fingerprint matches.
   snapshotId?: string;
   onAgentCwd?: (cwd: string | null) => void;
   onBaseBehindRemote?: (behind: boolean) => void;

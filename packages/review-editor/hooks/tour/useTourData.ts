@@ -20,8 +20,11 @@ export function useTourData(jobId: string): UseTourDataReturn {
   const [checked, setChecked] = useState<boolean[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingChecklistRef = useRef<boolean[] | null>(null);
+  // True means the next `checked` change is a seed (fetch/demo), not a user toggle: skip the PUT. Cleared only by
+  // the toggle itself, so StrictMode's effect replay cannot trigger a save.
   const skipNextSaveRef = useRef(true);
 
+  // Retry bumps this to re-run the fetch effect: calling fetchTour directly would return a cleanup the caller cannot store.
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const fetchTour = useCallback((): (() => void) | void => {

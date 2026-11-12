@@ -21,6 +21,7 @@ export function DestinationSpotlight({
 }: DestinationSpotlightProps) {
   const [rect, setRect] = useState<DOMRect | null>(null);
 
+  // Re-measure on an interval too: header siblings mount async and shift the target without a resize ResizeObserver can see.
   useLayoutEffect(() => {
     const measure = () => {
       const el = targetRef.current;

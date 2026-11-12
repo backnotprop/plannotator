@@ -120,6 +120,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const handleTabIndent = useTabIndent(setSuggestedCode);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(toolbarRef);
 
+  // The clamp needs the real box height (it changes with suggested code, Ask AI history, textarea resize), measured after every commit.
   useLayoutEffect(() => {
     const element = toolbarRef.current;
     if (!element) return;

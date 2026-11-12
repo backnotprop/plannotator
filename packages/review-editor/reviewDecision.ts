@@ -75,6 +75,7 @@ export function buildReviewApprovalBody(input: ReviewApprovalBodyInput): {
     return {
       draftGeneration: input.draftGeneration,
       approved: true,
+      // A note must never be silently dropped because annotations also ride: fold it in ahead of the export.
       feedback: note ? `${note}\n\n${input.feedbackMarkdown}` : input.feedbackMarkdown,
       annotations: input.annotations,
     };

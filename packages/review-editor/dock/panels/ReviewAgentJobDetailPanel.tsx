@@ -85,6 +85,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
     state.onNavigateToAnnotation(ann.id);
   }, [state.openDiffFile, state.onNavigateToAnnotation]);
 
+  // Uses the diff context snapshotted on the job at launch, not the current UI, so the export matches what the agent analyzed.
   const copyAllText = useMemo(
     () => {
       if (activeAnnotations.length === 0) return '';

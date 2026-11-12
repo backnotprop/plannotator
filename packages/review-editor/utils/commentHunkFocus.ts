@@ -7,6 +7,7 @@ export interface CommentHunkTarget {
 }
 
 export function focusCommentHunk(hunk: string, target: CommentHunkTarget, leading = 3): string {
+  // CRLF hunks (GitHub keeps line endings): match on the line without its \r and write the header back with one.
   const lines = hunk.split('\n');
   const bare = (l: string) => (l.endsWith('\r') ? l.slice(0, -1) : l);
   const headerIdx = lines.findIndex((l) => HUNK_HEADER.test(bare(l)));

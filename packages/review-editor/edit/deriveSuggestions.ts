@@ -7,6 +7,7 @@ export interface SuggestionHunk {
   suggestedCode: string;
 }
 
+// Normalize line endings so a CRLF file edited by an LF editor does not report every line changed; the agent restores the file's style.
 function normalize(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }

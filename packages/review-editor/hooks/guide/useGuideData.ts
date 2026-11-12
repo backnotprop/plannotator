@@ -27,7 +27,10 @@ export function useGuideData(jobId: string): UseGuideDataReturn {
   const [reviewed, setReviewed] = useState<boolean[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingReviewedRef = useRef<boolean[] | null>(null);
+  // True means the next `reviewed` change is a seed (fetch/demo), not a user toggle: skip the PUT. Cleared only by
+  // toggleReviewed, so StrictMode's effect replay cannot trigger a save.
   const skipNextSaveRef = useRef(true);
+  // Retry bumps this to re-run the fetch effect: calling fetchGuide directly would return a cleanup the caller cannot store.
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const fetchGuide = useCallback((): (() => void) | void => {

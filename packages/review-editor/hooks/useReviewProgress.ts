@@ -14,7 +14,7 @@ type ProgressStatus = 'loading' | 'ready' | 'unsupported' | 'error';
 const PROGRESS_TIMEOUT_MS = 5000;
 const MAX_CHANGES_PER_REQUEST = 1000;
 
-/** Persist explicit mutations, never hydrated state. */
+/** Persist explicit mutations, never hydrated state. Requests are serialized so a quick check/uncheck cannot arrive reversed. */
 export function useReviewProgress({
   snapshotId, contextKey, enabled, setViewedFiles, setSuppressedFiles,
 }: {
