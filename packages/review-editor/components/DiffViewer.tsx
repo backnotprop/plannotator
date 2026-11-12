@@ -970,7 +970,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         >
           {markdownPreviewEnabled ? (
             <>
-              {}
               <FileCommentBanner
                 comments={fileCommentsOutsidePreview}
                 selectedAnnotationId={selectedAnnotationId}
@@ -1094,7 +1093,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       )}
       {!collapsed && !bodyOverride && !markdownPreviewEnabled && diffOverflow !== 'wrap' && <DiffBottomBar root={viewport} />}
 
-      {}
       {fileCommentAnchor && (
         <CommentPopover
           anchorEl={fileCommentAnchor}

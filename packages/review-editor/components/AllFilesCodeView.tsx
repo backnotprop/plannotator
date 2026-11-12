@@ -2508,7 +2508,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         }
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
         />
-        {}
         {collapsed && generatedFiles?.has(filePath) === true && (
           <GeneratedFileNotice
             additions={file.additions}
@@ -2517,21 +2516,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             onHeightChange={() => refreshItem(item.id)}
           />
         )}
-        {}
         {imagePreview}
-        {}
         {renderPackageChanges && (!collapsed || packageFileKind(filePath)?.role === 'lockfile') && packageFileKind(filePath)
           ? renderPackageChanges({ file, onHeightChange: remeasure })
           : null}
-        {}
         {!collapsed && !imagePreview && isOversizedStub && (
           <OversizedFileNotice onHeightChange={() => refreshItem(item.id)} />
         )}
-        {}
         {!collapsed && !imagePreview && isBinaryNotice && (
           <BinaryFileNotice onHeightChange={() => refreshItem(item.id)} />
         )}
-        {}
         {isEditingThis && (
           <EditSessionHud
             onComplete={editSession.completeEdit}
@@ -2539,11 +2533,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             dirtyStore={editSession.dirtyStore}
           />
         )}
-        {}
         {!collapsed && (hostFileNotesByPathRef.current.get(filePath) ?? []).map((note) => (
           <div key={note.id} data-host-file-note={note.id}>{note.render()}</div>
         ))}
-        {}
         {!collapsed && fileComments.length > 0 && (
           <FileCommentBanner
             comments={fileComments}
@@ -2557,7 +2549,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             onHeightChange={() => refreshItem(item.id)}
           />
         )}
-        {}
         {!collapsed && previewed && previewControl!.render({ file, onHeightChange: remeasure })}
       </div>
     );
@@ -2728,7 +2719,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       onPointerMove={markdownPreview ? (event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; } : undefined}
       onPointerLeave={markdownPreview ? () => { pointerRef.current = null; } : undefined}
     >
-      {}
       {editEnabled ? (
         <EditProvider createEditor={editSession.createEditor}>{codeView}</EditProvider>
       ) : (
@@ -2736,7 +2726,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       )}
       {diffOverflow !== 'wrap' && <DiffBottomBar root={scrollEl} />}
 
-      {}
       {leadingContent && scrollEl &&
         createPortal(
           <div ref={attachLeadingEl} className="absolute top-0 left-0 right-0">
@@ -2779,7 +2768,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         />
       )}
 
-      {}
       {!readOnly && selectionAnnotationRequest && onAddEditorCommentForFile && (
         <CommentPopover
           key={`edit-selection:${selectionAnnotationRequest.filePath}:${selectionAnnotationRequest.lineStart}-${selectionAnnotationRequest.lineEnd}`}

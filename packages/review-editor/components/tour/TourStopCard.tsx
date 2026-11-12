@@ -18,7 +18,6 @@ function AnchorBlock({
 
   return (
     <div className="border border-border/20 dark:border-border/40 rounded-lg overflow-hidden">
-      {}
       <div className="flex items-center gap-2 px-3 py-2 bg-muted/20 dark:bg-muted/40 border-b border-border/15 dark:border-border/30">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-muted-foreground/50 flex-shrink-0">
           <path d="M3 1.5h6.5L13 5v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.2" />
@@ -38,14 +37,12 @@ function AnchorBlock({
         </button>
       </div>
 
-      {}
       {anchor.label && (
         <div className="px-3 py-2 text-[12px] text-foreground border-b border-border/10 dark:border-border/30 bg-muted/5 dark:bg-muted/20">
           {anchor.label}
         </div>
       )}
 
-      {}
       {mountedRef.current && (
         <DiffHunkPreview hunk={anchor.hunk} maxHeight={220} className="!border-0 !rounded-none" />
       )}
@@ -80,7 +77,6 @@ export const TourStopCard: React.FC<TourStopCardProps> = ({
         dimmed ? 'opacity-55' : 'opacity-100'
       }`}
     >
-      {}
       <div className={`absolute left-0 top-1 -translate-x-1/2 w-5 h-5 rounded-full flex items-center justify-center border-2 border-background z-10 text-[9px] font-mono font-semibold transition-colors duration-200 ${
         open
           ? 'bg-primary text-primary-foreground'
@@ -89,7 +85,6 @@ export const TourStopCard: React.FC<TourStopCardProps> = ({
         {index + 1}
       </div>
 
-      {}
       <button className="w-full text-left group cursor-pointer" onClick={onToggle}>
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
@@ -111,7 +106,6 @@ export const TourStopCard: React.FC<TourStopCardProps> = ({
         </div>
       </button>
 
-      {}
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
@@ -169,7 +163,6 @@ export const TourStopCard: React.FC<TourStopCardProps> = ({
         )}
       </AnimatePresence>
 
-      {}
       {!isLast && stop.transition && (
         <p className="text-[11px] text-muted-foreground/50 italic mt-4">
           {stop.transition}

@@ -183,7 +183,6 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
           />
         }
       >
-          {}
           <div className="review-file-row-main">
             {showViewedControls && (
               <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(node.path) : undefined} forceVisible={isActive} />

@@ -77,7 +77,6 @@ export const FileCommentCard: React.FC<{
       <CommentMeta
         leading={
           <>
-            {}
             <button
               className="flex-none -ml-0.5 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               onClick={(e) => { e.stopPropagation(); setCollapsed((c) => !c); }}
@@ -98,7 +97,6 @@ export const FileCommentCard: React.FC<{
         createdAt={comment.createdAt}
       />
 
-      {}
       {comment.markdownPreview && !collapsed && (
         <div
           data-file-comment-markdown-quote=""

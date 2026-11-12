@@ -111,7 +111,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
-      {}
       <div className="flex-shrink-0 px-8 py-3 border-b border-border/40">
         <div className="flex items-center gap-2">
           <StatusDot status={job.status} />
@@ -124,7 +123,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
         {job.cwd && (
           <p className="text-[10px] font-mono text-muted-foreground/50 mt-1 truncate" title={job.cwd}>{job.cwd}</p>
         )}
-        {}
         <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
           <span>Started {new Date(job.startedAt).toLocaleTimeString()}</span>
           {job.exitCode !== undefined && (
@@ -137,7 +135,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
             {job.warning}
           </p>
         )}
-        {}
         {userMessage && (
           <div className="mt-3 space-y-1.5">
             <Disclosure title="Prompt" copyText={userMessage} nested>
@@ -152,7 +149,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
         )}
       </div>
 
-      {}
       <div className="flex-shrink-0 px-8 flex gap-0.5 border-b border-border/40">
         {!isTour && !isGuide && (
           <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
@@ -170,7 +166,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
         </TabButton>
       </div>
 
-      {}
       {activeTab === 'findings' ? (
         isTour ? (
           <ScrollFade>

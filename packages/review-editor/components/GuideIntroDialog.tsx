@@ -15,9 +15,7 @@ export const GuideIntroDialog: React.FC<GuideIntroDialogProps> = ({ isOpen, onDi
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-sm p-4">
-      {}
       <div className="bg-card border border-border rounded-xl w-full max-w-5xl max-h-[calc(100vh-2rem)] shadow-2xl flex flex-col">
-        {}
         <div className="p-7 border-b border-border">
           <h3 className="font-semibold text-2xl">Introducing Guided Reviews</h3>
         </div>
@@ -42,7 +40,6 @@ export const GuideIntroDialog: React.FC<GuideIntroDialogProps> = ({ isOpen, onDi
             generated on demand by your local agent CLI.
           </p>
 
-          {}
           <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
             <span className="bg-muted rounded-md text-xs font-medium px-2 py-1 select-none">
               <TextShimmer duration={2.5} spread={1.5}>Guide</TextShimmer>
@@ -53,7 +50,6 @@ export const GuideIntroDialog: React.FC<GuideIntroDialogProps> = ({ isOpen, onDi
           </div>
         </div>
 
-        {}
         <div className="px-7 py-5 border-t border-border flex justify-end">
           <button
             onClick={onDismiss}

@@ -133,7 +133,6 @@ function TokenHoverCardContent({
         </div>
       )}
 
-      {}
       <div className="border-t border-border px-3.5 py-1.5 text-[10.5px] text-muted-foreground">
         Click a location to jump.{' '}
         <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px]">

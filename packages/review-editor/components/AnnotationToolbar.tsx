@@ -269,7 +269,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             }}
           />
 
-          {}
           {showSuggestedCode ? (
             <div className="mt-2">
               <div className="flex items-center justify-between mb-1">
@@ -329,7 +328,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           )}
 
           <div className="flex items-center gap-2 mt-3">
-            {}
             {aiAvailable && !isEditing && (
               <button
                 onClick={handleAskAIClick}
@@ -346,7 +344,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               </button>
             )}
 
-            {}
             <button
               onClick={onSubmit}
               disabled={!commentText.trim() && !suggestedCode.trim()}

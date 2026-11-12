@@ -44,7 +44,6 @@ function EditModeDemoPlaceholder() {
       className="flex h-full min-h-[300px] flex-col overflow-hidden rounded-xl border border-border bg-muted/20"
       aria-hidden="true"
     >
-      {}
       <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3.5 py-2">
         <span className="font-mono text-[11px] font-medium text-foreground/80">src/retry.ts</span>
         <span className="ml-auto inline-flex items-center gap-1 rounded border border-border bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -60,7 +59,6 @@ function EditModeDemoPlaceholder() {
         <span className="text-[10px] text-muted-foreground">1 change</span>
       </div>
 
-      {}
       <div className="flex-1 space-y-px px-3.5 py-3 font-mono text-[11px] leading-5">
         <div className="text-muted-foreground/70">
           <span className="mr-3 select-none text-muted-foreground/40">41</span>
@@ -81,7 +79,6 @@ function EditModeDemoPlaceholder() {
         </div>
       </div>
 
-      {}
       <div className="border-t border-border bg-background/60 px-3.5 py-3">
         <div className="rounded-lg border border-primary/25 bg-primary/[0.06] p-2.5">
           <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
@@ -232,7 +229,6 @@ export function EditModeAnnouncementDialog({
           <p className="text-xs text-muted-foreground">
             Change this anytime in Settings → Experimental → Edit Code to Suggest.
           </p>
-          {}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-3.5 py-2">
               <span id="edit-mode-enable-label">

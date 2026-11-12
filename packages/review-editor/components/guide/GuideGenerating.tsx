@@ -35,7 +35,6 @@ export const GuideGenerating: React.FC<GuideGeneratingProps> = ({ job, onCancel 
 
   return (
     <div className="w-full px-10 py-8">
-      {}
       <div className="flex items-center gap-2.5">
         <span className="relative flex h-2 w-2 flex-shrink-0">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-40" />

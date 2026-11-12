@@ -73,7 +73,6 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
       />
 
       <div className="flex items-center gap-2 mt-2">
-        {}
         {onSwitchToComment && (
           <button
             onClick={onSwitchToComment}
@@ -86,7 +85,6 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
           </button>
         )}
 
-        {}
         <button
           onClick={handleSubmit}
           disabled={!question.trim() || isLoading}
@@ -107,7 +105,6 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
         </button>
       </div>
 
-      {}
       {aiHistory.length > 0 && (
         <div className="mt-2 pt-2 border-t border-border/30 space-y-1.5 max-h-40 overflow-y-auto">
           {aiHistory.map(({ question: q, response: r }) => (

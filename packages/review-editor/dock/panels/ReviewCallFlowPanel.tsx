@@ -320,7 +320,6 @@ export function ReviewCallFlowPanel() {
         <header className="call-flow-header">
           <div>
             <h2>{data.summary.changedNodes === 0 ? 'No changed call paths' : 'Call paths'}</h2>
-            {}
             <p className="call-flow-summary">
               {data.summary.added > 0 && (
                 <span className="call-flow-summary-item call-flow-summary-changed">

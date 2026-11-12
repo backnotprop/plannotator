@@ -109,7 +109,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   return (
     <>
     <div ref={barRef} className="relative border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-      {}
       {providers.length > 1 ? (
         <div className="relative">
           <button
@@ -155,7 +154,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         </span>
       )}
 
-      {}
       {models.length > 1 ? (
         <>
           <span className="text-border/60">·</span>
@@ -216,7 +214,6 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         </>
       ) : null}
 
-      {}
       {reasoningEfforts.length > 0 && (
         <>
           <span className="text-border/60">·</span>
@@ -271,10 +268,8 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         </>
       )}
 
-      {}
       <div className="flex-1" />
 
-      {}
       {showSessionNote && (
         <span className="text-[10px] text-amber-500 animate-pulse">New chat session</span>
       )}

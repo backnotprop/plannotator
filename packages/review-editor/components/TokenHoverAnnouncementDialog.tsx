@@ -115,7 +115,6 @@ function HoverCardTryIt({
         <div className="flex gap-3 bg-success/10 px-3">
           <span className="w-5 shrink-0 select-none text-right text-success/60">42</span>
           <span className="truncate text-foreground">
-            {}
             <span className="text-primary/70">await</span>{' '}
             <span
               ref={tokenRef}

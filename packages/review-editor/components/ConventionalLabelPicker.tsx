@@ -100,7 +100,6 @@ export const ConventionalLabelPicker: React.FC<ConventionalLabelPickerProps> = (
           );
         })}
 
-        {}
         {showToggle && (
           <button
             type="button"

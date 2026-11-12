@@ -168,7 +168,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           className={`min-w-0 flex items-center text-xs font-semibold leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
           title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
         >
-          {}
           {status === 'renamed' && oldPath && !narrow && !isCompactTouchLayout && (
             <>
               <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
@@ -310,7 +309,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
         <SemanticFileBadge filePath={filePath} />
-        {}
         {onEditFile && !isEditing && (
           <button
             onClick={(e) => {
@@ -332,8 +330,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             {!isVeryTight && <span>Edit</span>}
           </button>
         )}
-        {}
-        {}
         {openIn}
         {!readOnly && <OpenInAppButton
           filePath={filePath}

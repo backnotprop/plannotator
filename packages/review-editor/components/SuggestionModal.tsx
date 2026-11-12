@@ -32,7 +32,6 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
     <div className="fixed inset-0 z-[2000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div data-highlight-composer="" className="relative w-[960px] max-w-[95vw] max-h-[85vh] flex flex-col bg-popover border border-border rounded-xl shadow-2xl">
-        {}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-foreground">Suggest Changes</span>
@@ -50,7 +49,6 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
             )}
           </div>
           <div className="flex items-center gap-1">
-            {}
             <button
               onClick={() => setModalLayout(modalLayout === 'horizontal' ? 'vertical' : 'horizontal')}
               className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -77,9 +75,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
           </div>
         </div>
 
-        {}
         <div className={`flex flex-1 min-h-0 ${modalLayout === 'vertical' ? 'flex-col' : ''}`}>
-          {}
           <div className={`flex-1 flex flex-col min-w-0 min-h-0 ${modalLayout === 'vertical' ? 'border-b border-border' : 'border-r border-border'}`}>
             <div className="px-3 py-1.5 border-b border-border/50 bg-muted/30">
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Original</span>
@@ -89,7 +85,6 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
             </pre>
           </div>
 
-          {}
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <div className="px-3 py-1.5 border-b border-border/50 bg-muted/30">
               <span className="text-[10px] font-medium text-success uppercase tracking-wider">Suggestion</span>
@@ -112,7 +107,6 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
           </div>
         </div>
 
-        {}
         <div className="flex items-center justify-between px-4 py-3 border-t border-border">
           <span className="text-[10px] text-muted-foreground">Tip: Edit the suggestion based on the original code on the left</span>
           <button

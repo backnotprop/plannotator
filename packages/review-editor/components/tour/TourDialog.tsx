@@ -176,10 +176,8 @@ export const TourDialog: React.FC<TourDialogProps> = ({ jobId, onClose }) => {
   return (
     <MotionConfig reducedMotion="user">
       <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-2 md:px-8 md:py-4" onClick={requestClose}>
-        {}
         <div className={`absolute inset-0 bg-black/50 backdrop-blur-[2px] ${closing ? 'tour-dialog-overlay-closing' : 'tour-dialog-overlay'}`} />
 
-        {}
         <div
           className={`relative z-10 w-full max-w-6xl h-full max-h-[96vh] bg-background rounded-2xl shadow-2xl border border-border/15 overflow-hidden flex flex-col ${closing ? 'tour-dialog-content-closing' : 'tour-dialog-content'}`}
           onClick={(e) => e.stopPropagation()}
@@ -312,7 +310,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
 
   return (
     <>
-      {}
       <div className="flex-shrink-0 flex items-center gap-3 px-5 py-1.5 border-b border-border/20 dark:border-border/40">
         <h2 className="text-sm font-semibold tracking-tight text-foreground truncate flex-1 min-w-0">
           {tour.title}
@@ -327,7 +324,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
         </button>
       </div>
 
-      {}
       <div className="flex-shrink-0 flex items-center gap-1 px-5 py-1.5 border-b border-border/10 dark:border-border/30">
         {PAGE_ORDER.map((p) => (
           <button
@@ -350,10 +346,8 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
         ))}
       </div>
 
-      {}
       <div className="flex-1 relative overflow-hidden">
 
-        {}
         {(page === 'intro' || exitingPage === 'intro') && (
           <div
             className={`absolute inset-0 z-10 ${getPageAnimClass('intro', page, exitingPage, slideDir)}`}
@@ -367,7 +361,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
               animate="visible"
               variants={introContainerVariants}
             >
-              {}
               <div className="relative flex-1 min-h-0">
                 <OverlayScrollArea className="h-full">
                   <div className="px-8 py-6 pb-12 max-w-4xl mx-auto">
@@ -380,7 +373,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
                       </motion.p>
                     )}
 
-                    {}
                     <motion.div
                       variants={introContainerVariants}
                       className="grid grid-cols-3 gap-3 mb-5 text-[13px]"
@@ -409,7 +401,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
                   </div>
                 </OverlayScrollArea>
 
-                {}
                 <div
                   className="pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-background backdrop-blur-xl"
                   style={{
@@ -419,7 +410,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
                 />
               </div>
 
-              {}
               {page === 'intro' && (
                 <div className="flex-shrink-0 px-8 pb-5 pt-1 max-w-4xl mx-auto w-full">
                   <motion.button
@@ -485,7 +475,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
           </div>
         )}
 
-        {}
         {(page === 'checklist' || exitingPage === 'checklist') && exitingPage !== 'intro' && (
           <div
             className={`absolute inset-0 ${getPageAnimClass('checklist', page, exitingPage, slideDir)}`}

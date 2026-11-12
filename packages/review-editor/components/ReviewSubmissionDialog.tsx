@@ -449,7 +449,6 @@ export function ReviewSubmissionDialog({
             : 'Review what will be posted.'}
         </DialogDescription>
 
-        {}
         {showEventChoice && (
           <fieldset data-review-event-choice className="mb-3">
             <legend className="sr-only">Review type</legend>
@@ -487,7 +486,6 @@ export function ReviewSubmissionDialog({
           </fieldset>
         )}
 
-        {}
         <textarea
           ref={generalCommentRef}
           data-pn-mobile-editable
@@ -514,7 +512,6 @@ export function ReviewSubmissionDialog({
           </p>
         )}
 
-        {}
         {submission.targets.length > 0 && (
           <div className="mb-3">
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
@@ -654,7 +651,6 @@ export function ReviewSubmissionDialog({
           </div>
         )}
 
-        {}
         {totalOrphans > 0 && (
           <div className="mb-3 p-3 rounded-md bg-warning/10 border border-warning/20">
             <div className="text-xs font-medium text-warning uppercase tracking-wide mb-1">
@@ -682,7 +678,6 @@ export function ReviewSubmissionDialog({
           </div>
         )}
 
-        {}
         <label data-pn-touch-target className="flex items-center gap-2 text-sm text-muted-foreground mb-4 cursor-pointer select-none">
           <input
             type="checkbox"
@@ -695,7 +690,6 @@ export function ReviewSubmissionDialog({
 
         </div>
 
-        {}
         <div className="shrink-0 flex justify-end gap-2 border-t border-border/50 bg-card px-4 pb-4 pt-3 sm:px-6 sm:pb-6">
           <button
             data-pn-touch-target

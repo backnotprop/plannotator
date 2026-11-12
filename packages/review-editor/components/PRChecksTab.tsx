@@ -93,14 +93,12 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
 
   return (
     <div className={bare ? 'space-y-4' : 'px-8 py-4 space-y-4 max-w-2xl'}>
-      {}
       <div className="space-y-2">
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Merge Status
         </h3>
 
         <div className="space-y-1.5">
-          {}
           {decisionStyle && (
             <div className={`flex items-center gap-2 px-2 py-1.5 rounded ${decisionStyle.bg}`}>
               <span className={`text-xs font-medium ${decisionStyle.text}`}>
@@ -109,7 +107,6 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
             </div>
           )}
 
-          {}
           <div className={`flex items-center gap-2 px-2 py-1.5 rounded ${mergeStyle.bg}`}>
             <span className={`text-xs font-medium ${mergeStyle.text}`}>
               {mergeableConflict ? 'Has merge conflicts' : mergeStyle.label}
@@ -118,7 +115,6 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
         </div>
       </div>
 
-      {}
       {context.checks.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">

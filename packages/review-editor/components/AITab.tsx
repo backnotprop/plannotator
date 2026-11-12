@@ -214,7 +214,6 @@ export const AITab: React.FC<AITabProps> = ({
           </div>
         )}
 
-        {}
         {fileGroups.map(({ filePath, messages: fileMessages }) => {
           const isExpanded = !collapsedFiles.has(filePath);
           const basename = filePath.split('/').pop() || filePath;
@@ -247,7 +246,6 @@ export const AITab: React.FC<AITabProps> = ({
           );
         })}
 
-        {}
         {generalMessages.length > 0 && (
           <div className="mb-3 mt-2">
             {fileGroups.length > 0 && (
@@ -267,7 +265,6 @@ export const AITab: React.FC<AITabProps> = ({
       </div>
       </OverlayScrollArea>
 
-      {}
       {permissionRequests.filter(p => !p.decided).length > 0 && (
         <div className="border-t border-border/50 p-2 space-y-2">
           {permissionRequests.filter(p => !p.decided).map(perm => (
@@ -285,7 +282,6 @@ export const AITab: React.FC<AITabProps> = ({
         </div>
       )}
 
-      {}
       <AIConfigBar
         providers={aiProviders}
         selectedProviderId={aiConfig?.providerId ?? null}
@@ -298,7 +294,6 @@ export const AITab: React.FC<AITabProps> = ({
         setupHint={askSessionSetupHint}
       />
 
-      {}
       {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} observationOnly={listenOnly} />}
     </div>
   );
@@ -387,7 +382,6 @@ const QAPair = memo<{
 
   return (
     <div data-question-id={question.id} className="flex flex-col gap-1.5">
-      {}
       <div className="p-2.5 rounded-lg border border-transparent hover:bg-muted/30 transition-colors">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-1.5">
@@ -410,7 +404,6 @@ const QAPair = memo<{
         <p className="text-xs text-foreground/80">{question.prompt}</p>
       </div>
 
-      {}
       <div className="group relative p-2.5 rounded-lg border border-border/50 bg-popover/50 hover:bg-muted/30 transition-colors">
         {response.error ? (
           <>
