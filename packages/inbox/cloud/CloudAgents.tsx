@@ -4,7 +4,6 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { inboxApi, InboxApiError, type CloudAgentTest, type CloudAgentsModel } from '../api';
 import { HostMark, Icon } from '../icons';
 
-/** What each preset's fields ask for, and where the person finds them. */
 const HINTS: Record<InboxCloudPreset, { url: string; key: string; where: string }> = {
   'claude-routine': {
     url: 'https://api.anthropic.com/v1/claude_code/routines/trig_…/fire',
@@ -24,21 +23,14 @@ const HINTS: Record<InboxCloudPreset, { url: string; key: string; where: string 
 };
 
 const errorText = (cause: unknown) => (cause instanceof InboxApiError ? cause.message : 'The Inbox did not answer. Try again.');
-/** Enter never submits here (the Inbox adds no keys): only the buttons do. */
 const noEnter = (event: KeyboardEvent) => {
   if (event.key === 'Enter') event.preventDefault();
 };
 
-/**
- * Settings → Devices → Cloud agents (packages/server/inbox-cloud-agents.ts): pair a Claude Code or Grok Bot routine
- * by its webhook, and the Inbox wakes it when the person writes to it. The window never learns the address or the
- * key back, only that one is set. Hidden where the route refuses (a tailnet guest).
- */
 export function CloudAgentsSection() {
   const [model, setModel] = useState<CloudAgentsModel | null>(null);
   const [hidden, setHidden] = useState(false);
   const [adding, setAdding] = useState(false);
-  /** The agent just paired: its block to paste and its test. */
   const [fresh, setFresh] = useState<string | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
 
@@ -97,7 +89,6 @@ export function CloudAgentsSection() {
   );
 }
 
-/** A paired agent: its name, kind and project; Send a test and Remove; a refused key asks for the new one. */
 function AgentRow({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (model: CloudAgentsModel) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +139,6 @@ function AgentRow({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (mo
   );
 }
 
-/** "The routine refused this key": one field for the new one. Held wakes go once it is saved. */
 function NewKey({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (model: CloudAgentsModel) => void }) {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -196,7 +186,6 @@ function NewKey({ agent, onModel }: { agent: InboxCloudAgentView; onModel: (mode
   );
 }
 
-/** Send a test: fires the webhook once and says plainly whether a run started (with its link when there is one). */
 function TestLine({ agent, onModel, primary }: { agent: InboxCloudAgentView; onModel: (model: CloudAgentsModel) => void; primary?: boolean }) {
   const [state, setState] = useState<{ busy: boolean; test: CloudAgentTest | null; error: string | null }>({ busy: false, test: null, error: null });
   const run = () => {
@@ -231,7 +220,6 @@ function TestLine({ agent, onModel, primary }: { agent: InboxCloudAgentView; onM
   );
 }
 
-/** Right after Pair: the block to paste into the routine, Copy, and Send a test. */
 function PairedPanel({ agent, onModel, onDone }: { agent: InboxCloudAgentView; onModel: (model: CloudAgentsModel) => void; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   const head = useRef<HTMLDivElement>(null);
@@ -267,7 +255,6 @@ function PairedPanel({ agent, onModel, onDone }: { agent: InboxCloudAgentView; o
   );
 }
 
-/** Pair: the kind, a name, the webhook's address and key, and (with more than one) the project it works in. */
 function PairForm({ projects, onCancel, onPaired }: { projects: CloudAgentsModel['projects']; onCancel: () => void; onPaired: (model: CloudAgentsModel, session: string) => void }) {
   const [preset, setPreset] = useState<InboxCloudPreset>('claude-routine');
   const [name, setName] = useState('');

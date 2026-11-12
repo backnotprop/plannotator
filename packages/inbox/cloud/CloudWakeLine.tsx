@@ -1,7 +1,6 @@
 import { inboxCloudWakeLine, type InboxCloudWake } from '@plannotator/core/inbox-cloud';
 import { Icon } from '../icons';
 
-/** The tone of each state: done, waiting, or not started. */
 const TONE: Record<InboxCloudWake['state'], 'delivered' | 'queued' | 'undelivered'> = {
   started: 'delivered',
   held: 'queued',
@@ -14,11 +13,6 @@ const TONE: Record<InboxCloudWake['state'], 'delivered' | 'queued' | 'undelivere
   unpaired: 'undelivered',
 };
 
-/**
- * The line under the person's last message to a cloud agent (packages/server/inbox-cloud-wake.ts): "Woke Nightly
- * fixer · run started" with the run's link, a wait with its time, or a plain failure. A refused key links to where a
- * new one is pasted. `wake` null: just sent, the Inbox has not written its state yet.
- */
 export function CloudWakeLine({ wake, fallbackName, time }: { wake: InboxCloudWake | null | undefined; fallbackName: string; time: (iso: string) => string }) {
   const shown: InboxCloudWake = wake ?? { state: 'sending', name: fallbackName, at: '' };
   const tone = TONE[shown.state];
