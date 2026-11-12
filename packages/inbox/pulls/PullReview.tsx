@@ -136,7 +136,7 @@ function allEntries(layerKey: string, scope: string): string[] {
       const name = window.localStorage.key(i);
       if (name?.startsWith(prefix)) names.push(name.slice(STORE.length));
     }
-  } catch {}
+  } catch {} // Storage off.
   return names;
 }
 
@@ -377,7 +377,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setRailWidth(width);
     try {
       window.localStorage.setItem(RAIL_WIDTH.key, String(width));
-    } catch {}
+    } catch {} // Storage full or off: this visit only.
   };
   const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
   const [sheet, setSheet] = useState(false);

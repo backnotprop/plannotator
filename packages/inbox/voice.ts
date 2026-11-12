@@ -104,6 +104,7 @@ export const browserDeps: VoiceDeps = {
 export interface VoiceHandle {
   session: VoiceSession;
   view: VoiceView;
+  // Send waits while busy: the reply could otherwise go out without the dictated words.
   busy: boolean;
 }
 

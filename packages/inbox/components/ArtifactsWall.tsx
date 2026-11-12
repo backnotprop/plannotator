@@ -187,7 +187,7 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
     setSize(next);
     try {
       localStorage.setItem(SIZE_KEY, next);
-    } catch {}
+    } catch {} // Private mode: the size holds for this page.
   };
 
   const days: { day: string; rows: InboxArtifactRow[] }[] = [];

@@ -51,7 +51,7 @@ export function RowsAsk({ replyPollMs = REPLY_POLL_MS }: { replyPollMs?: number 
         const answer = await inboxApi.thread(thread);
         const last = [...answer.thread.messages].reverse().find((message) => message.author.kind === 'agent');
         if (!gone && last) setSent((now) => (now && now.thread === thread ? { ...now, reply: firstLine(last.body) } : now));
-      } catch {}
+      } catch {} // Not read this time: the next read tries again.
     };
     const timer = setInterval(() => {
       if (Date.now() - started > REPLY_WAIT_MS) clearInterval(timer);

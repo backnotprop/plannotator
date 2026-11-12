@@ -11,7 +11,7 @@ export function useTaggable(threadId: string, enabled: boolean) {
     try {
       const next = await inboxApi.taggable(threadId);
       setModel(next && Array.isArray(next.sessions) ? next : null);
-    } catch {}
+    } catch {} // An older Inbox or a failed read: nobody to tag; `@` stays text.
   }, [threadId]);
   useEffect(() => {
     if (!enabled) return;
@@ -30,7 +30,7 @@ export function useTagConnections(threadId: string, sessions: readonly string[],
     try {
       const model = await inboxApi.sessions(threadId, null, key.split(','));
       setConnections(model.recipients ?? {});
-    } catch {}
+    } catch {} // Unknown: the lines read "Queued … as its next turn".
   }, [threadId, key]);
   useEffect(() => {
     if (!enabled || !key) return;

@@ -59,7 +59,7 @@ export function useAudioPeaks(url: string, size: number): number[] | null {
         if (peaksCache.size >= PEAKS_CACHE_MAX) peaksCache.delete(peaksCache.keys().next().value!);
         peaksCache.set(url, next);
         setPeaks(next);
-      } catch {}
+      } catch {} // Not decodable here: the plain bar stays.
     })();
     return () => {
       cancelled = true;

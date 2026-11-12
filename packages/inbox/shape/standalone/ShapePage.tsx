@@ -127,7 +127,7 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
           try {
             const data = JSON.parse((event as MessageEvent<string>).data) as { ids?: unknown };
             if (Array.isArray(data.ids)) ids = data.ids.filter((x): x is string => typeof x === 'string');
-          } catch {}
+          } catch {} // An empty list: read everything again.
           for (const listener of listeners.current) listener(ids);
           if (refreshTimer.current) clearTimeout(refreshTimer.current);
           refreshTimer.current = setTimeout(refresh, 60);

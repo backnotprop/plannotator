@@ -116,6 +116,7 @@ function fileViewSelection(doc: Document): boolean {
 
 export function installPasteFollowsField(win: Window = window, mod?: (e: { metaKey: boolean; ctrlKey: boolean }) => boolean): () => void {
   const doc = win.document;
+  // Several fields, newest first: one that took focus and then went away (the search palette) must not hide the one before it.
   let recent: TextField[] = [];
   // Where each field's caret was when it lost focus. Kept apart from `recent`, so focusing the field
   // again (which fires focusin) cannot clear it before it is put back.
@@ -142,6 +143,7 @@ export function installPasteFollowsField(win: Window = window, mod?: (e: { metaK
     if (pageSelection(doc)) return;
     const field = recent.find(usable);
     if (!field) return;
+    // Read before focus(): an earlier, no longer visible selection would otherwise be what the paste replaces.
     const caret = carets.get(field);
     if (messageSelectionPending(doc)) field.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
     field.focus({ preventScroll: true });

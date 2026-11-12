@@ -31,7 +31,7 @@ function useAnimatedOriginals(): ReadonlyMap<string, string> {
         const list = Array.isArray(answer.results) ? (answer.results as { icon?: unknown; result?: unknown }[]) : [];
         if (live) setOriginals(new Map(list.flatMap((r) => (typeof r.icon === 'string' && typeof r.result === 'string' ? [[r.result, r.icon] as const] : []))));
       })
-      .catch(() => {});
+      .catch(() => {}); // An Inbox from before "Animate it", or offline: no way back until a read answers.
     return () => {
       live = false;
     };

@@ -179,7 +179,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
           setPaired({ name: fresh.name, via: read?.offer ? pairedVia(read.offer.attempts) : null });
           setStep('paired');
         }
-      } catch {}
+      } catch {} // The next poll tries again.
     };
     const timer = setInterval(() => void poll(), PAIRED_POLL_MS);
     return () => {

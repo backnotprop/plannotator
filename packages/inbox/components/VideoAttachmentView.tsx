@@ -133,7 +133,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     video.pause();
     try {
       video.currentTime = time;
-    } catch {}
+    } catch {} // Not seekable yet: metadata is still loading.
     setCurrent(time);
   }, []);
 
@@ -461,7 +461,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (!media) return;
     try {
       media.currentTime = time;
-    } catch {}
+    } catch {} // Not seekable yet: metadata is still loading.
     setCurrent(time);
   };
 

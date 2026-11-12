@@ -38,7 +38,7 @@ export function useReviewDestination(): [ReviewDestination, (next: ReviewDestina
     setPicked(next);
     try {
       window.localStorage.setItem(DEST_KEY, next);
-    } catch {}
+    } catch {} // Storage off: the choice holds for this page.
   }, []);
   return [picked, choose];
 }
