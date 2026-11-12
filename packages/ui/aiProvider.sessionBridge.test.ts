@@ -27,10 +27,8 @@ const sdkProviders: AIProviderOption[] = [
 ];
 
 describe('"Ask this session" is the only Ask AI provider when present', () => {
-  // The owner's case: Codex saved as the pick, then a Claude Code session with
-  // the mod attached. The server offers only the bridge, and the saved pick must
-  // not route the question elsewhere, whatever the session's status. (That the
-  // cookie is left alone is pinned in aiProviderConfigPersistence.test.tsx.)
+  // The server offers only the bridge, and the saved pick must not route the question elsewhere,
+  // whatever the session's status.
   it('a bridge-only answer selects the bridge over a saved codex pick, in every status', () => {
     const saved = settings({ providerId: 'codex-sdk', providerByOrigin: { 'claude-code': 'codex-sdk' } });
     for (const status of ['ready', 'busy', 'blocked', 'gone'] as const) {
