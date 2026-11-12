@@ -14,6 +14,7 @@ export async function openEditorDiff(
   newPath: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
+    // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
     const proc = Bun.spawn(["code", "--diff", oldPath, newPath], {
       env: childEnv(),
       stdout: "ignore",

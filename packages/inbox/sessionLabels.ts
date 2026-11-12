@@ -2,8 +2,7 @@
  * Session labels beyond the To picker (issue #2450, after #2467): the name a session was given (`/rename` or the
  * transcript's title in Claude Code, Pi's and OpenCode's session names) on the `@` picker's rows, the list rows'
  * agents, Send to another session and an agent message's author. The same label the To picker shows, sent by the
- * session's connection on each poll, never stored, and only for this computer's owner (a tailnet guest's list
- * carries none, so it reads as before). An unnamed session reads exactly as it did.
+ * session's connection on each poll, never stored. An unnamed session reads exactly as it did.
  *
  * It is display only and not proof of who wrote: no tool takes a label, but Claude Code's comes from the session's
  * transcript (its latest `custom-title` line), which the session's own model can append to. So the server refuses a

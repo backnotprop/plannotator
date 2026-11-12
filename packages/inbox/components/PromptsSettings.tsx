@@ -9,6 +9,7 @@ import {
 import { inboxApi } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
+import { AgentRulesSection } from './AgentRules';
 import { Tip } from './Tip';
 
 /**
@@ -22,20 +23,33 @@ import { Tip } from './Tip';
  * only config.json `prompts.inbox` (Reset and Use shared delete the key);
  * whether the reminder is sent stays `inboxReminder`, in Settings → Agents.
  *
+ * Then Guided reviews: the person's standing instructions for every guide
+ * (`guide-instructions.md`, the same file the review UI's guide launch and
+ * VS Code edit), Default (none) or Custom, the same Edit and Reset.
+ *
  * Then the plan, review and annotate prompts, read-only, folded into one row.
  */
 
 const AGENT_NAME: Record<InboxPromptHost, string> = { 'claude-code': 'Claude Code', pi: 'Pi', opencode: 'OpenCode' };
 
 /** The count shows from here; past `max` Save is refused. */
-export const PROMPT_COUNT_FROM = 3700;
+export const PROMPT_COUNT_FROM = 8000;
+/** The guide instructions' count shows this close to their cap (12,000): from 11,000, as on the review page's guide launch. */
+const GUIDE_COUNT_WITHIN = 1000;
 
-type Slot = 'shared' | InboxPromptHost;
+type ReminderSlot = 'shared' | InboxPromptHost;
+type Slot = ReminderSlot | 'guide';
 
-/** The phone's list of sections: Default, or Custom once any reminder text is the person's own. */
+/** The phone's list of sections: Default, or Custom once any reminder text or guide instructions are the person's own. */
 export function promptsSummary(prompts: InboxPromptsSettings): string {
+  const rules = prompts.rules;
+  const ruled = rules ? rules.shared !== null || INBOX_PROMPT_HOSTS.some((host) => rules.runtimes[host] !== null) : false;
+  return reminderCustom(prompts) || ruled || Boolean(prompts.guide?.text) ? 'Custom' : 'Default';
+}
+
+function reminderCustom(prompts: InboxPromptsSettings): boolean {
   const { shared, runtimes } = prompts.reminder;
-  return shared !== null || INBOX_PROMPT_HOSTS.some((host) => runtimes[host] !== null) ? 'Custom' : 'Default';
+  return shared !== null || INBOX_PROMPT_HOSTS.some((host) => runtimes[host] !== null);
 }
 
 function Chip({ custom }: { custom: boolean }) {
@@ -67,6 +81,7 @@ export function PromptsSection({
   const [error, setError] = useState<{ slot: Slot; text: string } | null>(null);
   const [showDefault, setShowDefault] = useState(false);
   const [otherOpen, setOtherOpen] = useState(false);
+  const [reminderOpen, setReminderOpen] = useState(() => prompts.reminder.over?.shared != null || INBOX_PROMPT_HOSTS.some((host) => prompts.reminder.over?.runtimes[host] != null));
   const field = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLDivElement>(null);
   /** After Save, Cancel, Reset or Use shared: the control focus goes back to. */
@@ -79,10 +94,11 @@ export function PromptsSection({
   const agentDefault = (host: InboxPromptHost) => (wakes(host) ? defaultText : reminder.defaults.no_wake);
   /** What an agent gets now: its own text, else the shared text, else its own default. */
   const effectiveOf = (host: InboxPromptHost) => reminder.runtimes[host] ?? reminder.shared ?? agentDefault(host);
-  const currentOf = (slot: Slot) => (slot === 'shared' ? sharedText : effectiveOf(slot));
+  const guide = prompts.guide;
+  const currentOf = (slot: Slot) => (slot === 'guide' ? (guide?.text ?? '') : slot === 'shared' ? sharedText : effectiveOf(slot));
   const overShared = reminder.over?.shared ?? null;
   /** A calm line for text config.json holds over the limit (ignored, so the next text in line goes). */
-  const overNote = (length: number, slot: Slot) => (
+  const overNote = (length: number, slot: ReminderSlot) => (
     <p className="pm-over" data-prompt-over={slot}>
       The text in config.json is {length.toLocaleString('en-US')} characters, over the {reminder.max.toLocaleString('en-US')} limit, so it is ignored.
     </p>
@@ -111,14 +127,15 @@ export function PromptsSection({
   const save = async (slot: Slot, text: string | null, refocus: string) => {
     setSaving(true);
     setError(null);
-    const change: InboxPromptsChange = slot === 'shared' ? { inbox: { reminder: text } } : { inbox: { runtimes: { [slot]: { reminder: text } } } };
+    const change: InboxPromptsChange =
+      slot === 'guide' ? { guide: text } : slot === 'shared' ? { inbox: { reminder: text } } : { inbox: { runtimes: { [slot]: { reminder: text } } } };
     try {
       const saved = await inboxApi.savePrompts(change);
       onPrompts?.(saved.prompts);
       setEditing(null);
       focusAfter.current = refocus;
     } catch (cause) {
-      setError({ slot, text: cause instanceof Error ? cause.message : 'The reminder was not saved.' });
+      setError({ slot, text: cause instanceof Error ? cause.message : slot === 'guide' ? 'The instructions were not saved.' : 'The reminder was not saved.' });
     } finally {
       setSaving(false);
     }
@@ -144,9 +161,11 @@ export function PromptsSection({
 
   const editor = (slot: Slot) => {
     const length = draft.length;
-    const over = length > reminder.max;
-    const own = slot === 'shared' ? reminder.shared : reminder.runtimes[slot];
-    const changed = draft !== currentOf(slot) || (slot !== 'shared' && own === null);
+    const max = slot === 'guide' ? (guide?.max ?? reminder.max) : reminder.max;
+    const countFrom = slot === 'guide' ? max - GUIDE_COUNT_WITHIN : PROMPT_COUNT_FROM;
+    const over = length > max;
+    const own = slot === 'guide' ? guide?.text : slot === 'shared' ? reminder.shared : reminder.runtimes[slot];
+    const changed = draft !== currentOf(slot) || (slot !== 'shared' && slot !== 'guide' && own === null);
     const can = draft.trim() !== '' && !over && changed && !saving;
     const countId = `${id}-count-${slot}`;
     const submit = () => {
@@ -161,23 +180,24 @@ export function PromptsSection({
           ref={field}
           className="pm-area"
           value={draft}
-          aria-label={slot === 'shared' ? 'Inbox reminder' : `Inbox reminder for ${AGENT_NAME[slot]}`}
-          aria-describedby={length >= PROMPT_COUNT_FROM ? countId : undefined}
+          aria-label={slot === 'guide' ? 'Guided review instructions' : slot === 'shared' ? 'Inbox reminder' : `Inbox reminder for ${AGENT_NAME[slot]}`}
+          placeholder={slot === 'guide' ? 'e.g. Start with the riskiest change. Call the tenant a workspace.' : undefined}
+          aria-describedby={length >= countFrom ? countId : undefined}
           aria-invalid={over || undefined}
           data-prompt-field={slot}
           onChange={(event) => setDraft(event.target.value)}
         />
         <div className="pm-acts">
           <button type="button" className="ib-btn ib-sm ib-pri" disabled={!can} onClick={submit} data-prompt-save={slot}>
-            Save
+            {saving ? 'Saving…' : 'Save'}
           </button>
           <button type="button" className="ib-btn ib-sm ib-ghost pm-ghost" onClick={() => cancel(slot)} data-prompt-cancel={slot}>
             Cancel
           </button>
           <span className="pm-sp" />
-          {length >= PROMPT_COUNT_FROM && (
+          {length >= countFrom && (
             <span className="pm-count" id={countId} data-over={over || undefined} data-prompt-count="">
-              {length.toLocaleString('en-US')} / {reminder.max.toLocaleString('en-US')}
+              {length.toLocaleString('en-US')} / {max.toLocaleString('en-US')}
             </span>
           )}
         </div>
@@ -323,14 +343,64 @@ export function PromptsSection({
 
   return (
     <div ref={root} data-prompts-page="">
-      <section className="ib-sgroup ib-sgroup-first" aria-labelledby={`${id}-rem`}>
+      {prompts.rules && <AgentRulesSection rules={prompts.rules} editable={reminder.editable} onPrompts={onPrompts} />}
+      <section className={prompts.rules ? 'ib-sgroup' : 'ib-sgroup ib-sgroup-first'} aria-labelledby={`${id}-rem`}>
         <h2 id={`${id}-rem`}>Inbox reminder</h2>
         <p>{reminder.editable ? 'Sent once, when a session starts.' : 'Sent once, when a session starts. Change it on this computer.'}</p>
         <div className="ib-card">
-          {shared}
-          {INBOX_PROMPT_HOSTS.map(agent)}
+          <button type="button" className="pm-fold" aria-expanded={reminderOpen} aria-controls={`${id}-rem-body`} onClick={() => setReminderOpen((open) => !open)} data-prompts-reminder-fold="">
+            <Chevron />
+            Reminder text
+            <span className="ib-mut">· {reminderCustom(prompts) ? 'Custom' : 'Default'}</span>
+          </button>
+          {reminderOpen && (
+            <div id={`${id}-rem-body`} className="pm-rem-body" data-prompts-reminder="">
+              {shared}
+              {INBOX_PROMPT_HOSTS.map(agent)}
+            </div>
+          )}
         </div>
       </section>
+      {guide && (
+        <section className="ib-sgroup" aria-labelledby={`${id}-guide`}>
+          <h2 id={`${id}-guide`}>Guided reviews</h2>
+          <p>Added to every guided review, from the Inbox, the review page or VS Code.</p>
+          <div className="ib-card">
+            <div className="pm-shared" data-prompt-slot="guide">
+              <div className="pm-head">
+                <Chip custom={guide.text !== null} />
+                <span className="pm-sp" />
+                {reminder.editable && editing !== 'guide' && (
+                  <>
+                    {guide.text !== null && (
+                      <Tip content="Delete your instructions: guides follow Plannotator's method alone">
+                        <button type="button" className="ib-btn ib-sm ib-ghost pm-ghost" disabled={saving} onClick={() => void save('guide', null, '[data-prompt-edit="guide"]')} data-prompt-reset="guide">
+                          Reset to default
+                        </button>
+                      </Tip>
+                    )}
+                    <button type="button" className="ib-btn ib-sm" onClick={() => startEdit('guide')} data-prompt-edit="guide" aria-label="Edit the guided review instructions">
+                      Edit
+                    </button>
+                  </>
+                )}
+              </div>
+              {editing === 'guide' ? (
+                editor('guide')
+              ) : (
+                <>
+                  {guide.text !== null && (
+                    <p className="pm-text" data-prompt-text="guide">
+                      {guide.text}
+                    </p>
+                  )}
+                  {errorLine('guide')}
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
       <OtherPrompts others={prompts.others} open={otherOpen} onToggle={() => setOtherOpen((open) => !open)} configFile={configFile} home={home} />
     </div>
   );

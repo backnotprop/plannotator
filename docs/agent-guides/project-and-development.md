@@ -155,6 +155,8 @@ When adding or modifying server endpoints, both implementations must be updated.
 
 **Exception: the Shapes server.** The standalone Shape page's server (`packages/server/shape.ts`, started by `plannotator shape open`) is Bun-only for the same reason: it lives in the compiled binary, and Pi users reach it through the same `plannotator shape open`. It mounts the shared Shape routes (`packages/shared/shape/routes.ts`), which Pi also has (`apps/pi-extension/server/serverShape.ts`, not mounted), so a change to those routes still goes into both; only the server around them is in one place. See "Shape" in `guides-and-shared-ui.md`.
 
+**Child processes open no console window on Windows.** Every `Bun.spawn` / `Bun.spawnSync` and node:child_process call in both runtimes (and the plugins and providers they share) passes `windowsHide: true`: the Inbox runs with no console, so a console program it starts (gh and glab for pull request cards and states, git, tailscale, an agent CLI, PowerShell) would otherwise open a window while it runs. Bun Shell (`$` from "bun") cannot hide one, so runtime git calls use `Bun.spawn` (`gitStdout` in `packages/server/project.ts`). A call that starts an app window on purpose (a browser, an editor, Explorer) or runs only on macOS or POSIX carries a `windows-hide-guard: <why>` comment instead; `tests/windows-hide-guard.test.ts` fails on any other spawn without it.
+
 ## Installation
 
 **Via plugin marketplace** (when repo is public):
@@ -168,6 +170,8 @@ When adding or modifying server endpoints, both implementations must be updated.
 ```bash
 claude --plugin-dir ./apps/hook
 ```
+
+**The installers' binary download** (`scripts/install.sh` `download_release_binary`, `install.ps1` `Invoke-ResumableDownload`, `install.cmd` `:DownloadBinary`; keep the three in step) continues where a dropped or stalled connection stopped, instead of starting the ~200 MB binary again from zero. Each attempt asks the github.com URL again (it redirects to a signed URL that expires within the hour, so a redirected URL is never reused) and, after the first, asks only for the rest of the file (`curl -C -`, an HTTP Range request on PowerShell). curl's own `--retry` is not used for the binary: it throws away the bytes of the attempt it retries. Bounds: at most 30 attempts, at most 4 in a row that add no bytes, 2 s apart, 6 hours in all; a stall (below 1 byte/s for 60 s, or 60 s without data on PowerShell) ends an attempt and the next continues. A server that answers a Range with the whole file gets the file again from zero; after an HTTP/2 error (curl 92) the attempts go over HTTP/1.1. The SHA-256 check (the release's `.sha256`, or `PLANNOTATOR_EXPECTED_SHA256` from the updater) still covers the whole file before the atomic swap, and a failed download removes its partial file. `install.ps1` uses `HttpWebRequest` (what `Invoke-WebRequest` uses on Windows PowerShell 5.1, so the same proxy and TLS settings) and, if that gives up, runs its earlier `Invoke-WebRequest` download (4 attempts, no progress bar) as a last resort. The `.sha256` keeps its own short download (120 s, curl's `--retry 3`). Tests: `scripts/install-download.test.ts` (a local server that redirects, cuts, stalls, ignores the Range or sends the wrong bytes; install.sh with the real curl, install.ps1 under pwsh, and on Windows under Windows PowerShell 5.1, install.cmd under cmd.exe) and the `#2788` block of `scripts/install.test.ts`.
 
 ## Requirements
 

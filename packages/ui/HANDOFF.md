@@ -1858,6 +1858,7 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 
 ## Publishing & versioning
 
+- **Unreleased: core 0.25.28 (limits removed; 0.25.24–0.25.27 are taken or reserved by other branches).** No `exports` subpath added, removed or renamed; no export removed. Behaviour changes a host may notice: `parseQuestionAnswer` keeps `text`, `other` and `note` whole and no longer cuts `selected` labels or their count; `parseQuestionBlock` takes a block of any length and keeps every choice (no 20 cap). `MAX_QUESTION_BODY_CHARS`, `MAX_QUESTION_CHOICES`, `MAX_QUESTION_SELECTED_CHARS`, `MAX_QUESTION_OTHER_CHARS`, `MAX_QUESTION_TEXT_CHARS` and `MAX_QUESTION_NOTE_CHARS` keep their values but are `@deprecated` and no longer applied. `inboxStoredAgentName` keeps a name whole. `INBOX_TAGS_MAX`, `INBOX_ACTION_NOTE_MAX`, `INBOX_CARD_NOTES_MAX` and `INBOX_CARD_REASON_MAX` are now `Infinity`. `GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS` is 12,000 (was 2,000). New: `isSecretEnvPath` in `./annotatable`, and `documentRenderKindForPath` answers `"code"` for a `.env` file. A host that checks answers or picks against these caps itself must stop cutting at them. ui pins core `0.25.28` exactly; bun.lock changes only the two core version lines. Publish core first.
 - **Unreleased: core 0.25.23 (#3086, the Call tree).** Core adds one `exports` subpath, `./call-tree` (`plannotator.callTree/1`: the Call tree document, re-rooting at a hunk's function, its rows and search; browser-safe, no imports). Additive: nothing removed or renamed. ui does not import it; ui pins core `0.25.23` exactly only so `smoke:package` matches the source manifest. bun.lock changes only the two core version lines. Publish core 0.25.23 before the next ui.
 - **Unreleased: ui 0.63.0 + core 0.25.22: publish core first, then ui.** ui pins `@plannotator/core` `0.25.22` exactly. Versions only: both are what `main` already holds since ui 0.62.0 and core 0.25.21 went to npm (2026-11-10). No `exports` subpath is added, removed or renamed in either package, and no export is removed. The only `package.json` edits are the two versions and the core pin. Every section below still headed "unreleased" and not marked ui 0.63.0 shipped in ui 0.62.0 or earlier.
   - **ui 0.63.0 is a minor, and not additive**: a host that does nothing gets new behaviour (1 to 4 below).
@@ -2693,6 +2694,13 @@ Settings → General gains a **Hide the repository owner** switch, off by defaul
 - **`DocBadges`** and **`PlanDiffViewer`** read the setting for the repository chip's text. `repoInfo` is unchanged, and so is the chip at the default.
 - **`Settings`** gains **`hideRepoOwnerSetting?: boolean`** (default false) to hide the row.
 
+## Ctrl+C / Cmd+C after the highlight (next ui release; behavior fix, additive export, no core change)
+
+Ctrl+C / Cmd+C copied the selected words only while the `Viewer`'s selection toolbar was up. Once the comment composer opened (its textarea takes the focus) it copied nothing, and the same held for the HTML composer, the plan diff's block composer, the code-file view's line composer, and every other host of `useAnnotationHighlighter`, which copied nothing even at the toolbar stage. Every host gets the fix; there is no prop. It is the browser's own copy (the `copy` event, written inside the key press), not a new shortcut.
+
+- **`utils/highlightCopy`** (new): **`useHighlightCopy(text)`** writes `text` into the page's `copy` event while it is non-empty; **`writeHighlightCopy(event, text)`**, **`copyHasOwnSelection(event)`** and **`copyFromOtherField(event)`** are the rule, and **`HIGHLIGHT_COMPOSER_ATTR`** (`data-highlight-composer`) marks a composer that is not a `CommentPopover`. The copy is plain text, as Ctrl+C at the toolbar stage always was (rich text is the Copy button's alone). Text the person selected in an input or textarea, or anywhere in the page, always copies natively; a field outside the highlight's composer (`CommentPopover`'s `data-comment-popover`, or `data-highlight-composer`) keeps the browser's copy even with only a caret, as every field did before; an event another handler took is left alone.
+- **`useAnnotationHighlighter`** copies the selection while its toolbar is up and while that selection's composer is open (with `onHostDraft`, the toolbar stage only: the host owns the composer). The `Viewer`'s own copy listener is gone and it gets the copy through the hook; a host that mounts the hook directly gets it too.
+- **`HtmlViewer`** copies the composer's selected text (or a pinned element's text) while the composer is shown. **`PlanCleanDiffView`** copies the words dragged over when a click opened a block composer. **`CodeFileView`** (`components/CodeFilePopout`) copies the chosen lines, line breaks kept, while its line composer is open.
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.
@@ -3025,6 +3033,13 @@ Pinned by `components/CommentPopover.card.test.tsx` ("/" lists the skills, and i
 
 Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").
 
+## A failed Mermaid render stays inside its block (unreleased; every host, no opt-in, no core change)
+
+- **Nothing is left on `document.body`.** Mermaid renders into a temporary `#d{id}` node on the body and, on a parse failure or a draw error, drew its "Syntax error in text" graphic there and threw without removing it, so every failed render left one at the bottom of the page (one more per re-render). `MERMAID_CONFIG` now carries `suppressErrorRendering: true` (an added key; every other value unchanged) and the render slot removes `#d{id}` / `#i{id}` after any failed render, so a host with its own `initialize` is covered too.
+- **A diagram-type chunk that does not load** (Mermaid 12 loads sequence, flowchart, ELK and the rest each on first use) is re-attempted once, then the block shows the source under `LazyLoadNotice` ("Couldn't load this view. Reload"), not the red panel. Not a Retry: WebKit keeps a failed module fetch that a modulepreload link started for the page, so only a reload fetches it again. `DiagramRenderError` gains an optional `chunkFailed`.
+
+Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid diagram-type chunk", "Mermaid failure leaves nothing outside the block") and `tests/e2e/inbox-mermaid-failure-webkit.spec.ts`.
+
 ## `useSkillReferenceAutocomplete` `commands` / `onCommand` (ui 0.63.0; additive, opt-in, no core change)
 
 - **`commands?: readonly SkillCatalogEntry[]`** and **`onCommand?: (command, text) => void`**. A host's own rows in the `/` list that are not skills (the Inbox's `/side`). They are listed after the catalog's leading `plannotator` rows; a catalog skill with the same name wins; `$` never lists them; the list opens for them even with an empty catalog. Picking one inserts nothing: the typed trigger leaves the text through `setText`, focus is left to the host, and `onCommand` gets the row and the text that is left. A command is never painted (`referenceTokens`) or counted (`humanOnlyReferences`), and never reaches an export. Absent: unchanged.
@@ -3077,3 +3092,10 @@ Pinned by `components/Viewer.clickAWord.test.tsx`, `hooks/useClickWord.test.tsx`
 - **The answer's text.** `QuestionAnswer.other` may hold line breaks (it always could from decision mode's textarea). core's `formatQuestionAnswerLines` (and so `formatQuestionAnswersSection` and ui's `exportAnnotations`) now quotes a multi-line Other under `Answer: Other:` as `> line` lines, indented two spaces under its `- Other:` bullet when there are several picks, the way a multi-line note is quoted. A one-line Other prints byte for byte as before. `formatQuestionAnswerText` (`Annotation.text`) and the panel row stay one line.
 
 Pinned by `components/blocks/QuestionBlock.test.tsx` ("an Other answer of several lines") and core's `question-block.test.ts`.
+
+## `InlineImageTagsContext`: an `<img>` tag inside a line renders as a picture (unreleased; additive, opt-in, no core change)
+
+An `<img>` tag inside a table cell or a sentence is not an HTML block, so `InlineMarkdown` printed it as text. GitHub writes every resized screenshot that way, and PR authors put before/after pairs in tables.
+
+- **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
+- **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.

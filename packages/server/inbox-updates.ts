@@ -283,7 +283,7 @@ export async function probeBinaryVersion(binaryPath: string): Promise<string | n
     };
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(binaryPath, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
+      child = spawn(binaryPath, ["--version"], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
     } catch {
       resolve(null);
       return;

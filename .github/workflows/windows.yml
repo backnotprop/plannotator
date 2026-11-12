@@ -1,6 +1,7 @@
 name: Windows
 
-# The Windows jobs: the uninstall lifecycle, the Qwen Code installer steps, the
+# The Windows jobs: the uninstall lifecycle (with the installers' binary
+# download), the Qwen Code installer steps, the
 # code review diagram engine build, the Claude Code mod's Windows shells, the
 # Pi extension's Node runtime, and install.cmd / install.ps1 end to end. They
 # are part of the full tier: on a PR they run only once it has the `ci:full`
@@ -52,6 +53,13 @@ jobs:
 
       - name: Run focused uninstall tests
         run: bun test packages/server/uninstall.test.ts apps/hook/server/cli.test.ts packages/server/auto-update.test.ts packages/server/auto-update-stuck.test.ts
+
+      # The installers' binary download continuing after a dropped or stalled
+      # connection: install.ps1's under pwsh and Windows PowerShell 5.1, and
+      # install.cmd's under cmd.exe with the real curl.exe, against a local
+      # server (no network). Linux runs only the install.sh and pwsh parts.
+      - name: Run the installers' binary download tests
+        run: bun test scripts/install-download.test.ts
 
   # Path gate for the Qwen Code installer jobs below (about 20 Windows runner
   # minutes per run). Only these files can change what those tests run: the
