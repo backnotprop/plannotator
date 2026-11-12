@@ -7,7 +7,7 @@ import { startInboxServer, type InboxServer } from "../packages/server/inbox";
 import { removeStubbedHtml, stubHookDistHtml } from "./helpers/hook-dist-stub";
 import { NO_BROWSER } from "./helpers/no-browser";
 
-const python = Bun.which("python3");
+const python = process.platform === "win32" ? null : Bun.which("python3");
 const here = resolve(import.meta.dir, "hermes");
 const cli = resolve(import.meta.dir, "../apps/hook/server/index.ts");
 const roots: string[] = [];

@@ -274,7 +274,10 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       };
     case 'hermes':
       return {
-        artefacts: [{ kind: 'code', text: `${HERMES_PLUGIN_INSTALL}\n${HERMES_WAKE_GRANT_LINE}` }],
+        artefacts: [
+          { kind: 'code', text: HERMES_PLUGIN_INSTALL },
+          { kind: 'code', text: HERMES_WAKE_GRANT_LINE },
+        ],
         note: `Plannotator's Hermes Agent plugin, and Hermes's permission for it to start a turn with your reply. Its Inbox tool starts off: turn it on for Hermes Agent in Settings > Agents. ${HERMES_APPLIES} Your replies then come back into the Hermes session that asked: the terminal, the TUI, the Desktop app or your own direct messages.`,
       };
     case 'zed':
