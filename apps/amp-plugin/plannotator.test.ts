@@ -254,7 +254,6 @@ describe("Amp Plannotator registered commands", () => {
     "%s delivers rendered review messages and classifies only the decision",
     async (command) => {
       await withCommandHarness(async ({ run }) => {
-        // #1456: this reviewer sentence used to be mistaken for a closed session.
         const feedback = "This path has no feedback loop, add one.";
         for (const result of [
           { decision: "annotated", message: `  Review guidance:\n\n${feedback}\n  ` },
@@ -266,7 +265,6 @@ describe("Amp Plannotator registered commands", () => {
           expect(delivered.notifications).toEqual([]);
         }
 
-        // Deliberately not a legacy close phrase: the decision must control delivery.
         const message = "The reviewer closed this session.";
         const dismissed = await run(command, JSON.stringify({ decision: "dismissed", message }));
         expect(dismissed.appended).toEqual([]);
@@ -293,7 +291,6 @@ describe("Amp Plannotator registered commands", () => {
             expect(content).not.toContain("docs/plan.md");
           }
           if (decision === "approved") {
-            // These semantics distinguish approval notes from a revision request.
             expect(content).toContain("non-blocking");
             expect(content).toContain("Do not revise or reopen");
           }
@@ -313,8 +310,6 @@ describe("Amp Plannotator registered commands", () => {
         expect(empty.appended).toEqual([]);
         expect(empty.notifications).toEqual([expect.stringMatching(/closed/i)]);
 
-        // #1701: a bare Done keeps the zero-state sentence as feedback and
-        // marks it; it must not become a "please address the feedback" turn.
         const done = await run(command, JSON.stringify({
           decision: "annotated",
           feedback: "User reviewed the document and has no feedback.",
@@ -426,7 +421,6 @@ describe("/plannotator-inbox", () => {
 
 interface CommandHarness {
   configPath: string;
-  /** The arguments the stand-in CLI got last (JSON). */
   argsPath: string;
   run: (
     command: string,
@@ -449,7 +443,6 @@ async function withCommandHarness(run: (harness: CommandHarness) => Promise<void
     const cliPath = join(root, "fake-cli.ts");
     const resultPath = join(root, "result.json");
     const pluginPath = join(root, "plannotator.ts");
-    // A separate module instance keeps the cached CLI runtime local to this test.
     copyFileSync(join(import.meta.dir, "plannotator.ts"), pluginPath);
     const argsPath = join(root, "args.json");
     writeFileSync(cliPath, `

@@ -1,6 +1,3 @@
-// Renders inbox-og.html to inbox-assets/inbox-og.jpg (1200x630 JPEG).
-// Usage: bun apps/marketing/render-inbox-og.ts [out.jpg]
-// Needs the network for the Google Fonts the template loads.
 import { chromium } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 

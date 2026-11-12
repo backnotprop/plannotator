@@ -1,22 +1,12 @@
 import path from 'node:path';
 import type { Plugin } from 'vite';
 
-/**
- * Read-only hosts never render the annotation composer, the comment popover,
- * the open-in-app control (no server to launch an app),
- * or a reviewer identity. Swap those modules for tiny stubs at RESOLVE time so
- * their dependency tails (markdown sanitizer, base-ui dialogs, the username
- * wordlist) stay out of the CDN entry. Keyed on the resolved absolute path, so
- * it is immune to how the importer spelled the specifier, and it only exists
- * in this build — the app's own import graph is untouched.
- */
 const STUBS: Array<[target: string, stub: string]> = [
   ['packages/review-editor/components/ToolbarHost.tsx', 'viewer/stubs/ToolbarHost.tsx'],
   ['packages/ui/components/CommentPopover.tsx', 'viewer/stubs/CommentPopover.tsx'],
   ['packages/ui/utils/generateIdentity.ts', 'viewer/stubs/generateIdentity.ts'],
   ['packages/review-editor/components/InlineAnnotation.tsx', 'viewer/stubs/InlineAnnotation.tsx'],
   ['packages/review-editor/components/FileCommentBanner.tsx', 'viewer/stubs/FileCommentBanner.tsx'],
-  // No server behind guides.show, so no app to open a file in.
   ['packages/ui/components/OpenInAppButton.tsx', 'viewer/stubs/OpenInAppButton.tsx'],
 ];
 

@@ -1,16 +1,3 @@
-/**
- * @plannotator/cline's Inbox connection against a fake Cline plugin host and
- * a scratch Inbox (in this process, its own temp data dir, loopback).
- *
- * The fake host implements only what the plugin uses: the setup context
- * (`session.sessionId`, `cwd`, `emitEvent`, `onDispose`), `api.registerTool`,
- * and the plugin's `beforeRun` / `afterRun` hooks, which the test calls as
- * Cline does around each run. Cline is never installed or run here; the
- * end-to-end check against the real Cline CLI is cline-e2e.test.ts.
- *
- * Run: /tmp/overnight/bt.sh apps/cline-plugin/inbox.test.ts (or bun test apps/cline-plugin/inbox.test.ts)
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -35,7 +22,6 @@ afterEach(() => {
 const TICK = 40;
 const ON = { PLANNOTATOR_INBOX_TOOL: "1" } as NodeJS.ProcessEnv;
 
-/** One fake Cline session as a plugin sees it: what it emits, what it registered, and its cleanups. */
 class FakeCline {
   readonly emitted: { name: string; payload: { prompt?: string } }[] = [];
   readonly tools: ClineToolDefinition[] = [];
@@ -62,7 +48,6 @@ class FakeCline {
     return this.emitted.filter((event) => event.name === "queue_message").map((event) => event.payload.prompt ?? "");
   }
 
-  /** Cline stops the worker (the session ended, or no call for 30 minutes): its onDispose cleanups run. */
   async stopWorker(): Promise<void> {
     for (const cleanup of this.cleanups.splice(0)) await cleanup();
   }
@@ -111,7 +96,6 @@ async function thread(server: InboxServer, threadId: string): Promise<InboxThrea
   return ((await (await fetch(`${base(server)}/api/inbox/threads/${threadId}`)).json()) as { thread: InboxThread }).thread;
 }
 
-/** The To picker's model: live sessions by project. */
 async function liveSessions(server: InboxServer): Promise<{ project: { root: string }; sessions: { session: string; host: string; busy: boolean | null }[] }[]> {
   return ((await (await fetch(`${base(server)}/api/inbox/sessions`)).json()) as { projects: never }).projects;
 }
@@ -140,7 +124,6 @@ async function deliveryOf(server: InboxServer, threadId: string, id: string) {
   return found as { host: string; session: string } | null;
 }
 
-/** The message's delivery as the thread says it now (null: not delivered). */
 async function deliveredNow(server: InboxServer, threadId: string, id: string) {
   return (await thread(server, threadId)).messages.find((m) => m.id === id)?.delivery ?? null;
 }
@@ -151,7 +134,6 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
     const cline = new FakeCline("1793987197190_j62v5", w.project);
     const session = await start(w, cline);
     expect(session).not.toBeNull();
-    // Listed as a live Cline session in its project, idle.
     expect(
       await until(async () => (await liveSessions(w.server)).some((group) => group.project.root === w.project && group.sessions.some((s) => s.session === cline.sessionId && s.host === "cline"))),
     ).toBe(true);
@@ -162,7 +144,6 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
     expect(await until(() => cline.prompts().length > 0)).toBe(true);
     expect(cline.prompts()[0]).toStartWith("Plannotator Inbox: Idea: retry the webhook on a 409");
     expect(cline.prompts()[0]).toContain(`(${sent.message.id})`);
-    // Cline starts the turn: the run that begins now is ours, and the thread says it was delivered to this session.
     session!.beforeRun({ snapshot: { agentId: "agent-1" } });
     expect(await deliveryOf(w.server, sent.thread_id, sent.message.id)).toMatchObject({ host: "cline", session: cline.sessionId });
     session!.afterRun({ snapshot: { agentId: "agent-1" } });
@@ -174,7 +155,6 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
     const w = await world();
     const cline = new FakeCline("ses-a", w.project);
     const session = (await start(w, cline))!;
-    // One tool, never retried by Cline (a retried send would send twice).
     expect(cline.tools.map((t) => [t.name, t.retryable, t.maxRetries])).toEqual([["plannotator_inbox", false, 0]]);
     session.beforeRun({ snapshot: { agentId: "agent-1" } });
     const sent = idsOf(await cline.call({ action: "send_message", body: "Drafted the release notes. Ship today?" }));
@@ -184,7 +164,6 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
 
     const answer = await reply(w.server, sent.message_id, "Yes, ship it.");
     await Bun.sleep(TICK * 10);
-    // The run is still going: nothing goes into it.
     expect(cline.prompts()).toEqual([]);
     session.afterRun({ snapshot: { agentId: "agent-1" } });
     expect(await until(() => cline.prompts().length > 0)).toBe(true);
@@ -220,7 +199,6 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
     expect(await until(() => cline.prompts().length === 1)).toBe(true);
     await Bun.sleep(500);
     expect(await deliveredNow(w.server, sent.thread_id, answer.id)).toBeNull();
-    // The reply was given back: the next idle wake puts it in again, and that run takes it.
     expect(await until(() => cline.prompts().length === 2)).toBe(true);
     expect(cline.prompts()[1]).toContain("Thanks.");
     session.beforeRun({ snapshot: { agentId: "agent-1" } });
@@ -252,7 +230,6 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
     const sent = idsOf(await cline.call({ action: "send_message", body: "Profiling the import." }));
     const answer = await reply(w.server, sent.message_id, "Look at the lockfile parse.");
     expect(await until(() => cline.prompts().length === 1)).toBe(true);
-    // Cline queued ours behind a run this worker never saw start; that run ends now.
     await Bun.sleep(400);
     session.afterRun({ snapshot: { agentId: "agent-1" } });
     await Bun.sleep(400);
@@ -271,7 +248,6 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
     await reply(w.server, sent.message_id, "Added it to .env.");
     await Bun.sleep(TICK * 10);
     expect(first.prompts()).toEqual([]);
-    // A fresh worker: setup runs again for the same session, then the person's own run.
     const again = new FakeCline("ses-idle", w.project);
     const session = (await start(w, again))!;
     session.beforeRun({ snapshot: { agentId: "agent-1" } });
@@ -284,11 +260,9 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
 
   test("a hung Inbox costs setup at most CLINE_DISCOVER_TIMEOUT_MS (Cline gives import and setup 4 s together), with the remembered tools", async () => {
     const w = await world();
-    // Seen once while the Inbox answered: its tools are remembered.
     expect(await discoverInboxTools(w.dataDir)).not.toBeNull();
     const registryFile = inboxRegistryFileOf(w.dataDir);
     const registry = JSON.parse(readFileSync(registryFile, "utf8")) as { port: number };
-    // Now an Inbox that takes the connection and never answers.
     const hung = createServer(() => {});
     await new Promise<void>((resolve) => hung.listen(0, "127.0.0.1", resolve));
     try {

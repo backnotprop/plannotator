@@ -1,37 +1,17 @@
-/**
- * Code Review Ephemeral Server
- *
- * Spawned to serve the code review UI for git diffs.
- * Supports both local and remote sessions.
- *
- * Usage:
- *   bun apps/review/server/index.ts           # Unstaged changes (git diff)
- *   bun apps/review/server/index.ts --staged  # Staged changes
- *   bun apps/review/server/index.ts main      # Diff against ref
- *   bun apps/review/server/index.ts HEAD~5..HEAD  # Commit range
- *
- * Environment variables:
- *   PLANNOTATOR_REMOTE - Set to "1"/"true" for remote, "0"/"false" for local
- *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
- */
-
 import { $ } from "bun";
 import {
   startReviewServer,
   handleReviewServerReady,
 } from "@plannotator/server/review";
 
-// Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
 import indexHtml from "../dist/index.html" with { type: "text" };
 const htmlContent = indexHtml as unknown as string;
 
-// Parse CLI arguments
 const args = process.argv.slice(2);
 const isStaged = args.includes("--staged");
 const gitRef = args.filter((arg) => arg !== "--staged").join(" ").trim();
 
-// Build git diff command
 let diffCommand: string[];
 if (isStaged) {
   diffCommand = ["git", "diff", "--no-ext-diff", "--staged"];
@@ -41,7 +21,6 @@ if (isStaged) {
   diffCommand = ["git", "diff", "--no-ext-diff"];
 }
 
-// Execute git diff
 let rawPatch = "";
 try {
   const result = await $`${diffCommand}`.quiet();
@@ -51,7 +30,6 @@ try {
   process.exit(1);
 }
 
-// Determine display ref for UI
 let displayRef: string;
 if (isStaged) {
   displayRef = "--staged";
@@ -61,13 +39,10 @@ if (isStaged) {
   displayRef = "working tree";
 }
 
-// Start the review server
 const server = await startReviewServer({
   rawPatch,
   gitRef: displayRef,
   htmlContent,
-  // This dev server emits the full decision JSON below — feedback included on
-  // approve — so it advertises approve-with-notes (spec §6.4).
   approvalNotesSupported: true,
   onReady: (url, isRemote, port) => {
     handleReviewServerReady(url, isRemote, port);
@@ -78,16 +53,12 @@ const server = await startReviewServer({
   },
 });
 
-// Wait for user feedback submission
 const result = await server.waitForDecision();
 
-// Give browser time to receive response and update UI
 await Bun.sleep(500);
 
-// Cleanup
 server.stop();
 
-// Output the feedback as JSON
 console.log(
   JSON.stringify({
     gitRef: displayRef,

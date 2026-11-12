@@ -1,12 +1,7 @@
 #!/usr/bin/env node
 
-// Opens the Plannotator Inbox in the browser (starting it in the background
-// when it is not running) and prints its address, then a short guide to the
-// Inbox for the agent, which reads this output. Returns at once.
 const { exitWithFailure, runPlannotator } = require("../lib/run-plannotator");
 
-// What the agent reads after the address: the same guide every
-// /plannotator-inbox command carries (tests/inbox-guidance-parity.test.ts).
 const GUIDE = [
   "",
   "## Using the Inbox",
@@ -28,13 +23,11 @@ const GUIDE = [
   "Tell the user the Inbox's address above in one sentence, with the note under it when there is one (why no browser opened). This command starts no new work and resumes none: do anything else the person asked in the same message, otherwise stop there. For the rest of this session, use the Inbox as above: for a decision the person is not here to make, and to hand over long work you finished.",
 ].join("\n");
 
-// The CLI waits up to 20 s for an Inbox it starts; never wait much longer.
 const result = runPlannotator(["inbox", "--open"], { timeout: 30_000 });
 
 if (result.error || result.status !== 0) {
   exitWithFailure(result, "plannotator inbox --open");
 }
 
-// Stderr says why no browser opened, when none did (a remote session).
 const note = (result.stderr || "").trim();
 process.stdout.write(`Plannotator Inbox: ${result.stdout.trim()}${note ? `\n${note}` : ""}\n${GUIDE}\n`);

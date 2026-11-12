@@ -1,13 +1,3 @@
-/**
- * The daily ping's Worker (src/handler.ts) against a fake D1 that records
- * every statement and runs the three upserts on in-memory tables. Guards: only
- * an exact `{version, age_week, tool, first}` body, with or without
- * `favicon`, counts; one ping is one `n = n + 1` on its tool's row, and a
- * `first: 1` ping one more on the day's user total and, when it names a
- * favicon, on the day's favicon row, which holds nothing but the day; nothing
- * from the request but those fields (no IP, no header, no request.cf) reaches
- * the database; no table has a column that could hold one.
- */
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -84,7 +74,6 @@ function ping(body: string, init: RequestInit = {}): Request {
     headers: { "content-type": "application/json", "cf-connecting-ip": IP, "x-forwarded-for": IP, "x-real-ip": IP, "user-agent": "plannotator" },
     ...init,
   });
-  // What Cloudflare attaches at the edge; the Worker must never read it.
   Object.defineProperty(req, "cf", { value: { country: "DE", city: "Berlin", asn: 3320, clientTcpRtt: 12 } });
   return req;
 }
@@ -97,7 +86,6 @@ describe("POST /ping", () => {
     const { db, daily, total } = fakeDb();
     expect((await handleRequest(ping(body("0.28.46", 2, "plan", 1)), { DB: db }, NOW)).status).toBe(204);
     expect((await handleRequest(ping(body("0.28.46", 2, "review", 0)), { DB: db }, NOW)).status).toBe(204);
-    // Key order does not matter.
     expect((await handleRequest(ping('{"first":1,"tool":"plan","age_week":2,"version":"0.28.46"}'), { DB: db }, NOW)).status).toBe(204);
     expect((await handleRequest(ping(body("0.28.46", 1, "inbox", 1)), { DB: db }, NOW)).status).toBe(204);
     expect([...daily.values()]).toEqual([
@@ -123,9 +111,7 @@ describe("POST /ping", () => {
       withFavicon("0.28.57", 2, "plan", 1, "yellow"),
       withFavicon("0.28.57", 2, "review", 0, "yellow"),
       withFavicon("0.28.57", 3, "inbox", 1, "glass"),
-      // Key order does not matter.
       '{"favicon":"face","first":1,"tool":"review","age_week":2,"version":"0.28.57"}',
-      // An older release: no favicon, counted as before, no favicon row.
       body("0.28.46", 2, "plan", 1),
     ])
       expect({ b, status: (await handleRequest(ping(b), { DB: db }, NOW)).status }).toEqual({ b, status: 204 });
@@ -137,7 +123,6 @@ describe("POST /ping", () => {
     ]);
     expect([...total.values()].reduce((n, r) => n + r.n, 0)).toBe(8);
     expect([...daily.values()].reduce((n, r) => n + r.n, 0)).toBe(11);
-    // The favicon row is written with the day alone: never the version, age bucket or tool.
     expect(calls.filter((c) => c.sql === FAVICON_UPSERT_SQL).map((c) => c.values)).toEqual([
       ["2026-11-03", "glass"],
       ["2026-11-03", "face"],
@@ -202,9 +187,7 @@ describe("POST /ping", () => {
 
   test("a large body is refused unread: by its Content-Length, or once it passes the cap", async () => {
     const { db, calls } = fakeDb();
-    // A declared size over the cap: refused before any byte is read.
     let pulled = 0;
-    // highWaterMark 0: a chunk is made only when the Worker reads.
     const endless = new ReadableStream<Uint8Array>(
       {
         pull(controller) {
@@ -217,7 +200,6 @@ describe("POST /ping", () => {
     const declared = new Request("https://ping.plannotator.ai/ping", { method: "POST", body: endless, headers: { "content-length": String(10 * 1024 * 1024) }, duplex: "half" } as RequestInit);
     expect((await handleRequest(declared, { DB: db }, NOW)).status).toBe(413);
     expect(pulled).toBe(0);
-    // No length, or a false one: read only until it passes the cap.
     const lying = new ReadableStream<Uint8Array>({
       pull(controller) {
         pulled++;
@@ -257,7 +239,6 @@ describe("POST /ping", () => {
       ["daily_favicon", ["day", "favicon", "n"]],
     ]);
     const source = readFileSync(join(import.meta.dir, "..", "src", "handler.ts"), "utf-8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
-    // The one header it reads is Content-Length, to refuse a large body unread.
     expect([...source.matchAll(/req\.headers[^;]*/g)].map((m) => m[0])).toEqual(['req.headers.get("content-length") ?? "0")']);
     expect(source).not.toMatch(/\.cf\b|console\./);
   });

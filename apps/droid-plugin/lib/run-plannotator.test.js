@@ -1,9 +1,6 @@
 const { afterEach, beforeEach, describe, expect, test } = require("bun:test");
 const { emitAnnotateDecision } = require("./run-plannotator");
 
-// #1137: approved decisions carrying Approve-with-Notes feedback (#1092) were
-// collapsed to a bare "Approved." and the reviewer's notes were silently
-// dropped. These tests pin the full decision -> stdout contract.
 describe("emitAnnotateDecision", () => {
   let written;
   let originalWrite;
@@ -62,8 +59,6 @@ describe("emitAnnotateDecision", () => {
     );
   });
 
-  // #1701: a bare Done keeps the zero-state sentence as feedback and marks
-  // it; it must not be framed as feedback for the agent to address.
   test("a Done with nothing to send closes the session", () => {
     emitAnnotateDecision(
       '{"decision":"annotated","feedback":"User reviewed the document and has no feedback.","nothingToSend":true}',

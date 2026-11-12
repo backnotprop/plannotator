@@ -1,20 +1,5 @@
-/**
- * The relay's one call to Google: a push to one Android device through FCM
- * HTTP v1 (adr/implementation/inbox-mobile.md, section 10, "Push through FCM").
- *
- * The access token is an OAuth2 token minted from the service account the
- * Worker holds as a secret (`FCM_SERVICE_ACCOUNT`, the service account's JSON
- * key file as text): a JWT signed RS256 with its private key (WebCrypto),
- * exchanged at Google's token endpoint, and kept for 50 minutes per isolate
- * (Google's tokens last an hour). Plain `fetch`: FCM accepts HTTP/1.1, so the
- * `connect()` path APNs needs is not used.
- *
- * No Workers-only imports: the test suite reads `fcmMessage` from here to
- * check the body.
- */
 import { loopbackOverride } from "./origin";
 
-/** The fields of a service account's JSON key file the relay uses. */
 export interface FcmServiceAccount {
   projectId: string;
   clientEmail: string;
@@ -22,21 +7,14 @@ export interface FcmServiceAccount {
   privateKeyId: string | null;
 }
 
-/** Google's hosts. Fixed: only the relay's own proof replaces them (FCM_ORIGIN, FCM_OAUTH_ORIGIN under `wrangler dev`, loopback only). */
 export const FCM_ORIGIN = "https://fcm.googleapis.com";
 export const FCM_OAUTH_ORIGIN = "https://oauth2.googleapis.com";
-/** The JWT's audience: Google's token endpoint, whichever host the exchange is sent to. */
 export const FCM_OAUTH_AUDIENCE = `${FCM_OAUTH_ORIGIN}/token`;
 export const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 
 const TOKEN_LIFETIME_MS = 50 * 60_000;
-/** How long one request to Google may take before the push answers fcm_failed. */
 const REQUEST_TIMEOUT_MS = 15_000;
 
-/**
- * Read the secret: the service account's JSON key file. Null when it is not
- * one (the relay then answers as if it held no key, and logs it once).
- */
 export function parseServiceAccount(text: string | undefined): FcmServiceAccount | null {
   if (!text) return null;
   try {
@@ -51,11 +29,6 @@ export function parseServiceAccount(text: string | undefined): FcmServiceAccount
   }
 }
 
-/**
- * What FCM gets: data only, so the app draws every notification itself from
- * the decrypted summary; `collapse_key` lets a thread's newer push replace an
- * older one FCM still holds for an offline phone.
- */
 export function fcmMessage(token: string, envelope: string, collapseKey: string) {
   return { message: { token, data: { e: envelope }, android: { priority: "high", collapse_key: collapseKey } } };
 }
@@ -67,18 +40,13 @@ function base64url(bytes: Uint8Array): string {
 }
 
 const encoder = new TextEncoder();
-/** The access token this isolate holds, for one signer. */
 let cached: { signer: string; token: string; until: number } | null = null;
-/** The exchange in flight, per signer: concurrent pushes wait on one exchange instead of each signing their own. */
 const inflight = new Map<string, Promise<string>>();
-/** A refused exchange, per signer, remembered for a minute: a burst of pushes does not hammer Google with a key it refuses. */
 const refused = new Map<string, { error: FcmAuthError; until: number }>();
 const REFUSAL_MEMORY_MS = 60_000;
 
-/** Raised when the service account's key cannot be read, or Google's token endpoint refuses it or cannot be reached. */
 export class FcmAuthError extends Error {}
 
-/** The signed JWT bearer grant. A key that cannot be read or used is an FcmAuthError, never a transport failure. */
 async function assertion(account: FcmServiceAccount, now: number): Promise<string> {
   const iat = Math.floor(now / 1000);
   const header = base64url(encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT", ...(account.privateKeyId ? { kid: account.privateKeyId } : {}) })));
@@ -93,7 +61,6 @@ async function assertion(account: FcmServiceAccount, now: number): Promise<strin
   }
 }
 
-/** One exchange at Google's token endpoint. */
 async function exchange(account: FcmServiceAccount, oauthOrigin: string, signer: string, now: number): Promise<string> {
   const grant = await assertion(account, now);
   let answer: Response;
@@ -112,7 +79,6 @@ async function exchange(account: FcmServiceAccount, oauthOrigin: string, signer:
   try {
     parsed = JSON.parse(text);
   } catch {
-    // Not JSON: refused below.
   }
   if (answer.status !== 200 || typeof parsed.access_token !== "string") {
     throw new FcmAuthError(`Google's token endpoint answered ${answer.status}${typeof parsed.error === "string" ? ` ${parsed.error}` : ""}.`);
@@ -122,11 +88,6 @@ async function exchange(account: FcmServiceAccount, oauthOrigin: string, signer:
   return cached.token;
 }
 
-/**
- * The OAuth access token, minted again after 50 minutes (sooner if Google
- * says so) or when the account or the endpoint changes. Concurrent callers
- * share one exchange; a refusal is answered from memory for a minute.
- */
 async function accessToken(account: FcmServiceAccount, oauthOrigin: string, now: number): Promise<string> {
   const signer = `${oauthOrigin}\n${account.clientEmail}\n${account.privateKeyId ?? ""}`;
   if (cached && cached.signer === signer && now < cached.until) return cached.token;
@@ -151,16 +112,9 @@ async function accessToken(account: FcmServiceAccount, oauthOrigin: string, now:
 
 export interface FcmResult {
   status: number;
-  /** FCM's `errorCode` (`UNREGISTERED`, `INVALID_ARGUMENT`, `UNAVAILABLE`, ...) on a refusal, else null. */
   reason: string | null;
 }
 
-/**
- * Send one push. `origin` and `oauthOrigin` replace Google's hosts in the
- * relay's own proof only, and only when they name a loopback host. Throws on
- * a transport failure or a refused token exchange; a refusal by FCM itself is
- * a result.
- */
 export async function sendFcm(input: {
   account: FcmServiceAccount;
   token: string;
@@ -179,7 +133,6 @@ export async function sendFcm(input: {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const text = await answer.text();
-  // Drop the token only if it is still the one FCM refused: another push may have minted a fresh one meanwhile.
   if (answer.status === 401 && cached?.token === bearer) cached = null;
   let reason: string | null = null;
   if (answer.status !== 200) {
@@ -195,7 +148,6 @@ export async function sendFcm(input: {
         }
       }
     } catch {
-      // Not JSON: no reason.
     }
   }
   return { status: answer.status, reason };

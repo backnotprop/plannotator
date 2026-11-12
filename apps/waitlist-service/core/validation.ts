@@ -1,6 +1,3 @@
-// Validation + light enrichment for waitlist signups. Pure functions so they
-// can be reused in both the worker and (eventually) a Bun-side dev target.
-
 export const FREE_EMAIL_DOMAINS = new Set([
   "gmail.com",
   "googlemail.com",
@@ -30,13 +27,8 @@ export const FREE_EMAIL_DOMAINS = new Set([
   "hey.com",
 ]);
 
-// Conservative — strict-enough to catch typos, lenient-enough to admit unicode
-// TLDs and plus-addressing. Real verification happens by sending email.
 const EMAIL_RE = /^[^\s@]+@[^\s@.]+\.[^\s@]+$/;
 
-// Team-size buckets the form sends as slugs. The marketing page renders the
-// display strings (e.g. "Just me", "2–5"); the slug is what travels over the
-// wire so SQL stays clean and we don't have to deal with em-dash encoding.
 export const ALLOWED_TEAM_SIZES = new Set([
   "solo",
   "2-5",
@@ -51,10 +43,7 @@ export interface RawSignup {
   team_size?: unknown;
   note?: unknown;
   is_contributor?: unknown;
-  // Cloudflare Turnstile token from the client widget. Validated separately
-  // in the handler against the siteverify endpoint.
   turnstile_token?: unknown;
-  // Honeypot — bots tend to fill every visible-looking field.
   website?: unknown;
 }
 
@@ -83,11 +72,6 @@ function trimStr(v: unknown, max: number): string | null {
   return s.slice(0, max);
 }
 
-// Common compound TLDs / public suffixes. Not a full public-suffix list
-// (that would be ~10k entries from publicsuffix.org); just the ones most
-// people working in tech actually use. Used to pick the right label in
-// `inferCompanyFromEmail` — e.g. for `dept.acme.co.uk` the label is "acme",
-// not "co".
 const COMPOUND_TLDS = new Set([
   "co.uk",
   "co.jp",
@@ -120,9 +104,6 @@ function inferCompanyFromEmail(email: string): string | null {
   const parts = domain.replace(/^www\./, "").split(".");
   if (parts.length < 2) return null;
 
-  // Detect whether the last two segments form a known compound TLD; if so
-  // the registrable label is the segment immediately before it. Otherwise
-  // it's the segment immediately before the single-segment TLD.
   const lastTwo = parts.slice(-2).join(".");
   const tldSegments = COMPOUND_TLDS.has(lastTwo) ? 2 : 1;
   const labelIndex = parts.length - tldSegments - 1;
@@ -134,8 +115,6 @@ function inferCompanyFromEmail(email: string): string | null {
 }
 
 export function normalizeSignup(raw: RawSignup): NormalizedSignup {
-  // Honeypot — silently fail if filled. We still 200 the request from the
-  // caller's POV (see handler), but no row is written.
   if (typeof raw.website === "string" && raw.website.trim() !== "") {
     throw new ValidationError("__honeypot__", 200);
   }
@@ -145,9 +124,6 @@ export function normalizeSignup(raw: RawSignup): NormalizedSignup {
   const email = emailRaw.toLowerCase();
   if (!EMAIL_RE.test(email)) throw new ValidationError("Email looks invalid");
 
-  // Company is required by the form. If a caller leaves it blank we still
-  // try the email-domain inference — better to capture *something* than to
-  // 400 someone who hit "submit" without filling the field.
   let company = trimStr(raw.company, 160);
   let companyInferred = false;
   if (!company) {

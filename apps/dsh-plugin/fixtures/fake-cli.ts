@@ -1,22 +1,3 @@
-/**
- * A fake `plannotator` CLI for apps/dsh-plugin/tool.test.ts, run as
- * `bun fake-cli.ts <subcommand> ...args`. It records each call (with its pid
- * and cwd), then by FAKE_CLI_MODE:
- *   fail: prints "File not found: <first arg>" and exits 1 before opening
- *     anything, as the real CLI does for a bad path;
- *   hang: never opens the page (stays "starting") until it is stopped;
- *   late-fail: never opens the page; after FAKE_CLI_DELAY_MS prints
- *     "Port in use" and exits 1;
- *   crash: opens the page, then after FAKE_CLI_DELAY_MS exits 1 with no
- *     decision and nothing on stdout;
- *   (unset): opens the page and waits until the test writes
- *     `<log dir>/decide-<review id>.json`, then writes that record to
- *     PLANNOTATOR_HOST_RESULT_FILE and exits 0.
- * SIGTERM exits at once with no record, unless FAKE_CLI_IGNORE_TERM=1 (only
- * SIGKILL stops it then). The page URL serves nothing; no port or browser is
- * opened.
- */
-
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 

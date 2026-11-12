@@ -3,12 +3,6 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 
-/**
- * Emits `manifest.json` next to the built viewer describing exactly what an
- * exported HTML must pin: entry js/css (with sha384 integrity) and the
- * per-language grammar chunks. `createGuideHtml` consumes this shape
- * (`GuideViewerAssets`). Every path is relative to the viewer directory.
- */
 export interface ViewerManifest {
   version: number;
   js: string;
@@ -24,11 +18,7 @@ export function viewerManifestPlugin(opts: { version: number }): Plugin {
   return {
     name: 'guides-show-viewer-manifest',
     apply: 'build',
-    // After vite:css-post has emitted the stylesheet asset.
     enforce: 'post',
-    // writeBundle, not generateBundle: integrity must be computed from the
-    // bytes on disk — later hooks can still rewrite chunk code, and a stale
-    // hash makes the browser refuse the script (SRI).
     writeBundle(options, bundle) {
       const outDir = options.dir ?? path.dirname(options.file ?? '');
       const bytes = (fileName: string) => readFileSync(path.join(outDir, fileName));
@@ -46,7 +36,6 @@ export function viewerManifestPlugin(opts: { version: number }): Plugin {
         }
       }
       if (!js || !css) throw new Error(`viewer manifest: missing entry (js=${js}, css=${css})`);
-      // Deterministic on purpose (no timestamps): the checked-in copy must equal a fresh build's output.
       const manifest: ViewerManifest = { version: opts.version, js, css, jsIntegrity, cssIntegrity, langs };
       writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     },

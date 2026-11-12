@@ -1,9 +1,3 @@
-/**
- * The D1 store against real SQLite (bun:sqlite behind a D1-shaped adapter):
- * a table made from the schema before `agents` existed, the same table after
- * migrations/0001_agents.sql, and a fresh schema.sql. A Worker deployed before
- * the migration still stores every submission, once, without the names.
- */
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -16,10 +10,8 @@ import { D1FeedbackStore } from "../stores/d1";
 const root = join(import.meta.dir, "..");
 const schema = readFileSync(join(root, "schema.sql"), "utf-8");
 const migration = readFileSync(join(root, "migrations/0001_agents.sql"), "utf-8");
-/** The schema as it was deployed on 2026-10-27: the same table without the `agents` line. */
 const oldSchema = schema.replace(/^\s*agents TEXT,\n/m, "");
 
-/** `prepare(sql).bind(...).run()` over bun:sqlite; SQLite's own errors come through as D1's do. */
 function d1(db: Database): D1Database {
   return {
     prepare(sql: string) {
@@ -89,7 +81,6 @@ describe("D1FeedbackStore", () => {
     for (const db of [table(oldSchema + "\n" + migration), table(schema)]) {
       await new D1FeedbackStore(d1(db)).insert(entry);
       expect(rows(db)).toEqual([expect.objectContaining({ message: entry.message, agents: "Claude Code, Codex" })]);
-      // The migration leaves the append-only triggers in force.
       expect(() => db.query("UPDATE feedback SET agents = NULL").run()).toThrow(/append-only/);
       expect(() => db.query("DELETE FROM feedback").run()).toThrow(/append-only/);
     }

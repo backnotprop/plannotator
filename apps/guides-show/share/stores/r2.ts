@@ -1,18 +1,5 @@
-/**
- * Cloudflare R2 GuideStore. Two objects per guide so neither the body nor the
- * metadata is bounded by R2's custom-metadata size limit:
- *
- *   g/<id>       the body (ciphertext or snapshot JSON)
- *   g/<id>.meta  the StoredGuideMeta record as JSON
- *
- * The meta object is written FIRST and deleted LAST, so a reader that finds a
- * body always finds its meta, and a half-deleted guide reads as absent rather
- * than as a body with no way to know its mode. Expired guides are deleted
- * lazily on read.
- */
 import { isStoredGuideExpired, type GuideStore, type StoredGuideMeta } from '../core/storage';
 
-/** The slice of `R2Bucket` this store touches; typed structurally so tests can hand in a fake without the Workers types. */
 export interface R2GuideBucket {
   put(key: string, value: string, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
   get(key: string): Promise<{ text(): Promise<string> } | null>;

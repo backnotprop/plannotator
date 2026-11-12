@@ -1,9 +1,3 @@
-/**
- * The feedback Worker's handler against an in-memory store (no wrangler, no
- * Cloudflare account, no network): one route that only writes, strict
- * validation, a bounded JSON body, the per-IP limits, the origin rule, and an
- * answer that carries no data.
- */
 import { describe, expect, test } from "bun:test";
 import { FEEDBACK_PATH, handleRequest, MAX_BODY_BYTES, type HandlerDeps, type RateLimiter } from "../core/handler";
 import type { FeedbackEntry, FeedbackStore } from "../core/storage";
@@ -52,9 +46,7 @@ describe("the one route", () => {
     expect(d.store.rows).toEqual([
       { message: "The sidebar is great", category: "idea", contact: "me@example.com", version: "0.28.33", os: "macOS", surface: "inbox", agents: null, created_at: "2026-10-27T12:00:00.000Z" },
     ]);
-    // Nothing identifying is stored: the IP the Worker saw is not in the row.
     expect(JSON.stringify(d.store.rows)).not.toContain("203.0.113.7");
-    // No cookie is ever set.
     expect(res.headers.get("Set-Cookie")).toBeNull();
   });
 
@@ -202,7 +194,6 @@ describe("body", () => {
     const d = deps();
     const big = JSON.stringify({ message: "x".repeat(MAX_BODY_BYTES) });
     expect((await handleRequest(post(null, { raw: big }), d)).status).toBe(413);
-    // A stream with no Content-Length is cut off at the cap too.
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode(big));
@@ -244,7 +235,6 @@ describe("origins", () => {
     const pre = await handleRequest(new Request(`${URL_BASE}${FEEDBACK_PATH}`, { method: "OPTIONS", headers: { Origin: "https://plannotator.ai" } }), d);
     expect(pre.status).toBe(204);
     expect(pre.headers.get("Access-Control-Allow-Methods")).toBe("POST, OPTIONS");
-    // `*` in the list allows nothing; a near match is refused.
     for (const origin of ["https://evil.example", "https://plannotator.ai.evil.example", "http://plannotator.ai"]) {
       expect((await handleRequest(post({ message: "hi" }, { headers: { Origin: origin } }), d)).status).toBe(403);
     }
@@ -274,7 +264,7 @@ describe("abuse limits", () => {
     const throttle = createThrottle({ limit: 1, windowMs: 60_000, maxKeys: 2 });
     throttle.allow("a");
     throttle.allow("b");
-    throttle.allow("c"); // forgets "a"
+    throttle.allow("c");
     expect(throttle.allow("a")).toBe(true);
     expect(throttle.allow("c")).toBe(false);
   });
@@ -288,7 +278,6 @@ describe("abuse limits", () => {
       },
     };
     const d = deps({ rateLimiter: limiter });
-    // Malformed JSON: a 429 (not a 400) proves the limit runs first.
     const res = await handleRequest(post(null, { raw: "{" }), d);
     expect(res.status).toBe(429);
     expect(keys).toEqual(["203.0.113.7"]);
@@ -300,7 +289,6 @@ describe("abuse limits", () => {
     expect(limitKey("2001:0db8:0001:0002:ffff:ffff:ffff:ffff")).toBe("2001:db8:1:2::/64");
     expect(limitKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
     expect(limitKey("203.0.113.7")).toBe("203.0.113.7");
-    // IPv4-mapped and anything odd keep the whole address (a shared /64 would lump all IPv4 callers).
     expect(limitKey("::ffff:203.0.113.7")).toBe("::ffff:203.0.113.7");
     expect(limitKey("not an ip")).toBe("not an ip");
 

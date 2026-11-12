@@ -1,9 +1,3 @@
-/**
- * Size budgets for the portable viewer (decision record D1: the exported file
- * is small because the renderer lives on the CDN — so the renderer itself must
- * stay lean). Fails the build when the entry grows past these gzip sizes.
- *   bun build/check-budgets.ts
- */
 import { readdirSync, readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import path from 'node:path';
@@ -30,10 +24,6 @@ if (js > BUDGETS.jsGzipBytes) failures.push(`viewer js exceeds budget by ${((js 
 if (css > BUDGETS.cssGzipBytes) failures.push(`viewer css exceeds budget by ${((css - BUDGETS.cssGzipBytes) / 1024).toFixed(1)} KB gz`);
 if (langCount < 100) failures.push(`expected per-language grammar chunks, found ${langCount} — did dynamic imports get inlined?`);
 if (!manifest.jsIntegrity.startsWith('sha384-') || !manifest.cssIntegrity.startsWith('sha384-')) failures.push('manifest is missing SRI hashes');
-// The highlight worker is constructed from a blob/data URL by the portable
-// viewer, as a CLASSIC worker where a browser refuses module workers from an
-// opaque origin (Chrome, file://). That only works while the bundle carries no
-// module syntax: no static import/export, no dynamic import(), no import.meta.
 const workerFiles = readdirSync(dir).filter((f) => /^worker\..*\.js$/.test(f));
 if (workerFiles.length !== 1) failures.push(`expected exactly one worker bundle, found ${workerFiles.length}`);
 for (const file of workerFiles) {

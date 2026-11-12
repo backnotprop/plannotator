@@ -1,7 +1,3 @@
-/**
- * In-memory GuideStore for tests and throwaway local runs. Expiry is checked
- * lazily on read, exactly like the durable stores.
- */
 import { isStoredGuideExpired, type GuideStore, type StoredGuideMeta } from '../core/storage';
 
 export class MemoryGuideStore implements GuideStore {
@@ -27,7 +23,6 @@ export class MemoryGuideStore implements GuideStore {
     this.entries.delete(id);
   }
 
-  /** Test helper: what is currently held, expired or not. */
   get size(): number {
     return this.entries.size;
   }

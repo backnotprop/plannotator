@@ -1,6 +1,3 @@
-// Fetches contributors, issue authors, and discussion participants from GitHub.
-// Caches the result in-process so it only fetches once per build / dev session.
-
 type Person = { login: string; avatarUrl: string; url: string };
 
 export interface Contributors {
@@ -36,7 +33,6 @@ export async function getContributors(): Promise<Contributors> {
   const token = import.meta.env.GITHUB_TOKEN || process.env.GITHUB_TOKEN;
   if (token) headers['Authorization'] = `bearer ${token}`;
 
-  // REST /contributors covers the full commit history.
   try {
     const data = await fetchJSON(
       'https://api.github.com/repos/backnotprop/plannotator/contributors?per_page=100',
@@ -55,7 +51,6 @@ export async function getContributors(): Promise<Contributors> {
 
   if (token) {
     try {
-      // Paginate through all commits to collect every Co-authored-by trailer
       const coAuthorEmails = new Set<string>();
       let cursor: string | null = null;
       let hasNextPage = true;
@@ -87,7 +82,6 @@ export async function getContributors(): Promise<Contributors> {
         cursor = history.pageInfo.endCursor;
       }
 
-      // Resolve co-author emails — these are code authors too
       for (const email of coAuthorEmails) {
         if (email.includes('noreply.github.com')) {
           const login = NOREPLY_ID_RE.exec(email)?.[2] ?? NOREPLY_LOGIN_RE.exec(email)?.[1];
@@ -109,7 +103,6 @@ export async function getContributors(): Promise<Contributors> {
         }
       }
 
-      // Issue and discussion authors who aren't code contributors
       const json = await fetchGraphQL(token, `{
         repository(owner: "backnotprop", name: "plannotator") {
           issues(first: 100, orderBy: { field: CREATED_AT, direction: DESC }) {

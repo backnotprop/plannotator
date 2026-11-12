@@ -1,43 +1,14 @@
-/**
- * guides.show — Cloudflare Worker.
- *
- * Serves the immutable portable-guide viewer from R2 under /v1/, a static
- * landing page, and shared guides: /g/<id> pages plus the /api/g* create,
- * fetch and delete routes (contract: adr/implementation/guide-share-hosting.md).
- * The share routes are the pure handler in ../share/core/handler.ts over an R2
- * store.
- *
- * Why R2 for /v1 and not Workers Static Assets: assets are a per-deploy
- * snapshot, so a file missing from the next deploy disappears — but every HTML
- * ever exported pins a specific viewer build by URL + integrity, and must keep
- * opening forever (D8). R2 objects are only ever added.
- */
 import { GUIDE_VIEWER_MANIFEST } from '@plannotator/core/guide-viewer-manifest';
 import { GUIDE_SHARE_CORS_HEADERS, handleGuideShareRequest, isGuideShareRoute } from '../share/core/handler';
 import { R2GuideStore } from '../share/stores/r2';
 
 export interface Env {
   VIEWER: R2Bucket;
-  /** Shared guides: `g/<id>` bodies + `g/<id>.meta` records (see share/stores/r2.ts). */
   GUIDES: R2Bucket;
   ASSETS: Fetcher;
-  /**
-   * Cloudflare's native rate limiting binding, declared in `wrangler.toml` as
-   * `[[ratelimits]] name = "GUIDE_CREATE_LIMITER"`. OPTIONAL on purpose: a
-   * self-hosted Worker without the block, `wrangler dev`, the local viewer
-   * stand-in and the tests all run without it, and absence means no limiting.
-   * The brake protects the hosted deployment; it must never be a requirement.
-   */
   GUIDE_CREATE_LIMITER?: RateLimit;
 }
 
-/**
- * The `simple.period` the `[[ratelimits]]` block declares, echoed to the client
- * as `Retry-After`. Not exported: workerd rejects any named export from the
- * entry module that is not a function or handler ("Incorrect type for map
- * entry"), and the runtime refuses to start — `wrangler deploy --dry-run` does
- * not catch that, only running the Worker does.
- */
 const GUIDE_CREATE_RATE_LIMIT_PERIOD_SECONDS = 60;
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -59,7 +30,6 @@ function contentTypeFor(key: string): string {
   return (dot >= 0 && CONTENT_TYPES[key.slice(dot)]) || 'application/octet-stream';
 }
 
-/** Headers every /v1 asset carries: immutable (content-hashed names) and readable from any origin, including file:// documents (Origin: null). */
 export function viewerAssetHeaders(key: string, extra?: Record<string, string>): Headers {
   const h = new Headers({
     'Content-Type': contentTypeFor(key),
@@ -83,24 +53,6 @@ function json(body: unknown, status = 200, extra?: Record<string, string>): Resp
   });
 }
 
-/**
- * The brake on anonymous guide creation, alongside the handler's size cap.
- *
- * Guide creation is the one anonymous write this service accepts, so it is the
- * one route that is limited: reads are cheap and cached, delete already needs
- * the capability token issued at create, and preflights and viewer assets are
- * not writes at all. A compliant user shares a guide a handful of times an
- * hour; the configured 20 per minute per IP is far above that and only a
- * script hits it.
- *
- * Fails open in every direction it cannot resolve: no binding (self-host,
- * `wrangler dev`, tests), no `CF-Connecting-IP` (nothing is in front of the
- * Worker, so nothing to key on; behind Cloudflare that header is set at the
- * edge and a client cannot remove it), or a limiter that throws. A broken
- * brake must not stop people sharing guides.
- *
- * Returns the `429` to send, or `null` to let the create through.
- */
 export async function rateLimitGuideCreate(req: Request, limiter: RateLimit | undefined): Promise<Response | null> {
   if (!limiter) return null;
   const ip = req.headers.get('CF-Connecting-IP');
@@ -118,7 +70,6 @@ export async function rateLimitGuideCreate(req: Request, limiter: RateLimit | un
   });
 }
 
-/** Keys are `v1/<file>`; reject anything that is not a plain nested filename. */
 export function viewerKeyFromPath(pathname: string): string | null {
   if (!pathname.startsWith('/v1/')) return null;
   const key = pathname.slice(1);
@@ -156,14 +107,11 @@ export default {
         const limited = await rateLimitGuideCreate(req, env.GUIDE_CREATE_LIMITER);
         if (limited) return limited;
       }
-      // Shared guides. The handler pins this Worker's own /v1/ as the viewer
-      // base and this origin as the canonical page URL, both taken from req.url.
       return handleGuideShareRequest(req, { store: new R2GuideStore(env.GUIDES), viewerManifest: GUIDE_VIEWER_MANIFEST });
     }
     if (path.startsWith('/api/')) return json({ error: 'not found' }, 404);
     if (path === '/healthz') return json({ ok: true });
 
-    // Landing and any other static page.
     return env.ASSETS.fetch(req);
   },
 } satisfies ExportedHandler<Env>;

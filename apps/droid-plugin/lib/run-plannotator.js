@@ -20,7 +20,6 @@ function findRepoBin(startDir) {
           return candidateBin;
         }
       } catch {
-        // Ignore malformed package.json while walking up.
       }
     }
 
@@ -37,8 +36,6 @@ function writeIfPresent(stream, text) {
   stream.write(text.endsWith("\n") ? text : `${text}\n`);
 }
 
-// `options.timeout` (ms) bounds a command that must return quickly; reviews
-// wait for the reviewer and pass none.
 function runPlannotator(args, options = {}) {
   const repoBin = findRepoBin(process.cwd());
   const env = {
@@ -95,15 +92,11 @@ function emitAnnotateDecision(rawOutput, heading) {
     const parsed = JSON.parse(output);
     if (parsed && typeof parsed === "object") {
       if (parsed.decision === "approved") {
-        // Approve-with-Notes (#1092): `approved` may carry reviewer notes in
-        // `feedback`. Only a note-less approval is a plain "Approved."
         const feedback = typeof parsed.feedback === "string" ? parsed.feedback.trim() : "";
         if (!feedback) {
           process.stdout.write("Approved.\n");
           return;
         }
-        // Mirrors DEFAULT_ANNOTATE_APPROVED_WITH_NOTES_PROMPT in
-        // packages/shared/prompts.ts. Keep the two in sync.
         process.stdout.write(
           `# Approved with Notes\n\nThe artifact is approved. The notes below are non-blocking guidance, not a request for another revision.\n\n${feedback}\n\nDo not revise or reopen the artifact solely because of these notes unless the user explicitly requests it. Carry the notes into subsequent work where applicable.\n`,
         );
@@ -117,8 +110,6 @@ function emitAnnotateDecision(rawOutput, heading) {
 
       if (parsed.decision === "annotated") {
         const feedback = typeof parsed.feedback === "string" ? parsed.feedback.trim() : "";
-        // A Done with nothing to send (#1701): the zero-state sentence rides
-        // `feedback`, and nothing should reach the agent.
         if (!feedback || parsed.nothingToSend === true) {
           process.stdout.write("Annotation session closed.\n");
           return;
@@ -130,7 +121,6 @@ function emitAnnotateDecision(rawOutput, heading) {
       }
     }
   } catch {
-    // Fall back to the raw output below.
   }
 
   writeIfPresent(process.stdout, output);

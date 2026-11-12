@@ -1,17 +1,9 @@
-// Validation for one piece of product feedback. Pure functions: the handler
-// and the tests share them, and nothing here touches storage.
-//
-// The client copy of these limits is packages/core/product-feedback.ts;
-// test/limits.test.ts keeps the two in step.
-
 export const FEEDBACK_MESSAGE_MAX = 4000;
 export const FEEDBACK_CONTACT_MAX = 200;
 export const FEEDBACK_VERSION_MAX = 40;
 export const FEEDBACK_OS_MAX = 40;
-/** At most this many agent names are kept; any more are dropped. */
 export const FEEDBACK_AGENTS_MAX = 8;
 export const FEEDBACK_AGENT_NAME_MAX = 40;
-/** A longer list is not a client of ours: refused outright. */
 const FEEDBACK_AGENTS_LIST_MAX = 64;
 
 export const FEEDBACK_CATEGORIES = ["bug", "idea", "other"] as const;
@@ -26,7 +18,6 @@ export const FEEDBACK_SURFACES = [
 export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
 export type FeedbackSurface = (typeof FEEDBACK_SURFACES)[number];
 
-/** The only keys a body may carry. Anything else is refused, never ignored. */
 const ALLOWED_KEYS = new Set([
   "message",
   "category",
@@ -44,7 +35,6 @@ export interface NormalizedFeedback {
   version: string | null;
   os: string | null;
   surface: FeedbackSurface | null;
-  /** The agent names, joined with ", " ("Claude Code, Codex"); null when none were sent. */
   agents: string | null;
 }
 
@@ -54,16 +44,10 @@ export class ValidationError extends Error {
   }
 }
 
-// A version or OS name is a short label: letters, digits and a few separators.
 const LABEL_RE = /^[0-9A-Za-z][0-9A-Za-z .+_()-]*$/;
-// An agent name ("Claude Code", "OpenCode 2", "Windsurf / Devin"): words of letters, digits and `+ _ ( ) -`, one
-// space or " / " between them. No dot, no comma and no bare slash: no path passes as a name, and the stored list
-// reads back as it was sent. The client's rule too (packages/core/product-feedback.ts).
 const AGENT_NAME_RE = /^[0-9A-Za-z][0-9A-Za-z+_()-]*(?:(?: | \/ )[0-9A-Za-z+_()-]+)*$/;
-// C0 controls except tab and newline, and DEL. Stripped from free text.
 const CONTROL_RE = /[\u0000-\u0008\u000B-\u001F\u007F]/g;
 
-/** Length in code points, so an emoji counts once. */
 function lengthOf(value: string): number {
   let n = 0;
   for (const _ of value) n += 1;
@@ -93,12 +77,6 @@ function optionalChoice<T extends string>(raw: unknown, field: string, choices: 
   return raw as T;
 }
 
-/**
- * The agent names: a list of strings, or nothing. A name that is not a short
- * label is dropped (never stored), a repeat (case aside) is dropped, and only
- * the first FEEDBACK_AGENTS_MAX are kept: a bad name never costs the person
- * their feedback. Only a value that is not a list at all is refused.
- */
 function optionalAgents(raw: unknown): string | null {
   if (raw === undefined || raw === null) return null;
   if (!Array.isArray(raw)) throw new ValidationError("agents must be a list of names");

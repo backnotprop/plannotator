@@ -1,18 +1,8 @@
-/**
- * The deployed entry point itself (targets/cloudflare.ts, wrangler's `main`),
- * not just handleRequest: driven with a fake D1 that records every statement
- * and throws on anything but `prepare(sql).bind(...).run()`. Every request
- * that is not a valid POST /feedback (another method, a query string, another
- * path) never touches the database; a valid one runs exactly one parameterised
- * INSERT. So a read route wired into the entry, wherever its code lives,
- * fails here.
- */
 import { describe, expect, test } from "bun:test";
 import worker from "../targets/cloudflare";
 
 type Statement = { sql: string; bound: unknown[] | null; ran: boolean };
 
-/** A D1Database stand-in: `prepare(sql).bind(...).run()` and nothing else; any other use throws. */
 function fakeD1() {
   const statements: Statement[] = [];
   const refuse = (what: string) => {
@@ -78,15 +68,12 @@ describe("the Worker entry with a strict fake D1", () => {
       ["POST", "/feedback/1", json],
       ["POST", "/admin", json],
       ["POST", "/feedbacks", json],
-      // A browser page (any Origin, none allowed by default).
       ["POST", "/feedback", json, { Origin: "http://localhost:3000" }],
-      // Bad bodies never reach the insert.
       ["POST", "/feedback", JSON.stringify({ message: "" })],
       ["POST", "/feedback", "{"],
     ];
     for (const [method, path, body, headers] of cases) {
       const res = await call(db, method, path, body, headers);
-      // An OPTIONS with no Origin is an empty 204 (no CORS headers); everything else is refused.
       if (method === "OPTIONS") expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
       else expect(res.status, `${method} ${path}`).toBeGreaterThanOrEqual(400);
       if (method !== "HEAD") expect((await res.text()).includes("hi"), `${method} ${path} echoed data`).toBe(false);

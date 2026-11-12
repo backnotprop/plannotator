@@ -3,11 +3,8 @@ import { verifyTurnstile } from "./turnstile";
 import { normalizeSignup, ValidationError, type RawSignup } from "./validation";
 
 export interface HandlerOptions {
-  /** Max signups per IP per UTC day before we start 429-ing. */
   rateLimitPerDay: number;
-  /** Bearer token required for /admin/* routes. Disabled if undefined. */
   adminToken?: string;
-  /** Cloudflare Turnstile secret key. Verification is skipped if undefined. */
   turnstileSecret?: string;
 }
 
@@ -15,8 +12,6 @@ const DEFAULT_OPTIONS: HandlerOptions = {
   rateLimitPerDay: 20,
 };
 
-// Hard cap on /signup request bodies. The legitimate payload is < 1 KB; this
-// just stops a bad actor from making us parse megabyte-sized JSON.
 const MAX_BODY_BYTES = 16 * 1024;
 
 interface RequestContext {
@@ -78,8 +73,6 @@ function authorizeAdmin(request: Request, adminToken?: string): boolean {
   if (!adminToken) return false;
   const auth = request.headers.get("Authorization") ?? "";
   const expected = `Bearer ${adminToken}`;
-  // Constant-time-ish: rely on TextEncoder length check; not security-critical
-  // here because the token gates a list endpoint, not credentials.
   return auth.length === expected.length && auth === expected;
 }
 
@@ -90,9 +83,6 @@ async function handleSignup(
   ctx: RequestContext,
   opts: HandlerOptions
 ): Promise<Response> {
-  // Reject oversized bodies up-front. Content-Length is advisory but good
-  // enough for honest clients; misbehaving ones still hit the parse step
-  // which streams from a bounded request body in Workers.
   const declaredLength = request.headers.get("Content-Length");
   if (declaredLength) {
     const n = parseInt(declaredLength, 10);
@@ -135,7 +125,6 @@ async function handleSignup(
     normalized = normalizeSignup(body);
   } catch (e) {
     if (e instanceof ValidationError) {
-      // Honeypot: pretend success. Bot can't distinguish.
       if (e.message === "__honeypot__") {
         return Response.json({ ok: true }, { status: 200, headers: cors });
       }
@@ -147,8 +136,6 @@ async function handleSignup(
     throw e;
   }
 
-  // Verify Turnstile token if a secret is configured. We treat this as the
-  // primary defense; rate limiting and the honeypot stay as belt-and-suspenders.
   if (opts.turnstileSecret) {
     const token =
       typeof body.turnstile_token === "string" ? body.turnstile_token : null;
@@ -165,9 +152,6 @@ async function handleSignup(
     }
   }
 
-  // Rate-limit per IP / day. Skip if we have no IP (very rare; CF always
-  // sets CF-Connecting-IP). Fail-open on store errors so a hiccup in D1
-  // can't block legitimate signups — Turnstile is the primary defense.
   if (ctx.ip) {
     try {
       const day = new Date().toISOString().slice(0, 10);
@@ -190,9 +174,6 @@ async function handleSignup(
       user_agent: ctx.user_agent ? ctx.user_agent.slice(0, 500) : null,
       referer: ctx.referer ? ctx.referer.slice(0, 500) : null,
     });
-    // Always return a generic success — whether the row was new or already
-    // existed. Surfacing the duplicate flag would let anyone probe for which
-    // emails are on the list.
     return Response.json({ ok: true }, { status: 201, headers: cors });
   } catch (e) {
     console.error("signup insert failed:", e);

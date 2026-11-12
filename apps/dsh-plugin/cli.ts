@@ -1,21 +1,11 @@
-/**
- * The Plannotator CLI as the DSH plugin runs it: finding the binary and the
- * internal `plannotator dsh-plan` round trip (contract in
- * apps/hook/server/dsh-plan.ts).
- *
- * Plain Node only: DSH loads the plugin in its own Node runtime.
- */
-
 import { spawn } from "node:child_process";
 import { accessSync, constants as fsConstants, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** One `dsh-plan` decision, as the CLI prints it on stdout. */
 export interface DshPlanResult {
   approved: boolean;
   feedback?: string;
-  /** The agent-facing text, already composed from the `dsh` prompt templates. */
   message?: string;
   savedPath?: string;
   answersOnly?: boolean;
@@ -31,13 +21,6 @@ function isExecutableFile(path: string, platform: NodeJS.Platform): boolean {
   }
 }
 
-/**
- * The plannotator binary to run: the plugin's `binary` config, then
- * PLANNOTATOR_BIN, then `plannotator` on PATH, then where the install scripts
- * put it (~/.local/bin, or %LOCALAPPDATA%\plannotator on Windows). The last
- * step matters for DSH Desktop, whose PATH often lacks ~/.local/bin.
- * Undefined when none is found.
- */
 export function resolvePlannotatorBinary(options: {
   configured?: string;
   env?: NodeJS.ProcessEnv;
@@ -64,7 +47,6 @@ export function resolvePlannotatorBinary(options: {
   return installed && isExecutableFile(installed, platform) ? installed : undefined;
 }
 
-/** The last JSON line of the CLI's stdout, checked for the fields the plugin reads. */
 export function parseDshPlanOutput(stdout: string): DshPlanResult {
   const line = stdout.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("{")).pop();
   if (!line) throw new Error("plannotator dsh-plan printed no JSON");
@@ -84,21 +66,12 @@ function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException("The operation was aborted", "AbortError");
 }
 
-/**
- * Run `plannotator dsh-plan` with the plan on stdin and resolve with its
- * decision. Rejects when the binary cannot start, exits non-zero, or prints
- * no decision, and with the signal's reason once an abort has stopped the
- * child (SIGTERM, then SIGKILL after a second). Settles only after the child
- * has exited.
- */
 export function runDshPlan(options: {
   binary: string;
   plan: string;
-  /** The DSH session's working directory; the review's project root. */
   cwd?: string;
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
-  /** Each stderr chunk as it arrives (the CLI prints its URL there). */
   onStderr?: (chunk: string) => void;
 }): Promise<DshPlanResult> {
   return new Promise((resolve, reject) => {
@@ -139,8 +112,6 @@ export function runDshPlan(options: {
       stderr += chunk;
       options.onStderr?.(chunk);
     });
-    // A child that exits before reading stdin (a missing binary, an old CLI)
-    // breaks the pipe; the close handler reports the real failure.
     child.stdin.on("error", () => {});
     child.stdin.end(JSON.stringify({ plan: options.plan, ...(cwd && { cwd }) }));
 

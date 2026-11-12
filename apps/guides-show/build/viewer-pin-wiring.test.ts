@@ -1,11 +1,3 @@
-/**
- * The viewer pin (`packages/core/guide-viewer-manifest.ts`) is generated and
- * gitignored; a checkout holds only the fallback pin (an older viewer). A
- * shipping build that stops running `build:viewer-pin` would still build and
- * pass every test, and silently ship exports pinned to the old viewer. This
- * keeps every shipping path wired to the generator, reading the workflows as
- * YAML (comments are not steps) and the package scripts command by command.
- */
 import { describe, expect, test } from 'bun:test';
 import { YAML } from 'bun';
 import { readFileSync } from 'node:fs';
@@ -18,16 +10,13 @@ const root = path.resolve(import.meta.dirname, '../../..');
 const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
 const scripts = (file: string) => (JSON.parse(read(file)) as { scripts: Record<string, string> }).scripts;
 const jobs = (file: string) => (YAML.parse(read(file)) as { jobs: Record<string, Job> }).jobs;
-/** The commands of a step's `run:` block, one per line, shell comments dropped. */
 const commands = (step: Step) => (step.run ?? '').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-/** The commands of a package script. */
 const chain = (script: string | undefined) => (script ?? '').split('&&').map((c) => c.trim());
 const needs = (job: Job) => [job.needs ?? []].flat();
 
 const PIN = 'bun run build:viewer-pin';
 const SHIPS = /--compile\b|\bbun pm pack\b|\bbun run build:(opencode|pi)\b/;
 
-/** Index of the first step running `command` as a whole line; fails if that step is conditional. */
 function stepRunning(steps: Step[], command: string, where: string): number {
   const at = steps.findIndex((s) => commands(s).includes(command));
   expect(at, `${where} has no step running \`${command}\``).toBeGreaterThan(-1);
@@ -66,8 +55,6 @@ describe('every shipping build pins its own viewer', () => {
 
   test('the gate reads the viewer each shipping job actually pinned', () => {
     const release = jobs('.github/workflows/release.yml');
-    // Without these outputs the gate gets empty strings: it fails closed, but
-    // only on a tag, after the version is already burned.
     for (const id of ['build', 'npm-package']) {
       const job = release[id]!;
       expect(job.outputs, `release.yml job ${id} must expose the viewer it pinned`).toEqual({

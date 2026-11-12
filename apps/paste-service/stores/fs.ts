@@ -46,7 +46,6 @@ export class FsPasteStore implements PasteStore {
     }
   }
 
-  /** Delete expired pastes on startup */
   private sweep(): void {
     try {
       const files = readdirSync(this.dataDir).filter((f) => f.endsWith(".json"));
@@ -60,11 +59,9 @@ export class FsPasteStore implements PasteStore {
             unlinkSync(path);
           }
         } catch {
-          // skip malformed files
         }
       }
     } catch {
-      // dataDir might not exist yet
     }
   }
 }
