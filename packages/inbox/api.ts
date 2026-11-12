@@ -2383,6 +2383,8 @@ export interface InboxEventHandlers {
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
   onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
+  /** "Over your tailnet" published by itself once Tailscale came back (`event: tailscale`): its new state. Never called by an older Inbox. */
+  onTailscale?: (tailscale: TailscaleSettings) => void;
   /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
   onShapes?: (ids: string[]) => void;
   /**
@@ -2420,7 +2422,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2575,6 +2577,15 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
           ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
         });
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'tailscale':
+      try {
+        const data = JSON.parse(frame.data) as { tailscale?: unknown };
+        const tailscale = data.tailscale as TailscaleSettings | null | undefined;
+        if (tailscale && typeof tailscale === 'object' && typeof tailscale.on === 'boolean') handlers.onTailscale?.(tailscale);
       } catch {
         // A malformed frame changes nothing.
       }
