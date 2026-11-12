@@ -39,6 +39,7 @@
     "./pr-context-live": "./pr-context-live.ts",
     "./pr-artifact-document": "./pr-artifact-document.ts",
     "./pr-provider": "./pr-provider.ts",
+    "./pr-gitlab-versions": "./pr-gitlab-versions.ts",
     "./pr-marked": "./pr-marked.ts",
     "./pr-github-account": "./pr-github-account.ts",
     "./pr-stack": "./pr-stack.ts",

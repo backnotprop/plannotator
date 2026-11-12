@@ -70,6 +70,7 @@ import {
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { fetchPRContextWithReviewers, fetchPRFileBytes, fetchPRFileContent, fetchPRTree, ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
 import type { PRRef, PRRuntime } from "@plannotator/shared/pr-types";
+import { glVersionOf, glVersionsEndpoint } from "@plannotator/shared/pr-gitlab-versions";
 import { pullDetailsOf, type PullDetailsRead } from "./inbox-pull-details";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { compareRepoPaths, MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath, type RepoFileListing } from "@plannotator/shared/review-core";
@@ -753,8 +754,10 @@ export interface InboxPulls {
    * Null when the PR is not in the last list, has no known head, or has no such text file there. Never throws.
    */
   file(key: string, path: string, repos?: InboxPullRepo[]): Promise<InboxPullFile | null>;
-  /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
+  /** Whether a PR still has this commit (a force-push takes it off); null when the forge did not say. */
   hasCommit(key: string, sha: string): Promise<boolean | null>;
+  /** Whether a GitLab MR has a version whose head is this commit; null when the forge did not say. */
+  hasVersion(key: string, sha: string): Promise<boolean | null>;
   /**
    * The rail's All files: every file of the PR's repository at a head commit this Inbox read for it (`snapshot`, the
    * head the patch on screen was read at, or the list's), as the review app's `GET /api/repo-files` answers
@@ -1677,13 +1680,35 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     async hasCommit(key, sha) {
       const pull = findKnown(key);
       const parts = pull ? splitPath(pull.repo) : null;
-      if (!pull || !parts || pull.platform !== "github") return null;
-      const read = await run("gh", ["api", "--hostname", pull.host, `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/commits?per_page=100`, "--paginate", "--jq", ".[].sha"]).catch(() => null);
+      if (!pull || !parts) return null;
+      const read =
+        pull.platform === "github"
+          ? await run("gh", ["api", "--hostname", pull.host, `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/commits?per_page=100`, "--paginate", "--jq", ".[].sha"]).catch(() => null)
+          : await run("glab", ["api", "--hostname", pull.host, `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}/commits?per_page=100`, "--paginate"]).catch(() => null);
       if (!read || read.exitCode !== 0) return null;
-      const commits = read.stdout.split("\n").map((line) => line.trim().toLowerCase()).filter(Boolean);
+      let commits: string[];
+      try {
+        commits =
+          pull.platform === "github"
+            ? read.stdout.split("\n").map((line) => line.trim().toLowerCase()).filter(Boolean)
+            : parsePaginatedArray<{ id?: unknown }>(read.stdout).flatMap((commit) => (typeof commit.id === "string" ? [commit.id.toLowerCase()] : []));
+      } catch {
+        return null;
+      }
       if (commits.includes(sha.toLowerCase())) return true;
       // GitHub lists at most 250: past that, not listed says nothing.
       return commits.length >= PULL_COMMITS_LISTED_MAX ? null : false;
+    },
+    async hasVersion(key, sha) {
+      const pull = findKnown(key);
+      if (!pull || pull.platform !== "gitlab") return null;
+      const read = await run("glab", ["api", "--hostname", pull.host, `${glVersionsEndpoint({ host: pull.host, projectPath: pull.repo, iid: pull.number })}?per_page=100`, "--paginate"]).catch(() => null);
+      if (!read || read.exitCode !== 0) return null;
+      try {
+        return glVersionOf(read.stdout, sha) !== null;
+      } catch {
+        return null;
+      }
     },
     async repoFiles(key, params) {
       const at = repoAt(key);

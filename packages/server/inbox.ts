@@ -5405,16 +5405,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
         // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
         // what moved outdated; one no longer on the PR (a force-push) is refused for the page to put its words in the
-        // review's body. GitLab's docs do not say it takes one, so there a commit the Inbox no longer names is refused.
+        // review's body. GitLab likewise, at the MR version whose head is that commit.
         const heads = [pull.head_sha, pulls.readHead(key)].filter((sha): sha is string => !!sha);
         const named = typeof body.head_sha === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(body.head_sha) ? body.head_sha : null;
         const known = !!named && heads.includes(named);
-        if (!known && (!named || pull.platform !== "github")) {
+        if (!known && (!named || (pull.platform !== "github" && pull.platform !== "gitlab"))) {
           if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
           return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
         }
         const commitGone = () => json({ error: "The commit you read is no longer on this pull request.", code: "pull_commit_gone" }, 409);
         if (!known && (await pulls.hasCommit(key, named!)) === false) return commitGone();
+        if (!known && pull.platform === "gitlab" && fileComments.length > 0 && (await pulls.hasVersion(key, named!)) === false) return commitGone();
         const headSha = named!;
         const ref: PRRef | null =
           pull.platform === "github"

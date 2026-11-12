@@ -12,6 +12,7 @@ import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PR
 import { getPlannotatorDataDir } from "./data-dir";
 import { isAccessRefusal, markedCommentText, PRMarkedForbiddenError, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
 import { diffHunkLines, parseDiffToFiles } from "@plannotator/core/diff-files";
+import { readGlVersionAt } from "./pr-gitlab-versions";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -796,7 +797,10 @@ async function readGlPositionFiles(runtime: PRRuntime, ref: GlMRRef): Promise<Ma
   } catch {
     return null;
   }
-  if (!patch?.trim()) return null;
+  return patch?.trim() ? glPositionFilesOf(patch) : null;
+}
+
+function glPositionFilesOf(patch: string): Map<string, GlPositionFile> {
   const files = new Map<string, GlPositionFile>();
   for (const file of parseDiffToFiles(patch)) {
     const newToOld = new Map<number, number>();
@@ -899,6 +903,8 @@ export async function submitGlMRReview(
     let baseSha = headSha; // fallback
     let startSha = headSha;
     let diffRefsError: string | undefined;
+    let olderHead = false;
+    let versionFiles: Map<string, GlPositionFile> | null = null;
     try {
       const mrResult = await runtime.runCommand(
         "glab",
@@ -910,9 +916,20 @@ export async function submitGlMRReview(
           if (mrData.diff_refs) {
             baseSha = mrData.diff_refs.base_sha;
             startSha = mrData.diff_refs.start_sha;
+            olderHead = typeof mrData.diff_refs.head_sha === "string" && mrData.diff_refs.head_sha.toLowerCase() !== headSha.toLowerCase();
           }
         } catch {
           // Use fallbacks
+        }
+      }
+      if (olderHead) {
+        const version = await readGlVersionAt(runtime, ref, headSha);
+        if (version) {
+          baseSha = version.baseSha;
+          startSha = version.startSha;
+          versionFiles = version.diffs ? glPositionFilesOf(reconstructPatch(version.diffs)) : null;
+        } else {
+          diffRefsError = `GitLab has no version of this merge request at ${headSha.slice(0, 7)}`;
         }
       }
     } catch (error) {
@@ -925,7 +942,7 @@ export async function submitGlMRReview(
         error: `${comment.path}:${comment.line}: Failed to prepare inline comment: ${diffRefsError}`,
       }));
     } else {
-      const positionFiles = await readGlPositionFiles(runtime, ref);
+      const positionFiles = olderHead ? versionFiles : await readGlPositionFiles(runtime, ref);
       // Submit comments in parallel
       const results = await Promise.allSettled(
         fileComments.map(async (comment) => {
