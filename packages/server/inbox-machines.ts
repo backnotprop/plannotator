@@ -337,7 +337,7 @@ const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
-/** A tailnet guest of this Inbox, acting on another machine or on what waits for one. */
+/** A tailnet guest of this Inbox, starting or trusting an agent on another machine, or updating one. */
 const OWNER_ONLY_BODY = { error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" } as const;
 /** Of a forwarded read's query, what a guest never passes on: `sessions`' folder-trust facts. */
 const GUEST_STRIPPED = ["trust_agent", "trust_project"] as const;
@@ -521,7 +521,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onChange: machinesChanged,
       // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onSnoozes: () => emit({ event: "snoozes", data: {} }),
-      onDeliveries: ({ sessions, agents }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}) } }),
+      onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
     });
     peers.set(link.id, peer);
@@ -811,8 +811,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
       }
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
-    // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
-    if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
     // Rule 8's table decides, by route: a write it has not classified, or calls `local`, never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
@@ -839,6 +837,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox.
     const body = await context.readBody(req);
     if (checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    // A guest the allow list let onto this Inbox answers the owner's other machines' threads as it answers this one's
+    // (owner ruling 2026-11-11), Stop and Delete included; starting or trusting an agent there stays the owner's, as here.
+    if (context.isGuest(req, via) && startsAgentThere(route, body) && !/\/(stop|delete)$/.test(route)) return json(OWNER_ONLY_BODY, 403);
     // A press in this Inbox's window (its own Origin and this run's page session), said to the other machine with the
     // write: it answers a permission prompt, or starts, stops or trusts an agent there, only for one (remote launch).
     // An agent's or a script's bare call is still the owner's for every other write, as before.
@@ -991,11 +992,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return json({ waiting: waiting.map(outboxView), notices: outbox.notices().map(outboxView) });
     }
     // Cancel a write still waiting that never left (a launch held for a machine that is asleep): it is never sent.
-    // The owner's, from any of their devices; a held launch only from a window, as the forward took it.
+    // Any window's, as the write itself was (a guest's too); a held launch only from a window, as the forward took it.
     const cancel = /^\/api\/inbox\/outbox\/([^/]+)\/cancel$/.exec(path);
     if (cancel) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
       const body = await context.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
@@ -1013,7 +1013,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const dismiss = /^\/api\/inbox\/outbox\/([^/]+)\/dismiss$/.exec(path);
     if (dismiss) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
       const stale = staleTab(await context.readBody(req));
       if (stale) return stale;
       const entry = outbox.dismiss(decodeURIComponent(dismiss[1]!));
@@ -1093,7 +1092,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const unlinkMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/unlink$/.exec(path);
     if (path === "/api/inbox/machines/offer" || path === "/api/inbox/machines/link" || unlinkMatch) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (via !== "local") return json({ error: "Linking machines works only on this computer's own screen.", code: "local_only" }, 403);
+      // This computer's, and its owner's from any of their own devices over the tailnet (owner ruling 2026-11-11); never a guest's.
+      if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can link machines.", code: "owner_only" }, 403);
       const body = await context.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
@@ -1127,6 +1127,16 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
   /** Each linked machine's agents, as its list last said (kept in memory while it is away, like its rows); none from an older Inbox. */
   const agents = (): InboxAgentsGroup[] => [...peers.values()].flatMap((peer) => (peer.list?.agents ? [peer.list.agents] : []));
+  const sessionNames = (): { labels: Record<string, string>; titles: Record<string, string> } => {
+    const labels = Object.create(null) as Record<string, string>;
+    const titles = Object.create(null) as Record<string, string>;
+    for (const peer of peers.values()) {
+      if (!peer.list) continue;
+      Object.assign(labels, peer.list.session_labels);
+      Object.assign(titles, peer.list.session_titles);
+    }
+    return { labels, titles };
+  };
   const projectOwner = (projectId: string): string | null => {
     for (const peer of peers.values()) if (peer.list?.projects.some((p) => p.id === projectId)) return peer.id;
     return null;
@@ -1160,6 +1170,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     rows,
     projects,
     agents,
+    sessionNames,
     projectOwner,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */

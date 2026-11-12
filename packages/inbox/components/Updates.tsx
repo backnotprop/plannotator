@@ -1075,12 +1075,12 @@ export function AboutBlock({
 }: {
   /**
    * False on a tailnet guest's page, where every /api/inbox/update* route
-   * answers 403 local_only: the block shows the version, and no What's new,
-   * Update, Check now or update switch.
+   * answers 403 local_only: the block shows the version and What's new in it,
+   * and no Update, Check now or update switch.
    */
   updates?: boolean;
   /**
-   * The owner's page over the tailnet: also a link to What's new in the
+   * A page over the tailnet: also a link to What's new in the
    * release this Inbox runs (none for a development build).
    */
   whatsNewRunning?: boolean;
@@ -1126,6 +1126,13 @@ export function AboutBlock({
               </span>
               <span className="ib-txt">
                 <span className="ib-l">Plannotator {version}</span>
+                {running && (
+                  <span className="ib-desc">
+                    <button type="button" className="ib-lnk" data-about-whats-new={running} onClick={() => onWhatsNew!(running)}>
+                      What&apos;s new in {running}
+                    </button>
+                  </span>
+                )}
               </span>
             </div>
           </div>
