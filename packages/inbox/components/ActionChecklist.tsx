@@ -19,7 +19,6 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { inboxActionInDraft, inboxActionPersonMark, type InboxQuestion } from '@plannotator/core/inbox-types';
-import { INBOX_ACTION_NOTE_MAX } from '@plannotator/core/inbox-actions';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { CROSS_REPO_REF_PATTERN } from '@plannotator/core/forge-refs';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
@@ -465,7 +464,6 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
               className="ib-chk-note"
               value={text}
               rows={2}
-              maxLength={INBOX_ACTION_NOTE_MAX}
               onChange={(event) => setText(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
@@ -607,7 +605,6 @@ function DraftNote({
         rows={1}
         value={text}
         readOnly={readOnly}
-        maxLength={INBOX_ACTION_NOTE_MAX}
         placeholder={`Add a note for ${agent}`}
         onChange={(event) => {
           const value = event.target.value;

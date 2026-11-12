@@ -57,6 +57,7 @@ const bunCommandRuntime: PRRuntime = {
       env: childEnv(options?.env),
       stdout: "pipe",
       stderr: "pipe",
+      windowsHide: true,
     });
 
     const [stdout, stderr, exitCode] = await Promise.all([
@@ -74,6 +75,7 @@ const bunCommandRuntime: PRRuntime = {
       stdout: "pipe",
       stderr: "pipe",
       stdin: "pipe",
+      windowsHide: true,
     });
 
     proc.stdin.write(input);

@@ -33,7 +33,7 @@
 
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_REPLY_DRAFT_RECIPIENTS_MAX, INBOX_SESSION_ID_PATTERN, isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
+import { INBOX_SESSION_ID_PATTERN, isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
 import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
 import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
 import { InboxError } from "./schema";
@@ -73,9 +73,9 @@ function parse(text: string): InboxReplyDraft | null {
   }
 }
 
-/** A list of recipient session ids, or null when it is not one (too many, not session ids as a tag names them, repeats). */
+/** A list of recipient session ids, or null when it is not one (not session ids as a tag names them, repeats). */
 function recipientList(value: unknown): string[] | null {
-  if (!Array.isArray(value) || value.length > INBOX_REPLY_DRAFT_RECIPIENTS_MAX) return null;
+  if (!Array.isArray(value)) return null;
   if (value.some((id) => typeof id !== "string" || !INBOX_SESSION_ID_PATTERN.test(id))) return null;
   if (new Set(value).size !== value.length) return null;
   return [...(value as string[])];
@@ -161,7 +161,7 @@ export function checkInboxReplyDraftInput(
     : null;
   const recipients = input.recipients === undefined || input.recipients === null ? null : recipientList(input.recipients);
   if (input.recipients !== undefined && input.recipients !== null && recipients === null) {
-    throw new InboxError("validation_error", `recipients: at most ${INBOX_REPLY_DRAFT_RECIPIENTS_MAX} session ids (letters, digits, . _ : -), each once.`, { field: "recipients" });
+    throw new InboxError("validation_error", `recipients: session ids (letters, digits, . _ : -), each once.`, { field: "recipients" });
   }
   return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops, recipients };
 }

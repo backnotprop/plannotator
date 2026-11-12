@@ -183,11 +183,6 @@ export function inboxMergedAgents(self: string, own: InboxAgentsGroup, machines:
   return [{ machine: self, ...own }, ...machines.filter((group) => group.machine !== self)];
 }
 
-/** A label-free copy for a reader who is not this computer's owner. */
-export function inboxAgentsWithoutLabels(groups: InboxAgentsGroup[]): InboxAgentsGroup[] {
-  return groups.map((group) => ({ ...group, agents: group.agents.map(({ label: _label, ...agent }) => agent) }));
-}
-
 /**
  * Another machine's group as its list sent it (`agents`, one group): only what parses, capped, named by `machine`.
  * Null when its list has none (an older Inbox): the window then knows nothing of its agents.
