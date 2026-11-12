@@ -50,6 +50,7 @@ export function claudeTrustKey(folder: string): string {
   }
 }
 
+// A lock this old is dead (proper-lockfile's default); a click waits long enough for a dead one to go stale.
 const CLAUDE_LOCK_STALE_MS = 10_000;
 const CLAUDE_LOCK_WAIT_MS = 12_000;
 
@@ -78,6 +79,7 @@ async function withClaudeConfigLock(config: string, waitMs: number, work: () => 
         rmdirSync(lock);
         continue;
       } catch (error) {
+        // ENOENT: another writer got there first; anything else is a file or a full folder, not a lock.
         stuck = (error as NodeJS.ErrnoException).code !== "ENOENT";
       }
     }

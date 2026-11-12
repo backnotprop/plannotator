@@ -91,6 +91,7 @@ export function createLiveRelay(options: LiveRelayOptions) {
       return text(400, "Bad request.");
     }
     const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
+    // The app's page arrives same-site (its frame is navigated from the window's port): only a frame's navigation is let in this way.
     const frameLoad = req.headers.get("sec-fetch-mode")?.trim().toLowerCase() === "navigate" && req.headers.get("sec-fetch-dest")?.trim().toLowerCase() === "iframe";
     const fromElsewhere = site === "cross-site" || (site === "same-site" && !frameLoad);
 

@@ -224,9 +224,11 @@ export const CLAUDE_JOB_DISALLOWED_TOOLS: readonly string[] = [
   "Bash(python:*)", "Bash(python3:*)", "Bash(node:*)", "Bash(npx:*)",
   "Bash(bun:*)", "Bash(bunx:*)", "Bash(sh:*)", "Bash(bash:*)", "Bash(zsh:*)",
   "Bash(curl:*)", "Bash(wget:*)",
+  // git: file-writing output and config injection, in any subcommand position.
   "Bash(git * --out*)", "Bash(git -c *)", "Bash(git --config-env*)",
   "Bash(git * --config-env*)",
   "Bash(git grep *)", "Bash(git ls-remote *)", "Bash(gh api *)", "Bash(glab api *)",
+  // jj: config injection (global flags, accepted anywhere) and external tools.
   "Bash(jj --config*)", "Bash(jj * --config*)", "Bash(jj * --tool*)",
   // Plannotator's Inbox MCP server, by name.
   // `--strict-mcp-config` already loads no MCP server; this holds whatever the transport.

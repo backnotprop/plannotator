@@ -847,6 +847,7 @@ export async function startReviewServer(
       feedback: feedbackText,
       annotations: annotationList,
     });
+    // A failed decision-only line has nothing to recover, so it must not change the legacy draft behavior.
     return written !== null || !hasContent;
   };
 
