@@ -64,16 +64,12 @@ class SilentEventSource {
 
 interface Session {
   readonly origin: string;
-  /** The agentTool* fields of serverConfig (absent: the server reports no tool host). */
   readonly agentTool?: Record<string, unknown>;
   readonly mode?: "annotate";
-  /** Answer /api/ai/capabilities with a connected "Ask this session" bridge. */
   readonly bridge?: boolean;
-  /** Status POST /api/config answers. */
   readonly configStatus?: number;
 }
 
-/** What #1724's getServerConfig sends for a host whose tool is off by default and unset. */
 function offByDefault(host: "pi" | "opencode"): Record<string, unknown> {
   return { agentTool: false, agentToolConfigured: false, agentToolHost: host, agentToolEnabled: false };
 }
@@ -127,7 +123,6 @@ async function settle(): Promise<void> {
 
 async function mountApp(session: Session): Promise<void> {
   globalThis.fetch = stubFetch(session);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -154,7 +149,6 @@ function buttonIn(selector: string, label: string): HTMLButtonElement {
   return button;
 }
 
-/** A browser that has answered every earlier first-run dialog, Ask this session included. */
 function seedEarlierChainSeen({ askSession = true } = {}): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-permission-mode-configured", "true");
@@ -210,7 +204,6 @@ describe.if(hasDom)("agent tool offer in the plan editor", () => {
     await act(async () => buttonIn(DIALOG, "Done").click());
     expect(document.querySelector(DIALOG)).toBeNull();
 
-    // The Settings row already reads the new value.
     await openSettings();
     expect(settingSwitch()?.getAttribute("aria-checked")).toBe("true");
   });
@@ -245,16 +238,11 @@ describe.if(hasDom)("agent tool offer in the plan editor", () => {
 
   test("never shown where turning it on is not the reader's to do here", async () => {
     const sessions: Session[] = [
-      // Claude Code: on by default.
       { origin: "claude-code", agentTool: { agentTool: true, agentToolConfigured: false, agentToolHost: "claude-code", agentToolEnabled: true } },
-      // Oh My Pi (the Pi extension inside OMP): on by default, nothing to offer.
       { origin: "pi", agentTool: { agentTool: true, agentToolConfigured: false, agentToolHost: "oh-my-pi", agentToolEnabled: true } },
-      // No tool host reported: OpenCode 1, Codex, a server older than the switch.
       { origin: "opencode" },
       { origin: "codex" },
-      // PLANNOTATOR_AGENT_TOOL decides it.
       { origin: "pi", agentTool: { ...offByDefault("pi"), agentToolEnv: false } },
-      // Already on for the next session, or turned off on purpose.
       { origin: "pi", agentTool: { agentTool: true, agentToolConfigured: true, agentToolHost: "pi", agentToolEnabled: true } },
       { origin: "pi", agentTool: { agentTool: false, agentToolConfigured: true, agentToolHost: "pi", agentToolEnabled: false } },
     ];
@@ -314,7 +302,6 @@ describe.if(hasDom)("agent tool switch in plan and annotate Settings", () => {
     memory.clear();
     configPosts = [];
     storageModule?.setStorageBackend(memoryBackend);
-    // Every first-run dialog retired, the offer included, so Settings is reachable.
     seedEarlierChainSeen();
     memory.set(AGENT_TOOL_KEY, "1");
   });
@@ -358,7 +345,6 @@ describe.if(hasDom)("agent tool switch in plan and annotate Settings", () => {
     test(`${surface}: absent where the server reports no tool host`, async () => {
       await mountApp({ origin: "opencode", mode });
       await openSettings();
-      // Settings itself is open (its tab list rendered), only this row is missing.
       expect(document.querySelectorAll("nav.hidden button").length).toBeGreaterThan(0);
       expect(document.querySelector(SETTING_ROW)).toBeNull();
     });

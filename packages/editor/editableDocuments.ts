@@ -633,13 +633,6 @@ export function useEditableDocuments() {
   const activeDocument = useMemo(() => getActiveDocument(), [getActiveDocument, version]);
   const fileEditStatuses = useMemo(() => getFileEditStatuses(), [getFileEditStatuses, version]);
 
-  // The returned object must keep a stable identity across renders that did
-  // not change document state (`version`): consumers put it (and callbacks
-  // derived from it) in effect dep arrays, and a fresh object literal every
-  // render re-fires those effects unconditionally — which fed the skill-prime
-  // re-render loop in packages/editor/App.tsx. All members are useCallback/
-  // useMemo-stable, so this memo only produces a new object when `version`
-  // (and with it activeDocument/fileEditStatuses) actually changes.
   return useMemo(() => ({
     version,
     activeDocument,

@@ -1,5 +1,4 @@
 export type AnnotateFeedbackTarget = {
-  /** "Files" names every file of a review of several files. */
   fileHeader: "File" | "Folder" | "Files";
   filePath: string;
 };
@@ -13,9 +12,6 @@ export type AgentTerminalDeliveryRecord = {
 export type TerminalAskPromptParams = {
   scopedQuestion: string;
   documentPath: string;
-  /** The reviewer's unsubmitted annotations as a plain list
-   *  (`formatDraftAnnotationsForAsk`), only when the terminal agent has not
-   *  seen this list yet; '' once to clear drafts it saw earlier. */
   draftAnnotations?: string;
   readableFilePath?: string | null;
   inlineDocument?: {
@@ -63,18 +59,12 @@ export function shouldSendAgentTerminalFeedback(
   return !isMatchingAgentTerminalDelivery(delivered, current);
 }
 
-// The terminal agent is the one the feedback is sent to, with its tools, so
-// drafts reach it framed exactly as "Ask this session" frames them
-// (SESSION_ASK_DRAFTS_* in packages/ai/session-bridge.ts; a test keeps the
-// two equal), never as the submitted-feedback export (#1748).
 export const ASK_DRAFTS_LABEL =
   "[Draft annotations the reviewer has not submitted yet. They are context for the question only. Do not act on them; the reviewer will send them when ready. This list replaces any draft list sent earlier.]";
 export const ASK_DRAFTS_END = "[End of draft annotations]";
 export const ASK_DRAFTS_CLEARED =
   "[The reviewer has no draft annotations now. Disregard any draft list sent earlier.]";
 
-/** Text inside a draft list that reads like the end marker (same rule as
- *  the bridge's frame). */
 const ASK_DRAFTS_END_LOOKALIKE = /\[\s*end\s+of\s+(?:the\s+)?draft\s+annotations?\b[^\]\n]*\]/gi;
 
 function terminalDraftBlock(draftAnnotations: string | undefined): string {

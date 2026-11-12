@@ -8,7 +8,6 @@ import {
 const SIDES: AnnotateAgentTerminalSide[] = ['left', 'right', 'hidden'];
 const BOOLS = [false, true];
 
-/** Every combination the annotate shell can actually be in. */
 function everyCase(): AgentTerminalLayoutOptions[] {
   const cases: AgentTerminalLayoutOptions[] = [];
   for (const side of SIDES) {
@@ -41,7 +40,6 @@ const label = (o: AgentTerminalLayoutOptions) =>
 
 describe('getAgentTerminalLayout — invariants across the full option table', () => {
   test('the panel is never docked on both edges at once', () => {
-    // Two dock slots would mount AnnotateAgentTerminalPanel twice, i.e. two PTYs.
     for (const o of everyCase()) {
       const l = getAgentTerminalLayout(o);
       expect(l.showOnLeft && l.showOnRight, label(o)).toBe(false);
@@ -57,8 +55,6 @@ describe('getAgentTerminalLayout — invariants across the full option table', (
   });
 
   test('wide mode and sub-lg viewports never show the panel', () => {
-    // The panel itself is `hidden lg:flex`; a visible dock would reserve width
-    // for a box the browser refuses to paint.
     for (const o of everyCase()) {
       if (!o.isWideMode && !o.isBelowBreakpoint) continue;
       expect(getAgentTerminalLayout(o).isVisible, label(o)).toBe(false);
@@ -75,8 +71,6 @@ describe('getAgentTerminalLayout — invariants across the full option table', (
   });
 
   test('a running terminal stays mounted while collapsed, off the layout', () => {
-    // Unmounting a running panel kills the PTY the user is mid-conversation
-    // with, so a collapsed-but-running terminal must render zero-width.
     for (const o of everyCase()) {
       const l = getAgentTerminalLayout(o);
       if (!l.shouldRender || l.isVisible) continue;
@@ -96,9 +90,8 @@ describe('getAgentTerminalLayout — invariants across the full option table', (
   });
 
   test('the right panel is suppressed exactly when a VISIBLE right terminal holds the slot', () => {
-    // The bug this guards: an off-layout (collapsed or sub-breakpoint) terminal
-    // must not blank the annotations/AI panel, and a visible one must, because
-    // the two share the right-hand slot.
+    // The bug this guards: an off-layout (collapsed or sub-breakpoint) terminal must not blank the
+    // annotations/AI panel, and a visible one must, because the two share the right-hand slot.
     for (const o of everyCase()) {
       const l = getAgentTerminalLayout(o);
       const rightTerminalHoldsSlot = l.isVisible && l.placement === 'right';
@@ -137,8 +130,6 @@ describe('getAgentTerminalLayout — the hidden preference', () => {
   });
 
   test('an explicit session open still docks the panel while hidden', () => {
-    // Hidden is a default, not a lock: the rail toggle and Shift Shift arrive
-    // here as isOpen and must still produce a real dock slot.
     const l = getAgentTerminalLayout({
       showControls: true,
       isOpen: true,

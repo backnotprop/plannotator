@@ -196,8 +196,6 @@ describe('usePlanDiffViewAutoExit', () => {
     const harness = await mountHarness(true);
 
     await act(async () => harness.current().activate());
-    // hasPreviousVersion is always false here (nulls in), but the caller
-    // gates `active` off, so the html diff toggle must stay on.
     expect(harness.current().hasPreviousVersion).toBe(false);
     expect(harness.current().isPlanDiffActive).toBe(true);
   });
@@ -208,8 +206,6 @@ describe('usePlanDiffViewAutoExit', () => {
     await act(async () => harness.current().switchDoc(DOC_WITHOUT_BASELINE));
     expect(harness.current().isPlanDiffActive).toBe(false);
 
-    // Activating with no baseline immediately snaps back off — the stuck
-    // state can never establish itself.
     await act(async () => harness.current().activate());
     expect(harness.current().isPlanDiffActive).toBe(false);
   });

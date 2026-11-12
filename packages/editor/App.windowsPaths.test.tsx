@@ -1,12 +1,4 @@
-/**
- * Relative references in an annotated document on Windows (DOM-gated).
- *
- * The server reports the document as `C:\docs\guide\notes.md`. Relative
- * images and links in it resolve against its directory, so `/api/image` and
- * `/api/doc` must get `C:/docs/guide` as their base. A slash-only dirname
- * leaves the backslash path whole: the base becomes the file itself, and the
- * images 404 unless the session happened to start in the document's folder.
- */
+/** Relative references in an annotated document on Windows (DOM-gated). */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -53,7 +45,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let docRequests: URL[] = [];
 
-/** Serves the session, and `retry.md` / `notes.md` beside the document. */
 function sessionFetch(filePath: string, dir: string, sep: string): typeof fetch {
   return async (input) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
@@ -94,7 +85,6 @@ async function waitFor(check: () => boolean): Promise<void> {
 async function mount(filePath: string, dir: string, sep: string): Promise<void> {
   docRequests = [];
   globalThis.fetch = sessionFetch(filePath, dir, sep);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);

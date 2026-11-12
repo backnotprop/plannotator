@@ -1,14 +1,3 @@
-/**
- * Plan review with `:::question` answers.
- *
- * What regresses if this fails: the plan-review primary reads "Send answers"
- * while comments or edits are also going out (or stops reading it when only
- * answers are), the answers-only deny stops flagging
- * `answersOnly` (the server's plan.answered prompt) or starts framing the
- * export a second time, the "Feedback won't be sent" warning stops naming the
- * answers (or changes wording for documents without questions), or Edit Mode
- * leaves an answer pointing at a stale block id.
- */
 import { describe, expect, test } from 'bun:test';
 import { indexQuestionBlocks } from '@plannotator/shared/question-block';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -40,8 +29,6 @@ describe('isAnswersOnlyFeedback', () => {
 describe('planDenyFeedbackFields', () => {
   const payload = '# Plan Feedback\n\n## Answers to your questions\n\n1 of 1 question answered.\n';
   test('answers only: the flag rides the body and the export goes out unframed', () => {
-    // The server's plan.answered prompt carries the framing; a paragraph in
-    // the body as well would say it twice.
     expect(planDenyFeedbackFields(payload, true)).toEqual({ feedback: payload, answersOnly: true });
   });
   test('ordinary feedback: no flag, the body is unchanged', () => {

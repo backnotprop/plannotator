@@ -88,7 +88,6 @@ const sourceSave = (text: string) => ({
 const server = {
   disk: V1,
   history: true,
-  /** versionInfo on /api/plan (false: a file that had no version at open). */
   opened: true,
   stale: false,
   saves: [] as Array<Record<string, unknown>>,
@@ -164,7 +163,6 @@ function stream(): StubEventSource {
   return found;
 }
 
-/** The agent writes the file; the watcher reports its folder changed. */
 async function agentWrites(text: string): Promise<void> {
   server.disk = text;
   await act(async () => {
@@ -178,7 +176,6 @@ async function mount(): Promise<void> {
   memory.set("plannotator-announce-tui-herdr-seen", "1");
   memory.set("plannotator-announce-inbox-seen", "1");
   globalThis.fetch = makeFetch();
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -216,7 +213,6 @@ function pressModE(target: EventTarget): void {
   target.dispatchEvent(new KeyboardEvent("keydown", { key: "e", metaKey: true, bubbles: true, cancelable: true }));
 }
 
-/** CodeMirror's EditorView through its DOM back-reference. */
 function editorView(): { state: { doc: { toString(): string } }; dispatch(spec: unknown): void } {
   const content = document.querySelector<HTMLElement>(".cm-editor .cm-content");
   if (!content) throw new Error("CodeMirror content DOM did not render");
@@ -243,13 +239,11 @@ describe.if(hasDom)("annotate: a disk change becomes a version (#2037)", () => {
     await waitFor(() => document.body.textContent!.includes("charlie"));
 
     await waitFor(() => server.saves.length > 0, 4000);
-    // One save, for the text on screen once the writes settled.
     await wait(1000);
     expect(server.saves).toHaveLength(1);
     expect(server.saves[0]).toMatchObject({ hash: hashOf(V3) });
 
     await waitFor(() => badge() !== undefined);
-    // V1 -> V3: the agent's blank line and sentence.
     expect(badge()!.textContent).toContain("+2/-0");
   }, 15000);
 
@@ -273,7 +267,6 @@ describe.if(hasDom)("annotate: a disk change becomes a version (#2037)", () => {
 
   test("Reload from disk after a conflict saves the agent's text as a version", async () => {
     await mount();
-    // The reviewer has an unsaved edit in Edit Mode...
     await act(async () => { pressModE(document.body); });
     await waitFor(() => !!document.querySelector(".cm-editor .cm-content"));
     const view = editorView();
@@ -281,7 +274,6 @@ describe.if(hasDom)("annotate: a disk change becomes a version (#2037)", () => {
     await act(async () => {
       view.dispatch({ changes: { from: at, to: at + "sentinel".length, insert: "reviewer" } });
     });
-    // ...when the agent writes the file: a conflict, nothing saved yet.
     await agentWrites(V2);
     await waitFor(() => buttonNamed("Reload from disk") !== undefined, 4000);
     await wait(1000);

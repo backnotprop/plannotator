@@ -100,7 +100,6 @@ const DESIGN_COMMENT = {
 interface Recorded { method: string; path: string; search: string; body?: string }
 const requests: Recorded[] = [];
 
-/** What GET /api/draft answers in the current test. */
 let sessionDraft: unknown = null;
 
 const fakeFetch: typeof fetch = async (input, init) => {
@@ -149,7 +148,6 @@ async function mount(): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fakeFetch;
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -183,7 +181,6 @@ async function clickLink(text: string): Promise<void> {
   const link = Array.from(document.querySelectorAll("a")).find((a) => a.textContent?.includes(text));
   if (!link) throw new Error(`link "${text}" not rendered`);
   await act(async () => { link.click(); });
-  // Past the 500ms debounce of both draft writers.
   for (let attempt = 0; attempt < 14; attempt += 1) await settle(60);
 }
 
@@ -213,7 +210,6 @@ describe.if(hasDom)("plan review: linked documents in a recovered draft", () => 
     await answerBanner("Restore");
     for (let attempt = 0; attempt < 10; attempt += 1) await settle(60);
 
-    // The plan's own draft carries the plan's comment and never the design's.
     const saves = sessionSaves();
     expect(saves.length).toBeGreaterThan(0);
     for (const save of saves) {
@@ -223,8 +219,6 @@ describe.if(hasDom)("plan review: linked documents in a recovered draft", () => 
 
     const since = requests.length;
     await clickLink("the design");
-    // The design's comment is on the design (shown in its panel), already
-    // restored: its copy is not read and merged again, nor written back.
     expect(document.body.textContent).toContain("DESIGN_COMMENT_SENTINEL");
     expect(requests.slice(since).some((r) => r.path === "/api/draft/document" && r.method === "GET")).toBe(false);
     expect(documentWrites(since)).toEqual([]);

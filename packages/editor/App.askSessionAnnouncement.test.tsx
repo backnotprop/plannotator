@@ -50,7 +50,6 @@ class SilentEventSource {
 interface Session {
   readonly origin: string;
   readonly mode?: "archive";
-  /** What /api/ai/capabilities answers. */
   readonly ai: "bridge" | "gone" | "providers" | "off";
 }
 
@@ -67,7 +66,6 @@ function sessionBridge(host: string, status: "ready" | "gone") {
 const SDK_PROVIDER = { id: "claude-agent-sdk", name: "claude-agent-sdk", capabilities: {}, models: [] };
 
 let decisions: string[] = [];
-/** When set, /api/ai/capabilities waits for it before answering. */
 let capabilitiesGate: Promise<void> | null = null;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -127,7 +125,6 @@ async function settle(): Promise<void> {
 
 async function mountApp(session: Session): Promise<void> {
   globalThis.fetch = stubFetch(session);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -136,7 +133,6 @@ async function mountApp(session: Session): Promise<void> {
   for (let attempt = 0; attempt < 20 && !document.body.textContent?.includes("Session document"); attempt += 1) {
     await settle();
   }
-  // Capabilities land after the plan; give them a few ticks.
   for (let attempt = 0; attempt < 10; attempt += 1) await settle();
 }
 
@@ -155,7 +151,6 @@ function gotIt(selector: string): HTMLButtonElement {
   return button;
 }
 
-/** A browser that has already answered every earlier first-run dialog. */
 function seedEarlierChainSeen(): void {
   memory.set(LOOK_AND_FEEL_KEY, "true");
   memory.set(PERMISSION_MODE_KEY, "true");
@@ -204,8 +199,6 @@ describe.if(hasDom)("Ask this session announcement in the plan editor", () => {
   });
 
   test("a session that is not connected never sees it and never spends it", async () => {
-    // A Claude Code session without the bridge (mod off, remote, older CLI),
-    // a bridge whose session is gone, and another host entirely.
     const sessions: Session[] = [
       { origin: "claude-code", ai: "providers" },
       { origin: "pi", ai: "gone" },
@@ -227,13 +220,11 @@ describe.if(hasDom)("Ask this session announcement in the plan editor", () => {
     await mountApp({ origin: "claude-code", ai: "bridge" });
     expect(document.querySelector(DIALOG)).toBeNull();
 
-    // The reader's first click, and only then the capabilities answer.
     await act(async () => { document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })); });
     await act(async () => { answerCapabilities(); });
     for (let attempt = 0; attempt < 10; attempt += 1) await settle();
 
     expect(document.querySelector(DIALOG)).toBeNull();
-    // Deferred, not spent: a later load may show it.
     expect(memory.has(ASK_KEY)).toBe(false);
   });
 
@@ -248,17 +239,14 @@ describe.if(hasDom)("Ask this session announcement in the plan editor", () => {
   test("follows the terminal-tools announcement on the next load, never the same one", async () => {
     memory.set(LOOK_AND_FEEL_KEY, "true");
     memory.set(PERMISSION_MODE_KEY, "true");
-    // The Inbox announcement (between the two) is already seen here.
     memory.set(INBOX_KEY, "1");
     await mountApp({ origin: "claude-code", ai: "bridge" });
 
-    // The terminal-tools announcement owns this load.
     expect(document.querySelector(TERMINAL_TOOLS_DIALOG)).not.toBeNull();
     expect(document.querySelector(DIALOG)).toBeNull();
 
     await act(async () => gotIt(TERMINAL_TOOLS_DIALOG).click());
     await settle();
-    // Not back to back on the same load.
     expect(document.querySelector(DIALOG)).toBeNull();
     expect(memory.has(ASK_KEY)).toBe(false);
 
@@ -285,7 +273,6 @@ describe.if(hasDom)("Ask this session announcement in the plan editor", () => {
     memory.set(INBOX_KEY, "1");
     await mountApp({ origin: "claude-code", ai: "bridge" });
 
-    // The setup flow's heading (a structural landmark, not copy under test).
     expect(document.body.textContent).toContain("New: Permission Mode Preservation");
     expect(document.querySelector(DIALOG)).toBeNull();
     expect(memory.has(ASK_KEY)).toBe(false);

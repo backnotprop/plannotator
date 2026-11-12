@@ -70,7 +70,6 @@ class StubEventSource {
 const V1 = "# Rollout plan\n\nFirst draft sentinel alpha.\n";
 const V2 = "# Rollout plan\n\nRevised sentinel bravo.\n";
 
-/** What the fake server holds: the live revision and the plan it shows. */
 const server = {
   revision: 0 as number | undefined,
   plan: V1,
@@ -131,7 +130,6 @@ async function waitUntil(check: () => boolean, attempts = 40): Promise<void> {
   if (!check()) throw new Error("condition not reached");
 }
 
-/** Real-time wait for the 2s revision poll (settle() alone runs no timers). */
 async function waitFor(check: () => boolean, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
@@ -144,7 +142,6 @@ async function waitFor(check: () => boolean, timeoutMs: number): Promise<void> {
 
 function approveButton(): HTMLButtonElement | undefined {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
-    // The decision control's primary reads "Approve" with nothing to send.
     (button) => button.textContent?.trim().endsWith("Approve") ?? false,
   );
 }
@@ -153,7 +150,6 @@ async function mountPlan(): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = makeFetch();
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -189,7 +185,6 @@ describe.if(hasDom)("plan revisions pushed into an open review", () => {
   test("a stale approval loads the revised plan in place and the retry names the new revision", async () => {
     await mountPlan();
 
-    // The agent revises while the reviewer is reading v1.
     server.revision = 1;
     server.plan = V2;
 
@@ -197,7 +192,6 @@ describe.if(hasDom)("plan revisions pushed into an open review", () => {
     await waitUntil(() => document.body.textContent!.includes("sentinel bravo"));
 
     expect(server.decisions[0]).toMatchObject({ endpoint: "/api/approve", body: { planRevision: 0 } });
-    // Still undecided: the reviewer gets to decide on v2.
     const retry = approveButton();
     expect(retry).toBeDefined();
 
@@ -219,26 +213,22 @@ describe.if(hasDom)("plan revisions pushed into an open review", () => {
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    // The agent revises while the reviewer is typing.
     server.revision = 1;
     server.plan = V2;
     const pollsBefore = server.revisionPolls;
     await waitFor(() => server.revisionPolls > pollsBefore, 4000);
     await waitFor(() => false, 600).catch(() => undefined);
 
-    // Held: v1 still on screen, the composer and its text intact.
     expect(document.body.textContent).toContain("sentinel alpha");
     expect(document.body.textContent).not.toContain("sentinel bravo");
     expect(document.querySelector<HTMLTextAreaElement>('[data-comment-popover="true"] textarea')?.value).toBe("Half-written sentinel charlie");
 
-    // Finishing the comment closes the composer; the revision then loads.
     const add = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-comment-popover="true"] button'))
       .find((button) => button.textContent?.trim() === "Add");
     expect(add).toBeDefined();
     await act(async () => add!.click());
     await waitFor(() => document.body.textContent!.includes("sentinel bravo"), 4000);
     expect(document.querySelector('[data-comment-popover="true"]')).toBeNull();
-    // The finished comment survives the revision.
     expect(document.body.textContent).toContain("Half-written sentinel charlie");
   }, 15000);
 
@@ -274,9 +264,6 @@ async function openDecisionComposer(labelPart: string, text: string): Promise<vo
 }
 
 describe.if(hasDom)("plan revisions and the decision control (#1057)", () => {
-  // What regresses: the reviewer is writing "Request changes…" about v1 and
-  // the revision swaps the plan under the note, so the note answers a plan
-  // they never read.
   test("a revision waits while the decision note is being written", async () => {
     await mountPlan();
     await openDecisionComposer("Request changes", "Half-written sentinel delta");
@@ -290,7 +277,6 @@ describe.if(hasDom)("plan revisions and the decision control (#1057)", () => {
     expect(document.body.textContent).not.toContain("sentinel bravo");
     expect(decisionNote()?.value).toBe("Half-written sentinel delta");
 
-    // Putting the note away (Escape: back to the menu, then close) lets it load.
     await act(async () => {
       decisionNote()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
@@ -299,13 +285,10 @@ describe.if(hasDom)("plan revisions and the decision control (#1057)", () => {
     await waitFor(() => document.body.textContent!.includes("sentinel bravo"), 4000);
   }, 15000);
 
-  // What regresses: "Approve with a note…" is refused because the agent
-  // revised the plan; the armed approve survives, the button now reads Send
-  // Feedback (the note is a comment), and a click posts /api/approve anyway.
   test("an approve refused as plan_revised leaves nothing armed: the primary then sends feedback", async () => {
     server.notes = true;
     await mountPlan();
-    server.revision = 1; // the agent revised; the tab has not polled yet
+    server.revision = 1;
     server.plan = V2;
     await openDecisionComposer("Approve with a note", "ship it sentinel echo");
     await act(async () => {

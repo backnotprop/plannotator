@@ -88,10 +88,6 @@ const PLAN = [
 const CROSS_BLOCK_QUOTE =
   "Alpha paragraph one ends at ALPHAEND.\n\nBeta paragraph two opens at BETASTART.";
 
-/** A recovered draft holding one comment that spans the two paragraphs. The
- *  positions are absent on purpose: that is the state an edit-mode commit
- *  leaves every cross-block annotation in, so the restore path under test is
- *  the text search either way. */
 const DRAFT = {
   annotations: [
     {
@@ -135,8 +131,6 @@ async function settle(ms = 0): Promise<void> {
   });
 }
 
-/** The App defers every highlight repaint behind a `setTimeout(…, 100)`, so a
- *  run of zero-delay macrotasks is not enough to see one land. */
 async function settleRepaint(): Promise<void> {
   for (let attempt = 0; attempt < 6; attempt += 1) await settle(60);
 }
@@ -145,7 +139,6 @@ async function mount(plan: Record<string, unknown>): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fetchForPlan(plan);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -158,7 +151,6 @@ const findButton = (label: string): HTMLButtonElement | undefined =>
   Array.from(document.querySelectorAll("button"))
     .find((button) => button.textContent?.trim() === label);
 
-/** Everything painted for one annotation, in document order. */
 const paintedText = (id: string): string =>
   Array.from(document.querySelectorAll<HTMLElement>(
     `[data-bind-id="${id}"], [data-highlight-id="${id}"]`,
@@ -173,8 +165,6 @@ function pressModE(target: EventTarget): void {
   }));
 }
 
-/** CodeMirror's EditorView, via the DOM back-reference EditorView.findFromDOM
- *  reads (@codemirror/view is not a dependency of this package). */
 function editorView(): { state: { doc: { toString(): string } }; dispatch(spec: unknown): void } {
   const content = document.querySelector<HTMLElement>(".cm-editor .cm-content");
   if (!content) throw new Error("CodeMirror content DOM did not render");
@@ -237,8 +227,6 @@ describe.if(hasDom)("edit mode and cross-block highlights", () => {
     await act(async () => { pressModE(content); });
     await settleRepaint();
 
-    // The edit landed, and the untouched comment is still painted over both
-    // paragraphs rather than listed in the panel with no highlight.
     expect(document.body.textContent).toContain("tracing behaviour");
     expect(paintedText("annCrossBlock")).toContain("ALPHAEND");
     expect(paintedText("annCrossBlock")).toContain("BETASTART");

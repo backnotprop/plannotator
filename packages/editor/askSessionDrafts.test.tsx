@@ -58,7 +58,6 @@ function annotation(id: string, fields: Partial<Annotation>): Annotation {
   } as Annotation;
 }
 
-/** Two actionable drafts, like the report: the kind an agent would carry out. */
 const DRAFTS: Annotation[] = [
   annotation('a1', {
     blockId: 'block-1',
@@ -85,8 +84,6 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) cleanup();
 });
 
-/** A server with a pull bridge, a host that answers every question, and the
- *  chat hook's transport routed into the server's real handlers. */
 function serverWithSession(): { received: string[] } {
   const received: string[] = [];
   const bridge: SessionBridge = {
@@ -159,7 +156,6 @@ async function mountChat(): Promise<{ current: Chat | null }> {
   return ref;
 }
 
-/** What App's handleAskAI sends for these annotations. */
 function askParams(chat: Chat, drafts: Annotation[], sessionBridge: boolean) {
   return askAIAnnotationParams({
     sessionBridge,
@@ -184,7 +180,6 @@ describe.if(hasDom)('Ask this session: unsubmitted annotations (#1748)', () => {
       });
     };
 
-    // First question: the drafts arrive in their frame, before the question.
     await ask('Is my first draft right?', DRAFTS);
     expect(received[0]).toBe([
       SESSION_ASK_HEADER,
@@ -203,11 +198,9 @@ describe.if(hasDom)('Ask this session: unsubmitted annotations (#1748)', () => {
       expect(text).not.toContain('Context update');
     }
 
-    // Second question, drafts unchanged: nothing is pasted again.
     await ask('And the second one?', DRAFTS);
     expect(received[1]).toBe([SESSION_ASK_HEADER, 'Surface: annotating your last message', '', 'And the second one?'].join('\n'));
 
-    // A draft removed: the current list replaces the earlier one.
     await ask('Better now?', [DRAFTS[0]]);
     expect(received[2]).toBe([
       SESSION_ASK_HEADER,
@@ -220,7 +213,6 @@ describe.if(hasDom)('Ask this session: unsubmitted annotations (#1748)', () => {
       'Better now?',
     ].join('\n'));
 
-    // Every draft removed: one line says so, once.
     await ask('Anything left?', []);
     expect(received[3]).toBe([SESSION_ASK_HEADER, 'Surface: annotating your last message', '', SESSION_ASK_DRAFTS_CLEARED, '', 'Anything left?'].join('\n'));
     await ask('Done?', []);
@@ -228,11 +220,6 @@ describe.if(hasDom)('Ask this session: unsubmitted annotations (#1748)', () => {
     expect(received).toHaveLength(5);
   });
 
-  // A new thread (the App starts one on every document switch: folder and
-  // bundle files, linked documents) is a new Ask AI session but the SAME agent
-  // session, which already read the list. The failure this guards: the whole
-  // list pasted again per thread, and drafts removed after a thread switch
-  // never reported as cleared, so the agent kept a stale list.
   test('a new thread does not resend the list, and still reports it cleared', async () => {
     const { received } = serverWithSession();
     const chat = await mountChat();
@@ -259,8 +246,6 @@ describe.if(hasDom)('Ask this session: unsubmitted annotations (#1748)', () => {
     expect(received[2]).toBe([SESSION_ASK_HEADER, 'Surface: annotating your last message', '', SESSION_ASK_DRAFTS_CLEARED, '', 'third'].join('\n'));
   });
 
-  // The 0.28.6 wire: a client that still sends the feedback export as
-  // contextUpdate. The server keeps it out of the session.
   test('a feedback-export contextUpdate never reaches the session', async () => {
     const { received } = serverWithSession();
     const chat = await mountChat();

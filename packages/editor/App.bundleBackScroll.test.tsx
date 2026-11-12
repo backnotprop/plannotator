@@ -73,7 +73,6 @@ class SilentEventSource {
   removeEventListener(): void {}
 }
 
-// The issue's fixture: a long bundle file whose every section links out.
 const ROOT = "/tmp/scroll-back-repro";
 const ALPHA = `${ROOT}/review-alpha.md`;
 const BETA = `${ROOT}/review-beta.md`;
@@ -128,8 +127,6 @@ const fakeFetch: typeof fetch = async (input, init) => {
   return Response.json({ ok: true });
 };
 
-// --- Stand-in geometry for <main> and its blocks ----------------------------
-
 const BLOCK_HEIGHT = 100;
 const VIEWPORT_HEIGHT = 500;
 const originalRect = hasDom ? HTMLElement.prototype.getBoundingClientRect : (undefined as unknown as () => DOMRect);
@@ -150,7 +147,6 @@ function installGeometry(): void {
     configurable: true,
     get(this: HTMLElement) {
       if (!isMain(this)) return 0;
-      // A short document pulls the offset back for good, as in a browser.
       const top = Math.min(scrollTops.get(this) ?? 0, maxTop(this));
       scrollTops.set(this, top);
       return top;
@@ -160,8 +156,6 @@ function installGeometry(): void {
       scrollTops.set(this, Math.min(Math.max(0, value), maxTop(this)));
     },
   });
-  // A browser clamps the offset as soon as the content gets shorter, whether
-  // or not anything reads it: do the same on every DOM change.
   clampObserver = new MutationObserver(() => {
     for (const el of document.querySelectorAll<HTMLElement>("main")) void el.scrollTop;
   });
@@ -185,8 +179,6 @@ function removeGeometry(): void {
   else delete (HTMLElement.prototype as { scrollTop?: number }).scrollTop;
 }
 
-// --- Mounting ----------------------------------------------------------------
-
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
@@ -208,7 +200,6 @@ const main = () => document.querySelector<HTMLElement>("main")!;
 const headingText = () => main().querySelector("h1")?.textContent ?? "";
 const showsAlpha = () => (main().textContent ?? "").includes("Section 80");
 
-/** The first block whose bottom is below the viewport's top, and its top. */
 function topBlock(): { id: string | null; top: number } {
   for (const el of blocksOf(main())) {
     const r = el.getBoundingClientRect();
@@ -217,7 +208,6 @@ function topBlock(): { id: string | null; top: number } {
   return { id: null, top: 0 };
 }
 
-/** The link of section 40 ("Open linked Markdown" or "Open HTML module"). */
 function section40Link(text: string): HTMLAnchorElement {
   const links = Array.from(main().querySelectorAll<HTMLAnchorElement>("a")).filter((a) => a.textContent?.trim() === text);
   expect(links.length).toBe(80);
@@ -228,7 +218,6 @@ async function mount(): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fakeFetch;
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -260,7 +249,6 @@ afterAll(() => {
   resetStorageBackend();
 });
 
-/** Scroll review-alpha.md so a block in the middle sits 50px above the top. */
 async function scrollToMiddle(): Promise<{ id: string | null; top: number }> {
   await act(async () => {
     main().scrollTop = 0;
@@ -281,14 +269,14 @@ describe.if(hasDom)("annotate bundle Back keeps the reader's place", () => {
 
     await act(async () => { section40Link("Open linked Markdown").click(); });
     await waitFor(() => headingText().includes("Linked document"), "the linked document");
-    expect(main().scrollTop).toBe(0); // the short document clamped the offset
+    expect(main().scrollTop).toBe(0);
 
     const back = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
       .find((b) => /Back to review-alpha\.md/.test(b.textContent ?? ""));
     expect(back).toBeDefined();
     await act(async () => { back!.click(); });
     await waitFor(showsAlpha, "review-alpha.md to come back");
-    await settle(1_300); // the restore's frames and settle passes
+    await settle(1_300);
 
     expect(topBlock()).toEqual(before);
   });
@@ -299,7 +287,7 @@ describe.if(hasDom)("annotate bundle Back keeps the reader's place", () => {
 
     await act(async () => { section40Link("Open HTML module").click(); });
     await waitFor(() => document.querySelector("[data-html-back]") !== null, "the HTML page's Back control");
-    expect(main().scrollTop).toBe(0); // the page has no blocks: the offset is gone
+    expect(main().scrollTop).toBe(0);
     const htmlBack = document.querySelector<HTMLButtonElement>("[data-html-back]")!;
     expect(`${htmlBack.getAttribute("aria-label") ?? ""} ${htmlBack.textContent ?? ""}`).toContain("review-alpha.md");
 

@@ -1,12 +1,3 @@
-/**
- * AsciiDoc documents in the annotate surface (DOM-gated).
- *
- * `plannotator annotate guide.adoc` serves the RAW file with
- * `renderAs: "asciidoc"`; the document must then be the AsciiDoc parse
- * (`== Install` is a heading, `NOTE:` an alert), not the markdown parse that
- * shows the markup as text. A share link carries the kind as `r: 'asciidoc'`
- * so the portal, which has no server, parses it the same way.
- */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -69,7 +60,6 @@ async function settle(): Promise<void> {
 
 async function mount(plan: Record<string, unknown> | null): Promise<void> {
   globalThis.fetch = planFetch(plan);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);

@@ -73,7 +73,6 @@ const SAVED_COMMENT = {
   createdA: 1,
 };
 
-/** A comment on the ROOT document, recovered from the session draft. */
 const ROOT_COMMENT = {
   id: "root-comment",
   blockId: "",
@@ -88,13 +87,11 @@ const ROOT_COMMENT = {
 interface Recorded { method: string; path: string; search: string; body?: string }
 const requests: Recorded[] = [];
 
-/** What GET /api/draft/document answers in the current test. */
 let documentCopy: { status: number; body: unknown } = {
   status: 200,
   body: { found: true, annotations: [SAVED_COMMENT], globalAttachments: [] },
 };
 
-/** Other documents' copies the session draft offers (the server's index). */
 let offeredDocuments: { path: string; annotations: unknown[]; globalAttachments: unknown[] }[] = [];
 
 const fakeFetch: typeof fetch = async (input, init) => {
@@ -147,7 +144,6 @@ async function mount(): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fakeFetch;
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -177,7 +173,6 @@ afterAll(() => {
 const findButton = (label: string): HTMLButtonElement | undefined =>
   Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === label);
 
-/** Restore the root's comment from the session draft, then open the linked document. */
 async function restoreRootThenOpenLinked(): Promise<number> {
   await mount();
   const restore = findButton("Restore");
@@ -188,7 +183,6 @@ async function restoreRootThenOpenLinked(): Promise<number> {
   if (!link) throw new Error("linked document link not rendered");
   const before = requests.length;
   await act(async () => { link.click(); });
-  // Past the 500ms debounce of both draft writers.
   for (let attempt = 0; attempt < 14; attempt += 1) await settle(60);
   return before;
 }
@@ -204,18 +198,14 @@ describe.if(hasDom)("per-document draft copies", () => {
 
     const read = requests.find((r) => r.path === "/api/draft/document" && r.method === "GET");
     expect(read?.search).toContain(encodeURIComponent(LINKED_PATH));
-    // The saved comment is now the open document's (listed in the panel).
     expect(document.body.textContent).toContain("SAVED_COMMENT_SENTINEL");
 
-    // While the linked document is open, the session draft still carries the
-    // ROOT's comment and never the linked document's.
     const sessionSaves = requests.slice(since).filter((r) => r.path === "/api/draft" && r.method === "POST");
     expect(sessionSaves.length).toBeGreaterThan(0);
     for (const save of sessionSaves) {
       expect(save.body ?? "").toContain("ROOT_COMMENT_SENTINEL");
       expect(save.body ?? "").not.toContain("SAVED_COMMENT_SENTINEL");
     }
-    // The merged copy is never written back empty (or at all: it is unchanged).
     for (const write of documentWrites()) {
       for (const doc of write.documents) {
         if (doc.path === LINKED_PATH) expect(doc.annotations.length).toBeGreaterThan(0);
@@ -238,11 +228,6 @@ describe.if(hasDom)("per-document draft copies", () => {
     expect(writes.at(-1)?.annotations).toEqual([]);
   });
 
-  // The server clears, on a decision, only the copies the deciding page
-  // named itself on (`?client=`). A page that reads or writes copies under
-  // one id and decides under none (or another) makes the server fall back
-  // to clearing every copy the session covered, which includes the copies an
-  // earlier, crashed page wrote and this page never saw.
   test("the document copies and the decision name the same page", async () => {
     documentCopy = { status: 200, body: { found: true, annotations: [SAVED_COMMENT], globalAttachments: [] } };
     await restoreRootThenOpenLinked();
@@ -259,9 +244,6 @@ describe.if(hasDom)("per-document draft copies", () => {
     expect(new URLSearchParams(decision.search).get("client")).toBe(page);
   });
 
-  // Restore brings a copy back from the session draft's offer, which names no
-  // page. Unless the page then reads each copy under its own id, its decision
-  // leaves the copies it sent on disk, and they are offered again next time.
   test("Restore reads every restored copy under the page's id", async () => {
     offeredDocuments = [{ path: LINKED_PATH, annotations: [SAVED_COMMENT], globalAttachments: [] }];
     await mount();
@@ -275,19 +257,16 @@ describe.if(hasDom)("per-document draft copies", () => {
     const params = new URLSearchParams(claim.search);
     expect(params.get("path")).toBe(LINKED_PATH);
     expect(params.get("client")).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
-    // The restored comment is not written back: it is unchanged.
     expect(documentWrites()).toEqual([]);
   });
 
   test("comments on a document the server keeps no copy for ride the session draft", async () => {
-    // An Obsidian vault document, or a symlink alias of the root: 403.
     documentCopy = { status: 403, body: { error: "Path not allowed" } };
     await mount();
     const link = Array.from(document.querySelectorAll("a")).find((a) => a.textContent?.includes("the other doc"));
     if (!link) throw new Error("linked document link not rendered");
     await act(async () => { link.click(); });
     for (let attempt = 0; attempt < 6; attempt += 1) await settle(60);
-    // Restoring while the linked document is open puts the comment on it.
     const restore = findButton("Restore");
     if (!restore) throw new Error("Draft recovery dialog did not offer Restore");
     await act(async () => { restore.click(); });

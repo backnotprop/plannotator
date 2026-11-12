@@ -1,12 +1,3 @@
-/**
- * Whole-file diagram sources in the annotate surface (DOM-gated).
- *
- * `plannotator annotate flow.mmd` serves the file's RAW text with
- * `renderAs: "mermaid"`. The document surface must then be the diagram engine's
- * block — the same one a ```mermaid fence produces — and NOT the markdown
- * parse of that text (which would render "flowchart TD / A[Start] --> B" as
- * paragraphs). The `.dot` case is the Graphviz half of the same contract.
- */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -70,7 +61,6 @@ async function settle(): Promise<void> {
 
 async function mount(plan: Record<string, unknown>): Promise<void> {
   globalThis.fetch = planFetch(plan);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -144,7 +134,6 @@ describeDom("annotate: whole-file diagram sources", () => {
       sharingEnabled: false,
       serverConfig: {},
     });
-    // Give the diagram path the same number of ticks before concluding absence.
     for (let attempt = 0; attempt < 10; attempt += 1) await settle();
     expect(diagramBlock()).toBeNull();
   });

@@ -45,8 +45,6 @@ function seedAnnouncementsSeen(): void {
   memory.set("plannotator-plan-ai-announcement-seen", "1");
 }
 
-// SAFETY: implements the MediaQueryList surface the shell hooks consume.
-// Coarse-pointer matches put the app in its compact touch layout.
 function coarseMatchMedia(query: string): MediaQueryList {
   return {
     matches: query.includes("pointer: coarse"),
@@ -132,7 +130,6 @@ describe.if(hasDom)("compact navigator table of contents", () => {
     seedAnnouncementsSeen();
     window.matchMedia = coarseMatchMedia as typeof window.matchMedia;
     globalThis.fetch = planFetch;
-    // SAFETY: the App only uses EventSource's constructor, handlers, and close.
     globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
 
     host = document.createElement("div");

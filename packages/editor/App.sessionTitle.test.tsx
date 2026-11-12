@@ -1,12 +1,3 @@
-/**
- * `plannotator annotate --title` in the page (DOM-gated, #2289).
- *
- * /api/plan carries the caller's title. The tab and the desktop header must
- * show it, exactly as given, and keep it when a linked document opens. A
- * session without one keeps today's names: the open file in the tab and the
- * header. Failures caught: the App dropping the field, the tab or header
- * building its own name over it, and a linked document taking the tab back.
- */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -53,7 +44,6 @@ class SilentEventSource {
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-/** Serves a one-file session on `proposal.md`, with `design.md` beside it. */
 function sessionFetch(title: string | undefined): typeof fetch {
   return async (input) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
@@ -92,7 +82,6 @@ async function waitFor(check: () => boolean): Promise<void> {
 
 async function mount(title: string | undefined): Promise<void> {
   globalThis.fetch = sessionFetch(title);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -126,7 +115,6 @@ describe.if(hasDom)("annotate --title: the tab and the header", () => {
     await waitFor(() => document.title === TITLE);
     expect(document.title).toBe(TITLE);
     expect(headerName()?.textContent).toBe(TITLE);
-    // The tooltip (and its screen-reader description) still names the file that is open.
     const describedBy = headerName()?.getAttribute("aria-describedby");
     expect(describedBy ? document.getElementById(describedBy)?.textContent : null).toBe("/repo/docs/proposal.md");
 

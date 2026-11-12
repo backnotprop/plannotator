@@ -24,7 +24,6 @@ const App = appModule?.default as typeof import("./App")["default"];
 const originalFetch = globalThis.fetch;
 const originalEventSource = globalThis.EventSource;
 
-// Deliberate copy pin: the dialog's own heading is how this test identifies it.
 const DIALOG_HEADING = "New: Permission Mode Preservation";
 
 const memory = new Map<string, string>();
@@ -93,7 +92,6 @@ async function mount(plan: Record<string, unknown>): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fetchForPlan(plan);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);

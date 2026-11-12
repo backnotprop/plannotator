@@ -64,12 +64,7 @@ function seedAnnouncementsSeen(): void {
   memory.set("plannotator-plan-ai-announcement-seen", "1");
 }
 
-/** External annotations delivered as the stream's opening snapshot, so a test
- *  can seed the session with pre-existing feedback without driving the DOM
- *  annotation flow. Read by the EventSource double at construction time. */
 let seededExternalAnnotations: unknown[] = [];
-/** Per-document saved drafts (`/api/draft/document`), keyed by absolute path:
- *  merged into a folder-session document the first time it opens. */
 const savedDocumentDrafts = new Map<string, unknown[]>();
 
 class StubEventSource {
@@ -114,16 +109,9 @@ interface SubmittedBody {
 }
 
 let submissions: SubmittedBody[] = [];
-/** How many upcoming /api/feedback POSTs answer 500. Each failed attempt is
- *  still recorded in `submissions` so its captured body can be asserted. */
 let failFeedbackPosts = 0;
-/** Upcoming /api/feedback POSTs that reject as a network error (a stopped
- *  server), recorded first. */
 let feedbackNetworkFailures = 0;
-/** Upcoming /api/approve POSTs that answer 500, recorded first. */
 let failApprovePosts = 0;
-/** When true, the next /api/feedback POST gets the servers' already-decided
- *  refusal (another window sent first), recorded first. */
 let refuseNextFeedbackAsDecided = false;
 
 const MARKDOWN = "# Notes\n\nSome body text.\n";
@@ -141,8 +129,6 @@ function annotatePlan(extra: Record<string, unknown> = {}) {
 }
 
 function makeFetch(plan: unknown): typeof fetch {
-  // SAFETY: the app only ever calls fetch(input, init); the double implements
-  // that call signature and not `fetch.preconnect`.
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
     if (rawUrl.startsWith("https://api.github.com/")) return new Response(null, { status: 404 });
@@ -219,7 +205,6 @@ async function settle(): Promise<void> {
 
 async function mount(plan: unknown, waitFor: () => unknown): Promise<void> {
   globalThis.fetch = makeFetch(plan);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -304,11 +289,10 @@ describe.if(hasDom)("annotate decision control", () => {
 
     expect(submissions).toHaveLength(1);
     const body = submissions[0]!;
-    expect(body.endpoint).toBe("feedback"); // NEVER /api/approve (spec §5.3)
+    expect(body.endpoint).toBe("feedback");
     expect(body.feedback).toBe(ANNOTATE_NO_FEEDBACK_SENTENCE);
     expect(body.annotations).toEqual([]);
     expect(body.codeAnnotations).toEqual([]);
-    // #1701: marked so a host can skip the agent turn without reading the sentence.
     expect(body.nothingToSend).toBe(true);
   });
 
@@ -347,9 +331,6 @@ describe.if(hasDom)("annotate decision control", () => {
     expect(body.nothingToSend).toBeUndefined();
   });
 
-  // Maintainer ruling (empty-menu collapse): the non-gate empty menu is ONE
-  // composer. A resurrected "Done with a note…" row would silently split the
-  // decision back into two costumes.
   test("the empty non-gate menu offers exactly one composer item", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
@@ -430,11 +411,10 @@ describe.if(hasDom)("annotate decision control", () => {
     await act(async () => discardItem.click());
     await settle();
 
-    // Frozen copy (maintainer-approved): 'Discard & finish' is the confirm.
     const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
       .find((el) => el.textContent === "Discard & finish");
     if (!confirm) throw new Error("discard confirm did not open");
-    expect(submissions).toHaveLength(0); // nothing sent before the confirm
+    expect(submissions).toHaveLength(0);
     await act(async () => confirm.click());
     await settle();
 
@@ -454,7 +434,6 @@ describe.if(hasDom)("annotate decision control", () => {
     await typeNote("not ready to send");
     await pressNoteKey("Escape");
 
-    // Back at the menu, nothing submitted.
     expect(noteInput()).toBeNull();
     expect(menuItem("Send a note")).toBeDefined();
     expect(submissions).toHaveLength(0);
@@ -465,10 +444,6 @@ describe.if(hasDom)("annotate decision control", () => {
     expect(noteInput()?.value).toBe("not ready to send");
   });
 
-  // L3 pin: a failed POST must keep the captured decision armed — retrying
-  // through the primary replays THAT decision. Without it, the retry would
-  // either drop the armed note or commit it a second time (two
-  // GLOBAL_COMMENTs from one composer submit).
   test("a failed note submit keeps the decision armed; retry replays it without a second note", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
@@ -479,16 +454,12 @@ describe.if(hasDom)("annotate decision control", () => {
     await typeNote("hold the line");
     await pressNoteKey("Enter", { metaKey: true });
 
-    // First attempt: captured decision posted, but the POST failed — no
-    // completion overlay, the session stays reviewable.
     expect(submissions).toHaveLength(1);
     expect(submissions[0]!.endpoint).toBe("feedback");
     expect(submissions[0]!.feedback).toContain("hold the line");
     const primary = primaryButton();
-    expect(primary).not.toBeNull(); // still reviewable, not submitted
+    expect(primary).not.toBeNull();
 
-    // Retry via the primary: the armed decision replays with the SAME single
-    // note — never a re-commit, never a dropped note.
     await act(async () => primary!.click());
     await settle();
 
@@ -501,10 +472,9 @@ describe.if(hasDom)("annotate decision control", () => {
     expect(notes[0]!.text).toBe("hold the line");
   });
 
-  // The HTML pinpoint Esc ladder must still receive Escape when the popover
-  // is closed: the control's dismissal hook consumes Escape at the document
-  // level, so a leak here (listening while closed) would eat the ladder's
-  // first rung on every raw-HTML/live-app session.
+  // The HTML pinpoint Esc ladder must still receive Escape when the popover is closed: the
+  // control's dismissal hook consumes Escape at the document level, so a leak here (listening while
+  // closed) would eat the ladder's first rung on every raw-HTML/live-app session.
   test("HTML surface: Escape is consumed only while the decision popover is open", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
@@ -522,25 +492,18 @@ describe.if(hasDom)("annotate decision control", () => {
     const whileOpen = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     await act(async () => { document.body.dispatchEvent(whileOpen); });
     await settle();
-    expect(whileOpen.defaultPrevented).toBe(true); // the popover's rung
+    expect(whileOpen.defaultPrevented).toBe(true);
     expect(document.querySelector("[data-decision-popover]")).toBeNull();
 
     const whileClosed = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     await act(async () => { document.body.dispatchEvent(whileClosed); });
-    // Not consumed by the decision layer: the annotate Esc ladder (bridge /
-    // vim / draft rungs) still sees it.
     expect(whileClosed.defaultPrevented).toBe(false);
     expect(submissions).toHaveLength(0);
   });
 
-  // Guards the exact regression this project exists to fix on the surface
-  // that has no Mod+Enter (spec §8 E16): compact at zero must offer a visible
-  // positive decision row, and it must post the legacy Done body.
   test("compact touch offers a positive decision row at zero and it posts the legacy body", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
-    // SAFETY: implements the MediaQueryList surface the shell hooks consume;
-    // coarse-pointer matches put the app in its compact touch layout.
     window.matchMedia = ((query: string) => ({
       matches: query.includes("pointer: coarse"),
       media: query,
@@ -574,13 +537,11 @@ describe.if(hasDom)("annotate decision control", () => {
   });
 });
 
-/** A file row in the folder session's sidebar tree (labelled without `.md`). */
 function fileButton(name: string): HTMLButtonElement | undefined {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
     .find((button) => button.textContent?.trim() === name);
 }
 
-/** The completion overlay's state attribute, or null while no overlay shows. */
 function completionState(): string | null {
   return document.querySelector("[data-completion-state]")?.getAttribute("data-completion-state") ?? null;
 }
@@ -589,21 +550,9 @@ function completionTitle(): string | null {
   return document.querySelector("[data-completion-state] h2")?.textContent ?? null;
 }
 
-/**
- * The completion screen must say what actually happened. A Done with nothing
- * to send posts the nothing-to-send body, which every host treats as a no-op
- * (Pi: "Annotation closed (no feedback).", OpenCode: no turn, the Claude Code
- * mod: a logged no-op), so a "Feedback Sent" / "will address your feedback"
- * screen there told the reviewer the agent got something it never did.
- */
 describe.if(hasDom)("annotate completion screen", () => {
   type GlimpseWindow = Window & { glimpse?: { close?: () => void } };
 
-  // The footer's "Your response has been sent." line renders in the auto-close
-  // `closed` phase: an immediate auto-close whose close request went to a host
-  // window (Glimpse, or the VS Code panel's parent frame), so the tab stays up.
-  // With the default delay the footer shows the auto-close prompt instead and
-  // an assertion about the line would pass vacuously.
   afterEach(() => {
     delete (window as GlimpseWindow).glimpse;
   });
@@ -639,7 +588,6 @@ describe.if(hasDom)("annotate completion screen", () => {
 
     expect(submissions[0]!.nothingToSend).toBe(true);
     expect(completionState()).toBe("done");
-    // Deliberate label: the title names the decision the reviewer made.
     expect(completionTitle()).toBe("Done");
     expectNoSentClaim();
   });
@@ -657,8 +605,6 @@ describe.if(hasDom)("annotate completion screen", () => {
     expect(submissions[0]!.nothingToSend).toBeUndefined();
     expect(completionState()).toBe("denied");
     expect(completionTitle()).toBe("Feedback Sent");
-    // Something was sent, so the footer still says so (this also proves the
-    // harness reaches the footer line the nothing-sent tests assert away).
     expect(completionText()).toContain("has been sent");
   });
 
@@ -695,7 +641,6 @@ describe.if(hasDom)("annotate completion screen", () => {
       loadVaultTree: async () => Response.json({ error: "Unavailable" }, { status: 404 }),
       watchTrees: () => undefined,
     });
-    // alpha.md carries a saved comment, merged in when the file opens.
     savedDocumentDrafts.set("/repo/alpha.md", [{
       id: "alpha-1",
       blockId: "",
@@ -719,7 +664,7 @@ describe.if(hasDom)("annotate completion screen", () => {
       for (let attempt = 0; attempt < 20; attempt += 1) await settle();
     }
     await openFile("alpha");
-    await openFile("beta"); // the comment now lives on a document that is not open
+    await openFile("beta");
 
     await clickPrimary();
 
@@ -805,18 +750,9 @@ describe.if(hasDom)("annotate completion screen", () => {
   });
 });
 
-/**
- * #1392: `plannotator annotate`, the server stopped with the page open, Send
- * feedback: the POST rejected and the page showed nothing, so the reviewer
- * believed it was sent. A failed send must keep the session as it was, say
- * the feedback was not sent, and offer Retry and Copy feedback.
- */
 describe.if(hasDom)("annotate: a send that does not reach Plannotator", () => {
-  // Sonner keeps earlier tests' toasts in its module store, so find this one
-  // by its title rather than taking the first toast on the page.
   const failureToast = () =>
     Array.from(document.querySelectorAll<HTMLElement>("[data-sonner-toast]"))
-      // A dismissed toast stays in the DOM while it animates out.
       .filter((el) => el.getAttribute("data-removed") !== "true")
       .find((el) => el.querySelector("[data-title]")?.textContent?.endsWith(" not sent"));
   const toastButton = (label: string) =>
@@ -850,14 +786,12 @@ describe.if(hasDom)("annotate: a send that does not reach Plannotator", () => {
 
       expect(submissions).toHaveLength(1);
       expect(completionState()).toBeNull();
-      // Deliberate copy: the title says the feedback did not go out, and why.
       expect(failureToast()!.textContent).toContain("Feedback not sent");
       expect(failureToast()!.textContent).toContain("isn't running");
       expect(primaryButton()!.disabled).toBe(false);
 
       await act(async () => toastButton("Copy feedback")!.click());
       await waitFor(() => copied.length > 0, "the copy");
-      // The annotate-file framing Copy adds (it names the file) around the note.
       expect(copied[0]).toContain("keep the second example");
       expect(copied[0]).toContain("/tmp/notes.md");
       await waitFor(() => toastButton("Copied"), "the Copied label");
@@ -910,7 +844,6 @@ describe.if(hasDom)("annotate: a send that does not reach Plannotator", () => {
     expect(submissions[0]!.endpoint).toBe("approve");
     expect(completionState()).toBeNull();
     expect(failureToast()!.textContent).toContain("Approval not sent");
-    // A bare approval carries no text, so there is nothing to copy.
     expect(Boolean(toastButton("Copy feedback"))).toBe(false);
   });
 
@@ -928,9 +861,6 @@ describe.if(hasDom)("annotate: a send that does not reach Plannotator", () => {
     expect(failureToast()).toBeUndefined();
   });
 
-  // Another window (or the agent) decided this review first: the server
-  // refuses with 409 already_decided. Retrying can never work, so the
-  // message says why and offers only Copy feedback.
   test("already decided elsewhere: its own message, Copy feedback, no Retry", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();

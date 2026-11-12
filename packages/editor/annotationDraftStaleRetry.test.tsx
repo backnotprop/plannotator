@@ -73,7 +73,6 @@ function sandboxFile(): string {
   return filePath;
 }
 
-/** Route /api/draft to `session`; returns the generations POSTed. */
 function serve(session: AnnotateDraftSession): number[] {
   const posted: number[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -107,15 +106,12 @@ describe.if(hasDom)('session draft saves the server refuses', () => {
     const filePath = sandboxFile();
     const sessionA = createAnnotateDraftSession({ contentKey: contentHash('v1'), filePath });
     const sessionB = createAnnotateDraftSession({ contentKey: contentHash('v2'), filePath });
-    // A saved at generation 20; B restores from that path copy.
     sessionA.save({ annotations: [comment('from-a')], globalAttachments: [], draftGeneration: 20, ts: 1 });
     const posted = serve(sessionB);
     await mountHarness();
 
-    // A decides at generation 25 while B is still open.
     sessionA.settle(25);
 
-    // B's reviewer adds a comment: the save at 21 is refused, then retried above 25.
     await act(async () => { root?.render(<Harness annotations={[comment('from-b')]} />); });
     await tick(700);
 
@@ -134,7 +130,6 @@ describe.if(hasDom)('session draft saves the server refuses', () => {
     const posted = serve(session);
     await mountHarness();
 
-    // Another tab of this review sent the decision.
     session.settle(6);
 
     await act(async () => { root?.render(<Harness annotations={[comment('already-sent')]} />); });
@@ -151,8 +146,6 @@ describe.if(hasDom)('session draft saves the server refuses', () => {
     const posted = serve(session);
     await mountHarness();
 
-    // The reviewer types; the debounced save has not fired yet when the
-    // agent closes the session (App flushes on the session-closed event).
     await act(async () => { root?.render(<Harness annotations={[comment('typed-at-close')]} />); });
     session.closeKeepingDraft();
     await act(async () => { flushPendingSave(); });

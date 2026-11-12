@@ -24,18 +24,10 @@ export interface AnnotateApprovalBodyInput {
   feedback: string;
   annotations: unknown[];
   codeAnnotations: unknown[];
-  /** Which message the notes are about (annotate-last picker). */
   selectedMessageId?: string;
-  /** "messages" when the notes span more than one selected message. */
   feedbackScope?: "message" | "messages";
 }
 
-/**
- * The zero-feedback payload sentence. Every existing CLI consumer's plain-mode
- * output and the strict-gate exit codes depend on this exact byte sequence
- * (spec §5.3/§6.1), and the approval framing below reuses it so "Done with a
- * note…" can never read as a change request.
- */
 export const ANNOTATE_NO_FEEDBACK_SENTENCE =
   "User reviewed the document and has no feedback.";
 
@@ -70,7 +62,6 @@ export interface CompleteAnnotateFeedbackInput {
   /** Documents OTHER than the one `annotations` describes — never the same
    *  document again (see resolveFeedbackSections). */
   linkedDocuments: Map<string, LinkedDocAnnotationEntry>;
-  /** Heading for the linked-documents section; defaults to the plan wording. */
   linkedDocumentsHeading?: LinkedDocExportHeading;
   editorAnnotations: EditorAnnotation[];
   codeAnnotations: CodeAnnotation[];
@@ -80,15 +71,6 @@ export interface CompleteAnnotateFeedbackInput {
   directEditsSection: string;
   savedFileChangesSection: string;
   messageEntries?: MessageAnnotationEntry[];
-  /**
-   * Positive-finish framing. Non-gated annotate has no approve channel —
-   * every outcome is one feedback string — so this prefixes the zero-state
-   * sentence before the annotation sections (idempotent when the text already
-   * is the sentence). Since the empty-menu collapse (the maintainer merged
-   * "Done with a note…" into the single unframed "Send a note…"), the only
-   * caller is the non-gated discard path, which frames its positive finish
-   * over any direct edits that still ride along.
-   */
   approvalFraming?: boolean;
 }
 
@@ -133,12 +115,6 @@ export function buildCompleteAnnotateFeedback(
       if (hasLinkedAnnotations) {
         const enriched = new Map<string, LinkedDocAnnotationEntry>();
         for (const [filepath, entry] of input.linkedDocuments) {
-          // Parse each linked doc exactly the way it was rendered: plain-text
-          // sources (.yaml/.json/.toml/…) keep a leading `---` as real content,
-          // so stripping it here would shift every block id and mis-label the
-          // exported line numbers.
-          // Blocks the caller already derived (resolveFeedbackSections, which
-          // is also diagram-aware) are kept as they are.
           enriched.set(filepath, entry.markdown && !entry.blocks
             ? { ...entry, blocks: blocksForDocument(filepath, entry.markdown) }
             : entry);
@@ -151,8 +127,6 @@ export function buildCompleteAnnotateFeedback(
       if (hasCodeAnnotations) {
         annotationsText += exportCodeFileAnnotations(input.codeAnnotations);
       }
-      // The secondary sections open with a blank line to separate them from
-      // the section before; with no primary section that line led the payload.
       annotationsText = annotationsText.replace(/^\n+/, "");
     }
   }

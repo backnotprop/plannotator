@@ -77,7 +77,6 @@ class SilentEventSource {
   removeEventListener(): void {}
 }
 
-/** The file when the reviewer commented on it. */
 const ORIGINAL = [
   "# Chip notes",
   "",
@@ -86,8 +85,6 @@ const ORIGINAL = [
   "Cache keys collide on Windows paths.",
 ].join("\n");
 
-/** The same file after an agent edit: lines inserted above both comments,
- *  the retry sentence extended, the cache sentence rewritten (its quote gone). */
 const EDITED = [
   "# Chip notes",
   "",
@@ -104,11 +101,9 @@ const EDITED = [
   "Cache keys now hash the full path.",
 ].join("\n");
 
-/** The 1-based line `needle` sits on in `doc`. */
 const lineOf = (doc: string, needle: string): number =>
   doc.split("\n").findIndex((line) => line.includes(needle)) + 1;
 
-/** Two comments made on ORIGINAL, as the draft stored them. */
 const DRAFT_ANNOTATIONS: Annotation[] = [
   {
     id: "annRetry",
@@ -134,9 +129,6 @@ const DRAFT_ANNOTATIONS: Annotation[] = [
     startMeta: { parentTagName: "P", parentIndex: 1, textOffset: 11 },
     endMeta: { parentTagName: "P", parentIndex: 1, textOffset: 29 },
   },
-  // No stored positions (Edit Mode's remap drops them when a block moves), so
-  // a restore can only search for the quote. When the search fails nothing
-  // is painted at all — the case that used to raise no chip.
   {
     id: "annPaths",
     blockId: "block-2",
@@ -186,7 +178,6 @@ function fetchFor(document: string): typeof fetch {
     }
     return Response.json({});
   };
-  // SAFETY: the app only ever calls fetch(input, init).
   return impl as unknown as typeof fetch;
 }
 
@@ -199,7 +190,6 @@ async function settle(ms = 0): Promise<void> {
   });
 }
 
-/** Highlight repaints are deferred behind a `setTimeout(…, 100)`. */
 async function settleRepaint(): Promise<void> {
   for (let attempt = 0; attempt < 6; attempt += 1) await settle(60);
 }
@@ -208,7 +198,6 @@ async function mountAndRestore(document_: string): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fetchFor(document_);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -232,7 +221,6 @@ async function sendFeedback(): Promise<FeedbackBody> {
   return submissions[0]!;
 }
 
-/** The numbered entry heading that quotes `quote`. */
 const entryHeading = (feedback: string, quote: string): string => {
   const line = feedback.split("\n").find((l) => /^#+ \d+\. /.test(l) && l.includes(quote));
   if (!line) throw new Error(`no entry quoting "${quote}" in:\n${feedback}`);
@@ -261,7 +249,6 @@ describe.if(hasDom)("restoring a draft across a file edit", () => {
   test("the export labels each comment with the line its text is on now", async () => {
     await mountAndRestore(EDITED);
 
-    // The comment whose text survived is painted where the text now is.
     expect(document.querySelector('[data-bind-id="annRetry"], [data-highlight-id="annRetry"]'))
       .not.toBeNull();
 
@@ -270,7 +257,6 @@ describe.if(hasDom)("restoring a draft across a file edit", () => {
     const retryLine = lineOf(EDITED, "The retry loop");
     expect(retryLine).toBe(11);
     expect(entryHeading(feedback, "The retry loop")).toContain(`(line ${retryLine}) `);
-    // block-1 is now "Added context paragraph one." on line 3: the old label.
     expect(feedback).not.toContain("(line 3)");
   });
 
@@ -280,8 +266,6 @@ describe.if(hasDom)("restoring a draft across a file edit", () => {
     for (const id of ["annCache", "annPaths"]) {
       expect(document.querySelector(`[data-bind-id="${id}"], [data-highlight-id="${id}"]`)).toBeNull();
     }
-    // One chip each: annCache's positions resolved onto other text, annPaths
-    // had none to try. Both are equally absent from the document.
     expect(document.querySelectorAll("[data-annotation-unanchored]").length).toBe(2);
     expect(document.body.textContent).toContain("normalize separators");
     expect(document.body.textContent).toContain("what about UNC paths");
@@ -292,9 +276,7 @@ describe.if(hasDom)("restoring a draft across a file edit", () => {
       ["collide on Windows", "normalize separators"],
       ["Windows paths", "what about UNC paths"],
     ] as const) {
-      // Still delivered — the reviewer's words are not dropped...
       expect(feedback).toContain(comment);
-      // ...but with no line label: block-2 now names "## Background" (line 5).
       expect(entryHeading(feedback, `"${quote}"`)).not.toContain("(line");
     }
   });
@@ -314,7 +296,6 @@ describe.if(hasDom)("restoring a draft across a file edit", () => {
     );
     expect(body.feedback).toContain(expected);
     expect(expected).toContain(`(line ${lineOf(ORIGINAL, "The retry loop")}) `);
-    // The stored anchors went out untouched.
     const sent = new Map((body.annotations ?? []).map((a) => [a.id, a.blockId]));
     expect(sent.get("annRetry")).toBe("block-1");
     expect(sent.get("annCache")).toBe("block-2");
@@ -322,9 +303,6 @@ describe.if(hasDom)("restoring a draft across a file edit", () => {
   });
 
   test("diff-view comments and checkbox toggles are not restored as text, chipped or moved", async () => {
-    // A checkbox toggle quotes its list item's raw markdown and is keyed by
-    // that block; a diff-view comment's blockId indexes the version diff.
-    // Neither is a text highlight, so a restore must leave both alone.
     const doc = [ORIGINAL, "", "- [ ] Ship **the** fix"].join("\n");
     const task = parseMarkdownToBlocks(doc).find((b) => b.content.includes("Ship"));
     if (!task) throw new Error("task block did not parse");

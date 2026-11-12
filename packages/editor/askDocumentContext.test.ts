@@ -12,8 +12,6 @@ import {
 const file = (path: string, content = `# ${path}\n\nBody of ${path}.\n`, extra: Partial<Parameters<typeof describeAskDocument>[0]> = {}) =>
   describeAskDocument({ kind: 'document', path, renderAs: 'markdown', content, ...extra });
 
-/** Ask one question per document, as the editor does: each question's note is
- *  delivered, so the latch moves on to what it named. */
 function askAlong(docs: AskDocument[], sessionBridge = false): string[] {
   let latch: AskDocumentLatch = EMPTY_ASK_DOCUMENT_LATCH;
   return docs.map((doc, i) => {

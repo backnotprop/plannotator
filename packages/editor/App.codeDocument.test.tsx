@@ -1,11 +1,3 @@
-/**
- * Config and data files in the annotate surface (DOM-gated).
- *
- * `plannotator annotate config.toml` serves the RAW file with
- * `renderAs: "code"`; the document must then be ONE code block in the file's
- * language, not the markdown parse that turned each `#` comment into a
- * heading and each backticked name into a code chip (#1099's follow-up).
- */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -75,7 +67,6 @@ async function settle(): Promise<void> {
 
 async function mount(plan: Record<string, unknown>): Promise<void> {
   globalThis.fetch = planFetch(plan);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -98,7 +89,6 @@ const annotatePlan = (renderAs: string, filePath = "/tmp/config.toml") => ({
   serverConfig: {},
 });
 
-// Headings of the DOCUMENT only: the annotations panel has its own <h2>.
 const headings = () => [...(host?.querySelectorAll("h1, h2, h3, h4, h5, h6") ?? [])].filter((h) => h.closest("[data-block-id]"));
 const documentCode = () => host?.querySelector("[data-block-id] pre code") ?? null;
 
@@ -130,8 +120,6 @@ describeDom("annotate: config files as code", () => {
   });
 
   test("the version diff of a .toml shows its chunks as code, not markdown", async () => {
-    // The failure: App never told the diff view the document is code, so the
-    // previous version's comments rendered as headings again in the diff.
     await mount({
       ...annotatePlan("code"),
       previousPlan: TOML.replace("(version 1)", "(version 2)"),
