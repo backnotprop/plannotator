@@ -122,6 +122,9 @@ test('the thread’s ⋯ ticks a second thread into the tag; the tag’s list sh
   await expect(page).toHaveURL(/#tag=ini_/);
   await expect(page.locator('.ib-lhead h1')).toContainText('Release');
   await expect(page.locator('[data-list-title-note]')).toHaveText('2 threads · 2 projects');
+  // MSI signing was read when it opened, so it sits in Quiet, folded by default: open the band to see its row.
+  const quiet = page.locator('[data-section-id="quiet"] .ib-band');
+  if ((await quiet.count()) > 0 && (await quiet.getAttribute('aria-expanded')) === 'false') await quiet.click();
   await expect(rowButton(page, threads.notes)).toBeVisible();
   await expect(rowButton(page, threads.signing)).toBeVisible();
   await expect(rowButton(page, threads.index)).toHaveCount(0);
