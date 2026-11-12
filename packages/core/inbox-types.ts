@@ -431,6 +431,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
   cline: "Cline",
+  openclaw: "OpenClaw",
 };
 
 /**
@@ -448,7 +449,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "codex", "qwen", "t3"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "codex", "qwen", "t3"] as const;
 
 /** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
 export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
@@ -2431,6 +2432,7 @@ export type InboxAgentId =
   | "pi"
   | "opencode"
   | "dsh"
+  | "openclaw"
   | "claude-app";
 
 export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
@@ -2446,6 +2448,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "pi",
   "opencode",
   "dsh",
+  "openclaw",
   "claude-app",
 ];
 
@@ -2462,6 +2465,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   pi: "Pi",
   opencode: "OpenCode",
   dsh: "DeepSeek Harness",
+  openclaw: "OpenClaw",
   "claude-app": "Claude app",
 };
 
@@ -2727,7 +2731,7 @@ export interface InboxAgentsModel {
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2819,7 +2823,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -3013,6 +3017,7 @@ export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number
   dsh: INBOX_TOOL_COST_NOW,
   // Cline sends every tool's JSON Schema with each request too; not measured on a real Cline, so Pi's stands in.
   cline: INBOX_TOOL_COST_NOW,
+  openclaw: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */

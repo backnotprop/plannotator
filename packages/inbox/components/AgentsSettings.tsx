@@ -419,7 +419,7 @@ function AgentGroup({
   // computer"), and only once that is known and settled: never in, then out.
   const offLine = (kind: OffKind, text: string) => (row.detected === true && !settling ? { kind, text } : null);
   // DeepSeek Harness decides once, when it starts (its plugin), never per session.
-  const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : `${row.label}'s next session`;
+  const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : row.id === 'openclaw' ? "OpenClaw's next message" : `${row.label}'s next session`;
   const reach = row.reach;
   const reachValue =
     reach.kind === 'tool' ? (
