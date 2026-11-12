@@ -7,8 +7,6 @@ export function isInboxCloudHost(host: unknown): boolean {
   return host === "cloud" || host === "cloud-claude" || host === "cloud-grok" || host === "cloud-muse";
 }
 
-export const INBOX_CLOUD_POLLING_HOSTS: ReadonlySet<string> = new Set(["cloud-muse"]);
-
 export const INBOX_CLOUD_WAKE_GAP_MS = 60_000;
 
 export const INBOX_CLOUD_WAKE_TIMEOUT_MS = 15_000;

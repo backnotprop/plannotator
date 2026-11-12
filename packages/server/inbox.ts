@@ -218,7 +218,7 @@ import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
-import { CloudAgentError, createInboxCloudAgents } from "./inbox-cloud-agents";
+import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { createInboxAgentDoor, INBOX_AGENT_DOOR_PATH } from "./inbox-agent-door";
 import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
 import {
@@ -4126,6 +4126,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
     wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? cloudWake.status(session),
+    pollsItself: (session) => cloudPollsItself(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
     onPoll: (session, continues) =>
@@ -4203,6 +4204,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     devices: () => phones?.agentDevices ?? null,
     relayUp: () => relay?.reachable() ?? null,
   });
+  const cloudPollsItself = (session: string): boolean => {
+    const agent = cloudAgents.agent(session);
+    return agent !== null && !hasCloudWake(agent);
+  };
+  store.setCloudPolling(cloudPollsItself);
   const agentSignalsFor = (line: InboxLine): string[] => {
     if (line.kind !== "message" || line.record.author.kind !== "person" || line.at !== line.record.created_at) return [];
     const threadId = line.record.thread_id;

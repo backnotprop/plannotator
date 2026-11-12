@@ -86,6 +86,7 @@ export interface InboxAgentSession {
  * polls (live, no grace). `busy` null when the connection does not say.
  */
 export interface InboxRecipientConnection {
+  polls?: true;
   busy: boolean | null;
   idle_since: string | null;
   /** Send now can be offered: the connection said it can deliver into a running turn. */
@@ -354,6 +355,7 @@ export function createInboxLiveSessions(options: {
    * session never "ends" for want of a poll: only `dead` ends it.
    */
   wakeOnlyStatus?: (session: string) => "alive" | "dead" | null;
+  pollsItself?: (session: string) => boolean;
   /** The items of a session the Inbox wakes itself that may not have reached it (a `codex queue` that ran out of time). */
   uncertainItemsOf?: (session: string) => string[];
   /** Each poll, with the sessions its conversation continues (nearest first): the agent icons' faces link it (inbox-agent-faces.ts). */
@@ -1021,9 +1023,11 @@ export function createInboxLiveSessions(options: {
   const connectionOf = (asked: string): InboxRecipientConnection | null => {
     // A session whose conversation goes on under another id is connected as that one is.
     const stand = standInOf(asked);
-    if (!stand) return options.wakeOnlyStatus?.(asked) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(asked) } : null;
+    const polls = options.pollsItself?.(asked) ? { polls: true as const } : {};
+    if (!stand) return options.wakeOnlyStatus?.(asked) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(asked), ...polls } : null;
     const { session, entry } = stand;
     return {
+      ...polls,
       busy: entry.busy,
       idle_since: entry.busy === false && entry.idleSince !== null ? iso(entry.idleSince) : null,
       send_now: entry.sendNow,
