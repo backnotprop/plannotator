@@ -4,14 +4,16 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { GithubPRMetadata, PRContext } from '@plannotator/shared/pr-types';
 import { ReviewStateProvider, type ReviewState } from '../dock/ReviewStateContext';
-import { ReviewPRArtifactsPanel } from '../dock/panels/ReviewPRArtifactsPanel';
 import { buildPRArtifacts } from '../utils/prArtifacts';
 import { MarkdownBody } from './MarkdownBody';
-import { AnnotatableDescription } from './AnnotatableDescription';
 import { artifactContentProxyUrl } from '../dock/panels/artifactDocument';
 import { mediaArtifact } from '../utils/prMediaTarget';
 
 const hasDom = typeof document !== 'undefined';
+
+// The highlighter reads `window` at import; load these lazily.
+const { ReviewPRArtifactsPanel } = hasDom ? await import('../dock/panels/ReviewPRArtifactsPanel') : ({} as typeof import('../dock/panels/ReviewPRArtifactsPanel'));
+const { AnnotatableDescription } = hasDom ? await import('./AnnotatableDescription') : ({} as typeof import('./AnnotatableDescription'));
 
 const SHOT = 'https://github.com/user-attachments/assets/1111-shot';
 const CLIP = 'https://github.com/user-attachments/assets/2222-clip';
