@@ -1,3 +1,4 @@
+/// <reference path="./sql-text.d.ts" />
 /**
  * The Inbox database's migrations, carried inside the program: each `migration.sql` drizzle-kit wrote is
  * imported as text, so `bun build --compile` embeds it and the binary needs no migrations folder on disk.

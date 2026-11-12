@@ -209,7 +209,7 @@ import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import { InboxError, inboxDir } from "./schema";
-import type { InboxLog, InboxLogFactory, InboxLogState } from "./store-log/log";
+import type { InboxLog, InboxLogFactory, InboxLogState, InboxStoreBackup } from "./store-log/log";
 import { agentNamesHere, archiveSeqAfter, cardAfter, firstLineName, firstLineTagKeys, movesAddress, pullEventOf, threadNameIndexKey } from "./store-log/history";
 import { jsonlInboxLog } from "./store-log/jsonl-log";
 
@@ -439,6 +439,10 @@ export interface InboxDiskUsage {
   dir: string;
   bytes: number;
   projects: InboxProjectUsage[];
+  /** A log kept in one file (SQLite, behind its switch): that file's bytes, counted in `bytes` once instead of each project's lines. */
+  database?: number;
+  /** The dated backups a move left (SQLite, behind its switch), counted in `bytes`: Settings → Storage lists each with Remove. */
+  backups?: InboxStoreBackup[];
 }
 
 /**
@@ -1042,9 +1046,12 @@ export class InboxStore {
    */
   private restore(state: InboxLogState): void {
     this.changes += 1;
-    for (const { line, firstSeq } of state.records) {
-      if (line.seq > this.seq) this.seq = line.seq;
-      this.latest.set(`${line.kind}:${line.id}`, line);
+    for (const { line: latest, firstSeq } of state.records) {
+      if (latest.seq > this.seq) this.seq = latest.seq;
+      this.latest.set(`${latest.kind}:${latest.id}`, latest);
+      // A latest line that fails its check (steps, PRs, initiatives): the record before it stays, as in `apply`.
+      const kept = state.kept?.get(`${latest.kind}:${latest.id}`);
+      const line = kept ? ({ ...latest, record: kept } as InboxLine) : latest;
       switch (line.kind) {
         case "message":
           this.placeMessage(line.record, firstSeq, true);
@@ -3781,6 +3788,9 @@ export class InboxStore {
     // Every blob once in the total; a project and a thread count each blob they use once.
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
     let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes() + this.decisionLinesBytes();
+    // A log in one file is counted as that file (its lines still size each project and thread), plus its backups.
+    const inOneFile = this.log.stored?.();
+    if (inOneFile) total += inOneFile.bytes + inOneFile.backups.reduce((sum, backup) => sum + backup.bytes, 0);
     // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
     for (const stored of this.allProjects()) {
       const head = this.canonicalProjectId(stored.id);
@@ -3799,7 +3809,8 @@ export class InboxStore {
       for (const sha256 of projectBlobs) bytes += blobSizes.get(sha256) ?? 0;
       const onDisk = this.log.usage(project);
       bytes += onDisk.bytes;
-      total += onDisk.bytes;
+      // Each project's lines are the total's on JSONL; in one file, that file was counted above.
+      if (!inOneFile) total += onDisk.bytes;
       for (const { line, bytes: lineBytes } of onDisk.lines) {
         const messageId =
           line.kind === "message"
@@ -3829,7 +3840,12 @@ export class InboxStore {
       });
     }
     projects.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
-    return { dir: this.dir, bytes: total, projects };
+    return { dir: this.dir, bytes: total, projects, ...(inOneFile ? { database: inOneFile.bytes, backups: inOneFile.backups } : {}) };
+  }
+
+  /** Settings → Storage's Remove on a dated backup (SQLite only): false when there is no such backup. */
+  removeBackup(name: string): boolean {
+    return this.log.removeBackup?.(name) ?? false;
   }
 
   // ─────────────────────────── writing ───────────────────────────
