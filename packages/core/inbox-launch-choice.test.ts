@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { launchChoiceArgs, parseClaudeChoices, parseLaunchChoice, parsePiChoices } from "./inbox-launch-choice";
+import { codexThreadChoice, launchChoiceArgs, launchEffortsFor, parseClaudeChoices, parseCodexModels, parseLaunchChoice, parsePiChoices } from "./inbox-launch-choice";
 
 // Claude Code 2.1.322's and Pi 1.5's help, as their CLIs print it (wrapped).
 const CLAUDE_HELP = `  --effort <level>                      Effort level for the current session
@@ -56,5 +56,32 @@ describe("model and effort at launch", () => {
     expect(parseClaudeChoices("Usage: claude [options]")).toEqual(parseClaudeChoices(CLAUDE_HELP));
     expect(parsePiChoices(PI_HELP, PI_MODELS)).toEqual({ models: ["openai/gpt-5.5", "anthropic/claude-opus-4-1"], efforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"], effort_word: "Thinking" });
     expect(parsePiChoices("", null).models).toEqual([]);
+  });
+
+  test("Codex: its model/list gives the models its picker shows and each one's levels; the choice goes on the thread, checked again", () => {
+    const level = (reasoningEffort: string) => ({ reasoningEffort, description: "" });
+    const answer = {
+      data: [
+        { id: "gpt-6.1-sol", hidden: false, supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map(level) },
+        { id: "gpt-5.5", hidden: false, supportedReasoningEfforts: ["low", "medium", "high", "xhigh"].map(level) },
+        { id: "internal-preview", hidden: true, supportedReasoningEfforts: [level("low")] },
+        { id: "--model", hidden: false, supportedReasoningEfforts: [level("-x")] },
+      ],
+    };
+    const lists = parseCodexModels(answer)!;
+    expect(lists).toEqual({
+      models: ["gpt-6.1-sol", "gpt-5.5"],
+      efforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+      effort_word: "Effort",
+      model_efforts: { "gpt-6.1-sol": ["low", "medium", "high", "xhigh", "max", "ultra"], "gpt-5.5": ["low", "medium", "high", "xhigh"] },
+    });
+    expect(launchEffortsFor(lists, "gpt-5.5")).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(launchEffortsFor(lists, undefined)).toEqual(lists.efforts);
+    expect(parseCodexModels({ data: [] })).toBeNull();
+    expect(parseCodexModels(null)).toBeNull();
+
+    expect(codexThreadChoice({})).toEqual({ config: {} });
+    expect(codexThreadChoice({ model: "gpt-5.5", effort: "high" })).toEqual({ model: "gpt-5.5", config: { model_reasoning_effort: "high" } });
+    expect(codexThreadChoice({ model: "--oss", effort: "high now" })).toEqual({ config: {} });
   });
 });

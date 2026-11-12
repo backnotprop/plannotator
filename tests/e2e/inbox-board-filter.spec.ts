@@ -299,7 +299,7 @@ test('initiatives: made from the filter, set from a card\'s menu and the opened 
   expect(made.map((i) => i.name)).toEqual(['Design system', 'Onboarding']);
   const design = made[0]!.id;
 
-  // From the card's right-click menu: Initiative ▸ Design system.
+  // From the card's right-click menu: Tag ▸ Design system.
   await cardEl(page, ids.design).locator('[data-card-open]').click({ button: 'right' });
   await page.locator('[data-card-context-menu] [data-card-menu-action="initiative"]').hover();
   await page.locator(`[data-card-initiative-menu] [data-card-initiative-option="${design}"]`).click();
@@ -310,13 +310,13 @@ test('initiatives: made from the filter, set from a card\'s menu and the opened 
   await panel.locator('[data-card-initiative]').click();
   await page.locator(`[data-card-initiative-menu] [data-card-initiative-option="${design}"]`).click();
   await expect(panel.locator('[data-card-initiative]')).toHaveAttribute('data-card-initiative', design);
-  await expect(panel.locator('.ib-crdp-hist')).toContainText('Initiative: Design system by you');
+  await expect(panel.locator('.ib-crdp-hist')).toContainText('Tag: Design system by you');
   await panel.locator('[data-card-close]').click();
 
   // The menu counts workspaces' lanes: two in Design system, none in Onboarding, two in none.
   await filterButton(page).click();
   const counts = page.locator('[data-board-filter-menu] [data-board-initiative-option]');
-  await expect(counts.locator('.ib-pmi-l')).toHaveText(['All initiatives', 'Design system', 'Onboarding', 'No initiative']);
+  await expect(counts.locator('.ib-pmi-l')).toHaveText(['All tags', 'Design system', 'Onboarding', 'No tag']);
   await expect(counts.locator('.ib-bflt-n')).toHaveText(['2', '0', '2']);
   await page.locator(`[data-board-initiative-option="${design}"]`).click();
   expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}&initiative=${design}`);
@@ -348,7 +348,7 @@ test('initiatives: made from the filter, set from a card\'s menu and the opened 
   // No initiative: every lane card but those two.
   await page.goto(`${world.url}#board&initiative=none`);
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES - 2);
-  expect(await tokenWords(page, 'initiative')).toBe('No initiative');
+  expect(await tokenWords(page, 'initiative')).toBe('No tag');
 
   // Deleted in one click, no question: its cards are in none again, and a link to it is no filter.
   const onboarding = made[1]!.id;

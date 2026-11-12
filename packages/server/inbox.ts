@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_PROMPT_HOSTS, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -199,7 +199,7 @@ import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewS
 import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { createRefCards, refCliRunner, type RefRunner } from "./ref-cards";
+import { bitbucketRefReader, createRefCards, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -220,7 +220,7 @@ import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
-import { CloudAgentError, createInboxCloudAgents } from "./inbox-cloud-agents";
+import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { createInboxAgentDoor, INBOX_AGENT_DOOR_PATH } from "./inbox-agent-door";
 import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
 import {
@@ -245,6 +245,7 @@ import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxThreadTags } from "./inbox-thread-tags";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
 import { createInboxIconAnimate } from "./inbox-icon-animate";
@@ -567,6 +568,8 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: Bitbucket Cloud PRs' cards and states (default: the real API, unless `refRunner` is given). */
+  bitbucketRefReader?: BitbucketRefReader;
   /** Tests: a thread's PRs read their states from this instead of gh / glab (inbox-thread-pulls.ts). */
   threadPullFixture?: () => ThreadPullFixture | null;
   /**
@@ -771,6 +774,7 @@ const ERROR_STATUS: Record<string, number> = {
   config_not_saved: 500,
   // pins.json from a newer Plannotator: kept as it is (packages/shared/inbox/pins.ts).
   pins_newer: 409,
+  tags_newer: 409,
   // Artifact pins (packages/shared/inbox/artifact-pins.ts): a key that is not one of the thread's artifacts, and a file from a newer Plannotator.
   artifact_not_found: 404,
   artifact_pins_newer: 409,
@@ -1038,7 +1042,7 @@ const INBOX_SNOOZE_WRITE = /^\/api\/inbox\/(?:m\/[^/]+\/)?threads\/[^/]+\/snooze
  * Whether an Inbox ran on this machine before this start, from evidence that
  * predates it (read before this start writes the version, the store or the
  * registry): the version an earlier Inbox recorded (0.28.12 and later), the
- * registry every Inbox writes, a project in the store, or a setting the Inbox
+ * registry every Inbox writes, a project in the store (or its database), or a setting the Inbox
  * page wrote. Builds 0.28.7 to 0.28.11 recorded no version, so the version
  * alone would call their people fresh.
  */
@@ -1050,6 +1054,7 @@ export function inboxUsedBefore(dataDir: string): boolean {
   try {
     if (readdirSync(join(dataDir, "inbox", "projects")).length > 0) return true;
   } catch {}
+  if (existsSync(join(dataDir, "inbox", "inbox.db"))) return true;
   const config = loadConfig();
   return config.inboxNotifications !== undefined || config.inboxTool !== undefined;
 }
@@ -1091,7 +1096,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  // The SQLite switch (off for everyone): with it off and no inbox.db, this is today's InboxStore.open, nothing more.
+  // The SQLite switch (off by default, for every install): with it off and no inbox.db, this is today's InboxStore.open, nothing more.
   const opened = await openInboxStore(dataDir, {
     sqlite: options.sqlite ?? resolveInboxSqlite(loadConfig(), process.env),
     now: options.storeNow,
@@ -1101,6 +1106,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     checkFilesCommand: options.selfCommand?.length ? options.selfCommand : undefined,
   });
   const store = opened.store;
+  // A move that did not finish leaves the Inbox as it was; why goes to the terminal and inbox.log (never the debug
+  // log, whose values are words from a list: the reason names paths).
+  if (opened.moved && (opened.moved.status === "kept_files" || opened.moved.status === "kept_db")) {
+    const kept = opened.moved.status === "kept_files" ? "into SQLite did not finish; the Inbox stays on its files" : "back to the files did not finish; the Inbox stays on its database";
+    process.stderr.write(`Inbox: the move ${kept} (${opened.moved.reason}: ${opened.moved.detail}).\n`);
+  }
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
   const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
@@ -1201,6 +1212,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pinListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
   const artifactPinListeners = new Set<() => void>();
+  /** A thread's tags changed (inbox-thread-tags.ts): the windows' streams say `event: tags`. */
+  const threadTagListeners = new Set<() => void>();
   /** `plannotator inbox --open <thread>`: the thread, and the window (inbox-windows.ts `lastUsed`) that shows it. */
   const showListeners = new Set<(threadId: string, windowId: string) => void>();
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
@@ -1262,12 +1275,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // resolved for every known project once the server listens (below) and
   // when a project is first seen, never while a request waits (inbox-repos.ts).
   const repos = createInboxRepoCache(options.readProjectRepo ? { read: options.readProjectRepo } : {});
+  /** A project's remote host. It decides where a short `group/project!45` points, so it waits for a first read (at most INBOX_REPO_GIT_TIMEOUT_MS). */
+  const projectRepoHost = async (projectId: string): Promise<string | null> => {
+    const project = store.project(projectId);
+    if (!project) return null;
+    return (repos.get(project.root) ?? (await repos.refresh(project.root)))?.host ?? null;
+  };
   // Until the startup read of every project's origin has begun, an empty cache says nothing yet about Tidy's suggestions.
   let repoReadsBegun = false;
 
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  // Bitbucket Cloud PRs through the review app's credentials; a test that runs its own CLIs passes its own reader.
+  const refCards = createRefCards(
+    options.refRunner ? { run: options.refRunner, bitbucket: options.bitbucketRefReader } : { bitbucket: options.bitbucketRefReader ?? bitbucketRefReader },
+  );
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
   const cardRefResolvers = [forgeCardRefResolver(refCards)];
   const cardFavicons = createCardFavicons(options.cardFavicons ?? {});
@@ -1499,6 +1521,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         stepsOn,
         // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
         pulls: threadPullStates,
+        projectHost: projectRepoHost,
         // Bro mode: send_message's `body` field carries the line only while the person has it on.
         broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
@@ -1674,9 +1697,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id))) : undefined;
       return summary ? { ...row, pulls: summary } : row;
     };
+    // `tags` (additive, approval "inbox-thread-tags"): the live tags a thread is in, on the window's and the phone's rows only.
+    const tagsOf = store.allThreadTags();
+    const withTags = (row: InboxListRow): InboxListRow => {
+      const tags = tagsOf.get(row.thread_id);
+      return tags ? { ...row, tags } : row;
+    };
     const own = store
       .listRows()
-      .map((row) => withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)));
+      .map((row) => withTags(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now))));
     if (pullsByThread.size > 0) {
       const onView = own.filter((row) => row.pulls && !inboxRowArchived(row)).flatMap((row) => pullsByThread.get(row.thread_id) ?? []);
       if (onView.length > 0) void threadPullStates.refresh(onView);
@@ -1725,10 +1754,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
        * order: every pinned thread whatever the project filter or `archived`
        * (an archived thread stays pinned). Additive: absent from an older Inbox.
        */
-      pins: store
-        .pins()
-        .map((pin) => byId.get(pin.thread_id))
-        .filter((row): row is InboxListRow => row !== undefined),
+      pins: [
+        ...store
+          .pins()
+          .map((pin) => byId.get(pin.thread_id))
+          .filter((row): row is InboxListRow => row !== undefined),
+        // Merged: then each linked machine's own stars, in that machine's order (they live there, inbox-linked-marks).
+        ...(merged ? machines.pinnedIds().flatMap((id) => byId.get(id) ?? []) : []),
+      ],
+      /** The marks a linked machine may send to this Inbox for its own threads and agents (inbox-linked-marks). Additive. */
+      marks: INBOX_LINKED_MARKS,
+      /** The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list. Additive. */
+      tags: store.initiatives().filter((tag) => tag.deleted_at === null),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
       /**
        * Each machine's agents (additive; the Agents section, inbox-agents-list.ts): one group, this Inbox's own; on the
@@ -3604,9 +3641,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
-        // The sidebar's pins changed (any window's, or a deletion): the list reads `pins` again. Windows only.
+        // The sidebar's pins changed (any window's, a linked machine's, or a deletion): the list reads `pins` again.
+        // Windows, and a linked machine that asks (`pins=1`: a star writes no record, inbox-peer-link.ts).
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
-        if (windowId) pinListeners.add(onPins);
+        if (windowId || url.searchParams.get("pins") === "1") pinListeners.add(onPins);
+        // A thread's tags changed (any window's, a rename's marks, or a deletion): the list reads `tags` again. Windows only.
+        const onThreadTags = () => send(`event: tags\ndata: {}\n\n`);
+        if (windowId) threadTagListeners.add(onThreadTags);
         // The pinned artifacts changed (any window's, a phone's, or a deletion): the window reads them again. Windows only.
         const onArtifactPins = () => send(`event: artifact-pins\ndata: {}\n\n`);
         if (windowId) artifactPinListeners.add(onArtifactPins);
@@ -3688,6 +3729,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           draftListeners.delete(onDraft);
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
+          threadTagListeners.delete(onThreadTags);
           artifactPinListeners.delete(onArtifactPins);
           showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
@@ -4143,6 +4185,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
     wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? cloudWake.status(session),
+    pollsItself: (session) => cloudPollsItself(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
     onPoll: (session, continues) =>
@@ -4220,6 +4263,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     devices: () => phones?.agentDevices ?? null,
     relayUp: () => relay?.reachable() ?? null,
   });
+  const cloudPollsItself = (session: string): boolean => {
+    const agent = cloudAgents.agent(session);
+    return agent !== null && !hasCloudWake(agent);
+  };
+  store.setCloudPolling(cloudPollsItself);
   const cloudGate = createInboxCloudGate({ dataDir, relayUrl: () => readRelayFile(dataDir)?.url ?? defaultRelayUrl() });
   const agentSignalsFor = (line: InboxLine): string[] => {
     if (line.kind !== "message" || line.record.author.kind !== "person" || line.at !== line.record.created_at) return [];
@@ -4469,6 +4517,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // Tags on threads (packages/server/inbox-thread-tags.ts).
+  const threadTags = createInboxThreadTags({ store, serverSession, readBody: (req) => readBody(req), json });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Agent icons' faces (packages/server/inbox-agent-faces.ts).
@@ -4518,6 +4568,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const feedback = createInboxFeedback({ version, json, store, ...(options.feedbackUrl ? { url: () => options.feedbackUrl! } : {}) });
   const stopPinEvents = store.onPinsChange(() => {
     for (const listener of pinListeners) listener();
+  });
+  const stopThreadTagEvents = store.onThreadTagsChange(() => {
+    for (const listener of threadTagListeners) listener();
   });
   const stopArtifactPinEvents = store.onArtifactPinsChange(() => {
     for (const listener of artifactPinListeners) listener();
@@ -4575,6 +4628,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody,
     sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
     localOnly,
+    projectHost: projectRepoHost,
   });
 
   /** Running local sites shown in a thread through the live proxy (inbox-live.ts): this computer, and its owner over the tailnet. */
@@ -6062,6 +6116,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;
+      // Tags on threads (approval "inbox-thread-tags"): Add tag, untick, Remove from.
+      const threadTagged = await threadTags.route(req, url);
+      if (threadTagged) return threadTagged;
       // Pinned artifacts and the Artifacts wall (approval "inbox-artifact-stars").
       const artifactPinned = await artifactPins.route(req, url);
       if (artifactPinned) return artifactPinned;
@@ -7087,6 +7144,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     imageCapture.stop();
     clearInterval(uploadSweep);
     stopPinEvents();
+    stopThreadTagEvents();
     stopArtifactPinEvents();
     snoozes.stop();
     clearInterval(restartWatch);

@@ -102,6 +102,15 @@ describe("classifyForgeHost", () => {
     expect(classifyForgeHost("mygitlabproxy.example.com")).toBeNull();
     expect(classifyForgeHost("notgithub.com")).toBeNull();
   });
+
+  test("bitbucket.org is Bitbucket Cloud, and its bare #N refs stay unlinked as before", () => {
+    expect(classifyForgeHost("bitbucket.org")).toBe("bitbucket");
+    // Bitbucket Data Center has another API: an opaque self-hosted name, not Bitbucket.
+    expect(classifyForgeHost("bitbucket.example.com")).toBeNull();
+    // A Bitbucket repository's #N may be a pull request or an issue (numbered apart): no guessed link.
+    expect(forgeRefLinks({ display: "ws/repo", host: "bitbucket.org" })).toBeNull();
+    expect(matchCrossRepoRef("ws/repo#3", "", { host: "bitbucket.org" })?.href ?? null).toBeNull();
+  });
 });
 
 describe("matchCrossRepoRef", () => {

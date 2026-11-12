@@ -3,8 +3,7 @@
  * sidebar (a bottom sheet on a phone) that lists the sidebar's items in two groups, Top and Bottom, as they stand.
  * Each row: a grip, the item's icon and name, and a switch (a lock for Inbox and Settings, which never hide). The
  * logo heads Top and the keyboard and light/dark buttons sit under Settings: they hide, they do not move. Between
- * the groups, a fixed band says where Starred and Projects scroll, and under it Agents, which scrolls with them:
- * it hides, it does not move.
+ * the groups, the sections that scroll there (Starred, Tags, Agents, Projects): they hide, they do not move.
  *
  * Moving: drag a grip (within a group or across), or press it (a click, Enter, Space) for Move up, Move down and
  * Move to top / bottom; no arrow keys, no new shortcut. "Start from" applies Default, All at top or Minimal ("Custom"
@@ -36,6 +35,7 @@ import {
   type InboxSidebarStack,
 } from '@plannotator/core/inbox-sidebar';
 import { GogglesMark } from '../agents/AgentsSection';
+import { TagIcon } from './InitiativePeek';
 import { useInboxAgents } from '../agentsList';
 import { Icon } from '../icons';
 import { usePhone } from '../phone';
@@ -55,9 +55,9 @@ function Grip() {
   );
 }
 
-/** An item's icon; Agents draws the section's own goggles. */
+/** An item's icon; Agents draws the section's own goggles, Tags the tag's `#`. */
 function ItemIcon({ item }: { item: InboxSidebarItem }) {
-  return item === 'agents' ? <GogglesMark /> : <Icon name={SIDEBAR_ITEM_ICON[item]} />;
+  return item === 'agents' ? <GogglesMark /> : item === 'tags' ? <TagIcon className="ib-ic" /> : <Icon name={SIDEBAR_ITEM_ICON[item]} />;
 }
 
 type Drop = { stack: InboxSidebarStack; index: number };
@@ -220,12 +220,10 @@ export function SidebarCustomizer({
         </div>
         <div className="ib-sbc-body">
           {group('top')}
-          <div className="ib-sbc-middle" aria-hidden="true">
-            <Icon name="star" />
-            <Icon name="folder" />
-            Starred and Projects
-          </div>
+          <FixedRow item="starred" layout={layout} />
+          {drawn.has('tags') && <FixedRow item="tags" layout={layout} />}
           {drawn.has('agents') && <AgentsRow layout={layout} machines={machines === true} />}
+          <FixedRow item="projects" layout={layout} />
           {group('bottom')}
         </div>
         <div className="ib-sbc-foot">
@@ -281,7 +279,7 @@ function AgentsRow({ layout, machines }: { layout: InboxSidebarLayout; machines:
   return agents !== null || machines ? <FixedRow item="agents" layout={layout} /> : null;
 }
 
-/** The logo (heads Top), Agents (between the groups) and the Settings row's buttons: they hide, they do not move. */
+/** The logo (heads Top), the sections between the groups and the Settings row's buttons: they hide, they do not move. */
 function FixedRow({ item, layout, sub }: { item: InboxSidebarItem; layout: InboxSidebarLayout; sub?: boolean }) {
   return (
     <div className={`ib-sbc-row${sub ? ' ib-sbc-sub' : ' ib-sbc-fixed'}`} data-off={inboxSidebarShown(layout, item) ? undefined : ''} data-sbc-fixed={item}>

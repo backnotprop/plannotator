@@ -4,9 +4,10 @@
  * and shared by every window, the phone's included.
  *
  * The registry below is the one list of items. A new sidebar row (a future Artifacts row, say) is one more entry:
- * its place in the default layout, whether it hides, and its words. Starred and Projects are not items: they
- * always sit between the two stacks and scroll. Agents scrolls there with them and is an item, so it hides (the
- * owner, 2026-11-09); it does not move. The notices (Update, What's new, Can't check, Reload agents) are not items.
+ * its place in the default layout, whether it hides, and its words. Starred, Tags, Agents and Projects sit between
+ * the two stacks and scroll: they hide, they do not move (the owner, 2026-11-09 and 2026-11-12: "A customized sidebar
+ * should allow me to hide anything, including stars"). A saved layout that does not name one shows it. The notices
+ * (Update, What's new, Can't check, Reload agents) are not items.
  *
  * Pure functions only, shared by the window and the server.
  */
@@ -16,7 +17,7 @@
  * - `brand`: the logo row, always first at the top. It hides; it does not move.
  * - `stack`: a row in the top or bottom stack. It moves, and hides unless it is locked.
  * - `settings-row`: an icon button on the Settings row. It hides; it rides with Settings.
- * - `middle`: a section that scrolls between the two stacks (Agents). It hides; it does not move.
+ * - `middle`: a section that scrolls between the two stacks (Starred, Tags, Agents, Projects). It hides; it does not move.
  */
 export type InboxSidebarPlace = 'brand' | 'stack' | 'settings-row' | 'middle';
 export type InboxSidebarStack = 'top' | 'bottom';
@@ -43,7 +44,10 @@ export const INBOX_SIDEBAR_ITEMS = [
   { id: 'artifacts', label: 'Artifacts', place: 'stack', stack: 'top', hideable: true },
   { id: 'reviews', label: 'Reviews', place: 'stack', stack: 'top', hideable: true },
   { id: 'drafts', label: 'Drafts', place: 'stack', stack: 'top', hideable: true },
+  { id: 'starred', label: 'Starred', place: 'middle', hideable: true },
+  { id: 'tags', label: 'Tags', place: 'middle', hideable: true },
   { id: 'agents', label: 'Agents', place: 'middle', hideable: true },
+  { id: 'projects', label: 'Projects', place: 'middle', hideable: true },
   { id: 'copy-prompt', label: 'Copy prompt', place: 'stack', stack: 'bottom', hideable: true },
   { id: 'feedback', label: 'Feedback', place: 'stack', stack: 'bottom', hideable: true },
   { id: 'usage', label: 'Usage', place: 'stack', stack: 'bottom', hideable: true },
