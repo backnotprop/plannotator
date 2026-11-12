@@ -182,8 +182,12 @@ test.if(hasDom)('"Sets" opens the sets; an icon chosen there shows on the agent 
   expect(asked.filter((a) => a.includes('icon-sets'))).toEqual([]);
   await openSets(host);
   expect(asked).toContain('GET /api/inbox/icon-sets?remote=1');
-  expect([...document.querySelectorAll('.am-sets-tab')].map((t) => t.textContent)).toEqual(['Tiny Creatures', 'game-icons.net', 'Dungeon Crawl', 'Noto Emoji 3D']);
-  // The first set, numbered.
+  expect([...document.querySelectorAll('.am-sets-tab')].map((t) => t.textContent)).toEqual(['Noto Emoji 3D', 'Dungeon Crawl', 'game-icons.net', 'Tiny Creatures']);
+  // The first set shows first.
+  expect(tab('noto-3d').getAttribute('aria-selected')).toBe('true');
+  act(() => tab('tiny-creatures').click());
+  await settle();
+  // Numbered.
   expect(cells()).toHaveLength(170);
   expect(cells()[0]!.querySelector('.am-sets-n')!.textContent).toBe('#001');
   expect(cells()[0]!.getAttribute('aria-label')).toBe('Zombie, #001');
@@ -195,6 +199,35 @@ test.if(hasDom)('"Sets" opens the sets; an icon chosen there shows on the agent 
   expect(events.at(-1)!.faces.ses_a!.face).toBe('set:tiny-creatures/zombie');
   for (const s of ['sidebar', ...OUTSIDE]) expect({ s, drawn: drawn(at(host, s)) }).toEqual({ s, drawn: '/api/inbox/icon-sets/tiny-creatures/zombie px 16px' });
   for (const s of ['sidebar', ...OUTSIDE]) expect(at(host, s).querySelector<HTMLElement>('.ib-set, .am-setart')!.dataset.pixel).toBe('');
+});
+
+test.if(hasDom)('Sets opens on the set last looked at, kept by the browser across reloads; a set no longer listed falls back to the first', async () => {
+  inbox();
+  // Kept by an earlier page.
+  window.localStorage.setItem(panel.LAST_SET_KEY, 'dcss');
+  const host = mount(<Surfaces />);
+  let dialog = await openSets(host);
+  expect(tab('dcss').getAttribute('aria-selected')).toBe('true');
+  // Looking at a set, and choosing one of its icons, keep it for the next page.
+  act(() => tab('game-icons').click());
+  await settle();
+  expect(window.localStorage.getItem(panel.LAST_SET_KEY)).toBe('game-icons');
+  act(() => tab('tiny-creatures').click());
+  await settle();
+  window.localStorage.removeItem(panel.LAST_SET_KEY);
+  act(() => cells()[0]!.click());
+  await settle();
+  expect(window.localStorage.getItem(panel.LAST_SET_KEY)).toBe('tiny-creatures');
+  window.localStorage.setItem(panel.LAST_SET_KEY, 'gone');
+  dialog = await openSets(host);
+  // The agent's own set icon still opens its set.
+  expect(tab('tiny-creatures').getAttribute('aria-selected')).toBe('true');
+  act(() => dialog.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click());
+  await settle();
+  act(() => faces.keepAgentFace('ses_a', 'agent'));
+  await settle();
+  await openSets(host);
+  expect(tab('noto-3d').getAttribute('aria-selected')).toBe('true');
 });
 
 test.if(hasDom)('a one-colour icon is a mask in the text colour everywhere, never an <img> you see and never markup', async () => {

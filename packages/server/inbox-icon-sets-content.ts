@@ -36,8 +36,8 @@ export interface BuiltInIconSetFiles {
 
 /** The built-in sets, in the picker's order: their files' paths (the source files, or the binary's embedded copies). */
 export const BUILT_IN_ICON_SET_FILES: Readonly<Record<string, BuiltInIconSetFiles>> = Object.freeze({
-  "tiny-creatures": { manifest: tinyManifest, icons: tinyIcons },
-  "game-icons": { manifest: gameManifest, icons: gameIcons, credits: gameCredits },
-  dcss: { manifest: dcssManifest, icons: dcssIcons },
   "noto-3d": { manifest: notoManifest, icons: notoIcons },
+  dcss: { manifest: dcssManifest, icons: dcssIcons },
+  "game-icons": { manifest: gameManifest, icons: gameIcons, credits: gameCredits },
+  "tiny-creatures": { manifest: tinyManifest, icons: tinyIcons },
 } as unknown as Record<string, BuiltInIconSetFiles>);

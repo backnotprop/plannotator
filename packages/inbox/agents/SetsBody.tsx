@@ -5,8 +5,24 @@ import type { AgentFace } from './faceChoices';
 import { SETS_LABEL } from './FaceFan';
 import { getIconSet, isSetFace, setArtStyle, readIconSets, refreshFetchable, setCreditsHref, setFaceParts, setIconSrc, setLookOf, useIconSets, useSetListing } from './iconSets';
 
-/** The set last looked at in this page: the panel opens on it again. */
-let lastSet: string | null = null;
+/** The set last looked at, kept by this browser: Sets opens on it again, after a reload too. */
+export const LAST_SET_KEY = 'plannotator-inbox-icon-set-last';
+
+function readLastSet(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_SET_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function keepLastSet(id: string): void {
+  try {
+    window.localStorage.setItem(LAST_SET_KEY, id);
+  } catch {
+    // Storage refused: not kept.
+  }
+}
 
 /** "#007", or "#0025" in a set of a thousand or more. */
 export const setNumber = (n: number, count: number) => `#${String(n).padStart(count >= 1000 ? 4 : 3, '0')}`;
@@ -42,6 +58,7 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
   const current = isSetFace(face) ? setFaceParts(face) : null;
   const [picked, setPicked] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [lastSet] = useState(readLastSet);
   const setId = picked ?? current?.set ?? lastSet ?? sets?.[0]?.id ?? null;
   const set: InboxIconSet | null = sets?.find((s) => s.id === setId) ?? sets?.[0] ?? null;
   const fetchable = set?.kind === 'fetchable';
@@ -85,7 +102,7 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
 
   const choose = (icon: InboxIconSetIcon) => {
     if (!set) return;
-    lastSet = set.id;
+    keepLastSet(set.id);
     keepAgentFace(agent, `set:${set.id}/${icon.id}`);
     onDone();
   };
@@ -140,7 +157,7 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
             aria-selected={s.id === set?.id}
             data-set={s.id}
             onClick={() => {
-              lastSet = s.id;
+              keepLastSet(s.id);
               setPicked(s.id);
               scroller.current?.scrollTo({ top: 0 });
             }}
