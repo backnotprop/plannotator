@@ -46,7 +46,7 @@ let deleted: [string, string | null][] = [];
 beforeEach(() => {
   if (!hasDom) return;
   realFetch = globalThis.fetch;
-  globalThis.fetch = (async () => Response.json({ faces: {}, rev: 0 })) as typeof fetch;
+  globalThis.fetch = (async () => Response.json({ faces: {}, rev: 0 })) as unknown as typeof fetch;
   stopped = [];
   deleted = [];
   window.localStorage.clear();
@@ -162,7 +162,7 @@ test.skipIf(!hasDom)('this Inbox: a running launch has Rename…, a separator, S
 
 test.skipIf(!hasDom)('a named launch: Rename…, Reset name, then Stop and Delete; each calls its action for this Inbox (no machine)', async () => {
   // The Inbox keeps the name with the agent's face (agents/agentFaces.ts).
-  globalThis.fetch = (async () => Response.json({ faces: { lch_a: { face: 'agent', sessions: ['ses_lch_a'], name: 'Retry worker' } }, rev: 1 })) as typeof fetch;
+  globalThis.fetch = (async () => Response.json({ faces: { lch_a: { face: 'agent', sessions: ['ses_lch_a'], name: 'Retry worker' } }, rev: 1 })) as unknown as typeof fetch;
   await faces.readAgentFaces();
   mount([group([launched('lch_a', 'working', true, { host: 'pi' })])]);
   await settle();
