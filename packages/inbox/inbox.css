@@ -4036,8 +4036,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
    the list (components/ConnectLine.tsx: the dialog's band, moved there) and
    Settings → Agents (components/AgentsSettings.tsx). */
 .ib-mk svg.ib-glyph { stroke: var(--muted-foreground); fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
-/* Grok Bot's mark (a paired Grok Bot cloud agent; AgentIcons.tsx GrokBotIcon): the text colour, as on x.ai/bot. */
-.ib-mk svg.ib-grokbot { color: var(--foreground); }
+.ib-gk-body, .am-gk-b { stroke: color-mix(in oklch, var(--foreground) 30%, transparent); stroke-width: 1px; vector-effect: non-scaling-stroke; }
 /* The sound dialog's shell, wider; the body scrolls and the footer stays (a long list never pushes the buttons away). */
 .pn-inbox dialog.ib-dlg.ib-anote, dialog.ib-dlg.ib-anote { width: min(720px, calc(100vw - 32px)); border-radius: 14px; overflow: hidden; }
 dialog.ib-dlg.ib-anote[open] { display: flex; flex-direction: column; }

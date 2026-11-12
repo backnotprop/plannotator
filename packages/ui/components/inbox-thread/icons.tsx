@@ -267,7 +267,7 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
       return <ClaudeIcon />;
     // A Grok Bot routine paired as a cloud agent: Grok Bot's own mark (x.ai/bot).
     case 'cloud-grok':
-      return <GrokBotIcon className="ib-grokbot" />;
+      return <GrokBotIcon />;
     case 'gemini':
     case 'qwen':
     case 'zed':
