@@ -41,6 +41,15 @@ export function withQuestion(message: InboxMessageWire, question: InboxQuestion)
   return splitMessageActions({ ...rest, questions: all });
 }
 
+const questionsAndActions = (m: InboxMessageWire) => [...(m.questions ?? []), ...(m.actions ?? [])];
+const hasClosedQuestion = (m: InboxMessageWire) => questionsAndActions(m).some((q) => q.state === 'closed');
+const closeQuestion = (q: InboxQuestion): InboxQuestion => (q.state === 'superseded' || q.state === 'closed' ? q : { ...q, state: 'closed' });
+
+function closedByArchive(message: InboxMessageWire, archiveSeq: number): InboxMessageWire {
+  if ((message.seq ?? archiveSeq) >= archiveSeq || questionsAndActions(message).every((q) => q.state === 'superseded' || q.state === 'closed')) return message;
+  return { ...message, ...(message.questions ? { questions: message.questions.map(closeQuestion) } : {}), ...(message.actions ? { actions: message.actions.map(closeQuestion) } : {}) };
+}
+
 const withApplied = (model: HeldThread, id: string, seq: number): Readonly<Record<string, number>> => ({ ...model.applied, [id]: Math.max(seq, model.applied?.[id] ?? 0) });
 
 /** The answers a save of this window brought back (whole, for their message), on the thread held. */
@@ -99,7 +108,7 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
       ...(before?.ack && record.ack ? { ack: before.ack } : {}),
     };
     // A new message goes after every message with a lower seq (the read's order), else at the end.
-    const messages = [...thread.messages];
+    let messages = [...thread.messages];
     if (before) messages[at] = next;
     else {
       const after = seq === undefined ? -1 : messages.findIndex((m) => (m.seq ?? -1) > seq);
@@ -108,6 +117,8 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
     let head = thread;
     if (record.id === thread.thread_id && before) {
       const archived = record.resolved_at !== null && thread.resolved_at === null;
+      if (record.resolved_at === null && thread.resolved_at !== null && messages.some(hasClosedQuestion)) return REREAD;
+      if (archived) messages = messages.map((m) => closedByArchive(m, event.seq));
       head = {
         ...thread,
         resolved_at: record.resolved_at,

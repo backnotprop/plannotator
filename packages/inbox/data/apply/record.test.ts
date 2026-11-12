@@ -41,6 +41,9 @@ const rows: Row[] = [
     expect([after.thread.resolved_at, after.thread.archive_seq]).toEqual([at, 13]);
     expect(after.thread.messages[0]!.questions?.[0]?.key).toBe('q1');
   }],
+  ['the root archived: its open questions close, as a read says', message(13, msg(T, { resolved_at: at }), false), (after) => {
+    expect(after.thread.messages[0]!.questions?.map((x) => x.state)).toEqual(['closed']);
+  }],
   ['the root renamed: the thread takes the name', message(14, msg(T, { thread_name: 'Ship it' }), false), (after) => {
     expect(after.thread.thread_name).toBe('Ship it');
   }],
@@ -113,7 +116,7 @@ describe('a read landing after records', () => {
       now = out.model;
     }
     const kept = reconcileRead(now, read(11, base));
-    expect(kept.thread.messages[0]!.questions?.[0]).toMatchObject({ revision: 3, state: 'picked' });
+    expect(kept.thread.messages[0]!.questions?.[0]).toMatchObject({ revision: 3, state: 'closed' });
     expect([kept.thread.resolved_at, kept.thread.archive_seq]).toEqual([at, 13]);
   });
 });
@@ -132,4 +135,9 @@ describe('which records read the thread\'s files apart (a comment, the agent at 
     ['a pick saved', q(37, question('q1', 2, { state: 'picked' })), false],
   ];
   for (const [name, event, want] of cases) test(name, () => expect(recordMovesFiles(held, event)).toBe(want));
+});
+
+test('the root unarchived with a question the archive closed: the thread is read (only the server knows each state again)', () => {
+  const archived = model([msg(T, { seq: 1, resolved_at: at, questions: [question('q1', 1, { state: 'closed' })] })]);
+  expect(applyRecord({ ...archived, thread: { ...archived.thread, resolved_at: at } }, message(28, msg(T, { resolved_at: null }), false)).kind).toBe('reread');
 });
