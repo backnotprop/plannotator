@@ -703,6 +703,7 @@ packages/inbox/phoneSidebarSheet.test.tsx
 packages/inbox/composerDrag.test.tsx
 packages/inbox/agents/ownAgentIcons.test.tsx
 packages/inbox/agents/setAgentIcons.test.tsx
+packages/inbox/agents/agentRename.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
