@@ -268,6 +268,7 @@ test('a question card note: after a pick on the same card', async () => {
   await card.getByRole('button', { name: 'Add note' }).click();
   const note = card.getByPlaceholder('Context for the agent…');
   await expect(note).toBeFocused();
+  await note.evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await dictate(page, 'Only if the flag is off by default. ');
   await expectLanded(note, 'Only if the flag is off by default.');
   await card.getByText('Yes', { exact: true }).click();
