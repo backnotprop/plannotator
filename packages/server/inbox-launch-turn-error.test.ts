@@ -117,6 +117,8 @@ describe("a launched session's turn that ended in an error", () => {
     expect(w.notes(root).map((m) => m.body)).toEqual([launchTurnErrorNote("Fake Agent", CREDIT)]);
     expect(w.notes(root)[0]!.body).toBe(`Fake Agent's turn ended with an error: ${CREDIT}`);
     expect(w.notes(root)[0]!.author).toMatchObject({ kind: "agent", host: FAKE, session, name: "Fake Agent" });
+    // Marked for the window's notification: one note, so one notice (the window notifies on its first line only).
+    expect(w.notes(root)[0]!.turn_error).toBe(true);
     expect(await w.launch().runOf(root.id)).toMatchObject({ state: "failed", turn_error: true });
 
     // The Inbox starts again with the transcript unchanged: the line is back, the note is not written twice.
