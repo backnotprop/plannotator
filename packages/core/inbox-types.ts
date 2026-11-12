@@ -433,6 +433,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
   cline: "Cline",
+  openclaw: "OpenClaw",
   cloud: "Cloud agent",
   "cloud-claude": "Claude Code routine",
   "cloud-grok": "Grok Bot",
@@ -454,7 +455,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "codex", "qwen", "t3"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "codex", "qwen", "t3"] as const;
 
 /** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
 export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
@@ -674,6 +675,13 @@ export interface InboxMessage {
    * the store at Send; the window reads it to tell a review happened.
    */
   review_comments_of?: string[];
+  /**
+   * On a person's reply that quotes a message of the thread (approval "inbox-reply-quote"): the message, and the
+   * words selected in it (absent: the whole message). The store wrote the lead the agent reads at the start of the
+   * person's words (`inboxReplyQuoteLead`); the window draws this as one quiet line over the reply instead. Absent
+   * on every other message and on older records.
+   */
+  quote?: InboxReplyQuote;
   /**
    * On a person's New message (plan step 8): the live agent session it is
    * addressed to. Such a message answers nothing (`reply_to` null) and is
@@ -2449,6 +2457,7 @@ export type InboxAgentId =
   | "pi"
   | "opencode"
   | "dsh"
+  | "openclaw"
   | "claude-app";
 
 export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
@@ -2464,6 +2473,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "pi",
   "opencode",
   "dsh",
+  "openclaw",
   "claude-app",
 ];
 
@@ -2480,6 +2490,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   pi: "Pi",
   opencode: "OpenCode",
   dsh: "DeepSeek Harness",
+  openclaw: "OpenClaw",
   "claude-app": "Claude app",
 };
 
@@ -2745,7 +2756,7 @@ export interface InboxAgentsModel {
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2837,7 +2848,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -3031,6 +3042,7 @@ export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number
   dsh: INBOX_TOOL_COST_NOW,
   // Cline sends every tool's JSON Schema with each request too; not measured on a real Cline, so Pi's stands in.
   cline: INBOX_TOOL_COST_NOW,
+  openclaw: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */
@@ -3140,6 +3152,16 @@ export interface InboxReplyDraft {
    * sent as tags. Absent: not chosen (the thread's last writer), and on a draft an older Inbox wrote.
    */
   recipients?: string[];
+  /** The message the reply quotes (approval "inbox-reply-quote"), kept with the words. Absent: none. */
+  quote?: InboxReplyQuote;
+}
+
+/** The quote a person's reply carries (approval "inbox-reply-quote"): a message of the thread and, when the person selected some, its words. */
+export interface InboxReplyQuote {
+  /** The quoted message's id. */
+  of: string;
+  /** The words selected in it, as shown on screen. Absent: the message as a whole. */
+  words?: string;
 }
 
 /** How many sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes (any number). */
