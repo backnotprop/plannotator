@@ -3741,11 +3741,27 @@ export const INBOX_AGENT_FACE_SESSIONS_MAX = 16;
 /** The longest agent or session id an entry takes. */
 export const INBOX_AGENT_FACE_ID_MAX = 200;
 
-/** One agent's face. */
+/** One agent's face, and the name the person gave it. */
 export interface InboxAgentFaceEntry {
-  face: Exclude<InboxAgentFace, "agent">;
+  /** `agent` (its own mark) only beside a `name`: an entry is kept for a face, a name, or both. */
+  face: InboxAgentFace;
   /** Every session id this agent was or is (never its key itself), oldest first. */
   sessions: string[];
+  /**
+   * The name the person gave it (Rename… on its sidebar row): the window's name for it everywhere, over its own
+   * title. Display only: never sent to an agent. Absent: none given. An older Plannotator drops an entry that has a
+   * name and no face when it reads the file, and keeps the face of one with both.
+   */
+  name?: string;
+}
+
+/** The longest name an agent can be given, in characters (code points), as a project's. */
+export const INBOX_AGENT_NAME_MAX = INBOX_PROJECT_NAME_MAX;
+
+/** A given name as an entry keeps it, by a project name's rules (`checkInboxProjectName`); null for none or a refused one. */
+export function cleanInboxAgentName(value: unknown): string | null {
+  const checked = checkInboxProjectName(value);
+  return checked.ok ? checked.name : null;
 }
 
 /** One uploaded picture the Inbox keeps ("Your own…"): its hash, its type (sniffed from the bytes), when it was added (ms). */
@@ -3779,8 +3795,14 @@ export function readInboxAgentIcons(value: unknown): InboxAgentIcon[] {
   return out.slice(0, INBOX_AGENT_ICONS_KEPT * 2);
 }
 
-/** `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), or this browser's faces from before (`adopt`). */
-export type InboxAgentFaceChange = { agent: string; sessions?: string[]; face: InboxAgentFace } | { adopt: Record<string, InboxAgentFace> };
+/**
+ * `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), one agent's given name (null: back to its own),
+ * or this browser's faces from before (`adopt`).
+ */
+export type InboxAgentFaceChange =
+  | { agent: string; sessions?: string[]; face: InboxAgentFace }
+  | { agent: string; sessions?: string[]; name: string | null }
+  | { adopt: Record<string, InboxAgentFace> };
 
 const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= INBOX_AGENT_FACE_ID_MAX && value.trim() === value;
 
@@ -3796,9 +3818,11 @@ export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFa
   const out = Object.create(null) as Record<string, InboxAgentFaceEntry>;
   if (!value || typeof value !== "object" || Array.isArray(value)) return out;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const entry = raw as { face?: unknown; sessions?: unknown } | null;
-    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face) || entry.face === "agent") continue;
-    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key) };
+    const entry = raw as { face?: unknown; sessions?: unknown; name?: unknown } | null;
+    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face)) continue;
+    const name = cleanInboxAgentName(entry.name);
+    if (entry.face === "agent" && !name) continue;
+    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key), ...(name ? { name } : {}) };
   }
   return out;
 }
