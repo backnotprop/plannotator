@@ -36,7 +36,8 @@ import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import type { ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
-import { SessionDetail, ToPicker, startKey } from './ToPicker';
+import { SessionDetail, ToPicker } from './ToPicker';
+import { HERE, toStartKey, type ToMachine } from './toMachines';
 import { PhoneToSheet } from './PhoneToSheet';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
 import { useLaunchChoice } from './useLaunchChoice';
@@ -46,6 +47,10 @@ import { TrustDetails } from './TrustDetails';
 import { isLongPaste } from './pastedText';
 import { useComposeSessions, type ComposeSessionsLoader } from './useComposeSessions';
 import { useMachineLaunches } from './useMachineLaunches';
+import { linkedToMachines } from './linkedToMachines';
+import { useLinkedTarget } from './useLinkedTarget';
+import type { ComposeHeld, ComposeJoined, ComposeSent } from './composeResults';
+export type { ComposeHeld, ComposeJoined, ComposeSent };
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
 import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
@@ -68,7 +73,6 @@ import {
   draftSnapshot,
   draftThreadName,
   draftTo,
-  findTarget,
   hostLabel,
   isDirty,
   composeOpening,
@@ -153,62 +157,8 @@ export interface ComposeRequest {
   pickTo?: boolean;
 }
 
-/** Compose's message went into an open thread instead of starting one ("Send to that thread"). */
-export interface ComposeJoined {
-  threadId: string;
-  threadName: string;
-  /** Who got it: "Claude Code". */
-  agent: string;
-  /** The draft it was written in (deleted), or null. */
-  draftId: string | null;
-}
 
-export interface ComposeSent {
-  threadId: string;
-  session: string;
-  host: string;
-  projectName: string;
-  /** The draft it was sent from (it is deleted with the Send), or null. */
-  draftId: string | null;
-  /** The Board card the thread was created for (`ComposeRequest.card`): link the thread to it. */
-  cardId?: string | null;
-  /** It started a new agent session (launch), rather than going to a live one. */
-  launched?: boolean;
-  /** The PRs the thread was started for (`ComposeRequest.pulls`): hand them to it. */
-  pullKeys?: readonly string[] | null;
-  /** The linked machine the agent was started on (remote launch), or absent for this computer. */
-  machine?: string | null;
-  /** What the hand-off asked for: its guided-review line still in the words, or the person's own curation. */
-  pullAsk?: 'guide' | 'custom' | null;
-}
 
-/**
- * Where compose reads and sends (tour v2): the live sessions and the new
- * thread, and whether it keeps drafts and takes files. Absent: the Inbox's own
- * routes, drafts and uploads, exactly as always. The onboarding tour passes
- * one that writes nothing (`drafts: false`: closing asks nothing and Save
- * draft is gone; `uploads: false`: no paperclip, drop or paste).
- */
-/**
- * A new session for a linked machine that its Inbox could not take yet (remote launch, `InboxHeldError`): it waits
- * in this Inbox's outbox, and the agent starts there when that machine is back. Cancel takes it back while `queued`.
- */
-export interface ComposeHeld {
-  /** The outbox entry's key (`inboxApi.cancelOutbox`). */
-  key: string;
-  /** It never left yet: Cancel can take it back. */
-  queued: boolean;
-  machineName: string;
-  /** That machine is asleep (offline), not just slow to answer. */
-  asleep: boolean;
-  /** "Claude Code". */
-  agentName: string;
-  /** What that machine does before the agent starts: "clones acme/billing-api", "makes pricing-page" (E9). */
-  first?: string;
-  draftId: string | null;
-  /** What was written, kept so Cancel can put it back in Drafts (the one it was sent from is gone here). */
-  words: { body: string; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true };
-}
 
 export interface ComposeTransport {
   sessions: ComposeSessionsLoader;
@@ -383,15 +333,18 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Linked machines (remote launch): each one's launch block, read through the forward while launch is on here.
   const there = useMachineLaunches(!transport && !!model?.launch, trustPick?.machine ? { agent: trustPick.agent, project: trustPick.projectId, machine: trustPick.machine } : null);
   const load = async () => {
-    await Promise.all([loadHere(), startPick?.machine ? there.readOne(startPick.machine) : null]);
+    const machine = startPick?.machine ?? targetOn;
+    await Promise.all([loadHere(), machine ? there.readOne(machine) : null]);
   };
   const voice = useVoiceSession();
   const onlyProjects = pulls?.projects ?? (linkOnly && linkOnly.projects.length > 0 ? linkOnly.projects : null);
   // A link's PR in no project: nowhere is wrong, and a new scratch folder is the default where launching can.
   const linkScratch = !!linkOnly && linkOnly.projects.length === 0;
   const projects = useMemo(() => (model?.projects ?? []).filter((g) => !onlyProjects || (g.project.id !== null && onlyProjects.includes(g.project.id))), [model, onlyProjects?.join()]);
-  const target = findTarget(projects, chosen);
-  const anyLive = composeTargets(projects).length > 0;
+  // To's machine switch (approval "inbox-launcher-machine-switch"): each linked machine's live sessions, from its last
+  // read. Not for New review or a pull request's message: those go to an agent on this computer, in their projects.
+  const otherMachines = !transport && !box && !onlyProjects;
+  const { linkedSessions, target, targetOn, targetMachineName, anyLive } = useLinkedTarget(otherMachines, there, projects, chosen);
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
   // Launch: a new session To names instead of a live one (the agent, and the project it starts in).
   // For a pull request (`pulls`): only its projects and no scratch folder, so the default start is where its agent works and nothing else is offered.
@@ -860,7 +813,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
       const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE);
-      const machine = start?.machine ?? null;
+      const machine = start ? start.machine : targetOn;
       const input: StartThreadInput = {
         to: start
           ? {
@@ -893,7 +846,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       };
-      // Another machine's project (remote launch): through the forward, so that machine's Inbox starts the agent there.
+      // Another machine's project (remote launch) or running agent: through the forward, so that machine's Inbox takes it.
       const result = transport ? await transport.startThread(input) : await inboxApi.startThread(input, machine);
       // Drafts stay on this computer (the forward drops `draft_id`): the one this was sent from is done here.
       if (machine && draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
@@ -907,22 +860,22 @@ export function ComposeDialog(props: ComposeDialogProps) {
             // Another machine's project reads as the list's row does: "infra · Mac mini".
             projectName: startMachineName ? `${start.project.name} · ${startMachineName}` : start.project.name,
           }
-        : { session: target!.session, host: target!.host, projectName: target!.project.name };
+        : { session: target!.session, host: target!.host, projectName: targetMachineName ? `${target!.project.name} · ${targetMachineName}` : target!.project.name };
       if (box) forgetUnsentReview();
-      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: start?.machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(start?.machine ? { machine: start.machine } : {}) });
+      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) });
     } catch (cause) {
-      if (cause instanceof InboxHeldError && start?.machine && props.onHeld) {
+      if (cause instanceof InboxHeldError && (start?.machine || targetOn) && props.onHeld) {
         // That machine's Inbox could not take it now (asleep, or slow): it waits in this Inbox's outbox and starts there
         // when it is back. Compose closes; the window's toast offers Cancel while it has not left.
         if (draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
         props.onHeld({
           key: cause.outbox.key,
           queued: cause.outbox.state === 'queued',
-          machineName: cause.machine?.name ?? startMachineName ?? 'the other machine',
+          machineName: cause.machine?.name ?? startMachineName ?? targetMachineName ?? 'the other machine',
           asleep: cause.machine ? cause.machine.state === 'offline' : startAsleep,
-          agentName: start.name,
+          agentName: start ? start.name : hostLabel(target!.host),
           // E9: what that machine does first when it's back.
-          ...(start.clone ? { first: `clones ${start.clone.slug}` } : start.create ? { first: `makes ${start.project.name}` } : {}),
+          ...(start?.clone ? { first: `clones ${start.clone.slug}` } : start?.create ? { first: `makes ${start.project.name}` } : {}),
           draftId: draft?.id ?? null,
           words: { body, ...(threadName ? { thread_name: threadName } : {}), ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) },
         });
@@ -1250,7 +1203,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const noAgent = !!model && !anyLive && !canStart && !endedNote;
   const toValue = target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose';
   const toName = target
-    ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change`
+    ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}${targetMachineName ? `, on ${targetMachineName}` : ''}. Change`
     : start
       ? `To: a new ${start.name} session. Change`
       : endedNote
@@ -1295,7 +1248,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <>
               <HostMark host={target.host} agent={target.session} />
               <b>{hostLabel(target.host)}</b>
-              <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
+              {/* Another machine's agent names its machine, as a start there does ("· kiln-render · Atlas"). */}
+              <SessionDetail name={target.project.name} root={target.project.root} label={target.label} suffix={targetMachineName ?? undefined} />
             </>
           ) : endedNote ? (
             <>
@@ -1411,7 +1365,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (target) afterPicker();
     else (toRef.current ?? textRef.current)?.focus();
   };
-  const toSelected = target?.session ?? (start ? startKey(start.agent) : null);
+  const toSelected = target?.session ?? (start ? toStartKey(start.machine, start.agent, start.project.id) : null);
+  // The switch's machines: this computer, then each linked one with its live sessions and what can start there.
+  const toMachines = useMemo<ToMachine[]>(() => {
+    const here: ToMachine = { key: HERE, machine: null, name: selfView?.name ?? 'This computer', self: true, asleep: false, since: null, home, groups, launch: toStart ? toStart.launch : null, notice: null };
+    if (!otherMachines || !there.machines.some((m) => !m.self && m.state !== 'revoked')) return [here];
+    return linkedToMachines(here, there.machines, there.reads, linkedSessions, lastSent, model?.launch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherMachines, there.machines, there.reads, linkedSessions, selfView?.name, home, groups, toStart?.launch, model?.launch, lastSent]);
+  const toOpensOn = targetOn ?? start?.machine ?? HERE;
 
   const reviewRows = box && (
     <ReviewRows
@@ -1723,9 +1685,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       )}
       {/* The one place To's list splits: a phone's is a bottom sheet (kept mounted, for its way out), a computer's the list under To. */}
       {phone ? (
-        <PhoneToSheet open={picker} host={dialogRef.current} groups={groups} selected={toSelected} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} />
+        <PhoneToSheet open={picker} host={dialogRef.current} groups={groups} selected={toSelected} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} machines={toMachines} opensOn={toOpensOn} />
       ) : (
-        picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} />
+        picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} machines={toMachines} opensOn={toOpensOn} />
       )}
       {launchChoice.menu()}
       {folderMenu && start && launch && (

@@ -175,6 +175,38 @@ describe("the person's Priority", () => {
     expect(server.store.listRow(a.thread_id)!.priority).toBeUndefined();
   });
 
+  test("an agent's mark is the person's own: true puts the row in Priority, the person's Remove takes it out, false unmarks; agents read none of it", async () => {
+    const { dataDir, server, client } = await setup();
+    const project = join(dataDir, "..", "docs");
+    const send = async (body: string, extra: Record<string, unknown>) =>
+      (await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_r", agent_name: "Reviewer", body, ...extra } })) as {
+        content: { text: string }[];
+        structuredContent: { thread_id: string; priority?: boolean };
+      };
+    const first = await send("Re-review done: checks green, 2 approvals.", { subject: "PR #88", priority: true });
+    expect(first.structuredContent.priority).toBe(true);
+    expect(first.content[0]!.text).toContain("In the person's Priority.");
+    const threadId = first.structuredContent.thread_id;
+    expect((await rowOf(server, threadId))!.priority).toMatchObject({ person: true, ask: null });
+
+    const removed = (await (await priority(server, threadId, { priority: false })).json()) as Json;
+    expect(removed.before.at).not.toBeNull();
+    expect((await rowOf(server, threadId))!.priority).toBeNull();
+    await send("New push; checks running.", { reply_to: threadId });
+    expect((await rowOf(server, threadId))!.priority).toBeNull();
+
+    await send("Green after a rebase.", { reply_to: threadId, priority: true });
+    expect((await rowOf(server, threadId))!.priority).toMatchObject({ person: true });
+    const out = await send("Merged.", { reply_to: threadId, priority: false });
+    expect(out.content[0]!.text).toContain("Out of the person's Priority.");
+    expect((await rowOf(server, threadId))!.priority).toBeNull();
+
+    const read = await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses_r" } });
+    const listed = await client.callTool({ name: "read_thread", arguments: { project_path: project, agent_session: "ses_r", asked_by: "anyone" } });
+    const searched = await client.callTool({ name: "search", arguments: { query: "rebase", agent_session: "ses_r" } });
+    for (const answer of [read, listed, searched]) expect(JSON.stringify(answer)).not.toMatch(/\\?"priority\\?"/);
+  });
+
   test("a phone adds through its door; a repeated key is answered from the door's log", async () => {
     const { server, send } = await setup({ phones: true });
     const a = await send("Add me", "ses_a");

@@ -160,7 +160,9 @@ answers anyway surfaces its own reason through the #1600 `githubErrorDetail` pat
 `fetchFileContent`, `fetchFileBytes`, `submitReview`, plus optional `fetchViewedFiles` /
 `markFilesViewed` / `fetchStack` / `fetchList`); the dispatch functions look the provider up by
 `PRRef.platform`, and an absent optional method is the neutral answer (no viewed state, no stack,
-empty PR list). What the UI shows comes from `getPRPlatformCapabilities` (`packages/shared/pr-types.ts`,
+empty PR list). GitLab's stack walk and MR switcher list are in `packages/shared/pr-gitlab-stack.ts`
+(`merge_requests?source_branch=` up, `target_branch=` down; an opened MR before a merged one, closed skipped),
+and the switcher and stack label number layers with the platform's prefix (`!12`). What the UI shows comes from `getPRPlatformCapabilities` (`packages/shared/pr-types.ts`,
 browser-safe): `requestChanges`, `selfReviewBlocked`, `fileLevelComments`, `viewedSync`, `artifacts`,
 `reviewBodyRequired`, `agentCliAccess`, labels and the CLI. Pure helpers replace the old
 `platform === "github" ? number : iid` ternaries: `getPRNumber`, `getDisplayRepo`, `getPRHeadFetchSpec`

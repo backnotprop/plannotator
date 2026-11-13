@@ -3117,9 +3117,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * with Pi's 45-byte wrapper; Board on 13,720 + 613. Tokens scaled at the
  * entry's bytes per token (about 3.7), not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 12661, tokens: 3423 };
+/*
+ * Thread priority (send_message's boolean `priority`, INBOX_PRIORITY_FIELD_DESCRIPTION; no line in the description,
+ * which stays 1,944 characters): +348 bytes on the entry as the tool builds it from the default tool list (12,661 →
+ * 13,009, the field removed and kept), Board on the same +348. Tokens scaled at the entry's bytes per token (3.7),
+ * +94, not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 13009, tokens: 3517 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14333, tokens: 3920 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14681, tokens: 4014 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
