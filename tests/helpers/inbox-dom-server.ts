@@ -292,6 +292,8 @@ if (broOfferMode) {
       inboxVoiceIntro: { shownAt: settled },
       // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
       favicon: "glass",
+      // Personal agents (after Snooze in the line): settled by OpenClaw's Inbox tool turned on.
+      inboxTool: { openclaw: true },
     }),
   );
   let clock = new Date();

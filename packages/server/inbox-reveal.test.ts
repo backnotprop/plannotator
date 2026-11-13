@@ -116,6 +116,8 @@ async function world(options: Options = {}) {
     favicon: "glass",
     // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+    // Personal agents (after Snooze in the line): settled by OpenClaw's Inbox tool turned on.
+    inboxTool: { openclaw: true },
     ...options.config,
   };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
@@ -563,6 +565,39 @@ describe('"Set the rules" (Rules for your agents): last of the later group', () 
       expect((await w.claim("agent_rules")).show).toBe(false);
     });
   }
+});
+
+describe("personal agents: after Snooze, only while none is connected", () => {
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxTool: { openclaw: false } };
+  const writeCloudAgent = (dataDir: string, preset: string) =>
+    writeFileSync(
+      join(dataDir, "inbox", "cloud-agents.json"),
+      JSON.stringify({ v: 1, agents: [{ session: "cloud.0123456789ab", name: preset, preset, url: null, key: null, project_id: null, created_at: "2026-11-01T00:00:00.000Z", key_set_at: null, key_rejected_at: null }] }),
+    );
+
+  test("two days' use and none connected: next, shown once, nothing turned on", async () => {
+    const w = await world({ config: decided });
+    expect(await w.next()).toBe("personal_agents");
+    expect((await w.claim("personal_agents", "pa-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.personal_agents.shownAt).toMatch(/^\d{4}-/);
+    expect((await w.claim("personal_agents", "pa-key-1")).show).toBe(true);
+    expect((await w.claim("personal_agents", "pa-key-2")).show).toBe(false);
+    expect(await w.next()).toBeNull();
+  });
+
+  test("connecting one drops it on the next read: a Hermes cloud agent, not a Claude Code routine", async () => {
+    const w = await world({ config: decided });
+    writeCloudAgent(w.dataDir, "claude-routine");
+    expect(await w.next()).toBe("personal_agents");
+    writeCloudAgent(w.dataDir, "hermes");
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("personal_agents")).show).toBe(false);
+  });
+
+  test("never with the Inbox tool on for OpenClaw, nor on day 1", async () => {
+    expect(await (await world({ config: { ...decided, inboxTool: { openclaw: true } } })).next()).toBeNull();
+    expect(await (await world({ days: 1, config: decided })).next()).toBeNull();
+  });
 });
 
 describe("over the tailnet", () => {
