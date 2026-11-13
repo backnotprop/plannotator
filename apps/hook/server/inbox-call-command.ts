@@ -39,10 +39,9 @@
  * `<code>: <message>`. Exit 0 ok, 1 refused or unreachable, 2 bad usage.
  */
 
-import { readFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
-import { callInboxThroughRelay, inboxAgentSignalUrl } from "@plannotator/shared/inbox/agent-relay-client";
+import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -51,11 +50,13 @@ import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-che
 import type { InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
 import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE, INBOX_PAIRED_CALL_USAGE } from "./cli";
+import { pairedAttachments } from "./inbox-call-pieces";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
 /** One request never waits longer: a wedged Inbox must not hang a script. */
 const REQUEST_TIMEOUT_MS = 90_000;
+const PIECE_WAIT_MS = 60_000;
 
 /** The tool fields that say who is calling: only `--session` and the environment do. */
 const IDENTITY_FIELDS = ["agent_session", "agent_host", "agent_name"] as const;
@@ -280,60 +281,70 @@ async function runPairedCall(
   } catch (error) {
     return refused("invalid_json", `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}`, 2);
   }
-  // Files on this computer go up as bytes: the Inbox never opens a path a cloud agent names.
-  if (Array.isArray(args.attachments)) {
+  const relayed = !door && pairing.relay ? { ...pairing, relay: pairing.relay } : null;
+  const transport = async (tool: string, body: Record<string, unknown>, waitMs?: number): Promise<InboxAgentRelayOutcome> => {
+    if (relayed) return callInboxThroughRelay(relayed, tool, body, waitMs ? { readWaitMs: waitMs } : {});
     try {
-      args.attachments = await Promise.all(
-        args.attachments.map(async (item) => (typeof item === "string" ? { name: basename(item), data: (await readFile(resolve(deps.cwd, item))).toString("base64") } : item)),
-      );
+      const response = await fetch(`${door}/api/inbox/agent/call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${pairing.token}` },
+        body: JSON.stringify({ tool, arguments: body }),
+        signal: AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS),
+      });
+      return { kind: "answer", status: response.status, body: await response.text() };
     } catch (error) {
-      return refused("attachment_unreadable", error instanceof Error ? error.message : String(error));
+      return { kind: "refused", code: "inbox_no_answer", message: `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}` };
     }
-  }
-  if (!door && pairing.relay) {
-    const relayed = { ...pairing, relay: pairing.relay };
-    const outcome = await callInboxThroughRelay(relayed, parsed.action, args);
-    if (outcome.kind === "refused") return refused(outcome.code, outcome.message);
-    if (outcome.kind === "queued") {
-      await out(
-        `${JSON.stringify({
-          queued: true,
-          note:
-            outcome.reason === "offline"
-              ? "The person's computer is asleep or offline. This call waits at the relay and is applied once when it is back. Do not send it again."
-              : "The person's computer did not answer in time. This call waits at the relay and is applied once. Do not send it again.",
-        })}\n`,
-      );
-      return 0;
+  };
+  const resultOf = (outcome: Extract<InboxAgentRelayOutcome, { kind: "answer" }>): { result: CallResult } | { code: string; message: string } => {
+    let answer: { result?: CallResult; code?: string; error?: string } | null = null;
+    try {
+      answer = JSON.parse(outcome.body);
+    } catch {
+      answer = null;
     }
-    const answer = (() => {
-      try {
-        return JSON.parse(outcome.body) as { result?: CallResult; code?: string; error?: string };
-      } catch {
-        return null;
+    if (outcome.status === 401 && answer?.code === "device_revoked") return { code: "pairing_removed", message: "This cloud agent was removed from the person's Inbox. Nothing was sent. Ask the person for a new pairing string." };
+    if (outcome.status < 200 || outcome.status >= 300 || !answer?.result) return { code: answer?.code ?? "inbox_error", message: answer?.error ?? `The Inbox answered ${outcome.status}.` };
+    return { result: answer.result };
+  };
+
+  if (Array.isArray(args.attachments)) {
+    const sent = await pairedAttachments(args.attachments, deps.cwd, async (tool, body) => {
+      const outcome = await transport(tool, body, PIECE_WAIT_MS);
+      if (outcome.kind === "refused") return { ok: false, code: outcome.code, message: outcome.message };
+      if (outcome.kind === "queued") return { ok: false, code: "no_answer", message: "The person's computer did not take the file in time. Nothing was sent. Try again later." };
+      const got = resultOf(outcome);
+      if ("code" in got) return { ok: false, ...got };
+      if (got.result.isError) {
+        const text = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
+        const match = /^([a-z][a-z0-9_]*): ([\s\S]*)$/.exec(text);
+        return { ok: false, code: match?.[1] ?? "inbox_error", message: match?.[2] ?? text };
       }
-    })();
-    if (outcome.status === 401 && answer?.code === "device_revoked") return refused("pairing_removed", "This cloud agent was removed from the person's Inbox. Nothing was sent. Ask the person for a new pairing string.");
-    if (outcome.status < 200 || outcome.status >= 300 || !answer?.result) return refused(answer?.code ?? "inbox_error", answer?.error ?? `The Inbox answered ${outcome.status}.`);
-    if (parsed.action === "whoami" && !answer.result.isError) {
-      answer.result.structuredContent = { ...answer.result.structuredContent, signal_url: await inboxAgentSignalUrl(relayed) };
-    }
-    return printResult(answer.result, out, err);
-  }
-  let response: Response;
-  try {
-    response = await fetch(`${door}/api/inbox/agent/call`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${pairing.token}` },
-      body: JSON.stringify({ tool: parsed.action, arguments: args }),
-      signal: AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS),
+      return { ok: true };
     });
-  } catch (error) {
-    return refused("inbox_no_answer", `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}`);
+    if (!sent.ok) return refused(sent.code, sent.message);
+    args.attachments = sent.items;
   }
-  const answer = (await response.json().catch(() => null)) as { result?: CallResult; code?: string; error?: string } | null;
-  if (!response.ok || !answer?.result) return refused(answer?.code ?? "inbox_error", answer?.error ?? `The Inbox answered ${response.status}.`);
-  return printResult(answer.result, out, err);
+  const outcome = await transport(parsed.action, args);
+  if (outcome.kind === "refused") return refused(outcome.code, outcome.message);
+  if (outcome.kind === "queued") {
+    await out(
+      `${JSON.stringify({
+        queued: true,
+        note:
+          outcome.reason === "offline"
+            ? "The person's computer is asleep or offline. This call waits at the relay and is applied once when it is back. Do not send it again."
+            : "The person's computer did not answer in time. This call waits at the relay and is applied once. Do not send it again.",
+      })}\n`,
+    );
+    return 0;
+  }
+  const got = resultOf(outcome);
+  if ("code" in got) return refused(got.code, got.message);
+  if (relayed && parsed.action === "whoami" && !got.result.isError) {
+    got.result.structuredContent = { ...got.result.structuredContent, signal_url: await inboxAgentSignalUrl(relayed) };
+  }
+  return printResult(got.result, out, err);
 }
 
 /** `http://127.0.0.1:<port>` (or localhost, [::1]) with nothing after the port, else null. */
