@@ -69,7 +69,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 39;
+const TESTS = 40;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -667,6 +667,33 @@ test.skipIf(!hasDom)('a Send whose answer is lost after it went is read back: th
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   expect(await personReplies('Went, answer lost.')).toHaveLength(1);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send whose answer is lost keeps its "Sending…" reply while the thread is read for it', async () => {
+  const { el } = await openWithSaved('Lost, still drawn.');
+  const real = globalThis.fetch;
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let lost = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (lost && /\/api\/inbox\/threads\/[^/?]+(\?|$)/.test(path)) await held;
+    const answer = await real(input, init);
+    if ((init?.method ?? 'GET') === 'POST' && path.endsWith('/reply')) {
+      lost = true;
+      throw new TypeError('Failed to fetch');
+    }
+    return answer;
+  }) as typeof fetch;
+  act(() => button(el, 'Send').click());
+  await until(() => lost, 'the answer lost');
+  await settle();
+  expect(el.querySelectorAll('[data-sending]').length).toBe(1);
+  release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(el.querySelectorAll('[data-sending]').length).toBe(0);
+  expect(await personReplies('Lost, still drawn.')).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('a Send carrying a comment whose answer is lost after it went: the box closes; the reply and its comment went once', async () => {
