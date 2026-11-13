@@ -1011,14 +1011,14 @@ async function localInstead(response: Response): Promise<boolean> {
   return true;
 }
 
-async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function get<T>(path: string, signal?: AbortSignal, arriving?: (response: Response) => Promise<Response>): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   resumeDebugLog();
   const response = await fetch(path, { headers: { Accept: 'application/json', 'X-Plannotator-Load': pageLoad }, cache: 'no-store', signal });
   learnDebugLog(response);
-  if (machine && (await localInstead(response))) return get<T>(localRoute(path), signal);
-  const answer = await readJson<T>(response);
+  if (machine && (await localInstead(response))) return get<T>(localRoute(path), signal, arriving);
+  const answer = await readJson<T>(arriving ? await arriving(response) : response);
   // Local ids come only from this Inbox's own records (list rows, the archived list, thread reads, its own
   // events): any other answer can echo another machine's id (a kept draft names its project).
   if (machine) rememberMachine(idsIn(answer), machine);
@@ -1083,20 +1083,46 @@ export const REF_CARD_READ_MS = 20_000;
 /** A storage read with no answer by then (a held connection on a phone over the tailnet) fails, so Try again or a reopen reads anew. XL counts in about 1.3 s. */
 export const STORAGE_READ_MS = 20_000;
 
-/** `get`, given up after `timeoutMs`: the fetch is aborted and the read fails with InboxReadTimeout. */
+/** `get`, given up after `timeoutMs` with nothing arriving: the fetch is aborted and the read fails with InboxReadTimeout. */
 /** `outer`: the caller gave the read up (the person moved on): it ends at once, with that abort. */
 async function getWithin<T>(path: string, timeoutMs: number, outer?: AbortSignal): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
-  const timer = setTimeout(() => {
+  const expire = () => {
     timedOut = true;
     controller.abort();
-  }, timeoutMs);
+  };
+  let timer = setTimeout(expire, timeoutMs);
+  const progress = () => {
+    clearTimeout(timer);
+    timer = setTimeout(expire, timeoutMs);
+  };
+  const arriving = async (response: Response): Promise<Response> => {
+    progress();
+    const reader = response.body?.getReader();
+    if (!reader) return response;
+    const parts: Uint8Array[] = [];
+    let size = 0;
+    for (let part = await reader.read(); !part.done; part = await reader.read()) {
+      progress();
+      parts.push(part.value);
+      size += part.value.length;
+    }
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const part of parts) {
+      bytes.set(part, at);
+      at += part.length;
+    }
+    return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
+  };
   const onAbort = () => controller.abort(outer?.reason);
   if (outer?.aborted) onAbort();
   else outer?.addEventListener('abort', onAbort, { once: true });
   try {
-    return await get<T>(path, controller.signal);
+    const answer = await get<T>(path, controller.signal, arriving);
+    if (timedOut) throw new InboxReadTimeout(timeoutMs);
+    return answer;
   } catch (cause) {
     throw timedOut ? new InboxReadTimeout(timeoutMs) : cause;
   } finally {
