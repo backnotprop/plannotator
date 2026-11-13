@@ -3524,10 +3524,10 @@ function Inbox() {
   const rowOf = (threadId: string): InboxListRow | undefined =>
     (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
 
-  const say = (text: string) => {
+  const say = useCallback((text: string) => {
     setSaid('');
     setTimeout(() => setSaid(text), 30);
-  };
+  }, []);
   // The live region says "Reconnecting…" once when the stream dies, never its return, and not again within
   // RECONNECT_SAY_GAP_MS (a network that comes and goes would say it over and over).
   useEffect(() => {
