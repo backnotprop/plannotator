@@ -212,7 +212,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
           <button
             onClick={() => onSelectFile(node.fileIndex!)}
             onDoubleClick={() => onDoubleClickFile?.(node.fileIndex!)}
-            className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''}`}
+            className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''} ${isViewed && showViewedControls ? 'viewed' : ''}`}
             style={{ paddingLeft }}
             title={node.path}
           />

@@ -32,19 +32,19 @@ export const ChangeTypeLetter: React.FC<{
   oldPath?: string;
   untracked?: boolean;
 }> = ({ status, oldPath, untracked }) => (
-  <span className="w-3 text-center text-[10px] flex-shrink-0">
+  <span className="w-3.5 text-center text-[12px] leading-none flex-shrink-0" data-change-letter="">
     {untracked ? (
-      <span className="font-semibold text-muted-foreground/70" title="Untracked file">U</span>
+      <span className="font-semibold text-muted-foreground" title="Untracked file">U</span>
     ) : status === 'added' ? (
       <span className="font-semibold text-success" title="Added file">A</span>
     ) : status === 'deleted' ? (
       <span className="font-semibold text-destructive" title="Deleted file">D</span>
     ) : status === 'renamed' ? (
-      <span className="font-semibold text-[#007aff]" title={oldPath ? `Renamed from ${oldPath}` : 'Renamed file'}>R</span>
+      <span className="font-semibold text-muted-foreground" title={oldPath ? `Renamed from ${oldPath}` : 'Renamed file'}>R</span>
     ) : status === 'binary' ? (
-      <span className="font-semibold text-muted-foreground/70" title="Binary file">B</span>
+      <span className="font-semibold text-muted-foreground" title="Binary file">B</span>
     ) : (
-      <span className="text-muted-foreground/40" title="Modified file">M</span>
+      <span className="text-muted-foreground/60" title="Modified file">M</span>
     )}
   </span>
 );

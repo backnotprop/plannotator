@@ -168,7 +168,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   const headerRef = useRef<HTMLDivElement>(null);
   const fileCommentRef = useRef<HTMLButtonElement>(null);
   const { directory, name } = splitFilePath(filePath);
-  const isCompact = headerWidth > 0 && headerWidth < 760;
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
   const narrow = headerWidth > 0 && headerWidth < 560;
   // Narrow, with keepsFolder: the folder gives way first, from its start (`direction: rtl` puts the ellipsis there).
@@ -193,8 +192,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  const stageLabel = isVeryTight ? '' : isCompact ? (isStaging ? 'Adding' : isStaged ? 'Added' : 'Add') : (isStaging ? 'Adding...' : isStaged ? 'Added' : 'Git Add');
-  const commentLabel = isVeryTight ? '' : 'Comment';
+  const stageLabel = '';
+  const commentLabel = '';
   const viewedLabel = isVeryTight ? '' : 'Viewed';
   const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
 
@@ -202,13 +201,13 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
     <div
       ref={headerRef}
       data-file-header=""
-      className={`flex-shrink-0 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'px-3'}`}
+      className={`flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'pl-2 pr-2'}`}
       style={{ height: isCompactTouchLayout ? '44px' : 'var(--panel-header-h)' }}
     >
       <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
         {collapseToggle}
         <span
-          className={`min-w-0 flex items-center text-xs font-semibold leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
+          className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
           title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
         >
           {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
@@ -241,7 +240,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             </span>
           ) : foldedFolder ? (
             <>
-              <span data-file-header-folder="" className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground/70 [direction:rtl]">
+              <span data-file-header-folder="" className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]">
                 <bdi>{directory}</bdi>
               </span>
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{name}</span>
@@ -249,7 +248,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           ) : (
             <>
               {!showFilenameOnly && directory && (
-                <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/70">
+                <span className="min-w-0 overflow-hidden text-ellipsis font-normal text-muted-foreground">
                   {directory}
                 </span>
               )}
@@ -263,9 +262,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         </span>
         {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
         {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
-          <span className="flex-none ml-2 flex items-center gap-1.5 text-xs leading-none">
-            {additions > 0 && <span className="font-mono text-success">+{additions}</span>}
-            {deletions > 0 && <span className="font-mono text-destructive">-{deletions}</span>}
+          <span className="flex-none ml-3 flex items-center gap-1.5 text-[12px] leading-none tabular-nums">
+            {additions > 0 && <span className="text-success">+{additions}</span>}
+            {deletions > 0 && <span className="text-destructive">−{deletions}</span>}
             {status && <FileStatusLetter status={status} oldPath={oldPath} />}
             {isGenerated && (
               <span
@@ -279,7 +278,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </span>
         )}
       </div>
-      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         {accessory}
         {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
         {showViewedControl && onToggleViewed && (
@@ -316,6 +315,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
             title={isStaged ? "Unstage this file (A)" : "Stage this file (A)"}
+            aria-label={isStaged ? "Unstage this file" : "Stage this file"}
           >
             {isStaging ? (
               <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -348,6 +348,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             onClick={() => fileCommentRef.current && onFileComment(fileCommentRef.current)}
             className={`text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
             title="Add file-scoped comment"
+            aria-label="Comment on this file"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4v-4z" />

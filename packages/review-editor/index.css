@@ -27,7 +27,7 @@
 /* Shared panel header height — keeps file header, sidebar headers, and
    search bar vertically aligned across all three columns. */
 :root {
-  --panel-header-h: 33px;
+  --panel-header-h: 32px;
 
   /* Code-review-only readable-text bump. `text-xs` is the app's small/body
      tier; Tailwind's default leaves it at 12px, which reads cramped here.
@@ -2445,7 +2445,7 @@ diffs-container {
   --sidebar-fill: color-mix(in oklab, var(--foreground) 6%, transparent);
   --sidebar-fill-strong: color-mix(in oklab, var(--foreground) 9%, transparent);
   --sidebar-line: color-mix(in oklab, var(--foreground) 9%, transparent);
-  --sidebar-text-tertiary: color-mix(in oklab, var(--muted-foreground) 85%, var(--background));
+  --sidebar-text-tertiary: var(--muted-foreground);
   background: var(--background);
   border-right-color: color-mix(in oklab, var(--border) 50%, transparent);
 }
@@ -2460,20 +2460,37 @@ diffs-container {
 }
 /* Keep a row brought into view clear of the sticky block. */
 .review-sidebar :is(.file-tree-item, .review-folder-row, .panel-section-heading) {
-  scroll-margin-top: 64px;
+  scroll-margin-top: 36px;
 }
 
 /* File rows: 28 px, touching; the selected row a grey fill. A row with
    comments or a staged file keeps no tint (its badge and + say it). */
 .review-sidebar .file-tree-item {
-  min-height: 28px;
+  min-height: 24px;
+  height: 24px;
   padding-top: 0;
   padding-bottom: 0;
   padding-right: 8px;
   gap: 6px;
-  border-radius: 6px;
-  font-weight: 500;
+  border-radius: 4px;
+  font-weight: 400;
+  color: color-mix(in oklab, var(--foreground) 88%, var(--background));
+}
+.review-sidebar .file-tree-item.viewed {
   color: var(--muted-foreground);
+}
+.review-sidebar .file-tree-item .stage-plus {
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.review-sidebar .file-tree-item:is(:hover, :focus-within, .active) .stage-plus,
+.review-sidebar .file-tree-item .stage-plus:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .review-sidebar .file-tree-item .stage-plus {
+    opacity: 1;
+  }
 }
 .review-sidebar .file-tree-item.has-annotations,
 .review-sidebar .file-tree-item.staged {
@@ -2530,8 +2547,11 @@ diffs-container {
   position: absolute;
   inset: -4px;
 }
-.review-sidebar .file-tree-item [role="checkbox"] {
-  margin-right: 2px;
+.review-sidebar .file-tree-item .review-file-row-main > .w-4.h-4:not([role="checkbox"]) {
+  width: 10px;
+}
+.review-sidebar .file-tree-item .review-file-row-main > .stage-plus {
+  margin: 0 -3px;
 }
 
 /* The +/- number columns (CountColumns). The panel sets the widths from its
@@ -2546,7 +2566,7 @@ diffs-container {
   align-items: center;
   flex-shrink: 0;
   margin-left: auto;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -2557,7 +2577,7 @@ diffs-container {
   color: var(--sidebar-text-tertiary);
 }
 .review-kind-viewed {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
@@ -2566,7 +2586,7 @@ diffs-container {
    whose width the panel sets. 11 px so `ch` in the widths is the numbers' ch.
    Without numbers (a narrow panel) it takes their place. */
 .review-on-disk-dot {
-  font-size: 11px;
+  font-size: 12px;
   right: calc(8px + var(--count-del-w, 3ch) + 4px + var(--count-add-w, 3ch) + 6px);
 }
 .review-sidebar[data-compact-rows] .review-on-disk-dot {
@@ -2582,16 +2602,16 @@ diffs-container {
 .review-folder-row {
   width: 100%;
   min-width: 0;
-  height: 28px;
+  height: 24px;
   display: flex;
   align-items: center;
   gap: 6px;
   padding-right: 8px;
-  border-radius: 6px;
+  border-radius: 4px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   text-align: left;
-  color: var(--sidebar-text-tertiary);
+  color: var(--muted-foreground);
   transition: background-color 120ms, color 120ms;
 }
 .review-folder-row:hover {
@@ -2609,12 +2629,12 @@ diffs-container {
 .panel-section-heading {
   width: 100%;
   min-width: 0;
-  height: 28px;
+  height: 24px;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: 4px;
   text-align: left;
   cursor: pointer;
   color: color-mix(in oklab, var(--foreground) 78%, var(--background));
@@ -2683,7 +2703,7 @@ diffs-container {
 
 /* Groups: 12 px between them. */
 .review-panel-group + .review-panel-group {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 @media (prefers-reduced-motion: reduce) {

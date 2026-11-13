@@ -1049,6 +1049,8 @@ const ReviewApp: React.FC = () => {
 
   // Dockview center panel API for the review workspace.
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
+  const [dockActivePanelId, setDockActivePanelId] = useState<string | null>(null);
+  const [allChangesOpen, setAllChangesOpen] = useState(false);
   const filesRef = useRef(files);
   filesRef.current = files;
   const needsInitialDiffPanel = useRef(true);
@@ -1848,6 +1850,7 @@ const ReviewApp: React.FC = () => {
 
     // Sync activeFileIndex when user switches between dock tabs
     event.api.onDidActivePanelChange((panel) => {
+      setDockActivePanelId(panel?.id ?? null);
       if (!panel) {
         setIsAllFilesActive(false);
         setIsSemanticDiffActive(false);
@@ -1882,12 +1885,20 @@ const ReviewApp: React.FC = () => {
       }
     });
 
-    // Note: we intentionally no longer hide the tab header for a lone diff /
-    // all-files / semantic panel. The Split/Unified toggle lives in the tab
-    // strip's right-actions slot (ReviewDockRightActions), so the header must
-    // stay visible in single-panel diff views — otherwise the toggle would
-    // vanish exactly when it's most needed. The trade is a single tab showing
-    // in those views, which is acceptable.
+    const updateHeaders = () => {
+      const panels = event.api.panels;
+      const lone = event.api.groups.length === 1 && panels.length === 1 ? panels[0] : undefined;
+      const hide = !!lone && (lone.id === REVIEW_ALL_FILES_PANEL_ID || isReviewDiffPanelId(lone.id));
+      for (const group of event.api.groups) group.header.hidden = hide;
+      setAllChangesOpen(!!event.api.getPanel(REVIEW_ALL_FILES_PANEL_ID));
+    };
+    event.api.onDidAddPanel(updateHeaders);
+    event.api.onDidRemovePanel(updateHeaders);
+    event.api.onDidAddGroup(updateHeaders);
+    event.api.onDidRemoveGroup(updateHeaders);
+    event.api.onDidMovePanel(updateHeaders);
+    event.api.onDidLayoutChange(updateHeaders);
+    updateHeaders();
   }, []);
 
   // Open agent job detail as center dock panel
@@ -5885,6 +5896,15 @@ const ReviewApp: React.FC = () => {
     searching: hasSearchableFiles && !!searchQuery.trim(),
   };
 
+  const totalAdditions = files.reduce((sum, file) => sum + file.additions, 0);
+  const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
+  const headerTotals = !isCompactTouchLayout && (totalAdditions > 0 || totalDeletions > 0) ? (
+    <span className="flex-shrink-0 flex items-center gap-1.5 text-[12px] tabular-nums" data-header-totals="" title={`${files.length} files: ${totalAdditions} lines added, ${totalDeletions} removed`}>
+      {totalAdditions > 0 && <span className="text-success">+{totalAdditions}</span>}
+      {totalDeletions > 0 && <span className="text-destructive">−{totalDeletions}</span>}
+    </span>
+  ) : null;
+
   if (isLoading) {
     return (
       <ThemeProvider defaultTheme="dark" manageFavicon>
@@ -5912,7 +5932,7 @@ const ReviewApp: React.FC = () => {
         {/* Header */}
         <header className={isCompactTouchLayout
           ? 'min-h-[52px] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
-          : 'py-1 flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 lg:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
+          : 'py-1 min-[480px]:py-0 min-[480px]:h-10 flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
         }>
           <div className={isCompactTouchLayout
             ? 'contents'
@@ -5935,7 +5955,7 @@ const ReviewApp: React.FC = () => {
                 >
                   <FolderTree className="w-3.5 h-3.5" />
                 </button>
-                <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+                <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
             )}
             {isCompactTouchLayout && !shouldShowFileTree && <span aria-hidden />}
@@ -5963,7 +5983,7 @@ const ReviewApp: React.FC = () => {
                     guideOpen ? 'Go back' : 'Guide'
                   )}
                 </button>
-                <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+                <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
             )}
             {prMetadata ? (
@@ -5999,6 +6019,7 @@ const ReviewApp: React.FC = () => {
                     onNavigatePR={handlePRSwitch}
                   />
                 )}
+                {headerTotals}
               </div>
             ) : repoInfo ? (
               <div className={isCompactTouchLayout
@@ -6014,12 +6035,13 @@ const ReviewApp: React.FC = () => {
                   </span>
                 )}
                 <span
-                  className="text-xs text-muted-foreground/60 inline-flex items-center gap-1 truncate max-w-[220px]"
+                  className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-[220px]"
                   title={repoInfo.display}
                 >
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
                   {repoName}
                 </span>
+                {headerTotals}
               </div>
             ) : isStaticPatch ? (
               // Honest label for a repo-less session: name the patch that IS
@@ -6132,33 +6154,21 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
-                {/* GitHub error message */}
-                {!isCompactTouchLayout && platformActionError && (
+                {!isCompactTouchLayout && (platformActionError ? (
                   <div
                     className="text-xs text-destructive px-2 py-1 bg-destructive/10 rounded border border-destructive/20 max-w-[200px] truncate"
                     title={platformActionError}
                   >
                     {platformActionError}
                   </div>
-                )}
-
-                {!isCompactTouchLayout && reviewMode === 'workspace' && diffError && (
+                ) : reviewMode === 'workspace' && diffError ? (
                   <div
                     className="text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25 max-w-[240px] truncate"
                     title={diffError}
                   >
                     {files.length > 0 ? 'Some workspace changes could not be loaded' : 'Workspace changes could not be loaded'}
                   </div>
-                )}
-
-                {/* Partial PR diff notice — the platform withheld per-file
-                    content (PR too large). "Load full diff" re-requests the
-                    layer scope; the server recomputes the exact diff from the
-                    local checkout (waiting out the warmup if needed). The
-                    request is non-blocking on purpose: it can park for
-                    minutes behind a cold clone, and the reviewer keeps
-                    working with the partial diff meanwhile. */}
-                {!isCompactTouchLayout && prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope && (
+                ) : prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope ? (
                   <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
                     <span className="hidden md:inline" title={`${platformLabel} omitted diff content for some files because this PR is too large`}>
                       Partial diff
@@ -6190,12 +6200,7 @@ const ReviewApp: React.FC = () => {
                       </button>
                     )}
                   </div>
-                )}
-
-                {/* Diff staleness notice — files changed since this snapshot
-                    was computed (agent editing mid-review). Non-blocking; the
-                    user refreshes when ready. */}
-                {!isCompactTouchLayout && diffFreshness.isStale && !isLoadingDiff && (
+                ) : diffFreshness.isStale && !isLoadingDiff ? (
                   <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
                     <span className="hidden md:inline">Diff out of date</span>
                     <span className="md:hidden">Stale</span>
@@ -6215,13 +6220,7 @@ const ReviewApp: React.FC = () => {
                       ×
                     </button>
                   </div>
-                )}
-
-                {/* Baseline staleness — origin/<default> is behind the actual
-                    remote, so the "since main" comparison is against stale
-                    GitHub state. Fetch catches the tracking ref up and
-                    recomputes the diff in place. */}
-                {!isCompactTouchLayout && baseBehindRemote && !prMetadata && !isLoadingDiff && (
+                ) : baseBehindRemote && !prMetadata && !isLoadingDiff ? (
                   <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
                     <span className="hidden md:inline">Baseline is behind GitHub</span>
                     <span className="md:hidden">Base behind</span>
@@ -6240,7 +6239,7 @@ const ReviewApp: React.FC = () => {
                       </button>
                     )}
                   </div>
-                )}
+                ) : null)}
 
                 {/* Agent mode: ghost-X Close + the adaptive decision control
                     (Approve at zero, Send Feedback · n otherwise; the caret
@@ -6316,12 +6315,18 @@ const ReviewApp: React.FC = () => {
               </button>
             ))}
 
-            <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+            <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
 
             {/* An open guide's Split/Unified, Collapse all and gear (with their
                 own divider after): GuideScreen portals GuideDiffControls in
                 here, between Close/Approve and the tool icons. */}
             {guideVisible && !isCompactTouchLayout && <div ref={setGuideBarSlot} className="contents" />}
+            {!guideVisible && !isCompactTouchLayout && files.length > 0 && (
+              <>
+                <ReviewDockRightActions activePanel={dockActivePanelId ? { id: dockActivePanelId } : null} />
+                <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
+              </>
+            )}
 
             {/* Sidebar tab toggles */}
             {!isCompactTouchLayout && (
@@ -6379,7 +6384,7 @@ const ReviewApp: React.FC = () => {
               </button>
             )}
 
-            <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+            <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
 
             <ReviewHeaderMenu
               onOpenSettings={() => setOpenSettingsMenu(true)}
@@ -6521,7 +6526,7 @@ const ReviewApp: React.FC = () => {
                 onToggleShowStageControls={handleToggleReviewStageControls}
                 autoViewed={autoViewedEnabled}
                 onToggleAutoViewed={handleToggleAutoViewed}
-                onSelectAllFiles={() => completeNavigatorSelection(openAllFilesPanel)}
+                onSelectAllFiles={allChangesOpen ? undefined : () => completeNavigatorSelection(openAllFilesPanel)}
                 isAllFilesActive={isAllFilesActive}
                 onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
                 isSemanticDiffActive={isSemanticDiffActive}
@@ -6610,7 +6615,7 @@ const ReviewApp: React.FC = () => {
                 callFlowCount={callFlowAnalysis.status === 'ready' ? callFlowAnalysis.data.summary.changedNodes : undefined}
                 callFlowLoading={callFlowNavLoading}
                 callFlowError={callFlowNavError}
-                onSelectAllFiles={() => completeNavigatorSelection(openAllFilesPanel)}
+                onSelectAllFiles={allChangesOpen ? undefined : () => completeNavigatorSelection(openAllFilesPanel)}
                 isAllFilesActive={isAllFilesActive}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
                 onSelectFile={(index) => completeNavigatorSelection(() => handleFilePreview(index))}
@@ -6734,7 +6739,6 @@ const ReviewApp: React.FC = () => {
                 className={`h-full ${resolvedMode === 'light' ? 'dockview-theme-light' : 'dockview-theme-dark'}`}
                 components={reviewPanelComponents}
                 defaultTabComponent={ReviewDockTabRenderer}
-                rightHeaderActionsComponent={ReviewDockRightActions}
                 onReady={handleDockReady}
                 disableFloatingGroups
               />

@@ -97,7 +97,7 @@ function Segmented<T extends string>({ options, value, onChange, label, stretch 
           aria-label={opt.icon ? opt.label : undefined}
           title={opt.icon ? opt.label : undefined}
           onClick={() => onChange(opt.value)}
-          className={`${stretch ? 'flex-1 px-1' : 'px-2'} inline-flex items-center justify-center min-w-7 py-1 text-[11.5px] whitespace-nowrap rounded-[5px] transition-colors ${
+          className={`${stretch ? 'flex-1 px-1' : 'px-2'} inline-flex items-center justify-center min-w-7 py-1 text-[12px] whitespace-nowrap rounded-[5px] transition-colors ${
             value === opt.value ? 'bg-background text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'
           }`}
         >
@@ -141,6 +141,7 @@ export interface DiffDisplayOptionsPopoverProps {
   compactTouchLayout?: boolean;
   /** Where the gear's hover text opens when the host draws ui's tooltips (`componentTooltips`). Default: top. */
   triggerTitleSide?: 'top' | 'right' | 'bottom' | 'left';
+  actions?: React.ReactNode;
 }
 
 const GEAR = (
@@ -157,6 +158,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
   triggerContent = GEAR,
   compactTouchLayout = false,
   triggerTitleSide = 'top',
+  actions,
 }) => {
   const set: DiffDisplayChange = onChange ?? ((key, value) => configStore.set(key, value));
   const overflow = useConfigValue('diffOverflow');
@@ -198,6 +200,12 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
             className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
           >
             <div className="px-2.5 py-2">
+              {actions && (
+                <>
+                  {actions}
+                  <div className="border-t border-border/60 my-1.5 -mx-2.5" />
+                </>
+              )}
               <Switch label="Wrap long lines" checked={overflow === 'wrap'} onChange={(v) => set('diffOverflow', v ? 'wrap' : 'scroll')} />
               <Switch label="Line numbers" checked={showLineNumbers} onChange={(v) => set('diffShowLineNumbers', v)} />
               <Switch label="Backgrounds" checked={showBackground} onChange={(v) => set('diffShowBackground', v)} />
@@ -216,9 +224,9 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
               </div>
               <Row label="Tab size">
                 <div className="inline-flex items-center gap-px bg-muted/60 rounded-md p-px">
-                  <button type="button" onClick={() => stepTab(tabSize - 1)} disabled={tabSize <= 1} aria-label="Decrease tab size" className="px-1.5 py-0.5 text-[11.5px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">−</button>
-                  <span className="px-2 text-[11.5px] tabular-nums w-5 text-center" data-diff-tab-size={tabSize}>{tabSize}</span>
-                  <button type="button" onClick={() => stepTab(tabSize + 1)} disabled={tabSize >= 8} aria-label="Increase tab size" className="px-1.5 py-0.5 text-[11.5px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">+</button>
+                  <button type="button" onClick={() => stepTab(tabSize - 1)} disabled={tabSize <= 1} aria-label="Decrease tab size" className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">−</button>
+                  <span className="px-2 text-[12px] tabular-nums w-5 text-center" data-diff-tab-size={tabSize}>{tabSize}</span>
+                  <button type="button" onClick={() => stepTab(tabSize + 1)} disabled={tabSize >= 8} aria-label="Increase tab size" className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">+</button>
                 </div>
               </Row>
               {repositoryOptions && (

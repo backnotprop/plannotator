@@ -1222,7 +1222,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 agentFindingSources={agentFindingSources}
                 explainDisabled={isAILoading}
               />
-              <div className="p-4" ref={diffContentRef}>
+              <div ref={diffContentRef}>
                 <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
                   {isSplitLayout && diffOverflow !== 'wrap' && (
                     <div

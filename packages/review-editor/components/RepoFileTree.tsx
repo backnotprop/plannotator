@@ -17,7 +17,7 @@ import {
 } from '../utils/repoTree';
 
 /** Every row has one height, so the list renders only the window on screen. */
-export const REPO_TREE_ROW_HEIGHT = 28;
+export const REPO_TREE_ROW_HEIGHT = 24;
 const OVERSCAN_ROWS = 12;
 /** Rows drawn before the scroll container has a size (first paint, tests). */
 const UNMEASURED_ROWS = 80;

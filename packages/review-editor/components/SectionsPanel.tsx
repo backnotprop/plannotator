@@ -170,7 +170,7 @@ const SectionRow: React.FC<{
     <button
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
-      className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''}`}
+      className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isViewed && showViewedControl ? 'viewed' : ''}`}
       style={{ paddingLeft: 8 }}
       title={file.path}
     >
@@ -467,7 +467,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   const panelWidth = width ?? 256;
   const panelControls = (
     <PanelControlsRow
-      scope={<ScopeSwitch model={header} width={panelWidth} />}
+      scope={<ScopeSwitch model={header} width={panelWidth} progress={{ viewed: viewedFiles.size, total: files.length, staged: stagedCount, showViewed: showViewedControls !== false }} />}
       stagedCount={stagedCount}
       isSearchVisible={isSearchVisible}
       onOpenSearch={onOpenSearch}
@@ -545,7 +545,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
             style={countColumnVars(totalAdditions, totalDeletions)}
           >
             {/* Nav rows — shared with the tree view, same order. */}
-            <nav aria-label="Review views" className="pb-3 flex flex-col empty:hidden" data-review-views-nav="">
+            <nav aria-label="Review views" className="pb-1 flex flex-col empty:hidden" data-review-views-nav="">
             {onSelectAllFiles && (
               <AllChangesRow
                 active={isAllFilesActive ?? false}
