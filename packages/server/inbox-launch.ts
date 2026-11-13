@@ -102,6 +102,7 @@ import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
+import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { pathFoldersOf } from "./env-path";
 import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
@@ -487,6 +488,7 @@ export function createInboxLaunch(options: {
     claude,
     createPiLaunchHost(context),
     createCodexLaunchHost(context),
+    createOpenCodeLaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
@@ -1758,6 +1760,10 @@ ${result.text}`);
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
+      }
+      const modelEfforts = target.choice?.model ? lists?.model_efforts?.[target.choice.model] : undefined;
+      if (target.choice?.effort && modelEfforts && !modelEfforts.includes(target.choice.effort)) {
+        throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
       const model = target.choice?.model;
       const effort = target.choice?.effort;

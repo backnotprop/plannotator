@@ -34,7 +34,7 @@ import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
 import { ListFilterButton, type ListFilterSource } from './ListFilter';
-import { awayLine, type MachinesModel } from '../machines';
+import { awayLine, machineTakes, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
 import { useStarredAbove } from '../starredPills';
@@ -56,6 +56,12 @@ export interface InboxListProps {
   /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
   onHide?: () => void;
   title: string;
+  /**
+   * A tag's list (approval "inbox-thread-tags"): the tag's `#` before the title, and "5 threads · 2 projects" after it,
+   * quiet. Absent: neither.
+   */
+  titleMark?: ReactNode;
+  titleNote?: string | null;
   /** The project's folder, `~/src/billing-svc`, when one project is shown: in the title's tooltip, never drawn in the header. */
   path: string | null;
   sections: readonly InboxListSection[];
@@ -1572,8 +1578,7 @@ export function InboxList(props: InboxListProps) {
       onMarkRead={props.onMarkRead ? markRead : undefined}
       onMarkUnread={props.onMarkUnread ? markUnread : undefined}
       onSendNow={props.onSendNow ? sendNow : undefined}
-      // Pins are this Inbox's own: another machine's thread has no star to press here.
-      onUnstar={props.onUnstar && !(row.machine && props.machines?.names.has(row.machine)) ? unstar : undefined}
+      onUnstar={props.onUnstar ? unstar : undefined}
       day={day}
       menu={menuRow === row.thread_id}
       pinned={props.pinned?.has(row.thread_id) === true}
@@ -1615,6 +1620,7 @@ export function InboxList(props: InboxListProps) {
               data-list-refresh=""
               data-refreshing={props.refreshSpin != null ? '' : undefined}
             >
+              {props.titleMark && <span className="ib-lhead-mark">{props.titleMark}</span>}
               {props.path ? (
                 <Tip content={<ProjectTipText name={props.title} root={props.path} />}>
                   <span className="ib-lhead-tt">{props.title}</span>
@@ -1633,8 +1639,16 @@ export function InboxList(props: InboxListProps) {
           </h1>
         ) : (
           <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>
-            <h1 dir="auto">{props.title}</h1>
+            <h1 dir="auto">
+              {props.titleMark && <span className="ib-lhead-mark">{props.titleMark}</span>}
+              {props.title}
+            </h1>
           </Tip>
+        )}
+        {props.titleNote && (
+          <span className="ib-lhead-note" data-list-title-note="">
+            {props.titleNote}
+          </span>
         )}
         {/* The button's description, outside the h1 so the heading reads only the name. */}
         {props.onRefresh && (
@@ -1736,7 +1750,7 @@ export function InboxList(props: InboxListProps) {
           snoozeRequest={snoozeRequest}
           snoozeBlockedOf={props.snoozeBlockedOf}
           onSnoozeBlocked={props.onSnoozeBlocked}
-          pinnedOf={props.pinned ? (threadId) => props.pinned!.has(threadId) : undefined}
+          pinnedOf={props.pinned ? (row) => (!props.machines || machineTakes(row, props.machines, 'star') ? props.pinned!.has(row.thread_id) : null) : undefined}
           onTarget={setMenuRow}
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}

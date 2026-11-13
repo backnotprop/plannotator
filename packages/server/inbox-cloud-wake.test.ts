@@ -191,7 +191,7 @@ describe("the cloud wake", () => {
     const sent = await w.send(agent.session, "Hello.");
     await until(async () => (await w.wakeOf(sent.thread_id, sent.message.id))?.state === "key_rejected");
     const listed = (await w.call("/api/inbox/cloud-agents")).json.agents as InboxCloudAgentView[];
-    expect(listed[0]).toMatchObject({ key_set: true, key_rejected_at: expect.any(String) });
+    expect(listed[0]).toMatchObject({ wake: true, key_rejected_at: expect.any(String) });
     await w.call(`/api/inbox/cloud-agents/${agent.session}/key`, { key: NEW_KEY });
     await until(() => hook.seen.length === 2);
     expect(hook.seen[1]!.headers.authorization).toBe(`Bearer ${NEW_KEY}`);

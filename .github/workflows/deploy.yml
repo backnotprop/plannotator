@@ -185,14 +185,14 @@ jobs:
           aws s3 sync apps/marketing/dist/ s3://plannotator-marketing/ --delete
           --exclude "assets/*.mp4" --exclude "assets/*.webm"
 
-      # The sync guesses text/markdown with no charset for .md; re-upload the
-      # Inbox install prompt (/inbox/prompt.md) with an explicit charset.
       - name: Set the Inbox prompt's content type
         run: |
-          if [ -f apps/marketing/dist/inbox/prompt.md ]; then
-            aws s3 cp apps/marketing/dist/inbox/prompt.md s3://plannotator-marketing/inbox/prompt.md \
-              --content-type "text/markdown; charset=utf-8"
-          fi
+          for page in prompt.md cloud-agent.md muse.md; do
+            if [ -f "apps/marketing/dist/inbox/$page" ]; then
+              aws s3 cp "apps/marketing/dist/inbox/$page" "s3://plannotator-marketing/inbox/$page" \
+                --content-type "text/markdown; charset=utf-8"
+            fi
+          done
 
       - name: Invalidate CloudFront
         run: |
