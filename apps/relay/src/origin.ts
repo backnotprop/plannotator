@@ -7,7 +7,7 @@
  * provider token, a JWT or an access token anywhere else.
  */
 
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+export const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const logged = new Set<string>();
 
 export function loopbackOverride(name: string, value: string | undefined): string | undefined {

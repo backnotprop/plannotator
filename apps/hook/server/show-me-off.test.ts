@@ -218,6 +218,7 @@ test("Code review off with a broken config.json: --version, --help, review --hel
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
     HOME: process.env.HOME!,
+    PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER: "1",
@@ -228,7 +229,7 @@ test("Code review off with a broken config.json: --version, --help, review --hel
   };
   // In a folder that is no repository: the review parse answers at once, nothing is reviewed.
   const runWith = async (data: string, argv: string[]) => {
-    const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...argv], { cwd: root, env: { ...env, PLANNOTATOR_DATA_DIR: data }, stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...argv], { cwd: root, env: { ...env, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: data }, stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     return { stdout, stderr, code };
   };
@@ -286,6 +287,7 @@ test("Code review on: `shape` answers only with Shape on, and an old `review dra
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
       HOME: process.env.HOME!,
+      PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER: "1",

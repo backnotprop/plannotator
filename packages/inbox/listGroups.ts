@@ -15,7 +15,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 
 export const LIST_GROUPS_COOKIE = 'plannotator-inbox-list-groups';
 
-const GROUPS: readonly InboxListGroupId[] = ['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet', 'snoozed'];
+const GROUPS: readonly InboxListGroupId[] = ['priority', 'stopped', 'holding', 'waiting', 'new', 'sent', 'quiet', 'snoozed'];
 const CLOSED_BY_DEFAULT: ReadonlySet<InboxListGroupId> = new Set(['quiet', 'snoozed']);
 const PAGE_LOADED = Date.now();
 

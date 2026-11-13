@@ -28,6 +28,7 @@ export type HarnessId =
   | 'hermes'
   | 'zed'
   | 'kiro'
+  | 'muse'
   | 'jetbrains'
   | 'other';
 
@@ -56,6 +57,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'hermes', label: 'Hermes Agent' },
   { id: 'zed', label: 'Zed' },
   { id: 'kiro', label: 'Kiro' },
+  { id: 'muse', label: 'Muse Code' },
   { id: 'jetbrains', label: 'JetBrains' },
   { id: 'other', label: 'Other MCP client' },
 ];
@@ -300,6 +302,11 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       return {
         artefacts: [{ kind: 'code', label: '~/.kiro/settings/mcp.json', text: mcpServersSnippet(ctx) }],
         note: 'Kiro picks it up without a restart.',
+      };
+    case 'muse':
+      return {
+        artefacts: [{ kind: 'code', text: `muse mcp add ${SERVER} -- ${cmd}` }],
+        note: "Run it in a terminal, then start a new Muse Code session in a folder Muse trusts: it starts MCP servers only there. Replies don't wake Muse Code: it reads them when it next checks the Inbox.",
       };
     case 'jetbrains':
       return {

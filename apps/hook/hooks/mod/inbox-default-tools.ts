@@ -77,7 +77,11 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "items": {
             "type": "string"
           },
-          "description": "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123`, `group/sub/project!45`, or the URL. Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
+          "description": "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab), or the URL (Bitbucket: the URL only). Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
+        },
+        "priority": {
+          "type": "boolean",
+          "description": "`true` puts this thread in the person's Priority, the top of their list; `false` takes it out. Follow the person: use it when they told you this matters most to them, or when what they asked for plainly makes it so, and take it out when that is over. It is theirs to change at any time."
         }
       },
       "required": [

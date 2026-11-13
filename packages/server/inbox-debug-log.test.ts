@@ -374,7 +374,7 @@ process.exit(143);
     );
     for (const mode of ["stop", "exit"]) {
       const logDir = join(dir, mode);
-      const run = Bun.spawnSync([process.execPath, script, mode, logDir], { env: { PATH: process.env.PATH ?? "", HOME: dir, PLANNOTATOR_DATA_DIR: join(dir, "data"), NO_BROWSER: "1", PLANNOTATOR_TEST_SANDBOX: "1" }, stdout: "pipe", stderr: "pipe" });
+      const run = Bun.spawnSync([process.execPath, script, mode, logDir], { env: { PATH: process.env.PATH ?? "", HOME: dir, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: join(dir, "data"), NO_BROWSER: "1", PLANNOTATOR_TEST_SANDBOX: "1" }, stdout: "pipe", stderr: "pipe" });
       expect({ mode, code: run.exitCode }).toEqual({ mode, code: 143 });
       expect({ mode, seqs: seqs(join(logDir, "debug.log")) }).toEqual({ mode, seqs: Array.from({ length: 58 }, (_, i) => i) });
     }

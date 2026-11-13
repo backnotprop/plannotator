@@ -87,6 +87,7 @@ function sandbox(): Sandbox {
       ...agents.env,
       HOME: home,
       TMPDIR: tmpdir(),
+      PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: dataDir,
       // Both are ignored by the Inbox: local only, never 19432.
       PLANNOTATOR_REMOTE: "1",
