@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { braked } from "../src/brake";
+import { braked, clientKey } from "../src/brake";
+import { plainHttp } from "../src/https-only";
 import { CREATE_LIMIT, CREATE_WINDOW_MS, HELD_COMMANDS_MAX, HELD_COMMAND_BYTES_MAX, takeCreate, type CreateWindow } from "../src/limits";
 import { dumpMailbox, sha256, sleep, startRelay, until, type Json, type Relay } from "./wrangler-relay";
 
@@ -206,5 +207,32 @@ describe("the creation brake", () => {
     expect(refused?.status).toBe(429);
     expect(refused?.headers.get("retry-after")).toBe("60");
     expect(await braked(request("127.0.0.1:8787", null), undefined, undefined, 60)).toBeNull();
+  });
+
+  test("one IPv6 host cannot rotate through its /64 past the count", async () => {
+    const clock = { now: 1_000_000 };
+    const counter = objects(clock);
+    for (let i = 0; i < CREATE_LIMIT; i++) expect(await braked(request("relay.example", `2001:db8:1:2::${(i + 1).toString(16)}`), allow, counter, 60)).toBeNull();
+    expect((await braked(request("relay.example", "2001:db8:1:2:ffff:ffff:ffff:ffff"), allow, counter, 60))?.status).toBe(429);
+    expect(await braked(request("relay.example", "2001:db8:1:3::1"), allow, counter, 60)).toBeNull();
+  });
+
+  test("an IPv6 client is keyed by its /64, however the address is written", () => {
+    expect(clientKey("2001:0db8:0001:0002:0000:0000:0000:0001")).toBe("2001:db8:1:2::/64");
+    expect(clientKey("2001:db8:1:2::abcd")).toBe("2001:db8:1:2::/64");
+    expect(clientKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(clientKey("203.0.113.9")).toBe("203.0.113.9");
+  });
+});
+
+describe("https only", () => {
+  test("a plain-http request to the relay's host gets a bare 403 on every route; https and loopback pass", async () => {
+    for (const path of ["/v1/mailboxes", "/v1/mailboxes/mbx_0000000000000000000000/socket", "/anything?x=1"]) {
+      const answer = plainHttp(new Request(`http://relay.plannotator.ai${path}`, { method: "POST" }));
+      expect(answer?.status).toBe(403);
+      expect(await answer!.text()).toBe("");
+    }
+    expect(plainHttp(new Request("https://relay.plannotator.ai/v1/mailboxes"))).toBeNull();
+    expect(plainHttp(new Request("http://127.0.0.1:8787/v1/mailboxes"))).toBeNull();
   });
 });

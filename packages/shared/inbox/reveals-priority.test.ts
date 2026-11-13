@@ -2,8 +2,8 @@
  * The Priority dialog in the line (reveals.ts `priority`; the owner, 2026-11-13: after tags and personal agents, "only
  * if users haven't used priority yet").
  *
- * What regresses: its place (after Snooze and before the Board, so entries added right after Snooze, tags and personal
- * agents, come before it); its 3 days of use or its 8 threads moving; it being due once the person used Priority (the
+ * What regresses: its place (right after personal agents and before the Board; a tags entry added after Snooze comes
+ * before both); its 3 days of use or its 8 threads moving; it being due once the person used Priority (the
  * server's `open`); Escape (its Not now) not holding the next offer three days.
  */
 import { describe, expect, test } from "bun:test";
@@ -25,14 +25,16 @@ describe("its place in the line", () => {
     expect(revealNext(state({ open: { priority: false, board: true } }), NOW)).toBe("board");
   });
 
-  test("entries added right after Snooze (tags, personal agents) go before it", () => {
-    const later = (id: string) => ({ id, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, enabled: true }) as unknown as RevealEntry;
+  test("right after personal agents, so personal agents goes first; a tags entry added after Snooze goes before both", () => {
+    const ids = INBOX_REVEALS.map((entry) => entry.id);
+    expect(ids.indexOf("priority")).toBe(ids.indexOf("personal_agents") + 1);
+    expect(revealNext(state({ open: { personal_agents: true, priority: true } }), NOW)).toBe("personal_agents");
+    const tags = { id: "tags", kind: "offer", tenureMs: 2 * DAY, minThreads: 0, enabled: true } as unknown as RevealEntry;
     const table = [...INBOX_REVEALS];
-    const snooze = table.findIndex((entry) => entry.id === "snooze");
-    table.splice(snooze + 1, 0, later("tags"), later("personal_agents"));
+    table.splice(table.findIndex((entry) => entry.id === "snooze") + 1, 0, tags);
     const open = { priority: true, tags: true, personal_agents: true } as RevealState["open"];
     expect(revealNext(state({ open }), NOW, table)).toBe("tags" as never);
-    expect(revealNext(state({ open: { ...open, tags: false } as RevealState["open"] }), NOW, table)).toBe("personal_agents" as never);
+    expect(revealNext(state({ open: { ...open, tags: false } as RevealState["open"] }), NOW, table)).toBe("personal_agents");
     expect(revealNext(state({ open: { ...open, tags: false, personal_agents: false } as RevealState["open"] }), NOW, table)).toBe("priority");
   });
 });

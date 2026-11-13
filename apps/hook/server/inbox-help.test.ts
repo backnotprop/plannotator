@@ -258,7 +258,7 @@ describe("plannotator inbox --help as a process", () => {
     for (const argv of [["inbox", "--help"], ["inbox", "mcp", "--help"]]) {
       const proc = Bun.spawn([process.execPath, entry, ...argv], {
         cwd: root,
-        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_DATA_DIR: dataDir },
+        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir },
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
@@ -283,7 +283,7 @@ describe("plannotator inbox --help as a process", () => {
     const run = async (argv: string[]) => {
       const proc = Bun.spawn([process.execPath, entry, ...argv], {
         cwd: root,
-        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_DATA_DIR: dataDir },
+        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir },
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
