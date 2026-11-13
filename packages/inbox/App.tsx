@@ -10,7 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
-import { threadPullsBus } from './threadPulls/model';
+import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
 import { inboxRefTransport } from './refTransport';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
@@ -6179,6 +6179,8 @@ function Inbox() {
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
+  // The thread's PR list: where each open PR's "Open review thread" goes, read from Reviews' own list as its launchpad is.
+  const pullReviewOf = useMemo(() => (pullsShown ? pullReviewLinks(pulls.model, pulls.reviews) : null), [pullsShown, pulls.model, pulls.reviews]);
   // A review arrived, a verdict went: the rows and the sidebar's count follow the store, a moment after it changed.
   const pullsReloadRows = pulls.reloadRows;
   const rowsWaitingSince = useRef<number | null>(null);
@@ -7796,6 +7798,15 @@ function Inbox() {
             thread={thread}
             onNewMessageWith={(source) => openCompose({ reuse: [source] })}
             codeReview={settings?.code_review?.on === true}
+            pullReview={
+              pullReviewOf
+                ? {
+                    linkOf: pullReviewOf,
+                    // A thread opened beside Reviews keeps Reviews beside the one it opens.
+                    onOpen: (link) => leave(link.kind === 'thread' ? { page: 'inbox', project: null, thread: link.threadId, reviews: route.reviews } : { page: 'reviews', project: null, thread: null, stack: link.stackId, layer: null }),
+                  }
+                : undefined
+            }
             inReviews={!!route.reviews}
             reviewView={reviewView}
             onInReviews={pullsShown && !route.reviews ? () => go({ page: 'inbox', reviews: { project: null, view: 'all' }, project: null, thread: thread.thread_id }) : undefined}

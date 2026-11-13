@@ -12109,6 +12109,23 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-post { margin: 7px 2px 0 0; font-weight: 500; color: var(--muted-foreground); }
 .ib-prpop-post:hover:not(:disabled) { color: var(--foreground); }
 .ib-prpop-post1 { align-self: flex-start; }
+/* Open review thread (ThreadPulls.tsx `ReviewLine`): its own line under the PR, in the link colour, lined up with the
+   title (14 px padding + 16 px mark + 10 px gap); the row's own link keeps line 1 with Post decisions and the ×. The
+   line's whole width is the target, no fill at rest, the row's fill on hover. */
+.ib-prpop-row[data-rv] { flex-wrap: wrap; }
+.ib-prpop-rv { display: flex; align-items: center; gap: 6px; flex: 1 0 calc(100% - 42px); min-width: 0; margin: -5px 8px 7px 34px; padding: 4px 6px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; text-align: start; color: var(--primary); }
+.ib-prpop-rv:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+.ib-prpop-rv:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: -2px; }
+.ib-prpop-rv-ic { display: inline-flex; flex: none; }
+.ib-prpop-rv-w { flex: none; }
+.ib-prpop-rv-with { min-width: 0; display: inline-flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; font-weight: 400; color: var(--muted-foreground); }
+.ib-prpop-rv-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* In a stack the hairline runs on past the line (26 px tall less its -5 px top margin, plus its 7 px bottom one). */
+.ib-prpop-stack .ib-prpop-row[data-rv]:not(:last-child) .ib-prpop-ic::after { bottom: -47px; }
+@media (pointer: coarse) {
+  .ib-prpop-rv { min-height: 44px; margin: -6px 4px 4px 34px; font-size: var(--ib-fs-13-5, 13.5px); }
+  .ib-prpop-stack .ib-prpop-row[data-rv]:not(:last-child) .ib-prpop-ic::after { bottom: -61px; }
+}
 /* Export decisions › Post on a pull request: Where to post is part of the PR group (no divider), a quiet sub-choice
    indented under the PR rows' text; the unchecked choices keep the check's room. */
 .ib-pm-sublabel { padding: 6px 8px 2px 31px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 500; color: var(--muted-foreground); cursor: default; user-select: none; }
