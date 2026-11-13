@@ -50,3 +50,35 @@ export function unpinnedE2eEnvs(root: string): string[] {
   }
   return lines;
 }
+
+const ENV_BOUND = /(?:\benv|Env)\s*(?::\s*Record<[^>]*>)?\s*[:=]\s*$/;
+
+export function unpinnedChildEnvs(text: string): number[] {
+  return unpinnedInboxEnvs(text).filter((at) => {
+    const object = enclosingObject(text, at);
+    return object !== null && ENV_BOUND.test(text.slice(Math.max(0, object.start - 80), object.start));
+  });
+}
+
+const OWN_RELAY_OR_NOT_A_CHILD = ["apps/relay/test/", "tests/e2e/", "tests/e2e-relay-pin.test.ts", "packages/system/test/schedule.test.ts"];
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".local", ".wrangler"]);
+
+export function unpinnedUnitEnvs(root: string): string[] {
+  const lines: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      const file = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(file);
+        continue;
+      }
+      const path = relative(root, file);
+      if (!/\.test\.tsx?$/.test(entry.name) || OWN_RELAY_OR_NOT_A_CHILD.some((skip) => path.startsWith(skip))) continue;
+      const text = readFileSync(file, "utf8");
+      for (const at of unpinnedChildEnvs(text)) lines.push(`${path}:${text.slice(0, at).split("\n").length}`);
+    }
+  };
+  for (const top of ["tests", "packages", "apps"]) walk(join(root, top));
+  return lines;
+}

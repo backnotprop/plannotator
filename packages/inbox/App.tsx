@@ -88,7 +88,7 @@ import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread, priorityChangedRows } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
-import { inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
+import { inboxAgentsNow, inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
 import { filterAgentRows } from './agents/model';
 import {
   captureSettle,
@@ -186,9 +186,13 @@ import { useThreadTagsHost } from './useThreadTagsHost';
 import { projectWrites } from './projectWrites';
 import { priorityWrites } from './priorityWrites';
 import { snoozeWrites } from './snoozeWrites';
+import { agentWrites, type AgentDeleteAsk } from './agentWrites';
+import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
+import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
+import { agentDeleteThreads } from './agents/agentDelete';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, sameMachinePins, unpinnedWhere } from './pins';
 import { priorityAction } from './priority';
@@ -243,6 +247,7 @@ import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
+import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
@@ -379,8 +384,6 @@ const subscribeShapeFrames = (listener: (ids: string[]) => void) => {
 };
 /** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
 const RECONNECT_SAY_GAP_MS = 10 * 60_000;
-/** How long a page over the tailnet says that a restart has not come back: long enough to read away from the computer. */
-const RESTART_NOT_BACK_MS = 20_000;
 /** How long "Not reloaded: something you wrote is not saved yet" stays, with its Reload anyway (the stale page notice). */
 const STALE_NOT_SAVED_MS = 12_000;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */
@@ -4274,6 +4277,19 @@ function Inbox() {
 
   const { renameProject, renameAgent, setProjectPicture, combineProjects } = projectWrites({ showToast, dismissToast, refreshList, say, latestRef });
 
+  /** The sidebar agent's Delete … session…, asked in place (AgentDeleteDialog): its threads as the list holds them then. */
+  const [agentDelete, setAgentDelete] = useState<AgentDeleteAsk | null>(null);
+  const askAgentDelete = (agent: AgentDeleteAsk['agent'], machine: string | null) => {
+    if (!agent.launch) return;
+    setAgentDelete({ agent, machine, threads: agentDeleteThreads(agent, inboxAgentsNow(), machines, windowRows) });
+  };
+  const { deleteAgent: deleteAgentNow, stopAgent } = agentWrites({ showToast, dismissToast, setShown, afterWrite, restoreSnooze, say, refreshThread, openThreadId: () => thread?.thread_id ?? null });
+  const deleteAgent = (archive: boolean) => {
+    setAgentDelete(null);
+    return deleteAgentNow(agentDelete, archive);
+  };
+
+
   /**
    * Settings' Unarchive: the thread goes back to the list, in whatever
    * section its state puts it, and opens there (owner ruling 2026-10-12).
@@ -4476,37 +4492,7 @@ function Inbox() {
     },
   });
 
-  const restart = async () => {
-    setRestarting(true);
-    const before = latest?.serverSession;
-    /** Over the tailnet nobody is at the computer to see why: the window says what it knows. */
-    const notBack = () => {
-      setRestarting(false);
-      if (settings?.via === 'tailnet') showToast({ icon: 'warn', lead: 'The Inbox hasn’t come back yet. If it stays away, start it on the computer.', wrap: true }, RESTART_NOT_BACK_MS);
-    };
-    try {
-      await inboxApi.restart();
-    } catch {
-      notBack();
-      return;
-    }
-    // The new Inbox comes up on the same port: reload once it answers.
-    for (let i = 0; i < 100; i++) {
-      await new Promise((r) => setTimeout(r, 300));
-      try {
-        const health = await inboxApi.health();
-        if (health.serverSession !== before) {
-          // The person already chose to restart (asked first when a reply would be lost): no second question.
-          leaveOnPurpose();
-          window.location.reload();
-          return;
-        }
-      } catch {
-        // Not up yet.
-      }
-    }
-    notBack();
-  };
+  const restart = () => restartInbox(latest?.serverSession, settings?.via === 'tailnet', setRestarting, showToast);
 
   /**
    * The stale page notice's Reload: what the person wrote is saved first (stalePage.ts flushBeforeReload), then the
@@ -5267,18 +5253,21 @@ function Inbox() {
     // ask's card, the Sidebar tip) showed within the gap.
     board: oneTimeDialogShownThisLoad() || lineStagesBusy || lineTipBusy,
   });
-  const snoozeIntro = useSnoozeIntro({
-    due: lineLatch?.snoozeDue ?? false,
-    listLoaded: lineLatch !== null,
-    firstRun,
+  const revealAt = {
     blocked: revealBlocked,
-    snoozedHere: snoozedThisLoad.current,
     rows: snoozeIntroRows,
     toast: toast !== null,
     thread: route.page === 'inbox' ? (route.thread ?? null) : null,
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
+  };
+  const snoozeIntro = useSnoozeIntro({
+    due: lineLatch?.snoozeDue ?? false,
+    listLoaded: lineLatch !== null,
+    firstRun,
+    ...revealAt,
+    snoozedHere: snoozedThisLoad.current,
   });
   // The Board reveal (reveal.ts): the same calm moment, back on the list; the claim only stamps it, and the Board's own
   // first-visit dialog (BoardIntro) offers it: "Turn it on" turns it on (its sidebar row appears), "Not now" leaves it.
@@ -5286,13 +5275,7 @@ function Inbox() {
     due: lineLatch?.next === 'board',
     listLoaded: lineLatch !== null,
     firstRun,
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
-    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
-    clear: listIntroClear,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
+    ...revealAt,
     idle: pageIdle,
     on: settings?.board?.on === true,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
@@ -5303,13 +5286,7 @@ function Inbox() {
     due: lineLatch?.next === 'steps',
     listLoaded: lineLatch !== null,
     firstRun,
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
-    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
-    clear: listIntroClear,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
+    ...revealAt,
     idle: pageIdle,
     on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
@@ -5321,13 +5298,7 @@ function Inbox() {
   const broReveal = useLineReveal({
     id: 'bro',
     due: lineLatch?.next === 'bro',
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
-    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
-    clear: listIntroClear,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
+    ...revealAt,
     leaveCounts: (visit, now, _row, next) => broRevealLeaveCounts(visit, now, next),
     // Or the page idle on such a thread (a thread kept open beside the list never goes back to it).
     idle: pageIdle,
@@ -5344,13 +5315,7 @@ function Inbox() {
   const grillMeTipReveal = useLineReveal({
     id: 'grill_me_tip',
     due: lineLatch?.aside.includes('grill_me_tip') === true,
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
-    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
-    clear: listIntroClear,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
+    ...revealAt,
     leaveCounts: (visit, now, _row, next) => grillMeTipLeaveCounts(visit, now, next),
     idle: pageIdle,
     idleCounts: grillMeTipIdleCounts,
@@ -5360,17 +5325,24 @@ function Inbox() {
   const agentRulesReveal = useLineReveal({
     id: 'agent_rules',
     due: lineLatch?.next === 'agent_rules',
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
-    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
-    clear: listIntroClear,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
+    ...revealAt,
     leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
     idle: pageIdle,
     mayClaim: (pageAge) => lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
     holds: () => !rulesSet(settingsRef.current?.prompts?.rules),
+  });
+  // Personal agents (core/inbox-personal-agents.ts): the Inbox names it only while none is connected. Its banner is
+  // loaded before the claim, so the dialog opens with it or, offline, without it, and never changes while open.
+  const personalAgentsDue = lineLatch?.next === 'personal_agents';
+  const personalAgentsBanner = usePersonalAgentsBanner(personalAgentsDue);
+  const personalAgentsReveal = useLineReveal({
+    id: 'personal_agents',
+    due: personalAgentsDue,
+    ...revealAt,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    idle: pageIdle,
+    mayClaim: (pageAge) => personalAgentsBanner !== null && lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
+    holds: () => true,
   });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
@@ -5448,18 +5420,13 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
     firstRun,
+    ...revealAt,
     blocked: revealBlocked || otherRevealActive,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
-    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
-    clear: listIntroClear,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
   });
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
@@ -5532,6 +5499,8 @@ function Inbox() {
     broReveal.stage !== 'claimed' &&
     agentRulesReveal.stage !== 'open' &&
     agentRulesReveal.stage !== 'claimed' &&
+    personalAgentsReveal.stage !== 'open' &&
+    personalAgentsReveal.stage !== 'claimed' &&
     grillMeTipReveal.stage !== 'open' &&
     grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -5993,7 +5962,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -7451,6 +7420,8 @@ function Inbox() {
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
             onAgentRename={guestPage ? undefined : renameAgent}
+            onAgentStop={(agent, machine) => void stopAgent(agent, machine)}
+            onAgentDelete={askAgentDelete}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
@@ -7576,6 +7547,15 @@ function Inbox() {
           />
         ) : null;
       })()}
+      {agentDelete?.agent.launch && (
+        <AgentDeleteDialog
+          host={agentDelete.agent.host}
+          scratch={agentDelete.agent.launch.scratch ?? null}
+          threads={agentDelete.threads.length}
+          onCancel={() => setAgentDelete(null)}
+          onDelete={(archive) => void deleteAgent(archive)}
+        />
+      )}
       {readWarning && (
         <MarkReadWarning
           count={readWarning.count}
@@ -7684,6 +7664,9 @@ function Inbox() {
             window.location.hash = '#settings/prompts';
           }}
         />
+      )}
+      {personalAgentsReveal.stage === 'open' && (
+        <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
       )}
       {broReveal.stage === 'open' && (
         <BroIntro
