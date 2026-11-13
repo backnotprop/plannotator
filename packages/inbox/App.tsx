@@ -243,8 +243,7 @@ import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
 import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
-import { PriorityIntro } from './components/PriorityIntro';
-import { openPriorityMenu, priorityIntroHolds, priorityIntroMayClaim, priorityIntroPicture, priorityIntroTarget } from './priorityIntro';
+import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
@@ -5294,11 +5293,9 @@ function Inbox() {
     due: lineLatch?.next === 'bro',
     ...revealAt,
     leaveCounts: (visit, now, _row, next) => broRevealLeaveCounts(visit, now, next),
-    // Or the page idle on such a thread (a thread kept open beside the list never goes back to it).
     idle: pageIdle,
     idleCounts: broRevealIdleCounts,
     mayClaim: () => true,
-    // Turned on meanwhile (Settings, another window): nothing to offer.
     holds: () => settingsRef.current?.bro?.on !== true,
   });
   // The grill-me tip (shared/inbox/grill-me-tip.ts), beside the line (settings `reveal.aside`; reveals.ts `lastResort`:
@@ -5347,14 +5344,9 @@ function Inbox() {
   const listViewReveal = useLineReveal({
     id: 'list_view',
     due: lineLatch?.next === 'list_view' || (lineLatch?.ahead.includes('list_view') ?? false),
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
+    ...revealAt,
     thread: listViewThread,
-    // On the list itself, or over a thread while the page is idle (the thread kept open beside the list).
     clear: listViewRevealClear(listIntroClear, listViewThread, pageIdle),
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
     leaveCounts: (_visit, _now, _row, next) => listViewRevealLeaveCounts(next),
     idle: pageIdle,
     mayClaim: (pageAge) =>
@@ -5367,7 +5359,6 @@ function Inbox() {
         },
         pageAge,
       ),
-    // Simple list picked meanwhile (the ⋮ menu): nothing to offer.
     holds: () => listView === 'grouped',
   });
   const listViewIntroOpen = listViewReveal.stage === 'open';
@@ -5375,57 +5366,32 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
-  // The Priority dialog (priorityIntro.ts), registered with the line: the Inbox names it for someone who never added a
-  // thread to Priority; its moment is "Set the rules"' (a thread read and left, or the page idle), on the grouped list
-  // with 3 threads or more waiting on the person.
-  const priorityReveal = useLineReveal({
-    id: 'priority',
+  const { reveal: priorityReveal, dialog: priorityDialog } = usePriorityReveal({
     due: lineLatch?.next === 'priority',
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
-    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
-    clear: listIntroClear,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
-    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    revealAt,
     idle: pageIdle,
-    mayClaim: (pageAge) => priorityIntroMayClaim({ listLoaded: lineLatch !== null, firstRun, grouped: listView === 'grouped', rows: snoozeIntroRows }, pageAge),
-    holds: () => listView === 'grouped' && priorityIntroHolds(oneTimeRows.current),
-  });
-  const priorityIntroAim = priorityReveal.stage === 'open' ? priorityIntroTarget(snoozeIntroRows, priorityReveal.target) : null;
-  const priorityIntroScene = useMemo(() => (priorityReveal.stage === 'open' ? priorityIntroPicture(snoozeIntroRows, priorityIntroAim) : null), [priorityReveal.stage, priorityIntroAim, snoozeIntroRows]);
-  /** Try it: the dialog closes, then the real menu opens with focus on Add to Priority; it adds nothing itself. */
-  const tryPriorityIntro = () => {
-    const aim = priorityIntroAim;
-    priorityReveal.close();
-    setTimeout(() => {
+    listLoaded: lineLatch !== null,
+    firstRun,
+    grouped: listView === 'grouped',
+    oneTimeRows: () => oneTimeRows.current,
+    phone,
+    projectNames,
+    openThread: () => (routeRef.current.page === 'inbox' ? (routeRef.current.thread ?? null) : null),
+    openTarget: (threadId) => {
       const now = routeRef.current;
-      void openPriorityMenu({
-        root: document.querySelector('.pn-inbox') ?? document,
-        phone,
-        openThread: now.page === 'inbox' ? (now.thread ?? null) : null,
-        target: aim,
-        openTarget: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, tag: now.tag, thread: threadId }),
-      });
-    }, 0);
-  };
+      go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, tag: now.tag, thread: threadId });
+    },
+  });
   // The tab icon dialog ("Which favicon do you prefer?"; tabIconChoice.ts): an update-day dialog of the line, armed
   // while it is `reveal.next`, 15 s into the page (the owner, 2026-11-10; reveal.ts `soonMayClaim`): no leave and no
   // stillness, only Code review's guards (the page clear, nothing typed or open, no toast, settled).
-  const tabIconThread = route.page === 'inbox' ? (route.thread ?? null) : null;
+  const soonClear = listIntroClear && updateDialog === null && !restarting;
   const tabIconChoice = useTabIconChoice({
     due: lineLatch?.next === 'tab_icon',
-    blocked: revealBlocked,
     listLoaded: lineLatch !== null,
     firstRun,
-    thread: tabIconThread,
-    rows: snoozeIntroRows,
-    // Code review's own guard: the Inbox page with nothing over it (a thread open or not), no update on screen.
-    clear: listIntroClear && updateDialog === null && !restarting,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
-    toast: toast !== null,
+    ...revealAt,
+    clear: soonClear,
   });
   // The "themes" dialog (approval "inbox-theme-chooser"; themeChooser.ts): right after the tab icon dialog in the line,
   // for someone still on the default theme, armed while it is `reveal.next`, at the same 15 s moment.
@@ -5433,16 +5399,10 @@ function Inbox() {
   const pickTheme = useInboxThemePick();
   const themeChooser = useThemeChooser({
     due: lineLatch?.next === 'theme_chooser',
-    blocked: revealBlocked,
     listLoaded: lineLatch !== null,
     firstRun,
-    thread: tabIconThread,
-    rows: snoozeIntroRows,
-    // Code review's own guard: the Inbox page with nothing over it (a thread open or not), no update on screen.
-    clear: listIntroClear && updateDialog === null && !restarting,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
-    toast: toast !== null,
+    ...revealAt,
+    clear: soonClear,
     light: themeNow.lightTheme,
     dark: themeNow.darkTheme,
   });
@@ -7710,20 +7670,7 @@ function Inbox() {
       {personalAgentsReveal.stage === 'open' && (
         <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
       )}
-      {priorityReveal.stage === 'open' && priorityIntroScene && (
-        <PriorityIntro
-          picture={priorityIntroScene}
-          projectNames={projectNames}
-          phone={phone}
-          onGotIt={priorityReveal.close}
-          onTry={tryPriorityIntro}
-          onDismiss={() => {
-            // Escape, a click outside: the line's Not now (the next offer waits three days).
-            void inboxApi.revealNotNow('priority');
-            priorityReveal.close();
-          }}
-        />
-      )}
+      {priorityDialog}
       {broReveal.stage === 'open' && (
         <BroIntro
           phone={phone}
