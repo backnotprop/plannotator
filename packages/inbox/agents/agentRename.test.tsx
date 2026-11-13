@@ -224,7 +224,7 @@ const MAC = `ibx_01K${'0'.repeat(22)}M`;
 const view = (id: string, name: string): MachineView =>
   ({ id, name, self: id === SELF, state: 'online', since: '2026-11-09T08:00:00.000Z', reason: null, version: '0.29.0', address: null, both_ways: true, waiting: 0, list_cursor: 1, snoozes: true, launch: true }) as MachineView;
 
-test.skipIf(!hasDom)("another machine's agent offers no Rename…: no ⋯ and no right-click menu; this machine's agent keeps both", async () => {
+test.skipIf(!hasDom)("an older machine's agent (its list takes no agent marks) offers no Rename…: no ⋯ and no right-click menu; this machine's agent keeps both", async () => {
   setInboxAgents([{ ...group([agent('ses_a')]), machine: SELF }, { ...group([agent('ses_m', { host: 'pi' })]), machine: MAC }]);
   mount([], false, machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]));
   await settle();

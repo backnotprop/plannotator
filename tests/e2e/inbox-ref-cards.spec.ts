@@ -213,7 +213,7 @@ test.describe('ref hover cards', () => {
     root = inboxScratch('plannotator-inbox-ref-cards-e2e-');
     forge = fakeForge(join(root, 'bin'));
     seed(forge);
-    const env = { PATH: `${forge.dir}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
+    const env = { PATH: `${forge.dir}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
     const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
     expect(started.status, started.stderr).toBe(0);
     url = started.stdout.trim();

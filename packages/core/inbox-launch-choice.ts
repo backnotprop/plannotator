@@ -8,6 +8,7 @@ export interface InboxLaunchChoices {
   models: string[];
   efforts: string[];
   effort_word: string;
+  model_efforts?: Record<string, string[]>;
   last?: InboxLaunchChoice;
 }
 
@@ -54,6 +55,47 @@ export function parsePiChoices(help: string, listModels: string | null): Omit<In
   return { models, efforts: efforts.length > 0 ? efforts : [...PI_CHOICES_FALLBACK.efforts], effort_word: PI_CHOICES_FALLBACK.effort_word };
 }
 
+export function parseCodexModels(answer: unknown): Omit<InboxLaunchChoices, "last"> | null {
+  const data = (answer as { data?: unknown } | null)?.data;
+  if (!Array.isArray(data)) return null;
+  const models: string[] = [];
+  const efforts: string[] = [];
+  const modelEfforts: Record<string, string[]> = {};
+  for (const entry of data as { id?: unknown; hidden?: unknown; supportedReasoningEfforts?: unknown }[]) {
+    if (entry?.hidden === true || !inboxLaunchTokenOk(entry?.id) || models.includes(entry.id)) continue;
+    const levels = (Array.isArray(entry.supportedReasoningEfforts) ? entry.supportedReasoningEfforts : [])
+      .map((option: { reasoningEffort?: unknown }) => option?.reasoningEffort)
+      .filter((level): level is string => inboxLaunchTokenOk(level));
+    models.push(entry.id);
+    modelEfforts[entry.id] = levels;
+    for (const level of levels) if (!efforts.includes(level)) efforts.push(level);
+  }
+  if (models.length === 0) return null;
+  return { models, efforts, effort_word: "Effort", model_efforts: modelEfforts };
+}
+
+export function parseOpenCodeModels(answer: unknown): Omit<InboxLaunchChoices, "last"> | null {
+  const data = (answer as { data?: unknown } | null)?.data;
+  if (!Array.isArray(data)) return null;
+  const models: string[] = [];
+  const efforts: string[] = [];
+  const modelEfforts: Record<string, string[]> = {};
+  for (const entry of data as { providerID?: unknown; id?: unknown; enabled?: unknown; variants?: unknown }[]) {
+    const model = `${String(entry?.providerID)}/${String(entry?.id)}`;
+    if (entry?.enabled === false || typeof entry?.providerID !== "string" || typeof entry?.id !== "string" || !inboxLaunchTokenOk(model) || models.includes(model)) continue;
+    const variants = (Array.isArray(entry.variants) ? entry.variants : []).map((variant: { id?: unknown }) => variant?.id).filter((id): id is string => inboxLaunchTokenOk(id));
+    models.push(model);
+    modelEfforts[model] = variants;
+    for (const variant of variants) if (!efforts.includes(variant)) efforts.push(variant);
+  }
+  if (models.length === 0) return null;
+  return { models, efforts, effort_word: "Variant", model_efforts: modelEfforts };
+}
+
+export function launchEffortsFor(choices: Pick<InboxLaunchChoices, "efforts" | "model_efforts">, model: string | undefined): string[] {
+  return (model && choices.model_efforts?.[model]) || choices.efforts;
+}
+
 /** `efforts` null: the lists are not read yet, so only the token is checked (a slow CLI never refuses a start). */
 export function parseLaunchChoice(raw: { model?: unknown; effort?: unknown }, efforts: readonly string[] | null): InboxLaunchChoice {
   const choice: InboxLaunchChoice = {};
@@ -86,6 +128,20 @@ export function launchChoiceArgs(agent: string, choice: InboxLaunchChoice): stri
   if (inboxLaunchTokenOk(choice.model) && (agent === "claude-code" || agent === "pi")) args.push("--model", choice.model);
   if (effortFlag && inboxLaunchTokenOk(choice.effort)) args.push(effortFlag, choice.effort);
   return args;
+}
+
+export function codexThreadChoice(choice: InboxLaunchChoice): { model?: string; config: Record<string, string> } {
+  return {
+    ...(inboxLaunchTokenOk(choice.model) ? { model: choice.model } : {}),
+    config: inboxLaunchTokenOk(choice.effort) ? { model_reasoning_effort: choice.effort } : {},
+  };
+}
+
+export function openCodeSessionModel(model: string | undefined, variant: string | undefined): { providerID: string; id: string; variant?: string } | null {
+  if (!inboxLaunchTokenOk(model)) return null;
+  const at = model.indexOf("/");
+  if (at <= 0 || at === model.length - 1) return null;
+  return { providerID: model.slice(0, at), id: model.slice(at + 1), ...(inboxLaunchTokenOk(variant) ? { variant } : {}) };
 }
 
 export function launchChoiceLine(choice: InboxLaunchChoice | null | undefined, shortModel = (model: string) => model): string | null {

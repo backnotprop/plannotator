@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -52,6 +52,7 @@ import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
 import { fitCountsColumn, useDevicePixelRatio } from './listFit';
+import { useKeyboardFocus } from './useKeyboardFocus';
 
 export interface InboxListProps {
   /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
@@ -230,41 +231,6 @@ function RowMark({ row }: { row: InboxListRow }) {
   if (hideAgents) return null;
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
   return <AuthorMark author={rowAgent(row)} />;
-}
-
-/**
- * The row has keyboard focus (`:focus-visible`): its badge's card shows, as it
- * does on hover (approval "inbox-row-badges"). A click's focus does not count.
- * Escape closes the card and keeps focus on the row; that Escape is used up
- * (default prevented), so the window's Escape does not also close the thread.
- * The card comes back the next time the row takes keyboard focus.
- */
-function useKeyboardFocus(enabled: boolean): [
-  boolean,
-  { onFocus: (e: FocusEvent<HTMLElement>) => void; onBlur: () => void; onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => void },
-] {
-  const [on, setOn] = useState(false);
-  return [
-    on,
-    {
-      onKeyDown: (e) => {
-        if (!on || e.key !== 'Escape' || e.target !== e.currentTarget || e.defaultPrevented) return;
-        e.preventDefault();
-        setOn(false);
-      },
-      onFocus: (e) => {
-        if (!enabled || e.target !== e.currentTarget) return;
-        let visible = false;
-        try {
-          visible = e.currentTarget.matches(':focus-visible');
-        } catch {
-          visible = false;
-        }
-        setOn(visible);
-      },
-      onBlur: () => setOn(false),
-    },
-  ];
 }
 
 /** A blocked row's hover card (wide and three-line rows), or undefined: its filled marks' tooltip. */
@@ -1689,6 +1655,7 @@ export function InboxList(props: InboxListProps) {
           snoozeBlockedOf={props.snoozeBlockedOf}
           onSnoozeBlocked={props.onSnoozeBlocked}
           pinnedOf={props.pinned ? (row) => (!props.machines || machineTakes(row, props.machines, 'star') ? props.pinned!.has(row.thread_id) : null) : undefined}
+          prioritizesOf={props.machines ? (row) => machineTakes(row, props.machines!, 'priority') : undefined}
           onTarget={setMenuRow}
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}

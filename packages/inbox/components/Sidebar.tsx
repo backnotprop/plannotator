@@ -281,7 +281,10 @@ export function Sidebar(props: SidebarProps) {
   // A snoozed pin stays pinned but waits with the rest of its snooze, so it is no count here.
   const pinsWaiting = pinnedClosed ? pins.filter((row) => !inboxRowSnoozed(row) && ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
   // One scroll area holds Pinned and Projects (no limit on pins: a long Pinned section scrolls with the projects).
-  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}:${starredAbove}`);
+  // The person's layout (approval "inbox-sidebar-customize"; core inbox-sidebar.ts): which items show, their order,
+  // top or bottom. The onboarding tour's sidebar always draws the default.
+  const layout = useSidebarLayout(props.rememberSections !== false);
+  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}:${starredAbove}:${layout.hidden.join()}`);
   /**
    * After a pin's menu acted: Move up or down keeps focus on that row's ⋯ in its new place; Unpin moves it to
    * the next pinned row's ⋯ on screen, else the first project on screen, else the Pinned header, else Inbox (never the page).
@@ -423,9 +426,6 @@ export function Sidebar(props: SidebarProps) {
     ) : (
       children
     );
-  // The person's layout (approval "inbox-sidebar-customize"; core inbox-sidebar.ts): which items show, their order,
-  // top or bottom. The onboarding tour's sidebar always draws the default.
-  const layout = useSidebarLayout(props.rememberSections !== false);
   const drawn = drawnSidebarItems({
     board: Boolean(props.onBoard),
     reviews: Boolean(props.onPulls),
@@ -447,6 +447,8 @@ export function Sidebar(props: SidebarProps) {
   // Hidden in Customize sidebar (the owner, 2026-11-09): the whole section goes, heading and all. Agents keep running.
   const agentsShown = shows('agents');
   const tagsShown = shows('tags');
+  const starredShown = shows('starred');
+  const projectsShown = shows('projects');
   const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
   const searchButton = (
     <button
@@ -704,7 +706,7 @@ export function Sidebar(props: SidebarProps) {
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
         {/* A phone's sheet has one scroll: the places scroll with the sections. */}
         {phone && stack(layout.top)}
-        {pins.length > 0 && !starredAbove && sheetSection('pinned',
+        {starredShown && pins.length > 0 && !starredAbove && sheetSection('pinned',
           <>
             {sheetHeading(
             <SectionHeader
@@ -812,7 +814,7 @@ export function Sidebar(props: SidebarProps) {
             announce={props.announce}
           />
         )}
-        {sheetSection('projects',
+        {projectsShown && sheetSection('projects',
         <>
         {/* Two controls side by side, never one inside the other: the header opens and closes, the icon changes the order. */}
         <div className="ib-secrow">

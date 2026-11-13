@@ -22,7 +22,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
@@ -313,6 +313,14 @@ export async function inboxStatus(dataDir: string, timeoutMs = 2000): Promise<In
  * The start lock: one starter at a time, so two agents that find the Inbox
  * stopped at once do not start two writers on one store. Returns a release
  * function, or null when another starter holds a fresh lock.
+ *
+ * The lock folder names the processes that hold it (`holders`: the starter,
+ * and the detached Inbox it started, which joins with `joinInboxStartLock`).
+ * When every one of them is gone (a start that crashed: a force quit, a power
+ * cut, a kill during a long move into SQLite), the lock is stale at once
+ * instead of after `INBOX_START_LOCK_STALE_MS`, so the next start goes ahead
+ * rather than giving up with "try again". A lock with no holders file (an
+ * older Plannotator's) is stale by age alone, as before.
  */
 export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   const dir = inboxDir(dataDir);
@@ -321,12 +329,13 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       mkdirSync(lock);
+      joinInboxStartLock(dataDir);
       return () => rmSync(lock, { recursive: true, force: true });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       try {
         // Never stale while the Inbox it started moves into SQLite: a second Inbox would start beside it.
-        if (Date.now() - statSync(lock).mtimeMs <= INBOX_START_LOCK_STALE_MS || inboxUpgradeRunning(dataDir)) return null;
+        if (!inboxStartLockStale(dataDir) || inboxUpgradeRunning(dataDir)) return null;
         rmSync(lock, { recursive: true, force: true });
       } catch {
         // Gone in between: try again.
@@ -334,6 +343,30 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
     }
   }
   return null;
+}
+
+const START_LOCK_HOLDERS = "holders";
+
+/** Name this process as a holder of the start lock (the detached Inbox its starter started); best effort. */
+export function joinInboxStartLock(dataDir: string): void {
+  try {
+    appendFileSync(join(inboxDir(dataDir), INBOX_START_LOCK, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+  } catch {
+    // No lock (released meanwhile) or no room: the lock's age decides, as before.
+  }
+}
+
+/** The start lock's holders are all gone, or it is older than `INBOX_START_LOCK_STALE_MS`. Throws when there is no lock. */
+export function inboxStartLockStale(dataDir: string): boolean {
+  const lock = join(inboxDir(dataDir), INBOX_START_LOCK);
+  if (Date.now() - statSync(lock).mtimeMs > INBOX_START_LOCK_STALE_MS) return true;
+  let pids: number[];
+  try {
+    pids = readFileSync(join(lock, START_LOCK_HOLDERS), "utf8").split("\n").map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+  } catch {
+    return false;
+  }
+  return pids.length > 0 && !pids.some(isPidAlive);
 }
 
 /** Wait until `check` answers non-null, polling; null on timeout. */

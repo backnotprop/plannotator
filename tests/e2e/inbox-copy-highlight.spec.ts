@@ -73,7 +73,7 @@ async function dragSelect(page: Page, messageId: string, phrase: string): Promis
 test('Inbox thread message: Ctrl+C copies the highlighted words with the toolbar up and with the composer open', async ({ browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-copy-highlight-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   let claude: SimAgent | null = null;
   try {
     const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
