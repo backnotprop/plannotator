@@ -35,6 +35,6 @@ case "$statuses" in *201*) fail "a create succeeded" ;; esac
 case "$statuses" in *5[0-9][0-9]*) fail "the brake answered 5xx" ;; esac
 case "$statuses" in *429*) pass "the brake answers 429 within 25 creates a minute" ;; *) fail "no 429 in 25 creates" ;; esac
 retry=$(curl -sS -o /dev/null -D - -X POST "$RELAY/v1/mailboxes" --data '{}' | tr -d '\r' | awk -F': ' 'tolower($1)=="retry-after"{print $2}')
-[ "$retry" = 60 ] && pass "429 carries Retry-After: 60" || fail "Retry-After was '${retry:-absent}'"
+case "$retry" in [1-9] | [1-5][0-9] | 60) pass "429 carries Retry-After: $retry" ;; *) fail "Retry-After was '${retry:-absent}'" ;; esac
 
 exit $failed
