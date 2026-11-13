@@ -1,10 +1,10 @@
 {
-  "packages/inbox/App.tsx": 8102,
-  "packages/inbox/components/Thread.tsx": 7643,
+  "packages/inbox/App.tsx": 8098,
+  "packages/inbox/components/Thread.tsx": 7383,
   "packages/inbox/components/AttachmentPane.tsx": 3223,
   "packages/inbox/api.ts": 2478,
   "packages/inbox/pulls/pullReviewKept.test.tsx": 2302,
-  "packages/inbox/compose/ComposeDialog.tsx": 1934,
+  "packages/inbox/compose/ComposeDialog.tsx": 1896,
   "packages/inbox/components/InboxList.tsx": 1853,
   "packages/inbox/tour/Tour.tsx": 1847,
   "packages/inbox/pulls/pullReview.test.tsx": 1670,

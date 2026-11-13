@@ -21,10 +21,19 @@ interface SnoozeHost {
   listCovered: () => boolean;
   snoozeMoved: { readonly current: Map<string, InboxListSection[]> };
   snoozedThisLoad: { current: boolean };
-  restoreSnooze: (threadId: string, snooze: InboxRowSnooze | null | undefined) => Promise<unknown>;
 }
 
-export function snoozeWrites({ rowOf, threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered, snoozeMoved, snoozedThisLoad, restoreSnooze }: SnoozeHost) {
+export function snoozeWrites({ rowOf, threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered, snoozeMoved, snoozedThisLoad }: SnoozeHost) {
+  const restoreSnooze = async (threadId: string, snooze: InboxRowSnooze | null | undefined) => {
+    if (!snooze || !inboxSnoozeRunning(snooze.until)) return;
+    try {
+      await inboxApi.snooze(threadId, snooze.until, snooze.at);
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite([threadId]);
+  };
   const snooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, until: string) => {
     const threadId = row.thread_id;
     const earlier = (rowOf(threadId) ?? (threadRow()?.thread_id === threadId ? threadRow() : null))?.snoozed ?? null;
@@ -117,6 +126,6 @@ export function snoozeWrites({ rowOf, threadRow, showError, showToast, dismissTo
         : undefined,
     });
   };
-  return { snooze, unsnooze };
+  return { snooze, unsnooze, restoreSnooze };
 }
 
