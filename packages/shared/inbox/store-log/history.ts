@@ -1,11 +1,8 @@
 /**
  * The facts the store reads from the ORDER of its lines, not from any one record: when a thread was archived,
  * whether its address moved, where a name started routing, a message's first-line hashtags, a card's last real
- * change and the card as the Board reads it, a PR add or remove. One copy of each rule, used twice:
- *
- * - the store's replay of every line (`InboxStore.apply`, today's JSONL log), and
- * - the SQLite log, which works each fact out as its line is written and keeps it in a column or a row, so a
- *   start reads current state from the tables instead of replaying history (`sqlite/write-line.ts`).
+ * change and the card as the Board reads it, a PR add or remove: one copy of each rule, used by the store's
+ * replay of every line (`InboxStore.apply`) and by any other record log that works them out as it writes.
  *
  * Each function takes the record's previous line (what the store held before this one) and the new one.
  */
@@ -92,8 +89,7 @@ export function pullEventOf(prev: InboxThreadPull | undefined, record: InboxThre
 /**
  * A question line that only carries on typing over the line before it: the same pick, the same state, only the
  * typed words (`text`, `other`, `note`), the revision and the pick time moved, and neither line a Send. The
- * decision history keeps one row per change of choice, Send, replacement, set-aside or Undo, never one per key, so
- * the SQLite log writes such a line over the one before it.
+ * decision history keeps one row per change of choice, Send, replacement, set-aside or Undo, never one per key.
  */
 export function continuesTyping(prev: InboxQuestionRecord, next: InboxQuestionRecord): boolean {
   if (!prev.answer || !next.answer) return false;

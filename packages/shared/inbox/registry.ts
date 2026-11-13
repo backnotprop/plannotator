@@ -27,7 +27,6 @@ import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
 import { proveInboxProcess } from "./process-proof";
-import { inboxUpgradeRunning } from "./store-log/sqlite/upgrade-marker";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -317,7 +316,7 @@ export async function inboxStatus(dataDir: string, timeoutMs = 2000): Promise<In
  * The lock folder names the processes that hold it (`holders`: the starter,
  * and the detached Inbox it started, which joins with `joinInboxStartLock`).
  * When every one of them is gone (a start that crashed: a force quit, a power
- * cut, a kill during a long move into SQLite), the lock is stale at once
+ * cut), the lock is stale at once
  * instead of after `INBOX_START_LOCK_STALE_MS`, so the next start goes ahead
  * rather than giving up with "try again". A lock with no holders file (an
  * older Plannotator's) is stale by age alone, as before.
@@ -333,8 +332,7 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
     try {
-      // Never stale while the Inbox it started moves into SQLite: a second Inbox would start beside it.
-      if (!inboxStartLockStale(dataDir) || inboxUpgradeRunning(dataDir)) return null;
+      if (!inboxStartLockStale(dataDir)) return null;
       rmSync(lock, { recursive: true, force: true });
     } catch {
       // Gone in between: try again.
@@ -387,13 +385,12 @@ export function inboxStartLockStale(dataDir: string): boolean {
 }
 
 /** Wait until `check` answers non-null, polling; null on timeout. */
-export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100, keepWaiting?: () => boolean): Promise<T | null> {
+export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100): Promise<T | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value !== null) return value;
-    // `keepWaiting`: past the deadline, wait on while it says so (an Inbox still moving into SQLite).
-    if (Date.now() >= deadline && !keepWaiting?.()) return null;
+    if (Date.now() >= deadline) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }

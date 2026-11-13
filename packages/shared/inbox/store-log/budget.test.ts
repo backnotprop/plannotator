@@ -1,14 +1,11 @@
 /**
  * The size budget: an Inbox of 100,000 messages, kept by each record log, starts, lists, opens a thread and
- * searches within fixed ceilings. The SQLite log has to pass the same ceilings (and is expected to beat them).
+ * searches within fixed ceilings. Another record log has to pass the same ceilings.
  *
  * The store is a generated Inbox (`world.ts`, about 5,000 messages) copied whole with fresh ids until it holds
  * the target, appended through the log under test, so the same records reach every log. Ceilings are
  * absolute and generous: this guards a store that gets several times slower, not small drift on a busy
  * laptop. Each number is printed with the machine's load average beside it.
- *
- * On today's JSONL it also times the move into SQLite (`sqlite/import.ts`, check included) and the start after it:
- * what the person waits for on the first start of a version that moves them.
  *
  * Off by default (it writes about 300 MB and takes minutes): `PLANNOTATOR_INBOX_BUDGET=1 bun test
  * packages/shared/inbox/store-log/budget.test.ts`; `PLANNOTATOR_INBOX_BUDGET_MESSAGES` changes the size.
@@ -22,7 +19,6 @@ import { InboxSearchIndex } from "../search";
 import { InboxStore } from "../store";
 import { jsonlInboxLog } from "./jsonl-log";
 import { LOGS_UNDER_TEST } from "./logs-under-test";
-import { importJsonlInbox } from "./sqlite/import";
 import { writeInboxWorld } from "./world";
 
 const ON = process.env.PLANNOTATOR_INBOX_BUDGET === "1";
@@ -32,7 +28,6 @@ const TARGET = Number(process.env.PLANNOTATOR_INBOX_BUDGET_MESSAGES ?? 100_000);
  * Ceilings in ms at 100,000 messages (30,580 threads). Provisional: about twice today's JSONL store measured
  * 2026-11-11 on a laptop at load average ~30 (start 11.4 s, first list 11.8 s, thread 0.3 ms, search build
  * 23.9 s, a query 0.15 s). Tighten them from a quiet runner's numbers, and again once reads are paged by query.
- * The SQLite log starts from its tables (current state), not by replaying its change log.
  */
 const CEILING = { start: 25_000, listCold: 25_000, threadRead: 50, searchBuild: 60_000, searchQuery: 1_000 };
 
@@ -58,12 +53,6 @@ function copiedLines(lines: InboxLine[], copies: number): InboxLine[] {
     }
   }
   return out.sort((a, b) => a.seq - b.seq);
-}
-
-async function timedAsync<T>(run: () => Promise<T>): Promise<{ ms: number; value: T }> {
-  const t = performance.now();
-  const value = await run();
-  return { ms: performance.now() - t, value };
 }
 
 function timed<T>(run: () => T): { ms: number; value: T } {
@@ -106,7 +95,7 @@ describe.skipIf(!ON).each(LOGS_UNDER_TEST)("the size budget through the $name lo
       const start = timed(() => InboxStore.open(dataDir, { now: world.now, log }));
       const store = start.value;
       const rss = process.memoryUsage().rss;
-      // What the open store holds in JavaScript (the RSS also carries the write phase and SQLite's page cache).
+      // What the open store holds in JavaScript (the RSS also carries the write phase).
       Bun.gc(true);
       const heldHeap = process.memoryUsage().heapUsed - heapBefore;
       const threads = store.threadIds();
@@ -128,9 +117,6 @@ describe.skipIf(!ON).each(LOGS_UNDER_TEST)("the size budget through the $name lo
       const common = timed(() => index.search({ q: "deploy" }));
       const since = timed(() => store.changesSince(store.cursor() - 100));
       index.dispose();
-      // The move into SQLite, from these files (JSONL only), and the first start after it.
-      const upgrade = name === "jsonl" ? await timedAsync(() => importJsonlInbox(dataDir, { now: world.now })) : null;
-      const afterUpgrade = upgrade?.value.status === "imported" ? timed(() => InboxStore.open(dataDir, { now: world.now, log: LOGS_UNDER_TEST.find((l) => l.name === "sqlite")!.log })) : null;
 
       const numbers = {
         log: name,
@@ -148,7 +134,6 @@ describe.skipIf(!ON).each(LOGS_UNDER_TEST)("the size budget through the $name lo
         search_rare_ms: +rare.ms.toFixed(1),
         search_common_ms: +common.ms.toFixed(1),
         changes_since_last_100_ms: +since.ms.toFixed(2),
-        ...(upgrade ? { import_ms: Math.round(upgrade.ms), import_status: upgrade.value.status, start_after_import_ms: afterUpgrade ? Math.round(afterUpgrade.ms) : null } : {}),
       };
       console.log(JSON.stringify(numbers));
 
