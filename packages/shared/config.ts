@@ -740,6 +740,7 @@ export interface PlannotatorConfig {
    * a tagged machine, which has no owner. Config only. Default: none.
    */
   inboxTailscaleAllow?: string[];
+  gitlabHosts?: string[];
   /**
    * Launch agents from the Inbox (New message's "New session" rows;
    * packages/server/inbox-launch.ts). `enabled`: Settings → Agents' "Start

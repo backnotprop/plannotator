@@ -13,8 +13,8 @@
  * Pure: no DOM, no fetch.
  */
 
-import { forgeRefKey, forgeRefLabel, webForgeHost } from '@plannotator/core/forge-ref-card';
-import { classifyForgeHost, forgeRefLinks, matchCrossRepoRef, type ForgePlatform } from '@plannotator/core/forge-refs';
+import { forgeOfUrl, forgeRefKey, forgeRefLabel } from '@plannotator/core/forge-ref-card';
+import { forgeRefLinks, matchCrossRepoRef, type ForgePlatform } from '@plannotator/core/forge-refs';
 import type { InboxMessageWire, InboxProjectRepo } from '@plannotator/core/inbox-types';
 import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock';
 import { trimUrlTail } from '@plannotator/ui/components/InlineMarkdown';
@@ -284,9 +284,9 @@ interface Repository {
 
 /** The repository a url is in; a forge's own page (`github.com/settings`) is only its platform. */
 function readForge(url: URL): Repository | ForgePlatform | null {
-  const host = webForgeHost(url.hostname);
-  const platform = host ? classifyForgeHost(host) : null;
-  if (!host || !platform) return null;
+  const forge = forgeOfUrl(url);
+  if (!forge) return null;
+  const { host, platform } = forge;
   const parts = url.pathname.split('/').filter(Boolean);
   // GitHub and Bitbucket: `owner/repo/...`; GitLab: `group/sub/project/-/...`.
   const twoPart = platform !== 'gitlab';
