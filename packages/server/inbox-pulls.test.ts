@@ -949,24 +949,28 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     ]);
   });
 
-  test("GitLab: a fork layer's whole stack is refused with a note, and nothing runs", async () => {
+  test("GitLab: a fork layer's whole stack compares in the fork's project, from the target project's base", async () => {
     const mr = {
       iid: "5", title: "MR 5", webUrl: "https://gitlab.com/northwind/ledger/-/merge_requests/5", state: "opened", draft: false, updatedAt: "2026-11-03T10:00:00Z", mergedAt: null,
       sourceBranch: "feat", targetBranch: "main", approved: false, detailedMergeStatus: "NOT_APPROVED", diffStatsSummary: { additions: 1, deletions: 0, fileCount: 1 },
       headPipeline: null, project: { fullPath: "northwind/ledger" }, sourceProject: { fullPath: "dana/ledger" }, author: { username: "dana" }, approvedBy: { nodes: [] }, reviewers: { nodes: [] },
     };
+    const compare = { diffs: [{ old_path: "a.ts", new_path: "a.ts", diff: "@@ -1 +1 @@\n-old\n+new\n", new_file: false, renamed_file: false, deleted_file: false }] };
     const calls: string[][] = [];
     const run = async (cli: string, args: string[]) => {
       calls.push([cli, ...args]);
       if (cli === "glab" && args[0] === "auth") return { stdout: "  ✓ Logged in to gitlab.com as dana", stderr: "", exitCode: 0 };
       if (cli === "glab" && args.includes("graphql")) return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [mr] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
-      return { stdout: "", stderr: "", exitCode: 1 };
+      if (args[3] === "projects/northwind%2Fledger/merge_requests/5") return { stdout: JSON.stringify({ sha: "f".repeat(40), source_project_id: 77, target_project_id: 12 }), stderr: "", exitCode: 0 };
+      if (args[3]?.startsWith("projects/77/repository/compare?")) return { stdout: JSON.stringify(compare), stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "404 Not Found", exitCode: 1 };
     };
     const pulls = createInboxPulls({ run: run as never });
     expect((await pulls.list([{ host: "gitlab.com", repo: "northwind/ledger", project_id: "prj_1" }])).pulls).toHaveLength(1);
-    const before = calls.length;
-    await expect(pulls.diff("gitlab.com/northwind/ledger#5:pull", "stack")).rejects.toMatchObject({ code: "pull_diff_fork" });
-    expect(calls.length).toBe(before);
+    const answer = await pulls.diff("gitlab.com/northwind/ledger#5:pull", "stack");
+    expect(calls.filter((c) => c[4]?.includes("/compare")).map((c) => c[4])).toEqual(["projects/77/repository/compare?from=main&to=feat&from_project_id=12&straight=false"]);
+    expect(answer).toMatchObject({ head: "dana:feat", head_sha: "f".repeat(40) });
+    expect(answer.patch).toContain("+new");
   });
 
   describe("the PR's description", () => {
