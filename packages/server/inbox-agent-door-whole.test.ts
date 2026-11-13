@@ -23,7 +23,8 @@ describe("a cloud agent uses the whole Inbox", () => {
     const { local } = w;
 
     const all = await w.door(pairing.token, "read_thread", { asked_by: "anyone" });
-    expect((all.result!.structuredContent!.threads as Thread[]).map((t) => t.thread_id)).toContain(local.thread_id);
+    expect((all.result!.structuredContent!.threads as (Thread & { project: string })[]).find((t) => t.thread_id === local.thread_id)?.project).toBe("ledger");
+    expect(all.result!.content[0]!.text).toContain(`${local.thread_id} · in ledger`);
     const read = await w.door(pairing.token, "read_thread", { thread_id: local.thread_id });
     expect(read.result!.content[0]!.text).toContain("Private plan: the zebra launch.");
     const found = await w.door(pairing.token, "search", { query: "zebra" });

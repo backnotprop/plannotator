@@ -90,7 +90,7 @@ Do what the person asked, with your own tools and repositories. Then answer in t
       :::
 
 - If read_thread says `name_this_thread: true`, add `"thread": "<a few words>"` to that reply: it names the thread.
-- Any thread, any project: `read_thread '{"asked_by":"anyone"}'` lists every thread, `search '{"query":"<words>"}'` finds messages in every project, and `"project": "<its name>"` on `send_message` starts the thread in that project (without it, it goes in the project `whoami` names).
+- Any thread, any project: `read_thread '{"asked_by":"anyone"}'` lists every thread with its project, `search '{"query":"<words>"}'` finds messages in every project, and `"project": "<its name>"` on `send_message` starts the thread in that project (without it, it goes in the project `whoami` names: the one the person chose, or a place of your own, named after you, made with your first thread).
 - Files: `"attachments": ["report.md", "shot.png"]`, paths on your machine; they are sent as bytes and show below your message.
 - If `send_message` prints `"queued": true`, the person's computer is asleep. It is posted once when the computer is back (within 30 days). Do not send it again.
 - A wake that says it is a test from Settings needs nothing: end the run.
