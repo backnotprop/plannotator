@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEAD_RELAY, unpinnedE2eEnvs, unpinnedInboxEnvs } from "./helpers/relay-pin-scan";
+import { DEAD_RELAY, unpinnedChildEnvs, unpinnedE2eEnvs, unpinnedInboxEnvs, unpinnedUnitEnvs } from "./helpers/relay-pin-scan";
 
 const root = join(import.meta.dir, "..");
 
@@ -11,6 +11,15 @@ describe("no browser spec reaches the hosted relay", () => {
     if (unpinned.length > 0) {
       throw new Error(
         `These Inbox envs would reach https://relay.plannotator.ai. Add PLANNOTATOR_RELAY_URL: '${DEAD_RELAY}' next to PLANNOTATOR_DATA_DIR:\n${unpinned.join("\n")}`,
+      );
+    }
+  });
+
+  test("every child env a unit or DOM test builds by hand pins PLANNOTATOR_RELAY_URL or spreads process.env", () => {
+    const unpinned = unpinnedUnitEnvs(root);
+    if (unpinned.length > 0) {
+      throw new Error(
+        `These child envs would reach https://relay.plannotator.ai if the child starts an Inbox. Add PLANNOTATOR_RELAY_URL: '${DEAD_RELAY}' next to PLANNOTATOR_DATA_DIR:\n${unpinned.join("\n")}`,
       );
     }
   });
@@ -27,5 +36,9 @@ describe("no browser spec reaches the hosted relay", () => {
     expect(unpinnedInboxEnvs(`const env = { HOME: h, PLANNOTATOR_RELAY_URL: '${DEAD_RELAY}', PLANNOTATOR_DATA_DIR: d };`)).toHaveLength(0);
     expect(unpinnedInboxEnvs("const env = { ...process.env, PLANNOTATOR_DATA_DIR: d };")).toHaveLength(0);
     expect(unpinnedInboxEnvs("const env = { HOME: h, nested: { x: 1 }, PLANNOTATOR_DATA_DIR: d };")).toHaveLength(1);
+    expect(unpinnedChildEnvs("Bun.spawn([entry], { cwd, env: { PATH: p, PLANNOTATOR_DATA_DIR: d } });")).toHaveLength(1);
+    expect(unpinnedChildEnvs("const env: Record<string, string> = {\n  HOME: h,\n  PLANNOTATOR_DATA_DIR: d,\n};")).toHaveLength(1);
+    expect(unpinnedChildEnvs("expect(start.env).toEqual({ PLANNOTATOR_DATA_DIR: d });")).toHaveLength(0);
+    expect(unpinnedChildEnvs("const dir = resolveDataDir({ PLANNOTATOR_DATA_DIR: d });")).toHaveLength(0);
   });
 });
