@@ -73,7 +73,7 @@ class ToolbarErrorBoundary extends React.Component<
 }
 
 import { CommentPopover, hasCommentDraft, type CommentAskAIHandler } from './CommentPopover';
-import { TaterSpriteSitting } from './TaterSpriteSitting';
+import { TaterSittingSlot } from './TaterSpriteSlots';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
@@ -1937,7 +1937,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       data-viewer-fill-height={fillHeight ? '' : undefined}
       style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}
     >
-      {taterMode && <TaterSpriteSitting />}
+      {taterMode && <TaterSittingSlot />}
       <article
         ref={containerRef}
         data-print-region="article"

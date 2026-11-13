@@ -736,3 +736,4 @@ packages/inbox/attachmentTileKeys.test.tsx
 packages/inbox/threadTags.test.tsx
 packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
+packages/ui/components/TaterSpriteSlots.test.tsx
