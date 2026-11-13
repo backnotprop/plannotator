@@ -378,7 +378,7 @@ button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset
 .ib-prs-mskip { color: var(--muted-foreground); }
 .ib-prs-mlist .ib-prs-mbad { color: var(--destructive); }
 .ib-prs-picksheet { flex-direction: column; align-items: stretch; gap: 10px; max-height: 70vh; overflow-y: auto; }
-.ib-prs-pickrow { display: flex; align-items: center; gap: 12px; }
+.ib-prs-pickrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; }
 .ib-prs-picksheet .ib-prs-mlist { font-size: var(--ib-fs-14, 14px); }
 .ib-prs-picksheet .ib-prs-btn { height: 44px; padding: 0 18px; font-size: var(--ib-fs-15, 15px); }
 .ib-prs[data-phone] .ib-prs-bar .ib-prs-btn { height: 36px; padding: 0 14px; }

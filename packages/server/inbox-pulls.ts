@@ -85,6 +85,8 @@ export const INBOX_PULLS_FRESH_MS = 60_000;
 export const INBOX_PULLS_REFRESH_MS = 20_000;
 /** How long a PR merged from this Inbox shows merged whatever the forge's reads still say (`markMerged`). */
 export const INBOX_PULLS_MERGED_HOLD_MS = 10 * 60_000;
+/** How long a PR closed from this Inbox shows closed whatever the forge's reads still say (`markClosed`). */
+export const INBOX_PULLS_CLOSED_HOLD_MS = 10 * 60_000;
 /** GitHub's GraphQL budget below this many points: the host is not read again until it fills (`rateLimit.resetAt`). */
 export const INBOX_PULLS_RATE_FLOOR = 100;
 /** A patch larger than this is refused (the review says to open it on the forge). */
@@ -722,6 +724,13 @@ export interface InboxPulls {
    * `INBOX_PULLS_MERGED_HOLD_MS` or until a read says it is no longer open.
    */
   markMerged(key: string): void;
+  /**
+   * This Inbox closed the PR (the board's Close): every list shows it closed, as `markMerged` does, for
+   * `INBOX_PULLS_CLOSED_HOLD_MS` or until a read says it is no longer open.
+   */
+  markClosed(key: string): void;
+  /** This Inbox reopened a PR it closed (Close's Undo): the hold ends and the list shows it as it was before. */
+  markReopened(key: string): void;
   /** Whether this CLI says it's signed in to the host: nothing is asked of a host it isn't. */
   signedInTo(cli: RefCli, host: string): Promise<boolean>;
   /**
@@ -1120,17 +1129,24 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   /** PRs merged from this Inbox, by key: when (`markMerged`). */
   const mergedHere = new Map<string, number>();
   const asMerged = (pull: InboxPull, at: number): InboxPull => ({ ...pull, state: "merged", merged_at: pull.merged_at ?? new Date(at).toISOString() });
-  /** A list's PRs with the ones this Inbox merged shown merged (a read that says they are not open any more ends the hold). */
+  /** PRs closed from this Inbox, by key: when, and the state they had (`markClosed`; `markReopened` puts it back). */
+  const closedHere = new Map<string, { at: number; was: InboxPull["state"] }>();
+  /** A list's PRs with the ones this Inbox merged or closed shown so (a read that says they are not open any more ends the hold). */
   const withMergedHere = (pulls: InboxPull[]): InboxPull[] => {
-    if (mergedHere.size === 0) return pulls;
+    if (mergedHere.size === 0 && closedHere.size === 0) return pulls;
     return pulls.map((pull) => {
+      const open = pull.state === "open" || pull.state === "draft";
       const at = mergedHere.get(pull.key);
-      if (at === undefined) return pull;
-      if (now() - at > INBOX_PULLS_MERGED_HOLD_MS || (pull.state !== "open" && pull.state !== "draft")) {
+      if (at !== undefined) {
+        if (now() - at <= INBOX_PULLS_MERGED_HOLD_MS && open) return asMerged(pull, at);
         mergedHere.delete(pull.key);
-        return pull;
       }
-      return asMerged(pull, at);
+      const closed = closedHere.get(pull.key);
+      if (closed !== undefined) {
+        if (now() - closed.at <= INBOX_PULLS_CLOSED_HOLD_MS && open) return { ...pull, state: "closed" };
+        closedHere.delete(pull.key);
+      }
+      return pull;
     });
   };
   /** A repository one of the last lists (scoped or everywhere) showed. */
@@ -1565,6 +1581,23 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       for (const map of [known, knownWide]) {
         const pull = map.get(key);
         if (pull) map.set(key, asMerged(pull, at));
+      }
+    },
+    markClosed(key) {
+      const was = findKnown(key)?.state;
+      if (was !== "open" && was !== "draft") return;
+      closedHere.set(key, { at: now(), was });
+      for (const map of [known, knownWide]) {
+        const pull = map.get(key);
+        if (pull) map.set(key, { ...pull, state: "closed" });
+      }
+    },
+    markReopened(key) {
+      const closed = closedHere.get(key);
+      closedHere.delete(key);
+      for (const map of [known, knownWide]) {
+        const pull = map.get(key);
+        if (pull && pull.state === "closed") map.set(key, { ...pull, state: closed?.was ?? "open" });
       }
     },
     signedInTo: async (cli, host) => (await signedIn(cli)).has(host),

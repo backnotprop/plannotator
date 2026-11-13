@@ -160,6 +160,8 @@ interface Forge {
   bodies: Record<string, string | null>;
   /** The commits GitHub says the PR has; null, that read fails. */
   prCommits?: string[] | null;
+  /** A REST call's own answer (close and reopen read the PR, then write it); null: the default answers. */
+  rest?: (cli: string, args: string[]) => { stdout: string; stderr: string; exitCode: number } | null;
 }
 
 /** gh signed in to github.com only; glab signed in nowhere. */
@@ -175,6 +177,8 @@ function forge(answer: unknown = GH_ANSWER): Forge {
     others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
+      const rest = f.rest?.(cli, args);
+      if (rest) return rest;
       if (cli === "gh" && args.some((a) => a.includes("/commits?"))) return f.prCommits ? { stdout: `${f.prCommits.join("\n")}\n`, stderr: "", exitCode: 0 } : { stdout: "", stderr: "HTTP 502", exitCode: 1 };
       if (cli === "gh" && args.includes("--jq")) {
         const number = String(args[3]!.split("/").at(-1));
@@ -481,6 +485,99 @@ describe("merge (the Pull requests page)", () => {
     expect(((await res.json()) as { code: string }).code).toBe("pull_merge_unknown");
     expect(w.forge.calls.some((c) => c.args.includes("repos/northwind/billing-svc/pulls/412"))).toBe(true);
     expect(puts(w)).toEqual([]);
+  });
+});
+
+describe("close and reopen (the board's Close and its Undo)", () => {
+  const KEY = "github.com/northwind/billing-svc#412";
+  const PULL = "repos/northwind/billing-svc/pulls/412";
+  const call = (base: string, route: "close" | "reopen", fields: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/${route}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(fields) });
+  const writes = (w: { forge: Forge }) => w.forge.calls.filter((c) => c.args.includes("PATCH"));
+  const ok = (body: unknown) => ({ stdout: JSON.stringify(body), stderr: "", exitCode: 0 });
+  /** GitHub as the PR is now: the read answers `state`, a PATCH changes it. */
+  const hostSays = (w: { forge: Forge }, start: "open" | "closed") => {
+    let state: string = start;
+    w.forge.rest = (_cli, args) => {
+      if (!args.includes(PULL)) return null;
+      if (args.includes("PATCH")) {
+        state = args.at(-1) === "state=closed" ? "closed" : "open";
+        return ok({ state });
+      }
+      return ok({ state, merged: false, merged_at: null });
+    };
+  };
+  const stateOf = async (w: { pulls: () => Promise<Response> }) => ((await (await w.pulls()).json()) as InboxPullsAnswer).pulls.find((p) => p.key === KEY)?.state;
+
+  test("Code review off: refused before anything runs", async () => {
+    const w = await world();
+    const before = w.forge.calls.length;
+    for (const route of ["close", "reopen"] as const) {
+      const res = await call(w.base, route, { key: KEY });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("code_review_off");
+    }
+    expect(w.forge.calls.length).toBe(before);
+  });
+
+  test("closes after asking the host, shows it closed, and Undo reopens it; a second reopen is refused", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    expect(await stateOf(w)).toBe("open");
+    hostSays(w, "open");
+    const closed = await call(w.base, "close", { key: KEY });
+    expect(closed.status).toBe(200);
+    expect(writes(w).map((c) => c.args.slice(-3))).toEqual([[PULL, "-f", "state=closed"]]);
+    // Read before the write, never after it alone.
+    const read = w.forge.calls.findIndex((c) => c.args.includes(PULL) && !c.args.includes("PATCH"));
+    expect(read).toBeLessThan(w.forge.calls.findIndex((c) => c.args.includes("PATCH")));
+    expect(await stateOf(w)).toBe("closed");
+    // Closing it again: the host says it's closed, nothing is written.
+    expect(((await (await call(w.base, "close", { key: KEY })).json()) as { code: string }).code).toBe("pull_closed");
+    expect(writes(w)).toHaveLength(1);
+
+    const reopened = await call(w.base, "reopen", { key: KEY });
+    expect(reopened.status).toBe(200);
+    expect(writes(w).map((c) => c.args.at(-1))).toEqual(["state=closed", "state=open"]);
+    expect(await stateOf(w)).toBe("open");
+    // The reopen spent the close: Undo can't run twice.
+    const again = await call(w.base, "reopen", { key: KEY });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { code: string }).code).toBe("reopen_not_closed_here");
+    expect(writes(w)).toHaveLength(2);
+  });
+
+  test("a reopen of a PR this Inbox did not close is refused before the host is asked; another site and an unknown PR too", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    await w.pulls();
+    hostSays(w, "closed");
+    const asked = w.forge.calls.length;
+    const res = await call(w.base, "reopen", { key: KEY });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("reopen_not_closed_here");
+    expect(w.forge.calls.length).toBe(asked);
+    expect((await call(w.base, "close", { key: KEY }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await call(w.base, "close", { key: "github.com/northwind/billing-svc#999" })).status).toBe(404);
+    expect((await call(w.base, "close", {})).status).toBe(422);
+    expect(writes(w)).toEqual([]);
+  });
+
+  test("a refusal comes back in the host's words and the PR stays open", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    await w.pulls();
+    w.forge.rest = (_cli, args) => {
+      if (!args.includes(PULL)) return null;
+      if (args.includes("PATCH")) return { stdout: JSON.stringify({ message: "Must have admin rights to Repository." }), stderr: "gh: Must have admin rights to Repository. (HTTP 403)", exitCode: 1 };
+      return ok({ state: "open", merged: false, merged_at: null });
+    };
+    const res = await call(w.base, "close", { key: KEY });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: "Must have admin rights to Repository.", code: "pull_close_failed" });
+    expect(await stateOf(w)).toBe("open");
+    // Not closed here, so no Undo either.
+    expect(((await (await call(w.base, "reopen", { key: KEY })).json()) as { code: string }).code).toBe("reopen_not_closed_here");
   });
 });
 
@@ -2038,6 +2135,16 @@ describe("who may read it", () => {
       });
       expect(postGuest.status).toBe(403);
       expect(((await postGuest.json()) as { code: string }).code).toBe("local_only");
+      // Nor close or reopen one with the owner's gh account.
+      for (const route of ["close", "reopen"]) {
+        const asGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/${route}`, {
+          method: "POST",
+          headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
+          body: JSON.stringify({ key: "github.com/northwind/billing-svc#412" }),
+        });
+        expect(asGuest.status).toBe(403);
+        expect(((await asGuest.json()) as { code: string }).code).toBe("local_only");
+      }
       expect(f.calls).toEqual([]);
       expect(post.calls).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
