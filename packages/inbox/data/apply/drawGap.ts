@@ -1,9 +1,11 @@
 import { notifyManager } from '@tanstack/react-query';
 
 export const DRAW_GAP_MS = 100;
+export const DRAW_SETTLE_MS = 16;
 
 const waiting: (() => void)[] = [];
 let lastAt = Number.NEGATIVE_INFINITY;
+let firstAt = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 function flush(): void {
@@ -15,13 +17,18 @@ function flush(): void {
   });
 }
 
+export function drawNow(): void {
+  if (timer === null) return;
+  clearTimeout(timer);
+  flush();
+}
+
 export function drawSoon(write: () => void): void {
   const now = Date.now();
-  if (timer === null && now - lastAt >= DRAW_GAP_MS) {
-    lastAt = now;
-    write();
-    return;
-  }
+  if (lastAt > now) lastAt = now - DRAW_GAP_MS;
+  if (waiting.length === 0) firstAt = now;
   waiting.push(write);
-  timer ??= setTimeout(flush, Math.max(0, lastAt + DRAW_GAP_MS - now));
+  if (timer !== null) clearTimeout(timer);
+  const at = Math.max(lastAt + DRAW_GAP_MS, Math.min(now + DRAW_SETTLE_MS, firstAt + DRAW_GAP_MS));
+  timer = setTimeout(flush, Math.max(0, at - now));
 }

@@ -42,6 +42,7 @@ let savedMatchMedia: typeof window.matchMedia;
 let phone = false;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 let agentLines: ReadableStreamDefaultReader<Uint8Array> | null = null;
+let sendRecord: ((record: unknown) => void) | null = null;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -74,7 +75,7 @@ async function agentWrites(project: string, body: string, replyTo?: string): Pro
   }
 }
 
-const TESTS = 9;
+const TESTS = 10;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -124,7 +125,9 @@ beforeEach(() => {
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   (globalThis as Record<string, unknown>).EventSource = class {
-    addEventListener() {}
+    addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+      if (type === 'record') sendRecord = (record) => listener({ data: JSON.stringify(record) } as MessageEvent<string>);
+    }
     close() {}
   };
   savedMatchMedia = window.matchMedia;
@@ -287,6 +290,33 @@ test.skipIf(!hasDom)('Archive all hides the project; the toast Undo brings it ba
   await until(() => projectRow() !== null, 'the project back');
   const now = await serverSections();
   expect(now.get(ids.stopped)).toBe('stopped');
+});
+
+test.skipIf(!hasDom)('Archive all whose own archive records land before its answer: every taken row stays in place, marked Archived', async () => {
+  await renderApp();
+  const taken = [ids.stopped, ids.waiting, ids.mixed, ids.same, ids.picked, ids.filed];
+  await until(() => taken.every((id) => !!document.querySelector(`.ib-listcol [data-row="${id}"]`)), 'the project\'s rows');
+  const plain = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const answer = await plain(input, init);
+    if (init?.method !== 'POST' || !String(input).endsWith('/resolve')) return answer;
+    const reads = await Promise.all(taken.map(async (id) => JSON.parse((await loopback(`/api/inbox/threads/${id}`)).text) as { cursor: number; thread: { messages: { id: string }[] } }));
+    const cursor = Math.max(...reads.map((read) => read.cursor));
+    reads.forEach((read, i) => {
+      const root = read.thread.messages.find((m) => m.id === taken[i])!;
+      sendRecord!({ seq: cursor - taken.length + 1 + i, kind: 'message', id: root.id, first: false, message: root });
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    return answer;
+  }) as typeof fetch;
+  await openMenu();
+  await choose('archive');
+  await until(() => !!toast() && toast()!.textContent!.includes('Archived'), 'the archive toast');
+  for (const id of taken) {
+    const row = document.querySelector(`.ib-listcol [data-row="${id}"]`);
+    expect(row).not.toBeNull();
+    expect(row!.textContent).toContain('Archived');
+  }
 });
 
 test.skipIf(!hasDom)('the project the list shows stays while the person is there, says why it is empty, and leaves once they go', async () => {

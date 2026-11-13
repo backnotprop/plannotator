@@ -9200,6 +9200,29 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-lo-phone.ib-zx .ib-lo-text h2 { font-size: var(--ib-fs-16, 16px); }
   .ib-lo-phone.ib-zx .ib-lo-text p { font-size: var(--ib-fs-13, 13px); }
 }
+/* The one-time Priority dialog (reveals.ts `priority`; components/PriorityIntro.tsx): Snooze's shell and parts (520 px,
+   its well, "New", the hint chip, the buttons). The picture is static and in the person's own mode: the real row menu,
+   Add to Priority lit under the pointer, beside a card of the list where the thread lands, first in Priority. On a
+   phone two items of the long-press sheet stack over the card, the whole no taller than Snooze's picture of its sheet. */
+.ib-pqi-scene { display: flex; align-items: center; justify-content: center; gap: 16px; }
+.ib-pm.ib-pqi-menu { position: relative; flex: none; width: 176px; animation: none; text-align: left; }
+.ib-pqi-menu .ib-pmi { position: relative; }
+.ib-pqi-pointer { position: absolute; left: 92px; top: 8px; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.3)); }
+dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibility: visible; flex: 1 1 0; min-width: 0; height: auto; border: 0; border-radius: 10px; overflow: hidden; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); text-align: left; }
+.ib-pqi-list .ib-lbody { overflow: hidden; padding: 6px 0; }
+.ib-pqi-list .ib-lbody > .ib-group > .ib-rw, .ib-pqi-list .ib-lbody > .ib-group > .ib-mrow { content-visibility: visible; }
+.ib-pqi-list :is(.ib-nrow .ib-l2 > .ib-title, .ib-nrow .ib-l3, .ib-mrow > .ib-m2, .ib-mrow > .ib-m3) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.ib-pqi-list .ib-band { cursor: default; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  dialog.ib-dlg.ib-lo.ib-zx.ib-pqi.ib-lo-phone { width: calc(100vw - 16px); }
+  /* Drawn compact, as Snooze draws its sheet's rows, to stay within Snooze's height. */
+  .ib-pqi-scene { flex-direction: column; align-items: stretch; gap: 4px; }
+  .ib-lo-phone.ib-pqi .ib-lo-art, :root:not(.light) .ib-lo-phone.ib-pqi .ib-lo-art { padding-bottom: 10px; }
+  .ib-lo-phone .ib-pqi-list .ib-band { height: 28px; }
+  .ib-pqi-pos[data-phone] .ib-pm.ib-pqi-menu { width: auto; }
+  dialog.ib-pqi .ib-listcol.ib-pqi-list { flex: none; }
+  .ib-pqi-list .ib-lbody { padding: 0; }
+}
 /* Settings → Voice. */
 .ib-vpage-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
 .ib-vkeyctl { flex: 0 1 300px; min-width: 0; }

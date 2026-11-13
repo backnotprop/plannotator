@@ -26,7 +26,7 @@ import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { createInboxQueryClient } from './data/client';
 import { dropThread, heldThread, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
 import { sameThreadFiles } from './data/queries/files';
-import { putList, readList, takeListRead, useListModel } from './data/queries/list';
+import { putList, readListTaking, useListModel } from './data/queries/list';
 import { changeDrafts, heldReplyDrafts, readDrafts, useDrafts } from './data/queries/drafts';
 import { applyListRecord } from './data/apply/list';
 import { createRecordPause } from './data/apply/recordPause';
@@ -244,6 +244,7 @@ import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
 import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
+import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
@@ -728,6 +729,7 @@ function Inbox() {
   const [lineAgainAt, setLineAgainAt] = useState<number | null>(null);
   /** The list's rows, for "a question waits in the open thread" (`openThreadAsks`) in checks that run on a timer. */
   const oneTimeRows = useRef<readonly InboxListRow[]>([]);
+  const archivingHere = useRef(new Set<string>());
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
   const updatingThisLoad = useRef(false);
   /** This page snoozed something in this load: the announcement would tell the person what they just did. */
@@ -1103,7 +1105,7 @@ function Inbox() {
       latestRef.current = next;
       putList(queryClient, next);
       const groups = listGroups(next);
-      const gone = goneRows(shownRef.current, groups, routeRef.current.thread);
+      const gone = goneRows(shownRef.current, groups, routeRef.current.thread, archivingHere.current);
       if (gone.size > 0) armSlide();
       setShown((current) => shownAfter(current, groups, { adopt: false, keep: null, open: heldOpen(), gone }));
     },
@@ -1111,11 +1113,9 @@ function Inbox() {
   );
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
-      const next = await readList();
+      const { next, held, taken } = await readListTaking(() => latestRef.current, () => listCursor.current, { firstDone: firstList.current!.done, adopt, settings: routeRef.current.page === 'settings' });
       const failedBefore = listReadFailure.current !== null;
       listReadFailure.current = null;
-      const held = latestRef.current;
-      const taken = takeListRead(held, next, listCursor.current, { firstDone: firstList.current!.done, adopt, settings: routeRef.current.page === 'settings' });
       // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
       if (taken === 'older') return held;
       listCursor.current = { session: next.serverSession, cursor: next.cursor };
@@ -1169,7 +1169,7 @@ function Inbox() {
       const listedIds = new Set(groups.flatMap((group) => group.threads.map((row) => row.thread_id)));
       pruneThreads(queryClient, (id) => listedIds.has(id));
       // Archived or deleted elsewhere: the row leaves at once, with the settle's slide (held.ts `goneRows`).
-      const gone = adopt ? new Set<string>() : goneRows(shownRef.current, groups, routeRef.current.thread);
+      const gone = adopt ? new Set<string>() : goneRows(shownRef.current, groups, routeRef.current.thread, archivingHere.current);
       if (gone.size > 0) armSlide();
       setShown((current) => shownAfter(current, groups, { adopt, keep, open: heldOpen(), gone }));
       if (adopt) {
@@ -3680,12 +3680,11 @@ function Inbox() {
         incomplete = answer.error?.message ?? null;
         undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read, looked);
       } else {
-        const answer = await inboxApi.archiveProject(projectId, newBatchId());
+        for (const row of before) archivingHere.current.add(row.thread_id);
+        const answer = await inboxApi.archiveProject(projectId, newBatchId()).finally(() => setTimeout(() => before.forEach((row) => archivingHere.current.delete(row.thread_id)), 1000));
         taken = [...answer.batch.resolved, ...answer.batch.read];
         incomplete = answer.error?.message ?? null;
         undo = () => inboxApi.unarchiveProject(projectId, answer.batch);
-        // The list leaves archived threads out; each taken row stays where it is, shown archived, and goes when the
-        // list next settles (as the single Archive does, a thread open or none).
         const at = new Date().toISOString();
         setShown((current) => (current ? taken.reduce((sections, id) => markHeldRowArchived(sections, id, at), current) : current));
       }
@@ -4380,11 +4379,9 @@ function Inbox() {
     due: lineLatch?.next === 'bro',
     ...revealAt,
     leaveCounts: (visit, now, _row, next) => broRevealLeaveCounts(visit, now, next),
-    // Or the page idle on such a thread (a thread kept open beside the list never goes back to it).
     idle: pageIdle,
     idleCounts: broRevealIdleCounts,
     mayClaim: () => true,
-    // Turned on meanwhile (Settings, another window): nothing to offer.
     holds: () => settingsRef.current?.bro?.on !== true,
   });
   // The grill-me tip (shared/inbox/grill-me-tip.ts), beside the line (settings `reveal.aside`; reveals.ts `lastResort`:
@@ -4433,14 +4430,9 @@ function Inbox() {
   const listViewReveal = useLineReveal({
     id: 'list_view',
     due: lineLatch?.next === 'list_view' || (lineLatch?.ahead.includes('list_view') ?? false),
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
+    ...revealAt,
     thread: listViewThread,
-    // On the list itself, or over a thread while the page is idle (the thread kept open beside the list).
     clear: listViewRevealClear(listIntroClear, listViewThread, pageIdle),
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
     leaveCounts: (_visit, _now, _row, next) => listViewRevealLeaveCounts(next),
     idle: pageIdle,
     mayClaim: (pageAge) =>
@@ -4453,7 +4445,6 @@ function Inbox() {
         },
         pageAge,
       ),
-    // Simple list picked meanwhile (the ⋮ menu): nothing to offer.
     holds: () => listView === 'grouped',
   });
   const listViewIntroOpen = listViewReveal.stage === 'open';
@@ -4461,22 +4452,32 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  const { reveal: priorityReveal, dialog: priorityDialog } = usePriorityReveal({
+    due: lineLatch?.next === 'priority',
+    revealAt,
+    idle: pageIdle,
+    listLoaded: lineLatch !== null,
+    firstRun,
+    grouped: listView === 'grouped',
+    oneTimeRows: () => oneTimeRows.current,
+    phone,
+    projectNames,
+    openThread: () => (routeRef.current.page === 'inbox' ? (routeRef.current.thread ?? null) : null),
+    openTarget: (threadId) => {
+      const now = routeRef.current;
+      go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, tag: now.tag, thread: threadId });
+    },
+  });
   // The tab icon dialog ("Which favicon do you prefer?"; tabIconChoice.ts): an update-day dialog of the line, armed
   // while it is `reveal.next`, 15 s into the page (the owner, 2026-11-10; reveal.ts `soonMayClaim`): no leave and no
   // stillness, only Code review's guards (the page clear, nothing typed or open, no toast, settled).
-  const tabIconThread = route.page === 'inbox' ? (route.thread ?? null) : null;
+  const soonClear = listIntroClear && updateDialog === null && !restarting;
   const tabIconChoice = useTabIconChoice({
     due: lineLatch?.next === 'tab_icon',
-    blocked: revealBlocked,
     listLoaded: lineLatch !== null,
     firstRun,
-    thread: tabIconThread,
-    rows: snoozeIntroRows,
-    // Code review's own guard: the Inbox page with nothing over it (a thread open or not), no update on screen.
-    clear: listIntroClear && updateDialog === null && !restarting,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
-    toast: toast !== null,
+    ...revealAt,
+    clear: soonClear,
   });
   // The "themes" dialog (approval "inbox-theme-chooser"; themeChooser.ts): right after the tab icon dialog in the line,
   // for someone still on the default theme, armed while it is `reveal.next`, at the same 15 s moment.
@@ -4484,23 +4485,17 @@ function Inbox() {
   const pickTheme = useInboxThemePick();
   const themeChooser = useThemeChooser({
     due: lineLatch?.next === 'theme_chooser',
-    blocked: revealBlocked,
     listLoaded: lineLatch !== null,
     firstRun,
-    thread: tabIconThread,
-    rows: snoozeIntroRows,
-    // Code review's own guard: the Inbox page with nothing over it (a thread open or not), no update on screen.
-    clear: listIntroClear && updateDialog === null && !restarting,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
-    toast: toast !== null,
+    ...revealAt,
+    clear: soonClear,
     light: themeNow.lightTheme,
     dark: themeNow.darkTheme,
   });
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -4581,6 +4576,8 @@ function Inbox() {
     agentRulesReveal.stage !== 'claimed' &&
     personalAgentsReveal.stage !== 'open' &&
     personalAgentsReveal.stage !== 'claimed' &&
+    priorityReveal.stage !== 'open' &&
+    priorityReveal.stage !== 'claimed' &&
     grillMeTipReveal.stage !== 'open' &&
     grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -5044,7 +5041,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -6760,6 +6757,7 @@ function Inbox() {
       {personalAgentsReveal.stage === 'open' && (
         <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
       )}
+      {priorityDialog}
       {broReveal.stage === 'open' && (
         <BroIntro
           phone={phone}
