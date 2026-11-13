@@ -24,7 +24,9 @@ A paired cloud agent (contract section 13, "Through the relay") is a device regi
 - A device may hold at most 50 commands or 64 MiB of them; past that a command answers `429 too_many_held`.
 - The Worker refuses a request before it wakes a mailbox when its route is unknown, it has no bearer where one is needed, or its body is too large by `Content-Length` (64 KiB, or 32 MiB and a little for a command).
 - On a device route, a device the mailbox does not hold answers `401` like a wrong secret, so nobody can probe which devices exist.
-- The creation brake fails closed off loopback: with no rate-limit binding, no `CF-Connecting-IP` or a failing limiter, creation answers `503 brake_unavailable`.
+- The creation brake counts every create attempt, valid or not, per IPv4 address or IPv6 /64: Cloudflare's rate-limit binding first, then an exact count of 20 a minute in a small Durable Object per address (`CreateBrake`, memory only, nothing stored). The binding alone never refused in production: its counts are approximate and per location, and 50 creates in 72 seconds from one address all passed it.
+- The creation brake fails closed off loopback: with no rate-limit binding, no `CREATE_BRAKE` object, no `CF-Connecting-IP` or a failing limiter, creation answers `503 brake_unavailable`.
+- The Worker answers a plain-http request with a bare `403` and no body, on every route; only `wrangler dev` on loopback is served over http.
 - A cloud agent's signal address is a secret inside a URL. Anything that logs URLs (Cloudflare request logs, Logpush, a proxy on the agent's side) keeps it, and whoever holds it learns that something changed in that agent's threads, and when; nothing more. Leave URL logging off, or redact `/signals/`.
 - The signal's limit of 20 reads a minute is counted in the mailbox object's memory, so it starts again whenever Cloudflare unloads the object. It is a brake, not a quota.
 - Not done: mailbox ids that prove themselves (`mbx_` plus random bytes plus a short HMAC under a Worker secret, checked by the Worker before it wakes an object). Today any well-formed id wakes an object, which stores nothing for an id never made. Adding it means a new Worker secret, a longer id the pairing string and `relay.json` must accept, and keeping today's ids working until their Inboxes make new mailboxes.
@@ -42,6 +44,8 @@ wrangler deploy
 ```
 
 `FCM_SERVICE_ACCOUNT` is the key file Google's console downloads for a service account of the Firebase project (it names `project_id`, `client_email`, `private_key_id` and `private_key`); the account needs permission to send through the Firebase Cloud Messaging API. Pipe the file in (`wrangler secret put FCM_SERVICE_ACCOUNT < key.json`) and keep it out of the repository.
+
+After a deploy, `./live-check.sh` (not part of CI) checks the live relay: its plain answers, https only, a wrong token gets 401 or 404, and the creation brake answers 429; it makes no mailbox and leaves no data. Run it at most once a minute: it spends that minute's creations from your address.
 
 No workflow deploys it, and no workflow holds a Cloudflare, Apple or Google secret. Without `APNS_KEY` the relay runs and every push to an APNs token answers `no_apns_key`; without `FCM_SERVICE_ACCOUNT` every push to an FCM token answers `no_fcm_key`.
 

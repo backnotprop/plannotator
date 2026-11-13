@@ -19,6 +19,7 @@
  * size of its own.
  */
 import { DurableObject } from "cloudflare:workers";
+import type { CreateBrake } from "./create-brake";
 import { sendPush, type ApnsEnvironment } from "./apns";
 import { FcmAuthError, parseServiceAccount, sendFcm } from "./fcm";
 import { HELD_COMMANDS_MAX, HELD_COMMAND_BYTES_MAX, heldMaxAgeMs, SIGNAL_LIMIT, SIGNAL_WINDOW_MS } from "./limits";
@@ -27,6 +28,7 @@ export interface Env {
   MAILBOX: DurableObjectNamespace<Mailbox>;
   /** Cloudflare's rate limiting binding on mailbox creation, the rule guides.show uses (wrangler.toml). Absent: no brake. */
   MAILBOX_CREATE_LIMITER?: RateLimit;
+  CREATE_BRAKE?: DurableObjectNamespace<CreateBrake>;
   /** The APNs key (.p8 text), its key id and the team id: Worker secrets. Without the key a push answers `no_apns_key`. */
   APNS_KEY?: string;
   APNS_KEY_ID?: string;

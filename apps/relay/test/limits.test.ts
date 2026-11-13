@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { braked } from "../src/brake";
+import { braked, clientKey, windowCounter } from "../src/brake";
+import { plainHttp } from "../src/https-only";
 import { HELD_COMMANDS_MAX, HELD_COMMAND_BYTES_MAX } from "../src/limits";
 import { dumpMailbox, sha256, sleep, startRelay, until, type Json, type Relay } from "./wrangler-relay";
 
@@ -136,18 +137,60 @@ describe("the creation brake", () => {
     },
   };
 
-  test("closed off loopback when it cannot brake: no binding, no client address, or a failing limiter", async () => {
-    for (const [limiter, ip] of [
-      [undefined, "203.0.113.9"],
-      [allow, null],
-      [broken, "203.0.113.9"],
+  const admit = async () => true;
+
+  test("closed off loopback when it cannot brake: no binding, no exact count, no client address, or a failing limiter", async () => {
+    for (const [limiter, strict, ip] of [
+      [undefined, admit, "203.0.113.9"],
+      [allow, undefined, "203.0.113.9"],
+      [allow, admit, null],
+      [broken, admit, "203.0.113.9"],
     ] as const) {
-      const answer = await braked(request("relay.example", ip), limiter, 60);
+      const answer = await braked(request("relay.example", ip), limiter, 60, strict);
       expect(answer?.status).toBe(503);
       expect(((await answer!.json()) as Json).code).toBe("brake_unavailable");
     }
-    expect(await braked(request("relay.example", "203.0.113.9"), allow, 60)).toBeNull();
-    expect((await braked(request("relay.example", "203.0.113.9"), full, 60))?.status).toBe(429);
+    expect(await braked(request("relay.example", "203.0.113.9"), allow, 60, admit)).toBeNull();
+    expect((await braked(request("relay.example", "203.0.113.9"), full, 60, admit))?.status).toBe(429);
     expect(await braked(request("127.0.0.1:8787", null), undefined, 60)).toBeNull();
+  });
+
+  test("the 21st create in a minute from one address answers 429 even when Cloudflare's approximate limiter lets everything through", async () => {
+    let clock = 0;
+    const counters = new Map<string, () => boolean>();
+    const strict = async (key: string) => {
+      if (!counters.has(key)) counters.set(key, windowCounter(20, 60_000, () => clock));
+      return counters.get(key)!();
+    };
+    const create = (ip: string) => braked(request("relay.example", ip), allow, 60, strict);
+    for (let i = 0; i < 20; i++) expect(await create("198.51.100.7")).toBeNull();
+    const over = await create("198.51.100.7");
+    expect(over?.status).toBe(429);
+    expect(over?.headers.get("retry-after")).toBe("60");
+    expect(await create("198.51.100.8")).toBeNull();
+    for (let i = 0; i < 20; i++) expect(await create(`2001:db8:1:2::${i.toString(16)}`)).toBeNull();
+    expect((await create("2001:db8:1:2:ffff:ffff:ffff:ffff"))?.status).toBe(429);
+    expect(await create("2001:db8:1:3::1")).toBeNull();
+    clock += 60_000;
+    expect(await create("198.51.100.7")).toBeNull();
+  });
+
+  test("an IPv6 client is counted by its /64, however the address is written", () => {
+    expect(clientKey("2001:0db8:0001:0002:0000:0000:0000:0001")).toBe("2001:db8:1:2::/64");
+    expect(clientKey("2001:db8:1:2::abcd")).toBe("2001:db8:1:2::/64");
+    expect(clientKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(clientKey("203.0.113.9")).toBe("203.0.113.9");
+  });
+});
+
+describe("https only", () => {
+  test("a plain-http request to the relay's host gets a bare 403 on every route; https and loopback pass", async () => {
+    for (const path of ["/v1/mailboxes", "/v1/mailboxes/mbx_0000000000000000000000/socket", "/anything?x=1"]) {
+      const answer = plainHttp(new Request(`http://relay.plannotator.ai${path}`, { method: "POST" }));
+      expect(answer?.status).toBe(403);
+      expect(await answer!.text()).toBe("");
+    }
+    expect(plainHttp(new Request("https://relay.plannotator.ai/v1/mailboxes"))).toBeNull();
+    expect(plainHttp(new Request("http://127.0.0.1:8787/v1/mailboxes"))).toBeNull();
   });
 });

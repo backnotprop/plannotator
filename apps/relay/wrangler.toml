@@ -19,9 +19,8 @@ name = "plannotator-relay"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 
-# Custom domain (top-level: must precede any [table] in TOML). Pending before
-# release: the relay.plannotator.ai custom domain is recommended but not yet
-# deployed.
+# Custom domain (top-level: must precede any [table] in TOML): the relay is
+# live at relay.plannotator.ai.
 routes = [
   { pattern = "relay.plannotator.ai", custom_domain = true }
 ]
@@ -31,15 +30,23 @@ routes = [
 name = "MAILBOX"
 class_name = "Mailbox"
 
+[[durable_objects.bindings]]
+name = "CREATE_BRAKE"
+class_name = "CreateBrake"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Mailbox"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CreateBrake"]
 
 # The brake on anonymous mailbox creation (POST /v1/mailboxes only), the same
 # rule guides.show puts on its create route (apps/guides-show/wrangler.toml:
 # 20 per minute per IP, period 60), in its own namespace so the two services
 # do not share a count. Over it the Worker answers 429 with Retry-After: 60.
-# Optional in the Env type: without this block nothing is braked.
+# Optional in the Env type: without this block creation answers 503 off loopback.
 [[ratelimits]]
 name = "MAILBOX_CREATE_LIMITER"
 namespace_id = "1002"

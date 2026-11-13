@@ -22,9 +22,11 @@
  * run it under `wrangler dev` only.
  */
 import { braked } from "./brake";
+import { CreateBrake } from "./create-brake";
+import { plainHttp } from "./https-only";
 import { DEVICE_ID, HASH, Mailbox, SIGNAL_TOKEN, WEBSOCKET_MESSAGE_LIMIT, json, refuse, type Env } from "./mailbox";
 
-export { Mailbox };
+export { CreateBrake, Mailbox };
 
 /**
  * The `simple.period` of the `[[ratelimits]]` block, echoed as `Retry-After`.
@@ -86,10 +88,13 @@ function mailboxId(): string {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const insecure = plainHttp(req);
+    if (insecure) return insecure;
     const url = new URL(req.url);
     if (url.pathname === "/v1/mailboxes") {
       if (req.method !== "POST") return refuse(404, "not_found");
-      const brake = await braked(req, env.MAILBOX_CREATE_LIMITER, CREATE_PERIOD_SECONDS);
+      const strict = env.CREATE_BRAKE && ((key: string) => env.CREATE_BRAKE!.get(env.CREATE_BRAKE!.idFromName(key)).admit());
+      const brake = await braked(req, env.MAILBOX_CREATE_LIMITER, CREATE_PERIOD_SECONDS, strict);
       if (brake) return brake;
       const raw = await cappedBody(req, SMALL_BODY_MAX);
       if (raw === null) return refuse(413, "body_too_large");
