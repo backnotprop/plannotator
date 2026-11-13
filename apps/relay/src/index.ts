@@ -23,6 +23,7 @@
  */
 import { braked } from "./brake";
 import { CreateBrake } from "./create-brake";
+import { plainHttp } from "./https-only";
 import { DEVICE_ID, HASH, Mailbox, SIGNAL_TOKEN, WEBSOCKET_MESSAGE_LIMIT, json, refuse, type Env } from "./mailbox";
 
 export { CreateBrake, Mailbox };
@@ -87,6 +88,8 @@ function mailboxId(): string {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const insecure = plainHttp(req);
+    if (insecure) return insecure;
     const url = new URL(req.url);
     if (url.pathname === "/v1/mailboxes") {
       if (req.method !== "POST") return refuse(404, "not_found");

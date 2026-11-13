@@ -19,6 +19,8 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullLink, InboxPullsAnswer, InboxReviewRow, InboxThreadPullWire, InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullState } from '@plannotator/core/inbox-types';
@@ -274,6 +276,33 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     await settle();
     await click(host!.querySelector('[data-pr-button]'));
     expect(popover()!.querySelector('.ib-prpop-head')!.textContent).toBe('o/rStack of 3');
+  });
+
+  test("the card's stack lists its layers one under the other; the Pull requests board's stack button stays a flex row", async () => {
+    // The two files' rules for the shared class, in the order the window loads them (inbox.css, then prs/prs.css).
+    const rules = (file: string) =>
+      readFileSync(join(import.meta.dir, file), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .filter((line) => /^\.[^{]*\.ib-prpop-stack[^{]*\{[^}]*\}\s*$/.test(line) || /^\.ib-prpop-stack[^{]*\{[^}]*\}\s*$/.test(line));
+    const style = document.createElement('style');
+    style.textContent = [...rules('../inbox.css'), ...rules('../prs/prs.css')].join('\n');
+    document.head.append(style);
+    try {
+      answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull('o/r#2', 'open', 'a', 'b')]);
+      render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+      await settle();
+      await click(host!.querySelector('[data-pr-button]'));
+      const list = popover()!.querySelector<HTMLElement>('[data-pr-group="stack"] ol')!;
+      expect(list.querySelectorAll('[data-pr-row]')).toHaveLength(2);
+      expect(getComputedStyle(list).display).toBe('block');
+      const board = document.createElement('button');
+      board.className = 'ib-prpop-stack';
+      host!.append(board);
+      expect(getComputedStyle(board).display).toBe('flex');
+    } finally {
+      style.remove();
+    }
   });
 
   test('remove sends that ref, says so with Undo, and Undo adds it back', async () => {

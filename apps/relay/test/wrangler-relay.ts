@@ -56,7 +56,7 @@ export async function startRelay(name: string, vars: Record<string, string>, opt
   writeFileSync(envFile, Object.entries(vars).map(([k, v]) => (/^[\w.:/+=-]*$/.test(v) ? `${k}=${v}\n` : `${k}='${v}'\n`)).join(""), { mode: 0o600 });
   let output = "";
   const child = Bun.spawn(
-    [wrangler, "dev", "--local", "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(freePort()), "--persist-to", persist, "--env-file", envFile, "--show-interactive-dev-session=false"],
+    [wrangler, "dev", "--local", "--upstream-protocol", "https", "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(freePort()), "--persist-to", persist, "--env-file", envFile, "--show-interactive-dev-session=false"],
     { cwd: relayDir, stdout: "pipe", stderr: "pipe", env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1" } },
   );
   for (const stream of [child.stdout, child.stderr]) {

@@ -705,6 +705,55 @@ test('Stop while it starts again for a reply: "You stopped", never a failure, an
   }
 });
 
+test("the sidebar agent's ⋯: Rename…, Stop and Delete … session…; Stop is the thread's Stop, then Delete only, asked in a dialog over the page as it was", async () => {
+  const { page, fake } = world;
+  fake.configure({ startDelayMs: 0, hold: false });
+  await page.goto(world.url);
+  const threadId = await launchFrom(page, 'Rename the palette helper.');
+  await openThread(page, threadId);
+  const p = pane(page);
+  await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(p.locator('[data-run]')).toHaveCount(0);
+  const read = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { launch?: { id: string } }[] } };
+  const launchId = read.thread.messages[0]!.launch!.id;
+  const row = page.locator(`[data-sidebar-agent="${launchId}"]`);
+  const items = page.locator(`[data-agent-menu="${launchId}"] [role="menuitem"]`);
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await expect(items).toHaveText(['Rename…', 'Stop Claude Code', 'Delete Claude Code session…']);
+  await shot(page, '20-sidebar-agent-menu');
+  await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="stop"]`).click();
+  await expect(p.locator('[data-run="stopped"]')).toHaveText(/^You stopped Claude Code at \d{1,2}:\d{2} [AP]M\. Your reply starts it again\.$/);
+  expect(fake.calls().some((c) => c.argv[0] === 'stop')).toBe(true);
+  // Stopped: Delete only, as the thread's ⋯ offers then.
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await expect(items).toHaveText(['Rename…', 'Delete Claude Code session…']);
+  // From the list with no thread open: the dialog asks there, and nothing behind it moves.
+  await page.goto(world.url);
+  const hash = await page.evaluate(() => location.hash);
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="delete"]`).click();
+  const dialog = page.locator('dialog[data-dialog="agent-delete"]');
+  await expect(dialog.locator('h2')).toHaveText('Delete the Claude Code session?');
+  await expect(dialog.locator('[data-agent-delete-cancel]')).toBeFocused();
+  expect(await page.evaluate(() => location.hash)).toBe(hash);
+  await expect(page.locator('[data-launch-confirm]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="delete"]`).click();
+  await dialog.locator('[data-agent-delete-go]').click();
+  await expect(page.locator('.ib-toast')).toContainText('Session deleted');
+  await waitFor('launch folder removed', () => !existsSync(join(world.dataDir, 'inbox', 'launch', launchId)));
+  await expect(row).toHaveCount(0, { timeout: 15_000 });
+  // The box was not ticked: its thread stays in the list.
+  await expect(page.locator(`[data-thread-id="${threadId}"]`).first()).toBeVisible();
+  expect(world.errors).toEqual([]);
+});
+
 test('Delete while --bg is still running: the session it makes is stopped and removed, never left running', async () => {
   const { page, fake } = world;
   // Long enough that the Delete lands while --bg still runs: the window's reload and menu took 2.5 s on CI once main grew.
