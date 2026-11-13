@@ -1386,6 +1386,29 @@ jobs:
           path: artifacts
           digest-mismatch: error
 
+      - name: Compressed copies of the binaries
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          pack() {
+            f="$1"
+            want=$(cut -d' ' -f1 "$f.sha256")
+            gzip -9 -n -c "$f" > "$f.gz"
+            if [ "$(gzip -dc "$f.gz" | sha256sum | cut -d' ' -f1)" != "$want" ]; then
+              echo "::warning::$f.gz does not unpack to $f; it is not released"
+              rm -f "$f.gz"
+            fi
+            case "$f" in *.exe) return 0 ;; esac
+            tar --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - "$f" | xz -9 -T2 > "$f.tar.xz"
+            if [ "$(tar -xJOf "$f.tar.xz" "$f" | sha256sum | cut -d' ' -f1)" != "$want" ]; then
+              echo "::warning::$f.tar.xz does not unpack to $f; it is not released"
+              rm -f "$f.tar.xz"
+            fi
+          }
+          export -f pack
+          printf '%s\n' plannotator-darwin-arm64 plannotator-darwin-x64 plannotator-linux-x64 plannotator-linux-arm64 \
+            plannotator-win32-x64.exe plannotator-win32-arm64.exe | xargs -P 4 -I{} bash -c 'pack "$1" || echo "::warning::could not compress $1"' _ {}
+
       - name: List artifacts
         run: ls -la artifacts/
 
