@@ -457,6 +457,8 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     // A star lives on the thread's own machine (inbox-linked-marks): held and sent there like a snooze.
     expect(doorWriteKind("threads/msg_1/pin")).toBe("set");
     expect(doorWriteKind("pins")).toBe("set");
+    // An agent's face and given name live on the agent's own machine: held and sent there too.
+    expect(doorWriteKind("agent-faces")).toBe("set");
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {
