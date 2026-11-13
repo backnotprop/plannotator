@@ -292,6 +292,8 @@ if (broOfferMode) {
       inboxVoiceIntro: { shownAt: settled },
       // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
       favicon: "glass",
+      // Priority (after Snooze in the line): settled by a thread once added to Priority.
+      inboxPriorityIntro: { usedAt: settled },
     }),
   );
   let clock = new Date();

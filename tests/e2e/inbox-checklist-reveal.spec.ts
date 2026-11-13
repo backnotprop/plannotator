@@ -93,6 +93,8 @@ async function world(steps?: boolean): Promise<World> {
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: snoozeShown },
+      // Priority (after Snooze in the line): settled by a thread once added to Priority.
+      inboxPriorityIntro: { usedAt: snoozeShown },
       inboxBoard: true,
       inboxBoardIntro: { shownAt: boardShown },
       // The Sidebar tip (outside the line) was seen too: it shares the calm moment, and these cases read the stamps.

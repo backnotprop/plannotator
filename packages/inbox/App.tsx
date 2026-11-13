@@ -231,6 +231,8 @@ import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
+import { PriorityIntro } from './components/PriorityIntro';
+import { openPriorityMenu, priorityIntroHolds, priorityIntroMayClaim, priorityIntroPicture, priorityIntroTarget } from './priorityIntro';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
@@ -5912,6 +5914,41 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  // The Priority dialog (priorityIntro.ts), registered with the line: the Inbox names it for someone who never added a
+  // thread to Priority; its moment is "Set the rules"' (a thread read and left, or the page idle), on the grouped list
+  // with 3 threads or more waiting on the person.
+  const priorityReveal = useLineReveal({
+    id: 'priority',
+    due: lineLatch?.next === 'priority',
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    idle: pageIdle,
+    mayClaim: (pageAge) => priorityIntroMayClaim({ listLoaded: lineLatch !== null, firstRun, grouped: listView === 'grouped', rows: snoozeIntroRows }, pageAge),
+    holds: () => listView === 'grouped' && priorityIntroHolds(oneTimeRows.current),
+  });
+  const priorityIntroAim = priorityReveal.stage === 'open' ? priorityIntroTarget(snoozeIntroRows, priorityReveal.target) : null;
+  const priorityIntroScene = useMemo(() => (priorityReveal.stage === 'open' ? priorityIntroPicture(snoozeIntroRows, priorityIntroAim) : null), [priorityReveal.stage, priorityIntroAim, snoozeIntroRows]);
+  /** Try it: the dialog closes, then the real menu opens with focus on Add to Priority; it adds nothing itself. */
+  const tryPriorityIntro = () => {
+    const aim = priorityIntroAim;
+    priorityReveal.close();
+    setTimeout(() => {
+      const now = routeRef.current;
+      void openPriorityMenu({
+        root: document.querySelector('.pn-inbox') ?? document,
+        phone,
+        openThread: now.page === 'inbox' ? (now.thread ?? null) : null,
+        target: aim,
+        openTarget: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, tag: now.tag, thread: threadId }),
+      });
+    }, 0);
+  };
   // The tab icon dialog ("Which favicon do you prefer?"; tabIconChoice.ts): an update-day dialog of the line, armed
   // while it is `reveal.next`, 15 s into the page (the owner, 2026-11-10; reveal.ts `soonMayClaim`): no leave and no
   // stillness, only Code review's guards (the page clear, nothing typed or open, no toast, settled).
@@ -5951,7 +5988,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -6035,6 +6072,8 @@ function Inbox() {
     broReveal.stage !== 'claimed' &&
     agentRulesReveal.stage !== 'open' &&
     agentRulesReveal.stage !== 'claimed' &&
+    priorityReveal.stage !== 'open' &&
+    priorityReveal.stage !== 'claimed' &&
     grillMeTipReveal.stage !== 'open' &&
     grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -6581,7 +6620,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -8270,6 +8309,20 @@ function Inbox() {
             agentRulesReveal.close();
             wantRulesEditor();
             window.location.hash = '#settings/prompts';
+          }}
+        />
+      )}
+      {priorityReveal.stage === 'open' && priorityIntroScene && (
+        <PriorityIntro
+          picture={priorityIntroScene}
+          projectNames={projectNames}
+          phone={phone}
+          onGotIt={priorityReveal.close}
+          onTry={tryPriorityIntro}
+          onDismiss={() => {
+            // Escape, a click outside: the line's Not now (the next offer waits three days).
+            void inboxApi.revealNotNow('priority');
+            priorityReveal.close();
           }}
         />
       )}

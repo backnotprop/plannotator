@@ -92,6 +92,8 @@ interface Options {
   launched?: boolean;
   /** A fresh install: nothing in the store, so no Inbox ran here before. */
   fresh?: boolean;
+  /** The person once added a thread to Priority (config.json `inboxPriorityIntro.usedAt`), which settles the Priority dialog (after Snooze in the line). Default true. */
+  priorityUsed?: boolean;
 }
 
 type Json = Record<string, any>;
@@ -116,6 +118,7 @@ async function world(options: Options = {}) {
     favicon: "glass",
     // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+    ...(options.priorityUsed === false ? {} : { inboxPriorityIntro: { usedAt: new Date(Date.now() - 3 * DAY).toISOString() } }),
     ...options.config,
   };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
@@ -561,6 +564,54 @@ describe('"Set the rules" (Rules for your agents): last of the later group', () 
       const w = await world(options);
       expect(await w.next()).toBeNull();
       expect((await w.claim("agent_rules")).show).toBe(false);
+    });
+  }
+});
+
+describe("Priority: after Snooze, only while the person never added a thread to Priority", () => {
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false };
+  const threadIds = async (w: Awaited<ReturnType<typeof world>>) =>
+    ((await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string }[] }[] }).sections.flatMap((s) => s.threads.map((t) => t.thread_id));
+
+  test("three days' use and eight threads: next, shown once, nothing added", async () => {
+    const w = await world({ priorityUsed: false, threads: 8, config: decided });
+    expect(await w.next()).toBe("priority");
+    expect((await w.claim("priority", "pq-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.priority.shownAt).toMatch(/^\d{4}-/);
+    expect((await w.claim("priority", "pq-key-1")).show).toBe(true);
+    expect((await w.claim("priority", "pq-key-2")).show).toBe(false);
+    expect(w.saved().inboxPriorityIntro).toBeUndefined();
+    expect(await w.next()).toBeNull();
+  });
+
+  test("its Not now holds the next offer three days", async () => {
+    const w = await world({ priorityUsed: false, threads: 8, config: decided });
+    expect((await w.claim("priority", "pq-key-1")).show).toBe(true);
+    expect((await w.post("/api/inbox/reveal", { id: "priority", answer: "not_now" })).status).toBe(200);
+    expect(w.saved().inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+  });
+
+  test("adding a thread to Priority closes it for good, even after the thread is removed again", async () => {
+    const w = await world({ priorityUsed: false, threads: 8, config: decided });
+    expect(await w.next()).toBe("priority");
+    const [first] = await threadIds(w);
+    expect((await w.post(`/api/inbox/threads/${first}/priority`, { priority: true })).status).toBe(200);
+    expect(w.saved().inboxPriorityIntro.usedAt).toMatch(/^\d{4}-/);
+    expect(await w.next()).toBeNull();
+    expect((await w.post(`/api/inbox/threads/${first}/priority`, { priority: false })).status).toBe(200);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("priority")).show).toBe(false);
+  });
+
+  for (const [name, options] of [
+    ["seven threads", { priorityUsed: false, threads: 7, config: decided }],
+    ["day 2 of use", { priorityUsed: false, threads: 8, days: 2, config: decided }],
+    ["someone who used Priority before", { threads: 8, config: decided }],
+  ] as const) {
+    test(`never for ${name}`, async () => {
+      const w = await world(options);
+      expect(await w.next()).not.toBe("priority");
+      expect((await w.claim("priority")).show).toBe(false);
     });
   }
 });

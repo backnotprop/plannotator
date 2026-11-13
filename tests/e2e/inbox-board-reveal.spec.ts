@@ -94,6 +94,8 @@ async function world(): Promise<World> {
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxReveals: { lastShownAt: snoozeShown },
+      // Priority (after Snooze in the line): settled by a thread once added to Priority.
+      inboxPriorityIntro: { usedAt: snoozeShown },
     }),
   );
   const env = {

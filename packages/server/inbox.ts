@@ -247,6 +247,7 @@ import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxPriority } from "./inbox-priority";
+import { priorityIntroOpen, priorityIntroUsed } from "./inbox-priority-intro";
 import { createInboxThreadTags } from "./inbox-thread-tags";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
@@ -2753,6 +2754,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeIntroState = (owner: boolean, load: string | null = null) => ({
     due: owner && revealNow(owner, load) === "snooze",
   });
+  /** The Priority dialog (inbox-priority-intro.ts): open while the person never added a thread to Priority here. */
+  const priorityIntroIsOpen = () => priorityIntroOpen(loadConfig().inboxPriorityIntro, store.priorities().threads.length);
+  /** After any Priority change: an add standing is a use, kept once, so the dialog never shows. */
+  const markPriorityUsed = () => {
+    const next = priorityIntroUsed(loadConfig().inboxPriorityIntro, store.priorities().threads.length, new Date());
+    if (next) saveConfig({ inboxPriorityIntro: next });
+  };
   /** The person snoozed something: the dialog never shows. Once; a dev build marks too (only showing is release-only). */
   const markSnoozeUsed = () => {
     const saved = loadConfig().inboxSnoozeIntro;
@@ -3083,6 +3091,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     board: boardUndecided,
     steps: stepsUndecided,
     agent_rules: agentRulesUnset,
+    priority: priorityIntroIsOpen,
     // Bro mode (approval "bro-mode"): offered while config.json `inboxBro` is unset; its need (heavy use) is the queue's.
     bro: broUndecided,
     // The grill-me tip (shared/inbox/grill-me-tip.ts): nothing to decide, so open until shown; its need (the gap) is
@@ -4592,6 +4601,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     for (const listener of pinListeners) listener();
   });
   const stopPriorityEvents = store.onPriorityChange(() => {
+    markPriorityUsed();
     for (const listener of priorityListeners) listener();
   });
   const stopThreadTagEvents = store.onThreadTagsChange(() => {
