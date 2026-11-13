@@ -111,7 +111,7 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
           for (const row of answer.groups?.messages ?? []) if (row.type === "message") rows.push(row);
         }
         const shown = rows.slice(0, limit);
-        context.store.handover.read(shown.map((row) => row.message_id), null);
+        context.store.handover.read(shown.map((row) => row.id), null);
         const results = shown.map((row) => rowOf(row, projectIds === null));
         const head =
           results.length === 0

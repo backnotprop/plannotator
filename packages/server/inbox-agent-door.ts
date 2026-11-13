@@ -163,7 +163,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       if (rows.length < INBOX_SEARCH_LIMIT_MAX) break;
     }
     const shown = found.slice(0, limit);
-    store.handover.read(shown.map((row) => row.message_id), session);
+    store.handover.read(shown.map((row) => row.id), session);
     const results = shown.map((row) => rowOf(row, true));
     const scope = "your threads";
     const head =
