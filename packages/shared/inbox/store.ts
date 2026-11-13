@@ -6964,8 +6964,18 @@ export class InboxStore {
     return taken;
   }
 
+  recordAgentRead(ids: Iterable<string>, reader: string | null): void {
+    for (const id of ids) {
+      const message = this.messages.get(id);
+      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at || this.heldBy(message)) continue;
+      const at = this.stamp();
+      this.appendMessage({ ...message, read_by_agent: { session: reader, at } }, at);
+    }
+  }
+
   heldBy(message: InboxMessage): InboxHolder | null {
     if (message.delivery) return { by: "delivered", session: message.delivery.session, host: message.delivery.host };
+    if (message.read_by_agent) return { by: "read", session: message.read_by_agent.session, host: null };
     const tag = message.tags?.find((t) => t.delivery || t.read_at);
     if (tag) return { by: tag.delivery ? "delivered" : "read", session: tag.session, host: tag.host };
     const root = this.messages.get(message.thread_id);
