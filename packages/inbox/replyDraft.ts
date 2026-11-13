@@ -115,6 +115,7 @@ export interface ReplyDraftState {
    * place of "Saved …" until a later save lands, a Send carries the words or Discard drops them.
    */
   failed: boolean;
+  offer?: InboxReplyDraft | null;
 }
 
 /** Saves waiting or in flight anywhere on the page, and words left unsaved by a conflict (the restart guard reads them). */
@@ -125,6 +126,8 @@ let unsaved = 0;
  * closes or another opens, and these words must come back when it reopens.
  */
 const conflictWords = new Map<string, string>();
+const offers = new Map<string, InboxReplyDraft>();
+const offerWords = new Map<string, string>();
 /** Threads whose box holds more words than a draft takes: not saved (the restart guard asks). */
 const tooLongThreads = new Set<string>();
 /**
@@ -147,7 +150,7 @@ let landing = 0;
 const discards = new Map<string, number>();
 const discardsOf = (threadId: string) => discards.get(threadId) ?? 0;
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || landing > 0 || conflictWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || carriesFiles();
+  return unsaved > 0 || landing > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || carriesFiles();
 }
 
 /**
@@ -281,6 +284,7 @@ export interface ReplyDraftOptions {
    * all the same) or `differs` (its live words changed since: the conflict shows).
    */
   onWords?: (threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook;
+  ownedBox?: (threadId: string) => { text: string; files: ReplyDraftFiles } | null;
 }
 
 /** What the box did with another window's newer words (`onWords`). */
@@ -302,6 +306,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   onFilesRef.current = options.onFiles;
   const onWordsRef = useRef(options.onWords);
   onWordsRef.current = options.onWords;
+  const ownedBoxRef = useRef(options.ownedBox);
+  ownedBoxRef.current = options.ownedBox;
   const readDraft = (target: string) => readStoredDraft(storeRef.current, target);
   const chain = useRef<Promise<void>>(Promise.resolve());
   /** The save waiting for the pause in typing: the words, the box's files (for the long pastes' places) and the changes since the last. */
@@ -319,6 +325,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const generations = useRef(new Map<string, number>());
   /** Threads a Send has claimed: no save of theirs runs until it ends or fails. */
   const claimed = useRef(new Set<string>());
+  const offeredSends = useRef(new Set<string>());
   /** Threads whose Send is claiming them (its saves still answering): a refused save there is a conflict, never quiet. */
   const claiming = useRef(new Set<string>());
   /** The words refused saves left unsaved, per thread (module-level: they outlive the pane). */
@@ -431,7 +438,28 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     if (target === current.current) setState((s) => ({ ...s, failed: on }));
   };
   const show = (target: string, draft: InboxReplyDraft | null) => {
-    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target) });
+    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target), offer: offers.get(target) ?? null });
+  };
+  const ownedChange = (target: string, draft: InboxReplyDraft | null): 'offer' | 'edits' | null => {
+    const mine = ownedBoxRef.current?.(target) ?? null;
+    if (!mine || !draft || mine.text === draft.body) {
+      offers.delete(target);
+      return null;
+    }
+    if (pending.current?.threadId === target || carried.has(target) || replyContentKey(mine.text, mine.files) !== (synced.current.get(target) ?? '')) return 'edits';
+    adopt(target, draft);
+    offers.set(target, draft);
+    return 'offer';
+  };
+  const offerToConflict = (target: string): boolean => {
+    if (!offers.has(target)) return false;
+    offers.delete(target);
+    const words = offerWords.get(target);
+    offerWords.delete(target);
+    if (words !== undefined) setConflict(target, words);
+    unsavedChanged();
+    if (target === current.current) setState((s) => ({ ...s, offer: null, conflict: conflicts.current.get(target) ?? null }));
+    return true;
   };
   /**
    * The draft holds these words, every file these changes add and none they remove: only then did a save with no
@@ -528,7 +556,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
           return;
         }
         // Waiting on the person's choice after a conflict: the words must not land; the changes wait for Keep mine.
-        if (conflicts.current.has(target)) {
+        if (conflicts.current.has(target) || offers.has(target)) {
+          if (offers.has(target) && (text.trim() !== '' || save.ops.add.length > 0)) offerWords.set(target, text);
           handOn();
           return;
         }
@@ -631,6 +660,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
 
   /** Save what waits now (leaving the thread, the page going away). */
   const flush = useCallback(() => {
+    offerToConflict(current.current);
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     const next = pending.current;
@@ -647,14 +677,15 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         // An older Inbox answers 404 (caught below): no draft.
         const draft = await storeRef.current.read(threadId);
         if (!live) return;
-        adopt(threadId, draft);
-        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId) });
+        if (ownedChange(threadId, draft) === null) adopt(threadId, draft);
+        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), offer: offers.get(threadId) ?? null });
       } catch {
         if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId) });
       }
     });
     return () => {
       live = false;
+      offerToConflict(threadId);
       flush();
     };
   }, [threadId, flush]);
@@ -666,7 +697,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       if (!next) return;
       pending.current = null;
       if (timer.current) clearTimeout(timer.current);
-      if (claimed.current.has(next.threadId) || conflicts.current.has(next.threadId)) return;
+      if (claimed.current.has(next.threadId) || conflicts.current.has(next.threadId) || offers.has(next.threadId)) return;
       const ops = composeReplyDraftFileOps(carried.get(next.threadId) ?? NO_FILE_OPS, next.ops);
       // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
       void storeRef.current
@@ -719,6 +750,13 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         return;
       }
       if (tooLongThreads.has(target)) markTooLong(target, false);
+      if (offers.has(target)) {
+        carry(target, take(target, files, text));
+        if (text.trim() !== '' || files.length > 0) offerWords.set(target, text);
+        else offerWords.delete(target);
+        unsavedChanged();
+        return;
+      }
       if (conflicts.current.has(target)) {
         // The box's file changes made meanwhile (a tile removed or attached) wait with the others, so they hold
         // after the conflict clears, Cancel and Edit draft; Keep mine counts from here, Discard mine drops them.
@@ -761,6 +799,16 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     timer.current = null;
     pending.current = null;
     const target = current.current;
+    const offered = offers.get(target);
+    if (offered) {
+      offers.delete(target);
+      offerWords.delete(target);
+      takeCarried(target);
+      held.current.set(target, []);
+      unsavedChanged();
+      setState({ loadedFor: target, draft: offered, conflict: null, tooLong: false, failed: false });
+      return;
+    }
     bump(target);
     // A file still landing from an earlier Cancel or thread switch was thrown away with the rest.
     replyDraftDiscarded(target);
@@ -787,6 +835,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
    */
   const claim = useCallback(async (): Promise<string | null> => {
     const target = current.current;
+    if (offers.has(target)) offeredSends.current.add(target);
     // From here a save refused because another window changed the words is a conflict (never taken quietly): the
     // Send must not clear a draft holding words it does not carry.
     claiming.current.add(target);
@@ -808,12 +857,13 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     pending.current = null;
     claimed.current.add(target);
     bump(target);
-    if (conflicts.current.has(target)) return null;
+    if (conflicts.current.has(target) || offeredSends.current.has(target)) return null;
     return baseOf(target);
   }, [flush, write]);
 
   /** The Send failed: the thread's words may be saved again (the caller saves the box's words). */
   const release = useCallback(() => {
+    offeredSends.current.delete(current.current);
     claimed.current.delete(current.current);
   }, []);
 
@@ -835,7 +885,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     setState((s) => (s.tooLong || s.failed ? { ...s, tooLong: false, failed: false } : s));
     // After a conflict the Send carried this window's words and cleared nothing: the other
     // window's draft is still there, and the thread shows it.
-    if (conflicts.current.has(target)) {
+    if (conflicts.current.has(target) || offeredSends.current.delete(target)) {
       setConflict(target, null);
       setState((s) => ({ ...s, loadedFor: target, conflict: null }));
       return;
@@ -887,6 +937,10 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     if (conflicts.current.has(target)) {
       // The choice is already showing: it now names the newest draft.
       adopt(target, draft);
+      show(target, draft);
+      return { draft, replaceBox: false };
+    }
+    if (local !== null && draft !== null && ownedChange(target, draft) === 'offer') {
       show(target, draft);
       return { draft, replaceBox: false };
     }
@@ -981,7 +1035,18 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     quotes.current.set(current.current, value ? { ...value } : null);
   }, []);
 
-  return { ...state, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, heldOf, withMyChanges, settle, aim, quote };
+  const restoreOffer = useCallback((): { draft: InboxReplyDraft; typed: boolean } | null => {
+    const target = current.current;
+    const draft = offers.get(target);
+    const typed = offerWords.has(target);
+    offers.delete(target);
+    offerWords.delete(target);
+    unsavedChanged();
+    setState((s) => ({ ...s, offer: null }));
+    return draft ? { draft, typed } : null;
+  }, []);
+
+  return { ...state, restoreOffer, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, heldOf, withMyChanges, settle, aim, quote };
 }
 
 /** The thread's draft in the store (null: none), or undefined when it could not be read. */

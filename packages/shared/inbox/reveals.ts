@@ -7,7 +7,7 @@
  *
  * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, not shipped), the
  * same-day group (the tab icon, themes, List view "Grouping", list options "Rows", the sound, voice: no tenure, the
- * gap apart), then the later group, later only by tenure (Snooze, personal agents, the Board, the Checklist, Bro mode,
+ * gap apart), then the later group, later only by tenure (Snooze, personal agents, Priority, the Board, the Checklist, Bro mode,
  * "Set the rules"). The agent note is a setup dialog: never in the queue, but it keeps the gap
  * (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
@@ -47,7 +47,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "list_view" | "personal_agents";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "list_view" | "personal_agents" | "priority";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -141,14 +141,19 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // connecting one drops it. "Tags first" when both ship: a tags entry goes between Snooze and this one.
   // Either button settles it; Escape is its Not now.
   { id: "personal_agents", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
-  // 9. The Board. The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps
+  // 9. Priority (the owner, 2026-11-13: after tags and personal agents, "only if users haven't used priority yet"):
+  // open while the person never added a thread to Priority (packages/server/inbox-priority-intro.ts). After personal
+  // agents (a tags entry goes before those). 8 threads is the server's stand-in for "order matters"; the page
+  // also waits for 3 threads waiting on the person (priorityIntro.ts). Got it and Try it settle it; Escape is its Not now.
+  { id: "priority", kind: "offer", tenureMs: 3 * DAY_MS, minThreads: 8, enabled: true },
+  // 10. The Board. The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps
   // it; the dialog's "Turn it on" writes inboxBoard (unset -> true), "Not now" leaves it unset.
   { id: "board", kind: "offer", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },
-  // 10. The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and
+  // 11. The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and
   // the Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro`
   // opens, and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
-  // 11. Bro mode (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): only for heavy use
+  // 12. Bro mode (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): only for heavy use
   // (`revealHeavyUse`: 10 or more threads read in 7 days, on 2 or more days), never on day 0 or 1 (2 days' tenure).
   // After the Checklist in order since 2026-11-10 (it was after Snooze). Opt-in, as the Board: the claim only stamps
   // it, `BroIntro` opens, and only its "Turn it on" writes inboxBro (unset -> true).
