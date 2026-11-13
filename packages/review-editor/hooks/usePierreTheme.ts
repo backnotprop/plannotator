@@ -1,3 +1,4 @@
+import { COMPACT_HUNK_SEPARATOR_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 import { useState, useEffect } from 'react';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
 import { extendThemeSwitch, useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -246,7 +247,7 @@ export function usePierreTheme(options?: {
   const showFileHeader = options?.showFileHeader ?? false;
   const compactTouchLayout = options?.compactTouchLayout === true;
   const compactTouchCSS = compactTouchLayout ? COMPACT_TOUCH_GUTTER_UTILITY_CSS : '';
-  const separatorPx = compactTouchLayout ? 24 : 20;
+  const separatorPx = compactTouchLayout ? COMPACT_HUNK_SEPARATOR_HEIGHT : HUNK_SEPARATOR_HEIGHT;
   const lineBgIntensity = useConfigValue('diffLineBgIntensity');
 
   const [pierreTheme, setPierreTheme] = useState<PierreTheme>(() => {

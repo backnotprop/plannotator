@@ -182,8 +182,6 @@ import {
 } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
 import type { ReviewSidebarTab } from './components/ReviewSidebar';
-import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
-import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
@@ -224,6 +222,11 @@ import { JobLogsProvider } from './dock/JobLogsContext';
 import { reviewPanelComponents } from './dock/reviewPanelComponents';
 import { ReviewDockTabRenderer } from './dock/ReviewDockTabRenderer';
 import { ReviewDockRightActions } from './dock/ReviewDockRightActions';
+import { ReviewPanelToggle } from './components/ReviewPanelToggle';
+import { ReviewHeaderStatus } from './components/ReviewHeaderStatus';
+import { watchLoneTabHeader } from './dock/loneTabHeader';
+import { HeaderTotals } from './components/HeaderTotals';
+import { COMPACT_REVIEW_HEADER_HEIGHT, REVIEW_HEADER_HEIGHT } from './utils/diffChromeMetrics';
 import { usePRContext } from './hooks/usePRContext';
 import {
   REVIEW_PANEL_TYPES,
@@ -1885,20 +1888,7 @@ const ReviewApp: React.FC = () => {
       }
     });
 
-    const updateHeaders = () => {
-      const panels = event.api.panels;
-      const lone = event.api.groups.length === 1 && panels.length === 1 ? panels[0] : undefined;
-      const hide = !!lone && (lone.id === REVIEW_ALL_FILES_PANEL_ID || isReviewDiffPanelId(lone.id));
-      for (const group of event.api.groups) group.header.hidden = hide;
-      setAllChangesOpen(!!event.api.getPanel(REVIEW_ALL_FILES_PANEL_ID));
-    };
-    event.api.onDidAddPanel(updateHeaders);
-    event.api.onDidRemovePanel(updateHeaders);
-    event.api.onDidAddGroup(updateHeaders);
-    event.api.onDidRemoveGroup(updateHeaders);
-    event.api.onDidMovePanel(updateHeaders);
-    event.api.onDidLayoutChange(updateHeaders);
-    updateHeaders();
+    watchLoneTabHeader(event.api, setAllChangesOpen);
   }, []);
 
   // Open agent job detail as center dock panel
@@ -5896,14 +5886,23 @@ const ReviewApp: React.FC = () => {
     searching: hasSearchableFiles && !!searchQuery.trim(),
   };
 
-  const totalAdditions = files.reduce((sum, file) => sum + file.additions, 0);
-  const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
-  const headerTotals = !isCompactTouchLayout && (totalAdditions > 0 || totalDeletions > 0) ? (
-    <span className="flex-shrink-0 flex items-center gap-1.5 text-[12px] tabular-nums" data-header-totals="" title={`${files.length} files: ${totalAdditions} lines added, ${totalDeletions} removed`}>
-      {totalAdditions > 0 && <span className="text-success">+{totalAdditions}</span>}
-      {totalDeletions > 0 && <span className="text-destructive">−{totalDeletions}</span>}
-    </span>
-  ) : null;
+  const reviewStatusProps = {
+    platformActionError,
+    workspaceDiffError: reviewMode === 'workspace' ? diffError : null,
+    partialDiff: !!prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope,
+    staleDiff: diffFreshness.isStale && !isLoadingDiff,
+    baseBehind: !!baseBehindRemote && !prMetadata && !isLoadingDiff,
+    hasFiles: files.length > 0,
+    platformLabel,
+    canLoadFullDiff: !!prPatchUpgradeAvailable,
+    isLoadingFullDiff,
+    onLoadFullDiff: handleLoadFullDiff,
+    onRefreshStaleDiff: handleRefreshStaleDiff,
+    onDismissStaleDiff: diffFreshness.dismiss,
+    isFetchingBase,
+    onFetchBase: handleFetchBase,
+  };
+  const headerTotals = isCompactTouchLayout ? null : <HeaderTotals files={files} />;
 
   if (isLoading) {
     return (
@@ -5930,9 +5929,9 @@ const ReviewApp: React.FC = () => {
       >
         <RefHoverCards rootRef={refCardRootRef} onlyWithData />
         {/* Header */}
-        <header className={isCompactTouchLayout
-          ? 'min-h-[52px] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
-          : 'py-1 min-[480px]:py-0 min-[480px]:h-10 flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
+        <header style={{ '--review-header-h': `${isCompactTouchLayout ? COMPACT_REVIEW_HEADER_HEIGHT : REVIEW_HEADER_HEIGHT}px` } as React.CSSProperties} className={isCompactTouchLayout
+          ? 'min-h-[var(--review-header-h)] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
+          : 'py-1 min-[480px]:py-0 min-[480px]:h-[var(--review-header-h)] flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
         }>
           <div className={isCompactTouchLayout
             ? 'contents'
@@ -6072,9 +6071,6 @@ const ReviewApp: React.FC = () => {
             ? 'contents'
             : 'min-w-0 w-full min-[480px]:w-auto flex flex-wrap min-[480px]:flex-nowrap shrink-0 items-center justify-end gap-1 lg:gap-2'
           }>
-            {/* Split/Unified toggle + diff options moved to the dock tab strip
-                (rightHeaderActionsComponent → ReviewDockRightActions). An open
-                guide hides the dock; it draws them below, before the tool icons. */}
             {!isCompactTouchLayout && (origin ? (
               <>
                 {/* Destination dropdown (PR mode only) */}
@@ -6154,92 +6150,7 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
-                {!isCompactTouchLayout && (platformActionError ? (
-                  <div
-                    className="text-xs text-destructive px-2 py-1 bg-destructive/10 rounded border border-destructive/20 max-w-[200px] truncate"
-                    title={platformActionError}
-                  >
-                    {platformActionError}
-                  </div>
-                ) : reviewMode === 'workspace' && diffError ? (
-                  <div
-                    className="text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25 max-w-[240px] truncate"
-                    title={diffError}
-                  >
-                    {files.length > 0 ? 'Some workspace changes could not be loaded' : 'Workspace changes could not be loaded'}
-                  </div>
-                ) : prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope ? (
-                  <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
-                    <span className="hidden md:inline" title={`${platformLabel} omitted diff content for some files because this PR is too large`}>
-                      Partial diff
-                    </span>
-                    <span className="md:hidden">Partial</span>
-                    {!prPatchUpgradeAvailable ? (
-                      // Partiality without a local checkout: informational
-                      // only — never offer a button that cannot work. The
-                      // visible text stays runtime-neutral (--local is a CLI
-                      // remedy that not every runtime supports).
-                      <span
-                        className="hidden sm:inline text-amber-700/70 dark:text-amber-300/70"
-                        title="The platform omitted diff content for some files and this session has no local checkout to recompute from. CLI sessions can re-run the review with --local."
-                      >
-                        (no local checkout — full diff unavailable)
-                      </span>
-                    ) : isLoadingFullDiff ? (
-                      <span className="flex items-center gap-1.5 font-medium" title="Recomputing the full diff from the local checkout — waiting for the background clone if it's still running. You can keep reviewing.">
-                        <span className="inline-block w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" aria-hidden />
-                        Loading full diff…
-                      </span>
-                    ) : (
-                      <button
-                        onClick={handleLoadFullDiff}
-                        className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
-                        title="Recompute the full diff from the local checkout (may wait for the background clone to finish — you can keep reviewing meanwhile)"
-                      >
-                        Load full diff
-                      </button>
-                    )}
-                  </div>
-                ) : diffFreshness.isStale && !isLoadingDiff ? (
-                  <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
-                    <span className="hidden md:inline">Diff out of date</span>
-                    <span className="md:hidden">Stale</span>
-                    <button
-                      onClick={handleRefreshStaleDiff}
-                      className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
-                      title="Re-run the diff with the current settings"
-                    >
-                      Refresh
-                    </button>
-                    <button
-                      onClick={diffFreshness.dismiss}
-                      className="text-amber-700/60 dark:text-amber-300/60 hover:text-amber-900 dark:hover:text-amber-100 transition-colors leading-none"
-                      title="Dismiss"
-                      aria-label="Dismiss stale diff notice"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ) : baseBehindRemote && !prMetadata && !isLoadingDiff ? (
-                  <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
-                    <span className="hidden md:inline">Baseline is behind GitHub</span>
-                    <span className="md:hidden">Base behind</span>
-                    {isFetchingBase ? (
-                      <span className="flex items-center gap-1.5 font-medium">
-                        <span className="inline-block w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" aria-hidden />
-                        Fetching…
-                      </span>
-                    ) : (
-                      <button
-                        onClick={handleFetchBase}
-                        className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
-                        title="git fetch the default branch and recompute the diff"
-                      >
-                        Fetch
-                      </button>
-                    )}
-                  </div>
-                ) : null)}
+                {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
 
                 {/* Agent mode: ghost-X Close + the adaptive decision control
                     (Approve at zero, Send Feedback · n otherwise; the caret
@@ -6328,63 +6239,14 @@ const ReviewApp: React.FC = () => {
               </>
             )}
 
-            {/* Sidebar tab toggles */}
             {!isCompactTouchLayout && (
-              <button
-                data-pn-touch-target={isCompactTouchLayout || undefined}
-                data-pn-touch-target-icon={isCompactTouchLayout || undefined}
-                onClick={() => reviewSidebar.toggleTab('annotations')}
-                className={`relative p-1.5 rounded-md transition-all ${
-                  reviewSidebar.isOpen && reviewSidebar.activeTab === 'annotations'
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title="Annotations"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                </svg>
-                {totalAnnotationCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground px-0.5">
-                    {totalAnnotationCount > 99 ? '99+' : totalAnnotationCount}
-                  </span>
-                )}
-              </button>
+              <ReviewPanelToggle
+                isOpen={reviewSidebar.isOpen}
+                commentCount={totalAnnotationCount}
+                attention={(aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai')) || agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting')}
+                onToggle={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
+              />
             )}
-            {!isCompactTouchLayout && aiAvailable && (
-              <button
-                onClick={() => reviewSidebar.toggleTab('ai')}
-                className={`relative p-1.5 rounded-md transition-all ${
-                  reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai'
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title="AI Chat"
-              >
-                <SparklesIcon className="w-4 h-4" />
-                {aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai') && (
-                  <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-primary" />
-                )}
-              </button>
-            )}
-            {!isCompactTouchLayout && agentJobs.capabilities?.available && (
-              <button
-                onClick={() => reviewSidebar.toggleTab('agents')}
-                className={`relative p-1.5 rounded-md transition-all ${
-                  reviewSidebar.isOpen && reviewSidebar.activeTab === 'agents'
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title="Review Agents"
-              >
-                <ReviewAgentsIcon className="w-4 h-4" />
-                {agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting') && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'agents') && (
-                  <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                )}
-              </button>
-            )}
-
-            <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
 
             <ReviewHeaderMenu
               onOpenSettings={() => setOpenSettingsMenu(true)}
@@ -6427,44 +6289,7 @@ const ReviewApp: React.FC = () => {
           </div>
         )}
 
-        {isCompactTouchLayout && (
-          platformActionError ? (
-            <div className="shrink-0 border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {platformActionError}
-            </div>
-          ) : reviewMode === 'workspace' && diffError ? (
-            <div className="shrink-0 border-b border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
-              {files.length > 0 ? 'Some workspace changes could not be loaded.' : 'Workspace changes could not be loaded.'}
-            </div>
-          ) : prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope ? (
-            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-              <span className="min-w-0 truncate">The platform omitted part of this diff.</span>
-              {prPatchUpgradeAvailable && (
-                <button
-                  data-pn-touch-target
-                  type="button"
-                  onClick={handleLoadFullDiff}
-                  disabled={isLoadingFullDiff}
-                  className="shrink-0 font-medium underline underline-offset-2 disabled:opacity-60"
-                >
-                  {isLoadingFullDiff ? 'Loading…' : 'Load full diff'}
-                </button>
-              )}
-            </div>
-          ) : diffFreshness.isStale && !isLoadingDiff ? (
-            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-              <span>Diff out of date</span>
-              <button data-pn-touch-target type="button" onClick={handleRefreshStaleDiff} className="font-medium underline underline-offset-2">Refresh</button>
-            </div>
-          ) : baseBehindRemote && !prMetadata && !isLoadingDiff ? (
-            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-              <span>Baseline is behind the remote.</span>
-              <button data-pn-touch-target type="button" onClick={handleFetchBase} disabled={isFetchingBase} className="font-medium underline underline-offset-2 disabled:opacity-60">
-                {isFetchingBase ? 'Fetching…' : 'Fetch'}
-              </button>
-            </div>
-          ) : null
-        )}
+        {isCompactTouchLayout && <ReviewHeaderStatus variant="strip" {...reviewStatusProps} />}
 
         {gitContext?.diffFallback && (
           <div className="shrink-0 border-b border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
@@ -6814,6 +6639,7 @@ const ReviewApp: React.FC = () => {
               <ReviewSidebar
                 isOpen
                 onClose={reviewSidebar.close}
+                onSelectTab={reviewSidebar.open}
                 presentation={isCompactTouchLayout ? 'overlay' : 'panel'}
                 activeTab={reviewSidebar.activeTab}
                 annotations={allAnnotations}

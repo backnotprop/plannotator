@@ -139,7 +139,7 @@ describe('the list under the tabs', () => {
 });
 
 describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
-  test('Go to file, then the views as tabs, then the sentence', async () => {
+  test('the views as tabs with Go to file at the end of their row, then the sentence', async () => {
     const el = await mount(<ReviewPanelHeader model={model()} width={256} />);
     const tablist = el.querySelector('[role="tablist"][aria-label="Panel view"]')!;
     const tabs = [...tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
@@ -150,19 +150,19 @@ describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
     expect(tabs[0].id).toBe(reviewPanelBodyProps(model())['aria-labelledby']!);
     expect(sentence(el).textContent).toBe('All changessincemain');
     expect(el.querySelector('[data-go-to-file-button]')).not.toBeNull();
-    // Go to file comes first in reading and Tab order.
-    expect(el.querySelector('button')).toBe(el.querySelector('[data-go-to-file-button]'));
+    const row = el.querySelector('[data-panel-tabs-row]')!;
+    expect(row.contains(el.querySelector('[data-go-to-file-button]'))).toBe(true);
+    expect(tablist.contains(el.querySelector('[data-go-to-file-button]'))).toBe(false);
   });
 
   test('every control takes keyboard focus; the tabs are one Tab stop', async () => {
     const el = await mount(<ReviewPanelHeader model={model()} width={256} />);
     const buttons = [...el.querySelectorAll<HTMLButtonElement>('button')];
-    // Go to File, Tree, Git status, Commits, diff type, base.
     expect(buttons.length).toBe(6);
     const tabStops = buttons.filter((b) => b.tabIndex === 0);
     expect(tabStops.map((b) => b.getAttribute('data-panel-view') ?? b.getAttribute('aria-label'))).toEqual([
-      'Go to File…',
       'tree',
+      'Go to File…',
       'Changes shown: All changes',
       'Review base: main',
     ]);
@@ -278,11 +278,11 @@ describe.skipIf(!hasDom)('ReviewPanelHeader', () => {
     expect(baseTrigger(el).querySelector('[data-base-ref]')?.textContent).toBe('main');
   });
 
-  test('narrow: icon tabs that keep their names, and Go to File without its keys', async () => {
+  test('narrow: icon tabs that keep their names', async () => {
     const el = await mount(<ReviewPanelHeader model={model()} width={160} />);
     expect(viewTab(el, 'sections').textContent).toBe('');
     expect(viewTab(el, 'sections').getAttribute('aria-label')).toBe('Git status');
-    expect(el.querySelector('[data-go-to-file-button] kbd')).toBeNull();
+    expect(el.querySelector('[data-go-to-file-button]')).not.toBeNull();
   });
 
   test('Git status: the diff is fixed to all changes', async () => {
@@ -340,6 +340,24 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
     expect(el.querySelector('[data-tree-scope="all"]')?.getAttribute('aria-pressed')).toBe('false');
     // All files' count is in its name and tooltip, so the row keeps one line.
     expect(el.querySelector('[data-tree-scope="all"]')?.getAttribute('title')).toContain('(8 files)');
+  });
+
+  test('the Changes pill carries the review progress; staged files are named in its title and to assistive tech', async () => {
+    const el = await mount(<ScopeSwitch model={model()} width={256} progress={{ viewed: 1, total: 4, staged: 2, showViewed: true }} />);
+    const changes = el.querySelector('[data-tree-scope="changes"]')!;
+    expect(changes.querySelector('[data-panel-viewed-controls]')?.textContent).toBe('1/4');
+    expect(changes.getAttribute('title')).toContain('1 of 4 viewed · 2 staged');
+    expect(changes.querySelector('[data-panel-staged-count]')?.textContent).toBe('2 staged');
+    await act(async () => root?.render(<ScopeSwitch model={model()} width={256} progress={{ viewed: 4, total: 4, staged: 0, showViewed: true }} />));
+    expect(el.querySelector('[data-tree-scope="changes"]')?.getAttribute('title')).toContain('All 4 viewed');
+    expect(el.querySelector('[data-panel-staged-count]')).toBeNull();
+    await act(async () => root?.render(<ScopeSwitch model={model()} width={256} progress={{ viewed: 1, total: 4, staged: 0, showViewed: false }} />));
+    expect(el.querySelector('[data-tree-scope="changes"]')?.textContent).toBe('Changes4');
+  });
+
+  test('without a scope, the progress still shows in words', async () => {
+    const el = await mount(<ScopeSwitch model={model({ view: 'commits' })} width={256} progress={{ viewed: 1, total: 4, staged: 2, showViewed: true }} />);
+    expect(el.querySelector('[data-review-progress-caption]')?.textContent).toBe('1 of 4 viewed · 2 staged');
   });
 
   test('narrow: All files reads "All"', async () => {

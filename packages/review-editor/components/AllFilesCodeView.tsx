@@ -1,3 +1,4 @@
+import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
@@ -734,10 +735,6 @@ type HeaderMetricsTarget = { setMetrics(metrics?: Partial<VirtualFileMetrics>, f
 const isHeaderMetricsTarget = (value: unknown): value is HeaderMetricsTarget =>
   typeof value === 'object' && value !== null && typeof (value as HeaderMetricsTarget).setMetrics === 'function';
 
-const PANEL_HEADER_HEIGHT = 32;
-const COMPACT_PANEL_HEADER_HEIGHT = 44;
-export const HUNK_SEPARATOR_HEIGHT = 20;
-export const COMPACT_HUNK_SEPARATOR_HEIGHT = 24;
 // A file in a box as tall as its layout (`scrollsWithPage`). The box holds the padding, so the code draws what the
 // layout counts; under the last row only Pierre's own room for its sideways scrollbar (itemMetrics' paddingBottom).
 // The line under a header shows only while the header is stuck (browsers without scroll-state queries draw none).
@@ -3564,7 +3561,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [hostFileNotes, hostFileNotesByPath, files]);
   const itemMetrics = useMemo<Partial<VirtualFileMetrics>>(
     () => ({
-      diffHeaderHeight: (compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT) + hostHeaderExtra,
+      diffHeaderHeight: (compactTouchLayout ? COMPACT_FILE_HEADER_HEIGHT : FILE_HEADER_HEIGHT) + hostHeaderExtra,
       // The 32 is the line-info row's; a simple one's height is the library's own.
       ...(hunkSeparators === 'line-info' && { hunkSeparatorHeight: separatorHeight }),
       // Counted, every open file was laid out 8px taller per gap than it is. In a box as tall as the layout the rows

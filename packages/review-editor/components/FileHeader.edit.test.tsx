@@ -147,7 +147,7 @@ describe.if(hasDom)('FileHeader edit affordance (DOM)', () => {
     expect(compactPath?.textContent).toBe(longPath);
     expect(compactPath?.className).toContain('[direction:rtl]');
     expect(header.textContent).toContain('+1');
-    expect(header.textContent).toContain('-1');
+    expect(header.textContent).toContain('−1');
     expect(Array.from(header.querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))).toEqual(['Collapse diff']);
     expect(header.querySelector('[data-testid="edit-session-start"]')).toBeNull();
   });

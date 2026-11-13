@@ -151,15 +151,11 @@ const GEAR = (
   </svg>
 );
 
-export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps> = ({
-  repositoryOptions = true,
-  onChange,
-  triggerClassName = 'px-2 py-1 rounded-md text-muted-foreground hover:text-foreground transition-colors flex items-center data-popup-open:bg-background data-popup-open:text-foreground data-popup-open:shadow-sm',
-  triggerContent = GEAR,
-  compactTouchLayout = false,
-  triggerTitleSide = 'top',
-  actions,
-}) => {
+export const DiffDisplayOptionsBody: React.FC<{
+  repositoryOptions?: boolean;
+  onChange?: DiffDisplayChange;
+  actions?: React.ReactNode;
+}> = ({ repositoryOptions = true, onChange, actions }) => {
   const set: DiffDisplayChange = onChange ?? ((key, value) => configStore.set(key, value));
   const overflow = useConfigValue('diffOverflow');
   const indicators = useConfigValue('diffIndicators');
@@ -171,7 +167,57 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
   const hideWhitespace = useConfigValue('diffHideWhitespace');
   const stepTab = (n: number) => set('diffTabSize', Math.max(1, Math.min(8, n)));
+  return (
+    <>
+      {actions && (
+        <>
+          {actions}
+          <div className="border-t border-border/60 my-1.5 -mx-2.5" />
+        </>
+      )}
+      <Switch label="Wrap long lines" checked={overflow === 'wrap'} onChange={(v) => set('diffOverflow', v ? 'wrap' : 'scroll')} />
+      <Switch label="Line numbers" checked={showLineNumbers} onChange={(v) => set('diffShowLineNumbers', v)} />
+      <Switch label="Backgrounds" checked={showBackground} onChange={(v) => set('diffShowBackground', v)} />
+      {showBackground && (
+        <div className="flex justify-end pb-1">
+          <Segmented label="Background strength" options={INTENSITY} value={intensity} onChange={(v) => set('diffLineBgIntensity', v)} />
+        </div>
+      )}
+      <div className="border-t border-border/60 my-1.5 -mx-2.5" />
+      <Row label="Change marks">
+        <Segmented label="Change marks" options={INDICATORS} value={indicators} onChange={(v) => set('diffIndicators', v)} />
+      </Row>
+      <div className="pt-1">
+        <div className="text-xs text-muted-foreground mb-1">Changed words</div>
+        <Segmented stretch label="Changed words" options={LINE_DIFF} value={lineDiffType} onChange={(v) => set('diffLineDiffType', v)} />
+      </div>
+      <Row label="Tab size">
+        <div className="inline-flex items-center gap-px bg-muted/60 rounded-md p-px">
+          <button type="button" onClick={() => stepTab(tabSize - 1)} disabled={tabSize <= 1} aria-label="Decrease tab size" className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">−</button>
+          <span className="px-2 text-[12px] tabular-nums w-5 text-center" data-diff-tab-size={tabSize}>{tabSize}</span>
+          <button type="button" onClick={() => stepTab(tabSize + 1)} disabled={tabSize >= 8} aria-label="Increase tab size" className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">+</button>
+        </div>
+      </Row>
+      {repositoryOptions && (
+        <>
+          <div className="border-t border-border/60 my-1.5 -mx-2.5" />
+          <Switch label="Whole file" checked={expandUnchanged} onChange={(v) => set('diffExpandUnchanged', v)} />
+          <Switch label="Hide whitespace" checked={hideWhitespace} onChange={(v) => set('diffHideWhitespace', v)} />
+        </>
+      )}
+    </>
+  );
+};
 
+export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps> = ({
+  repositoryOptions = true,
+  onChange,
+  triggerClassName = 'px-2 py-1 rounded-md text-muted-foreground hover:text-foreground transition-colors flex items-center data-popup-open:bg-background data-popup-open:text-foreground data-popup-open:shadow-sm',
+  triggerContent = GEAR,
+  compactTouchLayout = false,
+  triggerTitleSide = 'top',
+  actions,
+}) => {
   return (
     <Popover.Root>
       {/* A native title by default (code review); ui's tooltip where the host opts in (the Inbox), like its neighbours. */}
@@ -200,42 +246,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
             className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
           >
             <div className="px-2.5 py-2">
-              {actions && (
-                <>
-                  {actions}
-                  <div className="border-t border-border/60 my-1.5 -mx-2.5" />
-                </>
-              )}
-              <Switch label="Wrap long lines" checked={overflow === 'wrap'} onChange={(v) => set('diffOverflow', v ? 'wrap' : 'scroll')} />
-              <Switch label="Line numbers" checked={showLineNumbers} onChange={(v) => set('diffShowLineNumbers', v)} />
-              <Switch label="Backgrounds" checked={showBackground} onChange={(v) => set('diffShowBackground', v)} />
-              {showBackground && (
-                <div className="flex justify-end pb-1">
-                  <Segmented label="Background strength" options={INTENSITY} value={intensity} onChange={(v) => set('diffLineBgIntensity', v)} />
-                </div>
-              )}
-              <div className="border-t border-border/60 my-1.5 -mx-2.5" />
-              <Row label="Change marks">
-                <Segmented label="Change marks" options={INDICATORS} value={indicators} onChange={(v) => set('diffIndicators', v)} />
-              </Row>
-              <div className="pt-1">
-                <div className="text-xs text-muted-foreground mb-1">Changed words</div>
-                <Segmented stretch label="Changed words" options={LINE_DIFF} value={lineDiffType} onChange={(v) => set('diffLineDiffType', v)} />
-              </div>
-              <Row label="Tab size">
-                <div className="inline-flex items-center gap-px bg-muted/60 rounded-md p-px">
-                  <button type="button" onClick={() => stepTab(tabSize - 1)} disabled={tabSize <= 1} aria-label="Decrease tab size" className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">−</button>
-                  <span className="px-2 text-[12px] tabular-nums w-5 text-center" data-diff-tab-size={tabSize}>{tabSize}</span>
-                  <button type="button" onClick={() => stepTab(tabSize + 1)} disabled={tabSize >= 8} aria-label="Increase tab size" className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">+</button>
-                </div>
-              </Row>
-              {repositoryOptions && (
-                <>
-                  <div className="border-t border-border/60 my-1.5 -mx-2.5" />
-                  <Switch label="Whole file" checked={expandUnchanged} onChange={(v) => set('diffExpandUnchanged', v)} />
-                  <Switch label="Hide whitespace" checked={hideWhitespace} onChange={(v) => set('diffHideWhitespace', v)} />
-                </>
-              )}
+              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} />
             </div>
           </Popover.Popup>
         </Popover.Positioner>
