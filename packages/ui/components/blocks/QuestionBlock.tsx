@@ -325,8 +325,9 @@ export interface QuestionAcceptBehavior {
   keepOther?: boolean;
   /** After a tap. `undo` puts back the answer from before it (picks, ticks,
    *  Other words, Skip; the note as it is now), and does nothing once the
-   *  answer has changed since the tap. */
-  onAccepted?: (undo: () => void) => void;
+   *  answer has changed since the tap. `accepted` names the question and the
+   *  answer the tap set, so a host can tell when it is no longer current. */
+  onAccepted?: (undo: () => void, accepted: { key: string; answer: QuestionAnswer }) => void;
 }
 
 /** A field a person types in: a textarea or a text input (not a choice's radio or checkbox). */
@@ -334,7 +335,7 @@ const isTypingField = (el: EventTarget | null): boolean =>
   el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && ['text', 'search', ''].includes(el.type));
 
 /** The parts of an answer Accept recommended sets (the note is not one). */
-const sameAnswerParts = (a: QuestionAnswer, b: QuestionAnswer): boolean =>
+export const sameAnswerParts = (a: QuestionAnswer, b: QuestionAnswer): boolean =>
   a.selected.length === b.selected.length && a.selected.every((l, i) => l === b.selected[i])
   && (a.other ?? '') === (b.other ?? '') && (a.text ?? '') === (b.text ?? '') && !!a.skipped === !!b.skipped;
 
@@ -678,7 +679,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       replacedOtherRef.current = null;
       setOtherBy(was.other ? 'field' : null);
       commit({ ...was, ...(now.note ? { note: now.note } : {}) });
-    });
+    }, { key: question.key, answer: next });
   };
   // Runs after the render that drew the accepted answer (and once more at
   // most, should the host not redraw it): the first checked choice, else the

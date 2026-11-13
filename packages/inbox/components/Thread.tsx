@@ -8,7 +8,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
-import type { QuestionAcceptBehavior } from '@plannotator/ui/components/blocks/QuestionBlock';
+import { sameAnswerParts, type QuestionAcceptBehavior } from '@plannotator/ui/components/blocks/QuestionBlock';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
@@ -485,12 +485,9 @@ export function MessageBody({
   replyFiles,
   contextNotes,
   onTryPrototype,
-  onAcceptedRecommended,
 }: {
   /** A question with a prototype (an option's, or one for all) was asked to open it (its key). Absent: no "Try prototype" tab. */
   onTryPrototype?: (key: string) => void;
-  /** Accept recommended was tapped on one of this message's questions: `undo` puts the answer back (QuestionBlock `acceptBehavior`). */
-  onAcceptedRecommended?: (undo: () => void) => void;
   /**
    * Context notes (Code review on; approval "inbox-context-notes"): an agent's `:::note path#L…` block shows as a
    * chip naming its file and lines, with its words; `onOpen` opens the review at them. Absent: the text as it is.
@@ -934,13 +931,44 @@ export function MessageBody({
   // on a busy thread grew without end).
   const footerRef = useRef(footerFor);
   footerRef.current = footerFor;
+  // The last Accept recommended's Undo, drawn at the end of that card's status line while the answer is still the
+  // one the tap set and the question still takes answers (not sent, closed or replaced).
+  const [acceptedUndo, setAcceptedUndo] = useState<{ key: string; answer: QuestionAnswer; undo: () => void } | null>(null);
+  const undoState = acceptedUndo ? message.questions?.find((q) => q.key === acceptedUndo.key)?.state : undefined;
+  const undoCurrent =
+    acceptedUndo !== null &&
+    !readOnly &&
+    (undoState === undefined || undoState === 'open' || undoState === 'picked') &&
+    !!answers.get(acceptedUndo.key) &&
+    sameAnswerParts(answers.get(acceptedUndo.key)!, acceptedUndo.answer);
+  useEffect(() => {
+    if (acceptedUndo && !undoCurrent) setAcceptedUndo(null);
+  }, [acceptedUndo, undoCurrent]);
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {
       const text = footerRef.current(question.question.key);
-      return text ? <span className="ib-qfoot-st">{text}</span> : null;
+      const undo = undoCurrent && acceptedUndo?.key === question.question.key ? acceptedUndo : null;
+      if (!text && !undo) return null;
+      return (
+        <span className="ib-qfoot-st">
+          {text}
+          {undo && (
+            <button
+              type="button"
+              className="ib-qfoot-undo"
+              onClick={() => {
+                setAcceptedUndo(null);
+                undo.undo();
+              }}
+            >
+              Undo
+            </button>
+          )}
+        </span>
+      );
     },
     // A new identity when the footers may have changed, so the cards redraw.
-    [footerFor],
+    [footerFor, acceptedUndo, undoCurrent],
   );
   // Replaced questions: the host's Quiet card in place of the answer card, and
   // the newer card's "Replaces …" line. Kept stable across renders.
@@ -1078,9 +1106,16 @@ export function MessageBody({
   // window does not offer it (adr/implementation/inbox-thread-state.md, Pick).
   // "Try prototype" (approval "inbox-question-tradeoffs"): a tab hanging from the right end of the options' tray, on a
   // question with a page to try (an attached HTML file, or an app the send checked).
-  const acceptedRef = useRef(onAcceptedRecommended);
-  acceptedRef.current = onAcceptedRecommended;
-  const acceptBehavior = useMemo<QuestionAcceptBehavior>(() => ({ asideWhileTyping: true, keepOther: true, onAccepted: (undo) => acceptedRef.current?.(undo) }), []);
+  const acceptBehavior = useMemo<QuestionAcceptBehavior>(
+    () => ({
+      asideWhileTyping: true,
+      keepOther: true,
+      onAccepted: (undo, accepted) => {
+        setAcceptedUndo({ ...accepted, undo });
+      },
+    }),
+    [],
+  );
   const tryRef = useRef(onTryPrototype);
   tryRef.current = onTryPrototype;
   const afterChoices = useCallback(
@@ -7229,14 +7264,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   onOpenInlineImage={(image) => openFromMessage(image)}
                   onOpenOptionSet={(key, image, choice) => openOptionSet(message.id, key, image, choice)}
                   onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
-                  // PROPOSED WORDS, waiting on the owner's OK: "Picked" and "Recommended · in your draft" are the card's own words; together on this toast they are new.
-                  onAcceptedRecommended={(undo) => {
-                    const onUndo = () => {
-                      onToastGone?.(onUndo);
-                      undo();
-                    };
-                    onToast?.({ icon: 'check', lead: 'Picked', detail: 'Recommended · in your draft', onUndo });
-                  }}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}

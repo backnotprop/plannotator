@@ -7,7 +7,8 @@
  *
  * What regresses if this fails: the button shows while a field of the card
  * is typed in, or stays away after; a tap drops Other… words on pick any; the
- * host's Undo does not put each kind of question back as it was; the pick-any
+ * host's Undo does not put each kind of question back as it was, or the host is
+ * not told which question and answer a tap set; the pick-any
  * rule of #1913 (offered until the ticks are the recommended ones) breaks; or
  * a host that does not opt in sees any of it.
  *
@@ -32,6 +33,7 @@ const TEXT = ':::question-text\nDescribe the manual test.\n\nRecommended: Two ph
 
 let latest: Annotation[] = [];
 let undos: (() => void)[] = [];
+let accepted: { key: string; answer: QuestionAnswer }[] = [];
 
 function Harness({ markdown, behavior }: { markdown: string; behavior?: QuestionAcceptBehavior }) {
   const blocks = parseMarkdownToBlocks(markdown);
@@ -61,7 +63,14 @@ function Harness({ markdown, behavior }: { markdown: string; behavior?: Question
   );
 }
 
-const ON: QuestionAcceptBehavior = { asideWhileTyping: true, keepOther: true, onAccepted: (undo) => undos.push(undo) };
+const ON: QuestionAcceptBehavior = {
+  asideWhileTyping: true,
+  keepOther: true,
+  onAccepted: (undo, what) => {
+    undos.push(undo);
+    accepted.push(what);
+  },
+};
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -81,6 +90,7 @@ afterEach(async () => {
   host = null;
   latest = [];
   undos = [];
+  accepted = [];
 });
 
 const NOTE = 'textarea[placeholder="Context for the agent…"]';
@@ -162,6 +172,9 @@ describe('QuestionBlock acceptBehavior', () => {
     // The ticks are the recommended ones: no button, as before.
     expect(accept()).toBeUndefined();
     expect(undos).toHaveLength(1);
+    // The host is told which question and what the tap set, to tell when its Undo is no longer current.
+    expect(accepted[0]!.key).toBe(card().dataset.questionKey!);
+    expect(accepted[0]!.answer).toMatchObject({ selected: ['Canary deploy', 'Rollback drill'], other: 'A smoke test on prod' });
     await act(async () => undos[0]!());
     expect(answer()).toMatchObject({ selected: ['Load test'], other: 'A smoke test on prod', note: 'only if staging is free' });
     expect(accept()).toBeDefined();
