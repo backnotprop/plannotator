@@ -15,9 +15,13 @@
 //   SET  packages/inbox/components/AgentsSettings.tsx (Settings → Agents words)
 //   SH   scripts/install.sh (what the installer prints)
 //   HELP apps/hook/server/inbox-help.ts (`plannotator inbox --help`)
+//   NA   docs/agent-guides/inbox-notifications-and-agents.md
+//   CA   apps/marketing/src/lib/inbox-cloud-agent.md (/inbox/cloud-agent.md, what a cloud agent follows)
+//   MU   apps/marketing/src/lib/inbox-muse.md (/inbox/muse.md, what Muse follows)
+//   CL   packages/core/inbox-cloud.ts (cloud agent kinds, wake rules and words)
 // When one of those changes, change the entry here; the pages follow.
 
-export type Tier = 'plugin' | 'hooks' | 'mcp';
+export type Tier = 'plugin' | 'hooks' | 'mcp' | 'cloud';
 
 /** yes: works. part: works with a condition the label names. no: doesn't. */
 export type Level = 'yes' | 'part' | 'no';
@@ -133,6 +137,14 @@ export const TIERS: TierInfo[] = [
     baseline: 'Inbox through MCP',
     note: 'Nothing wakes it: it reads your reply when it checks',
   },
+  {
+    id: 'cloud',
+    name: 'Cloud agents',
+    short: 'Paired in Settings → Cloud agents and reached through the relay',
+    has: ['tool'],
+    baseline: 'Inbox through the relay, paired in Settings',
+    note: 'Only a webhook wakes one. Without it the agent checks for your messages itself',
+  },
 ];
 
 export const cellOf = (agent: Agent, key: ColumnKey): Cell =>
@@ -147,6 +159,15 @@ const TEST = 'Send me a test question in the Plannotator Inbox, and read my answ
 const MCP_JSON = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
 
 const openInbox = (see: string): Step => ({ do: 'Open the Inbox. It connects the agents it finds on this computer.', code: 'plannotator inbox', see });
+/**
+ * The OpenClaw plugin's install line (apps/openclaw-plugin/README.md:20). A bare
+ * package name installs from ClawHub only; from npm it is
+ * `openclaw plugins install npm:@plannotator/openclaw` (OpenClaw's
+ * docs/cli/plugins/install.md, "npm only"; it asks to confirm unless `--force`).
+ */
+const OPENCLAW_INSTALL = 'openclaw plugins install @plannotator/openclaw';
+/** Plugins and cloud agents that first shipped in Plannotator 0.28.63. */
+const installNew: Step = { do: 'Install Plannotator 0.28.63 or newer. The same command updates an older one.', code: INSTALL };
 const onWindows = { title: 'On Windows', steps: [{ do: 'Install Plannotator from PowerShell. The other steps are the same.', code: INSTALL_WIN }] };
 
 const wakeCheck = (name: string, delivered = name) => ({
@@ -230,6 +251,32 @@ const filesOnly = (detail: string, src: string): Cell => ({ level: 'part', label
 const byHandMcp = (name: string) => ({
   do: `Add the Inbox to ${name} as a stdio MCP server named \`plannotator-inbox\` that runs this command. Plannotator has no step for ${name} yet: use its own MCP settings.`,
   code: 'plannotator inbox mcp',
+});
+
+// Cloud agents pair in Settings → Cloud agents and reach the Inbox through
+// the relay with `plannotator inbox call`, never MCP.
+const installCloud: Step = { do: 'Install Plannotator 0.28.63 or newer on your computer. The same command updates an older one.', code: INSTALL };
+const pairStep = (kind: string): Step => ({
+  do: `Open the Inbox. In Settings → Cloud agents press Pair a cloud agent, pick ${kind} and give it a name.`,
+  code: 'plannotator inbox',
+  see: 'One message to copy, under the name you gave it. It is shown only this once.',
+});
+const cloudTool = (name: string): Cell => ({
+  level: 'yes',
+  label: 'Through the relay',
+  detail: `${name} runs \`plannotator inbox call\` on its own computer to read and answer the threads you give it. Each call goes through the relay, sealed end to end.`,
+  src: 'CA:3,21,35,74-82; MU:3,40,104-116',
+});
+const cloudNo = (what: string): Cell => ({ level: 'no', label: 'No', detail: `A cloud agent has no ${what}: it can do what \`plannotator inbox call --help\` lists.`, src: 'CA:96; MU:134; NA:311' });
+const noCloudSettings: Trouble = {
+  symptom: 'Settings has no Cloud agents',
+  fix: 'It appears once this computer has reached the relay. Check that the computer is online and open Settings again.',
+  src: 'packages/server/inbox-cloud-gate.ts:20-33; NA:298,300',
+};
+const cloudConnectFail = (name: string): Trouble => ({
+  symptom: `${name} says it couldn’t connect`,
+  fix: 'It names a code. `invalid_pairing`: the pairing was cut off, so press New pairing and send the new message whole. `pairing_removed` or `pairing_without_relay`: press New pairing and send the new message. `relay_unreachable`: the network it runs on blocks the relay’s host. `computer_asleep`: your computer is asleep or offline, and the setup is fine.',
+  src: 'CA:41-50; MU:43-51; packages/inbox/cloud/CloudAgentCard.tsx:73; NA:300 (New pairing mints a new one)',
 });
 
 export const AGENTS: Agent[] = [
@@ -662,20 +709,18 @@ export const AGENTS: Agent[] = [
     slug: 'openclaw',
     name: 'OpenClaw',
     tier: 'plugin',
-    // @plannotator/openclaw is not published yet, so the install step can't work.
-    listed: false,
     lede: 'The plugin gives your own OpenClaw chats the Inbox tool. Your reply comes back into the same chat as a new message.',
     diff: 'Inbox only · your own chats only',
     inbox: {
       tool: offAtFirst(
         'The plugin gives OpenClaw a `plannotator_inbox` tool in your own chats. It is off until you turn it on, because OpenClaw sends every tool with each request.',
-        'apps/openclaw-plugin/README.md:17-26',
+        'apps/openclaw-plugin/README.md:31',
       ),
       reply: {
         level: 'yes',
         label: 'Wakes it',
         detail: 'Your reply goes into the same chat as a new message, after the turn that is running. OpenClaw 2026.11.5-beta.1 or newer.',
-        src: 'apps/openclaw-plugin/README.md:11,30; docs/agent-guides/inbox-notifications-and-agents.md:255,259; WAKE',
+        src: 'apps/openclaw-plugin/README.md:23,42; NA:256,260; WAKE',
       },
       start: noStart,
       permissions: noPermissions,
@@ -687,10 +732,10 @@ export const AGENTS: Agent[] = [
       ask: noAsk,
     },
     setup: [
-      { do: 'Install Plannotator.', code: INSTALL },
+      installNew,
       {
         do: 'Add the plugin. It needs OpenClaw 2026.11.5-beta.1 or newer. Until 2026.11.5 comes out that means OpenClaw’s beta (tested on 2026.11.5-beta.2). The running Gateway loads it without a restart.',
-        code: 'openclaw plugins install @plannotator/openclaw',
+        code: OPENCLAW_INSTALL,
       },
       openInbox('The Inbox opens in your browser. Settings → Agents lists OpenClaw.'),
       { do: '`plannotator inbox` turned the tool on when it found the plugin. Send a new message in one of your own OpenClaw chats.', see: 'The agent has a `plannotator_inbox` tool.' },
@@ -706,12 +751,12 @@ export const AGENTS: Agent[] = [
       {
         symptom: 'OpenClaw has no `plannotator_inbox` tool',
         fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. It applies from the next message in each chat.',
-        src: 'apps/openclaw-plugin/README.md:19; docs/agent-guides/inbox-notifications-and-agents.md:256,261',
+        src: 'apps/openclaw-plugin/README.md:31; NA:257,262',
       },
       {
         symptom: 'OpenClaw has no `plannotator_inbox` tool in a group or channel',
         fix: 'Only your own chats get it: OpenClaw on this computer and your own direct messages. Never a group or a channel, even when you write there.',
-        src: 'apps/openclaw-plugin/README.md:23-26; docs/agent-guides/inbox-notifications-and-agents.md:257',
+        src: 'apps/openclaw-plugin/README.md:37-38; NA:258',
       },
       {
         symptom: 'OpenClaw refuses to install the plugin',
@@ -722,14 +767,14 @@ export const AGENTS: Agent[] = [
         symptom: 'The plugin does nothing after you installed it again',
         fix: 'After `openclaw plugins uninstall` OpenClaw keeps the plugin turned off. Turn it back on.',
         code: 'openclaw plugins enable plannotator',
-        src: 'apps/openclaw-plugin/README.md:31',
+        src: 'apps/openclaw-plugin/README.md:43',
       },
-      { symptom: 'No Send now', fix: 'A plugin can’t steer a running OpenClaw turn, so your reply waits for the turn to end.', src: 'docs/agent-guides/inbox-notifications-and-agents.md:259' },
+      { symptom: 'No Send now', fix: 'A plugin can’t steer a running OpenClaw turn, so your reply waits for the turn to end.', src: 'NA:260' },
       inboxLog,
     ],
     limits: [
-      { text: 'After `/new` your reply goes into the chat’s new conversation.', src: 'apps/openclaw-plugin/README.md:32' },
-      { text: 'OpenClaw must run on the same computer as the Inbox. An OpenClaw on a VPS can’t reach it yet.', src: 'apps/openclaw-plugin/README.md:11,33' },
+      { text: 'After `/new` your reply goes into the chat’s new conversation.', src: 'apps/openclaw-plugin/README.md:44' },
+      { text: 'OpenClaw must run on the same computer as the Inbox. An OpenClaw on a VPS can’t reach it yet.', src: 'apps/openclaw-plugin/README.md:23,45' },
       { text: 'Not verified on Windows.', src: 'apps/openclaw-plugin/inbox.test.ts (a fake OpenClaw host; nothing runs a real OpenClaw on Windows)' },
     ],
     examples: ['Ask OpenClaw to send you a question. Answer it in the Inbox and OpenClaw goes on with your answer in the same chat.'],
@@ -743,13 +788,13 @@ export const AGENTS: Agent[] = [
     inbox: {
       tool: offAtFirst(
         'The plugin gives Hermes a `plannotator_inbox` tool in your own sessions. It is off until you turn it on, because Hermes sends every tool with each request.',
-        'apps/hermes-plugin/README.md:18; IB:251',
+        'apps/hermes-plugin/README.md:20; IB:252',
       ),
       reply: {
         level: 'yes',
         label: 'Wakes it',
         detail: 'Your reply starts a turn in the Hermes session that asked once it is idle, through Hermes’s own plugin system. It needs one Hermes setting on, which `plannotator inbox` turns on for you.',
-        src: 'IB:251; docs/agent-guides/inbox-notifications-and-agents.md:268-269; apps/hermes-plugin/hermes.py:64-75; WAKE',
+        src: 'IB:252; NA:269-270; apps/hermes-plugin/hermes.py:64-75; WAKE',
       },
       start: noStart,
       permissions: noPermissions,
@@ -761,7 +806,7 @@ export const AGENTS: Agent[] = [
       ask: noAsk,
     },
     setup: [
-      { do: 'Install Plannotator.', code: INSTALL },
+      installNew,
       { do: 'Add the plugin.', code: 'hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable' },
       openInbox(
         'The terminal says `Connected Hermes Agent … to the Inbox` and that Plannotator turned on Hermes Agent’s `plugins.entries.plannotator.allow_gateway_injection` so your replies can start a turn in the session that asked.',
@@ -783,25 +828,25 @@ export const AGENTS: Agent[] = [
       {
         symptom: 'Hermes has no `plannotator_inbox` tool',
         fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then start a new Hermes session. A running one keeps the tools it started with.',
-        src: 'IB:76,251; docs/agent-guides/inbox-notifications-and-agents.md:265',
+        src: 'IB:76,252; apps/hermes-plugin/README.md:20; NA:266',
       },
       {
         symptom: 'Your reply never shows up on its own',
         fix: 'Hermes hasn’t let the plugin start a turn. Run this. Until then your reply is saved and Hermes sees it when it next reads the thread.',
         code: 'hermes config set plugins.entries.plannotator.allow_gateway_injection true',
-        src: 'apps/hermes-plugin/__init__.py:15,156; apps/hermes-plugin/hermes.py:64-69; docs/agent-guides/inbox-notifications-and-agents.md:269',
+        src: 'apps/hermes-plugin/__init__.py:15,156; apps/hermes-plugin/hermes.py:64-69; NA:270',
       },
       {
         symptom: 'The classic command-line window doesn’t show your reply',
         fix: 'In Hermes’s classic command-line window (`hermes`) your reply still starts a turn and is saved in the session, but that window doesn’t show it. Hermes’s TUI (`hermes --tui`) shows your reply and the answer as they happen.',
-        src: 'the integration builder’s test on Hermes Agent 0.23.1; not in the repo',
+        src: 'apps/hermes-plugin/README.md:26',
       },
       {
         symptom: 'The tool refuses in a chat',
         fix: 'Only your own sessions get it: the terminal and the TUI and the Desktop app and your own direct messages. Your direct messages count when you are on that platform’s DM admin list (`allow_admin_from`) or when its allowlist names only you.',
-        src: 'apps/hermes-plugin/README.md:22; IB:251',
+        src: 'apps/hermes-plugin/README.md:24; IB:252',
       },
-      { symptom: 'No Send now', fix: 'Hermes takes a reply only when the session is idle, so there is no Send now.', src: 'docs/agent-guides/inbox-notifications-and-agents.md:268' },
+      { symptom: 'No Send now', fix: 'Hermes takes a reply only when the session is idle, so there is no Send now.', src: 'apps/hermes-plugin/README.md:25; NA:269' },
       {
         symptom: 'You want replies to stop starting turns',
         fix: 'Turn the setting off. Hermes then sees your replies when it reads the thread.',
@@ -813,16 +858,16 @@ export const AGENTS: Agent[] = [
     limits: [
       {
         text: 'Your reply starts a turn only while one Hermes setting is on. `plannotator inbox` turns it on for you. With it off your reply is saved and Hermes sees it only when it next reads the thread.',
-        src: 'docs/agent-guides/inbox-notifications-and-agents.md:269; apps/hermes-plugin/__init__.py:15',
+        src: 'NA:270; apps/hermes-plugin/README.md:14; apps/hermes-plugin/__init__.py:15',
       },
       {
         text: 'In Hermes’s classic command-line window (`hermes`) your reply still starts a turn and is saved in the session, but that window doesn’t show it. Hermes’s TUI (`hermes --tui`) shows your reply and the answer as they happen.',
-        src: 'the integration builder’s test on Hermes Agent 0.23.1; not in the repo',
+        src: 'apps/hermes-plugin/README.md:26',
       },
       { text: 'Hermes and Plannotator must run on the same computer.', src: 'apps/hermes-plugin/README.md:7; PR #3217 (no remote or VPS mode yet)' },
       {
         text: 'Tested on Hermes Agent 0.23.1 on Linux, with a stand-in model. Not yet tested on macOS, in the Desktop app, or with real chat accounts.',
-        src: 'the integration builder’s test; the repo’s tests use a stub of Hermes (inbox-notifications-and-agents.md:271)',
+        src: 'apps/hermes-plugin/README.md:27; the repo’s tests use a stub of Hermes (NA:272)',
       },
       { text: 'Not verified on Windows.', src: 'tests/hermes-plugin.test.ts (a stub of Hermes)' },
     ],
@@ -1406,6 +1451,143 @@ export const AGENTS: Agent[] = [
     ],
     limits: [],
     examples: ['Ask your agent to send you a guided review of its change. Comment on it in the Inbox.'],
+  },
+  {
+    slug: 'grok-bot',
+    name: 'Grok Bot',
+    tier: 'cloud',
+    lede: 'Grok Bot pairs with your Inbox from Settings and answers in its threads from the cloud. Your reply starts a run of its routine through the routine’s webhook.',
+    diff: 'Reply wakes it through its webhook · without one it checks on a schedule',
+    inbox: {
+      tool: cloudTool('Grok Bot'),
+      reply: {
+        level: 'part',
+        label: 'With a webhook',
+        detail: 'Once you add its routine’s webhook in Settings, your message starts a run of that routine, at most once a minute per thread. Without a webhook it checks for your messages on a schedule.',
+        src: 'CL:17,178; NA:300,305-306; CA:58-67; packages/server/inbox-cloud-agents.ts:46-48',
+      },
+      start: noStart,
+      permissions: noPermissions,
+    },
+    plannotator: {
+      plan: cloudNo('plan review'),
+      review: cloudNo('code review'),
+      annotate: cloudNo('annotate'),
+      ask: noAsk,
+    },
+    setup: [
+      installCloud,
+      pairStep('Grok Bot'),
+      {
+        do: 'Copy the message and send it to Grok Bot.',
+        see: 'Grok Bot installs `plannotator`, keeps the pairing and tells you it is connected. Settings shows `Connected · last seen` and when.',
+      },
+      {
+        do: 'Grok Bot adds a webhook to its routine and asks you for it. Open the routine in the Grok Bot desktop app, Webhook section. In Settings → Cloud agents press Add wake address and paste POST to and the key.',
+        see: 'Send a test answers `A run started. See Grok Bot\'s chat.`',
+      },
+      {
+        do: 'In Grok Bot open Settings → General → Auto-review and under Custom Rules add an Allow automatically rule for running `plannotator inbox call` in this routine. Without it a woken run stops and waits for your approval.',
+      },
+    ],
+    other: [
+      {
+        title: 'Without a webhook',
+        steps: [{ do: 'Leave the wake address empty. Grok Bot sets up a schedule that starts it, for example every 5 minutes, and answers when you wrote. Your message waits until its next run.' }],
+      },
+    ],
+    check: {
+      do: 'Write to it from New message in the Inbox. To lists it by the name you gave it.',
+      see: 'Under your message the thread reads `Woke … · run started · see Grok Bot\'s chat`, and Grok Bot answers in the same thread.',
+    },
+    trouble: [
+      noCloudSettings,
+      cloudConnectFail('Grok Bot'),
+      { symptom: 'A woken run stops and waits for approval', fix: 'Add the Auto-review rule from step 5. Some versions show it under Settings → General → Bot → Auto-review.', src: 'CA:62' },
+      {
+        symptom: 'Your message waits until Grok Bot’s next run',
+        fix: 'It has no wake address, so it sees your message when its schedule next starts it. Add the routine’s webhook in Settings → Cloud agents.',
+        src: 'packages/server/inbox-cloud-agents.ts:46-48; NA:300,304; CA:64-67',
+      },
+      {
+        symptom: 'The thread says `… refused its key. Nothing was started.`',
+        fix: 'The routine’s key changed. Paste the new key where Settings asks for it. Your waiting replies go when you save it.',
+        src: 'CL:184,213-214; NA:306',
+      },
+      { symptom: 'The thread says `… is at its hourly limit`', fix: 'The routine refused more runs for now. The Inbox wakes it again at the time the line shows.', src: 'CL:183,211-212; NA:306' },
+      { symptom: 'The thread says `… did not answer in time`', fix: 'The webhook gave no answer in 15 seconds. A run may have started, so the Inbox doesn’t send it again.', src: 'CL:19,207-208; NA:306' },
+      inboxLog,
+    ],
+    limits: [
+      { text: 'A thread wakes Grok Bot at most once a minute. Replies inside that minute go together, oldest first.', src: 'CL:17; NA:306' },
+      { text: 'Files you attach in the Inbox don’t reach Grok Bot. A wake says how many there are.', src: 'CL:126; NA:305,311' },
+      { text: 'Grok Bot reads only the threads you give it.', src: 'CA:3' },
+      { text: 'Your computer must be awake for Grok Bot to read. What it sends while the computer sleeps is posted when it is back, within 30 days.', src: 'CA:49,94' },
+    ],
+    examples: [
+      'Write to Grok Bot from New message in the Inbox. Its routine wakes and answers in the thread.',
+      'Ask Grok Bot to send you a question with options and pick one in the Inbox.',
+    ],
+  },
+  {
+    slug: 'muse',
+    name: 'Muse by Meta',
+    tier: 'cloud',
+    lede: 'Muse pairs with your Inbox from Settings and answers in its threads from its own cloud computer. Nothing wakes it: it checks for your messages itself.',
+    diff: 'Checks for your messages itself · nothing wakes it',
+    inbox: {
+      tool: cloudTool('Muse'),
+      reply: {
+        level: 'no',
+        label: 'Checks itself',
+        detail: 'Meta documents no webhook for Muse, so Plannotator never wakes it. A hook in Muse’s runtime checks every 10 seconds and starts a turn when you wrote. Without the hook a scheduled task checks every 5 minutes.',
+        src: 'CL:44-46; NA:304; MU:67-91',
+      },
+      start: noStart,
+      permissions: noPermissions,
+    },
+    plannotator: {
+      plan: cloudNo('plan review'),
+      review: cloudNo('code review'),
+      annotate: cloudNo('annotate'),
+      ask: noAsk,
+    },
+    setup: [
+      installCloud,
+      pairStep('Muse by Meta'),
+      {
+        do: 'Copy the message and send it to Muse in a chat.',
+        see: 'Muse installs `plannotator` on its computer, sets up its check and tells you it is connected, for example `Connected to your Plannotator Inbox as Muse.` Settings shows `Connected · last seen` and when.',
+      },
+    ],
+    other: [],
+    check: {
+      do: 'Write to it from New message in the Inbox. To lists it by the name you gave it.',
+      see: 'The thread reads `Saved for … It sees it when it next reads this thread.` and then `Delivered to …` once Muse reads it. Muse answers in the thread within about a minute, or 5 minutes without its hook.',
+    },
+    trouble: [
+      noCloudSettings,
+      cloudConnectFail('Muse'),
+      { symptom: 'Muse answers only every 5 minutes', fix: 'It couldn’t set up its hook, so a scheduled task checks every 5 minutes instead. Each check is one of its runs.', src: 'MU:69,87-91,138' },
+      {
+        symptom: 'Settings has no Add wake address for Muse',
+        fix: 'Meta documents no webhook for Muse, so there is nothing to add. Its Wake address reads `Not needed: it checks for your messages itself.`',
+        src: 'packages/inbox/cloud/CloudWake.tsx:25; CL:44-46; NA:304',
+      },
+      { symptom: 'Muse says it was unpaired', fix: 'You removed it or made a new pairing. Pair it again in Settings → Cloud agents and send it the new message.', src: 'MU:132' },
+      inboxLog,
+    ],
+    limits: [
+      { text: 'The 10-second check uses hooks in Muse’s runtime, which Meta doesn’t document and can change or remove at any time.', src: 'MU:69' },
+      { text: 'Without the hook every check is one of Muse’s runs, about 288 a day.', src: 'MU:91' },
+      { text: 'Files you attach in the Inbox don’t reach Muse.', src: 'NA:311' },
+      { text: 'Muse reads only the threads you give it. It can’t answer your own questions or approve anything for you.', src: 'MU:133' },
+      { text: 'Your computer must be awake for Muse to read. What Muse sends while it sleeps is posted when the computer is back.', src: 'MU:51,130' },
+    ],
+    examples: [
+      'Write to Muse from New message in the Inbox. It answers in the thread with its own tools.',
+      'Ask Muse to send you a question with options and pick one in the Inbox.',
+    ],
   },
 ];
 

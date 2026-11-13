@@ -182,6 +182,22 @@ describe('Plannotator Inbox launch switch', () => {
     }
   });
 
+  // The site draws Hermes Agent and Muse with the Inbox's own marks
+  // (AgentMark.astro); a mark changed in the app must change here too.
+  test('the Hermes Agent and Muse marks are the Inbox app\'s', async () => {
+    const assets = join(marketingRoot, 'public/assets');
+    const hermes = await import('../../packages/ui/components/icons/hermesAgentMask');
+    for (const [file, uri] of [['icon-hermes-light.png', hermes.HERMES_AGENT_MASK_LIGHT], ['icon-hermes-dark.png', hermes.HERMES_AGENT_MASK_DARK]]) {
+      expect((await readFile(join(assets, file))).toString('base64'), file).toBe(uri.split(',')[1]);
+    }
+    const muse = await import('../../packages/ui/components/icons/museMark');
+    const svg = await readFile(join(assets, 'icon-muse.svg'), 'utf8');
+    expect(svg).toContain(`d="${muse.MUSE_MARK_PATH}"`);
+    for (const stop of muse.MUSE_MARK_STOPS) expect(svg).toContain(`<stop offset="${stop.offset}" stop-color="${stop.color}"/>`);
+    const g = muse.MUSE_MARK_GRADIENT;
+    expect(svg).toContain(`x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}"`);
+  });
+
   // Each tier's line on the overview says what every agent in it has. The
   // keys behind it must be exactly the columns where none of the tier's
   // agents answers no, so the words can't claim what one of them lacks.

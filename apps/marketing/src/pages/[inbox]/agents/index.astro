@@ -153,9 +153,16 @@ const description = 'Setup and troubleshooting for every agent the Plannotator I
   }
 
   @media (min-width: 1024px) {
-    /* Subgrid rows: the three heads share one height, so every list starts on one line. */
-    .ag-tiers { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: auto auto; gap: 0 2.5rem; }
-    .ag-tier { display: grid; grid-row: span 2; grid-template-rows: subgrid; }
+    /* Subgrid rows: the first three heads share one height, so every list
+       starts on one line. Cloud agents sits under MCP only in the third
+       column; its flexible row takes what the long first lists leave. */
+    .ag-tiers { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr; gap: 0 2.5rem; }
+    .ag-tier { display: grid; grid-template-rows: subgrid; }
+    .ag-tier-plugin { grid-column: 1; grid-row: 1 / span 3; }
+    .ag-tier-hooks { grid-column: 2; grid-row: 1 / span 3; }
+    .ag-tier-plugin .ag-tier-list, .ag-tier-hooks .ag-tier-list { grid-row: span 2; }
+    .ag-tier-mcp { grid-column: 3; grid-row: 1 / span 2; }
+    .ag-tier-cloud { display: block; grid-column: 3; grid-row: 3; align-self: start; margin-top: 3rem; }
   }
 
   .ag-tier-head {
