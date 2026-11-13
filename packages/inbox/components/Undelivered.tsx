@@ -90,15 +90,17 @@ export function UndeliveredBand({
         <Icon name="clock" size={14} />
         <UndeliveredText wait={wait} name={name} />
       </span>
-      {onTakeBack && <TakeBackButton busy={takingBack} onPress={onTakeBack} />}
-      {onSendNow && (
-        <Tip content="Put it into the running turn now: the agent reads it at its next step, without waiting for the turn to end.">
-          <button type="button" className="ib-sendnow ib-sendnow-go" data-send-now="" disabled={sending} onClick={onSendNow}>
-            <Icon name="send" size={14} />
-            Send now
-          </button>
-        </Tip>
-      )}
+      <span className="ib-dl-acts">
+        {onTakeBack && <TakeBackButton busy={takingBack} onPress={onTakeBack} />}
+        {onSendNow && (
+          <Tip content="Put it into the running turn now: the agent reads it at its next step, without waiting for the turn to end.">
+            <button type="button" className="ib-sendnow ib-sendnow-go" data-send-now="" disabled={sending} onClick={onSendNow}>
+              <Icon name="send" size={14} />
+              Send now
+            </button>
+          </Tip>
+        )}
+      </span>
       {stuck && <StuckReason note={restart} name={restartName} />}
     </div>
   );
