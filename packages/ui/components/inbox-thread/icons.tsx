@@ -5,7 +5,7 @@
  */
 
 import type React from 'react';
-import { ClaudeIcon, CodexIcon, CursorIcon, GrokBotIcon, MuseIcon, OpenCodeIcon, PiIcon } from '../icons/AgentIcons';
+import { ClaudeIcon, CodexIcon, CursorIcon, GrokBotIcon, HermesAgentIcon, MuseIcon, OpenCodeIcon, PiIcon } from '../icons/AgentIcons';
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 
 const PATHS = {
@@ -182,6 +182,7 @@ const PATHS = {
   // The Board (Heroicons outline view-columns), New card (plus), a card the person made (user), Icebox (a snowflake, as the mock: Lucide snowflake).
   board: 'M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z',
   plus: 'M12 4.5v15m7.5-7.5h-15',
+  cloud: 'M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z',
   user: 'M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z',
   snowflake: 'm10 20-1.25-2.5L6 18M10 4 8.75 6.5 6 6m8 14 1.25-2.5L18 18M14 4l1.25 2.5L18 6m-1 15-3-6h-4m7-12-3 6 1.5 3M2 12h6.5L10 9m10 1-1.5 2 1.5 2m2-2h-6.5L14 15M4 10l1.5 2L4 14m3 7 3-6-1.5-3M7 3l3 6h4',
   // The shortcut map's button beside light and dark.
@@ -241,7 +242,6 @@ const TAB_GLYPHS: Partial<Record<string, string>> = {
   dsh: 'M6 4h5a7 7 0 0 1 0 14H6Z M3 21c2-1.5 4-1.5 6 0s4 1.5 6 0 4-1.5 6 0',
   // Cline: its bot head (the rounded head with a bump on top, pointed sides, two upright eyes), traced from Cline's
   // own icon (cline/cline assets/branding/logos/cline-icon-white.svg) as an outline.
-  hermes: 'M8 5v15 M16 5v15 M8 13.5h8 M8 8C6 7.6 4 6.8 2.5 5.2C3.3 8 5.4 9.8 8 10.4 M16 8c2-.4 4-1.2 5.5-2.8c-.8 2.8-2.9 4.6-5.5 5.2',
   cline:
     'M9.6 5.3A2.55 2.55 0 1 1 14.4 5.3H17.9A2.4 2.4 0 0 1 20.3 7.7V10.6L22.9 13.6 20.3 16.7V19.6A2.4 2.4 0 0 1 17.9 22H6.1A2.4 2.4 0 0 1 3.7 19.6V16.7L1.1 13.6 3.7 10.6V7.7A2.4 2.4 0 0 1 6.1 5.3Z M8.9 11.6v4 M15.1 11.6v4',
   // OpenClaw lobster mark, from openclaw/openclaw ui/src/components/icon-data-tools.ts, MIT, Copyright (c) 2026 OpenClaw Foundation.
@@ -252,6 +252,7 @@ const TAB_GLYPHS: Partial<Record<string, string>> = {
 export function TabGlyph({ harness }: { harness: string }) {
   if (harness === 'codex') return <CodexIcon className="ib-tglyph ib-img" />;
   if (harness === 'muse') return <MuseIcon className="ib-tglyph ib-img" />;
+  if (harness === 'hermes') return <HermesAgentIcon className="ib-tglyph" />;
   const d = TAB_GLYPHS[harness];
   if (!d) return null;
   return (
@@ -278,7 +279,6 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
     case 'dsh':
     case 'cline':
     case 'openclaw':
-    case 'hermes':
       return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d={TAB_GLYPHS[host]} />
@@ -286,6 +286,8 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
       );
     case 'pi':
       return <PiIcon />;
+    case 'hermes':
+      return <HermesAgentIcon />;
     case 'opencode':
       return <OpenCodeIcon />;
     case 'codex':
@@ -296,6 +298,14 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
       return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z" />
+        </svg>
+      );
+    case 'cloud-hermes':
+      return <HermesAgentIcon />;
+    case 'cloud-openclaw':
+      return (
+        <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d={TAB_GLYPHS[host.slice('cloud-'.length)]} />
         </svg>
       );
     case 'muse':

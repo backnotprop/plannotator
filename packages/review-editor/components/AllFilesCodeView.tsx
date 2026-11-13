@@ -1588,9 +1588,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
   });
 
+  const pendingAllCollapsedRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const pending = pendingAllCollapsedRef.current;
+    if (!workerPoolReady || pending == null) return;
+    pendingAllCollapsedRef.current = null;
+    setAllItemsCollapsed(pending);
+  }, [workerPoolReady, setAllItemsCollapsed]);
+
   const handleToggleAllCollapsed = useStableCallback(() => {
     const handle = viewerRef.current;
-    if (handle == null) return;
+    if (handle == null) {
+      const next = !(pendingAllCollapsedRef.current ?? allCollapsed);
+      pendingAllCollapsedRef.current = next;
+      setAllCollapsed(next);
+      return;
+    }
     // If anything is open, collapse all; otherwise expand all. Computed from
     // live item state so it stays correct after manual per-file toggles.
     const anyExpanded = identity.items.some(

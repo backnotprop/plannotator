@@ -78,6 +78,7 @@ async function restart(dataDir: string, now: () => Date, on: boolean) {
 
 async function runChild(dataDir: string, nowIso: string, mode: string, killAfterLoadingMs?: number): Promise<{ killed: boolean; out: string }> {
   const child = Bun.spawn([process.execPath, CHILD, dataDir, nowIso, mode], { stdout: "pipe", stderr: "pipe" });
+  const stderr = new Response(child.stderr).text();
   const reader = child.stdout.getReader();
   const decoder = new TextDecoder();
   let out = "";
@@ -93,7 +94,8 @@ async function runChild(dataDir: string, nowIso: string, mode: string, killAfter
     }
   }
   await child.exited;
-  if (child.signalCode !== "SIGKILL" && child.exitCode !== 0) throw new Error(`child failed: ${await new Response(child.stderr).text()}`);
+  const errors = await stderr;
+  if (child.signalCode !== "SIGKILL" && child.exitCode !== 0) throw new Error(`child failed: ${errors}`);
   return { killed: child.signalCode === "SIGKILL", out };
 }
 
@@ -149,20 +151,29 @@ describe("a crash while moving into SQLite", () => {
     const sample = temp("sample");
     cpSync(pristine, sample, { recursive: true });
     const whole = await runChild(sample, nowIso, "import");
-    const at = (word: string) => Number(new RegExp(`${word} ([0-9.]+)`).exec(whole.out)![1]);
     expect(whole.out).toContain("done imported");
-    const span = at("done imported") - at("loading");
+    const since = (out: string, word: string) => {
+      const at = (w: string) => Number(new RegExp(`${w} ([0-9.]+)`).exec(out)?.[1]);
+      return at(word) - at("loading");
+    };
+    let load = since(whole.out, "loaded");
+    let span = since(whole.out, "done imported");
     const random = seeded(7);
-    let inLoad = 0;
     let killed = 0;
-    for (let i = 0; i < 9; i++) {
+    let inLoad = 0;
+    for (let tries = 0; (killed < 9 || inLoad < 3) && tries < 60; tries++) {
       // Two in three aimed at the bulk write, the rest anywhere up to the end.
-      const end = i % 3 === 2 ? span : at("loaded") - at("loading");
+      const end = killed < 9 && killed % 3 === 2 ? span : load;
       const run = await crash("import", Math.floor(random() * end));
-      if (run.killed) killed++;
-      if (run.killed && !run.out.includes("loaded")) inLoad++;
+      if (run.killed && !run.out.includes("done ")) {
+        killed++;
+        if (!run.out.includes("loaded")) inLoad++;
+      } else {
+        load = Math.min(load, since(run.out, "loaded"));
+        span = Math.min(span, since(run.out, "done"));
+      }
     }
-    expect(killed).toBeGreaterThanOrEqual(6);
+    expect(killed).toBeGreaterThanOrEqual(9);
     expect(inLoad).toBeGreaterThanOrEqual(3);
   }, 600_000);
 });
