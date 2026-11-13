@@ -72,7 +72,7 @@ test.afterAll(async () => {
 
 test('pair a routine, send a test, write to it from New message: the thread says it woke, with the run link', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 860 });
-  await page.goto(`${url}#settings/devices`);
+  await page.goto(`${url}#settings/cloud-agents`);
   const section = page.locator('[data-settings-cloud]');
   await section.locator('[data-cloud-pair-start]').click();
   const form = section.locator('[data-cloud-pair-form]');
@@ -82,8 +82,8 @@ test('pair a routine, send a test, write to it from New message: the thread says
 
   const paired = section.locator('[data-cloud-agent]');
   await expect(paired.locator('[data-cloud-setup="no-relay"]')).toBeVisible();
-  await expect(paired.locator('[data-cloud-status]')).toHaveAttribute('data-cloud-status', 'no_relay');
   await paired.locator('[data-cloud-done]').click();
+  await expect(paired.locator('[data-cloud-status]')).toHaveAttribute('data-cloud-status', 'no_relay');
   await paired.locator('[data-cloud-wake-open]').click();
   await paired.locator('[data-cloud-url]').fill(hookUrl);
   await paired.locator('[data-cloud-key]').fill(KEY);
