@@ -508,6 +508,12 @@ export interface PlannotatorConfig {
    */
   inboxSnoozeIntro?: { firstUseAt?: string; snoozedAt?: string; shownAt?: string };
   /**
+   * The one-time Priority dialog (reveals.ts `priority`; packages/server/inbox-priority-intro.ts). `usedAt`: the person
+   * added a thread to Priority on this machine, so the dialog never shows; inbox/priority.json cannot say so, it deletes
+   * itself with its last entry. Its claim is the line's (`inboxReveals.priority`).
+   */
+  inboxPriorityIntro?: { usedAt?: string };
+  /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on. On: the sidebar's Board row and page, and the Inbox
    * serves the agents' `card` tool. Off: neither, every card kept. Written by
@@ -651,12 +657,19 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; personal_agents?: string; priority?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
     agent_rules?: { shownAt?: string; key?: string };
+    /** The personal agents dialog (core/inbox-personal-agents.ts): claimed once, as the Board's; nothing to turn on. */
+    personal_agents?: { shownAt?: string; key?: string };
+    /**
+     * The Priority dialog (reveals.ts `priority`): claimed once, as the Board's; nothing to turn on. `dueAt`: the first
+     * release start that knew it; it is never due on that local day (packages/server/inbox-priority-intro.ts).
+     */
+    priority?: { shownAt?: string; key?: string; dueAt?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
@@ -785,6 +798,16 @@ export interface PlannotatorConfig {
    * browser: getServerConfig() allowlists its keys.
    */
   bitbucketToken?: string;
+  /**
+   * A command that prints the Atlassian API token for Bitbucket Cloud, as an
+   * argument list run without a shell, e.g. `["security",
+   * "find-generic-password", "-s", "bitbucket", "-w"]`. Plannotator runs it
+   * only when it is about to call Bitbucket and keeps the token in memory: it
+   * never lands in an environment variable, a file or a child process. Pairs
+   * with `bitbucketEmail`. PLANNOTATOR_BITBUCKET_TOKEN still takes precedence;
+   * this takes precedence over `bitbucketToken`.
+   */
+  bitbucketTokenCommand?: string[];
   /**
    * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
    * jobs. When true (default), review jobs run with Cursor's sandbox forced
@@ -2461,7 +2484,8 @@ export interface BitbucketCredentials {
  * Resolve Bitbucket Cloud API credentials.
  *
  * Priority (highest wins):
- *   PLANNOTATOR_BITBUCKET_TOKEN / _EMAIL env vars  →  config.bitbucketToken / bitbucketEmail
+ *   PLANNOTATOR_BITBUCKET_TOKEN / _EMAIL env vars  →  config.bitbucketTokenCommand / bitbucketEmail
+ *   (`resolveBitbucketTokenCommand`; this function answers null for it)  →  config.bitbucketToken / bitbucketEmail
  *
  * The token and email are resolved together from one source: an env token
  * never pairs with a config-file email (a stale email would turn a valid
@@ -2479,12 +2503,35 @@ export function resolveBitbucketCredentials(
     const email = clean(env.PLANNOTATOR_BITBUCKET_EMAIL);
     return { token: envToken, ...(email ? { email } : {}) };
   }
+  if (resolveBitbucketTokenCommand(config, env)) return null;
   const cfgToken = clean(config.bitbucketToken);
   if (cfgToken) {
     const email = clean(config.bitbucketEmail);
     return { token: cfgToken, ...(email ? { email } : {}) };
   }
   return null;
+}
+
+/** A configured token command: what runs, and the email the token pairs with. */
+export interface BitbucketTokenCommand {
+  argv: string[];
+  email?: string;
+}
+
+/**
+ * The configured `bitbucketTokenCommand`, or null when there is none or the
+ * PLANNOTATOR_BITBUCKET_TOKEN env var wins over it. A value that is not a
+ * non-empty list of non-empty strings counts as unset.
+ */
+export function resolveBitbucketTokenCommand(
+  config: PlannotatorConfig,
+  env: Record<string, string | undefined> = process.env,
+): BitbucketTokenCommand | null {
+  if (typeof env.PLANNOTATOR_BITBUCKET_TOKEN === "string" && env.PLANNOTATOR_BITBUCKET_TOKEN.trim() !== "") return null;
+  const argv = config.bitbucketTokenCommand;
+  if (!Array.isArray(argv) || argv.length === 0 || !argv.every((part) => typeof part === "string" && part !== "")) return null;
+  const email = typeof config.bitbucketEmail === "string" && config.bitbucketEmail.trim() !== "" ? config.bitbucketEmail.trim() : undefined;
+  return { argv: [...argv], ...(email ? { email } : {}) };
 }
 
 /**

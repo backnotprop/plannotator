@@ -92,6 +92,22 @@ interface Options {
   launched?: boolean;
   /** A fresh install: nothing in the store, so no Inbox ran here before. */
   fresh?: boolean;
+  /** The person once added a thread to Priority (config.json `inboxPriorityIntro.usedAt`), which settles the Priority dialog (after Snooze in the line). Default true. */
+  priorityUsed?: boolean;
+  /**
+   * A personal agent connected (a Hermes cloud agent in inbox/cloud-agents.json), which settles the personal agents
+   * dialog (after Snooze in the line) without marking an earlier Inbox the way config.json `inboxTool` would. Default true.
+   */
+  personalAgent?: boolean;
+}
+
+/** A cloud agent of `preset` in the data dir's inbox/cloud-agents.json, as Settings → Cloud agents pairs one. */
+function writeCloudAgent(dataDir: string, preset: string) {
+  mkdirSync(join(dataDir, "inbox"), { recursive: true });
+  writeFileSync(
+    join(dataDir, "inbox", "cloud-agents.json"),
+    JSON.stringify({ v: 1, agents: [{ session: "cloud.0123456789ab", name: preset, preset, url: null, key: null, project_id: null, created_at: "2026-11-01T00:00:00.000Z", key_set_at: null, key_rejected_at: null }] }),
+  );
 }
 
 type Json = Record<string, any>;
@@ -116,12 +132,14 @@ async function world(options: Options = {}) {
     favicon: "glass",
     // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+    ...(options.priorityUsed === false ? {} : { inboxPriorityIntro: { usedAt: new Date(Date.now() - 3 * DAY).toISOString() } }),
     ...options.config,
   };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
   // A tagged machine names no owner: the owner reaches it with a login they allowed.
   if (options.tailnet === "tagged") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [OWNER] });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
+  if (options.personalAgent !== false) writeCloudAgent(dataDir, "hermes");
   const then = new Date(Date.now() - days * DAY);
   const store = InboxStore.open(dataDir, { now: () => then });
   const project = options.fresh ? null : store.ensureProject({ name: "docs", root: join(root, "docs") });
@@ -561,6 +579,97 @@ describe('"Set the rules" (Rules for your agents): last of the later group', () 
       const w = await world(options);
       expect(await w.next()).toBeNull();
       expect((await w.claim("agent_rules")).show).toBe(false);
+    });
+  }
+});
+
+describe("personal agents: after Snooze, only while none is connected", () => {
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false };
+
+  test("two days' use and none connected: next, shown once, nothing turned on", async () => {
+    const w = await world({ personalAgent: false, config: decided });
+    expect(await w.next()).toBe("personal_agents");
+    expect((await w.claim("personal_agents", "pa-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.personal_agents.shownAt).toMatch(/^\d{4}-/);
+    expect((await w.claim("personal_agents", "pa-key-1")).show).toBe(true);
+    expect((await w.claim("personal_agents", "pa-key-2")).show).toBe(false);
+    expect(await w.next()).toBeNull();
+  });
+
+  test("connecting one drops it on the next read: a Hermes cloud agent, not a Claude Code routine", async () => {
+    const w = await world({ personalAgent: false, config: decided });
+    writeCloudAgent(w.dataDir, "claude-routine");
+    expect(await w.next()).toBe("personal_agents");
+    writeCloudAgent(w.dataDir, "hermes");
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("personal_agents")).show).toBe(false);
+  });
+
+  test("never with the Inbox tool on for OpenClaw, nor on day 1", async () => {
+    expect(await (await world({ personalAgent: false, config: { ...decided, inboxTool: { openclaw: true } } })).next()).toBeNull();
+    expect(await (await world({ personalAgent: false, days: 1, config: decided })).next()).toBeNull();
+  });
+});
+
+describe("Priority: after personal agents, only while the person never added a thread to Priority, never on an upgrade day", () => {
+  // The version that has it first ran two days ago (the release start stamps `dueAt` only when none is saved).
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { priority: { dueAt: new Date(Date.now() - 2 * DAY).toISOString() } } };
+  const threadIds = async (w: Awaited<ReturnType<typeof world>>) =>
+    ((await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string }[] }[] }).sections.flatMap((s) => s.threads.map((t) => t.thread_id));
+
+  test("three days' use and eight threads: next, shown once, nothing added", async () => {
+    const w = await world({ priorityUsed: false, threads: 8, config: decided });
+    expect(await w.next()).toBe("priority");
+    expect((await w.claim("priority", "pq-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.priority.shownAt).toMatch(/^\d{4}-/);
+    expect((await w.claim("priority", "pq-key-1")).show).toBe(true);
+    expect((await w.claim("priority", "pq-key-2")).show).toBe(false);
+    expect(w.saved().inboxPriorityIntro).toBeUndefined();
+    expect(await w.next()).toBeNull();
+  });
+
+  test("its Not now holds the next offer three days", async () => {
+    const w = await world({ priorityUsed: false, threads: 8, config: decided });
+    expect((await w.claim("priority", "pq-key-1")).show).toBe(true);
+    expect((await w.post("/api/inbox/reveal", { id: "priority", answer: "not_now" })).status).toBe(200);
+    expect(w.saved().inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+  });
+
+  test("adding a thread to Priority closes it for good, even after the thread is removed again", async () => {
+    const w = await world({ priorityUsed: false, threads: 8, config: decided });
+    expect(await w.next()).toBe("priority");
+    const [first] = await threadIds(w);
+    expect((await w.post(`/api/inbox/threads/${first}/priority`, { priority: true })).status).toBe(200);
+    expect(w.saved().inboxPriorityIntro.usedAt).toMatch(/^\d{4}-/);
+    expect(await w.next()).toBeNull();
+    expect((await w.post(`/api/inbox/threads/${first}/priority`, { priority: false })).status).toBe(200);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("priority")).show).toBe(false);
+  });
+
+  test("the day the Inbox first runs a version that has it: stamped, not due; the next day: due", async () => {
+    const w = await world({ priorityUsed: false, threads: 8, config: { ...decided, inboxReveals: undefined } });
+    const dueAt = w.saved().inboxReveals.priority.dueAt as string;
+    expect(Date.now() - Date.parse(dueAt)).toBeLessThan(60_000);
+    expect(await w.next()).not.toBe("priority");
+    expect((await w.claim("priority")).show).toBe(false);
+    // The next day (the stamp a day back): due, and a claim keeps the stamp.
+    const config = w.saved();
+    writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ ...config, inboxReveals: { ...config.inboxReveals, priority: { dueAt: new Date(Date.parse(dueAt) - DAY).toISOString() } } }));
+    expect(await w.next()).toBe("priority");
+    expect((await w.claim("priority", "pq-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.priority.dueAt).toMatch(/^\d{4}-/);
+  });
+
+  for (const [name, options] of [
+    ["seven threads", { priorityUsed: false, threads: 7, config: decided }],
+    ["day 2 of use", { priorityUsed: false, threads: 8, days: 2, config: decided }],
+    ["someone who used Priority before", { threads: 8, config: decided }],
+  ] as const) {
+    test(`never for ${name}`, async () => {
+      const w = await world(options);
+      expect(await w.next()).not.toBe("priority");
+      expect((await w.claim("priority")).show).toBe(false);
     });
   }
 });

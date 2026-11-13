@@ -12,9 +12,12 @@ import {
   REF_DRAIN_MS,
   REF_TIMEOUT_MS,
   refRunnerKill,
+  type BitbucketRefReader,
   type RefCards,
   type RefRunner,
 } from "@plannotator/shared/ref-cards";
+import { fetchBbPRCard } from "@plannotator/shared/pr-provider";
+import { prCommandRuntime } from "./pr";
 
 import { childEnv } from "@plannotator/shared/child-env";
 import { sessionTailnetAskAllowed } from "./session-tailnet";
@@ -99,6 +102,9 @@ export function createBunRefCliRunner(timeoutMs: number = REF_TIMEOUT_MS): RefRu
 
 /** The real CLIs, each with a hard time limit, no prompt, no color. */
 export const refCliRunner: RefRunner = createBunRefCliRunner();
+
+/** Bitbucket Cloud pull requests through the review app's provider and credentials (the Inbox passes it). */
+export const bitbucketRefReader: BitbucketRefReader = (ref, signal) => fetchBbPRCard(prCommandRuntime, { platform: "bitbucket", host: "bitbucket.org", ...ref }, signal);
 
 /** `createRefCards` with the Bun runner by default (tests pass their own). */
 export function createRefCards(options: Partial<Parameters<typeof createSharedRefCards>[0]> = {}): ReturnType<typeof createSharedRefCards> {

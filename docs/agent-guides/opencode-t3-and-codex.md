@@ -119,6 +119,10 @@ order, `list` named it `2 files: notes.md, mock.html`, its feedback arrived
 headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 `close all` closed a second bundle.
 
+### OpenCode 2: sessions the Inbox starts
+
+In a server the Inbox started (`PLANNOTATOR_INBOX_LAUNCHED=1`), the plugin's wake watches each root session as it is created (`session.created`), not only once it ran, so the Inbox's first message reaches a session that has had no turn; with `PLANNOTATOR_INBOX_LAUNCHED_SESSION` it watches that session from the start (a restart). The rest is "OpenCode" in `inbox-launch.md`. Test: `inbox-v2-wake.test.ts` "OpenCode 2 started by the Inbox".
+
 ### OpenCode 2: the installer updates a running service's plugin
 
 The OpenCode 2 service keeps the plugin it loaded. When it is running with an
@@ -155,7 +159,7 @@ handling); instead each registration deletes entries whose pid is dead, and
 loopback port no longer accepts a connection, or that cannot be read. Commands
 list the project they detected (or `unknown`); only the plan review detects it.
 
-### T3 Code: Ask this session through an optional Claude hook (opt-in, unreleased)
+### T3 Code: Ask this session through an optional Claude hook (opt-in)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the
 Agent SDK, which loads `~/.claude/settings.json` hooks, so a Claude Bash hook
