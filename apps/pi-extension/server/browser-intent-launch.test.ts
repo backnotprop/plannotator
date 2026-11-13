@@ -69,6 +69,7 @@ async function run(
 			PATH: bin,
 			HOME: root,
 			TMPDIR: root,
+			PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
 			PLANNOTATOR_DATA_DIR: dataDir,
 			PLANNOTATOR_REMOTE: remote ? "1" : "0",
 			...browserEnv,

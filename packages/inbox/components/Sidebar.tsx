@@ -138,6 +138,9 @@ export interface SidebarProps {
    * true once it is kept. Absent: agent rows have no menu.
    */
   onAgentRename?: (agent: InboxAgent, name: string | null, own: string) => Promise<boolean>;
+  /** An agent row's Stop and Delete … session… for an agent the Inbox launched (`machine`: a linked machine's id, else null). */
+  onAgentStop?: (agent: InboxAgent, machine: string | null) => void;
+  onAgentDelete?: (agent: InboxAgent, machine: string | null) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -811,6 +814,9 @@ export function Sidebar(props: SidebarProps) {
             phone={phone}
             // The sheet stays open on a phone: the field is in it.
             onRename={props.onAgentRename}
+            onStop={props.onAgentStop}
+            // Delete asks in a dialog over the list: on a phone the sheet closes for it.
+            onDelete={props.onAgentDelete && ((agent, machine) => pick(() => props.onAgentDelete?.(agent, machine))())}
             announce={props.announce}
           />
         )}

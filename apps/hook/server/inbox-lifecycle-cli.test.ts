@@ -62,6 +62,7 @@ function sandbox(): Sandbox {
       HOME: home,
       USERPROFILE: home,
       TMPDIR: tmpdir(),
+      PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       BROWSER: NO_BROWSER,

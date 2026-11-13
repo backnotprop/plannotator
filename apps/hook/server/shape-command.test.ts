@@ -342,6 +342,7 @@ describe("the Shape switch, through the entrypoint", () => {
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
       HOME: process.env.HOME!,
+      PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER: "1",
@@ -399,6 +400,7 @@ describe("the Shape switch, through the entrypoint", () => {
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
       HOME: process.env.HOME!,
+      PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER: "1",
