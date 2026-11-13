@@ -69,7 +69,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 39;
+const TESTS = 41;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -669,6 +669,33 @@ test.skipIf(!hasDom)('a Send whose answer is lost after it went is read back: th
   expect(await personReplies('Went, answer lost.')).toHaveLength(1);
 }, 30_000);
 
+test.skipIf(!hasDom)('a Send whose answer is lost keeps its "Sending…" reply while the thread is read for it', async () => {
+  const { el } = await openWithSaved('Lost, still drawn.');
+  const real = globalThis.fetch;
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let lost = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (lost && /\/api\/inbox\/threads\/[^/?]+(\?|$)/.test(path)) await held;
+    const answer = await real(input, init);
+    if ((init?.method ?? 'GET') === 'POST' && path.endsWith('/reply')) {
+      lost = true;
+      throw new TypeError('Failed to fetch');
+    }
+    return answer;
+  }) as typeof fetch;
+  act(() => button(el, 'Send').click());
+  await until(() => lost, 'the answer lost');
+  await settle();
+  expect(el.querySelectorAll('[data-sending]').length).toBe(1);
+  release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(el.querySelectorAll('[data-sending]').length).toBe(0);
+  expect(await personReplies('Lost, still drawn.')).toHaveLength(1);
+}, 30_000);
+
 test.skipIf(!hasDom)('a Send carrying a comment whose answer is lost after it went: the box closes; the reply and its comment went once', async () => {
   const made = await loopback(
     `/api/inbox/messages/${world.waiting}/annotations`,
@@ -843,6 +870,35 @@ test.skipIf(!hasDom)('an unconfirmed Send is forgotten when the person leaves: t
   expect(second).not.toBe(first);
   expect(second.path).toContain(asked);
   expect(await personReplies('Yes.')).toHaveLength(2);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send that goes as two replies keeps its "Sending…" reply until the one with the words lands', async () => {
+  const made = await loopback(
+    `/api/inbox/messages/${world.waiting}/annotations`,
+    'POST',
+    JSON.stringify({ annotation: { id: 'ann-two-replies', blockId: 'block-1', startOffset: 0, endOffset: 13, type: 'COMMENT', text: 'On the first.', originalText: 'The docs site', createdA: 1 } }),
+  );
+  expect(made.status).toBe(200);
+  await agentSend('A word from another agent.', world.waiting);
+  const { el } = await openWithSaved('Two replies.');
+  const real = globalThis.fetch;
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let replies = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST' && String(input).endsWith('/reply') && ++replies === 2) await held;
+    return real(input, init);
+  }) as typeof fetch;
+  act(() => button(el, 'Send').click());
+  await until(() => replies === 2, 'the second reply on its way');
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
+  await until(() => el.querySelectorAll('article[data-author="person"]:not([data-sending])').length === 1, 'the first reply drawn');
+  expect(el.querySelectorAll('[data-sending]').length).toBe(1);
+  release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(el.querySelectorAll('[data-sending]').length).toBe(0);
+  expect(await personReplies('Two replies.')).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('an unconfirmed Send that a thread read shows landed is finished while the box still holds its words', async () => {

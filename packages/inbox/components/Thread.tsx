@@ -3441,7 +3441,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       }
       // The tiles this Send carries, by the uploads its requests carry: a file pasted while it is in flight stays.
       sentUploads = requests.flatMap((r) => r.input.uploads ?? []);
-      total = requests.length;
+      total = drawing.goesAs(requests.length);
       /** The reply that handed the thread over (approval "inbox-tag-handoff"), for the toast's Undo. */
       let handedReply: InboxMessageWire | null = null;
       /** The thread as the last reply's answer brought it (that reply asks for it on this Inbox's own threads). */
@@ -3544,16 +3544,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       setError(failed.line);
       setErrorDetails(failed.details ? { for: failed.line, text: failed.details } : null);
     } finally {
+      const checks = claimed && !done && wordsKey !== null && !(failure instanceof InboxApiError && failure.status >= 400 && failure.status < 500);
       if (done) drawing.landed();
-      else drawing.stopped();
+      else if (!checks) drawing.stopped();
       // Nothing went (or not all of it): the claim is given back and the box's words are saved again.
       // Unless the reply carrying them may have gone (its POST went out and no clear refusal came back,
       // e.g. the answer was lost): the thread is read, and a reply with its key there means it went.
       if (claimed && !done) {
-        const refused = failure instanceof InboxApiError && failure.status >= 400 && failure.status < 500;
         let wentAnyway: 'yes' | 'unknown' | 'no' | 'gone' = 'no';
-        if (wordsKey !== null && !refused) {
-          wentAnyway = await replyLanded(threadRef.current.thread_id, wordsKey);
+        if (checks) {
+          wentAnyway = await replyLanded(threadRef.current.thread_id, wordsKey!).finally(drawing.stopped);
         }
         if (wentAnyway === 'yes') {
           // It went (and its clear_draft with it): the Send is finished as if its answer had come.
@@ -5594,7 +5594,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">{reviewView.curating}</p>}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
-        <SendingReply sends={sendsDrawn} />
+        <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
         {showNew && !phone && newPill}
         <div className="ib-sr" aria-live="polite" data-fold-live="">
           {announced}

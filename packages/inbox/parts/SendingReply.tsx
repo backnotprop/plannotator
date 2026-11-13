@@ -3,13 +3,16 @@
  * place of the delivery line, as a reply held for another machine (HeldWrites.tsx). It goes once the reply lands
  * (the thread draws it) or the Send stops (the words are still in the box, which says why).
  */
+import type { MachineView, OutboxView } from '../api';
 import type { SendDrawn } from '../data/actions/sendDraw';
 import { Icon } from '../icons';
+import { outboxLine } from '../machines';
 
-export function SendingReply({ sends }: { sends: readonly SendDrawn[] }) {
+export function SendingReply({ sends, held, machine }: { sends: readonly SendDrawn[]; held: readonly OutboxView[]; machine: Pick<MachineView, 'name' | 'state'> | null }) {
+  const shown = sends.filter((send) => !held.some((entry) => entry.words?.trim() === send.words && outboxLine(entry, machine) !== null));
   return (
     <>
-      {sends.map((send) => (
+      {shown.map((send) => (
         <article key={send.key} className="ib-message" data-author="person" data-message-article={send.key} data-sending="">
           <div className="ib-fline ib-is-open">
             <span className="ib-mk ib-big" aria-hidden="true">

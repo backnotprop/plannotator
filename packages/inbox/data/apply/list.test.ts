@@ -39,6 +39,15 @@ describe('applyListRecord', () => {
     expect(applyListRecord(held, rootLine('a', 11))).toBeNull();
   });
 
+  test('a rename shows on the pinned row with the list row, and on a pinned thread the filter leaves out', () => {
+    const held = { ...list([row('a')]), pins: [row('a'), row('p')] } as ListModel;
+    const next = applyListRecord(held, rootLine('a', 11, { thread_name: 'Billing' }))!;
+    expect(next.sections[0]!.threads[0]!.thread_name).toBe('Billing');
+    expect(next.pins!.map((r) => r.thread_name)).toEqual(['Billing', null]);
+    const away = applyListRecord(held, rootLine('p', 12, { thread_name: 'Away' }))!;
+    expect(away.pins![1]!.thread_name).toBe('Away');
+  });
+
   test("what the list cannot take in place waits for the read: a new message, a reply's line, a replay, a thread not listed", () => {
     const held = list([row('a')]);
     expect(applyListRecord(held, { ...rootLine('a', 11, { resolved_at: 'x' }), first: true } as InboxEvent)).toBeNull();

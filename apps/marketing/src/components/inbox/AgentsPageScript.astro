@@ -1,0 +1,151 @@
+---
+// The agents pages' copy buttons and screenshot lightbox: the /inbox/ page's
+// own (src/pages/[inbox].astro), without its tabs, film and install prompt.
+---
+<div class="ag-lightbox" data-lightbox-modal hidden>
+  <div class="ag-lightbox-backdrop" data-close-lightbox></div>
+  <div class="ag-lightbox-dialog" role="dialog" aria-modal="true" aria-label="Screenshot">
+    <button class="ag-lightbox-close" type="button" aria-label="Close" data-close-lightbox>&times;</button>
+    <img class="ag-lightbox-img" alt="" />
+  </div>
+</div>
+
+<p class="sr-only" aria-live="polite" data-copy-live></p>
+
+<script is:inline>
+  (() => {
+    const live = document.querySelector('[data-copy-live]');
+    const announce = (message) => {
+      if (!live) return;
+      live.textContent = '';
+      setTimeout(() => { live.textContent = message; }, 50);
+    };
+
+    // The clipboard API, else a selected off-screen textarea (plain http,
+    // older browsers, a denied permission).
+    const copyText = (text) => {
+      const fallback = () =>
+        new Promise((resolve, reject) => {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.setAttribute('aria-hidden', 'true');
+          ta.style.position = 'fixed';
+          ta.style.top = '0';
+          ta.style.left = '0';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          const focused = document.activeElement;
+          ta.select();
+          try {
+            document.execCommand('copy') ? resolve() : reject(new Error('copy failed'));
+          } catch (e) {
+            reject(e);
+          } finally {
+            ta.remove();
+            if (focused && focused.focus) focused.focus();
+          }
+        });
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text).catch(fallback);
+      }
+      return fallback();
+    };
+
+    const check =
+      '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+    document.querySelectorAll('[data-copy]').forEach((b) => {
+      const icon = b.innerHTML;
+      b.addEventListener('click', () => {
+        copyText(b.getAttribute('data-copy') || '').then(() => {
+          b.innerHTML = check;
+          announce('Copied.');
+          setTimeout(() => { b.innerHTML = icon; }, 1500);
+        }, () => announce('Copy failed. Select the command and copy it by hand.'));
+      });
+    });
+
+    // Lightbox: the 2x render of the mode on screen (InboxShot's buttons).
+    const lb = document.querySelector('[data-lightbox-modal]');
+    const img = lb && lb.querySelector('.ag-lightbox-img');
+    if (!lb || !img) return;
+    let opener = null;
+    const close = () => {
+      lb.hidden = true;
+      document.body.style.overflow = '';
+      img.removeAttribute('src');
+      if (opener && opener.focus) opener.focus();
+    };
+    document.querySelectorAll('[data-lightbox-dark]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const light = document.documentElement.classList.contains('light');
+        img.src = b.getAttribute(light ? 'data-lightbox-light' : 'data-lightbox-dark');
+        img.alt = b.getAttribute('data-lightbox-alt') || '';
+        opener = b;
+        lb.hidden = false;
+        document.body.style.overflow = 'hidden';
+        const x = lb.querySelector('.ag-lightbox-close');
+        if (x) x.focus();
+      }),
+    );
+    document.querySelectorAll('[data-close-lightbox]').forEach((b) => b.addEventListener('click', close));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !lb.hidden) close();
+    });
+  })();
+</script>
+
+<style>
+  .ag-lightbox[hidden] { display: none; }
+
+  .ag-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4vw;
+  }
+
+  .ag-lightbox-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(4px);
+  }
+
+  .ag-lightbox-dialog {
+    position: relative;
+    max-width: 96vw;
+    max-height: 92vh;
+  }
+
+  .ag-lightbox-img {
+    display: block;
+    max-width: 96vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+  }
+
+  .ag-lightbox-close {
+    position: absolute;
+    top: -48px;
+    right: 0;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: transparent;
+    color: #fff;
+    font-size: 36px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+  }
+
+  .ag-lightbox-close:hover { opacity: 1; }
+</style>
