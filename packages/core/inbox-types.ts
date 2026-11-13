@@ -824,12 +824,6 @@ export interface InboxMessage {
    */
   thread_naming?: InboxThreadNaming;
   /**
-   * On an agent's message: send_message's `priority`, the reason it asks for the person's Priority, as
-   * `inboxPriorityReason` normalized it. Absent when it asked none, when the person had taken the thread out
-   * (`InboxPriorityState.off`), and on every other message. Read only by the list model (`InboxRowPriority.ask`).
-   */
-  priority?: string;
-  /**
    * On an agent's message: the person's 👍 Looks good (design record
    * "inbox-acknowledge", approved 2026-10-15, amended 2026-10-16). The thread
    * is marked read; once the Undo window passes the Inbox sends it to the
@@ -1803,8 +1797,8 @@ export interface InboxListRow extends InboxThreadSummary {
   snoozed?: InboxRowSnooze | null;
   /**
    * The thread is in the list's Priority group (`inboxRowInPriority`), or null.
-   * `person`: the person added it (`inbox/priority.json`); `ask`: an agent's
-   * standing ask (`InboxPriorityAsk`). Like `pinned_at`, only on the list model the window
+   * `person`: the person added it (`inbox/priority.json`), `at` when; `ask` is
+   * always null: no agent can set one. Like `pinned_at`, only on the list model the window
    * and the phone read, never on anything an agent reads. Every row from an
    * Inbox that keeps priority carries the key; absent from an older Inbox (no
    * menu item, no group). A linked machine's row carries that machine's own
@@ -1980,34 +1974,9 @@ export type InboxListGroupId = InboxSectionId | "snoozed" | "priority";
 /** Why a row is in Priority (`InboxListRow.priority`). */
 export interface InboxRowPriority {
   person: boolean;
-  /** When the person added it; for an agent's ask alone, when that message was sent. */
+  /** When the person added it. */
   at: string;
-  ask: InboxPriorityAsk | null;
-}
-
-/**
- * An agent's ask for the person's Priority: its newest message in the thread carries `priority`, the thread waits on
- * the person (open, the last word an agent's, no Mark read), and the person has not taken it out since they last
- * wrote there. Derived on every read: nothing stores or clears it.
- */
-export interface InboxPriorityAsk {
-  /** The reason, one line, as the row's grey line shows it. */
-  reason: string;
-  /** The agent's name. */
-  agent: string;
-  message_id: string;
-}
-
-/** An agent's Priority reason is cut to this many characters, "…" included. */
-export const INBOX_PRIORITY_REASON_MAX = 120;
-
-/** send_message's `priority`, as stored: one line, whitespace collapsed, cut with "…"; null when blank or not a string. */
-export function inboxPriorityReason(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const line = value.replace(/\s+/g, " ").trim();
-  if (!line) return null;
-  const chars = [...line];
-  return chars.length <= INBOX_PRIORITY_REASON_MAX ? line : `${chars.slice(0, INBOX_PRIORITY_REASON_MAX - 1).join("").trimEnd()}…`;
+  ask: null;
 }
 
 /** The person's adds to Priority, one per thread, kept in `inbox/priority.json` outside the event log. */
@@ -3137,14 +3106,14 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * entry's bytes per token (about 3.7), not counted on Pi.
  */
 /*
- * Thread priority (send_message's `priority`, INBOX_PRIORITY_FIELD_DESCRIPTION; no line in the description, which
- * stays 1,944 characters): +457 bytes on the entry as the tool builds it from the default tool list (12,661 →
- * 13,118, the field removed and kept), Board on the same +457. Tokens scaled at the entry's bytes per token (3.7),
- * +124, not counted on Pi.
+ * Thread priority (send_message's boolean `priority`, INBOX_PRIORITY_FIELD_DESCRIPTION; no line in the description,
+ * which stays 1,944 characters): +385 bytes on the entry as the tool builds it from the default tool list (12,661 →
+ * 13,046, the field removed and kept), Board on the same +385. Tokens scaled at the entry's bytes per token (3.7),
+ * +104, not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 13118, tokens: 3547 };
+const INBOX_TOOL_COST_NOW = { bytes: 13046, tokens: 3527 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14790, tokens: 4044 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14718, tokens: 4024 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

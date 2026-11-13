@@ -80,8 +80,8 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "description": "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab), or the URL (Bitbucket: the URL only). Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
         },
         "priority": {
-          "type": "string",
-          "description": "Only when finished work waits on nothing but the person's yes: a PR to approve, a plan to sign off, a release to ship. One short line in your own words (under 80 characters): what is ready and the yes it needs. It puts the thread in Priority, the top of their list, until they reply, answer or mark it read, or your next message here leaves it out. Not for ordinary questions, updates or reports."
+          "type": "boolean",
+          "description": "`true` puts this thread in the person's Priority, the top of their list, until you or they take it out; `false` takes it out. Mark only finished work that waits on nothing but their yes (a PR to approve, a plan to sign off, a release to ship), not ordinary questions, updates or reports, and take it out once that yes came."
         }
       },
       "required": [
