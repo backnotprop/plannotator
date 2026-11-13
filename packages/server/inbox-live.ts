@@ -68,6 +68,7 @@ import { INBOX_LIVE_SITES_MAX, INBOX_LIVE_URL_MAX, type InboxLiveSiteRef } from 
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { PrototypeAppTarget } from "@plannotator/core/inbox-questions";
+import { checkWebPrototypeUrl, defaultWebFraming, isWebPrototype, webFramePage, type WebFraming } from "./inbox-web-prototypes";
 
 /** The live bridge's sources. The CLI passes them as it does for annotate, so the server never imports ui. */
 export interface InboxLiveBridgeSources {
@@ -171,9 +172,8 @@ export function checkInboxLiveUrl(raw: unknown, reservedPorts: Iterable<number>)
   } catch {
     refuse(`${raw.trim()} is not an address; give one like http://localhost:5173/.`);
   }
-  if (url.protocol === "https:") refuse("needs an http:// address (the local proxy does not reach https sites).");
   if (url.protocol !== "http:") refuse("only an http:// address on this computer opens live.");
-  if (!isLoopbackHostname(url.hostname)) refuse(`${url.host} is not this computer: only localhost, 127.x or [::1] open live.`);
+  if (!isLoopbackHostname(url.hostname)) refuse(`${url.host} is not this computer: give its https:// address, or a localhost one.`);
   if (url.username || url.password) refuse("no user name or password in the address.");
   const port = liveTargetPort(url);
   for (const reserved of reservedPorts) {
@@ -214,6 +214,7 @@ export interface InboxLiveSitesOptions {
   idleMs?: number;
   /** The probe's fetch (tests). */
   fetchImpl?: typeof fetch;
+  webFraming?: (url: URL) => Promise<WebFraming>;
   /** The clock (tests). */
   now?: () => number;
   /**
@@ -362,8 +363,27 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       throw new InboxError("validation_error", `body: at most ${INBOX_LIVE_SITES_MAX} running-app prototypes in one message.`, { field: "body" });
     }
     const out: Omit<InboxLiveSiteRef, "opened_at">[] = [];
+    const framings: Promise<void>[] = [];
     for (const app of apps) {
       try {
+        if (isWebPrototype(app.target)) {
+          const url = checkWebPrototypeUrl(app.target);
+          const id = inboxLiveSiteId(url.href);
+          if (out.some((site) => site.id === id)) continue;
+          const site: Omit<InboxLiveSiteRef, "opened_at"> = { id, url: url.href, opened_by: "agent", web: true };
+          out.push(site);
+          if (probing) {
+            framings.push(
+              (options.webFraming ?? defaultWebFraming)(url).then(
+                (framing) => {
+                  if (framing === "not_framed") site.framed = false;
+                },
+                () => {},
+              ),
+            );
+          }
+          continue;
+        }
         const url = checkInboxLiveUrl(app.target, probing ? reservedPorts() : []);
         const id = inboxLiveSiteId(url.href);
         if (out.some((site) => site.id === id)) continue;
@@ -379,6 +399,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
         throw error;
       }
     }
+    await Promise.all(framings);
     return out;
   };
 
@@ -418,6 +439,8 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       if (action === "frame") {
         // The window's frame for the site: same origin only (the checks above), opening its proxy as GET .../live/:site does.
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        const shown = siteOf(threadId, siteId);
+        if (shown.web) return webFramePage(shown);
         return liveFramePage(wire(threadId, siteOf(threadId, siteId), await relayOrigin(via)));
       }
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);

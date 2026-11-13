@@ -31,6 +31,7 @@ import { annotationOf } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { LIVE_FRAME_SANDBOX, type PrototypePage } from '../prototypes';
+import { WebPage } from './PrototypeWebPage';
 
 /** The open window keeps an app's proxy alive (the server stops one after 10 idle minutes). */
 const PING_MS = 60_000;
@@ -65,7 +66,7 @@ function shortUrl(url: string): string {
 }
 
 function pageKey(page: PrototypePage): string {
-  return page.kind === 'app' ? `app:${page.siteId}` : `file:${page.attachmentId}`;
+  return page.kind === 'file' ? `file:${page.attachmentId}` : `${page.kind}:${page.siteId}`;
 }
 
 export function PrototypeWindow(props: {
@@ -92,6 +93,7 @@ export function PrototypeWindow(props: {
   const option = options[at]!;
   const page = option.page;
   const [armed, setArmed] = useState(false);
+  const commentRef = useRef<HTMLButtonElement>(null);
   const [justPicked, setJustPicked] = useState(false);
   const closeRef = useRef(props.onClose);
   closeRef.current = props.onClose;
@@ -124,7 +126,8 @@ export function PrototypeWindow(props: {
     closing.current = setTimeout(() => closeRef.current(), PICK_CLOSE_MS);
   };
   const attachment = page?.kind === 'file' ? (props.attachments.find((a) => a.id === page.attachmentId) ?? null) : null;
-  const name = !page ? option.label : page.kind === 'app' ? shortUrl(page.url) : page.name;
+  const name = !page ? option.label : page.kind === 'file' ? page.name : shortUrl(page.url);
+  const web = page?.kind === 'web' ? page : null;
 
   const arrow = (dir: -1 | 1, to: number | undefined) => (
     <button
@@ -136,6 +139,7 @@ export function PrototypeWindow(props: {
         if (to === undefined) return;
         setAt(to);
         setJustPicked(false);
+        if (web) setArmed(false);
       }}
       data-prototype-step={dir < 0 ? 'prev' : 'next'}
     >
@@ -146,7 +150,7 @@ export function PrototypeWindow(props: {
   return (
     <div className="ib-pw" role="dialog" aria-modal="true" aria-label={`Prototype: ${option.label}`} data-prototype-window="" data-prototype-kind={page?.kind}>
       <header className="ib-pw-bar">
-        <span className="ib-pw-name" title={page?.kind === 'app' ? page.url : undefined} data-prototype-url="">
+        <span className="ib-pw-name" title={page && page.kind !== 'file' ? page.url : undefined} data-prototype-url="">
           {name}
         </span>
         {!props.shared && pages.length > 1 && <span className="ib-pw-pill">{`Page ${place + 1} of ${pages.length}`}</span>}
@@ -156,10 +160,21 @@ export function PrototypeWindow(props: {
             <button type="button" role="radio" aria-checked={!armed} className="ib-seg-o" data-on={!armed ? '' : undefined} onClick={() => setArmed(false)} aria-label="Interact" data-prototype-interact="">
               <Icon name="frame" size={13} /> <span className="ib-pw-segt">Interact</span>
             </button>
-            <button type="button" role="radio" aria-checked={armed} className="ib-seg-o" data-on={armed ? '' : undefined} onClick={() => setArmed(true)} aria-label="Annotate" data-prototype-annotate="">
-              <Icon name="pen" size={13} /> <span className="ib-pw-segt">Annotate</span>
-            </button>
+            {web ? (
+              <button ref={commentRef} type="button" role="radio" aria-checked={armed} className="ib-seg-o" data-on={armed ? '' : undefined} onClick={() => setArmed(true)} aria-label="Comment" data-prototype-comment="">
+                <Icon name="comment" size={13} /> <span className="ib-pw-segt">Comment</span>
+              </button>
+            ) : (
+              <button type="button" role="radio" aria-checked={armed} className="ib-seg-o" data-on={armed ? '' : undefined} onClick={() => setArmed(true)} aria-label="Annotate" data-prototype-annotate="">
+                <Icon name="pen" size={13} /> <span className="ib-pw-segt">Annotate</span>
+              </button>
+            )}
           </div>
+        )}
+        {web && (
+          <a className="ib-iconbtn" href={web.url} target="_blank" rel="noopener noreferrer" aria-label="Open in a new tab" title="Open in a new tab" data-prototype-open="">
+            <Icon name="external" size={16} />
+          </a>
         )}
         <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Close the prototype" data-prototype-close="">
           <Icon name="x" size={16} />
@@ -168,6 +183,18 @@ export function PrototypeWindow(props: {
       <div className="ib-pw-stage">
         {!page ? (
           <p className="ib-pw-line">This option has no prototype.</p>
+        ) : page.kind === 'web' ? (
+          <WebPage
+            key={pageKey(page)}
+            threadId={props.threadId}
+            siteId={page.siteId}
+            url={page.url}
+            framed={page.framed}
+            title={`Prototype ${option.label}`}
+            commentAnchor={armed ? commentRef.current : null}
+            onCommentDone={() => setArmed(false)}
+            onSaved={props.onSaved}
+          />
         ) : page.kind === 'app' ? (
           <AppPage
             key={pageKey(page)}

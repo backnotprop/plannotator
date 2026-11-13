@@ -93,7 +93,7 @@ describe("a cloud agent uses the whole Inbox", () => {
     expect(view.project?.id).toBe(ledger);
   });
 
-  test("a question's prototype is a page it attaches; an address on a computer is refused, saying to attach the page", async () => {
+  test("a question's prototype is a page it attaches or an https address; an address on a computer is refused, saying what works", async () => {
     const w = await doorWorld(cleanups);
     const { pairing } = await w.pair();
     const page = Buffer.from("<!doctype html><title>Mock</title><p>New pricing</p>").toString("base64");
@@ -102,8 +102,14 @@ describe("a cloud agent uses the whole Inbox", () => {
     expect(sent.error).toBeNull();
     const message = (await w.thread(sent.result!.structuredContent!.thread_id as string)).messages[0]!;
     expect(message.attachments!.map((a) => [a.name, a.kind])).toEqual([["mock.html", "html"]]);
-    for (const address of ["http://localhost:3000/", "https://preview.example.com/pricing"]) {
-      expect((await w.door(pairing.token, "send_message", { subject: "Pricing", body: ask(address) })).error).toContain(`Prototype: ${address}: the Inbox opens a running app only on the person's computer, and yours runs elsewhere. Attach the page's HTML file in this send and name it instead (Prototype: mock.html).`);
+    const web = await w.door(pairing.token, "send_message", { subject: "Pricing", body: ask("https://preview.example.com/pricing") });
+    expect(web.error).toBeNull();
+    const webMessage = (await w.thread(web.result!.structuredContent!.thread_id as string)).messages[0]!;
+    expect(webMessage.live_sites!.map((site) => [site.url, site.web])).toEqual([["https://preview.example.com/pricing", true]]);
+    for (const address of ["http://localhost:3000/", "http://preview.example.com/pricing"]) {
+      const refused = (await w.door(pairing.token, "send_message", { subject: "Pricing", body: ask(address) })).error;
+      expect(refused).toContain(`Prototype: ${address}:`);
+      expect(refused).toContain("https://");
     }
   });
 });

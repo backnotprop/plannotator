@@ -179,6 +179,48 @@ describe("checkInboxLiveUrl", () => {
   });
 });
 
+describe("an option's prototype is a public https page", () => {
+  test("a local agent's https page is kept unproxied; a page that refuses frames is flagged for the window and named in the send result; a failed check never blocks", async () => {
+    const { project, dataDir } = world();
+    const checked: string[] = [];
+    const server = await start(dataDir, {
+      webPrototypeFraming: async (url) => {
+        checked.push(url.href);
+        if (url.pathname === "/broken") throw new Error("reset");
+        return url.pathname === "/b" ? "not_framed" : "framed";
+      },
+    });
+    const client = await agent(server);
+    const a = "https://preview.example.com/a";
+    const b = "https://preview.example.com/b";
+    const sent = await send(client, project, { live_sites: [a, `${b}#total`, "https://preview.example.com/broken"] });
+    expect(sent.isError).toBeFalsy();
+    expect(checked).toEqual([a, b, "https://preview.example.com/broken"]);
+    expect(sent.structured.prototypes_not_framed).toEqual([b]);
+    expect(sent.text).toContain(`Prototype: ${b}: this page does not allow being shown inside another page`);
+    expect(sent.text).not.toContain(`Prototype: ${a}:`);
+
+    const sites = (await thread(server, sent.structured.thread_id)).messages[0]!.live_sites!;
+    expect(sites.map((site) => [site.url, site.web, site.framed])).toEqual([
+      [a, true, undefined],
+      [b, true, false],
+      ["https://preview.example.com/broken", true, undefined],
+    ]);
+
+    const frame = await fetch(`${base(server)}/api/inbox/threads/${sent.structured.thread_id}/live/${inboxLiveSiteId(a)}/frame`);
+    expect(frame.status).toBe(200);
+    expect(frame.headers.get("content-security-policy")).toContain("frame-src https://preview.example.com;");
+    expect(frame.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(await frame.text()).toContain(`src="${a}"`);
+    expect(server.liveSites.running()).toEqual([]);
+
+    const again = await send(client, project, { live_sites: [a], idempotency_key: "k1" });
+    const replay = await send(client, project, { live_sites: [a], idempotency_key: "k1" });
+    expect([again.isError, replay.isError]).toEqual([undefined, undefined]);
+    expect(checked.filter((href) => href === a)).toHaveLength(2);
+  });
+});
+
 describe("an option's prototype is a running app", () => {
   test("send_message checks and records it; the window opens it through a proxy with its own token, and the proxy strips the frame refusal", async () => {
     const { project, dataDir } = world();
@@ -229,12 +271,12 @@ describe("an option's prototype is a running app", () => {
     const dead = `http://localhost:${closedPort()}/`;
 
     const cases: [string[], string][] = [
-      [["http://example.com/"], "is not this computer"],
+      [["http://example.com/"], "give its https:// address"],
       [[`http://localhost:${server.port}/`], "Plannotator's own"],
       [[registered.url], "Plannotator"],
       [[marked.url], "Plannotator"],
       [[dead], dead],
-      [[app.url, "https://localhost:1234/"], "https://localhost:1234/"],
+      [[app.url, "ftp://localhost:1234/"], "ftp://localhost:1234/"],
       [Array.from({ length: INBOX_LIVE_SITES_MAX + 1 }, (_, i) => `${app.url}p${i}`), `at most ${INBOX_LIVE_SITES_MAX}`],
     ];
     for (const [urls, words] of cases) {

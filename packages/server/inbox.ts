@@ -205,6 +205,7 @@ import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHom
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
+import type { WebFraming } from "./inbox-web-prototypes";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
 import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
@@ -495,6 +496,7 @@ export interface InboxServerOptions {
   liveIdleMs?: number;
   /** Tests: the live probe's fetch. */
   liveProbeFetch?: typeof fetch;
+  webPrototypeFraming?: (url: URL) => Promise<WebFraming>;
   /**
    * Tests: where the Feedback dialog's send goes (inbox-feedback.ts). Default:
    * `PLANNOTATOR_FEEDBACK_URL`, else the feedback Worker's constant URL.
@@ -4694,6 +4696,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     bridge: options.liveBridge ?? null,
     idleMs: options.liveIdleMs,
     fetchImpl: options.liveProbeFetch,
+    webFraming: options.webPrototypeFraming,
     // The owner's phone over the tailnet: the prototype relay (inbox-live-relay.ts), mapped on first use.
     tailnet: {
       isOwner: (req) => tailscale.isOwnerRequest(req.headers),

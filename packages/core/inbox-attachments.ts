@@ -199,6 +199,8 @@ export interface InboxLiveSiteRef {
   /** Who named it: an agent (a choice's `Prototype:` line). "person" is reserved for a site the person opens (#2258). */
   opened_by: "agent" | "person";
   opened_at: string;
+  web?: true;
+  framed?: false;
 }
 
 /**
