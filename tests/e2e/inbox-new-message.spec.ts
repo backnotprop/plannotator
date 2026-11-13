@@ -283,7 +283,7 @@ test('two live sessions (5.2): the list puts the writer first; the picked sessio
   // Its turn ends, then the turn goes in.
   await second.setBusy(false);
   await second.deliver(command.id);
-  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
+  await expect(pane.locator('article.ib-message[data-author="person"]').last().locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   await shot('5.2-delivered-to-the-picked-session');
 });
 

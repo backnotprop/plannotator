@@ -17,8 +17,10 @@
  * - A message whose text names web pictures (three Mermaid ways: an image
  *   node, an `<img>` in a label, a background in a label's style; a markdown
  *   image; a raw `<img>`; a protocol-relative one) makes zero requests: the
- *   window's CSP is `img-src 'self' data: blob:` (the review of #2722 found a
- *   Mermaid diagram reaching the web while that policy was widened).
+ *   window's CSP is `img-src 'self' data: blob:` plus one folder of the
+ *   site's own pictures, `https://plannotator.ai/assets/hosted/`, for the
+ *   personal agents dialog's banner (the review of #2722 found a Mermaid
+ *   diagram reaching the web while that policy was widened further).
  * - Annotation still works in the served page: a click pins its paragraph, the
  *   comment saves, and the page draws its highlight.
  * - Only the window can keep a page: a POST to /api/inbox/pages from another
@@ -165,7 +167,9 @@ test('an attached page shows its web pictures; the window asks the web for none,
 
       // The window's own policy, as served.
       const window = await context.request.get(url);
-      expect(window.headers()['content-security-policy']).toContain("img-src 'self' data: blob:;");
+      // One web folder is allowed, and only that: the site's own hand-uploaded pictures, for the personal agents
+      // dialog's banner (owner, 2026-11-13). Every other web picture stays blocked, as the requests below prove.
+      expect(window.headers()['content-security-policy']).toContain("img-src 'self' data: blob: https://plannotator.ai/assets/hosted/;");
 
       // Only the window may keep a page: the listener's cross-origin guard runs before the route.
       // Another site (or an opaque-origin page, `Origin: null`) cannot get HTML served from the Inbox.

@@ -22,12 +22,12 @@ interface GlMRRef {
 }
 
 /** URL-encode the project path for GitLab API (group/project → group%2Fproject) */
-function encodeProject(projectPath: string): string {
+export function encodeProject(projectPath: string): string {
   return encodeURIComponent(projectPath);
 }
 
 /** Build glab API args with optional --hostname for self-hosted */
-function apiArgs(host: string, endpoint: string, extra: string[] = []): string[] {
+export function apiArgs(host: string, endpoint: string, extra: string[] = []): string[] {
   const args = ["api", endpoint, ...extra];
   if (host !== "gitlab.com") {
     args.push("--hostname", host);
