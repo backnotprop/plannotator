@@ -34,13 +34,15 @@ function setup() {
 }
 
 describe("take back and the one hand-over step", () => {
-  test("a waiting reply leaves the queue, Send now is refused, and a second press changes nothing", () => {
-    const { store, reply, refusal } = setup();
+  test("a waiting reply leaves the queue, Send now is refused, another agent's read passes it, and a second press changes nothing", () => {
+    const { store, asked, reply, refusal } = setup();
     const first = reply("Parquet.", "k1");
     expect(store.pendingReplies("ses_a").map((m) => m.id)).toEqual([first.id]);
     expect(refusal(first.id)).toBeNull();
     expect(store.pendingReplies("ses_a")).toEqual([]);
     expect(() => store.requestDeliverNow(first.id)).toThrow("taken back");
+    store.markAgentChecked(asked.thread_id, Number.POSITIVE_INFINITY, undefined, "ses_b");
+    expect(store.message(asked.thread_id)!.agent_checked_seq).toBe(store.messageCursor(first.id));
     const lines = store.cursor();
     expect(store.takeBack(first.id).taken_back_at).toBeTruthy();
     expect(store.cursor()).toBe(lines);
