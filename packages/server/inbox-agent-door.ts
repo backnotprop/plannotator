@@ -162,9 +162,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       for (const row of rows) if (inScope(row.thread_id, session)) found.push(row);
       if (rows.length < INBOX_SEARCH_LIMIT_MAX) break;
     }
-    const shown = found.slice(0, limit);
-    store.handover.read(shown.map((row) => row.id), session);
-    const results = shown.map((row) => rowOf(row, true));
+    const results = found.slice(0, limit).map((row) => rowOf(row, true));
     const scope = "your threads";
     const head =
       results.length === 0

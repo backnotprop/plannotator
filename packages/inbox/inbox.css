@@ -6208,7 +6208,13 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-undl .ib-m-whybox .ib-rl-lead, .pn-inbox .ib-undl .ib-m-whybox .ib-rl-fold { padding-left: 20px; }
 /* OpenCode's one quiet line (approval "reload-hosts"): under the lead, in its column and tone. */
 .pn-inbox .ib-undl .ib-m-whybox > .ib-rw-after { padding-left: 20px; margin: 0; color: var(--muted-foreground); line-height: 1.7; }
+.pn-inbox .ib-delivered.ib-undl:not([data-stuck]) { flex-wrap: nowrap; }
+.pn-inbox .ib-delivered.ib-undl:not([data-stuck]) .ib-dl-main { min-width: 0; flex: 0 1 auto; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-delivered.ib-undl:not([data-stuck]) { flex-wrap: wrap; }
+  .pn-inbox .ib-delivered.ib-undl .ib-dl-acts { margin-left: 20px; gap: 8px; }
+  .pn-inbox .ib-delivered.ib-undl .ib-dl-acts .ib-sendnow.ib-sendnow-go { margin-left: 0; }
+  .pn-inbox .ib-undl .ib-takeback { height: 36px; padding: 0 14px; font-size: var(--ib-fs-14, 14px); }
   .pn-inbox .ib-delivered.ib-undl { width: 100%; flex-wrap: wrap; padding: 10px 10px 10px 12px; }
   .pn-inbox .ib-delivered.ib-undl .ib-dl-main { flex: 1 1 100%; }
   .pn-inbox .ib-sendnow.ib-sendnow-go { height: 36px; margin-left: 20px; padding: 0 14px 0 12px; font-size: var(--ib-fs-14, 14px); }

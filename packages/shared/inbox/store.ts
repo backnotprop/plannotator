@@ -687,6 +687,7 @@ export interface InboxDeliveryPresence {
    * saved for the agent's next read. Absent: never.
    */
   uncertain?(session: string, itemId: string): boolean;
+  handed?(session: string, itemId: string): boolean;
   /**
    * Whether the session's connection claimed an item and will never deliver it (its wake was killed while it
    * delivered): the row says it was not delivered, and it may move to another session. Absent: never.
@@ -2549,6 +2550,7 @@ export class InboxStore {
       hostOf: noted("hostOf", bound(presence.hostOf)),
       launchResumes: noted("launchResumes", bound(presence.launchResumes)),
       uncertain: noted("uncertain", bound(presence.uncertain)),
+      handed: noted("handed", (session: string, itemId: string) => this.handover.handedTo(session).includes(itemId)),
       stuck: noted("stuck", bound(presence.stuck)),
       autoSendAfterMs: presence.autoSendAfterMs,
       waitOf: noted("waitOf", bound(presence.waitOf)),
@@ -2591,7 +2593,7 @@ export class InboxStore {
     const askerLive = (session: string): boolean => (presence ? presence.askerLive(session) : true);
     const uncertain = (session: string | null, itemId: string): boolean => !!session && presence?.uncertain?.(session, itemId) === true;
     const stuck = (session: string | null, itemId: string): boolean => !!session && presence?.stuck?.(session, itemId) === true;
-    const handed = (session: string | null, itemId: string): boolean => !!session && this.handover.handedTo(session).includes(itemId);
+    const handed = (session: string | null, itemId: string): boolean => !!session && (presence?.handed ?? ((s: string, id: string) => this.handover.handedTo(s).includes(id)))(session, itemId);
     // How long it waited on a busy session, and whether it goes in by itself (approval "inbox-busy-agent-reply"):
     // the server's clock while it waits, the item's own record once the Inbox marked it.
     const waitOf = (item: InboxMessage, session: string | null) => {
@@ -2638,7 +2640,7 @@ export class InboxStore {
         const decision = inboxDeliveryState({
           delivered: !!last.delivery,
           stuck: !last.delivery && stuck(lastTo.session, last.id),
-          handed: !last.delivery && handed(lastTo.session, last.id),
+          handed: !last.delivery && handed(lastTo.session, last.id) && !uncertain(lastTo.session, last.id),
           undelivered: !last.delivery && !askerLive(lastTo.session),
           askerEnded: false,
           wakes: !uncertain(lastTo.session, last.id),
@@ -2670,7 +2672,7 @@ export class InboxStore {
       const decision = inboxDeliveryState({
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),
-        handed: replyWaiting && handed(replySession, last.id),
+        handed: replyWaiting && handed(replySession, last.id) && !uncertain(replySession, last.id),
         undelivered: false,
         askerEnded,
         wakes: (wakingSession !== null || (askedSession !== null && connection != null)) && !uncertain(replySession, last.id),
@@ -6964,8 +6966,18 @@ export class InboxStore {
     return taken;
   }
 
+  recordAgentRead(ids: Iterable<string>, reader: string | null): void {
+    for (const id of ids) {
+      const message = this.messages.get(id);
+      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at || this.heldBy(message)) continue;
+      const at = this.stamp();
+      this.appendMessage({ ...message, read_by_agent: { session: reader, at } }, at);
+    }
+  }
+
   heldBy(message: InboxMessage): InboxHolder | null {
     if (message.delivery) return { by: "delivered", session: message.delivery.session, host: message.delivery.host };
+    if (message.read_by_agent) return { by: "read", session: message.read_by_agent.session, host: null };
     const tag = message.tags?.find((t) => t.delivery || t.read_at);
     if (tag) return { by: tag.delivery ? "delivered" : "read", session: tag.session, host: tag.host };
     const root = this.messages.get(message.thread_id);

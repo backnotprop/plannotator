@@ -54,7 +54,7 @@ describe("take back and the one hand-over step", () => {
     store.recordDelivery(delivered.id, { host: "pi", session: "ses_a" });
     expect(refusal(delivered.id)).toEqual({ code: "agent_has_it", by: "delivered" });
     const read = reply("And gzip.", "k2");
-    store.handover.read([read.id], "ses_b");
+    store.recordAgentRead([read.id], "ses_b");
     expect(refusal(read.id)).toEqual({ code: "agent_has_it", by: "read" });
     expect(store.message(read.id)!.taken_back_at ?? null).toBeNull();
   });

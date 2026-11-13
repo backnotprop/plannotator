@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { InboxDraft, InboxMessageWire, InboxReplyDraft } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi } from './api';
 
+export const TAKE_BACK_LABEL = 'Take back';
+
 export interface TakeBackState {
   id: string;
   busy: boolean;
@@ -20,7 +22,7 @@ export function takeBackRefusal(error: unknown, name: string): string {
 }
 
 export function takeBackOffered(message: InboxMessageWire, only: boolean): boolean {
-  if (message.author.kind !== 'person' || message.delivery || message.taken_back_at || message.launch || message.handoff || message.review_verdict) return false;
+  if (message.author.kind !== 'person' || message.delivery || message.taken_back_at || message.read_by_agent || message.launch || message.handoff || message.review_verdict) return false;
   if (message.ack_of || message.tidy || (message.set_aside?.length ?? 0) > 0 || (message.reopened?.length ?? 0) > 0 || (message.reask?.length ?? 0) > 0) return false;
   if (message.tags?.some((tag) => tag.delivery || tag.read_at)) return false;
   if ((message.sent_annotations ?? 0) > 0) return false;

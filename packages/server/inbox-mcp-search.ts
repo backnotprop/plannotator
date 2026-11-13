@@ -110,9 +110,7 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
           total += answer.totals?.messages ?? 0;
           for (const row of answer.groups?.messages ?? []) if (row.type === "message") rows.push(row);
         }
-        const shown = rows.slice(0, limit);
-        context.store.handover.read(shown.map((row) => row.id), null);
-        const results = shown.map((row) => rowOf(row, projectIds === null));
+        const results = rows.slice(0, limit).map((row) => rowOf(row, projectIds === null));
         const head =
           results.length === 0
             ? `No message matches ${JSON.stringify(q)} in ${scope}.`

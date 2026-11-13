@@ -20,9 +20,9 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function world() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-take-back-")));
-  roots.push(root);
+async function world(existing?: { root: string }) {
+  const root = existing?.root ?? realpathSync(mkdtempSync(join(tmpdir(), "plannotator-take-back-")));
+  if (!existing) roots.push(root);
   const project = join(root, "api");
   mkdirSync(project, { recursive: true });
   const dataDir = join(root, "data");
@@ -72,7 +72,7 @@ async function world() {
     link.start();
     stops.push(() => link.dispose());
   };
-  return { server, client, ask, reply, upload, takeBack, wake };
+  return { root, server, client, ask, reply, upload, takeBack, wake };
 }
 
 describe("take back", () => {
@@ -113,6 +113,17 @@ describe("take back", () => {
     const id = await w.reply(asked.message_id, "k1", "Use the ARM runner.");
     await w.client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-b" } });
     expect(await w.takeBack(id)).toMatchObject({ status: 409, code: "agent_has_it", by: "read" });
+  }, 30_000);
+
+  test("an agent's read still refuses a take-back after the Inbox restarts", async () => {
+    const first = await world();
+    const asked = await first.ask("ses-a", "Which runner?");
+    const id = await first.reply(asked.message_id, "k1", "Use the ARM runner.");
+    await first.client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-b" } });
+    await first.client.close();
+    first.server.stop();
+    const again = await world({ root: first.root });
+    expect(await again.takeBack(id)).toMatchObject({ status: 409, code: "agent_has_it", by: "read" });
   }, 30_000);
 
   test("racing the shared connection's claim, a reply is never both taken back and delivered", async () => {
