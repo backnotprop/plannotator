@@ -797,16 +797,8 @@ REM option before --version, which ends curl's option parsing.
 set "CURL_RETRY=--retry 3 --retry-delay 2"
 curl --retry-all-errors --version >nul 2>&1
 if !ERRORLEVEL! equ 0 set "CURL_RETRY=!CURL_RETRY! --retry-all-errors"
-set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
-call :DownloadBinary
-if !DL_STATUS! neq 0 (
-    echo Failed to download binary >&2
-    if exist "!TEMP_FILE!" del "!TEMP_FILE!"
-    exit /b 1
-)
-
 REM Download checksum to a randomized temp path for the same reason as
-REM the binary download above (concurrent collision + symlink pre-placement).
+REM the binary download below (concurrent collision + symlink pre-placement).
 set "CHECKSUM_FILE=%TEMP%\plannotator-checksum-%RANDOM%.txt"
 set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"
 curl -fsSL !CURL_RETRY! !CURL_SUM_LIMITS! "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
@@ -823,7 +815,6 @@ if !DL_STATUS! neq 0 (
     REM at CHECKSUM_FILE. Clean it up to match the discipline used
     REM for TEMP_FILE elsewhere in this script.
     if exist "!CHECKSUM_FILE!" del "!CHECKSUM_FILE!"
-    del "!TEMP_FILE!"
     exit /b 1
 )
 
@@ -848,9 +839,26 @@ if "!CHECKSUM_SHAPE:~64,1!"=="" set "CHECKSUM_OK="
 if not "!CHECKSUM_SHAPE:~65!"=="" set "CHECKSUM_OK="
 if not defined CHECKSUM_OK (
     echo The checksum file for !BINARY_NAME! !TAG! is not a SHA-256 checksum. Nothing was changed; try again later. >&2
-    del "!TEMP_FILE!"
     exit /b 1
 )
+
+set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
+set "TAKEN="
+set "PACKED_SUFFIXES=.gz"
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="1" set "PACKED_SUFFIXES="
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="true" set "PACKED_SUFFIXES="
+if /i "!PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD!"=="yes" set "PACKED_SUFFIXES="
+for %%S in (!PACKED_SUFFIXES!) do if not defined TAKEN call :DownloadPacked %%S
+if defined TAKEN goto :DownloadTaken
+call :DownloadBinary
+if !DL_STATUS! neq 0 (
+    echo Failed to download binary >&2
+    if exist "!TEMP_FILE!" del "!TEMP_FILE!"
+    exit /b 1
+)
+set "TAKEN=!BINARY_NAME!"
+:DownloadTaken
+echo Downloaded !TAKEN!.
 
 REM Verify checksum using certutil
 set "ACTUAL_CHECKSUM="
@@ -2051,6 +2059,31 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference =
 set "PLN_NT_STATE="
 set "PLN_NT_FROM="
 set "PLN_NT_TAG="
+goto :eof
+
+:DownloadPacked
+set "PK_SUFFIX=%~1"
+curl -fsSIL --connect-timeout 30 --max-time 60 "!BINARY_URL!!PK_SUFFIX!" >nul 2>&1
+if errorlevel 1 goto :eof
+set "PK_RAW_URL=!BINARY_URL!"
+set "PK_RAW_FILE=!TEMP_FILE!"
+set "BINARY_URL=!BINARY_URL!!PK_SUFFIX!"
+set "TEMP_FILE=%TEMP%\plannotator-packed-%RANDOM%!PK_SUFFIX!"
+call :DownloadBinary 2>nul
+set "PK_FILE=!TEMP_FILE!"
+set "BINARY_URL=!PK_RAW_URL!"
+set "TEMP_FILE=!PK_RAW_FILE!"
+set "PK_STATUS=1"
+set "PLN_PK_IN=!PK_FILE!"
+set "PLN_PK_OUT=!TEMP_FILE!"
+set "PLN_PK_SHA=!EXPECTED_CHECKSUM!"
+if !DL_STATUS! equ 0 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; try { $i = [System.IO.File]::OpenRead($env:PLN_PK_IN); try { $g = New-Object System.IO.Compression.GZipStream -ArgumentList $i, ([System.IO.Compression.CompressionMode]::Decompress); $o = [System.IO.File]::Create($env:PLN_PK_OUT); try { $g.CopyTo($o) } finally { $o.Dispose(); $g.Dispose() } } finally { $i.Dispose() }; $s = [System.IO.File]::OpenRead($env:PLN_PK_OUT); try { $h = [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($s)).Replace('-', '') } finally { $s.Dispose() }; if ($h -ne $env:PLN_PK_SHA) { exit 1 } } catch { exit 1 }; exit 0" >nul 2>&1 && set "PK_STATUS=0"
+if exist "!PK_FILE!" del "!PK_FILE!" >nul 2>&1
+if "!PK_STATUS!"=="0" (
+    set "TAKEN=!BINARY_NAME!!PK_SUFFIX!"
+) else (
+    if exist "!TEMP_FILE!" del "!TEMP_FILE!" >nul 2>&1
+)
 goto :eof
 
 REM ======================================================================
