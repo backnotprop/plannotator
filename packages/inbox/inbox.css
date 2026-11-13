@@ -12042,7 +12042,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
    bottom edge above the home bar (--ib-sheet-inset), its corners, surface and rise; above the keyboard while one is
    up (`--ib-vvh`, phone.ts, as .ib-sheet). The Pull requests page's popover (prs/prs.css, loaded after this file)
    uses .ib-prpop and some of the same .ib-prpop-* names for its own look, so the sheet's rules are scoped under
-   .ib-prpop-sheet to win over them; the desktop card is left as it is. */
+   .ib-prpop-sheet to win over them (a stack's list, below, in the card too). */
 .ib-prpop.ib-prpop-sheet { z-index: 120; left: var(--ib-sheet-inset); right: var(--ib-sheet-inset); bottom: calc(100% - var(--ib-vvh, 100%) + var(--ib-sheet-inset) + env(safe-area-inset-bottom, 0px)); top: auto; width: auto; max-width: none; max-height: min(78dvh, calc(var(--ib-vvh, 100dvh) - 64px - env(safe-area-inset-top, 0px))); padding: 0; border-width: 0; border-radius: var(--ib-sheet-corner, 12px); box-shadow: var(--ib-float-s); font-size: inherit; animation: var(--ib-sheet-rise); }
 :root[data-ib-keyboard] .ib-prpop.ib-prpop-sheet { bottom: calc(100% - var(--ib-vvh, 100%) + var(--ib-sheet-inset)); }
 @media (prefers-reduced-motion: reduce) { .ib-prpop.ib-prpop-sheet { animation: none; } }
@@ -12050,7 +12050,9 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-sheet .ib-prpop-repo { margin-left: 0; font-size: inherit; }
 .ib-prpop-sheet .ib-prpop-n { font-family: inherit; font-variant-numeric: normal; }
 .ib-prpop-sheet .ib-prpop-title { display: inline; margin: 0; overflow: visible; -webkit-line-clamp: unset; line-clamp: none; }
-.ib-prpop-sheet .ib-prpop-stack, .ib-prpop-sheet .ib-prpop-stack:hover { display: block; width: auto; margin: 0; padding: 0 0 6px; border-radius: 0; background: none; font-size: inherit; cursor: auto; }
+/* A thread's stack is a list of rows, one under the other, in the card and the sheet: the Pull requests board's stack
+   button (prs/prs.css `.ib-prpop-stack`, a flex row) shares the class, so the list's own two classes win over it. */
+.ib-prpop-rows.ib-prpop-stack, .ib-prpop-rows.ib-prpop-stack:hover { display: block; width: auto; margin: 0; padding: 0 0 6px; border-radius: 0; background: none; font-size: inherit; cursor: auto; }
 .ib-prpop-sheet .ib-prpop-err { margin: 0; font-size: var(--ib-fs-12, 12px); color: var(--ib-ref-closed); }
 /* Its edit: the field takes the row's width beside Add; Close is the sheet's last row, the width of the sheet. */
 .ib-prpop-sheet .ib-prpop-edit { gap: 8px; padding: 10px 12px 8px; }
