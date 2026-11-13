@@ -328,6 +328,8 @@ The `/docs/reference/keyboard-shortcuts` page is auto-generated from the shortcu
 
 The site's videos are not in the repository, so a plugin update that copies the repo stays small. They live in the `plannotator-marketing` S3 bucket under `assets/` and are served at `https://plannotator.ai/assets/<name>` (the same URLs as when they shipped from `public/assets/`; the in-app announcements and the README link to them). The marketing deploy's `aws s3 sync … --delete` has `--exclude "assets/*.mp4" --exclude "assets/*.webm"`, so it neither uploads nor deletes them. Pages link to them with `videoUrl('<name>')` from `src/lib/media.ts`, an absolute URL, so `bun run dev` plays the production files. Posters (small jpgs) stay in `public/assets/`. `apps/marketing/media.test.ts` fails when a video is put back in `public/`, a page links one by a relative path, or the sync loses its excludes.
 
+Other files uploaded by hand (for example a picture an in-app dialog loads from the site) go under `assets/hosted/`, which the sync also excludes (`--exclude "assets/hosted/*"`); upload them the same way with their own content type.
+
 To add or replace a video, someone with AWS access uploads it with an explicit content type (`video/webm` for `.webm`), then checks the public URL:
 
 ```bash
