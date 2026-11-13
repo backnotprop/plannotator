@@ -75,7 +75,7 @@ export function createInboxHandover(store: InboxHandoverStore, now: () => number
       const out: string[] = [];
       for (const [id, list] of hands) {
         const message = store.message(id);
-        if (message && !message.delivery && !message.taken_back_at && list.some((h) => h.session === session && h.until === null && h.way !== "read")) out.push(id);
+        if (message && !message.delivery && !message.taken_back_at && list.some((h) => h.session === session && h.until === null)) out.push(id);
       }
       return out;
     },
