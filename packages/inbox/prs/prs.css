@@ -381,6 +381,8 @@ button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset
 .ib-prs-pickrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; }
 .ib-prs-picksheet .ib-prs-mlist { font-size: var(--ib-fs-14, 14px); }
 .ib-prs-picksheet .ib-prs-btn { height: 44px; padding: 0 18px; font-size: var(--ib-fs-15, 15px); }
+/* The window's toast (Close's count with Undo) sits above the phone's pick sheet, never over its buttons (SheetPage's useToastAbove). */
+.pn-inbox:has(.ib-prs-picksheet) .ib-toast { bottom: calc(var(--ib-prs-sheet-h, 0px) + 8px); }
 .ib-prs[data-phone] .ib-prs-bar .ib-prs-btn { height: 36px; padding: 0 14px; }
 .ib-prs[data-phone][data-picking] .ib-prs-scroll { padding-bottom: 96px; }
 

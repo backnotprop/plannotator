@@ -4,7 +4,8 @@
  *  - Close asking first, or closing several at once instead of one after another;
  *  - a refusal not reported in the host's words, sent again by itself, or leaving the selection;
  *  - closed PRs staying in Open, or a toast without the count and Undo;
- *  - Undo reopening anything but what that Close closed, or not picking them again and saying how each went.
+ *  - Undo reopening anything but what that Close closed, or not picking them again and saying how each went;
+ *  - on a phone, the toast covering the pick sheet's buttons.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No gh: the window's fetch is stubbed.
  */
@@ -208,4 +209,17 @@ test('Undo reopens exactly what that Close closed, picks them again, and reports
   expect(toasts.at(-1)!.toast.onUndo).toBeUndefined();
   await settle();
   expect(sent).toHaveLength(5);
+});
+
+test("a phone's pick sheet lifts the window's toast above it while it shows, and lets it go after", () => {
+  if (!hasDom) return;
+  draw({ phone: true });
+  const inbox = $('.pn-inbox')!;
+  click($('[data-pr-select="select"]')!);
+  click(tile(key(7))!);
+  expect($('[data-pr-actions] [data-pr-close]')).not.toBeNull();
+  expect(inbox.style.getPropertyValue('--ib-prs-sheet-h')).toMatch(/^\d+px$/);
+  click($('[data-pr-clear]')!);
+  expect($('[data-pr-actions]')).toBeNull();
+  expect(inbox.style.getPropertyValue('--ib-prs-sheet-h')).toBe('');
 });

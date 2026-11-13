@@ -181,6 +181,7 @@ export function SheetPage(props: SheetPageProps) {
   const chosenKey = [...chosen].sort().join('\n');
   const live: BulkPhase = (bulk.at === 'confirm' || bulk.at === 'report') && bulk.keys !== chosenKey ? { at: 'idle' } : bulk;
   const busy = live.at === 'running';
+  const pickSheet = useToastAbove();
 
   const show = useCallback((next: Pop) => {
     clearTimers();
@@ -839,7 +840,7 @@ export function SheetPage(props: SheetPageProps) {
       </div>
       {popover}
       {actions && phone && (
-        <div className="ib-prs-picksheet" data-pr-actions="">
+        <div ref={pickSheet} className="ib-prs-picksheet" data-pr-actions="">
           {mergeList}
           {mergeNote}
           <div className="ib-prs-pickrow">
@@ -868,6 +869,29 @@ function joinOr(names: readonly string[]): string {
 }
 
 const MERGE_WORDS = ['Merge', 'Confirm merge', 'Merging…', 'Merged'] as const;
+
+/**
+ * A phone's pick sheet is fixed to the bottom and grows with the report, so the window's toast (Close's Undo) would
+ * cover its buttons: its height goes to `--ib-prs-sheet-h` on the Inbox's root, and prs.css lifts the toast above it.
+ */
+function useToastAbove(): (sheet: HTMLDivElement | null) => void {
+  const stop = useRef<(() => void) | null>(null);
+  useEffect(() => () => stop.current?.(), []);
+  return useCallback((sheet: HTMLDivElement | null) => {
+    stop.current?.();
+    stop.current = null;
+    const root = sheet?.closest<HTMLElement>('.pn-inbox');
+    if (!sheet || !root) return;
+    const say = () => root.style.setProperty('--ib-prs-sheet-h', `${Math.ceil(sheet.getBoundingClientRect().height)}px`);
+    say();
+    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(say);
+    watch?.observe(sheet);
+    stop.current = () => {
+      watch?.disconnect();
+      root.style.removeProperty('--ib-prs-sheet-h');
+    };
+  }, []);
+}
 
 /** The bar's actions: idle, Merge's confirm (for the picks it was asked for), one PR after another, then the report. */
 type BulkPhase =
