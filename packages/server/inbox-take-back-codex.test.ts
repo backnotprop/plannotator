@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { deliveryLine, type RecipientConnection } from "@plannotator/core/inbox-delivery-line";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -35,14 +36,29 @@ async function world() {
   const post = (path: string, body: Record<string, unknown>) =>
     fetch(`http://127.0.0.1:${server.port}/api/inbox/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession, ...body }) });
   const asked = (await client.callTool({ name: "send_message", arguments: { body: "Which runner?", project_path: project, agent_session: THREAD, agent_host: "codex", agent_name: "Codex" }, _meta: codexMeta() }))
-    .structuredContent as { message_id: string };
+    .structuredContent as { message_id: string; thread_id: string };
   const reply = async (key: string, words: string) => ((await (await post(`messages/${asked.message_id}/reply`, { idempotency_key: key, words })).json()) as { reply: { id: string } }).reply.id;
   const takeBack = async (id: string) => (await post(`messages/${id}/take-back`, {})).status === 200;
   const queued = (id: string) => fake.calls().some((call) => call.name === "codex" && call.args[0] === "queue" && call.args.some((arg) => arg.startsWith("--message=") && arg.includes(`(${id})`)));
-  return { server, reply, takeBack, queued };
+  const connection = async () =>
+    ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${asked.thread_id}/sessions?asker=${THREAD}`)).json()) as { asker: { connection: RecipientConnection } }).asker.connection;
+  return { server, reply, takeBack, queued, connection };
 }
 
 describe("take back against the Codex wake", () => {
+  test("a reply in Codex's queue reads as handed to Codex, with no Send now, and is not taken back", async () => {
+    const w = await world();
+    const id = await w.reply("k1", "Use the ARM runner.");
+    await w.server.codexWake.sweep();
+    expect(w.queued(id)).toBe(true);
+    const connection = await w.connection();
+    expect(connection.handed).toEqual([id]);
+    const line = deliveryLine({ name: "Codex", deliveredAt: null, time: (iso) => iso, wakes: true, sendingNow: false, connection, handed: connection.handed!.includes(id) });
+    expect(line.text).toBe("Handed to Codex; it takes this at its next step.");
+    expect(line.sendNow).toBeUndefined();
+    expect(await w.takeBack(id)).toBe(false);
+  }, 30_000);
+
   test("a reply queued behind another in the same sweep is never both taken back and queued", async () => {
     const w = await world();
     let takenBack = 0;

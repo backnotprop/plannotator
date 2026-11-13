@@ -25,6 +25,7 @@ export interface InboxHandover {
   read(ids: Iterable<string>, reader: string | null): void;
   giveBack(messageId: string, session: string): void;
   holder(message: InboxMessage): InboxHolder | null;
+  handedTo(session: string): string[];
 }
 
 export function createInboxHandover(store: InboxHandoverStore, now: () => number): InboxHandover {
@@ -77,6 +78,14 @@ export function createInboxHandover(store: InboxHandoverStore, now: () => number
       const left = (hands.get(messageId) ?? []).filter((h) => h.session !== session || h.until !== null);
       if (left.length > 0) hands.set(messageId, left);
       else hands.delete(messageId);
+    },
+    handedTo(session) {
+      const out: string[] = [];
+      for (const [id, list] of hands) {
+        const message = store.message(id);
+        if (message && !message.delivery && !message.taken_back_at && list.some((h) => h.session === session && h.until === null && h.way !== "read")) out.push(id);
+      }
+      return out;
     },
     holder(message) {
       const standing = (hands.get(message.id) ?? []).filter((h) => live(message.id, h));

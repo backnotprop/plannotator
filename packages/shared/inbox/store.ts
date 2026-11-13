@@ -1866,7 +1866,7 @@ export class InboxStore {
 
   /** A thread's messages in seq order (a message's thread never changes, so the index only grows). */
   private threadMessages(threadId: string): InboxMessage[] {
-    return (this.threadMembers.get(threadId) ?? []).map((id) => this.messages.get(id)!);
+    return (this.threadMembers.get(threadId) ?? []).map((id) => this.messages.get(id)!).filter((message) => !message.taken_back_at);
   }
 
   private questionRecords(messageId: string): InboxQuestionRecord[] {
@@ -2199,7 +2199,7 @@ export class InboxStore {
 
   thread(threadId: string): InboxThread | null {
     const root = this.messages.get(threadId);
-    if (!root || root.thread_id !== threadId) return null;
+    if (!root || root.thread_id !== threadId || root.taken_back_at) return null;
     const project = this.shownProject(root.project_id);
     if (!project) return null;
     return {
@@ -2247,7 +2247,7 @@ export class InboxStore {
 
   threadSummary(threadId: string): InboxThreadSummary | null {
     const root = this.messages.get(threadId);
-    if (!root || root.thread_id !== threadId) return null;
+    if (!root || root.thread_id !== threadId || root.taken_back_at) return null;
     // The note carrying a 👍 is not a message of the thread as the person sees it.
     const messages = this.threadMessages(threadId).filter((m) => !isAckNote(m));
     // A Tidy note never moves the row: its time and author are the message before it.
@@ -2292,7 +2292,7 @@ export class InboxStore {
     function* sources(): Iterable<InboxActivitySource> {
       for (const [threadId, members] of store.threadMembers) {
         const root = store.messages.get(threadId);
-        if (!root || root.thread_id !== threadId) continue;
+        if (!root || root.thread_id !== threadId || root.taken_back_at) continue;
         // Messages are in seq order, so the last one written is the newest: a thread quiet since before the span
         // is passed over without reading the rest.
         const lastId = members[members.length - 1];
@@ -2300,8 +2300,9 @@ export class InboxStore {
         if (!(lastAt >= span.fromMs)) continue;
         const times: number[] = [];
         for (const id of members) {
-          const at = Date.parse(store.messages.get(id)?.created_at ?? "");
-          if (Number.isFinite(at)) times.push(at);
+          const message = store.messages.get(id);
+          const at = Date.parse(message?.created_at ?? "");
+          if (Number.isFinite(at) && !message?.taken_back_at) times.push(at);
         }
         yield {
           thread_id: threadId,
@@ -2590,6 +2591,7 @@ export class InboxStore {
     const askerLive = (session: string): boolean => (presence ? presence.askerLive(session) : true);
     const uncertain = (session: string | null, itemId: string): boolean => !!session && presence?.uncertain?.(session, itemId) === true;
     const stuck = (session: string | null, itemId: string): boolean => !!session && presence?.stuck?.(session, itemId) === true;
+    const handed = (session: string | null, itemId: string): boolean => !!session && this.handover.handedTo(session).includes(itemId);
     // How long it waited on a busy session, and whether it goes in by itself (approval "inbox-busy-agent-reply"):
     // the server's clock while it waits, the item's own record once the Inbox marked it.
     const waitOf = (item: InboxMessage, session: string | null) => {
@@ -2636,6 +2638,7 @@ export class InboxStore {
         const decision = inboxDeliveryState({
           delivered: !!last.delivery,
           stuck: !last.delivery && stuck(lastTo.session, last.id),
+          handed: !last.delivery && handed(lastTo.session, last.id),
           undelivered: !last.delivery && !askerLive(lastTo.session),
           askerEnded: false,
           wakes: !uncertain(lastTo.session, last.id),
@@ -2667,6 +2670,7 @@ export class InboxStore {
       const decision = inboxDeliveryState({
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),
+        handed: replyWaiting && handed(replySession, last.id),
         undelivered: false,
         askerEnded,
         wakes: (wakingSession !== null || (askedSession !== null && connection != null)) && !uncertain(replySession, last.id),
@@ -3704,7 +3708,7 @@ export class InboxStore {
     if (!thread) return null;
     return {
       ...thread,
-      messages: thread.messages.filter((message) => !message.taken_back_at).map((message) => {
+      messages: thread.messages.map((message) => {
         let out: InboxMessageWire = message;
         // The writer's own folder, by name only: an agent never reads another folder's absolute path.
         if (message.from_project) out = { ...out, from_project: { name: message.from_project.name } } as unknown as InboxMessageWire;
@@ -6950,7 +6954,7 @@ export class InboxStore {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     if (message.taken_back_at) return message;
-    const refusal = inboxTakeBackRefusal(message, { carries: this.carriesRecords(message.id), loneRoot: this.threadMessages(message.thread_id).every((m) => m.id === message.id || m.taken_back_at) });
+    const refusal = inboxTakeBackRefusal(message, { carries: this.carriesRecords(message.id), loneRoot: this.threadMessages(message.thread_id).every((m) => m.id === message.id) });
     if (refusal) throw new InboxError("cannot_take_back", refusal);
     const holder = this.heldBy(message) ?? this.handover.holder(message);
     if (holder) throw new InboxError("agent_has_it", "The agent already has this message.", { ...holder });
