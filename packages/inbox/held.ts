@@ -367,7 +367,8 @@ export function settlesOnBack(shown: readonly InboxListSection[], row: InboxList
   if (drawn && (drawn.id === INBOX_PRIORITY_GROUP.id) !== inboxRowInPriority(row)) return true;
   if (row.unseen > 0) return true;
   if (drawn?.id === INBOX_PRIORITY_GROUP.id) return false;
-  if (row.section !== 'stopped' && row.section !== 'holding' && row.section !== 'waiting') return false;
+  const onYou = (section: string | undefined) => section === 'stopped' || section === 'holding' || section === 'waiting';
+  if (!onYou(row.section)) return onYou(drawn?.id);
   return drawn?.id !== row.section;
 }
 

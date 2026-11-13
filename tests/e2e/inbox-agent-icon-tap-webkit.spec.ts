@@ -1,8 +1,9 @@
 /**
  * An agent's icon on an iPad, in WebKit, on a slow link: a long press on the mark opens the face picker, a tap on
- * "Sets" opens the icon dialog, and a tap on an icon applies it. WebKit sends no click for a touch whose pointerdown
- * was cancelled, so a picker place that cancels it cannot be tapped on an iPhone or iPad (Chromium clicks anyway).
- * Every Inbox answer waits 400 ms (a 3G round trip).
+ * "Sets" opens the icon dialog, a tap on an icon shows its page and a tap on "Use this icon" applies it; a tap on the
+ * mark opens the picker with the face unchanged, and a second tap closes it. WebKit sends no click for a touch whose
+ * pointerdown was cancelled, so a picker place that cancels it cannot be tapped on an iPhone or iPad (Chromium clicks
+ * anyway). Every Inbox answer waits 400 ms (a 3G round trip).
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-agent-icon-tap-webkit.spec.ts`.
@@ -52,7 +53,7 @@ async function longPress(target: Locator): Promise<void> {
   await target.dispatchEvent('pointerup', at);
 }
 
-test('a tap on the face picker’s "Sets" opens the icon dialog, and a tap on an icon applies it', async ({ page }) => {
+test('a tap on the face picker’s "Sets" opens the icon dialog, a tap on an icon and on "Use this icon" applies it; a tap on the mark opens the picker', async ({ page }) => {
   test.setTimeout(120_000);
   await page.route('**/api/inbox/**', async (route) => {
     await new Promise((done) => setTimeout(done, 400));
@@ -75,6 +76,18 @@ test('a tap on the face picker’s "Sets" opens the icon dialog, and a tap on an
   const icon = dialog.locator('.am-sets-i:not(:disabled)').first();
   await expect(icon).toBeVisible({ timeout: 30_000 });
   await icon.tap();
+  await dialog.locator('[data-use-icon]').tap();
   await expect(dialog).toHaveCount(0);
   await expect(mark.locator('[data-agent-mark]')).toHaveAttribute('data-face', /^set:/, { timeout: 30_000 });
+
+  const face = (await mark.locator('[data-agent-mark]').getAttribute('data-face'))!;
+  await mark.tap();
+  await expect(sets).toBeVisible();
+  await expect(mark).toHaveAttribute('aria-expanded', 'true');
+  await expect(mark.locator('[data-agent-mark]')).toHaveAttribute('data-face', face);
+  // The fan's plate lies over the mark: a second tap there is the mark's.
+  const box = (await mark.boundingBox())!;
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(mark).toHaveAttribute('aria-expanded', 'false');
+  await expect(mark.locator('[data-agent-mark]')).toHaveAttribute('data-face', face);
 });

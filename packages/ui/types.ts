@@ -42,6 +42,7 @@ export type WideModeType = 'wide' | 'focus';
 export interface ImageAttachment {
   path: string;
   name: string;
+  kind?: 'file';
 }
 
 /** DOM-relative text position used to restore a document annotation selection. */
