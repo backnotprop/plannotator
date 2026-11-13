@@ -340,6 +340,7 @@ packages/ui/components/SkillReferenceMenu.placement.test.tsx
 packages/ui/components/sidebar/FileBrowser.test.ts
 packages/editor/editableDocumentsHook.test.tsx
 packages/review-editor/components/InlineAnnotation.explain.test.tsx
+packages/review-editor/components/InlineAnnotation.suggestionLanguage.test.tsx
 packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
 packages/review-editor/App.panelView.test.tsx
 packages/review-editor/App.agentTool.test.tsx
