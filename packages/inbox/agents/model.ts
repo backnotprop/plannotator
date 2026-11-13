@@ -168,6 +168,14 @@ export interface AgentFacts {
   rows: [string, string][];
 }
 
+/** A Claude model's id by its family and version ("claude-opus-5-5" → "Opus 5.5"); any other id as it is. */
+export function modelName(id: string): string {
+  const parts = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id);
+  if (!parts) return id;
+  const family = parts[1]!.charAt(0).toUpperCase() + parts[1]!.slice(1);
+  return `${family} ${parts[2]}${parts[3] ? `.${parts[3]}` : ''}`;
+}
+
 export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: Date = new Date()): AgentFacts {
   const { agent } = entry;
   const sub = [agentHostName(agent.host), agent.project?.name, machine?.name].filter(Boolean).join(' · ');
@@ -187,6 +195,7 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
+  if (agent.live && agent.model) rows.push(['Model', agent.effort ? `${modelName(agent.model)} · ${agent.effort}` : modelName(agent.model)]);
   if (agent.live && typeof agent.context === 'number') rows.push(['Context', `${agent.context}% used`]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
   return { title: entry.name, sub, state, rows };

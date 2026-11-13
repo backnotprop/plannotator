@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_EFFORT_LEVELS, INBOX_EFFORT_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_MODEL_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -46,6 +46,16 @@ import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { createInboxContinuations, parseInboxContinues } from "./inbox-continuations";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
+
+/** A poll's `model`: an id such as `claude-opus-5-5` or a provider's, else null. */
+function modelIdOf(value: unknown): string | null {
+  return typeof value === "string" && /^[\w.:/@\[\]-]{1,120}$/.test(value) ? value : null;
+}
+
+/** A poll's `effort`: one of INBOX_EFFORT_LEVELS, else null. */
+function effortLevelOf(value: unknown): string | null {
+  return typeof value === "string" && (INBOX_EFFORT_LEVELS as readonly string[]).includes(value) ? value : null;
+}
 
 /** A poll's `context`: a whole percentage, 0 to 100, else null. */
 function contextPercentOf(value: unknown): number | null {
@@ -83,6 +93,9 @@ export interface InboxAgentSession {
   /** A turn runs now (live only); null when the connection does not say, or it is not live. */
   busy: boolean | null;
   label: string | null;
+  /** Its model id and latest request's effort (live only); null when its connection does not say. */
+  model: string | null;
+  effort: string | null;
   /** How full its context window is, 0 to 100 (live only); null when its connection does not say. */
   context: number | null;
 }
@@ -192,6 +205,9 @@ interface SeenSession {
   plugin: LoadedPlugin | null;
   /** Claude Code's version (`engine`); null when it sent none. */
   engine: string | null;
+  /** Its model id (`model`) and latest request's effort (`effort`); null when its latest poll sent none. */
+  model: string | null;
+  effort: string | null;
   /** How full its context window is, 0 to 100 (`context`); null when its latest poll sent none. */
   context: number | null;
   /**
@@ -545,6 +561,8 @@ export function createInboxLiveSessions(options: {
       folder: null,
       plugin: null,
       engine: null,
+      model: null,
+      effort: null,
       context: null,
       tags: false,
     };
@@ -567,6 +585,8 @@ export function createInboxLiveSessions(options: {
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
     entry.engine = parseEngine(body.engine);
+    entry.model = modelIdOf(body[INBOX_MODEL_POLL_FIELD]);
+    entry.effort = effortLevelOf(body[INBOX_EFFORT_POLL_FIELD]);
     entry.context = contextPercentOf(body[INBOX_CONTEXT_POLL_FIELD]);
     if (typeof body.project_path === "string" && body.project_path) entry.cwd = body.project_path;
     const folder = parseSessionFolder(body.session_folder);
@@ -678,6 +698,8 @@ export function createInboxLiveSessions(options: {
       folder: null,
       plugin: null,
       engine: null,
+      model: null,
+      effort: null,
       context: null,
       tags: true,
       wakeOnly: session,
@@ -708,6 +730,8 @@ export function createInboxLiveSessions(options: {
       folder: null,
       plugin: null,
       engine: null,
+      model: null,
+      effort: null,
       context: null,
       tags: true,
       label: name,
@@ -895,6 +919,8 @@ export function createInboxLiveSessions(options: {
         live,
         busy: live ? entry.busy : null,
         label: entry.label ?? null,
+        model: live ? entry.model : null,
+        effort: live ? entry.effort : null,
         context: live ? entry.context : null,
       });
     }
@@ -911,7 +937,7 @@ export function createInboxLiveSessions(options: {
       // Which ids its conversation continues: an agent is listed once for them all (inbox-agents-list.ts).
       // The context's fill in 5-point steps: it can move with every response of a turn, and each change has every
       // window read the list again.
-      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}:${entry.context === null ? "" : Math.floor(entry.context / 5)}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
+      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}:${entry.model ?? ""}:${entry.effort ?? ""}:${entry.context === null ? "" : Math.floor(entry.context / 5)}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
       .join("|") + `#${continuations.signature()}`;
 
   /**

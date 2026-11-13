@@ -105,6 +105,7 @@ import {
   discoverInboxTools,
   engineAtLeast,
   engineHasSessionAppend,
+  effortLevelOf,
   SESSION_USAGE_MIN_ENGINE,
   inboxFirstPromptContext,
   inboxRegistryPathOf,
@@ -198,6 +199,15 @@ function readEngineVersion($: Engine): Promise<string | null> {
   })()
   return engineVersion
 }
+
+/** The main loop's model id, as `/model` shows it; null when the engine does not say. */
+async function readModel($: Engine): Promise<string | null> {
+  const model = await $.session.model()
+  return typeof model === 'string' && model ? model : null
+}
+
+/** The main loop's latest request's effort (`turn.step`): the engine has no call that reads it. */
+let mainEffort: string | null = null
 
 /**
  * How full the context window is, as the status line has it (`$.session.usage()`'s `context.percent`, free to
@@ -597,6 +607,8 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       title: () => title.generatedTitle() ?? '',
+      model: () => readModel($),
+      effort: () => mainEffort,
       contextPercent: () => readContextPercent($),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
@@ -1221,7 +1233,10 @@ export function register(on: On) {
   })
 
   on('turn.step', async function* ($: Engine, e: any, next: Next) {
-    if (!e.agentId) await plainReminderAgain($)
+    if (!e.agentId) {
+      mainEffort = effortLevelOf(e.effort)
+      await plainReminderAgain($)
+    }
     const instance = allowed ? mod : null
     // A main-loop model request is going out: a reply Send now put into the turn is in it (inbox.ts).
     if (instance && !instance.isDisposed && !e.agentId && typeof e.turnId === 'string') instance.onMainStep(e.turnId)

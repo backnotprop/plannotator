@@ -64,6 +64,9 @@ import {
   INBOX_AUTO_RELOAD_POLL_FIELD,
   INBOX_CONTINUES_POLL_FIELD,
   INBOX_TITLE_POLL_FIELD,
+  INBOX_MODEL_POLL_FIELD,
+  INBOX_EFFORT_POLL_FIELD,
+  INBOX_EFFORT_LEVELS,
   INBOX_CONTEXT_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
@@ -132,6 +135,11 @@ export function engineAtLeast(version: string | null | undefined, min: string): 
 /** Whether an engine version is at least SESSION_APPEND_MIN_ENGINE. */
 export function engineHasSessionAppend(version: string | null | undefined): boolean {
   return engineAtLeast(version, SESSION_APPEND_MIN_ENGINE)
+}
+
+/** A model request's `effort` when it is one of INBOX_EFFORT_LEVELS, else null. */
+export function effortLevelOf(value: unknown): string | null {
+  return typeof value === 'string' && (INBOX_EFFORT_LEVELS as readonly string[]).includes(value) ? value : null
 }
 
 /** plugin.json's `version` (the plugin this process loaded); null when unreadable. */
@@ -1001,6 +1009,10 @@ export interface InboxLinkOptions {
   label?: () => string | Promise<string>
   /** Set by the host, never by the model. */
   title?: () => string | Promise<string>
+  /** The model id, sent as INBOX_MODEL_POLL_FIELD on every poll; null or a rejection sends none. */
+  model?: () => Promise<string | null>
+  /** The latest main-loop request's effort, sent as INBOX_EFFORT_POLL_FIELD; null sends none. */
+  effort?: () => string | null
   /**
    * How full the session's context window is (0 to 100), read for every poll
    * and sent as INBOX_CONTEXT_POLL_FIELD. Null or a rejection: nothing sent.
@@ -1504,6 +1516,8 @@ export class InboxLink {
     const label = await this.labelNow()
     const title = this.options.title ? await Promise.resolve().then(this.options.title).catch(() => '') : null
     const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
+    const model = this.options.model ? await this.options.model().catch(() => null) : null
+    const effort = this.options.effort ? this.options.effort() : null
     const context = this.options.contextPercent ? await this.options.contextPercent().catch(() => null) : null
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
@@ -1513,6 +1527,8 @@ export class InboxLink {
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),
       ...(title === null ? {} : { [INBOX_TITLE_POLL_FIELD]: title }),
+      ...(model === null ? {} : { [INBOX_MODEL_POLL_FIELD]: model }),
+      ...(effort === null ? {} : { [INBOX_EFFORT_POLL_FIELD]: effort }),
       ...(context === null ? {} : { [INBOX_CONTEXT_POLL_FIELD]: context }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),

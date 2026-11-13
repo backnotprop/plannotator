@@ -37,8 +37,10 @@ import {
   TranscriptForkedFrom,
   transcriptContinuedLineOf,
   transcriptForkedFromOf,
+  effortLevelOf,
 } from './inbox'
-import { INBOX_BRIDGE_POLL_PATH, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD } from './inbox-contract'
+import type { InboxLinkOptions } from './inbox'
+import { INBOX_BRIDGE_POLL_PATH, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_EFFORT_POLL_FIELD, INBOX_MODEL_POLL_FIELD } from './inbox-contract'
 import { fakeHost } from './testing/fake-host'
 
 const scratch = mkdtempSync(join(tmpdir(), 'plannotator-continues-'))
@@ -291,7 +293,7 @@ describe('what the poll says', () => {
   const DATA = '/data'
   const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
 
-  async function pollsOf(continues?: () => Promise<readonly string[]>, contextPercent?: () => Promise<number | null>) {
+  async function pollsOf(continues?: () => Promise<readonly string[]>, contextPercent?: () => Promise<number | null>, more: Partial<InboxLinkOptions> = {}) {
     const host = fakeHost()
     host.files.set(inboxRegistryPathOf(DATA), REGISTRY)
     const polls: Record<string, unknown>[] = []
@@ -299,7 +301,7 @@ describe('what the poll says', () => {
       if (url.endsWith(INBOX_BRIDGE_POLL_PATH)) polls.push(body as Record<string, unknown>)
       return { status: 200, ok: true, text: JSON.stringify({ commands: [] }) }
     }
-    const link = new InboxLink({ host, dataDir: DATA, sessionId: NEW, tools: [], isBusy: () => false, instanceId: 'me', ...(continues ? { continues } : {}), ...(contextPercent ? { contextPercent } : {}) })
+    const link = new InboxLink({ host, dataDir: DATA, sessionId: NEW, tools: [], isBusy: () => false, instanceId: 'me', ...(continues ? { continues } : {}), ...(contextPercent ? { contextPercent } : {}), ...more })
     link.start()
     for (let i = 0; i < 4; i += 1) {
       host.clock += 1_000
@@ -319,6 +321,20 @@ describe('what the poll says', () => {
     for (const poll of await pollsOf(async () => [])) expect(INBOX_CONTINUES_POLL_FIELD in poll).toBe(false)
     for (const poll of await pollsOf(async () => Promise.reject(new Error('no shell')))) expect(INBOX_CONTINUES_POLL_FIELD in poll).toBe(false)
     for (const poll of await pollsOf()) expect(INBOX_CONTINUES_POLL_FIELD in poll).toBe(false)
+  })
+
+  test('the model and the last effort ride on every poll; neither when the engine says nothing or the read fails', async () => {
+    for (const poll of await pollsOf(undefined, undefined, { model: async () => 'claude-opus-5-5', effort: () => 'high' })) {
+      expect([poll[INBOX_MODEL_POLL_FIELD], poll[INBOX_EFFORT_POLL_FIELD]]).toEqual(['claude-opus-5-5', 'high'])
+    }
+    for (const poll of await pollsOf(undefined, undefined, { model: async () => Promise.reject(new Error('older engine')), effort: () => null })) {
+      expect(INBOX_MODEL_POLL_FIELD in poll || INBOX_EFFORT_POLL_FIELD in poll).toBe(false)
+    }
+  })
+
+  // Internal builds can send a numeric effort: only a named level is kept.
+  test('only a named effort level is kept from a model request', () => {
+    expect(['high', 'xhigh', 7, 'turbo', undefined].map(effortLevelOf)).toEqual(['high', 'xhigh', null, null, null])
   })
 
   // Same rule as `continues`: the latest figure on every poll, none when the host cannot say.

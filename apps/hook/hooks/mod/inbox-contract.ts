@@ -1534,6 +1534,15 @@ export const INBOX_CONTINUES_POLL_FIELD = 'continues'
 export const INBOX_TITLE_POLL_FIELD = 'title'
 
 /**
+ * The session's model id (`claude-opus-5-5`) and its latest request's effort,
+ * one of INBOX_EFFORT_LEVELS. Sent on every poll, so the latest stands; each is
+ * absent when the host does not say. An older Inbox ignores them.
+ */
+export const INBOX_MODEL_POLL_FIELD = 'model'
+export const INBOX_EFFORT_POLL_FIELD = 'effort'
+export const INBOX_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+
+/**
  * How full the session's context window is, a whole percentage 0 to 100, as
  * the host reported it for its last response (Claude Code's status line
  * `used_percentage`). Sent on every poll, so the latest stands; absent when the

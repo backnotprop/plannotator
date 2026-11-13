@@ -63,6 +63,21 @@ describe("who is listed, and how", () => {
     expect(group.agents[1]).toMatchObject({ host: "claude-code", label: "Fix login redirect", project: { id: "prj_ledger", name: "ledger" }, waiting: 0 });
   });
 
+  test("a live session carries its model and effort from its latest poll; a bad value, an older connection or an ended session carries none", async () => {
+    const { live, clock } = liveSessions();
+    await poll(live, "ses-set", { model: "claude-opus-5-5", effort: "high" });
+    await poll(live, "ses-odd", { model: "<b>opus</b>", effort: "turbo" });
+    await poll(live, "ses-old");
+    const facts = () => Object.fromEntries(inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents.map((agent) => [agent.id, [agent.model, agent.effort]]));
+    expect(facts()).toEqual({ "ses-set": ["claude-opus-5-5", "high"], "ses-odd": [undefined, undefined], "ses-old": [undefined, undefined] });
+    // The latest poll stands: a model without effort clears the effort.
+    await poll(live, "ses-set", { model: "claude-haiku-5-5" });
+    expect(facts()["ses-set"]).toEqual(["claude-haiku-5-5", undefined]);
+    clock.t += 60 * 60_000;
+    await poll(live, "ses-other");
+    expect(facts()["ses-set"]).toEqual([undefined, undefined]);
+  });
+
   test("a live session carries its context window's fill from its latest poll; a bad figure, an older connection or an ended session carries none", async () => {
     const { live, clock } = liveSessions();
     await poll(live, "ses-full", { context: 63 });
@@ -281,12 +296,19 @@ describe("what tells the windows (`event: deliveries`' `agents`)", () => {
     expect(moved()).toBe(true);
     await poll(live, "ses-a", { busy: false, label: "Renamed" });
     expect(moved()).toBe(false);
-    // The context's fill tells the windows in 5-point steps only: a busy turn's every response moves it a little.
-    await poll(live, "ses-a", { busy: false, label: "Renamed", context: 61 });
+    // A model switch or another effort tells them at once.
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "high" });
     expect(moved()).toBe(true);
-    await poll(live, "ses-a", { busy: false, label: "Renamed", context: 63 });
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max" });
+    expect(moved()).toBe(true);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max" });
     expect(moved()).toBe(false);
-    await poll(live, "ses-a", { busy: false, label: "Renamed", context: 66 });
+    // The context's fill tells the windows in 5-point steps only: a busy turn's every response moves it a little.
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max", context: 61 });
+    expect(moved()).toBe(true);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max", context: 63 });
+    expect(moved()).toBe(false);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max", context: 66 });
     expect(moved()).toBe(true);
     clock.t += 31_000; // Past the live window: it ended.
     expect(moved()).toBe(true);
