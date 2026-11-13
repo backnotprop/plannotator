@@ -412,6 +412,42 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.pins).toEqual(["msg_b"]);
   });
 
+  test("an agent's face moves no record: the stream asks for `agent-faces`, and the frame reads the list again before the windows hear it", async () => {
+    const told: string[] = [];
+    let facesAtTold: unknown = null;
+    const d = door({
+      cursor: 3,
+      frames: ["event: agent-faces\ndata: {\"faces\":{},\"rev\":2}\n\n"],
+      threads: () =>
+        Response.json({
+          cursor: 3,
+          sections: [],
+          marks: ["star", "agent-face", "agent-name"],
+          agents: [{ agents: [], total: 0, ended_today: 0, faces: d.stats.threads > 1 ? { ses_b: { face: "glass-red", sessions: [], name: "Retry worker" } } : {}, faces_rev: d.stats.threads }],
+        }),
+    });
+    const { peer } = link(d.url, {
+      onReread: (event) => {
+        told.push(event);
+        facesAtTold = peer.list!.agents!.faces;
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("agent-faces")).toBe("1");
+    expect(told).toEqual(["agent-faces"]);
+    expect(facesAtTold).toEqual({ ses_b: { face: "glass-red", sessions: [], name: "Retry worker" } });
+  });
+
+  test("a machine's agent faces come from its agents group, only what parses; an older Inbox's group has none", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 3, sections: [], agents: [{ agents: [], total: 0, ended_today: 0 }] });
+    expect(peer.list!.agents!.faces).toBeUndefined();
+    peer.acceptList({ cursor: 4, sections: [], agents: [{ agents: [], total: 0, ended_today: 0, faces: { ses_a: { face: "yellow", sessions: ["ses_0"] }, ses_x: { face: "not-a-face" }, "": { face: "yellow" } }, faces_rev: 5 }] });
+    expect(peer.list!.agents!.faces).toEqual({ ses_a: { face: "yellow", sessions: ["ses_0"] } });
+    expect(peer.list!.agents!.faces_rev).toBe(5);
+  });
+
   test("one fetch in flight at a time: refreshes during it make one more, never several at once (F5)", async () => {
     let inFlight = 0;
     let most = 0;
