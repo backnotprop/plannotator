@@ -25,14 +25,14 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { LaunchChoiceMeta } from './LaunchChoiceMeta';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { inboxAskingMessage, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
-import { InboxApiError, InboxHeldError, inboxApi, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
+import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { awayLine, outboxLine, type MachinesModel } from '../machines';
 import { threadSessions, type ThreadSession } from '../agents/model';
 import { useInboxAgentsWho } from '../agentsList';
@@ -60,9 +60,8 @@ import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksVi
 import { threadLinks } from '../threadLinks';
 import { useDefaultRefHost } from '../defaultRefHost';
 import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileViewChoice, type FileView } from '../fileView';
-import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
+import { fullScreenExit } from '../fullScreenOrigin';
 import { takeArrivalFocus } from '../threadStep';
-import type { InboxToastModel } from './Toast';
 import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
 import { inboxRowSnoozed, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
@@ -74,7 +73,7 @@ import { HoldingChips, SnippetText } from '../parts/FoldLine';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
-import { reviewOpenPlan, type ReviewView } from '../pulls/reviewsModel';
+import { reviewOpenPlan } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
@@ -94,7 +93,7 @@ import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
 import { useReplyHasWords, useReplyTextStore, useReplyTextWhile } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
-import { conflictText, DraftHead, DraftFootNote, DraftStamp, unsentWords } from './DraftLabel';
+import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, DraftStamp, unsentWords } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { debugNote } from '../debugLog';
@@ -112,7 +111,7 @@ import { useThreadAttachments } from '../data/queries/files';
 import { MessageView } from '../parts/MessageView';
 import { useSendReply } from '../data/actions/send';
 import { pickComposerMode } from '../fullScreenComposer';
-import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi, type ReuseSource } from '../reuse';
+import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
@@ -185,6 +184,8 @@ import { arrowQuotesWhole, quoteToSend, selectedWordsIn } from '../replyQuote';
 import { useReplyQuote } from '../useReplyQuote';
 import { useAcceptedUndo } from '../useAcceptedUndo';
 import { useTileArrows } from '../useTileArrows';
+import type { ThreadPaneProps } from '../thread/paneProps';
+export type { ThreadPaneProps };
 import { DeliveredLine, EndedActions } from '../parts/EndedActions';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { ReplyTextField } from '../parts/ReplyTextField';
@@ -196,7 +197,7 @@ export { AckPill };
 import { ReactionTray } from './ReactionTray';
 import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
-import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
+import { OpenQuestionsButton } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
 import { useTextUnderFoot } from '../footLine';
 import { clearPhoneHead, fitPhoneHead } from '../headFit';
@@ -211,10 +212,9 @@ import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
-import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
+import { useThreadSteps } from '../steps/useThreadSteps';
 import { linkHashtags, useInitiativeTags } from '../hashtags';
-import type { Signal } from '../signal';
-import { replyWordsCount, withFreeName, withoutReplyWords, type ShapeReplyPart } from '../shape/addToReply';
+import { replyWordsCount, withFreeName, withoutReplyWords } from '../shape/addToReply';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
@@ -1176,301 +1176,6 @@ export function MessageBody({
   );
 }
 
-export interface ThreadPaneProps {
-  /** The thread is open in Reviews (the address), whatever its row says from one read to the next. */
-  inReviews?: boolean;
-  /** Its row in Reviews: the line and title over the messages, and what came before the review folded. */
-  reviewView?: ReviewView | null;
-  /** The review card's quiet link to this thread in Reviews; absent where there is no such page, or already on it. */
-  onInReviews?: () => void;
-  /**
-   * The thread in full screen: the sidebar and the list hidden, the thread at a reading measure. The header leads with
-   * "‹ Inbox" (back to them) in place of the button that hid them, and has no ×.
-   */
-  threadAlone?: boolean;
-  /** The sidebar is open beside the list (the person's choice, not held closed): full screen hides it and brings it back. */
-  fullSidebar?: boolean;
-  /** Enter or leave the thread's full screen; absent where it has none (a thread opened from a Board card). */
-  onFull?: (on: boolean) => void;
-  /** A line under the subject, from the window (the tour's notifications ask, once more, in the first real thread). */
-  notice?: React.ReactNode;
-  thread: InboxThread;
-  /**
-   * Linked machines: the machine whose thread this is, when it is another machine (null: this machine's own).
-   * The meta line under the subject names it, or says it is away since when.
-   */
-  machine?: MachineView | null;
-  /**
-   * Update a linked machine (by id): the error line's "Update" when a Delete there was refused because its Inbox is
-   * too old. Absent: the line says so without it.
-   */
-  onMachineUpdate?: (machineId: string) => void;
-  /** An archived thread's reuse button: New message with this file. Absent: an archived thread offers no button. */
-  onNewMessageWith?: (source: ReuseSource) => void;
-  /**
-   * Writes held for that machine about this thread (machines.ts `threadOutbox`): the person's words still on their
-   * way ("Sending to MacBook…", "Will send when MacBook is back"), or a write that did not land, with Dismiss.
-   */
-  outbox?: readonly OutboxView[];
-  onDismissOutbox?: (key: string) => void;
-  /**
-   * The thread's list row's `sent`: the person's reply is the last message
-   * (the Inbox's own notes read past), and when the agent read it (by the
-   * store's seq, so a reply the agent was not given still reads as unread),
-   * or null.
-   */
-  sent: { at: string; checked_at: string | null; read_by?: string; recipients?: InboxSentRecipient[] } | null;
-  /** The thread's questions changed through a pick (the response's questions for that message). */
-  /** `stateKept`: every question kept its state (only words typed in an answer changed): nothing outside the pane moved. */
-  onQuestions: (messageId: string, questions: InboxQuestion[], stateKept?: boolean) => void;
-  /**
-   * A Send's answer carried the thread as a read of it answers now (`thread_read`): the window draws the sent reply
-   * from it and reads only the list after. False: not drawn (the person moved on, or no such read), so `onChanged` reads.
-   */
-  onSentRead?: (model: ThreadModel) => Promise<boolean>;
-  /**
-   * Mark read is drawn (the header's Read pressed) but its write and the reads after it have not landed: the line
-   * under the header ("Read … N questions were closed …") waits for them, so it never shows half of what it says.
-   */
-  readPending?: boolean;
-  /** The questions (`<message id>/<key>`) with an answer saving, each time they change; none: the last one landed, or the pane closed. */
-  onPickSaves?: (ids: ReadonlySet<string>, paneClosed?: boolean) => void;
-  /** Something was written (a Send, resolve): read the thread and the list again. */
-  onChanged: () => Promise<void>;
-  /** Raised each time the Inbox says this thread's reply draft changed (`event: drafts`): the draft is read again. */
-  draftChanged?: number;
-  /** Raised each time records needed only this thread's files read again, not the thread (openThreadReads.ts). */
-  filesChanged?: number;
-  /**
-   * The same two as signals (signal.ts), which draw nothing themselves: the window tells the pane to read its
-   * reply draft, or its files, again. A read that brings nothing new then draws nothing at all.
-   */
-  draftSignal?: Signal | null;
-  filesSignal?: Signal | null;
-  onClose: () => void;
-  /** The attachment open beside the thread (`#…&file=att_…`), its version, and an annotation to show. */
-  file: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null; set?: string | null } | null;
-  /** `replace`: swap the history entry (stepping between files), so Back returns to the thread in one press. */
-  /** `back`: the browser's Back when the entry on screen was opened from `file` (a linked page's Back), else a new entry. */
-  /** `move`: into full screen from beside the thread, or back out to it (fullScreenOrigin.ts): the window keeps the history a stack of frames. */
-  onOpenFile: (file: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null; set?: string | null } | null, options?: { replace?: boolean; back?: boolean; move?: FrameMove }) => void;
-  /**
-   * The full screen on screen was entered from the file beside the thread (the history entry's mark,
-   * fullScreenOrigin.ts): × and Escape go back beside the thread. Else they close the file, back to the thread.
-   */
-  fullFromSide?: boolean;
-  /** The file × and Escape go back to when it is not the one on screen (fullScreenOrigin.ts `fullExitFile`), or null. */
-  fullExitFile?: string | null;
-  /** Open the guided review a message carries (the record's 4.2; `at`: a place in it, a context note's "Open in the review"; `side: 'old'` for removed lines). */
-  onOpenGuide: (messageId: string, at?: { path: string; line: number; side?: 'old' }) => void;
-  /**
-   * Where "new since you looked" starts (folding.ts `lookBoundary`), read
-   * from the thread BEFORE the window recorded this look and kept until the
-   * person leaves the thread. The window takes it from its own first read,
-   * which lands before it records the look. Absent: the pane takes it from
-   * the first thread it is given.
-   */
-  lookSeq?: number | null;
-  /** When this thread came back from its snooze, while the person stays in it (snoozeBack.ts); else null. */
-  snoozeBack?: string | null;
-  /**
-   * The window's rows and machines, which `threadSessions` (agents/model.ts) finds a thread's agents in. Absent: a
-   * session is named by its label, else its agent.
-   */
-  agentContext?: { rows: readonly InboxListRow[]; machines: MachinesModel } | null;
-  /** The list's agent filter now (`#agent=<id>`), and what a click on a session's name in the header does with it. */
-  agentFilter?: string | null;
-  onAgentFilter?: (agentId: string | null) => void;
-  /**
-   * Seen on sight (design record "inbox-new-in-open-thread", approved
-   * 2026-10-12): the seq the window's looks this visit covered (the look
-   * recorded when the thread opened, raised as arrivals are seen). An agent
-   * message after it arrived while the thread was open; once its first lines
-   * have been on screen for a second (window in front, nothing over the
-   * thread) the pane calls `onSeen` with the seq the look may now cover.
-   * Null: the thread carries no seqs (an older Inbox). Absent `onSeen`: off.
-   */
-  seenThrough?: number | null;
-  onSeen?: (throughSeq: number) => void;
-  /** Something over the thread from outside the pane (a guided review, a dialog): nothing counts as seen. */
-  covered?: boolean;
-  /**
-   * Whether this thread is visible: called with its id and whether anything
-   * covers it (from outside, or a file over it), and with null when the pane
-   * goes. Notifications skip a question in the thread on screen (notify.ts).
-   */
-  onScreenChange?: (state: { threadId: string; covered: boolean } | null) => void;
-  /** The thread's list row as it is now: Mark read's state and whether it is offered. Null until the list has it. */
-  row?: InboxListRow | null;
-  /** The group the thread's row sits in on the list on screen (markRead.ts `seenHeldInNew`). */
-  drawn?: InboxListGroupId | null;
-  /** Mark read, or move it back (the pressed button). Absent: no Mark read button. */
-  onMarkRead?: (read: boolean) => void;
-  /**
-   * Mark unread (markRead.ts `canMarkUnread`): on a thread read by opening it
-   * (not marked read) the header's Mark read becomes Mark unread, the moment
-   * `row` reads it as looked at (its look on its way included) and while the
-   * list still holds its row in New (the owner, 2026-11-02). It closes the
-   * thread, which stays unread. Absent: the button stays Mark read.
-   */
-  onMarkUnread?: () => void;
-  /**
-   * 👍 Looks good on the agent's latest message (`on`), or take it back:
-   * silent, nothing is sent; the thread is marked read. `agent` names the
-   * agent for the toast. Absent: no Looks good button. `reaction`: the emoji
-   * picked in the 👍's tray (null: 👍 Looks good; taking back, the one taken
-   * back), approval "inbox-reaction-tray". `was`: set only when the message
-   * already had the mark (the reaction it had; null: 👍), so only the emoji changes.
-   */
-  onAck?: (messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null, was?: InboxReaction | null) => void;
-  /**
-   * An action item's Done or Can't do it (`mark`) into the reply draft, or
-   * taking it back (`null`), approval "inbox-action-items-in-reply": the window
-   * writes it and reads the thread again. Resolves the message's action items
-   * as saved, or null when it was refused. Absent: the pane writes it itself
-   * and reads the thread again.
-   */
-  onAction?: (messageId: string, key: string, mark: ActionMark | null) => Promise<InboxQuestion[] | null>;
-  /** Archive (`true`) or Unarchive. Absent: the pane calls the resolve route itself. */
-  onArchive?: (archived: boolean) => void;
-  /**
-   * The thread is pinned to the sidebar (approval "inbox-pinned-threads"), and
-   * the header's pin toggle. Absent (an older Inbox keeps no pins): no toggle.
-   */
-  pinned?: boolean;
-  /** Resolves once the pin is written and the list read again (the header waits on it before the next click's request). */
-  onPin?: (pinned: boolean) => void | Promise<unknown>;
-  /** Add to Priority or Remove from Priority in the ⋯ menu, after the star. Absent where the row offers neither. */
-  priority?: { on: boolean; onToggle: () => void };
-  /** Snooze the thread until a moment (the ⋯ menu, approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no item. */
-  onSnooze?: (until: string) => void;
-  /** This thread's machine must update before Snooze works: Snooze stays and opens the update dialog. */
-  snoozeBlocked?: { name: string; onPress: () => void };
-  /** End its snooze: the line under the subject, and the ⋯ menu. */
-  onUnsnooze?: () => void;
-  /** The thread whose reply box should open (the warning toast's Reply); the pane calls `onReplyOpened` once it has. */
-  replyRequest?: string | null;
-  onReplyOpened?: () => void;
-  /** Shape's Pebble (approval "shape-inbox-placement"): the thread's board, at the header's right beside ⋮. Null: none. */
-  shapeButton?: React.ReactNode;
-  /**
-   * Ask AI's Side for the selection bars of the agents' messages and of the open file (ask/useInboxAsk.tsx `side`).
-   * Absent while this thread cannot ask: no Side. The top bar has no Ask icon (the owner, 2026-11-09): Side starts a chat.
-   */
-  onSide?: (selected: string, source?: string) => void;
-  /**
-   * The reply box's `/side` (ask/useInboxAsk.tsx `sideWords`): the reply's words go to the thread's side chat, and
-   * `taken` is called once its box has them. Absent while this thread cannot ask: `/side` is not listed.
-   */
-  onSideWords?: (words: string, taken?: () => void) => void;
-  /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
-  replyWords?: string | null;
-  onReplyWordsTaken?: () => void;
-  /**
-   * A board's Add to reply (packages/inbox/shape/addToReply.ts): its words join the reply after any it holds, its
-   * picture joins the reply's files, with the window's "Added to your reply · Undo". The pane calls `onReplyPartTaken` once.
-   */
-  replyPart?: ShapeReplyPart | null;
-  onReplyPartTaken?: () => void;
-  /** On a phone the header leads with a Back button named for the screen under the thread ("Inbox", a project). */
-  backLabel?: string;
-  /** A thread opened from a Board card: the chip naming the card, under the subject (board/CardChip.tsx). */
-  cardChip?: React.ReactNode;
-  /**
-   * Thread steps (approval "inbox-thread-steps"): the switch, and the window's steps changes (a steps line naming
-   * this thread, presence moved, a catch-up). Null or off: no steps button. `boardCard`: the Board card that links
-   * the thread (the Board on), opened by the panel head's Board icon.
-   */
-  threadSteps?: { on: boolean; subscribe: StepsSubscribe; boardCard?: { title: string; onOpen: () => void } | null } | null;
-  /**
-   * Code review is on (Settings → Capabilities, approval "inbox-code-review-direction"): a review an agent sent
-   * shows as a review card with Start review. Off or absent: today's guided-review tile, nothing new.
-   */
-  codeReview?: boolean;
-  /** A phone: one screen at a time, so an open file takes the whole window (phone.ts). */
-  phone?: boolean;
-  /**
-   * A window too narrow for the list beside the thread (stack.ts): the thread
-   * covers the list, and its header leads with the way back to it.
-   */
-  stacked?: boolean;
-  /** A window too narrow for a file beside the thread (stack.ts): an open file takes the whole window. */
-  fileStacked?: boolean;
-  /**
-   * This page came through the tailnet ("Over your tailnet"): "Open in" is a
-   * new tab only, never an app on the computer. Null until the settings say
-   * where the page is: no "Open in" yet, so a tailnet page never asks for the
-   * local app list.
-   */
-  remote?: boolean | null;
-  /**
-   * A tailnet guest's page (`tailnetGuest(settings)`): no thread PRs (they run this computer's `gh`), and the
-   * run line offers no Try again (starting an agent is the owner's).
-   */
-  guest?: boolean;
-  /**
-   * A file open beside the thread on a desktop hides the list and the
-   * sidebar: the header then leads with `‹ Inbox` (`backLabel`), which closes
-   * the file (through the pane's leave, as the file's × does: a typed
-   * comment waits as the file's draft) and calls this with the file's name, so the window can bring the
-   * list back and put focus on this thread's row. Absent: no such button.
-   */
-  onBackToList?: (fileName: string | null) => void;
-  /** The window's one toast: "Files open side by side now" with Undo, when a picked view becomes the remembered one. */
-  onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
-  /** Take down the toast this pane put up, named by its Undo, when it is still the one showing (another replaced it: no change). */
-  onToastGone?: (onUndo: () => void) => void;
-  /**
-   * The thread's address, or one message's (`&msg=<id>`), for the copy menus' Copy link (CopyMenus.tsx). Absent:
-   * the window's own origin (rowMenu.ts `threadLink` before the settings load).
-   */
-  linkOf?: (messageId?: string) => string;
-  /** A link in an attached page to this Inbox (AttachmentPane's `onInboxLink`). */
-  onInboxLink?: (href: string) => (() => void) | null;
-  /**
-   * A search result to land on (`#thread=…&msg=…`): the message is unfolded
-   * if folded or hidden in the middle fold, scrolled to the centre, focused
-   * and ringed (a question's card when the match was in a question), and the
-   * query's words are highlighted in it until the first click or key in the
-   * thread. `onLanded` then drops `msg=` from the hash. `focus: 'prompt'`
-   * (decision mode's "Open the thread", approval "inbox-decide-thread-only"):
-   * focus goes to the question's prompt, not the card.
-   */
-  landing?: { messageId: string; terms: readonly string[]; questionKey: string | null; focus?: 'prompt' } | null;
-  onLanded?: () => void;
-  /**
-   * The Artifacts view is on (approval "inbox-thread-artifacts", `#thread=…&artifacts`):
-   * the thread's body is swapped for a grid of every artifact across its messages.
-   */
-  artifacts?: boolean;
-  /** Turn the Artifacts view on or off (the header's button, "Back to the thread"). Absent: no Artifacts button. */
-  onArtifacts?: (open: boolean) => void;
-  /** The Artifacts view shows the thread's links (`#thread=…&artifacts&links`): its other side, never a second view. */
-  links?: boolean;
-  /** Move between the view's two sides. */
-  onLinks?: (on: boolean) => void;
-  /**
-   * Decision mode (experimental, thread only): "Decide these N" at the top of
-   * the open-questions list, which opens the dialog scoped to this thread.
-   * The window passes it only while two or more of the thread's decisions wait.
-   */
-  decide?: OpenQuestionsDecide | null;
-  /**
-   * A launched thread's run line (the thread route's `run`, launch only): null while the agent rests.
-   * Absent: not a launched thread, or launch is off (the delivery line as always).
-   */
-  run?: InboxRun | null;
-  /** The host's attach command for a launched thread (the thread route's `attach_command`), also while the agent rests. */
-  attachCommand?: string | null;
-  /** Stop, Try again or Delete changed the launch: read the thread again. */
-  onRunChanged?: () => void;
-  /**
-   * The ids of the messages in the first read of this thread that landed after it was opened (App's `openedWith`).
-   * A permission card among them never takes focus. Null (or absent) while that read has not landed, when `thread`
-   * may be a stale copy from an earlier visit: then no card takes focus.
-   */
-  openedWith?: ReadonlySet<string> | null;
-}
 
 
 const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
@@ -1500,7 +1205,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -1676,9 +1381,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft, wanted: readonly string[]) => void>(() => {});
   /** Only another window changed the words: the box takes them (set below, once the tiles exist); what it did. */
   const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook>(() => 'differs');
+  const ownedFor = useRef<string | null>(null);
+  const ownedBox = useRef<(threadId: string) => { text: string; files: ReplyDraftFiles } | null>(() => null);
   const replyDraft = useReplyDraft(thread.thread_id, {
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
+    ownedBox: (threadId) => ownedBox.current(threadId),
   });
   const keptWords = (replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '';
   /** Whether a Send carries words: the box's, or (the box closed) those kept as its draft. */
@@ -1754,6 +1462,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const landLater = (threadId: string, uploads: readonly Promise<InboxUpload | null>[]) => {
     for (const upload of uploads) void landInReplyDraft(threadId, upload);
   };
+  ownedBox.current = (threadId) =>
+    threadId === threadRef.current.thread_id && ownedFor.current === threadId && boxRef.current.open
+      ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) }
+      : null;
   takeTheirWords.current = (threadId, draft, was) => {
     // Closed, or showing another thread: no words here to keep (Edit draft and the thread's next visit read the draft).
     if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return 'hidden';
@@ -1821,6 +1533,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // Cancel and Escape keep the words and files as a draft (saved now; a file still uploading joins it once in);
     // Discard drops them.
     replyDraft.flush();
+    ownedFor.current = null;
     setBox({ open: false, text: '' });
     setTaggedIds([]);
     if (!discarded && !machine) landLater(thread.thread_id, replyFiles.detach());
@@ -3655,6 +3368,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     announce(conflictText(conflictSentElsewhere));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflictShown]);
+  const offerShown = !!replyDraft.offer && replyDraft.conflict === null;
+  useEffect(() => {
+    if (offerShown) announce(DRAFT_OFFER_TEXT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerShown]);
 
   // The thread's draft, once read, goes back in the box (open, without focus), unless the person already wrote there.
   useEffect(() => {
@@ -3662,7 +3380,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     restoredFor.current = thread.thread_id;
     // Words a conflict left unsaved here come back before the draft another window holds.
     const kept = replyDraft.conflict ?? replyDraft.draft?.body ?? null;
-    if (kept === null) return;
+    if (kept === null || replyDraft.offer) return;
     const current = boxRef.current;
     if (current.open && current.text.trim()) return;
     if (!current.open) restoringRef.current = true;
@@ -4429,6 +4147,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const sentFiles = new Set(replyFiles.current().filter((f) => f.upload && carried.has(f.upload.upload_id)).map((f) => f.key));
     const later = replyFiles.current().some((f) => !sentFiles.has(f.key));
     replyFiles.forget(sentFiles);
+    if (!later) ownedFor.current = null;
     setBox({ open: later, text: '' });
     if (carriedWords) replyDraft.sent();
     else replyDraft.release();
@@ -5530,7 +5249,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     openBox();
   };
   /** "Draft  Saved 4:51 PM  Discard" for the open box: above it on a phone; a computer shows only "Not saved …", over the box's row. Nothing until the first save. */
-  const stampSavedAt = replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null;
+  const stampSavedAt = replyDraft.conflict === null && !replyDraft.offer && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null;
   const stampTooLong = replyDraft.conflict === null && replyDraft.tooLong;
   const stampFailed = replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0);
   /** Discard: the Draft line's (a phone, above the box) and the bin's (a computer, the row's far right). */
@@ -5544,6 +5263,22 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** The live-session choice open under the box: it stands in for the box's Send and bin. */
   const routeChoiceOpen = route.open && asking;
+  const restoreDraft = () => {
+    const offered = replyDraft.restoreOffer();
+    if (!offered) return;
+    const { draft } = offered;
+    if (offered.typed) {
+      const typed = replyText.get();
+      const text = draft.body.trim() && typed.trim() ? `${draft.body.trimEnd()}\n\n${typed.trimStart()}` : draft.body.trim() ? draft.body : typed;
+      takeDraftFiles(draftFilesWithMine(draft.files ?? []), text, 'add');
+      changeReply(text, true);
+      focusReplyEnd();
+    } else {
+      setBox({ open: true, text: draft.body });
+      takeDraftFiles(draft.files ?? [], draft.body);
+    }
+    announce('Your saved draft is in the reply.');
+  };
   /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
   const discardMine = () => {
     const draft = replyDraft.takeTheirs();
@@ -6252,6 +5987,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 }}
                 onPost={decisionsPostable ? postOn : undefined}
                 postOnAdd={postAfterAdd}
+                review={pullReview}
               />
             )}
             {artifactsButton && (
@@ -7182,6 +6918,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <>
             {/* Above the box (approval "inbox-reply-recipient"): after a conflict its line and choice, and on a phone the
                 Draft line (below). On a computer nothing else. */}
+            {offerShown && <DraftOffer onRestore={restoreDraft} />}
             {replyDraft.conflict !== null && (
               <DraftHead
                 conflict={{
@@ -7212,6 +6949,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {...boxDrop.handlers}
               // A press beside the text (the row of chips under it) puts the caret in the reply.
               onMouseDown={(event) => focusReplyFromBox(event, textRef.current)}
+              onFocus={(event) => {
+                if ((event.target as EventTarget) === textRef.current) ownedFor.current = thread.thread_id;
+              }}
               // A paste that carries files (a screenshot, a copied image) attaches them; text pastes as text.
               onPaste={(event) => {
                 if (replyFiles.paste(event)) setError(null);
