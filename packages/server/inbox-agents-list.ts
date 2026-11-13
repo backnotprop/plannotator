@@ -39,7 +39,11 @@ export interface InboxAgentLaunch {
   host: string;
   project_id: string;
   started_at: string;
+  /** The host started it (`session_ref`). */
+  started: boolean;
   run: InboxRunState | null;
+  /** Its scratch folder's name; null in a project. */
+  scratch: string | null;
 }
 
 /** One thread waiting on the person, by the session that owns it. */
@@ -141,7 +145,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       ...(known ?? { host: launch.host, project: evidence.projectById(launch.project_id), started_at: launch.started_at, last_seen_at: null }),
       id: launch.launch_id,
       session,
-      launch: { id: launch.launch_id, thread_id: launch.thread_id },
+      launch: { id: launch.launch_id, thread_id: launch.thread_id, started: launch.started, run, scratch: launch.scratch },
       host: known?.host ?? launch.host,
       state: working ? "working" : ended ? "ended" : "idle",
       waiting: 0,

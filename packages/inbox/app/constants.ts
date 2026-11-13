@@ -13,8 +13,6 @@ export const EMPTY_SET: ReadonlySet<string> = new Set();
 export const REFRESH_SPIN_MS = 600;
 /** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
 export const RECONNECT_SAY_GAP_MS = 10 * 60_000;
-/** How long a page over the tailnet says that a restart has not come back: long enough to read away from the computer. */
-export const RESTART_NOT_BACK_MS = 20_000;
 /** How long "Not reloaded: something you wrote is not saved yet" stays, with its Reload anyway (the stale page notice). */
 export const STALE_NOT_SAVED_MS = 12_000;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */

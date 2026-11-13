@@ -181,6 +181,7 @@ packages/inbox/rowsNotesLook.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
+packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
 packages/inbox/threadSessionsHeader.test.tsx
@@ -340,6 +341,7 @@ packages/ui/components/SkillReferenceMenu.placement.test.tsx
 packages/ui/components/sidebar/FileBrowser.test.ts
 packages/editor/editableDocumentsHook.test.tsx
 packages/review-editor/components/InlineAnnotation.explain.test.tsx
+packages/review-editor/components/InlineAnnotation.suggestionLanguage.test.tsx
 packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
 packages/review-editor/App.panelView.test.tsx
 packages/review-editor/App.agentTool.test.tsx
@@ -607,6 +609,7 @@ packages/inbox/boardReveal.test.tsx
 packages/inbox/broReveal.test.tsx
 packages/inbox/broRevealApp.test.tsx
 packages/inbox/grillMeTip.test.tsx
+packages/inbox/personalAgentsIntro.test.tsx
 packages/inbox/codeReviewOffer.test.tsx
 packages/inbox/tabIconChoice.test.tsx
 packages/inbox/themeChooser.test.tsx
@@ -707,6 +710,7 @@ packages/review-editor/components/ReviewHeaderMenu.test.tsx
 packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/prs/sheetTable.test.tsx
 packages/inbox/prs/sheetSelect.test.tsx
+packages/inbox/prs/sheetMerge.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
 packages/inbox/agents/faceFan.test.tsx
@@ -718,6 +722,7 @@ packages/inbox/agents/ownAgentIcons.test.tsx
 packages/inbox/agents/setAgentIcons.test.tsx
 packages/inbox/agents/animateAnyIcon.test.tsx
 packages/inbox/agents/agentRename.test.tsx
+packages/inbox/agents/agentMenuLaunch.test.tsx
 packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
