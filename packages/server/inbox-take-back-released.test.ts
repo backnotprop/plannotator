@@ -43,7 +43,7 @@ async function releasedMod(tag: string, root: string) {
   return (await import(join(dir, "testing", "claude-session.ts"))) as typeof import("../../apps/hook/hooks/mod/testing/claude-session");
 }
 
-describe.skipIf(!released)("take back against a released plugin's shared connection", () => {
+describe.skipIf(!released && !process.env.CI)("take back against a released plugin's shared connection", () => {
   for (const tag of RELEASES) {
     test(`${tag}: racing its claim, a reply is never both taken back and delivered`, async () => {
       const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-take-back-released-")));
@@ -102,7 +102,7 @@ describe.skipIf(!released)("take back against a released plugin's shared connect
   }
 });
 
-describe.skipIf(!released)("take back against a released Claude Code mod", () => {
+describe.skipIf(!released && !process.env.CI)("take back against a released Claude Code mod", () => {
   for (const tag of RELEASES) {
     test(`${tag}: a press right after its last ask is refused, and the words go in once`, async () => {
       const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-take-back-released-mod-")));
