@@ -6,8 +6,8 @@ import { INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE } from "../../sche
 
 export const JSONL_ENTRIES = [INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE];
 
-export function freeBackupName(inboxDir: string, at: Date): string {
-  const base = `backup-${at.toISOString().slice(0, 10)}-sqlite`;
+export function freeBackupName(inboxDir: string, at: Date, kind: "jsonl" | "sqlite"): string {
+  const base = `backup-${at.toISOString().slice(0, 10)}-${kind}`;
   for (let n = 1; ; n++) {
     const name = n === 1 ? base : `${base}-${n}`;
     if (!existsSync(join(inboxDir, name))) return name;

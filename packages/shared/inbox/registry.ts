@@ -27,6 +27,7 @@ import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
 import { proveInboxProcess } from "./process-proof";
+import { INBOX_DB_FILE, INBOX_RETURN_PARTIAL } from "./store-log/sqlite-return/names";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -332,7 +333,7 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
     try {
-      if (!inboxStartLockStale(dataDir)) return null;
+      if (!inboxStartLockStale(dataDir) || inboxReturnRunning(dataDir)) return null;
       rmSync(lock, { recursive: true, force: true });
     } catch {
       // Gone in between: try again.
@@ -375,22 +376,31 @@ export function joinInboxStartLock(dataDir: string): void {
 export function inboxStartLockStale(dataDir: string): boolean {
   const lock = join(inboxDir(dataDir), INBOX_START_LOCK);
   if (Date.now() - statSync(lock).mtimeMs > INBOX_START_LOCK_STALE_MS) return true;
-  let pids: number[];
+  const pids = startLockHolders(dataDir);
+  return pids !== null && pids.length > 0 && !pids.some(isPidAlive);
+}
+
+function startLockHolders(dataDir: string): number[] | null {
   try {
-    pids = readFileSync(join(lock, START_LOCK_HOLDERS), "utf8").split("\n").map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+    return readFileSync(join(inboxDir(dataDir), INBOX_START_LOCK, START_LOCK_HOLDERS), "utf8").split("\n").map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
   } catch {
-    return false;
+    return null;
   }
-  return pids.length > 0 && !pids.some(isPidAlive);
+}
+
+export function inboxReturnRunning(dataDir: string): boolean {
+  const dir = inboxDir(dataDir);
+  if (!existsSync(join(dir, INBOX_DB_FILE)) && !existsSync(join(dir, INBOX_RETURN_PARTIAL))) return false;
+  return (startLockHolders(dataDir) ?? []).some((pid) => pid !== process.pid && isPidAlive(pid));
 }
 
 /** Wait until `check` answers non-null, polling; null on timeout. */
-export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100): Promise<T | null> {
+export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100, keepWaiting?: () => boolean): Promise<T | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value !== null) return value;
-    if (Date.now() >= deadline) return null;
+    if (Date.now() >= deadline && !keepWaiting?.()) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }

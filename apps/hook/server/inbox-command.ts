@@ -53,6 +53,7 @@ import { inboxDir } from "@plannotator/shared/inbox/schema";
 import {
   acquireInboxStartLock,
   inboxStartLockStale,
+  inboxReturnRunning,
   joinInboxStartLock,
   INBOX_START_LOCK,
   INBOX_START_LOCK_STALE_MS,
@@ -65,6 +66,7 @@ import {
   type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
+import { INBOX_DB_FILE, InboxReturnError, inboxReturnFailedWords } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
@@ -95,6 +97,7 @@ const LOCK_HELD_ENV = "PLANNOTATOR_INBOX_LOCK_HELD";
 const DETACHED_ENV = "PLANNOTATOR_INBOX_DETACHED";
 /** How long a starter waits for a detached Inbox to answer its health check. */
 const START_TIMEOUT_MS = 20_000;
+const RETURN_WAIT_MAX_MS = 5 * 60_000;
 
 /**
  * The argv that runs this same CLI: the compiled binary alone, or bun plus the
@@ -146,10 +149,22 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
 }
 
 function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
-  return waitForInbox(async () => {
-    const next = await inboxStatus(dataDir, 1000);
-    return next.state === "running" ? next.entry : null;
-  }, START_TIMEOUT_MS);
+  const started = Date.now();
+  return waitForInbox(
+    async () => {
+      const next = await inboxStatus(dataDir, 1000);
+      return next.state === "running" ? next.entry : null;
+    },
+    startTimeoutMs(),
+    100,
+    () => Date.now() - started < RETURN_WAIT_MAX_MS && inboxReturnRunning(dataDir),
+  );
+}
+
+export function startTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.PLANNOTATOR_TEST_SANDBOX ? env.PLANNOTATOR_INBOX_START_TIMEOUT_MS?.trim() : undefined;
+  const ms = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : START_TIMEOUT_MS;
 }
 
 /**
@@ -192,7 +207,8 @@ async function startDetachedInbox(dataDir: string, release: (() => void) | null,
   try {
     const running = await waitUntilRunning(dataDir);
     if (!running) {
-      throw new Error(`The Plannotator Inbox did not start; see ${join(inboxDir(dataDir), INBOX_LOG_FILE)}.`);
+      const words = existsSync(join(inboxDir(dataDir), INBOX_DB_FILE)) ? `${inboxReturnFailedWords(dataDir)} Details: ` : "The Plannotator Inbox did not start; see ";
+      throw new Error(`${words}${join(inboxDir(dataDir), INBOX_LOG_FILE)}.`);
     }
     return running;
   } finally {
@@ -391,6 +407,11 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
           .finally(() => process.exit(0));
       },
     });
+  } catch (error) {
+    if (!(error instanceof InboxReturnError)) throw error;
+    release?.();
+    process.stderr.write(`${error.message}\n`);
+    process.exit(1);
   } finally {
     release?.();
   }

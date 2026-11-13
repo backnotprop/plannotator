@@ -1,6 +1,6 @@
 /**
  * The size budget: an Inbox of 100,000 messages, kept by each record log, starts, lists, opens a thread and
- * searches within fixed ceilings. Another record log has to pass the same ceilings.
+ * searches within fixed ceilings.
  *
  * The store is a generated Inbox (`world.ts`, about 5,000 messages) copied whole with fresh ids until it holds
  * the target, appended through the log under test, so the same records reach every log. Ceilings are

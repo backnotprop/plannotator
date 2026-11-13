@@ -1,8 +1,8 @@
 /**
  * The facts the store reads from the ORDER of its lines, not from any one record: when a thread was archived,
  * whether its address moved, where a name started routing, a message's first-line hashtags, a card's last real
- * change and the card as the Board reads it, a PR add or remove: one copy of each rule, used by the store's
- * replay of every line (`InboxStore.apply`) and by any other record log that works them out as it writes.
+ * change and the card as the Board reads it, a PR add or remove, as the store's replay of every line
+ * (`InboxStore.apply`) works them out.
  *
  * Each function takes the record's previous line (what the store held before this one) and the new one.
  */
@@ -14,7 +14,6 @@ import {
   readInboxCard,
   type InboxCard,
   type InboxMessage,
-  type InboxQuestionRecord,
   type InboxThreadPull,
 } from "@plannotator/core/inbox-types";
 import type { InboxThreadPullEvent } from "../store";
@@ -84,23 +83,4 @@ export function pullEventOf(prev: InboxThreadPull | undefined, record: InboxThre
   return live
     ? { seq, at: record.added_at, op: "add", pull: record.pull, by: record.added_by }
     : { seq, at: record.removed_at!, op: "remove", pull: record.pull, by: record.removed_by! };
-}
-
-/**
- * A question line that only carries on typing over the line before it: the same pick, the same state, only the
- * typed words (`text`, `other`, `note`), the revision and the pick time moved, and neither line a Send. The
- * decision history keeps one row per change of choice, Send, replacement, set-aside or Undo, never one per key.
- */
-export function continuesTyping(prev: InboxQuestionRecord, next: InboxQuestionRecord): boolean {
-  if (!prev.answer || !next.answer) return false;
-  if (sentNow(prev) || sentNow(next)) return false;
-  return JSON.stringify(withoutTyping(prev)) === JSON.stringify(withoutTyping(next));
-}
-
-const sentNow = (q: InboxQuestionRecord) => q.sent_reply_id !== null && q.sent_revision === q.revision;
-
-function withoutTyping(q: InboxQuestionRecord): unknown {
-  const { revision: _r, picked_at: _p, answer, ...rest } = q;
-  const { text: _t, other: _o, note: _n, ...choice } = answer!;
-  return { ...rest, answer: choice };
 }
