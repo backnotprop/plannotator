@@ -70,6 +70,7 @@ export function LaunchChoiceMenu({
             aria-checked={on}
             className="ib-cp-opt ib-cp-lchopt"
             data-compose-choice-value={value ?? 'default'}
+            title={value ?? undefined}
             onClick={() => {
               if (field === 'model') return onChoice(pickLaunchModel(choice, choices, value));
               const next = { ...choice };

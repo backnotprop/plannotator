@@ -55,6 +55,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { FAKE_LOGIN_CLAUDE_VALUE, installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
 import { installFakeCodexLaunch } from '../helpers/fake-codex-launch';
+import { installFakeOpenCodeLaunch } from '../helpers/fake-opencode-launch';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -204,7 +205,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeConfig({ inboxLaunch: { enabled: false } });
   const env: Record<string, string> = {
     // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
-    PATH: `${bin}:${join(root, 'codex', 'bin')}:/usr/bin:/bin`,
+    PATH: `${bin}:${join(root, 'codex', 'bin')}:${join(root, 'opencode', 'bin')}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
     PLANNOTATOR_DATA_DIR: dataDir,
@@ -851,5 +852,38 @@ test('Codex: its own models with each one\'s levels; the pick goes on thread/sta
   } finally {
     rmSync(join(world.home, '.codex'), { recursive: true, force: true });
     for (const start of codex.starts()) if (codex.alive(start.pid)) process.kill(start.pid, 'SIGKILL'); // inbox-guard: own child (the fake codex)
+  }
+});
+
+test('OpenCode: the picked model and variant go on the new session, its plugin takes the root, and the answer shows in the thread', async () => {
+  const { page } = world;
+  mkdirSync(join(world.home, '.config', 'opencode'), { recursive: true });
+  writeFileSync(join(world.home, '.config', 'opencode', 'opencode.json'), JSON.stringify({ plugins: ['@plannotator/opencode'] }));
+  const opencode = installFakeOpenCodeLaunch(join(world.root, 'opencode'));
+  try {
+    await page.goto(world.url);
+    await openCompose(page);
+    const d = dialog(page);
+    await d.locator('[data-compose-to]').click();
+    await d.locator('[data-compose-start="opencode"]').first().click({ timeout: 20_000 });
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model', { timeout: 10_000 });
+    await d.locator('[data-compose-choice]').click();
+    await expect(d.locator('[data-compose-choices] .ib-cp-cap')).toHaveText(['Model', 'Variant']);
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="opencode/flint-40b-free"]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="high"]').click();
+    await page.keyboard.press('Escape');
+    await expect(d.locator('[data-compose-choice]')).toHaveText('flint-40b-free · high');
+    await d.getByRole('textbox', { name: 'Message' }).fill('Bump the parser.');
+    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    await d.locator('[data-compose-send]').click();
+    const { thread_id } = (await (await answer).json()) as { thread_id: string };
+    const created = await waitFor('the session', () => opencode.http('POST', /^\/api\/session$/)[0]);
+    expect(created.body.model).toEqual({ providerID: 'opencode', id: 'flint-40b-free', variant: 'high' });
+    await openThread(page, thread_id);
+    await expect(pane(page).locator('[data-launched] [data-launch-choice]')).toHaveText('flint-40b-free · high');
+    await expect(pane(page)).toContainText('Done:', { timeout: 20_000 });
+  } finally {
+    rmSync(join(world.home, '.config', 'opencode'), { recursive: true, force: true });
+    for (const start of opencode.starts()) if (opencode.alive(start.pid)) process.kill(start.pid, 'SIGKILL'); // inbox-guard: own child (the fake opencode2)
   }
 });

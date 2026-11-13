@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react';
-import { keepAgentFace, keepOwnPicture, removeOwnPicture, type AgentFaceRef } from './agentFaces';
+import { keepOwnPicture, removeOwnPicture } from './agentFaces';
 import { isOwnFace, type AgentFace } from './faceChoices';
 import { OWN_LABEL } from './FaceFan';
-import { AnimateIt } from './AnimateIt';
 import { fitPicture } from './fitPicture';
 import { ownIconSrc, useOwnIcons } from './ownIcons';
 
 /**
  * "Your own…" in the agent icon dialog (AgentIconDialog.tsx): a large drop area (a click picks a file; a picture can
  * also be dropped anywhere on the dialog, or pasted while it is open), then the pictures already uploaded, any of
- * which this agent can show. A new picture, or one picked, shows on this agent at once and the dialog closes (`onDone`).
+ * which this agent can show. A new picture, or one picked, goes to `onPick` (its page, AgentIconDialog.tsx); a new one
+ * is kept with the Inbox, shown on no agent yet.
  * × takes a picture away, with no question: the agents that showed it go back to their own mark. The refusals are Set
  * picture…'s own words. Each picture is drawn as its still, as uploaded, scaled to fit its tile.
  */
-export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
+export function OwnIconsBody({ face, onPick }: { face: AgentFace; onPick: (face: AgentFace) => void }) {
   const icons = useOwnIcons() ?? [];
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25,10 +25,10 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
     setRefused(null);
     // A still photo over the limit (a phone's) is shrunk here first (fitPicture.ts); the upload checks what comes out.
     const fitted = await fitPicture(file);
-    const refusal = 'refused' in fitted ? fitted.refused : await keepOwnPicture(agent, fitted.file);
+    const kept = 'refused' in fitted ? fitted : await keepOwnPicture(fitted.file);
     setBusy(false);
-    if (refusal) setRefused(refusal);
-    else onDone();
+    if ('refused' in kept) setRefused(kept.refused);
+    else onPick(kept.face);
   };
   const pick = () => {
     const input = document.createElement('input');
@@ -92,10 +92,7 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
                 aria-label={`Picture ${icons.length - i}`}
                 className="am-own-i"
                 data-own-icon={icon.id}
-                onClick={() => {
-                  keepAgentFace(agent, `own:${icon.id}`);
-                  onDone();
-                }}
+                onClick={() => onPick(`own:${icon.id}`)}
               >
                 <img src={ownIconSrc(icon.id, true)} alt="" draggable={false} decoding="async" />
               </button>
@@ -118,7 +115,6 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
           ))}
         </div>
       )}
-      <AnimateIt agent={agent} face={face} onDone={onDone} />
     </div>
   );
 }

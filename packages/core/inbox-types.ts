@@ -441,6 +441,8 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "cloud-claude": "Claude Code routine",
   "cloud-grok": "Grok Bot",
   "cloud-muse": "Muse by Meta",
+  "cloud-hermes": "Hermes Agent server",
+  "cloud-openclaw": "OpenClaw server",
 };
 
 /**
@@ -1084,7 +1086,8 @@ export interface InboxAddressee {
 export type InboxLaunchAgent =
   | "claude-code"
   | "pi"
-  | "codex";
+  | "codex"
+  | "opencode";
 
 /** One Codex usage limit (`account/rateLimits/read`): how much of it is used, its length, and when it resets. */
 export interface InboxCodexLimit {
