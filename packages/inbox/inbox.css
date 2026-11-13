@@ -7973,6 +7973,13 @@ dialog.ib-dlg.ar-ed { width: 500px; }
 @media (pointer: coarse) {
   .pn-inbox .ar-area { font-size: max(16px, var(--ib-fs-16, 16px)); }
 }
+/* The personal agents dialog (PersonalAgentsIntro.tsx): the Board dialog's text and buttons under a 4:1 banner, which
+   is drawn only when both of its pictures loaded before the dialog opened. Each picture carries its own ground. */
+dialog.ib-dlg.ib-bi.ib-pa { width: min(600px, calc(100vw - 32px)); }
+.ib-pa-banner { aspect-ratio: 4 / 1; }
+.ib-pa-art { display: block; width: 100%; height: 100%; }
+.ib-pa-banner .ib-pa-light, :root.light .ib-pa-banner .ib-pa-dark { display: none; }
+:root.light .ib-pa-banner .ib-pa-light { display: block; }
 .ib-ri-stage { display: flex; flex-direction: column; gap: 10px; width: 400px; max-width: 100%; margin: 0 auto; transition: opacity 400ms ease-out; }
 .ib-ri-stage[data-fading] { opacity: 0; }
 .ib-ri-rules { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; min-height: 24px; }

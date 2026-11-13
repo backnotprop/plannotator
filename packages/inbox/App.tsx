@@ -233,6 +233,7 @@ import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
+import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
@@ -5946,6 +5947,25 @@ function Inbox() {
     mayClaim: (pageAge) => lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
     holds: () => !rulesSet(settingsRef.current?.prompts?.rules),
   });
+  // Personal agents (core/inbox-personal-agents.ts): the Inbox names it only while none is connected. Its banner is
+  // loaded before the claim, so the dialog opens with it or, offline, without it, and never changes while open.
+  const personalAgentsDue = lineLatch?.next === 'personal_agents';
+  const personalAgentsBanner = usePersonalAgentsBanner(personalAgentsDue);
+  const personalAgentsReveal = useLineReveal({
+    id: 'personal_agents',
+    due: personalAgentsDue,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    idle: pageIdle,
+    mayClaim: (pageAge) => personalAgentsBanner !== null && lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
+    holds: () => true,
+  });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
   // other offers), back on the list with no thread open or the page idle (any layout), once the list is taller than the
@@ -6022,7 +6042,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -6106,6 +6126,8 @@ function Inbox() {
     broReveal.stage !== 'claimed' &&
     agentRulesReveal.stage !== 'open' &&
     agentRulesReveal.stage !== 'claimed' &&
+    personalAgentsReveal.stage !== 'open' &&
+    personalAgentsReveal.stage !== 'claimed' &&
     grillMeTipReveal.stage !== 'open' &&
     grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -6652,7 +6674,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -8354,6 +8376,9 @@ function Inbox() {
             window.location.hash = '#settings/prompts';
           }}
         />
+      )}
+      {personalAgentsReveal.stage === 'open' && (
+        <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
       )}
       {broReveal.stage === 'open' && (
         <BroIntro

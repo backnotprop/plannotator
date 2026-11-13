@@ -34,8 +34,8 @@ function pagesWith(options: { maxEntries?: number; maxBytes?: number } = {}) {
 }
 
 describe("the window's policy", () => {
-  test("loads pictures from this server, data: and blob: only, never the web", () => {
-    expect(directives(WINDOW_CSP).get("img-src")).toEqual(["'self'", "data:", "blob:"]);
+  test("loads pictures from this server, data: and blob:, and the project's hosted folder only, never the rest of the web", () => {
+    expect(directives(WINDOW_CSP).get("img-src")).toEqual(["'self'", "data:", "blob:", "https://plannotator.ai/assets/hosted/"]);
   });
 
   test("plays a srcdoc page's own video and audio (data: and blob:), never the web's", () => {
