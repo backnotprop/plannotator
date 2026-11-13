@@ -67,6 +67,8 @@ export function UndeliveredBand({
   name,
   onSendNow,
   sending,
+  onTakeBack,
+  takingBack,
   restart,
   restartName,
 }: {
@@ -75,6 +77,8 @@ export function UndeliveredBand({
   /** Present while Send now is offered. */
   onSendNow?: (() => void) | null;
   sending?: boolean;
+  onTakeBack?: (() => void) | null;
+  takingBack?: boolean;
   /** Why it cannot go in sooner, when the fix is a plugin reload (restartNote). */
   restart: RestartNote | null;
   restartName: string;
@@ -86,6 +90,7 @@ export function UndeliveredBand({
         <Icon name="clock" size={14} />
         <UndeliveredText wait={wait} name={name} />
       </span>
+      {onTakeBack && <TakeBackButton busy={takingBack} onPress={onTakeBack} />}
       {onSendNow && (
         <Tip content="Put it into the running turn now: the agent reads it at its next step, without waiting for the turn to end.">
           <button type="button" className="ib-sendnow ib-sendnow-go" data-send-now="" disabled={sending} onClick={onSendNow}>
@@ -96,5 +101,15 @@ export function UndeliveredBand({
       )}
       {stuck && <StuckReason note={restart} name={restartName} />}
     </div>
+  );
+}
+
+export function TakeBackButton({ busy, onPress }: { busy?: boolean; onPress: () => void }) {
+  return (
+    <Tip content="Take it out of the queue and back into your reply box. Nothing goes out until you send it again.">
+      <button type="button" className="ib-sendnow ib-takeback" data-take-back="" disabled={busy} onClick={onPress}>
+        Take back
+      </button>
+    </Tip>
   );
 }

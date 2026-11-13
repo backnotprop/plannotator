@@ -81,7 +81,7 @@ function usePortal<T extends HTMLElement>() {
  * One open message's menu: its ⋯ (handed to `head` to place after Reply) and,
  * off a phone, a right-click on the head line `head` draws.
  */
-export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement }) {
+export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement; onTakeBack?: (() => void) | null }) {
   const { message, phone } = props;
   const copies = useCopies(props);
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
@@ -129,6 +129,15 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       <div className="ib-pm-title" aria-hidden="true">
         {copyAuthor(message)} · {whenTime(message.created_at)}
       </div>
+      {props.onTakeBack && (
+        <>
+          <Menu.Item className="ib-pmi" label="Take back" onClick={props.onTakeBack} data-take-back-item="">
+            <Icon name="reply" size={15} />
+            Take back
+          </Menu.Item>
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
       <Menu.Item className="ib-pmi" label="Copy message" onClick={() => copies.message(message)} data-copy-item="message">
         <Icon name="copy" size={15} />
         Copy message

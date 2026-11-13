@@ -5244,6 +5244,7 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .ib-sendnow { margin-left: 4px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; cursor: pointer; white-space: nowrap; }
 .pn-inbox .ib-sendnow:hover { background: var(--muted); }
 .pn-inbox .ib-sendnow:disabled { opacity: 0.6; cursor: progress; }
+.pn-inbox .ib-takeback-note { margin: 0 0 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-sendnow { position: relative; }
   .pn-inbox .ib-sendnow::after { content: ''; position: absolute; inset: -9px -4px; }
