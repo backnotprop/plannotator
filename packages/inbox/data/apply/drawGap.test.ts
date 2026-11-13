@@ -51,3 +51,19 @@ test('a steady stream of records redraws at most once per gap, not once per reco
   stop();
   client.clear();
 });
+
+test('a clock that went back never holds the records back until it catches up', async () => {
+  await wait(DRAW_GAP_MS + 20);
+  const { client, key, add, stop } = watched();
+  const realNow = Date.now;
+  const start = realNow();
+  Date.now = () => start + 3_600_000;
+  add(1);
+  await wait(DRAW_GAP_MS + 20);
+  Date.now = realNow;
+  add(2);
+  await wait(DRAW_GAP_MS + 20);
+  expect(client.getQueryData(key)).toEqual([1, 2]);
+  stop();
+  client.clear();
+});
