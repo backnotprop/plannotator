@@ -61,6 +61,9 @@ export function noteHintSaid(store: InboxStore, session: string | null | undefin
 /** A GitLab merge request written short (`group/sub/project!45`); `owner/repo#12` also names issues, so it is not read here. */
 const SHORT_MERGE_REQUEST = /(?<![\w/.!-])[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+![1-9]\d{0,9}(?!\w)/g;
 
+/** A Bitbucket Cloud pull request's URL: `inboxPullUrlsIn` reads only the forges the Reviews page reads. */
+const BITBUCKET_PULL_URL = /https:\/\/bitbucket\.org\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull-requests\/[1-9]\d{0,9}(?![\w-])/g;
+
 /**
  * The pull and merge requests the agent's own words name, each once, in text
  * order: a PR's or MR's https URL, or a GitLab `group/project!45`. Not read:
@@ -81,6 +84,7 @@ export function pullsNamedInBody(body: string, projectHost?: string | null): Inb
   };
   for (const url of inboxPullUrlsIn(text)) take(text.indexOf(url), url);
   for (const match of text.matchAll(SHORT_MERGE_REQUEST)) take(match.index ?? 0, match[0]);
+  for (const match of text.matchAll(BITBUCKET_PULL_URL)) take(match.index ?? 0, match[0]);
   return found.sort((a, b) => a.index - b.index).map((entry) => entry.ref);
 }
 

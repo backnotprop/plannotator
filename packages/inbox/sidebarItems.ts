@@ -12,6 +12,8 @@ export const SIDEBAR_ITEM_ICON: Record<Exclude<InboxSidebarItem, 'agents' | 'tag
   logo: 'photo',
   search: 'search',
   'new-message': 'compose',
+  starred: 'star',
+  projects: 'folder',
   inbox: 'inbox',
   board: 'board',
   shape: 'layers',

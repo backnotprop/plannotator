@@ -37,6 +37,7 @@ export * from "./inbox-open-in";
 export * from "./inbox-delivery";
 export * from "./inbox-codex";
 export * from "./inbox-qwen";
+export * from "./inbox-muse";
 export * from "./inbox-t3";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
@@ -433,6 +434,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
   cline: "Cline",
+  muse: "Muse Code",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
   cloud: "Cloud agent",
@@ -1082,7 +1084,8 @@ export interface InboxAddressee {
 export type InboxLaunchAgent =
   | "claude-code"
   | "pi"
-  | "codex";
+  | "codex"
+  | "opencode";
 
 /** One Codex usage limit (`account/rateLimits/read`): how much of it is used, its length, and when it resets. */
 export interface InboxCodexLimit {
@@ -2469,6 +2472,7 @@ export type InboxAgentId =
   | "pi"
   | "opencode"
   | "dsh"
+  | "muse"
   | "openclaw"
   | "hermes"
   | "claude-app";
@@ -2486,6 +2490,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "pi",
   "opencode",
   "dsh",
+  "muse",
   "openclaw",
   "hermes",
   "claude-app",
@@ -2504,6 +2509,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   pi: "Pi",
   opencode: "OpenCode",
   dsh: "DeepSeek Harness",
+  muse: "Muse Code",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
   "claude-app": "Claude app",

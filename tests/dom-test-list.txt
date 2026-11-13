@@ -707,6 +707,7 @@ packages/inbox/phoneSidebarSheet.test.tsx
 packages/inbox/composerDrag.test.tsx
 packages/inbox/agents/ownAgentIcons.test.tsx
 packages/inbox/agents/setAgentIcons.test.tsx
+packages/inbox/agents/animateAnyIcon.test.tsx
 packages/inbox/agents/agentRename.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
@@ -714,5 +715,7 @@ packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
 packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx
 packages/review-editor/components/PRMediaScope.test.tsx
 packages/ui/components/InlineMarkdown.imgTags.test.tsx
+packages/inbox/attachmentTileKeys.test.tsx
 packages/inbox/threadTags.test.tsx
+packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { codexThreadChoice, launchChoiceArgs, launchEffortsFor, parseClaudeChoices, parseCodexModels, parseLaunchChoice, parsePiChoices } from "./inbox-launch-choice";
+import { codexThreadChoice, launchChoiceArgs, launchEffortsFor, openCodeSessionModel, parseClaudeChoices, parseCodexModels, parseLaunchChoice, parseOpenCodeModels, parsePiChoices } from "./inbox-launch-choice";
 
 // Claude Code 2.1.322's and Pi 1.5's help, as their CLIs print it (wrapped).
 const CLAUDE_HELP = `  --effort <level>                      Effort level for the current session
@@ -83,5 +83,25 @@ describe("model and effort at launch", () => {
     expect(codexThreadChoice({})).toEqual({ config: {} });
     expect(codexThreadChoice({ model: "gpt-5.5", effort: "high" })).toEqual({ model: "gpt-5.5", config: { model_reasoning_effort: "high" } });
     expect(codexThreadChoice({ model: "--oss", effort: "high now" })).toEqual({ config: {} });
+  });
+
+  test("OpenCode: its model list as provider/model with each model's variants; the session model splits at the first slash", () => {
+    const answer = {
+      data: [
+        { providerID: "opencode", id: "flint-40b-free", enabled: true, variants: [{ id: "low" }, { id: "max" }] },
+        { providerID: "openrouter", id: "anthropic/claude-opus-4.5", enabled: true, variants: [] },
+        { providerID: "opencode", id: "off-model", enabled: false, variants: [] },
+      ],
+    };
+    expect(parseOpenCodeModels(answer)).toEqual({
+      models: ["opencode/flint-40b-free", "openrouter/anthropic/claude-opus-4.5"],
+      efforts: ["low", "max"],
+      effort_word: "Variant",
+      model_efforts: { "opencode/flint-40b-free": ["low", "max"], "openrouter/anthropic/claude-opus-4.5": [] },
+    });
+    expect(parseOpenCodeModels({ data: [] })).toBeNull();
+    expect(openCodeSessionModel("openrouter/anthropic/claude-opus-4.5", "high")).toEqual({ providerID: "openrouter", id: "anthropic/claude-opus-4.5", variant: "high" });
+    expect(openCodeSessionModel("opencode/big-pickle", undefined)).toEqual({ providerID: "opencode", id: "big-pickle" });
+    for (const bad of ["opus", "/x", "x/", "--model/x", undefined]) expect(openCodeSessionModel(bad, "high"), String(bad)).toBeNull();
   });
 });

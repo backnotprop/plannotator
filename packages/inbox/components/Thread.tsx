@@ -193,6 +193,8 @@ import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { inboxTileShortcuts } from '../shortcuts/grid.shortcuts';
+import { gridStep, type GridKey } from '../gridMove';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
@@ -3912,6 +3914,30 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       },
     },
   });
+  // Arrow keys between a message's tiles (shortcuts/grid.shortcuts.ts `inboxTileShortcuts`). Not under a file in full
+  // screen, a guide or Artifacts: a tile behind them can still hold focus, and there ← → step the file.
+  const tileList = (target: Element | null) => (target && sectionRef.current?.contains(target) && target.matches('[data-attachment-id]') ? target.closest('.ib-tiles') : null);
+  useShortcutScope({
+    scope: inboxTileShortcuts,
+    handlers: {
+      move: {
+        when: (event) => {
+          if (event.defaultPrevented || event.isComposing || paneCovered || modalOpen()) return false;
+          const list = tileList(keyTarget(event));
+          return !!list && list.querySelectorAll('[data-attachment-id]').length > 1;
+        },
+        handle: (event) => {
+          const target = keyTarget(event);
+          const tiles = [...(tileList(target)?.querySelectorAll<HTMLElement>('[data-attachment-id]') ?? [])];
+          const from = tiles.indexOf(target as HTMLElement);
+          const to = from < 0 ? null : gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
+          const next = to === null ? null : tiles[to];
+          next?.focus({ preventScroll: true });
+          next?.scrollIntoView?.({ block: 'nearest' });
+        },
+      },
+    },
+  });
 
   // Another window (or a phone's Send) saved, sent or discarded this thread's draft, or this one did:
   // its copy here follows. A box with no edits since its last save or read takes the new words (or
@@ -5309,6 +5335,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Where the person's last message is addressed: its own `to`, or, for a reply in a thread the
   // person started, the thread's (the server hands it to that session), unless it answers another
   // session that wrote in it (that session takes it, as any plain reply).
+  const earlierDelivered = (message: InboxMessageWire): string | null => {
+    if (message === last || message.author.kind !== 'person' || isInboxNote(message) || !isDelivered(message, root)) return null;
+    const name = message.delivery ? toName(message, message.delivery) : message.to ? toName(message, message.to) : recipientName(askedBy(message));
+    return message.delivery?.at ? `Delivered to ${name}, ${whenTime(message.delivery.at)}` : `Delivered to ${name}`;
+  };
   const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null;
   // The session the person's last reply goes to, when its connection wakes it: a message addressed to a
   // session (`lastTo`), or a reply to an agent message sent through a waking connection (`wakes`).
@@ -7239,6 +7270,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
                     openIn={openIn}
                     newestId={newestFileId}
+                    newestKeycap={!file}
                   />
                 )}
                 {message.guide &&
@@ -7315,6 +7347,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     restart={restart}
                     restartName={restartName}
                   />
+                )}
+                {earlierDelivered(message) !== null && (
+                  <div className="ib-delivered" data-delivery="delivered">
+                    <span className="ib-dl-main">
+                      <Icon name="check" size={14} />
+                      <span className="ib-dl-text">{earlierDelivered(message)}</span>
+                    </span>
+                  </div>
                 )}
                 {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName(lastTo?.host ?? 'cloud')} time={whenTime} />}
                 {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
