@@ -156,6 +156,7 @@
     "./inbox/decision-export-md": "./inbox/decision-export-md.ts",
     "./inbox/decision-post": "./inbox/decision-post.ts",
     "./inbox/store": "./inbox/store.ts",
+    "./inbox/comment-drafts": "./inbox/comment-drafts.ts",
     "./inbox/store-log/sqlite/open-store": "./inbox/store-log/sqlite/open-store.ts",
     "./inbox/store-log/sqlite/move-words": "./inbox/store-log/sqlite/move-words.ts",
     "./inbox/store-log/sqlite/export-inbox": "./inbox/store-log/sqlite/export-inbox.ts",

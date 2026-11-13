@@ -4,6 +4,7 @@
  * header counts; a filter field (title, author, repository, number), Open | Merged (the last 14 days), and the forge's
  * own closed search as a link. A tile's popover (hover or focus; Enter or a tap pins it, a bottom sheet on a phone)
  * says what the PR is and offers Open, Open on GitHub, and Merge when the forge said it can (a second click confirms).
+ * A desktop's Grid | Table shows the same PRs as rows instead (SheetTable.tsx; approval "inbox-pr-board-bulk").
  *
  * Keyboard: Tab and Enter only (arrow keys are deferred, q-38094e68). A tile's popover actions join the Tab order only
  * once Enter pins it; Escape closes it back to the tile.
@@ -19,6 +20,8 @@ import { usePullRisk } from '../pulls/usePullRisk';
 import { Named, Person } from '../pulls/Face';
 import { facesOnce } from '../pulls/words';
 import { ChecksMark, checksLabel } from './ChecksMark';
+import { SheetTable, type TableSection } from './SheetTable';
+import { nextSort, pullWords, type SheetLayout, type TableSort } from './tableModel';
 import {
   agoWords,
   closedLinks,
@@ -60,6 +63,10 @@ export interface SheetPageProps {
   mode?: 'page' | 'pane';
   /** The page's back arrow, to Reviews (in place of the sidebar button). */
   onBack?: () => void;
+  /** Grid (the tiles) or Table; a phone always has the grid. */
+  layout?: SheetLayout;
+  /** Without it there is no Grid | Table switch. */
+  onLayout?: (layout: SheetLayout) => void;
 }
 
 /** The popover: the PR it is of, the tile it hangs from, and whether Enter or a tap pinned it (its actions take focus). */
@@ -108,6 +115,21 @@ export function SheetPage(props: SheetPageProps) {
     () => props.risk ?? Object.fromEntries(Object.entries(riskAnswer?.judgments ?? {}).map(([key, judgment]) => [key, judgment.level])),
     [props.risk, riskAnswer],
   );
+  const layout: SheetLayout = phone || !props.onLayout ? 'grid' : (props.layout ?? 'grid');
+  const [sort, setSort] = useState<TableSort | null>(null);
+  // The table's header sticks under the bar, whose height changes as it wraps.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar || layout !== 'table') return;
+    const measure = () => setBarHeight(bar.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(bar);
+    return () => watch.disconnect();
+  }, [layout]);
   const sheet = useMemo(() => (model ? sheetModel(model, now, risk) : null), [model, now, risk]);
   const merged = useMemo(() => (model && view === 'merged' ? mergedModel(model, now) : null), [model, now, view]);
   const notices = useMemo(() => (model ? pullsNotices(model) : []), [model]);
@@ -166,10 +188,7 @@ export function SheetPage(props: SheetPageProps) {
   const tile = (pull: InboxPull, stack: InboxPullStack, inStack: boolean) => {
     const you = needsYou(pull);
     const dim = !!q && !matchesQuery(pull, q);
-    const checks = checksLabel(pull.checks);
-    const words = [inboxPullLabel(pull), pull.title, pull.state === 'draft' ? 'draft' : pull.state === 'merged' ? 'merged' : null, you === 'review' ? 'needs your review' : you === 'changes' ? 'changes requested' : null, checks]
-      .filter(Boolean)
-      .join(', ');
+    const words = pullWords(pull);
     return (
       <button
         key={pull.key}
@@ -250,6 +269,20 @@ export function SheetPage(props: SheetPageProps) {
   const closed = model ? closedLinks(model.hosts) : [];
   const empty = model && sheet && sheet.sections.length === 0 ? pullsEmptyWords(model, notices) : null;
   const visible = sheet ? sheet.sections.filter((s) => !q || s.units.some((u) => u.layers.some((l) => matchesQuery(l, q)))) : [];
+  const table = (sections: TableSection[]) => (
+    <SheetTable
+      sections={sections}
+      query={q}
+      now={now}
+      risk={risk}
+      judgments={props.risk ? undefined : riskAnswer?.judgments}
+      sort={sort}
+      onSort={(key) => setSort((was) => nextSort(was, key))}
+      onRow={(pull, stack) => props.onOpenPull(pull, stack)}
+      onOpenStack={props.onOpenStack}
+      labelledBy={titleId}
+    />
+  );
 
   let body: ReactNode;
   if (!model && props.error) {
@@ -276,19 +309,26 @@ export function SheetPage(props: SheetPageProps) {
             </>
           )}
         </p>
-        {merged!.sections.map((section) => {
-          const shown = section.pulls.filter((p) => !q || matchesQuery(p, q));
-          if (shown.length === 0) return null;
-          return (
-            <section key={section.key} className="ib-prs-sec" aria-label={section.label}>
-              <div className="ib-prs-sech">
-                <h2>{section.label}</h2>
-                <span className="ib-prs-secn">{section.pulls.length} merged</span>
-              </div>
-              <div className="ib-prs-tiles">{shown.map((p) => tile(p, { id: p.key, platform: p.platform, host: p.host, repo: p.repo, layers: [p], parents: { [p.key]: null }, base: p.base, open_base: p.base }, false))}</div>
-            </section>
-          );
-        })}
+        {layout === 'table'
+          ? table(
+              merged!.sections
+                .map((section) => ({ section, shown: section.pulls.filter((p) => !q || matchesQuery(p, q)) }))
+                .filter(({ shown }) => shown.length > 0)
+                .map(({ section, shown }) => ({ key: section.key, host: shown[0]!.host, repo: shown[0]!.repo, label: section.label, outside: false, units: shown.map(alone), count: `${section.pulls.length} merged` })),
+            )
+          : merged!.sections.map((section) => {
+              const shown = section.pulls.filter((p) => !q || matchesQuery(p, q));
+              if (shown.length === 0) return null;
+              return (
+                <section key={section.key} className="ib-prs-sec" aria-label={section.label}>
+                  <div className="ib-prs-sech">
+                    <h2>{section.label}</h2>
+                    <span className="ib-prs-secn">{section.pulls.length} merged</span>
+                  </div>
+                  <div className="ib-prs-tiles">{shown.map((p) => tile(p, alone(p), false))}</div>
+                </section>
+              );
+            })}
         {merged!.sections.length === 0 && <p className="ib-prs-note">Nothing merged in the last 14 days.</p>}
         {merged!.quiet.length > 0 && merged!.sections.length > 0 && <p className="ib-prs-note">Nothing merged in {joinOr(merged!.quiet)}</p>}
       </>
@@ -305,16 +345,16 @@ export function SheetPage(props: SheetPageProps) {
       </div>
     );
   } else {
+    const count = (section: (typeof visible)[number]) => `${section.open} open${section.landedWeek > 0 ? ` · ${section.landedWeek} landed this week` : ''}`;
     body = (
       <>
-        {visible.map((section) => (
+        {layout === 'table' && visible.length > 0 && table(visible.map((section) => ({ ...section, count: count(section) })))}
+        {layout === 'grid' && visible.map((section) => (
           <section key={section.key} className="ib-prs-sec" aria-label={section.label} data-pr-repo={section.key}>
             <div className="ib-prs-sech">
               <h2 title={`${section.host}/${section.repo}`}>{section.label}</h2>
               {section.outside && <span className="ib-prs-outside">not a project</span>}
-              <span className="ib-prs-secn">
-                {section.open} open{section.landedWeek > 0 ? ` · ${section.landedWeek} landed this week` : ''}
-              </span>
+              <span className="ib-prs-secn">{count(section)}</span>
             </div>
             <div className="ib-prs-tiles">{section.units.map(unit)}</div>
           </section>
@@ -357,7 +397,14 @@ export function SheetPage(props: SheetPageProps) {
     />
   );
   return (
-    <section className={`ib-prs${mode === 'pane' ? ' ib-pane ib-prs-inpane' : ''}`} aria-labelledby={titleId} data-prs-page="" data-phone={phone ? '' : undefined}>
+    <section
+      className={`ib-prs${mode === 'pane' ? ' ib-pane ib-prs-inpane' : ''}`}
+      aria-labelledby={titleId}
+      data-prs-page=""
+      data-phone={phone ? '' : undefined}
+      data-layout={layout}
+      style={layout === 'table' ? ({ '--ib-prs-bar-h': `${barHeight}px` } as CSSProperties) : undefined}
+    >
       <div className="ib-prs-scroll">
         <header className="ib-prs-head">
           <div className="ib-prs-title">
@@ -384,7 +431,7 @@ export function SheetPage(props: SheetPageProps) {
             </p>
           )}
         </header>
-        <div className="ib-prs-bar">
+        <div className="ib-prs-bar" ref={barRef}>
           <label className="ib-prs-field">
             <Icon name="search" size={14} />
             <input
@@ -405,6 +452,15 @@ export function SheetPage(props: SheetPageProps) {
               </button>
             ))}
           </div>
+          {props.onLayout && !phone && (
+            <div className="ib-seg ib-prs-seg">
+              {(['grid', 'table'] as const).map((l) => (
+                <button key={l} type="button" className="ib-seg-o" data-on={layout === l ? '' : undefined} aria-pressed={layout === l} onClick={() => props.onLayout!(l)} data-pr-layout={l}>
+                  {l === 'grid' ? 'Grid' : 'Table'}
+                </button>
+              ))}
+            </div>
+          )}
           {closed.map((link) => (
             <a key={link.host} className="ib-prs-closed" href={link.url} target="_blank" rel="noreferrer">
               {link.label}
@@ -435,6 +491,11 @@ export function SheetPage(props: SheetPageProps) {
       {popover}
     </section>
   );
+}
+
+/** A PR on its own, as a stack of one (the Merged view's tiles and rows). */
+function alone(p: InboxPull): InboxPullStack {
+  return { id: p.key, platform: p.platform, host: p.host, repo: p.repo, layers: [p], parents: { [p.key]: null }, base: p.base, open_base: p.base };
 }
 
 function joinOr(names: readonly string[]): string {
