@@ -102,7 +102,9 @@ test('a picture added to a comment shows in the comment box, and Send carries it
   await pictureButton.click();
   await expect(page.getByPlaceholder('Paste path or URL...')).toHaveCount(0);
   const png = await page.screenshot({ type: 'png' });
-  await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: 'legend.png', mimeType: 'image/png', buffer: png });
+  const dropZone = page.getByText(/^Drop (a file|image) or click to browse$/);
+  await expect(dropZone).toBeVisible();
+  await dropZone.locator('xpath=ancestor::*[.//input[@type="file"]][1]//input[@type="file"]').setInputFiles({ name: 'legend.png', mimeType: 'image/png', buffer: png });
   await page.locator('button[title^="Save"]').click();
 
   const thumb = pictureButton.locator('img');
