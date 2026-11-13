@@ -267,7 +267,7 @@ beforeEach(() => {
 afterEach(() => {
   if (hasDom) window.removeEventListener('keydown', onWindow);
 });
-function escape(from?: HTMLElement | null) {
+function escape(from?: HTMLElement | null): { usedBeforeWindow: boolean | null } {
   windowSaw = null;
   act(() => {
     (from ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
