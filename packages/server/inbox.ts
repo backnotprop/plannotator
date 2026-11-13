@@ -249,7 +249,7 @@ import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxPriority } from "./inbox-priority";
-import { priorityIntroOpen, priorityIntroUsed } from "./inbox-priority-intro";
+import { priorityIntroOpen, priorityIntroUnused, priorityIntroUsed } from "./inbox-priority-intro";
 import { createInboxThreadTags } from "./inbox-thread-tags";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
@@ -2758,8 +2758,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeIntroState = (owner: boolean, load: string | null = null) => ({
     due: owner && revealNow(owner, load) === "snooze",
   });
-  /** The Priority dialog (inbox-priority-intro.ts): open while the person never added a thread to Priority here. */
-  const priorityIntroIsOpen = () => priorityIntroOpen(loadConfig().inboxPriorityIntro, store.priorities().threads.length);
+  /**
+   * The Priority dialog (inbox-priority-intro.ts): open while the person never added a thread to Priority here, from
+   * the day after the first release start that knows it (stamped here, as the tab icon's is, for someone who could
+   * still get it; claims keep the stamp).
+   */
+  if (normalizeStableVersion(version) !== null && !loadConfig().inboxReveals?.priority?.dueAt && priorityIntroUnused(loadConfig().inboxPriorityIntro, store.priorities().threads.length)) {
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, priority: { ...loadConfig().inboxReveals?.priority, dueAt: new Date().toISOString() } } });
+  }
+  const priorityIntroIsOpen = () => {
+    const config = loadConfig();
+    return priorityIntroOpen(config.inboxPriorityIntro, store.priorities().threads.length, config.inboxReveals?.priority?.dueAt, new Date());
+  };
   /** After any Priority change: an add standing is a use, kept once, so the dialog never shows. */
   const markPriorityUsed = () => {
     const next = priorityIntroUsed(loadConfig().inboxPriorityIntro, store.priorities().threads.length, new Date());

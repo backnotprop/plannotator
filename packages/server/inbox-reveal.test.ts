@@ -611,8 +611,9 @@ describe("personal agents: after Snooze, only while none is connected", () => {
   });
 });
 
-describe("Priority: after Snooze, only while the person never added a thread to Priority", () => {
-  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false };
+describe("Priority: after personal agents, only while the person never added a thread to Priority, never on an upgrade day", () => {
+  // The version that has it first ran two days ago (the release start stamps `dueAt` only when none is saved).
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { priority: { dueAt: new Date(Date.now() - 2 * DAY).toISOString() } } };
   const threadIds = async (w: Awaited<ReturnType<typeof world>>) =>
     ((await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string }[] }[] }).sections.flatMap((s) => s.threads.map((t) => t.thread_id));
 
@@ -644,6 +645,20 @@ describe("Priority: after Snooze, only while the person never added a thread to 
     expect((await w.post(`/api/inbox/threads/${first}/priority`, { priority: false })).status).toBe(200);
     expect(await w.next()).toBeNull();
     expect((await w.claim("priority")).show).toBe(false);
+  });
+
+  test("the day the Inbox first runs a version that has it: stamped, not due; the next day: due", async () => {
+    const w = await world({ priorityUsed: false, threads: 8, config: { ...decided, inboxReveals: undefined } });
+    const dueAt = w.saved().inboxReveals.priority.dueAt as string;
+    expect(Date.now() - Date.parse(dueAt)).toBeLessThan(60_000);
+    expect(await w.next()).not.toBe("priority");
+    expect((await w.claim("priority")).show).toBe(false);
+    // The next day (the stamp a day back): due, and a claim keeps the stamp.
+    const config = w.saved();
+    writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ ...config, inboxReveals: { ...config.inboxReveals, priority: { dueAt: new Date(Date.parse(dueAt) - DAY).toISOString() } } }));
+    expect(await w.next()).toBe("priority");
+    expect((await w.claim("priority", "pq-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.priority.dueAt).toMatch(/^\d{4}-/);
   });
 
   for (const [name, options] of [

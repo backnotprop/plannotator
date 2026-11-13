@@ -665,8 +665,11 @@ export interface PlannotatorConfig {
     agent_rules?: { shownAt?: string; key?: string };
     /** The personal agents dialog (core/inbox-personal-agents.ts): claimed once, as the Board's; nothing to turn on. */
     personal_agents?: { shownAt?: string; key?: string };
-    /** The Priority dialog (reveals.ts `priority`): claimed once, as the Board's; nothing to turn on. */
-    priority?: { shownAt?: string; key?: string };
+    /**
+     * The Priority dialog (reveals.ts `priority`): claimed once, as the Board's; nothing to turn on. `dueAt`: the first
+     * release start that knew it; it is never due on that local day (packages/server/inbox-priority-intro.ts).
+     */
+    priority?: { shownAt?: string; key?: string; dueAt?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
