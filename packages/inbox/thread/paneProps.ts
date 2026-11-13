@@ -171,6 +171,7 @@ export interface ThreadPaneProps {
   pinned?: boolean;
   /** Resolves once the pin is written and the list read again (the header waits on it before the next click's request). */
   onPin?: (pinned: boolean) => void | Promise<unknown>;
+  priority?: { on: boolean; onToggle: () => void };
   /** Snooze the thread until a moment (the ⋯ menu, approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no item. */
   onSnooze?: (until: string) => void;
   /** This thread's machine must update before Snooze works: Snooze stays and opens the update dialog. */

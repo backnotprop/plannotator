@@ -1,6 +1,7 @@
 /** The route written back to the address, as a new history entry or in place. */
 
 import { systemHashOf } from '../system/route';
+import { sheetLayoutHash } from '../prs/tableModel';
 import { pushScreen, whileWritingRoute } from '../history';
 import { withFullMark, type FullMark } from '../fullScreenOrigin';
 import { settingsHash } from '../settingsRoute';
@@ -34,6 +35,7 @@ export function hashOf(route: Route): string {
     hash =
       'prs' +
       (route.prsView === 'merged' ? '&state=merged' : '') +
+      sheetLayoutHash(route.prsLayout) +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}${route.prsFrom === 'sheet' ? '&from=sheet' : route.prsFrom === 'reviews' ? '&from=reviews' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;

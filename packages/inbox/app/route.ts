@@ -6,6 +6,7 @@ import { withoutClickSignal } from '../history';
 import { parseFileView } from '../fileView';
 import { parseSettingsHash, type SettingsSection } from '../settingsRoute';
 import type { SheetView } from '../prs/SheetPage';
+import { sheetLayoutOf, type SheetLayout } from '../prs/tableModel';
 import { pullFilterOf, type PullFilter } from '../pulls/model';
 import { boardInitiativeOf, boardViewOf, type BoardView } from '../board/model';
 import { shapeReviewAtOf, type ReviewAt } from '../shape/review';
@@ -20,6 +21,7 @@ export interface Route {
    * the Sheet goes to Reviews there; `#prs` itself is a phone's way in (Reviews' "Pull requests" row).
    */
   prsView?: SheetView;
+  prsLayout?: SheetLayout;
   prsFrom?: 'sheet' | 'stack' | 'reviews';
   /** The Artifacts wall on Pinned (`#artifacts=pinned`; approval "inbox-artifact-stars"); All is `#artifacts`. */
   pinned?: boolean;
@@ -145,6 +147,7 @@ export function routeOf(fullHash: string): Route {
       project: null,
       thread: null,
       prsView: params.get('state') === 'merged' ? 'merged' : 'open',
+      prsLayout: sheetLayoutOf(params.get('layout')),
       stack,
       layer,
       scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',

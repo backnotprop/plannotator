@@ -164,6 +164,14 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     expect(posted).toEqual(['group/app!45']);
   });
 
+  test('Post on a pull request: a Bitbucket PR gets no row (the server refuses posting there); the others keep theirs', async () => {
+    stubPulls(['acme/notes#12', 'https://bitbucket.org/acme/billing/pull-requests/7']);
+    frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone={false} addPull={() => {}} postDecisions={{ post: () => {}, addPullThenPost: () => {} }} />);
+    const sub = await openExportSubmenu(await openMore());
+    await until(() => !!sub.querySelector('[data-decision-post]'), 'the PR rows');
+    expect([...sub.querySelectorAll<HTMLElement>('[data-decision-post]')].map((r) => r.getAttribute('data-decision-post'))).toEqual(['acme/notes#12']);
+  });
+
   test('Where to post: the stored choice is checked (the description by default), and a pick saves it without closing the menu', async () => {
     stubPulls(['acme/notes#12']);
     frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone={false} postDecisions={{ post: () => {}, addPullThenPost: () => {} }} />);

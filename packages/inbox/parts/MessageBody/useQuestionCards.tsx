@@ -10,6 +10,7 @@ import type { IndexedQuestion, QuestionStatus } from '@plannotator/core/question
 import { TryPrototypeTab } from '../../components/PrototypeWindow';
 import { prototypePageCount } from '../../prototypes';
 import type { MessageBodyProps } from './types';
+import { useAcceptedUndo } from '../../useAcceptedUndo';
 
 /** An unsent pick's tag on its card (statusLabel). */
 // A pick saved and not sent is part of the person's draft (approval "inbox-reply-drafts": "Draft" replaces "Not sent").
@@ -21,6 +22,7 @@ export function useQuestionCards({
   projectRoot,
   readOnly,
   footerFor,
+  answers,
   renderReplacedCard,
   renderReplacesLine,
   renderActions,
@@ -29,7 +31,7 @@ export function useQuestionCards({
   noteAtLine,
   notesRef,
   refRepo,
-}: Pick<MessageBodyProps, 'message' | 'projectRoot' | 'readOnly' | 'footerFor' | 'renderReplacedCard' | 'renderReplacesLine' | 'renderActions' | 'onTryPrototype'> & {
+}: Pick<MessageBodyProps, 'message' | 'projectRoot' | 'readOnly' | 'footerFor' | 'answers' | 'renderReplacedCard' | 'renderReplacesLine' | 'renderActions' | 'onTryPrototype'> & {
   blocks: Block[];
   noteAtLine: ReadonlyMap<number, InboxNoteBlock>;
   notesRef: { readonly current: MessageBodyProps['contextNotes'] };
@@ -39,16 +41,7 @@ export function useQuestionCards({
   // memoized callback, a listener) holds this render's scope, so none names them directly: they are read through
   // refs. Else each message drawn after a re-read pinned that read's whole thread view (#2948, a window left open
   // on a busy thread grew without end).
-  const footerRef = useRef(footerFor);
-  footerRef.current = footerFor;
-  const renderFooter = useCallback(
-    (question: IndexedQuestion) => {
-      const text = footerRef.current(question.question.key);
-      return text ? <span className="ib-qfoot-st">{text}</span> : null;
-    },
-    // A new identity when the footers may have changed, so the cards redraw.
-    [footerFor],
-  );
+  const { renderFooter, acceptBehavior } = useAcceptedUndo(message, readOnly, answers, footerFor);
   // Replaced questions: the host's Quiet card in place of the answer card, and
   // the newer card's "Replaces …" line. Kept stable across renders.
   const replacedRef = useRef(renderReplacedCard);
@@ -149,5 +142,5 @@ export function useQuestionCards({
     },
     [message.questions],
   );
-  return { renderFooter, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel };
+  return { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel };
 }

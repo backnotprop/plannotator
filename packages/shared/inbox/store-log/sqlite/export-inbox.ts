@@ -10,7 +10,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } fr
 import { join } from "node:path";
 import { inboxDir } from "../../schema";
 import { exportInboxDb } from "./export";
-import { JSONL_ENTRIES } from "./move-files";
+import { JSONL_ENTRIES, jsonlEntriesPresent } from "./move-files";
 import { INBOX_DB_FILE } from "./sqlite-log";
 
 export type InboxExportResult = { from: "database" | "files"; lines: number } | { from: "empty"; lines: 0 };
@@ -32,7 +32,7 @@ export function exportInbox(dataDir: string, outDir: string): InboxExportResult 
   const inbox = inboxDir(dataDir);
   const db = join(inbox, INBOX_DB_FILE);
   if (existsSync(db)) return { from: "database", ...exportInboxDb(db, outDir) };
-  const present = JSONL_ENTRIES.filter((entry) => existsSync(join(inbox, entry)));
+  const present = jsonlEntriesPresent(inbox);
   if (present.length === 0) return { from: "empty", lines: 0 };
   mkdirSync(outDir, { recursive: true, mode: 0o700 });
   for (const entry of present) cpSync(join(inbox, entry), join(outDir, entry), { recursive: true });

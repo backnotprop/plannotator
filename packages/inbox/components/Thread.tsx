@@ -29,7 +29,7 @@ import { AttachmentTiles, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
-import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId } from '../optionSets';
+import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId, openChoiceSetOf } from '../optionSets';
 import { PrototypeWindow, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
@@ -155,6 +155,8 @@ import { Tip } from './Tip';
 import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
 import { arrowQuotesWhole, quoteToSend, selectedWordsIn } from '../replyQuote';
 import { useReplyQuote } from '../useReplyQuote';
+import { useTileArrows } from '../useTileArrows';
+import { DeliveredLine, EndedActions } from '../parts/EndedActions';
 import { ReactionTray } from './ReactionTray';
 import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
@@ -178,7 +180,7 @@ import { keepEqualByKey } from '../thread/keepEqual';
 import { replyWordsCount, withFreeName, withoutReplyWords } from '../shape/addToReply';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 import type { ThreadPaneProps } from '../thread/paneProps';
-import { FOLD_STEP, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
+import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
 import { HeadMark } from '../parts/HeadMark';
@@ -192,10 +194,7 @@ import { MessageBody } from '../parts/MessageBody/MessageBody';
 export { AckPill, MessageBody };
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
-/** The agent superseded the question this call named (`422 question_superseded`). */
-const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError && cause.code === 'question_superseded';
-
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -1496,12 +1495,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** A tile, or a link in a message: the file as it is now, focus in its pane (a typed comment in the open file waits as its draft). */
   /** `opening`: called as the file opens. */
-  /** `set`: a question's picture choices the viewer then steps through (optionSets.ts); absent: every file of the thread. */
+  /** `set`: a question's picture choices the viewer then steps through (optionSets.ts); absent: the choices of the open question that shows this file (openChoiceSetOf), else every file of the thread. */
   /** `version`: the version the agent sent (a file the person's reply names, commented at that version, or moved since). */
   const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'> & { name?: string }, view: FileView | null = null, opening?: () => void, set: string | null = null, version: 'current' | 'sent' = 'current') => {
     const go = () => {
       opening?.();
-      openFile(attachment, version, null, view, set);
+      openFile(attachment, version, null, view, set ?? openChoiceSetOf(thread.messages, steps, attachment.id));
       setPaneFocus((n) => n + 1);
     };
     const pane = paneRef.current;
@@ -2276,6 +2275,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       },
     },
   });
+  useTileArrows(sectionRef, paneCovered);
 
   // Another window (or a phone's Send) saved, sent or discarded this thread's draft, or this one did:
   // its copy here follows. A box with no edits since its last save or read takes the new words (or
@@ -3686,6 +3686,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Where the person's last message is addressed: its own `to`, or, for a reply in a thread the
   // person started, the thread's (the server hands it to that session), unless it answers another
   // session that wrote in it (that session takes it, as any plain reply).
+  const earlierDelivered = (message: InboxMessageWire): string | null => {
+    if (message === last || message.author.kind !== 'person' || isInboxNote(message) || !isDelivered(message, root)) return null;
+    const name = message.delivery ? toName(message, message.delivery) : message.to ? toName(message, message.to) : recipientName(askedBy(message));
+    return message.delivery?.at ? `Delivered to ${name}, ${whenTime(message.delivery.at)}` : `Delivered to ${name}`;
+  };
   const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null;
   // The session the person's last reply goes to, when its connection wakes it: a message addressed to a
   // session (`lastTo`), or a reply to an agent message sent through a waking connection (`wakes`).
@@ -4023,27 +4028,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       pick(q.messageId, q.key, skipToggledAnswer(base));
     }
   };
-  // Send to another session and Archive, when the session that asked has ended (the foot's row, below).
   const endedActions = showAskerNote ? (
-    <div className="ib-footended" data-foot-ended="">
-      {anyOtherLive && (
-        <button
-          type="button"
-          className="ib-btn"
-          data-ended-send=""
-          onClick={() => {
-            openBox();
-            setRcptOpen(true);
-          }}
-        >
-          <Icon name="forward" size={15} />
-          Send to another session
-        </button>
-      )}
-      <button type="button" className="ib-btn" data-ended-archive="" onClick={() => void resolve(true)}>
-        Archive
-      </button>
-    </div>
+    <EndedActions
+      sendElsewhere={
+        anyOtherLive
+          ? () => {
+              openBox();
+              setRcptOpen(true);
+            }
+          : null
+      }
+      onArchive={() => void resolve(true)}
+    />
   ) : null;
   // Shown whenever a question is listed (open, or answered in the draft) or an action item waits, or Re-ask or "Decide
   // these" is offered (they live in the list, so never out of reach). Every question answered in the draft: the icon
@@ -4956,6 +4952,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
+              priority={priority}
               markRead={menuMarkRead}
               moveBack={menuMoveBack}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
@@ -5466,6 +5463,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
                     openIn={openIn}
                     newestId={newestFileId}
+                    newestKeycap={!file}
                   />
                 )}
                 {message.guide &&
@@ -5543,6 +5541,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     restartName={restartName}
                   />
                 )}
+                <DeliveredLine text={earlierDelivered(message)} />
                 {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName(lastTo?.host ?? 'cloud')} time={whenTime} />}
                 {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.

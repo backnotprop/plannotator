@@ -82,7 +82,7 @@ export function MessageBody({
   const refCard = useRefHoverCards(bodyRef);
   const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet });
   const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback });
-  const { renderFooter, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, renderReplacedCard, renderReplacesLine, renderActions, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
+  const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
   const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion } = useBodyComments({ comments, message, blocks, onPick });
 
@@ -185,6 +185,7 @@ export function MessageBody({
         questionStatusLabel={statusLabel}
         questionPictureBadge={pictureBadge}
         questionPictureSize={pictureSizeOf}
+        questionAcceptBehavior={acceptBehavior}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
         renderDirectiveBlock={renderActions || noteBlocks.length > 0 ? directiveBlock : undefined}

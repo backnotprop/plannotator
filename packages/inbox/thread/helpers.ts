@@ -3,7 +3,7 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxMessageWire, InboxQuestion, InboxThread, InboxUpload } from '@plannotator/core/inbox-types';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, type QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxAskingMessage, type InboxAnnotationRecord, type InboxQuestionState } from '@plannotator/core/inbox-types';
-import type { OutboxView } from '../api';
+import { InboxApiError, type OutboxView } from '../api';
 import { annotationOf } from '../attachments';
 import { agentName, clockTime, dayWords } from '../format';
 import { PILL_BAND_PX, atEnd } from '../seenOnSight';
@@ -177,3 +177,4 @@ export function commentTags(record: InboxAnnotationRecord): string[] {
 
 export const NO_SENT_ANSWERS: readonly SentAnswerGroup[] = [];
 export const NO_QUESTIONS: InboxQuestion[] = [];
+export const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError && cause.code === 'question_superseded';

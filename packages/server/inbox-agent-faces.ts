@@ -11,8 +11,10 @@
  *
  * Every answer and event also carries `icons`, the pictures uploaded for "Your own…" (inbox-agent-icons.ts).
  *
- * A save tells every window (`event: agent-faces` with `{ faces, rev }`). Agents, the MCP, search, the phone's door and
- * a linked machine's forward never see faces or given names: they stay on the computer whose Inbox the window shows.
+ * A save tells every window (`event: agent-faces` with `{ faces, rev }`). An agent's face and name live on the computer
+ * whose agent it is (approval "inbox-linked-marks"): a linked machine's window sets them here through its forward and
+ * reads them back from this Inbox's list (its agents group's `faces`). Agents, the MCP, search and the phone's door
+ * never see them.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
