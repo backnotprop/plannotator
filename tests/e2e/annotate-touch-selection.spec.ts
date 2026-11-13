@@ -6,7 +6,7 @@
  * On a touch screen the selection used to be painted as a highlight 400 ms
  * after it rested, and the toolbar took over before the person could drag a
  * handle. Now a resting selection stays the system's and the same selection
- * toolbar waits under it; a button of it takes the selection, then does what
+ * toolbar waits above it; a button of it takes the selection, then does what
  * it does on a painted one (Comment opens the composer, Delete deletes, Looks
  * good applies the label, Cancel dismisses the toolbar).
  *
@@ -164,7 +164,7 @@ for (const phone of [
   { name: 'iPhone 15 (WebKit)', engine: 'webkit', device: iPhone },
   { name: 'Pixel 7 (Chromium)', engine: 'chromium', device: pixel },
 ] as const) {
-  test(`${phone.name}, FORCED selection: a selection that rests gets the selection toolbar under it, is not painted, and stays the system's`, async () => {
+  test(`${phone.name}, FORCED selection: a selection that rests gets the selection toolbar, is not painted, and stays the system's`, async () => {
     await withPage(phone.engine, phone.device, async (page) => {
       await forceSelection(page, 'second paragraph says', 'plain thing', 'the report');
       await page.waitForTimeout(REST_MS);
@@ -267,7 +267,7 @@ for (const phone of [
 }
 
 // (A later tap does not clear Chromium's emulated long-press selection, so closing by a tap on the page is left to a real phone.)
-test('Pixel 7 (Chromium), real long press: a finger selects a word, nothing is painted, and the toolbar waits below it', async () => {
+test('Pixel 7 (Chromium), real long press: a finger selects a word, nothing is painted, and the selection toolbar waits', async () => {
   // Chromium on Linux (CI) recognizes no long press from DevTools touches: a held
   // synthesizeTapGesture ends as pointerup and touchend with no contextmenu and no
   // selection. The forced-selection tests above cover the hook there; this one runs on macOS.

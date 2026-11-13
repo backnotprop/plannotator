@@ -133,7 +133,7 @@ interface AnnotationToolbarProps {
    * The whole selection's rect, in viewport coordinates, when `element` is
    * only its start (the first of several marks; a 1px anchor over an HTML
    * frame). Read only by the touch placement (`touchSelectionToolbar`), which
-   * puts the toolbar below the selection's bottom; desktop placement uses
+   * places the toolbar by the selection's edges; desktop placement uses
    * `element` as before. Absent or null: `element`'s rect.
    */
   touchAnchorRect?: () => ToolbarRect | null;
@@ -141,8 +141,9 @@ interface AnnotationToolbarProps {
    * The selection is not painted: a touch screen's resting selection, still
    * the system's, handles and edit menu included (`element` is any element
    * of its start; `touchAnchorRect` its live box). The toolbar is placed by
-   * the touch rules whatever the host opted into (the system's menu is above
-   * the selection), a press on it leaves the page's selection alone, and it
+   * the touch rules whatever the host opted into, above the selection and
+   * clear of the system's menu (`placeTouchToolbar`'s `prefer: 'above'`), a
+   * press on it leaves the page's selection alone, and it
    * is marked for `useAnnotationHighlighter`, which keeps it through that
    * press. Absent: a painted selection, exactly as before.
    */
@@ -275,14 +276,15 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       }
 
       if (touchToolbar) {
-        // Below the selection, where iOS's own edit menu does not go, and
-        // kept inside the visible screen.
+        // Clear of iOS's own edit menu and kept inside the visible screen:
+        // below a painted selection, above one that is still the system's.
         const placed = placeTouchToolbar({
           anchor,
           toolbar: measuredSizeRef.current ?? TOUCH_TOOLBAR_SIZE_ESTIMATE,
           viewport: readVisibleViewport(),
           insets: readSafeAreaInsets(),
           mode: positionMode,
+          prefer: unpainted ? 'above' : 'below',
         });
         hiddenRef.current = placed.placement === 'hidden';
         setPosition({ top: placed.top, left: placed.left, touch: placed.placement, maxWidth: placed.maxWidth });
@@ -321,7 +323,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       vv?.removeEventListener("resize", updatePosition);
       vv?.removeEventListener("scroll", updatePosition);
     };
-  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar]);
+  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar, unpainted]);
 
   // Touch placement needs the toolbar's real size to keep it inside the
   // screen. Its width does not depend on where it sits (width: max-content in

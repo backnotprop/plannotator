@@ -146,6 +146,22 @@ describe('placeTouchToolbar', () => {
     expect(pos.top + toolbar.height).toBeLessThanOrEqual(short.height - TOUCH_TOOLBAR_EDGE_MARGIN);
   });
 
+  test('prefer above: over the band where iOS draws its menu above a selection, clear of the start handle', () => {
+    const anchor = word(100, 300);
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above', prefer: 'above' });
+    expect(pos.placement).toBe('above');
+    expect(anchor.top - (pos.top + toolbar.height)).toBeGreaterThanOrEqual(52);
+    // iOS 27 draws its menu below the selection: the toolbar is nowhere near it.
+    expect(pos.top + toolbar.height).toBeLessThan(anchor.bottom);
+  });
+
+  test('prefer above: without room above, the default rules put it below', () => {
+    const nearTop = word(100, 40);
+    const pos = placeTouchToolbar({ anchor: nearTop, toolbar, viewport: phone, mode: 'center-above', prefer: 'above' });
+    expect(pos).toEqual(placeTouchToolbar({ anchor: nearTop, toolbar, viewport: phone, mode: 'center-above' }));
+    expect(pos.placement).toBe('below');
+  });
+
   test('keeps clear of the notch and the home indicator (safe-area insets)', () => {
     const landscape = { left: 0, top: 0, width: 844, height: 390 };
     const insets = { left: 47, right: 47, bottom: 21, top: 0 };
