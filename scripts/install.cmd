@@ -2077,7 +2077,7 @@ set "PK_STATUS=1"
 set "PLN_PK_IN=!PK_FILE!"
 set "PLN_PK_OUT=!TEMP_FILE!"
 set "PLN_PK_SHA=!EXPECTED_CHECKSUM!"
-if !DL_STATUS! equ 0 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; try { $i = [System.IO.File]::OpenRead($env:PLN_PK_IN); try { $g = New-Object System.IO.Compression.GZipStream -ArgumentList $i, ([System.IO.Compression.CompressionMode]::Decompress); $o = [System.IO.File]::Create($env:PLN_PK_OUT); try { $g.CopyTo($o) } finally { $o.Dispose(); $g.Dispose() } } finally { $i.Dispose() }; if ((Get-FileHash -LiteralPath $env:PLN_PK_OUT -Algorithm SHA256).Hash -ne $env:PLN_PK_SHA) { exit 1 } } catch { exit 1 }; exit 0" >nul 2>&1 && set "PK_STATUS=0"
+if !DL_STATUS! equ 0 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; try { $i = [System.IO.File]::OpenRead($env:PLN_PK_IN); try { $g = New-Object System.IO.Compression.GZipStream -ArgumentList $i, ([System.IO.Compression.CompressionMode]::Decompress); $o = [System.IO.File]::Create($env:PLN_PK_OUT); try { $g.CopyTo($o) } finally { $o.Dispose(); $g.Dispose() } } finally { $i.Dispose() }; $s = [System.IO.File]::OpenRead($env:PLN_PK_OUT); try { $h = [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($s)).Replace('-', '') } finally { $s.Dispose() }; if ($h -ne $env:PLN_PK_SHA) { exit 1 } } catch { exit 1 }; exit 0" >nul 2>&1 && set "PK_STATUS=0"
 if exist "!PK_FILE!" del "!PK_FILE!" >nul 2>&1
 if "!PK_STATUS!"=="0" (
     set "TAKEN=!BINARY_NAME!!PK_SUFFIX!"
