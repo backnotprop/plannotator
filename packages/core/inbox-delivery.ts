@@ -69,6 +69,7 @@ export interface InboxDeliveryConnection {
   send_now: boolean;
   /** Claude Code refused a reply and holds the session's replies until the person types there (`held`). Absent: no. */
   held?: boolean;
+  polls?: boolean;
 }
 
 export interface InboxDeliveryInput {
@@ -140,7 +141,7 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   if (input.stuck) return { state: "undelivered", reason: "stuck", ...no };
   if (input.undelivered) return { state: "undelivered", reason: "undelivered", ...no };
   if (input.askerEnded) return { state: "saved", reason: "ended", ...no };
-  if (!input.wakes) return { state: "saved", reason: "reads", ...no };
+  if (!input.wakes || input.connection?.polls === true) return { state: "saved", reason: "reads", ...no };
   const connection = input.connection;
   // Its session does not poll now: it waits for the session to come back, whatever was pressed before.
   if (connection === null) return { state: "queued", reason: "away", ...no };

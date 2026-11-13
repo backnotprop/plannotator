@@ -88,7 +88,8 @@ test('Add tag from the row menu makes a tag and tags the thread; the Tags sectio
   await expect(page.locator('[data-tags-section]')).toHaveCount(0);
 
   await rowButton(page, threads.notes).click({ button: 'right' });
-  await expect(rowMenu(page).getByRole('menuitem').nth(1)).toHaveText('Add tag');
+  // Star thread, then Add to Priority, then Add tag.
+  await expect(rowMenu(page).getByRole('menuitem').nth(2)).toHaveText('Add tag');
   await rowMenu(page).locator('[data-add-tag-item]').click();
   const field = rowMenu(page).locator('[data-tag-find]');
   await expect(field).toBeFocused();
