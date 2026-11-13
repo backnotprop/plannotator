@@ -4,7 +4,9 @@
  * PNG in the repo, so it rides as a base64 data-URI.
  */
 
+import { useId } from 'react';
 import type React from 'react';
+import { MUSE_MARK_GRADIENT, MUSE_MARK_PATH, MUSE_MARK_STOPS } from './museMark';
 import { HERMES_AGENT_MASK_DARK, HERMES_AGENT_MASK_LIGHT } from './hermesAgentMask';
 
 const HERMES_AGENT_STYLE = {
@@ -95,6 +97,20 @@ export function GrokBotIcon({ className }: { className?: string }) {
     <svg viewBox="16 16 60 60" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
       <path className="ib-gk-body" d={GROK_BOT_CIRCLE_PATH} fill="#0b0b0c" />
       <path className="ib-gk-eyes" d={GROK_BOT_EYES_PATH} fill="#fff" />
+    </svg>
+  );
+}
+
+export function MuseIcon({ className }: { className?: string }) {
+  const id = `muse-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  return (
+    <svg viewBox="0 0 100 100" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false" data-mark="muse">
+      <defs>
+        <linearGradient id={id} gradientUnits="userSpaceOnUse" {...MUSE_MARK_GRADIENT}>
+          {MUSE_MARK_STOPS.map((s) => <stop key={s.offset} offset={s.offset} stopColor={s.color} />)}
+        </linearGradient>
+      </defs>
+      <path d={MUSE_MARK_PATH} fill={`url(#${id})`} stroke="none" />
     </svg>
   );
 }

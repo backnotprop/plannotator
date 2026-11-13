@@ -33,12 +33,13 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxCardWire, InboxDecision, InboxHealth, InboxInitiative, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxCardWire, InboxDecision, InboxHealth, InboxInitiative, InboxListRow, InboxListSection, InboxPriorityBefore, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
 import {
   InboxApiError,
+  InboxHeldError,
   inboxApi,
   onReplySent,
   adoptPageSession,
@@ -76,7 +77,7 @@ import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
 import { appliedFilter, filterListSections, localDay, pickCount, settledHeldRead, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, priorityChangedRows, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
@@ -178,6 +179,7 @@ import { MarkReadWarning } from './components/MarkReadWarning';
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, sameMachinePins, unpinnedWhere } from './pins';
+import { priorityAction, priorityBackIn } from './priority';
 import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -206,7 +208,7 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
-import { hearAgentFacesEvent, keepAgentName, readAgentFaces } from './agents/agentFaces';
+import { hearAgentFacesEvent, keepAgentName, onAgentFaceRefused, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -1739,6 +1741,22 @@ function Inbox() {
   }, [refreshList, flushNotifications, refreshDecisions, armSlide]);
 
   /**
+   * The list read again after another window or a phone changed the person's Priority (`event: priority`). With no
+   * thread open only the rows whose Priority changed move (held.ts `priorityChangedRows`), each alone and with the
+   * settle's slide; the rest of the list holds, as `refreshSnoozes` does.
+   */
+  const refreshPriority = useCallback(async () => {
+    const next = await refreshList(false);
+    const drawn = shownRef.current;
+    if (routeRef.current.thread || !next || !drawn) return;
+    const groups = listGroups(next);
+    const moving = priorityChangedRows(drawn, groups);
+    if (moving.length === 0) return;
+    armSlide();
+    setShown((current) => (current ? moving.reduce((list, threadId) => settleThread(list, groups, threadId), current) : current));
+  }, [refreshList, armSlide]);
+
+  /**
    * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
    * have been on screen; record the look up to `through` (never past it) and
    * let the row unbold in place. `look.through` rises only once the server
@@ -2286,6 +2304,7 @@ function Inbox() {
       }, delay);
     };
     let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
+    let priorityTimer: ReturnType<typeof setTimeout> | null = null;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let machinesTimer: ReturnType<typeof setTimeout> | null = null;
     let machineThreadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2546,6 +2565,12 @@ function Inbox() {
           if (snoozesTimer) clearTimeout(snoozesTimer);
           snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
         },
+        // The person's Priority changed (another window, a phone, an archive): read the list; with no thread open the
+        // row goes to its place, as a snooze from elsewhere does.
+        onPriority: () => {
+          if (priorityTimer) clearTimeout(priorityTimer);
+          priorityTimer = setTimeout(() => void refreshPriority(), 60);
+        },
         // A thread's PRs read behind the window's answer changed their checks or review: the cards showing them read again.
         onThreadPulls: (threadIds) => {
           for (const id of threadIds) threadPullsBus.emit(id);
@@ -2555,7 +2580,10 @@ function Inbox() {
         onRows: (rows, rev, last) => hearRowsEvent(rows, rev, () => void refreshSettings(), last),
         onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
         // An agent icon's face was saved (here, another window, a phone): every icon of that agent redraws at once.
-        onAgentFaces: (data) => hearAgentFacesEvent(data),
+        // A linked machine's agent's face or name changed there: its list brings it.
+        onAgentFaces: (data) => {
+          if (!hearAgentFacesEvent(data)) listAfterEvents(60);
+        },
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
@@ -2709,10 +2737,11 @@ function Inbox() {
       if (draftsTimer) clearTimeout(draftsTimer);
       if (cardsTimer) clearTimeout(cardsTimer);
       if (snoozesTimer) clearTimeout(snoozesTimer);
+      if (priorityTimer) clearTimeout(priorityTimer);
       if (machinesTimer) clearTimeout(machinesTimer);
       if (machineThreadTimer) clearTimeout(machineThreadTimer);
     };
-  }, [refreshList, refreshSnoozes, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
+  }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
 
   // Opening a thread: read it, record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look
@@ -3624,6 +3653,11 @@ function Inbox() {
     onSavedReactionsFailed((cause) => showToast(errorToast(cause, 'Your saved emoji did not change.')));
     return () => onSavedReactionsFailed(null);
   });
+  // A linked machine's agent's face that waits for that machine, or that it refused (agents/agentFaces.ts).
+  useEffect(() => {
+    onAgentFaceRefused((cause) => showToast(errorToast(cause, 'The picture did not change.')));
+    return () => onAgentFaceRefused(null);
+  });
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
@@ -4072,12 +4106,16 @@ function Inbox() {
       // From a row's menu, a thread that is not the open one: the subject says which (as Mark read's toast).
       const detail = threadId !== open && before ? `“${before.subject ?? '(no subject)'}”` : undefined;
       const snoozed = before?.snoozed;
+      const priority = (before ?? (threadRow?.thread_id === threadId ? threadRow : null))?.priority;
       showToast({
         icon: 'archive',
         lead: 'Archived',
         ...(detail ? { detail } : {}),
-        // Archive ended the snooze: Undo unarchives first, since an archived thread takes none.
-        onUndo: () => void archive(threadId, rootId, false).then(() => restoreSnooze(threadId, snoozed)),
+        // Archive ended the snooze and the person's Priority: Undo unarchives first, since an archived thread takes neither.
+        onUndo: () =>
+          void archive(threadId, rootId, false)
+            .then(() => restoreSnooze(threadId, snoozed))
+            .then(() => restorePriority(threadId, priority)),
       });
     } else {
       dismissToast();
@@ -4242,6 +4280,91 @@ function Inbox() {
   };
 
   /**
+   * Add to Priority or Remove from Priority, from the row menu, the thread's ⋯ or a phone's long-press sheet. The row
+   * moves at once, with the settle's slide, a thread open beside the list or none (`movePriorityRow`), as a snooze
+   * does; the rest of the list holds still. The toast's Undo writes back exactly what the route said was there before
+   * (the first time of an add included) and puts the row back.
+   */
+  const setPriority = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, on: boolean) => {
+    const threadId = row.thread_id;
+    const subject = row.subject ?? '(no subject)';
+    // Where Remove sends it, from the row before the write (Priority never changes a row's section).
+    const backIn = priorityBackIn(rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null));
+    let before: InboxPriorityBefore;
+    try {
+      ({ before } = await inboxApi.priority(threadId, on));
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite([threadId]);
+    const drawnBefore = movePriorityRow(threadId);
+    if (on) {
+      showToast({
+        icon: 'check',
+        lead: 'Added to Priority',
+        detail: `“${subject}”`,
+        speech: `Added “${subject}” to Priority.`,
+        onUndo: () => void undoPriority(threadId, before, drawnBefore, 'Removed from Priority again.'),
+      });
+      return;
+    }
+    showToast({
+      icon: 'check',
+      lead: 'Removed from Priority',
+      ...(backIn ? { detail: backIn } : {}),
+      speech: `Removed “${subject}” from Priority.${backIn ? ` ${backIn}.` : ''}`,
+      onUndo: () => void undoPriority(threadId, before, drawnBefore, 'Back in Priority.'),
+    });
+  };
+  /**
+   * One row to where the latest read puts it after a Priority write, the rest of the list held (held.ts
+   * `settleThread`), with the settle's slide. Nothing where a thread covers the list (Back moves it,
+   * `settlesOnBack`). Returns the list as drawn before, for the Undo, or null when nothing moved.
+   */
+  const movePriorityRow = (threadId: string): InboxListSection[] | null => {
+    const drawn = shownRef.current;
+    if ((routeRef.current.thread && listCovered()) || !drawn || !latestRef.current || drawnSection(drawn, threadId) === null) return null;
+    const groups = listGroups(latestRef.current);
+    if (drawnSection(drawn, threadId) === drawnSection(groups, threadId)) return null;
+    armSlide();
+    setShown((current) => (current ? settleThread(current, groups, threadId) : current));
+    return drawn;
+  };
+  /**
+   * The Undo of Add to Priority or Remove from Priority: the entries as they were, then the row back between the
+   * neighbours it had (held.ts `putRowBack`) when the list still holds them, else to its place.
+   */
+  const undoPriority = async (threadId: string, before: InboxPriorityBefore, drawnBefore: InboxListSection[] | null, words: string) => {
+    dismissToast();
+    try {
+      await inboxApi.priority(threadId, { restore: before });
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite([threadId]);
+    const now = rowOf(threadId);
+    if (drawnBefore && now && !(routeRef.current.thread && listCovered()) && drawnSection(drawnBefore, threadId) !== null) {
+      armSlide();
+      setShown((current) => (current ? putRowBack(replaceHeldRow(current, now), drawnBefore, threadId) : current));
+    } else movePriorityRow(threadId);
+    say(words);
+  };
+  /** Archive's Undo puts the person's add back with its first time: the archive dropped it (the store's `endPriority`). */
+  const restorePriority = async (threadId: string, priority: InboxListRow['priority']) => {
+    if (!priority?.person) return;
+    try {
+      await inboxApi.priority(threadId, { restore: { at: priority.at, off_at: null } });
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite([threadId]);
+    movePriorityRow(threadId);
+  };
+
+  /**
    * Pin a thread to the sidebar, or unpin it (approval "inbox-pinned-threads"),
    * from the row menu, the thread header or the pinned row's menu. A pin is the
    * person's own write and moves no row. Pin says so in the live region only
@@ -4368,6 +4491,7 @@ function Inbox() {
    */
   const rowAction = (row: InboxListRow, action: RowMenuAction) => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
+    if (action === 'priority-add' || action === 'priority-remove') return void setPriority(row, action === 'priority-add');
     if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
     if (action === 'mark-unread') return void markUnread(row.thread_id);
     if (action === 'unsnooze') return void unsnooze(row);
@@ -4478,7 +4602,8 @@ function Inbox() {
       await keepAgentName(agent, name);
     } catch (cause) {
       showToast(errorToast(cause, 'The name did not change.'));
-      return false;
+      // Held for the agent's machine: the field closes, and the name shows once that machine has it.
+      return cause instanceof InboxHeldError;
     }
     say(name === null ? `Name reset${own ? ` to ${own}` : ''}.` : `Renamed to ${name}.`);
     return true;
@@ -7612,6 +7737,10 @@ function Inbox() {
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}
             onPin={pinsOn && machineTakes({ machine: machineOf(thread.thread_id) ?? undefined }, machines, 'star') ? (next) => setPin(thread, next) : undefined}
+            priority={(() => {
+              const action = openThreadRow && machineTakes(openThreadRow, machines, 'priority') ? priorityAction(openThreadRow) : null;
+              return action ? { on: action === 'priority-remove', onToggle: () => void setPriority(thread, action === 'priority-add') } : undefined;
+            })()}
             onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
             onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
             snoozeBlocked={(() => {

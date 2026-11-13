@@ -16,22 +16,24 @@ import type { InboxShortcutExtras } from './extras';
 import { inboxFileViewerShortcuts } from './fileViewer.shortcuts';
 import { inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts } from './grid.shortcuts';
 import { inboxListShortcuts } from './list.shortcuts';
+import { inboxPrBoardShortcuts } from './prBoard.shortcuts';
 import { inboxThreadShortcuts } from './thread.shortcuts';
 
 export { inboxAppShortcuts } from './app.shortcuts';
 export { inboxFileViewerShortcuts } from './fileViewer.shortcuts';
 export { inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts } from './grid.shortcuts';
 export { inboxListShortcuts } from './list.shortcuts';
+export { inboxPrBoardShortcuts } from './prBoard.shortcuts';
 export { inboxThreadShortcuts } from './thread.shortcuts';
 export { inboxSearchShortcuts } from '../search/searchShortcut';
 export { INBOX_SHORTCUT_EXTRAS, type InboxShortcutExtras } from './extras';
 export * from './guards';
 
-export const inboxShortcutRegistry = createShortcutRegistry([inboxAppShortcuts, inboxSearchShortcuts, inboxListShortcuts, inboxThreadShortcuts, inboxFileViewerShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts]);
+export const inboxShortcutRegistry = createShortcutRegistry([inboxAppShortcuts, inboxSearchShortcuts, inboxListShortcuts, inboxThreadShortcuts, inboxFileViewerShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts, inboxPrBoardShortcuts]);
 
 /** The registry with other extras (tests: every combination must validate and stay unambiguous). */
 export function buildInboxShortcutRegistry(extras: InboxShortcutExtras): ShortcutRegistry {
-  return createShortcutRegistry([buildInboxAppShortcuts(extras), buildInboxSearchShortcuts(extras), inboxListShortcuts, inboxThreadShortcuts, inboxFileViewerShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts]);
+  return createShortcutRegistry([buildInboxAppShortcuts(extras), buildInboxSearchShortcuts(extras), inboxListShortcuts, inboxThreadShortcuts, inboxFileViewerShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxTileShortcuts, inboxPrBoardShortcuts]);
 }
 
 export const inboxSurface: ShortcutSurface = {

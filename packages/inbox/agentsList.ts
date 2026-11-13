@@ -11,7 +11,7 @@
  * the agent as read, and `inboxAgentsNow` is the list as read.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
+import { readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxListRow } from '@plannotator/core/inbox-types';
 import { agentListFilter, type AgentListFilter } from './agents/model';
 import { givenName, useAgentNames, type AgentNames } from './agents/agentNames';
 import type { MachinesModel } from './machines';
@@ -40,6 +40,8 @@ export function setInboxAgents(next: unknown): void {
             agents,
             total: typeof group.total === 'number' && group.total >= agents.length ? group.total : agents.length,
             ended_today: typeof group.ended_today === 'number' && group.ended_today >= 0 ? group.ended_today : 0,
+            // A linked machine's faces and given names, kept there (agents/agentFaces.ts draws them).
+            ...(typeof group.machine === 'string' && group.faces !== undefined ? { faces: readInboxAgentFaces(group.faces), faces_rev: typeof group.faces_rev === 'number' ? group.faces_rev : 0 } : {}),
           };
         })
     : null;

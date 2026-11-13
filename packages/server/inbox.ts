@@ -246,6 +246,7 @@ import { createInboxCommentDrafts } from "./inbox-comment-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxPriority } from "./inbox-priority";
 import { createInboxThreadTags } from "./inbox-thread-tags";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
@@ -782,6 +783,8 @@ const ERROR_STATUS: Record<string, number> = {
   // Snoozes (packages/shared/inbox/snoozes.ts): a time gone by, and a file from a newer Plannotator.
   snooze_past: 409,
   snoozes_newer: 409,
+  // priority.json from a newer Plannotator (packages/shared/inbox/priority.ts).
+  priority_newer: 409,
   // Attachments and annotations (step 2).
   attachment_not_found: 404,
   attachment_missing: 404,
@@ -1211,6 +1214,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const askListeners = new Set<(threadId: string) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
   const pinListeners = new Set<() => void>();
+  /** The person's Priority changed (inbox-priority.ts): the windows' streams say `event: priority`. */
+  const priorityListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
   const artifactPinListeners = new Set<() => void>();
   /** A thread's tags changed (inbox-thread-tags.ts): the windows' streams say `event: tags`. */
@@ -1668,8 +1673,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include") => {
     // One pass over the store feeds both the folders' counts and the sections.
-    // `pinned_at` and `snoozed` (additive) on the window's and the phone's rows only: never on anything an agent reads.
+    // `pinned_at`, `snoozed` and `priority` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
+    const addedAt = new Map(store.priorities().threads.map((entry) => [entry.thread_id, entry.at]));
+    // Every row of this Inbox carries the key: it is how a window knows this Inbox keeps priority.
+    const withPriority = (row: InboxListRow): InboxListRow => {
+      const at = addedAt.get(row.thread_id);
+      return { ...row, priority: at !== undefined && !inboxRowArchived(row) ? { person: true, at, ask: null } : null };
+    };
     // Launched threads (only while launch is on): "Starting" / "Working", and a session blocked on a prompt in Stopped on you.
     // Resolved once per list: off, it is the identity and no row costs anything. Only this Inbox's own rows: a linked
     // machine's launches are that machine's to decorate.
@@ -1706,7 +1717,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     const own = store
       .listRows()
-      .map((row) => withTags(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now))));
+      .map((row) => withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)))));
     if (pullsByThread.size > 0) {
       const onView = own.filter((row) => row.pulls && !inboxRowArchived(row)).flatMap((row) => pullsByThread.get(row.thread_id) ?? []);
       if (onView.length > 0) void threadPullStates.refresh(onView);
@@ -3646,6 +3657,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Windows, and a linked machine that asks (`pins=1`: a star writes no record, inbox-peer-link.ts).
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("pins") === "1") pinListeners.add(onPins);
+        // The person's Priority changed (any window's, a phone's, a linked machine's, an archive, or a deletion): the list
+        // is read again. Windows, and a linked machine that asks (`priority=1`, as `pins=1`).
+        const onPriority = () => send(`event: priority\ndata: {}\n\n`);
+        if (windowId || url.searchParams.get("priority") === "1") priorityListeners.add(onPriority);
         // A thread's tags changed (any window's, a rename's marks, or a deletion): the list reads `tags` again. Windows only.
         const onThreadTags = () => send(`event: tags\ndata: {}\n\n`);
         if (windowId) threadTagListeners.add(onThreadTags);
@@ -3669,9 +3684,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The sidebar's layout was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onSidebar = (sidebar: InboxSidebarLayout, rev: number) => send(`event: sidebar\ndata: ${JSON.stringify({ sidebar, rev })}\n\n`);
         if (windowId) sidebarListeners.add(onSidebar);
-        // An agent icon's face was saved (any window's, a phone's too): every window draws it at once. Windows only.
+        // An agent icon's face or given name was saved (any window's, a linked machine's): every window draws it at
+        // once. Windows, and a linked machine that asks (`agent-faces=1`: a face writes no record, inbox-peer-link.ts).
         const onAgentFaces = (wire: InboxAgentFacesWire) => send(`event: agent-faces\ndata: ${JSON.stringify(wire)}\n\n`);
-        if (windowId) agentFaceListeners.add(onAgentFaces);
+        if (windowId || url.searchParams.get("agent-faces") === "1") agentFaceListeners.add(onAgentFaces);
         // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId) reactionsListeners.add(onReactions);
@@ -3730,6 +3746,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           draftListeners.delete(onDraft);
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
+          priorityListeners.delete(onPriority);
           threadTagListeners.delete(onThreadTags);
           artifactPinListeners.delete(onArtifactPins);
           showListeners.delete(onShow);
@@ -4519,6 +4536,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // The person's Add to Priority and Remove from Priority (packages/server/inbox-priority.ts).
+  const priority = createInboxPriority({ store, serverSession, readBody: (req) => readBody(req), json });
   // Tags on threads (packages/server/inbox-thread-tags.ts).
   const threadTags = createInboxThreadTags({ store, serverSession, readBody: (req) => readBody(req), json });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
@@ -4571,6 +4590,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const feedback = createInboxFeedback({ version, json, store, ...(options.feedbackUrl ? { url: () => options.feedbackUrl! } : {}) });
   const stopPinEvents = store.onPinsChange(() => {
     for (const listener of pinListeners) listener();
+  });
+  const stopPriorityEvents = store.onPriorityChange(() => {
+    for (const listener of priorityListeners) listener();
   });
   const stopThreadTagEvents = store.onThreadTagsChange(() => {
     for (const listener of threadTagListeners) listener();
@@ -5088,7 +5110,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const labels = merged ? { ...machines.sessionNames().labels, ...live.labels() } : live.labels();
         const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         const shown = ownerOrLocal(req, via) ? null : inboxSessionsShown(rows);
-        const model = { ...rows, session_labels: shown ? inboxNamesShown(labels, shown) : labels, session_titles: shown ? inboxNamesShown(titles, shown) : titles };
+        // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
+        // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
+        const faces = fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM ? agentFacesFile.wire() : null;
+        const agents = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev })) : rows.agents;
+        const model = { ...rows, agents, session_labels: shown ? inboxNamesShown(labels, shown) : labels, session_titles: shown ? inboxNamesShown(titles, shown) : titles };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -6121,6 +6147,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;
+      // Add to Priority and Remove from Priority.
+      const prioritized = await priority.route(req, url);
+      if (prioritized) return prioritized;
       // Tags on threads (approval "inbox-thread-tags"): Add tag, untick, Remove from.
       const threadTagged = await threadTags.route(req, url);
       if (threadTagged) return threadTagged;
@@ -7149,6 +7178,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     imageCapture.stop();
     clearInterval(uploadSweep);
     stopPinEvents();
+    stopPriorityEvents();
     stopThreadTagEvents();
     stopArtifactPinEvents();
     snoozes.stop();

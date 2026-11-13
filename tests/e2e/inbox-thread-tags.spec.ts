@@ -45,7 +45,7 @@ const toast = (page: Page) => page.locator('[data-inbox-toast]');
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-thread-tags-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const src = join(root, 'src');
@@ -88,7 +88,8 @@ test('Add tag from the row menu makes a tag and tags the thread; the Tags sectio
   await expect(page.locator('[data-tags-section]')).toHaveCount(0);
 
   await rowButton(page, threads.notes).click({ button: 'right' });
-  await expect(rowMenu(page).getByRole('menuitem').nth(1)).toHaveText('Add tag');
+  // Star thread, then Add to Priority, then Add tag.
+  await expect(rowMenu(page).getByRole('menuitem').nth(2)).toHaveText('Add tag');
   await rowMenu(page).locator('[data-add-tag-item]').click();
   const field = rowMenu(page).locator('[data-tag-find]');
   await expect(field).toBeFocused();
