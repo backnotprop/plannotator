@@ -55,7 +55,7 @@ test.skipIf(!python)("end to end: the plugin over the real plannotator signs as 
   chmodSync(bin, 0o755);
   const child = Bun.spawn([python!, "e2e.py", project], {
     cwd: here,
-    env: { PATH: process.env.PATH ?? "", HOME: join(root, "home"), PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_INBOX_TOOL: "1", PLANNOTATOR_BIN: bin, PLANNOTATOR_BROWSER: NO_BROWSER, PYTHONDONTWRITEBYTECODE: "1" },
+    env: { PATH: process.env.PATH ?? "", HOME: join(root, "home"), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_INBOX_TOOL: "1", PLANNOTATOR_BIN: bin, PLANNOTATOR_BROWSER: NO_BROWSER, PYTHONDONTWRITEBYTECODE: "1" },
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
