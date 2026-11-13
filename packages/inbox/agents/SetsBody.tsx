@@ -47,9 +47,11 @@ const licenceLabel = (spdx: string | undefined) => (spdx ? spdx.replace(/-(\d+\.
  *
  * Its keys are the dialog's own (the arrows move in the grid, Enter in the search picks the first found): it adds no
  * shortcut. The one credit a set's licence asks for (game-icons.net's) is a muted line under its grid.
+ * `builtInOnly`: a linked machine's agent, whose machine has the built-in sets and maybe not a set fetched here.
  */
-export function SetsBody({ face, onPick }: { face: AgentFace; onPick: (face: AgentFace) => void }) {
-  const sets = useIconSets();
+export function SetsBody({ face, builtInOnly = false, onPick }: { face: AgentFace; builtInOnly?: boolean; onPick: (face: AgentFace) => void }) {
+  const listed = useIconSets();
+  const sets = useMemo(() => (builtInOnly ? listed?.filter((s) => s.kind === 'built-in') : listed), [listed, builtInOnly]);
   // The pointer of fetchable sets is read only here, when the person opens Sets.
   useEffect(() => {
     void readIconSets(true);

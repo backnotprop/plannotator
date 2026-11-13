@@ -116,7 +116,7 @@ async function startWorld(options: { version?: string; config?: Record<string, u
   );
   const child: ChildProcessWithoutNullStreams = spawn('bun', [join(repo, 'tests/e2e/voice-inbox.ts'), root, JSON.stringify({ html, version: options.version, codex: options.codex })], {
     cwd: repo,
-    env: { PATH: process.env.PATH ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', HOME: join(root, 'home'), PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_PHONES: '0' },
+    env: { PATH: process.env.PATH ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', HOME: join(root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_PHONES: '0' },
   });
   let stderr = '';
   child.stderr.on('data', (chunk) => (stderr += String(chunk)));

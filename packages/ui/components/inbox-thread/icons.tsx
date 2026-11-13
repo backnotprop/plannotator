@@ -109,6 +109,9 @@ const PATHS = {
   // Pinned threads (approval "inbox-pinned-threads"): Unpin is Lucide's pin-off, Move up Heroicons' arrow-up.
   pinOff: 'M12 17v5M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89M2 2l20 20M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11',
   arrowUp: 'M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18',
+  // The Inbox's Add to Priority and Remove from Priority: an arrow up to a line, an arrow down to a line.
+  toTop: 'M5 4h14M12 20V9m-5 4 5-5 5 5',
+  toBottom: 'M5 20h14M12 4v11m-5-4 5 5 5-5',
   // The Board's "You: …" link to the thread (Heroicons outline arrow-up-right).
   arrowUpRight: 'm4.5 19.5 15-15m0 0H8.25m11.25 0v11.25',
   // The tour's "Connect agents next →" (Heroicons outline arrow-right).

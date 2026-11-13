@@ -40,12 +40,19 @@ function BackRow({ label, onBack }: { label: string; onBack: () => void }) {
 /**
  * Focus for a menu whose items a swap just changed: now, and again on the next frame. The menu keeps its highlighted
  * index across the swap and focuses whatever item lands at it once its list settles (the times' "Next week" where
- * Snooze stood); a focus after that is one the menu's list registers, so its arrows go on from there. Returns the
- * cleanup. A host's Back to its menu calls it for its Snooze item.
+ * Snooze stood); a focus after that is one the menu's list registers, so its arrows go on from there. When the old
+ * index is past the new list's end the menu moves no focus, and a focus on the item that already has it fires no
+ * event: the menu's popup takes focus first, so the list hears the item's. Returns the cleanup. A host's Back to its
+ * menu calls it for its Snooze item.
  */
 export function focusAfterSwap(find: () => HTMLElement | null | undefined): () => void {
   find()?.focus({ preventScroll: true });
-  const frame = requestAnimationFrame(() => find()?.focus({ preventScroll: true }));
+  const frame = requestAnimationFrame(() => {
+    const item = find();
+    if (!item) return;
+    if (item === item.ownerDocument.activeElement) item.closest<HTMLElement>('[role="menu"]')?.focus({ preventScroll: true });
+    item.focus({ preventScroll: true });
+  });
   return () => cancelAnimationFrame(frame);
 }
 
