@@ -296,6 +296,13 @@ export interface InboxSendInput {
    * told to have ended when it stops polling.
    */
   wakes?: boolean;
+  /**
+   * The sender's host could not say in time whether the person's reply wakes
+   * it (a T3 Code thread whose T3 answered late or could not be asked): kept
+   * on the message (`InboxMessage.wake_undecided`) until `settleWake`.
+   * Ignored with `wakes`.
+   */
+  wake_undecided?: boolean;
 }
 
 export interface InboxSendResult {
@@ -794,6 +801,8 @@ export class InboxStore {
   private readonly messages = new Map<string, InboxMessage>();
   /** The agent sessions with a message through a waking connection (`hasWakingMessage`, read every second). */
   private readonly wakingSessions = new Set<string>();
+  /** The messages still `wake_undecided`. */
+  private readonly wakeUndecidedIds = new Set<string>();
   /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
   private readonly launchedRootIds = new Set<string>();
   /** The seq of a message's first line: its place in the event log. */
@@ -1128,6 +1137,8 @@ export class InboxStore {
     if (record.author.kind === "person") this.indexPersonTags(record);
     this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
     if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
+    if (record.wake_undecided) this.wakeUndecidedIds.add(record.id);
+    else this.wakeUndecidedIds.delete(record.id);
     if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
     if (!first) return;
     this.messageSeq.set(record.id, firstSeq);
@@ -3863,7 +3874,9 @@ export class InboxStore {
    * never comes back, with no ended state to offer the route choice. A
    * waking recipient stays strict (its connection takes the reply, and the
    * route choice opens when it ended), and so does any reader that wrote,
-   * owns a message or was tagged in the thread.
+   * owns a message or was tagged in the thread. A recipient whose wake is
+   * undecided (`wake_undecided`) stays strict too until it is settled: its
+   * reply may yet go to it as a turn.
    */
   private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
     if (message.to || hasTags(message) || message.delivery || isAckNote(message)) return false;
@@ -3871,7 +3884,7 @@ export class InboxStore {
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent") return false;
     if ((asked.author.session ?? null) === reader) return false;
-    return asked.wakes === true || !isNewcomer();
+    return asked.wakes === true || asked.wake_undecided === true || !isNewcomer();
   }
 
   /**
@@ -4267,7 +4280,7 @@ export class InboxStore {
       ...(input.from_project && input.from_project.root !== this.projectsById.get(projectId)?.root && !this.projectGroup(projectId).some((id) => this.projectsById.get(id)?.root === input.from_project!.root)
         ? { from_project: { name: input.from_project.name, root: input.from_project.root } }
         : {}),
-      ...(input.wakes === true ? { wakes: true } : {}),
+      ...(input.wakes === true ? { wakes: true } : input.wake_undecided === true ? { wake_undecided: true as const } : {}),
       ...(input.turn_error === true ? { turn_error: true as const } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
@@ -7397,6 +7410,32 @@ export class InboxStore {
       for (const tag of message.tags ?? []) if (tag.host === host && tag.wakes) out.add(tag.session);
     }
     return out;
+  }
+
+  /** The messages of `host` still `wake_undecided`, as ids by the session that sent them. */
+  wakeUndecidedOfHost(host: string): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    for (const id of this.wakeUndecidedIds) {
+      const message = this.messages.get(id);
+      // Deleted with its thread.
+      if (!message) this.wakeUndecidedIds.delete(id);
+      else if (message.author.kind === "agent" && message.author.host === host && message.author.session) {
+        out.set(message.author.session, [...(out.get(message.author.session) ?? []), id]);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Whether the person's reply wakes the sender of a `wake_undecided` message
+   * is known now: the message gets `wakes` when it does, and is no longer
+   * undecided either way. No write for a message that is not undecided.
+   */
+  settleWake(messageId: string, wakes: boolean): void {
+    const message = this.messages.get(messageId);
+    if (!message?.wake_undecided) return;
+    const { wake_undecided: _settled, ...settled } = message;
+    this.appendMessage(wakes ? { ...settled, wakes: true } : settled, this.stamp());
   }
 
   /** The sessions of `host` with a message of their own that wakes. A person's message or tag only names a session, however it runs. */

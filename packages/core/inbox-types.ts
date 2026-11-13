@@ -727,6 +727,14 @@ export interface InboxMessage {
    */
   wakes?: boolean;
   /**
+   * On an agent's message from a T3 Code thread: when it was sent, T3 had not
+   * said whether a saved grant reaches the thread (it answered late, or could
+   * not be asked), so `wakes` was neither set nor ruled out. The T3 wake asks
+   * again and settles it (`InboxStore.settleWake`): `wakes` when a grant
+   * reaches the thread and can send into it, and this goes either way.
+   */
+  wake_undecided?: true;
+  /**
    * On an agent's message: the earlier questions it said it supersedes
    * (send_message's `supersedes`, as sent: `<message id>` for every open
    * question of that message, or `<message id>/<key>` for one). The question

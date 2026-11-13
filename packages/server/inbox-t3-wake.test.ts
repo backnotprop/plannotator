@@ -31,14 +31,15 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** A T3 environment that has `threads`; `fail` makes the next sends throw that text. */
+/** A T3 environment that has `threads`; `fail` makes the next sends throw that text; `hold` keeps every call open until it resolves. */
 function fakeT3(threads: string[]) {
   const sends: Record<string, unknown>[] = [];
   const attempts: unknown[] = [];
-  const state = { fail: null as string | null, down: false };
+  const state = { fail: null as string | null, down: false, hold: null as Promise<void> | null };
   const rpc: T3Rpc = {
     async call(name, args) {
       const threadId = args.threadId as string;
+      await state.hold;
       if (state.down) throw new Error("fetch failed");
       if (!threads.includes(threadId)) throw new Error(`T3 ${name}: The thread was not found.`);
       if (name === "t3_thread_read") {
@@ -56,32 +57,41 @@ function fakeT3(threads: string[]) {
   return { rpc, sends, attempts, state, threads };
 }
 
-async function world(options: { grant?: boolean; threads?: string[]; now?: () => number; sessionsNow?: () => number } = {}) {
+async function world(options: { grant?: boolean; threads?: string[]; now?: () => number; sessionsNow?: () => number; lookupTimeoutMs?: number } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-t3-wake-"));
   roots.push(root);
   const dataDir = join(root, "data");
   if (options.grant !== false) new T3Credentials(dataDir, ENDPOINT).save({ endpoint: ENDPOINT.href, epoch: "e1", tokens: { access_token: "tok", token_type: "Bearer" } });
   const t3 = fakeT3(options.threads ?? [THREAD]);
-  const server = await startInboxServer({ dataDir, t3Wake: { connect: async () => t3.rpc, ...(options.now ? { now: options.now } : {}) }, ...(options.sessionsNow ? { sessionsNow: options.sessionsNow, setAsideDelayMs: 50 } : {}) });
-  servers.push(server);
-  const client = new Client({ name: "claude-code", version: "2.1.316" });
-  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
-  clients.push(client);
-  const base = `http://127.0.0.1:${server.port}`;
-  const send = async (body: string, thread = THREAD) => {
-    const result = await client.callTool({ name: "send_message", arguments: { body, project_path: root, agent_session: thread, agent_host: "t3", agent_name: "T3 Code" } });
-    return { ...(result.structuredContent as { message_id: string; thread_id: string }), text: (result.content as { text: string }[])[0]!.text };
-  };
-  const reply = async (messageId: string, words: string, key = "k1") => {
-    const response = await fetch(`${base}/api/inbox/messages/${messageId}/reply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: key, words }),
+  /** An Inbox on the data folder, with its doors. */
+  const start = async () => {
+    const server = await startInboxServer({
+      dataDir,
+      t3Wake: { connect: async () => t3.rpc, ...(options.now ? { now: options.now } : {}), ...(options.lookupTimeoutMs ? { lookupTimeoutMs: options.lookupTimeoutMs } : {}) },
+      ...(options.sessionsNow ? { sessionsNow: options.sessionsNow, setAsideDelayMs: 50 } : {}),
     });
-    return ((await response.json()) as { reply: { id: string } }).reply.id;
+    servers.push(server);
+    const client = new Client({ name: "claude-code", version: "2.1.316" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+    clients.push(client);
+    const base = `http://127.0.0.1:${server.port}`;
+    /** `after`: the message of an Inbox thread this one is added after (`reply_to`). */
+    const send = async (body: string, thread = THREAD, after?: string) => {
+      const result = await client.callTool({ name: "send_message", arguments: { body, project_path: root, agent_session: thread, agent_host: "t3", agent_name: "T3 Code", ...(after ? { reply_to: after } : {}) } });
+      return { ...(result.structuredContent as { message_id: string; thread_id: string }), text: (result.content as { text: string }[])[0]!.text };
+    };
+    const reply = async (messageId: string, words: string, key = "k1") => {
+      const response = await fetch(`${base}/api/inbox/messages/${messageId}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: key, words }),
+      });
+      return ((await response.json()) as { reply: { id: string } }).reply.id;
+    };
+    const thread = async (id: string) => ((await (await fetch(`${base}/api/inbox/threads/${id}`)).json()) as { thread: InboxThread }).thread;
+    return { server, client, send, reply, thread };
   };
-  const thread = async (id: string) => ((await (await fetch(`${base}/api/inbox/threads/${id}`)).json()) as { thread: InboxThread }).thread;
-  return { server, client, t3, send, reply, thread };
+  return { ...(await start()), t3, start };
 }
 
 describe("a reply to a T3 Code thread", () => {
@@ -198,6 +208,182 @@ describe("a reply to a T3 Code thread", () => {
       await w.server.t3Wake.sweep();
       expect(w.t3.sends).toHaveLength(0);
     }
+  });
+});
+
+/**
+ * T3 is slow or down at the moment an agent sends: nothing is promised then,
+ * the message is kept undecided, and T3's answer settles it.
+ */
+describe("a message a T3 Code thread sent while T3 had not answered", () => {
+  /** T3 holds every call open; the function returned lets them through. */
+  const hold = (t3: ReturnType<typeof fakeT3>) => {
+    let release = () => {};
+    t3.state.hold = new Promise<void>((resolve) => (release = resolve));
+    return () => {
+      t3.state.hold = null;
+      release();
+    };
+  };
+  const requestIds = (t3: ReturnType<typeof fakeT3>) => t3.sends.map((call) => call.clientRequestId);
+
+  test("is promised once T3 answers, and a reply written before that goes in once", async () => {
+    const w = await world({ lookupTimeoutMs: 50 });
+    const release = hold(w.t3);
+    const sent = await w.send("Ship the worker today?");
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    const asked = async () => (await w.thread(sent.thread_id)).messages[0]!;
+    expect(await asked()).toMatchObject({ author: { host: "t3", session: THREAD }, wake_undecided: true });
+    expect((await asked()).wakes).toBeUndefined();
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    expect(w.t3.sends).toHaveLength(0);
+
+    release();
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+    expect(await asked()).toMatchObject({ wakes: true });
+    expect((await asked()).wake_undecided).toBeUndefined();
+    expect(requestIds(w.t3)).toEqual([`plannotator-inbox-${replyId}`]);
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
+    // The thread's next message is promised as it is sent.
+    expect((await w.send("And the TTL?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+  });
+
+  test("keeps its reply for its thread while undecided: another agent's read of the Inbox thread does not take it", async () => {
+    const w = await world({ lookupTimeoutMs: 50 });
+    const release = hold(w.t3);
+    const sent = await w.send("Ship the worker today?");
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    // An agent new to the Inbox thread reads it before T3 has answered.
+    const read = await w.client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id, agent_session: "ses_another_reader" } });
+    expect(read.isError ?? false).toBe(false);
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery ?? null).toBeNull();
+
+    release();
+    await w.server.t3Wake.sweep();
+    expect(requestIds(w.t3)).toEqual([`plannotator-inbox-${replyId}`]);
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
+  });
+
+  test("is asked about again on the backoff when T3 could not be asked, and the reply goes in once T3 is back", async () => {
+    let clock = Date.now();
+    const w = await world({ now: () => clock });
+    w.t3.state.down = true;
+    const sent = await w.send("Which cache?");
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    const replyId = await w.reply(sent.message_id, "The edge one.");
+    await w.server.t3Wake.sweep();
+    expect((await w.thread(sent.thread_id)).messages[0]).toMatchObject({ wake_undecided: true });
+
+    // T3 is back: it is asked when the backoff comes due, not before.
+    w.t3.state.down = false;
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(0);
+    clock += 31_000;
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+    expect((await w.thread(sent.thread_id)).messages[0]).toMatchObject({ wakes: true });
+    expect(requestIds(w.t3)).toEqual([`plannotator-inbox-${replyId}`]);
+  });
+
+  test("is settled as soon as T3 answers about the thread again, before the backoff is due", async () => {
+    let clock = Date.now();
+    const w = await world({ now: () => clock });
+    w.t3.state.down = true;
+    const sent = await w.send("Which cache?");
+    const replyId = await w.reply(sent.message_id, "The edge one.");
+    await w.server.t3Wake.sweep();
+    // T3 is back, and the thread's next message finds its grant.
+    w.t3.state.down = false;
+    expect((await w.send("And the TTL?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    await Bun.sleep(0);
+    await w.server.t3Wake.sweep();
+    expect(requestIds(w.t3)).toEqual([`plannotator-inbox-${replyId}`]);
+  });
+
+  test("is settled before a later reply goes into the same Inbox thread, so its own reply goes in first and is not counted as read", async () => {
+    let clock = Date.now();
+    const w = await world({ now: () => clock });
+    w.t3.state.down = true;
+    const first = await w.send("Which cache?");
+    const early = await w.reply(first.message_id, "The edge one.");
+    await w.server.t3Wake.sweep();
+    // T3 is back: the thread's next message, in the same Inbox thread, is promised as it is sent.
+    w.t3.state.down = false;
+    const second = await w.send("And the TTL?", THREAD, early);
+    expect(second.thread_id).toBe(first.thread_id);
+    expect(second.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    const late = await w.reply(second.message_id, "An hour.", "k2");
+    await Bun.sleep(0);
+    await w.server.t3Wake.sweep();
+    expect(requestIds(w.t3)).toEqual([`plannotator-inbox-${early}`, `plannotator-inbox-${late}`]);
+  });
+
+  test("sent first after a restart, with T3 down: its reply goes in before a later reply to a message promised before the restart", async () => {
+    let clock = Date.now();
+    const w = await world({ now: () => clock });
+    const promised = await w.send("Ship the worker today?");
+    expect(promised.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    w.server.stop();
+
+    w.t3.state.down = true;
+    const again = await w.start();
+    const undecided = await again.send("Which cache?", THREAD, promised.message_id);
+    expect(undecided.thread_id).toBe(promised.thread_id);
+    expect(undecided.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    const early = await again.reply(undecided.message_id, "The edge one.", "k1");
+    const late = await again.reply(promised.message_id, "Yes, ship it.", "k2");
+    await again.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(0);
+
+    w.t3.state.down = false;
+    clock += 31_000;
+    await again.server.t3Wake.sweep();
+    expect(requestIds(w.t3)).toEqual([`plannotator-inbox-${early}`, `plannotator-inbox-${late}`]);
+  });
+
+  test("is settled by an Inbox started again before T3 answered: a reply from before the restart and one after it each go in once", async () => {
+    const w = await world();
+    w.t3.state.down = true;
+    const first = await w.send("Which cache?");
+    const before = await w.reply(first.message_id, "The edge one.");
+    const second = await w.send("And the TTL?", OTHER);
+    expect((await w.thread(second.thread_id)).messages[0]).toMatchObject({ wake_undecided: true });
+    w.server.stop();
+
+    w.t3.state.down = false;
+    w.t3.threads.push(OTHER);
+    const again = await w.start();
+    await again.server.t3Wake.sweep();
+    expect((await again.thread(second.thread_id)).messages[0]).toMatchObject({ wakes: true });
+    const after = await again.reply(second.message_id, "An hour.", "k2");
+    await again.server.t3Wake.sweep();
+    await again.server.t3Wake.sweep();
+    expect(requestIds(w.t3)).toEqual([`plannotator-inbox-${before}`, `plannotator-inbox-${after}`]);
+
+    // Delivered is on disk: another restart sends nothing again.
+    again.server.stop();
+    const third = await w.start();
+    await third.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(2);
+  });
+
+  test("is not promised when T3's late answer is that no grant reaches the thread", async () => {
+    const w = await world({ threads: [], lookupTimeoutMs: 50 });
+    const release = hold(w.t3);
+    const sent = await w.send("Anyone there?");
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    expect((await w.thread(sent.thread_id)).messages[0]).toMatchObject({ wake_undecided: true });
+    await w.reply(sent.message_id, "Here.");
+
+    release();
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+    const asked = (await w.thread(sent.thread_id)).messages[0]!;
+    expect(asked.wake_undecided).toBeUndefined();
+    expect(asked.wakes).toBeUndefined();
+    expect(w.t3.sends).toHaveLength(0);
+    expect(w.server.t3Wake.status(THREAD)).toBeNull();
   });
 });
 
@@ -428,6 +614,37 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     expect(Date.now() - started).toBeLessThan(2_500);
     expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     w.t3.state.stallMs = 0;
+  });
+
+  test("a T3 that answers after send_message stopped waiting: the message is promised then, and the reply goes in once", async () => {
+    const w = await loopback({ lookupTimeoutMs: 200 });
+    w.t3.state.stallMs = 800;
+    const sent = await w.send("Which cache?");
+    w.t3.state.stallMs = 0;
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    const replyId = await w.reply(sent.message_id, "The edge one.", "k1");
+    for (let waited = 0; w.t3.turns.length === 0 && waited < 15_000; waited += 25) await Bun.sleep(25);
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+    expect(w.t3.turns).toEqual([{ threadId: THREAD, message: expect.stringContaining("The edge one."), clientRequestId: `plannotator-inbox-${replyId}`, mode: "queue" }]);
+    expect((await w.thread(sent.thread_id)).messages[0]).toMatchObject({ wakes: true });
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
+  });
+
+  test("a late answer under a grant that cannot send into the thread promises nothing: the log says why, and nothing is sent", async () => {
+    const w = await loopback({ access: "read-only", scoped: true, lookupTimeoutMs: 200 });
+    w.t3.state.stallMs = 800;
+    const sent = await w.send("Which cache?");
+    w.t3.state.stallMs = 0;
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    await w.reply(sent.message_id, "The edge one.", "k1");
+    const asked = async () => (await w.thread(sent.thread_id)).messages[0]!;
+    for (let waited = 0; (await asked()).wake_undecided && waited < 15_000; waited += 25) await Bun.sleep(25);
+    await w.server.t3Wake.sweep();
+    expect((await asked()).wake_undecided).toBeUndefined();
+    expect((await asked()).wakes).toBeUndefined();
+    expect(w.t3.sendCalls).toBe(0);
+    expect(w.logs.find((entry) => entry.includes(`cannot send into thread ${THREAD}`))).toContain("(read-only)");
   });
 });
 

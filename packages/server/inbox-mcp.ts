@@ -299,8 +299,11 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * not `codex exec`, and a Codex CLI that runs `codex queue`;
    * packages/server/inbox-codex-wake.ts).
    * Absent: only a caller's own connection wakes it (`callerWakes`).
+   * Null: its host could not say in time (a T3 Code thread whose T3 has not
+   * answered, packages/server/inbox-t3-wake.ts). Nothing is promised, and the
+   * message is stored `wake_undecided` for the T3 wake to settle.
    */
-  sessionWakes?: (host: unknown, session: unknown, meta: unknown) => Promise<boolean>;
+  sessionWakes?: (host: unknown, session: unknown, meta: unknown) => Promise<boolean | null>;
   /**
    * Whether this session's bridge polls the Inbox now, so a Tidy for that host
    * reaches it by itself. Never a Codex or Qwen Code wake. Absent: never.
@@ -397,8 +400,9 @@ export function callerWorkingFolder(ctx: unknown): string | undefined {
  * Whether a sender's session is woken by the person's reply: its own
  * connection says so (`callerWakes`), or the Inbox knows that session is
  * woken (`sessionWakes`: its bridge polls now, or a Codex thread it wakes).
+ * Null when its host could not say in time (`sessionWakes`).
  */
-export async function senderWakes(context: Pick<InboxMcpContext, "sessionWakes">, ctx: unknown, input: { agent_host?: string; agent_session?: string }): Promise<boolean> {
+export async function senderWakes(context: Pick<InboxMcpContext, "sessionWakes">, ctx: unknown, input: { agent_host?: string; agent_session?: string }): Promise<boolean | null> {
   if (callerWakes(ctx)) return true;
   if (!context.sessionWakes) return false;
   const meta = (ctx as { mcpReq?: { _meta?: unknown } } | undefined)?.mcpReq?._meta;
@@ -454,7 +458,7 @@ export const INBOX_REPLY_READ_LATER_TEXT =
   "The person's reply won't arrive in this session by itself: go on with your work and call read_thread with this thread_id later.";
 
 /** What a send tool's result ends with, for this caller. */
-export function replyNextStepText(wakes: boolean, host: string | undefined): string {
+export function replyNextStepText(wakes: boolean | null, host: string | undefined): string {
   if (!wakes) return INBOX_REPLY_READ_LATER_TEXT;
   return INBOX_MCP_WAKING_HOSTS.includes(host?.trim() ?? "") ? `${INBOX_REPLY_ARRIVES_TEXT} ${INBOX_REPLY_LOOK_TEXT}` : INBOX_REPLY_ARRIVES_TEXT;
 }
@@ -794,7 +798,7 @@ export async function sendAgentMessage(
   project: InboxProject,
   input: AgentSendInput,
   guide?: InboxGuideRef,
-  wakes = false,
+  wakes: boolean | null = false,
 ): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
@@ -858,7 +862,7 @@ export async function sendAgentMessage(
       from_project: fromProject,
       supersedes: input.supersedes ?? null,
       done: input.done ?? null,
-      ...(wakes ? { wakes: true } : {}),
+      ...(wakes ? { wakes: true } : wakes === null ? { wake_undecided: true } : {}),
     });
   } catch (error) {
     await captured?.discard();

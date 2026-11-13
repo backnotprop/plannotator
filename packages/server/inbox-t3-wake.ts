@@ -33,7 +33,12 @@
  *    answer about the grant or the thread (`orchestration_error`) is a failure
  *    to reach T3, kept on the backoff;
  *  - on an agent's send_message, the lookup gets a few seconds
- *    (`lookupTimeoutMs`): a T3 that does not answer by then is not promised.
+ *    (`lookupTimeoutMs`): a T3 that does not answer by then is not promised,
+ *    and neither is one that could not be asked. Such a message is stored
+ *    undecided (`wake_undecided`), and the sweep settles it once T3 answers:
+ *    it gets `wakes` when a grant reaches the thread and can send into it.
+ *    From then on a reply to it goes in like any other, also one written
+ *    before T3 answered, and across a restart of the Inbox.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -99,8 +104,11 @@ export function t3ModeDeniedLine(itemId: string, thread: string, code: string, m
 }
 
 export interface InboxT3Wake {
-  /** Whether a message from this host and session wakes it: a T3 thread a saved grant reaches. */
-  wakes(host: unknown, session: unknown): Promise<boolean>;
+  /**
+   * Whether a message from this host and session wakes it: a T3 thread a saved grant reaches. Null when T3 has not
+   * said (no answer in `lookupTimeoutMs`, or it could not be asked): the message is stored undecided and settled later.
+   */
+  wakes(host: unknown, session: unknown): Promise<boolean | null>;
   /** `alive` (a T3 thread the Inbox wakes), `dead` (T3 no longer has it), null (not a T3 thread, or one no saved grant reaches). */
   status(session: string): "alive" | "dead" | null;
   /** The thread called an Inbox tool: it is there. */
@@ -206,7 +214,7 @@ export function createInboxT3Wake(options: {
     return ceiling === "below-full-access" ? mode !== "full-access" : rank(mode) <= rank(ceiling);
   };
   /** The grant whose environment has the thread; null when none does; "unreachable" when T3 could not be asked. */
-  const homeOf = async (thread: string): Promise<Link | null | "unreachable"> => {
+  const lookUp = async (thread: string): Promise<Link | null | "unreachable"> => {
     const known = homes.get(thread);
     // Logged out, or the grant lapsed: asked again (and found by no grant).
     if (known && known.credentials.token()) return known;
@@ -231,6 +239,16 @@ export function createInboxT3Wake(options: {
     if (unreachable) return "unreachable";
     misses.set(thread, now());
     return null;
+  };
+  /** One lookup per thread at a time: the sweep gets the answer of the lookup an agent's send stopped waiting on. */
+  const lookups = new Map<string, Promise<Link | null | "unreachable">>();
+  const homeOf = (thread: string): Promise<Link | null | "unreachable"> => {
+    let lookup = lookups.get(thread);
+    if (!lookup) {
+      lookup = lookUp(thread).finally(() => lookups.delete(thread));
+      lookups.set(thread, lookup);
+    }
+    return lookup;
   };
 
   // ── The sessions it wakes ──
@@ -340,14 +358,53 @@ export function createInboxT3Wake(options: {
     }
   };
 
+  /**
+   * T3's answer about a thread settles the messages it sent while T3 had not said: `wakes` when a grant reaches the
+   * thread and can send into it. True when they were promised: their replies can go now.
+   */
+  const settle = (session: string, ids: readonly string[], link: Link | null): boolean => {
+    const wakes = link !== null && sendsInto(session, link);
+    if (link && !deniedNow(session, link) && !covers(link, session)) {
+      sayOnce(t3NotCoveredLine(session, ceilingOf(link) ?? "its mode", threadModes.get(session) ?? null, link.credentials.endpoint.href));
+    }
+    for (const id of ids) store.settleWake(id, wakes);
+    return wakes;
+  };
+  /** The backoff of a thread whose undecided messages wait on T3. */
+  const settleKeyOf = (session: string) => `wake.${session}`;
+  /**
+   * The threads whose messages are still undecided (`undecided`, less those a delivery's lookup settled): T3 is asked
+   * again. A T3 that still cannot be asked leaves them undecided, on the send's backoff (`kept`), which an answer
+   * already in hand does not wait for. True when one was promised.
+   */
+  const settleUndecided = async (undecided: ReadonlyMap<string, string[]>, kept: Set<string>): Promise<boolean> => {
+    let promised = false;
+    for (const [session, ids] of undecided) {
+      const key = settleKeyOf(session);
+      if (!homes.has(session) && (retryAt.get(key)?.at ?? 0) > now()) {
+        kept.add(key);
+        continue;
+      }
+      const link = await homeOf(session);
+      if (stopped) break;
+      if (link === "unreachable") {
+        kept.add(key);
+        backOff(key);
+        sayOnce(`T3 could not be reached for thread ${session}. Trying again later.`);
+        continue;
+      }
+      if (settle(session, ids, link)) promised = true;
+    }
+    return promised;
+  };
+
   let sweeping: Promise<void> | null = null;
   let again = false;
   const sweepOnce = async (): Promise<void> => {
-    const sessions = knownSessions();
-    if (sessions.size === 0) return;
-    const pending = store.pendingRepliesFor(sessions, { tags: true });
+    const pending = store.pendingRepliesFor(knownSessions(), { tags: true });
+    const undecided = store.wakeUndecidedOfHost(INBOX_T3_HOST);
     const pendingKeys = new Set<string>();
-    /** Items this pass could send: a retry is kept only for those, so nothing that cannot go runs a timer. */
+    /** Items this pass could send, and threads it could not ask T3 about: a retry is kept only for those, so nothing that cannot go runs a timer. */
     const sendable = new Set<string>();
     for (const [session, items] of pending) {
       const work = items.filter((item) => wakesItem(item, session) && !options.skip?.(item, session));
@@ -371,6 +428,18 @@ export function createInboxT3Wake(options: {
         sayOnce(`T3 could not be reached for thread ${session}. Trying again later.`);
         continue;
       }
+      // The answer settles what the thread sent while T3 had not said, before anything goes into it: a delivery
+      // counts the thread's earlier replies to that session as read, so a reply to a message promised only now
+      // goes first, in the next pass.
+      const late = undecided.get(session);
+      if (late) {
+        undecided.delete(session);
+        if (settle(session, late, link)) {
+          for (const item of todo) sendable.add(keyOf(item, session));
+          again = true;
+          continue;
+        }
+      }
       if (!link) {
         sayOnce(`No T3 grant reaches thread ${session}; run \`plannotator t3 login --url <T3 MCP URL>\`. Its replies wait in the Inbox.`);
         continue;
@@ -389,6 +458,9 @@ export function createInboxT3Wake(options: {
         await deliverOne(link, item, session);
       }
     }
+    // Last, so what could go already did not wait for these threads' answers.
+    if (await settleUndecided(undecided, sendable)) again = true;
+    if (stopped) return;
     for (const key of [...retryAt.keys()]) if (!sendable.has(key)) retryAt.delete(key);
     for (const key of [...refused]) if (!pendingKeys.has(key)) refused.delete(key);
     scheduleRetry();
@@ -419,8 +491,10 @@ export function createInboxT3Wake(options: {
     if (line.kind !== "message") return;
     const message = line.record as InboxMessage;
     if (message.author.kind === "agent") {
-      if (message.wakes !== true || message.author.host !== INBOX_T3_HOST || !message.author.session) return;
-      knownSessions().add(message.author.session);
+      if (message.author.host !== INBOX_T3_HOST || !message.author.session) return;
+      if (message.wakes === true) knownSessions().add(message.author.session);
+      // Sent while T3 had not answered: the sweep asks again.
+      else if (!message.wake_undecided) return;
     } else {
       if (message.to?.host === INBOX_T3_HOST) knownSessions().add(message.to.session);
       for (const tag of message.tags ?? []) if (tag.host === INBOX_T3_HOST && tag.wakes) knownSessions().add(tag.session);
@@ -437,7 +511,8 @@ export function createInboxT3Wake(options: {
   return {
     wakes: async (host, session) => {
       if (host !== INBOX_T3_HOST || !isT3ThreadId(session)) return false;
-      // An agent waits on this: a T3 that has not answered in a few seconds is not promised (the lookup goes on).
+      // An agent waits on this: a T3 that has not answered in a few seconds is not promised (the lookup goes on,
+      // and settles the message).
       let timer: ReturnType<typeof setTimeout> | undefined;
       const late = new Promise<"unreachable">((resolve) => {
         timer = setTimeout(() => resolve("unreachable"), options.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS);
@@ -445,7 +520,8 @@ export function createInboxT3Wake(options: {
       const looked = homeOf(session);
       looked.catch(() => {});
       const home = await Promise.race([looked, late]).finally(() => clearTimeout(timer));
-      if (home === null || home === "unreachable") return false;
+      if (home === "unreachable") return null;
+      if (home === null) return false;
       if (!deniedNow(session, home) && !covers(home, session)) {
         sayOnce(t3NotCoveredLine(session, ceilingOf(home) ?? "its mode", threadModes.get(session) ?? null, home.credentials.endpoint.href));
         return false;
