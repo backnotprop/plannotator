@@ -310,7 +310,33 @@ export interface QuestionBlockProps {
    *  carry it for the host's CSS (see `QuestionPictureTiles`); nothing is drawn
    *  differently without host CSS. */
   pictureSize?: (url: string) => QuestionPictureSize | null;
+  /** Accept recommended, gentler (opt-in; the Plannotator Inbox). Absent: today's button. */
+  acceptBehavior?: QuestionAcceptBehavior;
 }
+
+/** `QuestionBlockProps.acceptBehavior`. Each part is off when absent. */
+export interface QuestionAcceptBehavior {
+  /** The button is not drawn while a text field in the card has focus (the
+   *  note, Other…, a text question's answer); it is back once focus leaves it. */
+  asideWhileTyping?: boolean;
+  /** Pick any: words typed under Other… stay in the answer beside the
+   *  recommended ticks, and the button is offered until the ticks alone are
+   *  the recommended ones. */
+  keepOther?: boolean;
+  /** After a tap. `undo` puts back the answer from before it (picks, ticks,
+   *  Other words, Skip; the note as it is now), and does nothing once the
+   *  answer has changed since the tap. */
+  onAccepted?: (undo: () => void) => void;
+}
+
+/** A field a person types in: a textarea or a text input (not a choice's radio or checkbox). */
+const isTypingField = (el: EventTarget | null): boolean =>
+  el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && ['text', 'search', ''].includes(el.type));
+
+/** The parts of an answer Accept recommended sets (the note is not one). */
+const sameAnswerParts = (a: QuestionAnswer, b: QuestionAnswer): boolean =>
+  a.selected.length === b.selected.length && a.selected.every((l, i) => l === b.selected[i])
+  && (a.other ?? '') === (b.other ?? '') && (a.text ?? '') === (b.text ?? '') && !!a.skipped === !!b.skipped;
 
 /** The picture tile's label (`pictureBadge`): a small dark chip over the picture's top-left corner. */
 const PICTURE_BADGE_STYLE: React.CSSProperties = {
@@ -391,6 +417,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   pictureBadge,
   onZoomChoice,
   pictureSize,
+  acceptBehavior,
 }) => {
   const { question, number } = indexed;
   const resolveImage = useImageResolver();
@@ -501,6 +528,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   // the recommendation is "Yes".
   const [otherBy, setOtherBy] = useState<'row' | 'field' | null>(null);
   const [otherFocused, setOtherFocused] = useState(false);
+  // A text field of the card has focus (acceptBehavior.asideWhileTyping).
+  const [typing, setTyping] = useState(false);
+  const answerRef = useRef(answer);
+  answerRef.current = answer;
   // Pick any: the reviewer's own Other text the recommended row replaced when
   // ticked, put back when it is unticked (the answer has one Other field).
   const replacedOtherRef = useRef<string | null>(null);
@@ -540,11 +571,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       && question.choices.some((c) => c.recommended)
       && !question.choices.some((c) => c.settled)
       && !isRecommendedQuestionAnswer(
-        answer!,
+        acceptBehavior?.keepOther ? { ...answer!, other: undefined } : answer!,
         question.choices.filter((c) => c.recommended).map((c) => c.label),
         question.suggestedText,
       ))
   );
+  const showAccept = offerAccept && !(acceptBehavior?.asideWhileTyping && typing);
   const selected = answered || skipped ? answer!.selected : settledLabels;
   const base = answer ?? emptyQuestionAnswer(indexed);
 
@@ -628,12 +660,25 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   };
 
   const acceptRecommended = () => {
-    const next = recommendedQuestionAnswer(indexed, base);
-    if (!next) return;
+    const recommended = recommendedQuestionAnswer(indexed, base);
+    if (!recommended) return;
+    const keptOther = acceptBehavior?.keepOther && question.kind === 'multi' && recommended.selected.length > 0 && base.other?.trim() ? base.other : undefined;
+    const next = keptOther ? { ...recommended, other: keptOther } : recommended;
+    const before = answer;
     replacedOtherRef.current = null;
-    if (next.other) setOtherBy('row');
+    if (next.other && !keptOther) setOtherBy('row');
     focusAfterAcceptRef.current = true;
     commit(next);
+    const onAccepted = acceptBehavior?.onAccepted;
+    if (!onAccepted) return;
+    onAccepted(() => {
+      const now = answerRef.current;
+      if (!now || !sameAnswerParts(now, next)) return;
+      const { note: _n, ...was } = before ?? emptyQuestionAnswer(indexed);
+      replacedOtherRef.current = null;
+      setOtherBy(was.other ? 'field' : null);
+      commit({ ...was, ...(now.note ? { note: now.note } : {}) });
+    });
   };
   // Runs after the render that drew the accepted answer (and once more at
   // most, should the host not redraw it): the first checked choice, else the
@@ -799,6 +844,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       data-directive-kind={question.directiveKind}
       data-question-key={question.key}
       data-question-status={status}
+      onFocus={acceptBehavior?.asideWhileTyping ? (event) => setTyping(isTypingField(event.target)) : undefined}
+      onBlur={acceptBehavior?.asideWhileTyping ? (event) => setTyping(isTypingField(event.relatedTarget) && !!cardRef.current?.contains(event.relatedTarget as Node)) : undefined}
       aria-labelledby={promptId}
       aria-describedby={describedBy}
       aria-disabled={readOnly || undefined}
@@ -1240,7 +1287,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {/* Plannotator's own footer (no host actions, no save bar) keeps the
               Accept button as the one right-aligned item. */}
           {!hasHostFooter && !dirty ? (
-            offerAccept && (
+            showAccept && (
               <button
                 type="button"
                 onClick={acceptRecommended}
@@ -1251,7 +1298,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             )
           ) : (
             <div className={cx(FOOT_OWN_ROW, 'ml-auto rtl:ml-0 rtl:mr-auto flex min-w-0 flex-wrap items-center justify-end gap-1')}>
-              {offerAccept && (
+              {showAccept && (
                 <button
                   type="button"
                   onClick={acceptRecommended}

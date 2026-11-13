@@ -137,6 +137,7 @@ packages/inbox/phoneStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/sharedPictureChoice.test.tsx
+packages/inbox/acceptStepsAside.test.tsx
 packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
@@ -293,6 +294,7 @@ packages/inbox/feedbackDialog.test.tsx
 packages/ui/components/HumanOnlySkillNotice.test.tsx
 packages/ui/components/MenuVersionSection.test.tsx
 packages/ui/components/blocks/QuestionBlock.test.tsx
+packages/ui/components/blocks/QuestionBlock.acceptBehavior.test.tsx
 packages/ui/components/blocks/QuestionBlock.pictures.test.tsx
 packages/ui/components/blocks/QuestionContext.lines.test.tsx
 packages/ui/components/blocks/QuestionBlock.host.test.tsx

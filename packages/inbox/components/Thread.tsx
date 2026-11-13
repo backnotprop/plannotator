@@ -8,6 +8,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
+import type { QuestionAcceptBehavior } from '@plannotator/ui/components/blocks/QuestionBlock';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
@@ -484,9 +485,12 @@ export function MessageBody({
   replyFiles,
   contextNotes,
   onTryPrototype,
+  onAcceptedRecommended,
 }: {
   /** A question with a prototype (an option's, or one for all) was asked to open it (its key). Absent: no "Try prototype" tab. */
   onTryPrototype?: (key: string) => void;
+  /** Accept recommended was tapped on one of this message's questions: `undo` puts the answer back (QuestionBlock `acceptBehavior`). */
+  onAcceptedRecommended?: (undo: () => void) => void;
   /**
    * Context notes (Code review on; approval "inbox-context-notes"): an agent's `:::note path#L…` block shows as a
    * chip naming its file and lines, with its words; `onOpen` opens the review at them. Absent: the text as it is.
@@ -1074,6 +1078,9 @@ export function MessageBody({
   // window does not offer it (adr/implementation/inbox-thread-state.md, Pick).
   // "Try prototype" (approval "inbox-question-tradeoffs"): a tab hanging from the right end of the options' tray, on a
   // question with a page to try (an attached HTML file, or an app the send checked).
+  const acceptedRef = useRef(onAcceptedRecommended);
+  acceptedRef.current = onAcceptedRecommended;
+  const acceptBehavior = useMemo<QuestionAcceptBehavior>(() => ({ asideWhileTyping: true, keepOther: true, onAccepted: (undo) => acceptedRef.current?.(undo) }), []);
   const tryRef = useRef(onTryPrototype);
   tryRef.current = onTryPrototype;
   const afterChoices = useCallback(
@@ -1215,6 +1222,9 @@ export function MessageBody({
         questionStatusLabel={statusLabel}
         questionPictureBadge={pictureBadge}
         questionPictureSize={pictureSizeOf}
+        // Accept recommended steps aside while a card field is typed in, keeps Other… words, and offers Undo
+        // (approval "question-note-vs-accept-recommended").
+        questionAcceptBehavior={acceptBehavior}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
         renderDirectiveBlock={renderActions || noteBlocks.length > 0 ? directiveBlock : undefined}
@@ -7219,6 +7229,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   onOpenInlineImage={(image) => openFromMessage(image)}
                   onOpenOptionSet={(key, image, choice) => openOptionSet(message.id, key, image, choice)}
                   onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
+                  // PROPOSED WORDS, waiting on the owner's OK: "Picked" and "Recommended · in your draft" are the card's own words; together on this toast they are new.
+                  onAcceptedRecommended={(undo) => onToast?.({ icon: 'check', lead: 'Picked', detail: 'Recommended · in your draft', onUndo: undo })}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}
