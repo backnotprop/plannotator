@@ -3133,3 +3133,11 @@ An `<img>` tag inside a table cell or a sentence is not an HTML block, so `Inlin
 - **A host that provides none of these sees no change.**
 
 Pinned by `components/CommentPopover.hostDraft.test.tsx`.
+
+## Questions: `acceptBehavior`, a gentler Accept recommended (unreleased; additive, opt-in, no core change)
+
+- **A host that does nothing sees no change.** `QuestionBlock` takes an optional `acceptBehavior` (`Viewer` / `BlockRenderer` `questionAcceptBehavior`, type `QuestionAcceptBehavior`), each part off when absent:
+  - `asideWhileTyping`: Accept recommended is not drawn while a text field of the card has focus (the note, the Other field, a text question's answer); it is back once focus leaves the card's fields. A choice's radio or checkbox is not a field. The rule for when the button exists is unchanged.
+  - `keepOther`: on a pick-any question, a tap keeps the words typed under Other in the answer, beside the recommended ticks, and the button is then offered until the ticks alone are the recommended ones (PR #1913's rule, read on the ticks). Pick one and text questions never offer the button once Other or the answer holds words, so nothing changes there.
+  - `onAccepted(undo, { key, answer })`: called after a tap, with the question's key and the answer the tap set (so the host can tell when it is no longer current; `sameAnswerParts` is exported for that). `undo` puts back the answer from before it (picks, ticks, Other words, Skip; the note as it is now) and does nothing once the answer has changed since the tap. The card draws no Undo itself: the host shows it (the Plannotator Inbox: an Undo at the end of the card's status line).
+- Pinned by `components/blocks/QuestionBlock.acceptBehavior.test.tsx`.
