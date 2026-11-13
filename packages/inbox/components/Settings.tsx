@@ -18,6 +18,7 @@ import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, r
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
 import { CloudAgentsSection } from '../cloud/CloudAgents';
 import { useCloudAgentsGate } from '../cloud/useCloudAgentsGate';
+import { CloudHowButton } from '../cloud/how/CloudHowButton';
 import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
@@ -1422,7 +1423,14 @@ export function SettingsPage(props: SettingsPageProps) {
             </a>
           </div>
         )}
-        {section === 'accounts' && settings ? (
+        {section === 'cloud-agents' && settings ? (
+          <div className="ib-spg-h">
+            <h1 ref={heading} tabIndex={-1}>
+              {SETTINGS_SECTION_LABEL[section]}
+            </h1>
+            <CloudHowButton />
+          </div>
+        ) : section === 'accounts' && settings ? (
           // Accounts' Refresh reads every machine, so it sits by the page's title (approval "accounts-page").
           <div className="ib-spg-h">
             <h1 ref={heading} tabIndex={-1}>
