@@ -17,8 +17,15 @@ function flush(): void {
   });
 }
 
+export function drawNow(): void {
+  if (timer === null) return;
+  clearTimeout(timer);
+  flush();
+}
+
 export function drawSoon(write: () => void): void {
   const now = Date.now();
+  if (lastAt > now) lastAt = now - DRAW_GAP_MS;
   if (waiting.length === 0) firstAt = now;
   waiting.push(write);
   if (timer !== null) clearTimeout(timer);
