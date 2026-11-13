@@ -40,6 +40,8 @@ function lumen(over: Partial<ToMachine> = {}): ToMachine {
     ...over,
   };
 }
+/** Today, so "asleep since" reads as a time alone whatever day the test runs. */
+const TODAY = new Date(new Date().setHours(9, 10, 0, 0)).toISOString();
 const on = (p: ReturnType<typeof project>): MachineLaunchProject => ({ ...p, machine: ATLAS, machine_name: 'Atlas' });
 function atlas(over: Partial<ToMachine> = {}): ToMachine {
   return {
@@ -48,7 +50,7 @@ function atlas(over: Partial<ToMachine> = {}): ToMachine {
     name: 'Atlas',
     self: false,
     asleep: false,
-    since: '2026-11-12T14:10:00.000Z',
+    since: TODAY,
     home: '/Users/atlas',
     groups: groupsOf(
       { id: 'prj_kr', name: 'kiln-render', root: '/Users/atlas/kiln-render', sessions: [session('claude-code', 'Staging certs', true)] },

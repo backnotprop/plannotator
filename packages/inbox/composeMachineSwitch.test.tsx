@@ -29,8 +29,10 @@ const ORBIT = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAX';
 const QUILL = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAY';
 const FERN = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAZ';
 
+/** Today, so "asleep since" reads as a time alone whatever day the test runs. */
+const TODAY = new Date(new Date().setHours(9, 10, 0, 0)).toISOString();
 const view = (id: string, name: string, over: Partial<MachineView> = {}): MachineView =>
-  ({ id, name, self: false, state: 'online', since: '2026-11-12T14:10:00.000Z', reason: null, version: '0.30.0', address: null, both_ways: true, waiting: 0, list_cursor: 1, snoozes: true, launch: true, ...over }) as MachineView;
+  ({ id, name, self: false, state: 'online', since: TODAY, reason: null, version: '0.30.0', address: null, both_ways: true, waiting: 0, list_cursor: 1, snoozes: true, launch: true, ...over }) as MachineView;
 const SELF_VIEW = view(SELF, 'Lumen', { self: true, launch: null });
 
 const live = (session: string, host: string, label: string, busy: boolean) => ({ session, host, label, busy, started_at: '2026-11-12T16:00:00.000Z', last_seen_at: '2026-11-12T17:00:00.000Z', idle_since: null, last_thread: null });
