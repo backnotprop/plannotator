@@ -93,14 +93,28 @@ describe("the Artifacts wall read", () => {
     expect(keys(pinned)).toEqual([f.shotB.id, f.doc.id]);
     expect(pinned.artifacts[0]!.pinned_at).toEqual(expect.any(String));
     // All / Pinned under the type; each type under the pinned filter.
-    expect(pinned.counts).toEqual({ all: 5, pinned: 2, types: { images: 1, pages: 0, documents: 1, other: 0 } });
-    expect((await page(store, "?type=images")).counts).toEqual({ all: 2, pinned: 1, types: { images: 2, pages: 1, documents: 1, other: 1 } });
+    expect(pinned.counts).toEqual({ all: 5, pinned: 2, types: { images: 1, videos: 0, pages: 0, documents: 1, other: 0 } });
+    expect((await page(store, "?type=images")).counts).toEqual({ all: 2, pinned: 1, types: { images: 2, videos: 0, pages: 1, documents: 1, other: 1 } });
     expect(keys(await page(store, "?pinned=1&type=images"))).toEqual([f.shotB.id]);
     // A pin on an archived thread shows only with archived included.
     const { old } = { old: store.threadIds().find((id) => store.thread(id)!.subject === "Old work")! };
     store.setArtifactPinned(old, f.oldShot.id, true);
     expect(keys(await page(store, "?pinned=1"))).toEqual([f.shotB.id, f.doc.id]);
     expect(keys(await page(store, "?pinned=1&archived=include"))).toEqual([f.shotB.id, f.doc.id, f.oldShot.id]);
+  });
+
+  test("a video is under Videos, not Images; a recording stays under Other files", async () => {
+    const { store, f, web } = world();
+    const clip = file("walkthrough.mp4", "video");
+    const webm = file("checkout.webm", "video");
+    const voice = file("note.wav", "audio");
+    store.sendMessage({ project_id: web.project_id, author: agent("ses_w"), thread: "web", body: "Clips", attachments: [clip, webm, voice] });
+    const videos = await page(store, "?type=videos");
+    expect(keys(videos)).toEqual([clip.id, webm.id]);
+    expect(videos.artifacts.map((a) => a.type)).toEqual(["videos", "videos"]);
+    expect(keys(await page(store, "?type=images"))).toEqual([f.shotA.id, f.shotB.id]);
+    expect(keys(await page(store, "?type=other"))).toEqual([voice.id, f.zip.id]);
+    expect(videos.counts.types).toEqual({ images: 2, videos: 2, pages: 1, documents: 1, other: 2 });
   });
 
   test("paging walks every row once, in order", async () => {
@@ -123,7 +137,7 @@ describe("the Artifacts wall read", () => {
 
   test("bad filters are refused", async () => {
     const { store } = world();
-    for (const query of ["?type=videos", "?archived=only", "?pinned=yes", "?limit=0", "?limit=201", "?cursor=-1", "?cursor=1.5"]) {
+    for (const query of ["?type=movies", "?archived=only", "?pinned=yes", "?limit=0", "?limit=201", "?cursor=-1", "?cursor=1.5"]) {
       expect(await refused(() => page(store, query))).toBe("validation_error");
     }
   });
