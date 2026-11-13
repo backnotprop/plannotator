@@ -6,6 +6,7 @@ import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useAnnotationHighlighter } from '@plannotator/ui/hooks/useAnnotationHighlighter';
 import { proxiesGitHubImages, resolvePRImage } from '../utils/prImage';
 import { useReviewState } from '../dock/ReviewStateContext';
+import { renderPRDescriptionVideo } from './PRDescriptionVideo';
 import { PRMediaScope } from './PRMediaScope';
 
 /**
@@ -47,6 +48,7 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
     onSelectAnnotation: onSelectDescriptionAnnotation,
     selectedAnnotationId: selectedDescriptionAnnotationId,
     mode: 'comment',
+    verifyRestoredContent: true,
   });
 
   // Reconcile marks off the store: apply new ones (idempotent) and remove marks
@@ -70,6 +72,7 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
             markdown={markdown}
             className={className}
             resolveImage={proxiedImages ? resolvePRImage : undefined}
+            renderParagraph={proxiedImages ? renderPRDescriptionVideo : undefined}
             preserveVideos
             responsiveImages
           />

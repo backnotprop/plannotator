@@ -4,6 +4,27 @@
  * PNG in the repo, so it rides as a base64 data-URI.
  */
 
+import type React from 'react';
+import { HERMES_AGENT_MASK_DARK, HERMES_AGENT_MASK_LIGHT } from './hermesAgentMask';
+
+const HERMES_AGENT_STYLE = {
+  '--ib-hermes-light': `url("${HERMES_AGENT_MASK_LIGHT}")`,
+  '--ib-hermes-dark': `url("${HERMES_AGENT_MASK_DARK}")`,
+  backgroundColor: 'currentColor',
+  WebkitMaskImage: 'var(--ib-hermes-mask, var(--ib-hermes-light))',
+  maskImage: 'var(--ib-hermes-mask, var(--ib-hermes-light))',
+  WebkitMaskSize: 'contain',
+  maskSize: 'contain',
+  WebkitMaskRepeat: 'no-repeat',
+  maskRepeat: 'no-repeat',
+  WebkitMaskPosition: 'center',
+  maskPosition: 'center',
+} as React.CSSProperties;
+
+export function HermesAgentIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" className={className ? `ib-hermes ${className}` : 'ib-hermes'} style={HERMES_AGENT_STYLE} aria-hidden="true" focusable="false" data-mark="hermes" />;
+}
+
 export function ClaudeIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">

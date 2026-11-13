@@ -266,6 +266,69 @@
   .ib-prst-base { grid-template-columns: 28px 18px minmax(0, 1fr); }
 }
 
+/* The board as a table (prs/SheetTable.tsx): 40 px rows, fixed column widths, the title takes the rest. The bar and
+   the header stay put while the rows scroll; the header sits under the bar (--ib-prs-bar-h, measured). What sticks
+   paints what is behind the page: its own fill when it has one, else the window's ground. */
+.ib-prs { --ib-prs-solid: linear-gradient(var(--ib-main-bg, var(--card)), var(--ib-main-bg, var(--card))), var(--ib-ground, var(--background)); }
+.ib-prs[data-layout='table'] .ib-prs-bar { position: sticky; top: 0; z-index: 4; background: var(--ib-prs-solid); }
+.ib-prtb-wrap { container-type: inline-size; }
+.ib-prtb { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; }
+.ib-prtb th,
+.ib-prtb td { padding: 0 8px; text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb thead th { position: sticky; top: var(--ib-prs-bar-h, 0px); z-index: 2; height: 32px; padding: 0; background: var(--ib-prs-solid); border-bottom: 1px solid var(--ib-line); font-weight: 500; }
+.ib-prtb-n { width: 104px; }
+.ib-prtb-a { width: 128px; }
+.ib-prtb-s { width: 196px; }
+.ib-prtb-ck { width: 92px; }
+.ib-prtb-risk { width: 80px; }
+.ib-prtb-upd { width: 82px; }
+.ib-prtb-size { width: 104px; }
+.ib-prtb-sort { display: flex; align-items: center; gap: 3px; width: 100%; height: 32px; padding: 0 8px; border: 0; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; text-align: start; cursor: pointer; }
+.ib-prtb-sort:hover,
+.ib-prtb th[aria-sort] .ib-prtb-sort { color: var(--foreground); }
+.ib-prtb-sort:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 4px; }
+.ib-prtb-ar { display: inline-flex; width: 11px; }
+/* A repository's row. */
+.ib-prtb-g th { height: 38px; padding-top: 10px; border-bottom: 1px solid var(--ib-line); font-weight: 600; font-size: var(--ib-fs-14, 14px); color: var(--foreground); }
+.ib-prtb-gin { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ib-prtb-gl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb-gn { font-weight: 400; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* A PR's row. */
+.ib-prtb-r td { height: 40px; border-bottom: 1px solid color-mix(in oklch, var(--border) 40%, transparent); cursor: pointer; transition: background-color 120ms var(--ib-prs-ease); }
+.ib-prtb-r:hover td { background: var(--ib-hover); }
+.ib-prtb-r[data-dim] td { opacity: 0.4; }
+.ib-prtb-nin { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ib-prtb-open { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: var(--muted-foreground); font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; border-radius: 3px; }
+.ib-prtb-open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-prtb-r[data-you] .ib-prtb-open { color: var(--primary); font-weight: 600; }
+.ib-prtb-open svg { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prtb-stack { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.ib-prtb-stack:hover { color: var(--foreground); background: var(--ib-prt-hover); }
+.ib-prtb-stack:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* A layer above the first: an elbow from the layer under it, as wide as the stack's mark. */
+.ib-prtb-elbow { flex: none; width: 9px; height: 12px; margin: 0 5px 0 6px; transform: translateY(-5px); border-left: 1px solid var(--ib-prt-quiet); border-bottom: 1px solid var(--ib-prt-quiet); border-bottom-left-radius: 3px; }
+.ib-prtb-t span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb-r[data-state='merged'] .ib-prtb-t,
+.ib-prtb-r[data-state='closed'] .ib-prtb-t { color: var(--muted-foreground); }
+.ib-prtb-who { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-prtb-who > span:last-child:not(.ib-prd-face) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb-s > span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.ib-prtb-s[data-tone='you'] { color: var(--primary); }
+.ib-prtb-s[data-tone='bad'] { color: var(--destructive); }
+.ib-prtb-ckin { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); }
+.ib-prtb-ckin .ib-prck[data-checks='success'],
+.ib-prtb-ckin .ib-prck[data-checks='pending'] { color: var(--ib-prt-quiet); }
+.ib-prtb-upd { color: var(--muted-foreground); }
+td.ib-prtb-size { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); }
+.ib-prtb-add { color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prtb-del { color: var(--destructive); }
+/* Narrower, so the title keeps about 200 px: Risk goes, then Updated and Size, then Author. A column goes to no width
+   rather than out of the table: the repository rows span every column, and a fixed table would share a dropped
+   column's width out among empty ones. */
+@container (max-width: 1000px) { .ib-prtb .ib-prtb-risk { width: 0; padding: 0; } .ib-prtb .ib-prtb-risk > * { display: none; } }
+@container (max-width: 920px) { .ib-prtb :is(.ib-prtb-upd, .ib-prtb-size) { width: 0; padding: 0; } .ib-prtb :is(.ib-prtb-upd, .ib-prtb-size) > * { display: none; } }
+@container (max-width: 640px) { .ib-prtb .ib-prtb-a { width: 0; padding: 0; } .ib-prtb .ib-prtb-a > * { display: none; } }
+
 /* A phone: one column, tighter gutters; the counts part by space (a dot would dangle at a line's start). */
 .ib-prs[data-phone] .ib-prs-scroll { padding: 0 14px 32px; }
 .ib-prs[data-phone] .ib-prs-sum { column-gap: 12px; margin-left: 0; clip-path: none; }
