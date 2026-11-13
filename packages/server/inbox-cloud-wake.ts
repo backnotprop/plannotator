@@ -12,7 +12,7 @@ import {
 } from "@plannotator/core/inbox-cloud";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import type { InboxCloudAgent, InboxCloudAgents } from "./inbox-cloud-agents";
+import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents, type InboxCloudWakeAgent } from "./inbox-cloud-agents";
 import { postCloudWebhook } from "./inbox-cloud-post";
 
 const RETRY_FIRST_MS = 30_000;
@@ -104,7 +104,7 @@ export function createInboxCloudWake(options: {
 
   const wakeItem = (item: InboxMessage): InboxCloudWakeItem => ({ id: item.id, at: item.created_at, body: item.body, files: item.attachments?.length ?? 0 });
 
-  const wakeThread = async (agent: InboxCloudAgent, threadId: string, items: InboxMessage[]): Promise<number | null> => {
+  const wakeThread = async (agent: InboxCloudWakeAgent, threadId: string, items: InboxMessage[]): Promise<number | null> => {
     const thread = store.thread(threadId);
     if (!thread) return null;
     const at = now();
@@ -172,7 +172,7 @@ export function createInboxCloudWake(options: {
     first = false;
     for (const [session, all] of pending) {
       const agent = agents.agent(session);
-      if (!agent) continue;
+      if (!agent || !hasCloudWake(agent)) continue;
       if (startPass) for (const item of all) if (item.cloud_wake?.state === "sending") setWake(item, session, { ...item.cloud_wake, state: "uncertain" });
       const open = all.filter((item) => !inboxCloudWakeSettled(store.message(item.id)?.cloud_wake));
       const byThread = new Map<string, InboxMessage[]>();

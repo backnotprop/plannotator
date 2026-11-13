@@ -73,6 +73,7 @@ import {
   type InboxQuestionRecord,
   type InboxReplyDraft,
   type InboxPin,
+  type InboxPriorityBefore,
   type InboxSupersededBy,
   type InboxListRow,
   type InboxListSection,
@@ -154,6 +155,8 @@ import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins
 import { isInboxArtifactKey, readInboxArtifactPins, writeInboxArtifactPins } from "./artifact-pins";
 import { inboxThreadArtifactRefs, type InboxArtifactPin, type InboxArtifactRef } from "@plannotator/core/inbox-artifact-pins";
 import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
+import { checkInboxPriorityRestore, readInboxPriority, writeInboxPriority, type InboxPriorityState } from "./priority";
+import { readInboxThreadTags, writeInboxThreadTags, type InboxThreadTagMark } from "./thread-tags";
 import { inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
@@ -198,6 +201,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import type { InboxActivityModel } from "@plannotator/core/inbox-types";
 import {
+  inboxHashtags,
   inboxInitiativeBareName,
   inboxInitiativeJoinKey,
   inboxInitiativeNameKey,
@@ -862,6 +866,14 @@ export class InboxStore {
   private snoozeList: InboxSnooze[] = [];
   /** Told when the snoozes change (no store line is written for them). */
   private readonly snoozeListeners = new Set<() => void>();
+  /**
+   * The person's Priority (priority.ts): a file outside the event log, read at
+   * load. Read by nothing that routes, lists or answers an agent; `listRow`
+   * never carries it (the server's list model does).
+   */
+  private priorityState: InboxPriorityState = { threads: [], off: [] };
+  /** Told when the person's Priority changes (no store line is written for it). */
+  private readonly priorityListeners = new Set<() => void>();
   private readonly deletionListeners = new Set<() => void>();
   /** The Board's cards, by id (approval "inbox-board"). Read by nothing that routes or lists threads. */
   private readonly cards = new Map<string, InboxCard>();
@@ -893,6 +905,21 @@ export class InboxStore {
    * to disk; a delete's reload builds it again. Read by `initiativeThreads` only, from the newest end.
    */
   private readonly tagThreads = new Map<string, { latest: Map<string, number>; order: string[] }>();
+  /**
+   * Thread tags (approval "inbox-thread-tags"): the tag keys in each of the person's messages (`personWords`, so
+   * no quoted feedback, code or link), by message, replaced whenever the message's line is applied, so a replay
+   * and a restore from the SQLite log read the same. Never written to disk; a delete's reload builds it again.
+   */
+  private readonly personTagsByMessage = new Map<string, { thread: string; keys: readonly string[] }>();
+  /** The person's messages that carry a tag, by thread. */
+  private readonly personTagMessages = new Map<string, Set<string>>();
+  /**
+   * The person's marks on threads (thread-tags.ts): Add tag, untick, Remove from. A file outside the event log,
+   * read at load, by thread then tag. Read by nothing that routes, lists or answers an agent.
+   */
+  private threadTagMarks = new Map<string, Map<string, InboxThreadTagMark>>();
+  /** Told when the marks change (no store line is written for them). */
+  private readonly threadTagListeners = new Set<() => void>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly listeners = new Set<InboxListener>();
@@ -968,6 +995,8 @@ export class InboxStore {
     this.loadPins();
     this.loadArtifactPins();
     this.loadSnoozes();
+    this.loadPriority();
+    this.loadThreadTags();
   }
 
   /**
@@ -1096,6 +1125,7 @@ export class InboxStore {
   /** A message's latest record in memory; `first`: its first line, at `firstSeq` (its place in the thread and the log). */
   private placeMessage(record: InboxMessage, firstSeq: number, first: boolean): void {
     this.messages.set(record.id, record);
+    if (record.author.kind === "person") this.indexPersonTags(record);
     this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
     if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
     if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
@@ -1186,6 +1216,12 @@ export class InboxStore {
    */
   private routeThread(projectId: string, name: string | null): string | null {
     return name === null ? null : this.newestOpen(projectId, this.rootsNamed(projectId, name));
+  }
+
+  /** The open thread a message with this `thread` name and no reply_to would join in the project, or null. */
+  threadRoutedBy(projectId: string, name: unknown): string | null {
+    const checked = checkInboxThreadName(name);
+    return checked.ok ? this.routeThread(projectId, checked.name) : null;
   }
 
   /**
@@ -1549,6 +1585,106 @@ export class InboxStore {
   private endLapsedSnooze(threadId: string): void {
     const snooze = this.snoozeList.find((entry) => entry.thread_id === threadId);
     if (snooze && !inboxSnoozeRunning(snooze.until, this.now())) this.endSnooze(threadId);
+  }
+
+  // ─────────────────────────── priority ───────────────────────────
+
+  /** The person's Priority changed (an add, a remove, an Undo, an archive, or a deleted thread left it): no store line is written. */
+  onPriorityChange(listener: () => void): () => void {
+    this.priorityListeners.add(listener);
+    return () => this.priorityListeners.delete(listener);
+  }
+
+  private priorityChanged(): void {
+    for (const listener of this.priorityListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the write.
+      }
+    }
+  }
+
+  /** Read priority.json and keep the entries of threads that exist (the same load-time pruning as `loadPins`). */
+  private loadPriority(): void {
+    const before = this.priorityState;
+    const read = readInboxPriority(this.dir);
+    const kept: InboxPriorityState = { threads: read.threads.filter((e) => this.isThreadRoot(e.thread_id)), off: read.off.filter((e) => this.isThreadRoot(e.thread_id)) };
+    this.priorityState = kept;
+    if (kept.threads.length !== read.threads.length || kept.off.length !== read.off.length) {
+      try {
+        writeInboxPriority(this.dir, kept);
+      } catch {
+        // Best effort: the next load prunes it again.
+      }
+    }
+    const gone = (list: readonly { thread_id: string }[], now: readonly { thread_id: string }[]) => list.some((e) => !now.some((k) => k.thread_id === e.thread_id));
+    if (gone(before.threads, kept.threads) || gone(before.off, kept.off)) this.priorityChanged();
+  }
+
+  /** The person's adds (`threads`) and the asks they took out (`off`). */
+  priorities(): Readonly<InboxPriorityState> {
+    return this.priorityState;
+  }
+
+  private priorityBefore(threadId: string): InboxPriorityBefore {
+    return {
+      at: this.priorityState.threads.find((e) => e.thread_id === threadId)?.at ?? null,
+      off_at: this.priorityState.off.find((e) => e.thread_id === threadId)?.at ?? null,
+    };
+  }
+
+  /** Write one thread's entries as `next` says (null: none); nothing when they are already so. */
+  private commitPriority(threadId: string, next: InboxPriorityBefore): void {
+    const was = this.priorityBefore(threadId);
+    if (was.at === next.at && was.off_at === next.off_at) return;
+    const put = (list: InboxPriorityState["threads"], at: string | null) => [...list.filter((e) => e.thread_id !== threadId), ...(at === null ? [] : [{ thread_id: threadId, at }])];
+    const state: InboxPriorityState = { threads: put(this.priorityState.threads, next.at), off: put(this.priorityState.off, next.off_at) };
+    writeInboxPriority(this.dir, state);
+    this.priorityState = state;
+    this.priorityChanged();
+  }
+
+  /**
+   * The person's Add to Priority (`on`) or Remove from Priority. Add writes
+   * their entry (adding an added thread keeps its first time) and drops any
+   * `off`; an archived thread refuses, since the list does not draw it. Remove
+   * drops the entry. Answers the state before, for the Undo. Writes no store line.
+   */
+  setPriority(threadId: string, on: boolean): InboxPriorityBefore {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const before = this.priorityBefore(threadId);
+    if (on) {
+      if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+      this.commitPriority(threadId, { at: before.at ?? this.now().toISOString(), off_at: null });
+    } else {
+      this.commitPriority(threadId, { at: null, off_at: before.off_at });
+    }
+    return before;
+  }
+
+  /** Undo: one thread's entries exactly as `value` (a `before`) says. Answers the state it replaced. */
+  restorePriority(threadId: string, value: unknown): InboxPriorityBefore {
+    const restore = checkInboxPriorityRestore(value);
+    if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const before = this.priorityBefore(threadId);
+    this.commitPriority(threadId, { at: restore.at === null ? null : new Date(restore.at).toISOString(), off_at: restore.off_at === null ? null : new Date(restore.off_at).toISOString() });
+    return before;
+  }
+
+  /**
+   * An archive ends the person's add (Archive's Undo in the window writes it
+   * back with its first time). The archive already stands, so a file that
+   * cannot be written never fails it.
+   */
+  private endPriority(threadId: string): void {
+    if (!this.priorityState.threads.some((e) => e.thread_id === threadId)) return;
+    try {
+      this.commitPriority(threadId, { at: null, off_at: this.priorityBefore(threadId).off_at });
+    } catch {
+      // See above.
+    }
   }
 
   /** A thread's reply draft was saved or deleted: its row's `unsent` (and section) changed with no store line. */
@@ -2443,7 +2579,7 @@ export class InboxStore {
     const connectionOf = (session: string): InboxDeliveryConnection | null | undefined => {
       if (!presence) return undefined;
       const connection = presence.connection(session);
-      return connection ? { busy: connection.busy, send_now: connection.send_now, ...(connection.held ? { held: true } : {}) } : null;
+      return connection ? { busy: connection.busy, send_now: connection.send_now, ...(connection.held ? { held: true } : {}), ...(connection.polls ? { polls: true } : {}) } : null;
     };
     const askerLive = (session: string): boolean => (presence ? presence.askerLive(session) : true);
     const uncertain = (session: string | null, itemId: string): boolean => !!session && presence?.uncertain?.(session, itemId) === true;
@@ -5402,6 +5538,7 @@ export class InboxStore {
       );
     }
     if (resolved && by === "person") this.endSnooze(root.id);
+    if (resolved && !isResolved) this.endPriority(root.id);
     if (!resolved && isResolved) this.endLapsedSnooze(root.id);
     return this.threadSummary(root.id)!;
   }
@@ -6170,21 +6307,22 @@ export class InboxStore {
     return out;
   }
 
-  private commentPictures(images: unknown): { path: string; name: string }[] | undefined {
+  private commentPictures(images: unknown): { path: string; name: string; kind?: "file" }[] | undefined {
     if (images === undefined || images === null || (Array.isArray(images) && images.length === 0)) return undefined;
     const field = "annotation.images";
     if (!Array.isArray(images) || images.length > INBOX_COMMENT_PICTURES_MAX) {
       throw new InboxError("validation_error", `${field}: at most ${INBOX_COMMENT_PICTURES_MAX} pictures, each { path, name }.`, { field });
     }
     return images.map((image, index) => {
-      const { path, name } = (image && typeof image === "object" ? image : {}) as { path?: unknown; name?: unknown };
+      const { path, name, kind } = (image && typeof image === "object" ? image : {}) as { path?: unknown; name?: unknown; kind?: unknown };
+      const file = kind === "file";
       const picture = inboxCommentPicture(path);
       if (!picture || typeof name !== "string" || name.trim() === "" || name.length > 200) {
         throw new InboxError("validation_error", `${field}[${index}]: { path: "<upload id>/<file name>", name } of a picture you uploaded.`, { field });
       }
       const upload = readInboxUpload(this.dir, picture.upload_id);
-      if (!upload || upload.kind !== "image") throw new InboxError("upload_not_found", `${field}[${index}]: that picture is no longer here; add it again.`, { field });
-      return { path: path as string, name: inboxViewingText(name, 200) || "image" };
+      if (!upload || (!file && upload.kind !== "image")) throw new InboxError("upload_not_found", `${field}[${index}]: that ${file ? "file" : "picture"} is no longer here; add it again.`, { field });
+      return { path: path as string, name: inboxViewingText(name, 200) || (file ? upload.name : "image"), ...(file ? { kind: "file" as const } : {}) };
     });
   }
 
@@ -6336,6 +6474,8 @@ export class InboxStore {
     this.pullEvents.clear();
     this.initiativesById.clear();
     this.tagThreads.clear();
+    this.personTagsByMessage.clear();
+    this.personTagMessages.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
     const attachmentIds = new Set<string>();
@@ -6533,6 +6673,12 @@ export class InboxStore {
    * delivers". A Tidy note is left to its wake: a read shows it as one line.
    * No write when nothing is new.
    */
+  private cloudPolls: (session: string) => boolean = () => false;
+
+  setCloudPolling(polls: (session: string) => boolean): void {
+    this.cloudPolls = polls;
+  }
+
   recordOwnRead(threadId: string, session: string, shown?: ReadonlySet<string>): void {
     for (const message of this.threadMessages(threadId)) {
       if (message.author.kind !== "person" || message.tidy || (shown && !shown.has(message.id))) continue;
@@ -6551,7 +6697,7 @@ export class InboxStore {
       // A plain reply it owns that the read mark could not cover (a reply still owed to another
       // session comes before it): its read settles it, as the mark does, so the wake never repeats it.
       const plain = !tag && !message.to && !hasTags(message);
-      if (wakes && !plain && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "")) continue;
+      if (wakes && !plain && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "") && !this.cloudPolls(session)) continue;
       this.recordDelivery(message.id, { host: host ?? "agent", session });
     }
   }
@@ -7644,7 +7790,7 @@ export class InboxStore {
     const key = inboxInitiativeNameKey(name);
     for (const other of this.initiativesById.values()) {
       if (other.id !== self && other.deleted_at === null && inboxInitiativeNameKey(other.name) === key) {
-        throw new InboxError("initiative_exists", `There is already an initiative named ${other.name}.`, { field: "name", initiative_id: other.id });
+        throw new InboxError("initiative_exists", `There is already a tag named ${other.name}.`, { field: "name", initiative_id: other.id });
       }
     }
     return name;
@@ -7728,11 +7874,15 @@ export class InboxStore {
     return "make" in pick ? this.appendNewInitiative(pick.make, by).id : pick.id;
   }
 
-  /** The person renamed an initiative: every card in it reads the new name (they name it by id). */
+  /**
+   * The person renamed an initiative: every card in it reads the new name (they name it by id). A thread in it as
+   * a tag only through a typed `#OldName` gets a mark first, so a rename keeps every thread it holds.
+   */
   renameInitiative(id: string, name: unknown): InboxInitiative {
     const current = this.liveInitiative(id);
     const next = this.initiativeName(name, current.id);
     if (next === current.name) return current;
+    if (inboxInitiativeTagKey(next) !== inboxInitiativeTagKey(current.name)) this.markTypedMembers(current.id);
     const at = this.stamp();
     const record: InboxInitiative = { ...current, name: next, updated_at: at };
     this.appendInitiative(record, at);
@@ -7762,6 +7912,176 @@ export class InboxStore {
     const record: InboxInitiative = { ...current, updated_at: at, deleted_at: null };
     this.appendInitiative(record, at);
     return record;
+  }
+
+  // ─────────────────────────── thread tags ───────────────────────────
+  // A tag is an initiative (approval "inbox-thread-tags", step 1): the same
+  // records, with the Board on or off. A thread is in a tag when the person
+  // put it there (Add tag: a mark in tags.json), or typed `#Name` in
+  // their own words in it and did not take it out after (a removal mark wins
+  // over a `#Name` typed before it, not over one typed after). An agent's
+  // `#Name` and a card's initiative put no thread in a tag, and a mark moves
+  // no card.
+
+  /** The marks changed (Add tag, untick, a rename's marks, or a deleted thread left them): no store line is written. */
+  onThreadTagsChange(listener: () => void): () => void {
+    this.threadTagListeners.add(listener);
+    return () => this.threadTagListeners.delete(listener);
+  }
+
+  private threadTagsChanged(): void {
+    for (const listener of this.threadTagListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the write.
+      }
+    }
+  }
+
+  /** A person's message's tag keys, kept by message and thread (`personTagsByMessage`). */
+  private indexPersonTags(record: InboxMessage): void {
+    const had = this.personTagsByMessage.get(record.id);
+    const keys = typeof record.body === "string" && /#[\p{L}\p{N}]/u.test(record.body) ? [...new Set(inboxHashtags(personWords(record.body)).map((tag) => tag.key))].filter(Boolean) : [];
+    if (keys.length === 0) {
+      if (!had) return;
+      this.personTagsByMessage.delete(record.id);
+      this.personTagMessages.get(had.thread)?.delete(record.id);
+      return;
+    }
+    this.personTagsByMessage.set(record.id, { thread: record.thread_id, keys });
+    let ids = this.personTagMessages.get(record.thread_id);
+    if (!ids) this.personTagMessages.set(record.thread_id, (ids = new Set()));
+    ids.add(record.id);
+  }
+
+  /**
+   * Read tags.json and keep the marks of threads that exist and of tags that were ever made (a deleted
+   * thread or project ends in a reload, so every load is where a mark can outlive its thread). Called at the end
+   * of every load.
+   */
+  private loadThreadTags(): void {
+    const read = readInboxThreadTags(this.dir);
+    const kept = read.filter((mark) => this.isThreadRoot(mark.thread_id) && this.initiativesById.has(mark.tag));
+    const had = this.threadTagMarks.size > 0;
+    this.threadTagMarks = new Map();
+    for (const mark of kept) this.placeThreadTagMark(mark);
+    if (kept.length !== read.length) {
+      try {
+        writeInboxThreadTags(this.dir, kept);
+      } catch {
+        // Best effort: the next load prunes it again.
+      }
+    }
+    if (had || kept.length > 0) this.threadTagsChanged();
+  }
+
+  private placeThreadTagMark(mark: InboxThreadTagMark): void {
+    let marks = this.threadTagMarks.get(mark.thread_id);
+    if (!marks) this.threadTagMarks.set(mark.thread_id, (marks = new Map()));
+    marks.set(mark.tag, mark);
+  }
+
+  /** The live tags, oldest first, and the one each tag key names (the first live one with it, as a sent tag reads). */
+  private liveTags(): { live: InboxInitiative[]; byKey: Map<string, string> } {
+    const live = this.initiatives().filter((i) => i.deleted_at === null);
+    const byKey = new Map<string, string>();
+    for (const tag of live) {
+      const key = inboxInitiativeTagKey(tag.name);
+      if (key && !byKey.has(key)) byKey.set(key, tag.id);
+    }
+    return { live, byKey };
+  }
+
+  /** Per tag id, the seq of the person's latest message in the thread that types it. */
+  private typedTagSeqs(threadId: string, byKey: ReadonlyMap<string, string>): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const id of this.personTagMessages.get(threadId) ?? []) {
+      const entry = this.personTagsByMessage.get(id);
+      const seq = this.messageSeq.get(id) ?? 0;
+      for (const key of entry?.keys ?? []) {
+        const tag = byKey.get(key);
+        if (tag && seq > (out.get(tag) ?? -1)) out.set(tag, seq);
+      }
+    }
+    return out;
+  }
+
+  private threadTagsWith(threadId: string, tags: { live: InboxInitiative[]; byKey: Map<string, string> }): string[] {
+    const typed = this.typedTagSeqs(threadId, tags.byKey);
+    const marks = this.threadTagMarks.get(threadId);
+    return tags.live
+      .filter((tag) => {
+        const mark = marks?.get(tag.id);
+        const seq = typed.get(tag.id);
+        if (!mark) return seq !== undefined;
+        return mark.on || (seq !== undefined && seq > mark.seq);
+      })
+      .map((tag) => tag.id);
+  }
+
+  /** The live tags a thread is in, oldest tag first. */
+  threadTags(threadId: string): string[] {
+    if (!this.isThreadRoot(threadId)) return [];
+    if (!this.threadTagMarks.has(threadId) && !this.personTagMessages.get(threadId)?.size) return [];
+    return this.threadTagsWith(threadId, this.liveTags());
+  }
+
+  /** Every thread in at least one live tag, with its tags (oldest tag first): the list model's rows carry them. */
+  allThreadTags(): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    const tags = this.liveTags();
+    if (tags.live.length === 0) return out;
+    for (const threadId of new Set([...this.threadTagMarks.keys(), ...this.personTagMessages.keys()])) {
+      if (!this.isThreadRoot(threadId)) continue;
+      const ids = this.threadTagsWith(threadId, tags);
+      if (ids.length > 0) out.set(threadId, ids);
+    }
+    return out;
+  }
+
+  /** Every mark, by thread then tag. */
+  threadTagMarkList(): InboxThreadTagMark[] {
+    return [...this.threadTagMarks.values()].flatMap((marks) => [...marks.values()]);
+  }
+
+  private commitThreadTagMarks(next: readonly InboxThreadTagMark[]): void {
+    if (next.length === 0) return;
+    const all = new Map(this.threadTagMarkList().map((mark) => [`${mark.thread_id}\0${mark.tag}`, mark] as const));
+    for (const mark of next) {
+      all.delete(`${mark.thread_id}\0${mark.tag}`);
+      all.set(`${mark.thread_id}\0${mark.tag}`, mark);
+    }
+    writeInboxThreadTags(this.dir, [...all.values()]);
+    // Placed again from the list just written, as a load places them: a pair marked again moves to the end of
+    // the file, and the marks read in that order after a restart too.
+    this.threadTagMarks = new Map();
+    for (const mark of all.values()) this.placeThreadTagMark(mark);
+    this.threadTagsChanged();
+  }
+
+  /**
+   * The person put a thread in a live tag (`on`) or took it out. A thread already where it is asked to be writes
+   * nothing. Writes no store line. Answers the thread's tags.
+   */
+  setThreadTag(threadId: string, tagId: unknown, on: boolean): string[] {
+    if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const tag = this.liveInitiative(tagId);
+    if (this.threadTags(threadId).includes(tag.id) === on) return this.threadTags(threadId);
+    this.commitThreadTagMarks([{ thread_id: threadId, tag: tag.id, on, seq: this.seq, at: this.stamp() }]);
+    return this.threadTags(threadId);
+  }
+
+  /** Before a rename that changes a tag's key: each thread in it only through a typed `#Name` gets an `on` mark. */
+  private markTypedMembers(tagId: string): void {
+    const tags = this.liveTags();
+    const at = this.stamp();
+    const marks: InboxThreadTagMark[] = [];
+    for (const threadId of this.personTagMessages.keys()) {
+      if (!this.isThreadRoot(threadId) || this.threadTagMarks.get(threadId)?.get(tagId)?.on === true) continue;
+      if (this.threadTagsWith(threadId, tags).includes(tagId)) marks.push({ thread_id: threadId, tag: tagId, on: true, seq: this.seq, at });
+    }
+    this.commitThreadTagMarks(marks);
   }
 
   /** The person put a card in an initiative, or took it out of one (null): one card line, a history entry. */

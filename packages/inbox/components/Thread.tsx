@@ -1,4 +1,5 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { useThreadArmed } from '../threadArmed';
 import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
@@ -7,6 +8,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
+import { sameAnswerParts, type QuestionAcceptBehavior } from '@plannotator/ui/components/blocks/QuestionBlock';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
@@ -33,7 +35,10 @@ import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxPersonAnsweredSince
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
-import { awayLine, outboxLine } from '../machines';
+import { awayLine, outboxLine, type MachinesModel } from '../machines';
+import { threadSessions, type ThreadSession } from '../agents/model';
+import { useInboxAgentsWho } from '../agentsList';
+import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
@@ -48,7 +53,7 @@ import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTil
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
-import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId } from '../optionSets';
+import { choiceLetters, openChoiceSetOf, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId } from '../optionSets';
 import { PrototypeWindow, TryPrototypeTab, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, prototypePageCount, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
@@ -99,6 +104,7 @@ import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered'
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
+import { givenName, useAgentNames } from '../agents/agentNames';
 import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
 import { shareUnchanged } from '../shareUnchanged';
@@ -147,14 +153,13 @@ import { fileGroupName, sentAnswersOf, sentReplyParts, type SentAnswerGroup } fr
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
 import { paintTagReferences, type TagMarkPlace } from '../tagHighlight';
-import { TagModeNote, TagNotes, TagStack, useTagConnections, useTaggable } from './TagPicker';
+import { TagModeNote, TagNotes, useTagConnections, useTaggable } from './TagPicker';
 import {
   activeHandoff,
   effectiveTagMode,
   handoffName,
   messageTags,
   namesList,
-  participantsWords,
   sendTagsByTarget,
   tagDeliveryLine,
   tagName,
@@ -190,6 +195,8 @@ import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { inboxTileShortcuts } from '../shortcuts/grid.shortcuts';
+import { gridStep, type GridKey } from '../gridMove';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
@@ -616,7 +623,8 @@ export function MessageBody({
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
-  const { initiatives: tagInitiatives } = useInitiativeTags();
+  // With the Board off, a tag's list in the Inbox (`#tag=ini_…`, approval "inbox-thread-tags").
+  const { initiatives: tagInitiatives, href: tagHref } = useInitiativeTags();
   const linkFiles = useCallback(
     (text: string) =>
       linkHashtags(
@@ -624,8 +632,9 @@ export function MessageBody({
           ? linkReplyFeedback(text, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
           : text,
         tagInitiatives,
+        tagHref,
       ),
-    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives],
+    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives, tagHref],
   );
   // The feedback the Send wrote after the person's words ("# Feedback on the attached files"…): a block of
   // its own, its headings at text size (replyFeedback.ts; display only). The person's own message only.
@@ -684,17 +693,17 @@ export function MessageBody({
   // A sent tag's preview: hover or focus, or a first tap on a touch screen (InitiativePeek).
   const tagPeek = useInitiativePeek(bodyRef);
   const { tapOpens } = tagPeek;
-  // A hashtag's link opens the Board in this window (the markdown renderer opens links in a new tab).
+  // A hashtag's link opens the Board (with the Board off, the tag's list) in this window (the markdown renderer opens links in a new tab).
   const openHashtag = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
       const target = event.target as Element | null;
       // The preview is portaled: its own links are plain in-app links.
       if (target?.closest?.('[data-tag-peek]')) return;
-      const link = target?.closest?.('a[href^="#board&initiative="]');
+      const link = target?.closest?.('a[href^="#board&initiative="], a[href^="#tag="]');
       if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      if (tapOpens(link)) return;
+      if (link.getAttribute('href')!.startsWith('#board&') && tapOpens(link)) return;
       window.location.hash = link.getAttribute('href')!;
     },
     [tapOpens],
@@ -923,13 +932,44 @@ export function MessageBody({
   // on a busy thread grew without end).
   const footerRef = useRef(footerFor);
   footerRef.current = footerFor;
+  // The last Accept recommended's Undo, drawn at the end of that card's status line while the answer is still the
+  // one the tap set and the question still takes answers (not sent, closed or replaced).
+  const [acceptedUndo, setAcceptedUndo] = useState<{ key: string; answer: QuestionAnswer; undo: () => void } | null>(null);
+  const undoState = acceptedUndo ? message.questions?.find((q) => q.key === acceptedUndo.key)?.state : undefined;
+  const undoCurrent =
+    acceptedUndo !== null &&
+    !readOnly &&
+    (undoState === undefined || undoState === 'open' || undoState === 'picked') &&
+    !!answers.get(acceptedUndo.key) &&
+    sameAnswerParts(answers.get(acceptedUndo.key)!, acceptedUndo.answer);
+  useEffect(() => {
+    if (acceptedUndo && !undoCurrent) setAcceptedUndo(null);
+  }, [acceptedUndo, undoCurrent]);
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {
       const text = footerRef.current(question.question.key);
-      return text ? <span className="ib-qfoot-st">{text}</span> : null;
+      const undo = undoCurrent && acceptedUndo?.key === question.question.key ? acceptedUndo : null;
+      if (!text && !undo) return null;
+      return (
+        <span className="ib-qfoot-st">
+          {text}
+          {undo && (
+            <button
+              type="button"
+              className="ib-qfoot-undo"
+              onClick={() => {
+                setAcceptedUndo(null);
+                undo.undo();
+              }}
+            >
+              Undo
+            </button>
+          )}
+        </span>
+      );
     },
     // A new identity when the footers may have changed, so the cards redraw.
-    [footerFor],
+    [footerFor, acceptedUndo, undoCurrent],
   );
   // Replaced questions: the host's Quiet card in place of the answer card, and
   // the newer card's "Replaces …" line. Kept stable across renders.
@@ -1067,6 +1107,16 @@ export function MessageBody({
   // window does not offer it (adr/implementation/inbox-thread-state.md, Pick).
   // "Try prototype" (approval "inbox-question-tradeoffs"): a tab hanging from the right end of the options' tray, on a
   // question with a page to try (an attached HTML file, or an app the send checked).
+  const acceptBehavior = useMemo<QuestionAcceptBehavior>(
+    () => ({
+      asideWhileTyping: true,
+      keepOther: true,
+      onAccepted: (undo, accepted) => {
+        setAcceptedUndo({ ...accepted, undo });
+      },
+    }),
+    [],
+  );
   const tryRef = useRef(onTryPrototype);
   tryRef.current = onTryPrototype;
   const afterChoices = useCallback(
@@ -1126,8 +1176,9 @@ export function MessageBody({
     />
   );
 
-  // Here and not through the Viewer's onSelectAnnotation: on a touch screen the highlighter does not listen (the
-  // system's selection is the person's, ui's useAnnotationHighlighter), so a tap would reach nothing.
+  // Here and not through the Viewer's onSelectAnnotation, so a tap opens a highlight the same way on every screen. (On a
+  // touch screen the highlighter does listen here: no onHostDraft, so it paints a finger's selection itself once the
+  // selection is finished, and keeps it selected; ui's useAnnotationHighlighter.)
   const openHighlight = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as Element;
     const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
@@ -1207,6 +1258,9 @@ export function MessageBody({
         questionStatusLabel={statusLabel}
         questionPictureBadge={pictureBadge}
         questionPictureSize={pictureSizeOf}
+        // Accept recommended steps aside while a card field is typed in, keeps Other… words, and offers Undo
+        // (approval "question-note-vs-accept-recommended").
+        questionAcceptBehavior={acceptBehavior}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
         renderDirectiveBlock={renderActions || noteBlocks.length > 0 ? directiveBlock : undefined}
@@ -1333,6 +1387,14 @@ export interface ThreadPaneProps {
   /** When this thread came back from its snooze, while the person stays in it (snoozeBack.ts); else null. */
   snoozeBack?: string | null;
   /**
+   * The window's rows and machines, which `threadSessions` (agents/model.ts) finds a thread's agents in. Absent: a
+   * session is named by its label, else its agent.
+   */
+  agentContext?: { rows: readonly InboxListRow[]; machines: MachinesModel } | null;
+  /** The list's agent filter now (`#agent=<id>`), and what a click on a session's name in the header does with it. */
+  agentFilter?: string | null;
+  onAgentFilter?: (agentId: string | null) => void;
+  /**
    * Seen on sight (design record "inbox-new-in-open-thread", approved
    * 2026-10-12): the seq the window's looks this visit covered (the look
    * recorded when the thread opened, raised as arrivals are seen). An agent
@@ -1391,6 +1453,8 @@ export interface ThreadPaneProps {
   pinned?: boolean;
   /** Resolves once the pin is written and the list read again (the header waits on it before the next click's request). */
   onPin?: (pinned: boolean) => void | Promise<unknown>;
+  /** Add to Priority or Remove from Priority in the ⋯ menu, after the star. Absent where the row offers neither. */
+  priority?: { on: boolean; onToggle: () => void };
   /** Snooze the thread until a moment (the ⋯ menu, approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no item. */
   onSnooze?: (until: string) => void;
   /** This thread's machine must update before Snooze works: Snooze stays and opens the update dialog. */
@@ -1732,6 +1796,10 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
+const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
+const NO_ROWS: readonly InboxListRow[] = [];
+const NO_SESSIONS: readonly ThreadSession[] = [];
+
 /**
  * A named session's message author (issue #2450): the agent's name as ever, then " · " and the session's label in
  * the secondary colour, a little smaller and never bold, cut in the middle past ROW_LABEL_MAX and with "…" where the
@@ -1755,7 +1823,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -1786,6 +1854,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const htmlArmed = useThreadArmed(thread.thread_id);
   const launchAct = async <T,>(action: () => Promise<T>, done?: string | ((result: T) => { lead: string; detail?: string })) => {
     setLaunchError(null);
     try {
@@ -2641,8 +2710,26 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
+  // Two or more sessions (issue #3108): the header's line and the message lines name each one.
+  const severalSessions = participants.length > 1;
+  const agentsWho = useInboxAgentsWho(severalSessions);
+  const sessions = useMemo(
+    () => (severalSessions ? threadSessions(participants, agentsWho, agentContext?.machines ?? NO_MACHINES, agentContext?.rows ?? NO_ROWS, machine?.id ?? null, sessionLabels) : NO_SESSIONS),
+    [severalSessions, participants, agentsWho, agentContext, machine, sessionLabels],
+  );
+  /** Each session id's name, in a thread with two or more sessions (its message lines lead with it). */
+  const sessionNames = useMemo(() => new Map(sessions.length > 1 ? sessions.flatMap((s) => s.sessions.map((id) => [id, s.name] as const)) : []), [sessions]);
   const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
-  const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
+  // A given name (agents/agentNames.ts) leads an `@` row's second line; the row's label is the token the agent reads, so it stays.
+  const agentNames = useAgentNames();
+  const tagOpts: TagOption[] = useMemo(
+    () =>
+      tagOptions(taggable, tagOwner, thread.project.id, whenTime).map((option) => {
+        const given = givenName(agentNames, option.id);
+        return given ? { ...option, detail: option.detail ? `${given} · ${option.detail}` : given } : option;
+      }),
+    [taggable, tagOwner, thread.project.id, agentNames],
+  );
   // Until the list is read (or from an older Inbox) `@` is plain text.
   const composerTags = useMemo(
     () =>
@@ -3095,12 +3182,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** A tile, or a link in a message: the file as it is now, focus in its pane (a typed comment in the open file waits as its draft). */
   /** `opening`: called as the file opens. */
-  /** `set`: a question's picture choices the viewer then steps through (optionSets.ts); absent: every file of the thread. */
+  /** `set`: a question's picture choices the viewer then steps through (optionSets.ts); absent: the choices of the open question that shows this file (openChoiceSetOf), else every file of the thread. */
   /** `version`: the version the agent sent (a file the person's reply names, commented at that version, or moved since). */
   const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'> & { name?: string }, view: FileView | null = null, opening?: () => void, set: string | null = null, version: 'current' | 'sent' = 'current') => {
     const go = () => {
       opening?.();
-      openFile(attachment, version, null, view, set);
+      openFile(attachment, version, null, view, set ?? openChoiceSetOf(thread.messages, steps, attachment.id));
       setPaneFocus((n) => n + 1);
     };
     const pane = paneRef.current;
@@ -3872,6 +3959,30 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           return origin === 'thread' || origin === 'row' || origin === 'file';
         },
         handle: fullScreenByKey,
+      },
+    },
+  });
+  // Arrow keys between a message's tiles (shortcuts/grid.shortcuts.ts `inboxTileShortcuts`). Not under a file in full
+  // screen, a guide or Artifacts: a tile behind them can still hold focus, and there ← → step the file.
+  const tileList = (target: Element | null) => (target && sectionRef.current?.contains(target) && target.matches('[data-attachment-id]') ? target.closest('.ib-tiles') : null);
+  useShortcutScope({
+    scope: inboxTileShortcuts,
+    handlers: {
+      move: {
+        when: (event) => {
+          if (event.defaultPrevented || event.isComposing || paneCovered || modalOpen()) return false;
+          const list = tileList(keyTarget(event));
+          return !!list && list.querySelectorAll('[data-attachment-id]').length > 1;
+        },
+        handle: (event) => {
+          const target = keyTarget(event);
+          const tiles = [...(tileList(target)?.querySelectorAll<HTMLElement>('[data-attachment-id]') ?? [])];
+          const from = tiles.indexOf(target as HTMLElement);
+          const to = from < 0 ? null : gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
+          const next = to === null ? null : tiles[to];
+          next?.focus({ preventScroll: true });
+          next?.scrollIntoView?.({ block: 'nearest' });
+        },
       },
     },
   });
@@ -5284,6 +5395,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Where the person's last message is addressed: its own `to`, or, for a reply in a thread the
   // person started, the thread's (the server hands it to that session), unless it answers another
   // session that wrote in it (that session takes it, as any plain reply).
+  const earlierDelivered = (message: InboxMessageWire): string | null => {
+    if (message === last || message.author.kind !== 'person' || isInboxNote(message) || !isDelivered(message, root)) return null;
+    const name = message.delivery ? toName(message, message.delivery) : message.to ? toName(message, message.to) : recipientName(askedBy(message));
+    return message.delivery?.at ? `Delivered to ${name}, ${whenTime(message.delivery.at)}` : `Delivered to ${name}`;
+  };
   const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null;
   // The session the person's last reply goes to, when its connection wakes it: a message addressed to a
   // session (`lastTo`), or a reply to an agent message sent through a waking connection (`wakes`).
@@ -5337,10 +5453,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       : lastTo
         ? deliveryLine({
             name: last.delivery ? toName(last, last.delivery) : last.to ? toName(last, last.to) : hostName(lastTo.host),
-            deliveredAt: last.delivery?.at ?? null,
+            deliveredAt: last.delivery?.at ?? (recipientConnection?.polls ? (sent?.checked_at ?? null) : null),
             time: whenTime,
             // A Codex reply whose `codex queue` ran out of time may not have gone: saved, not queued.
-            wakes: !uncertainItem(recipientConnection, last.id),
+            wakes: !recipientConnection?.polls && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
@@ -5362,7 +5478,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
   const heldHandoff = last.author.kind === 'person' && !!last.handoff && !last.handoff.settled_at && !last.handoff.undone_at;
-  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || isInboxCloudHost(lastTo?.host)) ? last : null;
+  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || (isInboxCloudHost(lastTo?.host) && !recipientConnection?.polls && !last.delivery)) ? last : null;
   const delivered: DeliveryLine | null = cloudLast
     ? null
     : heldHandoff && deliveredNow
@@ -5436,11 +5552,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const joined = new Set<string>();
     for (const m of thread.messages) {
       if (m.author.kind !== 'person') continue;
-      if (m.handoff && !m.handoff.undone_at && m.to) threadMoves.set(m.id, { kind: 'handoff', names: handoffName(m), host: m.to.host });
+      if (m.handoff && !m.handoff.undone_at && m.to) threadMoves.set(m.id, { kind: 'handoff', names: givenName(agentNames, m.to.session) ?? handoffName(m), host: m.to.host });
       const added = messageTags(m).filter((t) => t.joined && !joined.has(t.session));
       for (const t of added) joined.add(t.session);
       if (added.length > 0 && !threadMoves.has(m.id)) {
-        threadMoves.set(m.id, { kind: 'added', names: namesList(added.map((t) => t.label || agentName({ kind: 'agent', host: t.host, name: t.name ?? null }))), host: added[0]!.host });
+        // The given name, else the header's name, else the tag's label, else the agent.
+        threadMoves.set(m.id, { kind: 'added', names: namesList(added.map((t) => givenName(agentNames, t.session) ?? sessionNames.get(t.session) ?? (t.label || agentName({ kind: 'agent', host: t.host, name: t.name ?? null })))), host: added[0]!.host });
       }
     }
   }
@@ -6572,6 +6689,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
+              priority={priority}
               markRead={menuMarkRead}
               moveBack={menuMoveBack}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
@@ -6768,17 +6886,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
             chip would (the owner, 2026-11-02: never the same words twice). */}
         {!one && !reviewView && (
-          <div className="ib-tmeta" data-thread-meta="">
+          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 ? '' : undefined}>
+            {/* Two or more sessions: who at the start, the count and time at the end. */}
+            {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />}
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
-                {participants.length > 1 && (
-                  <>
-                    <span className="ib-tg-hwho" data-thread-participants="">
-                      <TagStack participants={participants} />
-                      <span>{participantsWords(participants)}</span>
-                    </span>
-                    <span className="ib-tdot" aria-hidden="true" />
-                  </>
-                )}
                 <span>{plural(thread.messages.length, 'message')}</span>
                 <span className="ib-tdot" aria-hidden="true" />
                 <span>{spanWords(root.created_at, thread.messages[thread.messages.length - 1]!.created_at)}</span>
@@ -6820,14 +6931,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           const move = threadMoves.get(message.id);
           if (move) {
             const held = move.kind === 'handoff' && !message.handoff?.settled_at;
+            const quietAdd = move.kind === 'added' && sessions.length > 1;
             before.push(
-              <div className="ib-tmove" key={`move-${message.id}`} data-thread-move={move.kind} data-held={held ? '' : undefined}>
-                <Icon name={move.kind === 'handoff' ? 'forward' : 'plus'} size={14} />
+              <div className="ib-tmove" key={`move-${message.id}`} data-thread-move={move.kind} data-held={held ? '' : undefined} data-quiet={quietAdd ? '' : undefined}>
+                {/* Added to a thread of several: "You added Retry worker · 4:20 PM", the header's names, no icon or mark. */}
+                {!quietAdd && <Icon name={move.kind === 'handoff' ? 'forward' : 'plus'} size={14} />}
                 <span className="ib-tmove-t">
                   {move.kind === 'handoff' ? 'You handed this thread to ' : 'You added '}
-                  <HostMark host={move.host} />
+                  {!quietAdd && <HostMark host={move.host} />}
                   <b>{move.names}</b>
-                  {move.kind === 'added' ? ' to this thread' : ''}
+                  {move.kind === 'added' && !quietAdd ? ' to this thread' : ''}
                   <span className="ib-tmove-tm"> · {whenTime(message.created_at)}</span>
                 </span>
                 {held && (
@@ -6860,11 +6973,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // screen reader. The session's poll names it; an unnamed one reads as it always did. Display only: no
           // tool takes a label, but Claude Code's comes from the transcript, which the session's own model can
           // append to, so it never proves who wrote (the agent's name and mark stay, and the server refuses "You").
-          const authorLabel = message.author.kind === 'agent' ? labelOf(sessionLabels, message.author.session) : null;
-          const name = isAgent ? agentName(message.author) : 'You';
+          // In a thread with two or more sessions the header's name for the session leads, its agent in the mark,
+          // the tooltip and after it for a screen reader: "Billing refactor", heard "Billing refactor, Claude Code".
+          const kind = message.author.kind === 'agent' ? agentName(message.author) : null;
+          const sessionName = message.author.kind === 'agent' ? (sessionNames.get(message.author.session ?? '') ?? null) : null;
+          const named = sessionName && sessionName !== kind ? sessionName : null;
+          const authorLabel = message.author.kind === 'agent' && !named ? labelOf(sessionLabels, message.author.session) : null;
+          const name = named ?? kind ?? 'You';
           const labelled = authorLabel ? authorWithLabel(name, authorLabel) : null;
-          const nameTip = labelled?.shown ?? name;
-          const nameSaid = labelled?.spoken ?? name;
+          const nameTip = named ? `${named} · ${kind}` : (labelled?.shown ?? name);
+          const nameSaid = named ? `${named}, ${kind}` : (labelled?.spoken ?? name);
           // The day too when it is not today, and the whole moment on hover.
           const time = whenTime(message.created_at);
           const fullWhen = fullTime(message.created_at);
@@ -6928,8 +7046,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       <Icon name="reply" />
                     </span>
                   )}
-                  <Tip content={nameTip} cut={!authorLabel}>
-                    {authorLabel ? labelledAuthorName({ agent: name, label: authorLabel, hidden: true }) : <span className="ib-fl-nm">{name}</span>}
+                  <Tip content={nameTip} cut={!authorLabel && !named}>
+                    {authorLabel ? (
+                      labelledAuthorName({ agent: name, label: authorLabel, hidden: true })
+                    ) : (
+                      <span className="ib-fl-nm" data-session-name={named ? '' : undefined}>
+                        {named ? <bdi>{name}</bdi> : name}
+                      </span>
+                    )}
                   </Tip>
                   {/* An answers snippet is shortened (each prompt cut at a word): its whole text always; words only while cut. */}
                   <Tip content={snippetText(snippet)} cut={snippet.kind !== 'answers'}>
@@ -7060,12 +7184,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                         </span>
                       )}
                     </span>
-                    <Tip content={authorLabel ? nameTip : one ? name : null} cut={!authorLabel}>
+                    <Tip content={authorLabel || named ? nameTip : one ? name : null} cut={!authorLabel && !named}>
                       {authorLabel ? (
                         labelledAuthorName({ agent: name, label: authorLabel, open: true, hidden: hide, onFold: one ? undefined : () => toggleMessage(message.id) })
                       ) : (
-                        <span className="ib-fl-nm ib-who" aria-hidden={hide}>
+                        <span className="ib-fl-nm ib-who" aria-hidden={hide} data-session-name={named ? '' : undefined} onClick={named && !one ? () => toggleMessage(message.id) : undefined}>
                           <bdi>{name}</bdi>
+                          {named && !hide && <span className="ib-sr">, {kind}</span>}
                         </span>
                       )}
                     </Tip>
@@ -7206,6 +7331,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
                     openIn={openIn}
                     newestId={newestFileId}
+                    newestKeycap={!file}
                   />
                 )}
                 {message.guide &&
@@ -7282,6 +7408,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     restart={restart}
                     restartName={restartName}
                   />
+                )}
+                {earlierDelivered(message) !== null && (
+                  <div className="ib-delivered" data-delivery="delivered">
+                    <span className="ib-dl-main">
+                      <Icon name="check" size={14} />
+                      <span className="ib-dl-text">{earlierDelivered(message)}</span>
+                    </span>
+                  </div>
                 )}
                 {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName(lastTo?.host ?? 'cloud')} time={whenTime} />}
                 {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
@@ -7839,6 +7973,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         // A full screen opened over another file beside the thread goes back to that file: a comment not saved yet waits as the full screen file's draft.
         exitLeavesFor={fullExitFile && fullExitFile !== openAttachment.id ? (allFiles.find((a) => a.id === fullExitFile)?.name ?? 'that file') : null}
         phone={phone}
+        armedStart={htmlArmed.armedStart}
+        onArmed={htmlArmed.onArmed}
         openIn={openIn}
         steps={optionSet ? optionSet.steps : steps}
         allSteps={steps}

@@ -45,7 +45,8 @@ const forgeParser: InboxCardRefParser = {
       return { kind, source: "github", ref: `${owner}/${repo}#${n}`, url: `https://github.com/${owner}/${repo}/${kind === "pr" ? "pull" : "issues"}/${n}` };
     }
     const ref = parseForgeRefUrl(text);
-    if (!ref) return null;
+    // Bitbucket's pull requests are the PR-URL parser's (below); its issues are no card reference.
+    if (!ref || ref.platform === "bitbucket") return null;
     const kind = ref.kind === "pull" ? "pr" : "issue";
     if (hint === "pr" && kind !== "pr") return null;
     const repo = `${ref.owner}/${ref.repo}`;

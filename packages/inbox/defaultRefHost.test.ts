@@ -33,6 +33,8 @@ describe('the host most projects use', () => {
   test('another tie: the first host by name; a winner no link can be formed for: github.com', () => {
     expect(defaultRefHost([{ repo_host: 'gitlab.com' }, gl])).toBe('gitlab.com');
     expect(defaultRefHost([{ repo_host: 'git.internal.example' }, { repo_host: 'git.internal.example' }, gl])).toBe('github.com');
+    // Mostly Bitbucket: its #N forms no link, so owner/repo#123 keeps linking on github.com.
+    expect(defaultRefHost([{ repo_host: 'bitbucket.org' }, { repo_host: 'bitbucket.org' }, gl])).toBe('github.com');
   });
 });
 

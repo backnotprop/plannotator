@@ -335,19 +335,6 @@ export function threadParticipants(thread: InboxThread): InboxParticipant[] {
 }
 
 /**
- * The names of a thread's participants, for the head ("Claude Code and Pi"):
- * each agent once, two sessions of one agent named once.
- */
-export function participantsWords(participants: readonly InboxParticipant[]): string {
-  const names: string[] = [];
-  for (const p of participants) {
-    const name = agentName(p.host, p.name);
-    if (!names.includes(name)) names.push(name);
-  }
-  return namesList(names);
-}
-
-/**
  * The Sent row's line for a reply that tags agents: "1 of 3 delivered · Pi queued".
  * `recipients` is the row's `sent.recipients`, the owner first.
  */

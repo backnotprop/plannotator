@@ -319,8 +319,10 @@ test.skipIf(!hasDom)('an MCP agent gets the other heads-up; Send carries the tag
 test.skipIf(!hasDom)('the thread head shows the agents in the thread overlapping, the row beside its project; the Sent row counts deliveries', async () => {
   const el = await renderApp(`#thread=${tags.ids.t3}`);
   await until(() => el.querySelector('[data-thread-participants]') !== null, 'the thread head');
-  expect(el.querySelector('[data-thread-participants]')!.textContent).toBe('Claude Code and Pi');
-  expect(el.querySelector('[data-thread-participants] [data-tag-stack]')!.getAttribute('data-tag-stack')).toBe('2');
+  // Two sessions: their marks and "2 sessions", a Claude Code mark and a Pi mark.
+  expect(el.querySelector('[data-thread-participants]')!.textContent).toBe('2 sessions');
+  expect(el.querySelector('[data-thread-participants]')!.getAttribute('data-thread-sessions')).toBe('2');
+  expect(el.querySelector('[data-thread-participants] [data-pile]')!.getAttribute('data-pile')).toBe('2');
   const model = await api<{ sections: InboxListSection[] }>('/api/inbox/threads');
   const rows = model.sections.flatMap((s) => s.threads);
   expect(rows.find((r) => r.thread_id === tags.ids.t3)!.participants?.map((p) => p.host)).toEqual(['claude-code', 'pi']);

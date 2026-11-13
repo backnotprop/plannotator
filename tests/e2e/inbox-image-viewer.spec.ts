@@ -423,7 +423,7 @@ test('plan review and annotate get the light version: full screen, ← → acros
     ['# Checkout plan', '', '## Options', '', '![A: one page](checkout-a-single-page.png)', '', '![B: three steps](checkout-b-steps.png)', '', '![C: a drawer](checkout-c-drawer.png)', '', '## Mobile', '', '![Phone](checkout-mobile.png)', ''].join('\n'),
   );
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -499,7 +499,7 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
   const doc = join(root, 'PLAN.md');
   writeFileSync(doc, ['# Sizes', '', '![Tall](tall.png)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -600,7 +600,7 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
   const doc = join(root, 'PLAN.md');
   writeFileSync(doc, ['# Zoom', '', '![Wide](wide.png)', '', '![Other](other.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -707,7 +707,7 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
   // A link high on the page, where the tap beside the image lands once the overlay is open.
   writeFileSync(doc, ['# Ghost tap', '', '[Go somewhere else](https://example.com/ghost) and [another link](https://example.com/ghost-2)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   const { defaultBrowserType: _ignored, ...device } = devices['iPhone 15'];
@@ -1086,7 +1086,7 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
   const doc = join(root, 'NOTES.md');
   writeFileSync(doc, ['# Notes', '', '![Big](big.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
