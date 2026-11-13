@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { InboxAuthor, InboxThread } from '@plannotator/core/inbox-types';
 import { inboxApi, resetListReads, type AttachmentsModel, type InboxEvent, type ListModel } from '../../packages/inbox/api';
+import { drawNow } from '../../packages/inbox/data/apply/drawGap';
 import { applyListRecord } from '../../packages/inbox/data/apply/list';
 import { applyStreamRecord } from '../../packages/inbox/data/apply/stream';
 import { createInboxQueryClient } from '../../packages/inbox/data/client';
@@ -132,6 +133,8 @@ export class WindowCopy {
   }
 
   async settle(): Promise<void> {
+    await Bun.sleep(0);
+    drawNow();
     if (!this.open) return;
     if (isThreadStale(this.client, this.open)) {
       putThread(this.client, this.open, await inboxApi.thread(this.open));
