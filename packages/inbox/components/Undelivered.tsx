@@ -14,6 +14,7 @@ import { undeliveredLabel, undeliveredShort, undeliveredWords } from '../deliver
 import { Icon } from '../icons';
 import { StuckReason } from './RestartNote';
 import { Tip } from './Tip';
+import { TAKE_BACK_LABEL } from '../takeBack';
 
 /** How often the minute words are written again: often enough that a minute turns over within a few seconds. */
 export const UNDELIVERED_TICK_MS = 5_000;
@@ -110,7 +111,7 @@ export function TakeBackButton({ busy, onPress }: { busy?: boolean; onPress: () 
   return (
     <Tip content="Take it out of the queue and back into your reply box. Nothing goes out until you send it again.">
       <button type="button" className="ib-sendnow ib-takeback" data-take-back="" disabled={busy} onClick={onPress}>
-        Take back
+        {TAKE_BACK_LABEL}
       </button>
     </Tip>
   );

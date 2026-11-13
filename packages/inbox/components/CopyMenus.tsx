@@ -20,6 +20,7 @@ import { useThreadTags } from '../threadTags';
 import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
+import { TAKE_BACK_LABEL } from '../takeBack';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -131,9 +132,9 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       </div>
       {props.onTakeBack && (
         <>
-          <Menu.Item className="ib-pmi" label="Take back" onClick={props.onTakeBack} data-take-back-item="">
+          <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={props.onTakeBack} data-take-back-item="">
             <Icon name="reply" size={15} />
-            Take back
+            {TAKE_BACK_LABEL}
           </Menu.Item>
           <Menu.Separator className="ib-pm-sep" />
         </>
