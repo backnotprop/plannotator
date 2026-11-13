@@ -441,6 +441,8 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "cloud-claude": "Claude Code routine",
   "cloud-grok": "Grok Bot",
   "cloud-muse": "Muse by Meta",
+  "cloud-hermes": "Hermes Agent server",
+  "cloud-openclaw": "OpenClaw server",
 };
 
 /**
@@ -1084,7 +1086,8 @@ export interface InboxAddressee {
 export type InboxLaunchAgent =
   | "claude-code"
   | "pi"
-  | "codex";
+  | "codex"
+  | "opencode";
 
 /** One Codex usage limit (`account/rateLimits/read`): how much of it is used, its length, and when it resets. */
 export interface InboxCodexLimit {
@@ -1199,6 +1202,14 @@ export interface InboxLaunchFrom {
 
 /** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
 export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting_terminal" | "stopped" | "failed" | "missing" | "cloning" | "clone_failed" | "clone_cancelled";
+
+/**
+ * Whether Stop is offered for a launch: it started (the host gave it a session) and it runs, at rest (no line) or
+ * starting, working or at a prompt in Terminal. A prompt in the window has its own Stop on the permission card.
+ */
+export function inboxLaunchStops(started: boolean, run: InboxRunState | null): boolean {
+  return started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
+}
 
 /** What a launched thread's run line shows (the thread route's `run`). */
 export interface InboxRun {
@@ -1793,6 +1804,16 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   snoozed?: InboxRowSnooze | null;
   /**
+   * The thread is in the list's Priority group (`inboxRowInPriority`), or null.
+   * `person`: the person added it (`inbox/priority.json`), `at` when; `ask` is
+   * always null: no agent can set one. Like `pinned_at`, only on the list model the window
+   * and the phone read, never on anything an agent reads. Every row from an
+   * Inbox that keeps priority carries the key; absent from an older Inbox (no
+   * menu item, no group). A linked machine's row carries that machine's own
+   * (approval "inbox-linked-marks": the add lives on the thread's machine).
+   */
+  priority?: InboxRowPriority | null;
+  /**
    * The thread came back from a snooze at this time and has not been read
    * since: the row's small clock. Only on the list model, like `snoozed`.
    */
@@ -1952,8 +1973,44 @@ export const INBOX_ROW_WAIT_TEXT_MAX = 200;
 export const INBOX_ROW_WAIT_HOLDS_MAX = 8;
 export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
-/** A group the list draws: a section, or the Snoozed band under Quiet (`INBOX_SNOOZED_BAND`), which no row is placed in. */
-export type InboxListGroupId = InboxSectionId | "snoozed";
+/**
+ * A group the list draws: a section, the Priority group above them all (`INBOX_PRIORITY_GROUP`), or the Snoozed band
+ * under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row.
+ */
+export type InboxListGroupId = InboxSectionId | "snoozed" | "priority";
+
+/** Why a row is in Priority (`InboxListRow.priority`). */
+export interface InboxRowPriority {
+  person: boolean;
+  /** When the person added it. */
+  at: string;
+  ask: null;
+}
+
+/** The person's adds to Priority, one per thread, kept in `inbox/priority.json` outside the event log. */
+export interface InboxPriorityEntry {
+  thread_id: string;
+  at: string;
+}
+
+/**
+ * What the priority route answers, and what its Undo writes back: the person's add (`at`) and the time they took an
+ * agent's ask out (`off_at`) as they were before the write, null meaning none.
+ */
+export interface InboxPriorityBefore {
+  at: string | null;
+  off_at: string | null;
+}
+
+export const INBOX_PRIORITY_GROUP = { id: "priority", label: "Priority" } as const;
+
+/**
+ * The row is drawn in the Priority group: it carries `priority`, and is neither snoozed (the Snoozed band wins) nor
+ * archived. One rule for the window's list and its menus.
+ */
+export function inboxRowInPriority(row: Pick<InboxListRow, "priority" | "snoozed" | "resolved_at" | "back_from_archive">): boolean {
+  return row.priority != null && !row.snoozed && !inboxRowArchived(row);
+}
 
 export interface InboxListSection {
   id: InboxListGroupId;
@@ -3227,7 +3284,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
  * rows only once this Inbox takes it; an older Inbox says none.
  */
-export const INBOX_LINKED_MARKS = ["star"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -3337,8 +3394,12 @@ export interface InboxAgent {
    * the host gave the conversation a new session id. One of them that still polls is listed as its own agent too.
    */
   continues?: string[];
-  /** Set when the Inbox launched it: the launch's id and its thread. */
-  launch?: { id: string; thread_id: string };
+  /**
+   * Set when the Inbox launched it: the launch's id and its thread; whether the host started it (`started`), its
+   * run line's state (`run`, null: no line) and the name of the scratch folder its Delete removes (`scratch`, null in
+   * a project), absent from an older Inbox.
+   */
+  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
   /** Its title as its connection last said it (the To picker's name). Absent when none. */
@@ -3375,6 +3436,13 @@ export interface InboxAgentsGroup {
   total: number;
   /** How many of `total` ended today (each `ended`). */
   ended_today: number;
+  /**
+   * A linked machine's faces and given names for its agents, as kept there (`inbox/agent-faces.json`; approval
+   * "inbox-linked-marks"): in that machine's group on the merged view, and in its own group when a linked machine reads
+   * its list. Absent from an older Inbox. `faces_rev` is that file's `rev`.
+   */
+  faces?: Record<string, InboxAgentFaceEntry>;
+  faces_rev?: number;
 }
 
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */

@@ -155,7 +155,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   thread_pulls: {
     args: ["thread_id", "add", "remove"],
     lines: [
-      "`thread_pulls`: A thread's pull/merge requests. `thread_id`; `add` and `remove`, lists of `owner/repo#123`, `group/sub/project!45` or PR URLs. Neither lists them. You own your thread's list: add a PR when you open or take on one for this work (or pass `pulls` on send_message), and remove one when it stops being part of the work; merged ones stay. The person can add and remove too; read_thread shows who did, and your next reply in the thread says what they changed. From a shell: `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`.",
+      "`thread_pulls`: A thread's pull/merge requests. `thread_id`; `add` and `remove`, lists of `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab) or PR URLs (Bitbucket: the URL only). Neither lists them. You own your thread's list: add a PR when you open or take on one for this work (or pass `pulls` on send_message), and remove one when it stops being part of the work; merged ones stay. The person can add and remove too; read_thread shows who did, and your next reply in the thread says what they changed. From a shell: `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`.",
     ],
   },
   get_guide_brief: {

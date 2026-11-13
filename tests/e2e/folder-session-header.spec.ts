@@ -93,6 +93,7 @@ test('annotate a folder: the header names the folder, cut from the start, and th
     stdio: 'ignore',
     env: {
       PATH: process.env.PATH ?? '', HOME: root,
+      PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
       PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_READY_FILE: ready,
       PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER,
       PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_REMOTE: '0', PLANNOTATOR_INBOX_CONNECT: '0',

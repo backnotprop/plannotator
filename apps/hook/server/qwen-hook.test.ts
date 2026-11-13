@@ -53,6 +53,7 @@ function env(s: { root: string; data: string; ready: string }, extra: Record<str
     ...(base as Record<string, string>),
     HOME: s.root,
     QWEN_HOME: join(s.root, ".qwen"),
+    PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_DATA_DIR: s.data,
     PLANNOTATOR_PORT: "0",
     PLANNOTATOR_REMOTE: "0",

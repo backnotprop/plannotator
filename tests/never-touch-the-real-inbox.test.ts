@@ -244,7 +244,7 @@ describe("the import-time sandbox works with no bunfig", () => {
 
   test("a scratch value (CI's mktemp -d) is kept", async () => {
     const cwd = scratch("plannotator-no-bunfig-");
-    const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_DATA_DIR: join(cwd, "data") });
+    const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: join(cwd, "data") });
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe(join(cwd, "data"));
   });
@@ -254,7 +254,7 @@ describe("the import-time sandbox works with no bunfig", () => {
     // The probe only prints: nothing is created or read at these paths.
     const values = ["~/.plannotator", join(accountHome, ".plannotator"), "/opt/plannotator-relocated-data-probe"];
     for (const value of values) {
-      const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_DATA_DIR: value });
+      const result = await bun([probe], cwd, { ...baseEnv(), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: value });
       expect(result.code, result.stderr).toBe(0);
       const dir = result.stdout.trim();
       expect(dir).not.toBe(value);
@@ -266,7 +266,7 @@ describe("the import-time sandbox works with no bunfig", () => {
   test("HOME pointed elsewhere does not hide the account's own ~/.plannotator", async () => {
     const cwd = scratch("plannotator-no-bunfig-");
     const value = join(accountHome, ".plannotator");
-    const result = await bun([probe], cwd, { ...baseEnv(), HOME: cwd, PLANNOTATOR_DATA_DIR: value });
+    const result = await bun([probe], cwd, { ...baseEnv(), HOME: cwd, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: value });
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout.trim()).not.toBe(value);
     expect(isScratchDataDir(result.stdout.trim())).toBe(true);
@@ -294,7 +294,7 @@ describe("the import-time sandbox works with no bunfig", () => {
     const dom = await bun([join(repoRoot, "tests", "helpers", "inbox-dom-server.ts"), theDefault, cwd, "1"], cwd, env);
     expect(dom.code).not.toBe(0);
     expect(dom.stderr).toContain("real Plannotator data directory");
-    const dast = await bun([join(repoRoot, "scripts", "dast", "target.ts")], cwd, { ...env, PLANNOTATOR_DAST_ISOLATED: "1", PLANNOTATOR_DATA_DIR: theDefault });
+    const dast = await bun([join(repoRoot, "scripts", "dast", "target.ts")], cwd, { ...env, PLANNOTATOR_DAST_ISOLATED: "1", PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: theDefault });
     expect(dast.code).not.toBe(0);
     expect(dast.stderr).toContain("real Plannotator data directory");
     const dastUnset = await bun([join(repoRoot, "scripts", "dast", "target.ts")], cwd, { ...env, PLANNOTATOR_DAST_ISOLATED: "1" });

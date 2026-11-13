@@ -50,7 +50,7 @@ async function probe(defineRelease: boolean): Promise<{ off: string | null; endp
 process.stdout.write(JSON.stringify({ off: dailyPingOff({ version: "0.28.10" }), endpoint: dailyPingEndpoint("0.28.10") }));`,
     );
     const args = ["--define", '__CLI_VERSION__="0.28.10"', ...(defineRelease ? ["--define", "__PLANNOTATOR_RELEASE__=true"] : []), script];
-    const child = Bun.spawn([process.execPath, ...args], { env: { PATH: process.env.PATH ?? "", HOME: dir, TMPDIR: dir, PLANNOTATOR_DATA_DIR: join(dir, "data") }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, ...args], { env: { PATH: process.env.PATH ?? "", HOME: dir, TMPDIR: dir, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: join(dir, "data") }, stdout: "pipe", stderr: "pipe" });
     const out = await new Response(child.stdout).text();
     await child.exited;
     return JSON.parse(out);
