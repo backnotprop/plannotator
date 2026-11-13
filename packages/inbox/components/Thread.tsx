@@ -4518,7 +4518,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       }
       // The tiles this Send carries, by the uploads its requests carry: a file pasted while it is in flight stays.
       sentUploads = requests.flatMap((r) => r.input.uploads ?? []);
-      total = requests.length;
+      total = drawing.goesAs(requests.length);
       /** The reply that handed the thread over (approval "inbox-tag-handoff"), for the toast's Undo. */
       let handedReply: InboxMessageWire | null = null;
       /** The thread as the last reply's answer brought it (that reply asks for it on this Inbox's own threads). */

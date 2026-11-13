@@ -22,7 +22,7 @@ export interface SendDrawn {
   /** One per drawing: its key on screen. */
   key: string;
   words: string;
-  /** The person's replies in the thread when it was pressed: a reply beyond these is this Send's, landed. */
+  /** The person's replies in the thread when it was pressed: once as many beyond these as the Send's replies (`goesAs`, one until known), the one with the words landed. */
   repliesBefore: number;
 }
 
@@ -34,13 +34,15 @@ interface SendDraw extends SendDrawn {
 export interface SendDrawing {
   landed: () => void;
   stopped: () => void;
+  goesAs: (replies: number) => number;
 }
 
 /** The person's replies in a thread (a Send's reply landed: one more). */
 export const personReplies = (thread: { messages: readonly { author: { kind: string } }[] }): number => thread.messages.filter((m) => m.author.kind === 'person').length;
 
-const NOTHING: SendDrawing = { landed: () => {}, stopped: () => {} };
+const NOTHING: SendDrawing = { landed: () => {}, stopped: () => {}, goesAs: (replies) => replies };
 let drawings = 0;
+const repliesOf = new Map<string, number>();
 
 export function useDrawSend(): (drawn: Omit<SendDrawn, 'key'>) => SendDrawing {
   const client = useInboxQueryClient();
@@ -50,12 +52,17 @@ export function useDrawSend(): (drawn: Omit<SendDrawn, 'key'>) => SendDrawing {
       if (drawn.words === '') return NOTHING;
       let landed = () => {};
       let stopped = () => {};
+      const key = `send-${++drawings}`;
       const until = new Promise<void>((resolve, reject) => {
         landed = () => resolve();
         stopped = () => reject(new Error('send stopped'));
-      });
-      mutate({ ...drawn, key: `send-${++drawings}`, until });
-      return { landed, stopped };
+      }).finally(() => repliesOf.delete(key));
+      mutate({ ...drawn, key, until });
+      const goesAs = (replies: number) => {
+        repliesOf.set(key, replies);
+        return replies;
+      };
+      return { landed, stopped, goesAs };
     },
     [mutate],
   );
@@ -65,5 +72,5 @@ export function useDrawSend(): (drawn: Omit<SendDrawn, 'key'>) => SendDrawing {
 export function useSendsDrawn(threadId: string, personReplies: number): readonly SendDrawn[] {
   const client = useInboxQueryClient();
   const drawn = useMutationState({ filters: { mutationKey: inboxKeys.sendDraw(), status: 'pending' }, select: (m) => m.state.variables as SendDraw }, client);
-  return useMemo(() => drawn.filter((d) => d.threadId === threadId && personReplies <= d.repliesBefore), [drawn, threadId, personReplies]);
+  return useMemo(() => drawn.filter((d) => d.threadId === threadId && personReplies < d.repliesBefore + (repliesOf.get(d.key) ?? 1)), [drawn, threadId, personReplies]);
 }
