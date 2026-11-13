@@ -101,7 +101,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // PATH: this world's own bin and the system's tools, never the agents installed on the machine running the
   // spec (the first-run screen speaks about the agents it finds: none here). No test sandbox: Settings → Agents
   // reads the Claude Code setup this spec writes under HOME, which the sandbox's agent home would hide.
-  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir };
+  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir };
   // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(dataDir);
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
