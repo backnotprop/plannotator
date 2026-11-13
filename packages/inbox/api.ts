@@ -1224,16 +1224,26 @@ const KEEPALIVE_BODY_MAX = 60_000;
  * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
  * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
  */
-async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean } = {}): Promise<T> {
+async function gzipped(text: string): Promise<ArrayBuffer | null> {
+  if (typeof CompressionStream === 'undefined') return null;
+  try {
+    return await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  } catch {
+    return null;
+  }
+}
+
+async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean } = {}): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   // A write to another machine is keyed end to end (rule 1): the window's own key, or one made for it here.
   const sent = machine && typeof body.idempotency_key !== 'string' ? { ...body, idempotency_key: newUuid() } : body;
   const text = JSON.stringify(pageSession ? { ...sent, serverSession: pageSession } : sent);
+  const zipped = init.gzip && !machine ? await gzipped(text) : null;
   const response = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}) },
-    body: text,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}), ...(zipped ? { 'Content-Encoding': 'gzip' } : {}) },
+    body: zipped ?? text,
     ...(init.keepalive && text.length <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
@@ -1564,7 +1574,7 @@ export const inboxApi = {
   /** Keep a ```html fence's page and get the URL of its sandboxed document (approval "inbox-inline-html"). */
   embed: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embeds'), { html }),
   /** An attached HTML page's frame document, kept by the Inbox and served under its own policy (inbox-pages.ts). */
-  page: (html: string) => post<{ id: string; url: string }>(inboxUrl('/pages'), { html }),
+  page: (html: string) => post<{ id: string; url: string }>(inboxUrl('/pages'), { html }, { gzip: true }),
   /** The global skills the composers' `/` and `$` picker lists (raw entries; ui's catalog layer normalizes them). */
   skills: () => get<{ skills?: unknown }>(inboxUrl('/skills')),
   /** One human-only skill's SKILL.md, read when the person sends a message that references it. */
