@@ -176,3 +176,4 @@ export function commentTags(record: InboxAnnotationRecord): string[] {
 }
 
 export const NO_SENT_ANSWERS: readonly SentAnswerGroup[] = [];
+export const NO_QUESTIONS: InboxQuestion[] = [];

@@ -178,7 +178,7 @@ import { keepEqualByKey } from '../thread/keepEqual';
 import { replyWordsCount, withFreeName, withoutReplyWords } from '../shape/addToReply';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 import type { ThreadPaneProps } from '../thread/paneProps';
-import { FOLD_STEP, NO_ANNOTATIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
+import { FOLD_STEP, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
 import { HeadMark } from '../parts/HeadMark';
@@ -5432,7 +5432,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     footers: questions.map((q) => footerFor(message)(q.key)),
                     replaced: questions.map((q) => {
                       const key = `${message.id}/${q.key}`;
-                      return [replacementOf(thread.messages, q), pending.has(key) ? (pending.get(key) ?? null) : undefined, replacedBy(thread.messages, q)] as const;
+                      return [replacementOf(thread.messages, q), pending.has(key) ? (pending.get(key) ?? null) : undefined, q.message_id ? replacedBy(thread.messages, q) : NO_QUESTIONS] as const;
                     }),
                     readOnly: !isAgent || !liveMessage(message) || questions.length === 0 || allSent,
                     live: liveMessage(message),
