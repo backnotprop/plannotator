@@ -167,9 +167,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST threads/:id/unread": "set",
   "POST threads/:id/mark-unread": "set",
   "POST threads/:id/snooze": "set",
-  // A star lives on the thread's own machine (approval "inbox-linked-marks"), like a snooze.
+  // A star and the person's Priority live on the thread's own machine (approval "inbox-linked-marks"), like a snooze.
   "POST threads/:id/pin": "set",
   "POST pins": "set",
+  "POST threads/:id/priority": "set",
   // An agent's face or given name lives on the agent's own machine (approval "inbox-linked-marks"), keyed by its id.
   "POST agent-faces": "set",
   "POST messages/:id/picks": "set",
