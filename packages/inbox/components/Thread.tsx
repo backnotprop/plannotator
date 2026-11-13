@@ -6835,7 +6835,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">{reviewView.curating}</p>}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
-        <SendingReply sends={sendsDrawn} />
+        <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
         {showNew && !phone && newPill}
         <div className="ib-sr" aria-live="polite" data-fold-live="">
           {announced}

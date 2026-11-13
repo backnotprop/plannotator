@@ -111,6 +111,7 @@ let toasts: Omit<InboxToastModel, 'id'>[] = [];
 /** Set: each pick waits here until the test releases it, the POST already seen. */
 let gate: (() => void)[] | null = null;
 let replies = 0;
+let changed: () => Promise<void> = async () => {};
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -121,6 +122,7 @@ beforeEach(() => {
   toasts = [];
   gate = null;
   replies = 0;
+  changed = async () => {};
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -176,7 +178,7 @@ function draw(outbox: OutboxView[]) {
       outbox={outbox}
       sent={null}
       onQuestions={() => {}}
-      onChanged={async () => {}}
+      onChanged={() => changed()}
       onClose={() => {}}
       file={null}
       onOpenFile={() => {}}
@@ -298,4 +300,29 @@ test.skipIf(!hasDom)('an answer typed behind a held pick: only its newest words 
   act(() => draw([held('k1'), held('k2'), held('k3', 'refused')]));
   await until(() => field.value === '', 'the words undone');
   expect(toasts.at(-1)!.lead.startsWith('Pick not saved.')).toBe(true);
+});
+
+test.skipIf(!hasDom)('a Send held for a sleeping machine shows once: the held reply, not also the Send on its way', async () => {
+  let release = () => {};
+  changed = () => new Promise<void>((done) => (release = done));
+  const el = await render();
+  const reply = [...el.querySelectorAll('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Reply') as HTMLButtonElement;
+  await act(async () => reply.click());
+  await settle();
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(text, 'Ship the ledger fix.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  const send = [...el.querySelectorAll('section.ib-pane button')].find((b) => b.textContent?.trim() === 'Send') as HTMLButtonElement;
+  await act(async () => send.click());
+  await until(() => replies === 1, 'the reply');
+  act(() => draw([{ ...held('k-reply'), route: `messages/${M1}/reply`, words: 'Ship the ledger fix.', thread: M1 }]));
+  await settle();
+  const mine = [...el.querySelectorAll('article[data-author="person"]')].filter((a) => a.textContent?.includes('Ship the ledger fix.'));
+  expect(mine).toHaveLength(1);
+  expect(mine[0]!.textContent).toContain('Will send when MacBook is back');
+  await act(async () => release());
 });
