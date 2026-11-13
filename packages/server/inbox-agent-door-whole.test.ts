@@ -92,4 +92,18 @@ describe("a cloud agent uses the whole Inbox", () => {
     const view = ((await w.call("/api/inbox/cloud-agents")).json.agents as InboxCloudAgentView[]).find((a) => a.session === agent.session)!;
     expect(view.project?.id).toBe(ledger);
   });
+
+  test("a question's prototype is a page it attaches; an address on a computer is refused, saying to attach the page", async () => {
+    const w = await doorWorld(cleanups);
+    const { pairing } = await w.pair();
+    const page = Buffer.from("<!doctype html><title>Mock</title><p>New pricing</p>").toString("base64");
+    const ask = (prototype: string) => `:::question\nShip the new pricing page?\n- [ ] Yes\n    Prototype: ${prototype}\n- [ ] No\n:::`;
+    const sent = await w.door(pairing.token, "send_message", { subject: "Pricing", body: ask("mock.html"), attachments: [{ name: "mock.html", data: page }] });
+    expect(sent.error).toBeNull();
+    const message = (await w.thread(sent.result!.structuredContent!.thread_id as string)).messages[0]!;
+    expect(message.attachments!.map((a) => [a.name, a.kind])).toEqual([["mock.html", "html"]]);
+    for (const address of ["http://localhost:3000/", "https://preview.example.com/pricing"]) {
+      expect((await w.door(pairing.token, "send_message", { subject: "Pricing", body: ask(address) })).error).toContain(`Prototype: ${address}: the Inbox opens a running app only on the person's computer, and yours runs elsewhere. Attach the page's HTML file in this send and name it instead (Prototype: mock.html).`);
+    }
+  });
 });

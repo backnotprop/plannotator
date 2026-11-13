@@ -8,6 +8,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
+import { prototypePlace } from "./inbox-live";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { fail, okComplete, type ToolResult } from "./inbox-mcp-result";
 
@@ -81,7 +82,14 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       if (ids.length !== uploads.length || ids.some((id, i) => id !== uploads[i])) throw new InboxError("attachment_path_refused", "attachments: uploaded bytes only.");
       return inboxUploadAttachments(store.dir, [...uploads], new Date(context.mcp.now?.() ?? Date.now()).toISOString());
     },
-    checkPrototypeApps: undefined,
+    checkPrototypeApps: async (apps) => {
+      const app = apps[0]!;
+      throw new InboxError(
+        "validation_error",
+        `body: ${prototypePlace(app)}: Prototype: ${app.target}: the Inbox opens a running app only on the person's computer, and yours runs elsewhere. Attach the page's HTML file in this send and name it instead (Prototype: mock.html).`,
+        { field: "body" },
+      );
+    },
     walkthroughThread: () => false,
     sessionWakes: async (_host, session) => session === agent.session && hasCloudWake(agent),
   });

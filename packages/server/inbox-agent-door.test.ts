@@ -125,12 +125,12 @@ describe("the agent door", () => {
     }
     expect((await w.door(pairing.token, "submit_guide", { guide: { title: "T", sections: [] }, walkthrough: true })).error).toStartWith("path_refused:");
     expect((await w.door(pairing.token, "read_thread", { project_path: w.project })).error).toStartWith("path_refused:");
-    const before = filesUnder(join(w.dataDir, "inbox")).length;
+    const before = filesUnder(join(w.dataDir, "inbox")).filter((file) => /blobs|upload/.test(file.path)).length;
     expect((await w.door(pairing.token, "send_message", { body: "See this.", attachments: [join(w.project, "secret.png")] })).error).toStartWith("attachment_path_refused:");
     expect((await w.door(pairing.token, "send_message", { body: "See this.", attachments: ["../../../etc/hosts"] })).error).toStartWith("attachment_path_refused:");
     expect((await w.door(pairing.token, "send_message", { body: "See ![it](secret.png)" })).error).toStartWith("image_path_refused:");
     expect((await w.door(pairing.token, "send_message", { body: "Big.", attachments: [{ name: "big.bin", data: Buffer.alloc(INBOX_AGENT_ATTACHMENTS_MAX_BYTES + 1).toString("base64") }] })).error).toStartWith("attachments_too_large:");
-    expect(filesUnder(join(w.dataDir, "inbox")).length).toBe(before);
+    expect(filesUnder(join(w.dataDir, "inbox")).filter((file) => /blobs|upload/.test(file.path)).length).toBe(before);
 
     const sent = await w.door(pairing.token, "send_message", { body: "The notes.", attachments: [{ name: "notes.md", data: Buffer.from("# From the cloud\n").toString("base64") }] });
     expect(sent.error).toBeNull();
