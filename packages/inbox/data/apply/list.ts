@@ -5,7 +5,8 @@
  * list read after the record still brings each row. What a record says exactly, the list takes at once:
  *  - its thread archived (a later line of the root, now resolved): the row leaves the list (the owner's ruling: a
  *    thread archived anywhere leaves every window's list at once);
- *  - its thread renamed (a later line of the root with another name): the row's name.
+ *  - its thread renamed (a later line of the root with another name): the row's name, in its section, the snoozed
+ *    and the pins (the sidebar's Pinned row and the starred pills change with the list row).
  * Anything else (a new message, a look, an unarchive, a question) waits for that read.
  *
  * The list held takes the record's seq as its cursor, so a list read that left before the record and lands after it
@@ -25,10 +26,11 @@ export function applyListRecord(list: ListModel, event: InboxEvent): ListModel |
   const threadId = record.thread_id;
   const listed = (rows: readonly InboxListRow[] | undefined) => rows?.some((row) => row.thread_id === threadId) ?? false;
   const row = [...list.sections.flatMap((section) => section.threads), ...(list.snoozed ?? [])].find((r) => r.thread_id === threadId);
-  if (!row) return null;
+  const pinned = list.pins?.some((r) => r.thread_id === threadId) ?? false;
+  if (!row && !pinned) return null;
   // Archived by this line: a time the row does not have yet. A later line of a thread that came back after an archive
   // (an agent wrote after it) carries that older time, as the row does: nothing moves.
-  if (record.resolved_at !== null && record.resolved_at !== row.resolved_at) {
+  if (row && record.resolved_at !== null && record.resolved_at !== row.resolved_at) {
     const sections: InboxListSection[] = list.sections.map((section) => (listed(section.threads) ? { ...section, threads: withoutThread(section.threads, threadId) } : section));
     return { ...list, cursor: event.seq, sections, ...(list.snoozed ? { snoozed: withoutThread(list.snoozed, threadId) } : {}) };
   }
@@ -39,6 +41,8 @@ export function applyListRecord(list: ListModel, event: InboxEvent): ListModel |
     return threads.some((row, i) => row !== section.threads[i]) ? { ...section, threads } : section;
   });
   const snoozed = list.snoozed ? rename(list.snoozed) : undefined;
-  const changed = sections.some((section, i) => section !== list.sections[i]) || (snoozed && snoozed.some((row, i) => row !== list.snoozed![i]));
-  return changed ? { ...list, cursor: event.seq, sections, ...(snoozed ? { snoozed } : {}) } : null;
+  const pins = list.pins ? rename(list.pins) : undefined;
+  const moved = (after: readonly InboxListRow[] | undefined, before: readonly InboxListRow[] | undefined) => !!after && after.some((row, i) => row !== before![i]);
+  const changed = sections.some((section, i) => section !== list.sections[i]) || moved(snoozed, list.snoozed) || moved(pins, list.pins);
+  return changed ? { ...list, cursor: event.seq, sections, ...(snoozed ? { snoozed } : {}), ...(pins ? { pins } : {}) } : null;
 }
