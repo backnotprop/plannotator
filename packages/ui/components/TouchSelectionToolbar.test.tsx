@@ -1,6 +1,6 @@
 /**
  * The selection toolbar of a text selection made with a finger (issue #1041):
- * the toolbar a painted selection gets, under the selection while it is still
+ * the toolbar a painted selection gets, above the selection while it is still
  * the system's. Where it sits and that a press leaves the selection where it
  * is (AnnotationToolbar's `unpainted`), what each button hands the hook, and
  * that the markdown Viewer shows it and acts on its buttons. DOM-gated
@@ -120,26 +120,29 @@ async function mountToolbar(anchor: { current: ToolbarRect | null }, mode: Edito
 }
 
 describe('TouchSelectionToolbar', () => {
-  test.skipIf(!hasDom)('sits under the selection, centered, clear of the end handle, and follows it as the page scrolls', async () => {
-    const anchor = { current: rect(100, 200, 200, 40) as ToolbarRect | null };
+  test.skipIf(!hasDom)('sits above the selection, centered, clear of iOS\'s menu band and the start handle, and follows it as the page scrolls', async () => {
+    const anchor = { current: rect(100, 300, 200, 40) as ToolbarRect | null };
     await mountToolbar(anchor);
 
-    // 30px under the selection's bottom (240), centered on it (200 - 138).
-    expect(parseFloat(offerBox()!.style.top)).toBe(270);
-    expect(parseFloat(offerBox()!.style.left)).toBe(62);
-    expect(offerBox()!.dataset.pnAnnotationToolbarTouch).toBe('below');
+    // Over the selection's top (300), past the 60px band where iOS draws its
+    // menu above a selection; centered on it (200 - 138).
+    const box = offerBox()!;
+    expect(box.dataset.pnAnnotationToolbarTouch).toBe('above');
+    const top = parseFloat(box.style.top);
+    expect(top + box.getBoundingClientRect().height).toBeLessThanOrEqual(300 - 60);
+    expect(parseFloat(box.style.left)).toBe(62);
 
     // The page scrolls 80px: the selection moved, and so did the toolbar.
-    anchor.current = rect(100, 120, 200, 40);
+    anchor.current = rect(100, 220, 200, 40);
     await act(async () => { window.dispatchEvent(new Event('scroll')); });
-    expect(parseFloat(offerBox()!.style.top)).toBe(190);
+    expect(parseFloat(offerBox()!.style.top)).toBe(top - 80);
   });
 
-  test.skipIf(!hasDom)('goes above a selection at the bottom of the screen, and hides while the selection is scrolled out of sight', async () => {
-    const anchor = { current: rect(100, 790, 200, 40) as ToolbarRect | null };
+  test.skipIf(!hasDom)('goes below a selection with no room above it, and hides while the selection is scrolled out of sight', async () => {
+    const anchor = { current: rect(100, 40, 200, 40) as ToolbarRect | null };
     await mountToolbar(anchor);
-    expect(offerBox()!.dataset.pnAnnotationToolbarTouch).toBe('above');
-    expect(parseFloat(offerBox()!.style.top)).toBeLessThan(790);
+    expect(offerBox()!.dataset.pnAnnotationToolbarTouch).toBe('below');
+    expect(parseFloat(offerBox()!.style.top)).toBeGreaterThan(80);
 
     anchor.current = rect(100, -400, 200, 40);
     await act(async () => { window.dispatchEvent(new Event('scroll')); });
@@ -270,7 +273,7 @@ describe('Viewer on a touch screen', () => {
 
   const marks = () => document.querySelectorAll('mark').length;
 
-  test.skipIf(!hasDom)('a selection that rests shows the selection toolbar under it and paints nothing; Comment opens the composer', async () => {
+  test.skipIf(!hasDom)('a selection that rests shows the selection toolbar and paints nothing; Comment opens the composer', async () => {
     await mountViewer('coarse');
     await selectWords();
     await rest();

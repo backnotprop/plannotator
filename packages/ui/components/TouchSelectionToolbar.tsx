@@ -12,7 +12,8 @@ type SharedToolbarProps = Pick<
 /**
  * The selection toolbar of a text selection made with a finger
  * (`useAnnotationHighlighter`'s `touchSelectionOffer`): the toolbar a painted
- * selection gets, drawn under the selection while it is still the system's.
+ * selection gets, drawn above the selection, clear of the system's edit menu,
+ * while the selection is still the system's.
  * Nothing is painted until a button is tapped, so the person can drag the
  * selection's handles; a button then takes the selection and does what it does
  * on a painted one. Comment mode has no Delete and no labels, so its toolbar

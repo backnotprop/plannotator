@@ -1053,7 +1053,7 @@ export interface UseAnnotationHighlighterReturn {
    * come to rest, waiting for the person to act on it; null otherwise. Nothing
    * is painted for it, so the system selection, its handles and its edit menu
    * stay theirs until a button is tapped. It is what `AnnotationToolbar`
-   * shows under the selection (`TouchSelectionToolbar` draws it): each button
+   * shows above the selection (`TouchSelectionToolbar` draws it): each button
    * takes the selection, then does what it does on a painted one. The offer is
    * gone while the selection moves and back when it rests again. A host that
    * composes (`onHostDraft`) never gets one: its own Comment action takes the
