@@ -1,6 +1,7 @@
 import { inboxCommentPicture, inboxCommentPictureUploads, type InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
 import { inboxUrl, machineOf } from './inboxUrl';
+import { attachedLines } from '@plannotator/ui/utils/attachedLines';
 
 export function commentPictureUrl(path: string): string | null {
   const picture = inboxCommentPicture(path);
@@ -28,7 +29,5 @@ export function withPictureFiles<T extends { images?: ImageAttachment[] }>(annot
 }
 
 export function pictureLines(annotation: Pick<Annotation, 'images'>): string {
-  const images = withPictureFiles(annotation).images ?? [];
-  if (images.length === 0) return '';
-  return `**Attached images:**\n${images.map((image) => `- [${image.name}] \`${image.path}\``).join('\n')}\n`;
+  return attachedLines(withPictureFiles(annotation).images);
 }

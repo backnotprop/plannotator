@@ -172,7 +172,7 @@ describe.skipIf(process.platform === "win32")("CLI output through a pipe", () =>
       const kit = Buffer.from(SHAPE_KIT);
       expect(kit.length, "The kit now fits in the socket, so this test no longer sees a cut: make the socket smaller").toBeGreaterThan(SOCKET_HOLDS);
 
-      const { code, stderr } = await readThroughSocket(["shape", "kit"], "out-kit", { env: { PLANNOTATOR_DATA_DIR: dataDir } });
+      const { code, stderr } = await readThroughSocket(["shape", "kit"], "out-kit", { env: { PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir } });
 
       const received = readFileSync(inRoot("out-kit"));
       expect(received.length, stderr).toBe(kit.length);

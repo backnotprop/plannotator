@@ -304,9 +304,10 @@ test.skipIf(!hasDom)('an HTML file: the pen leads the toolbar and flips Annotate
   await render(<Pane start={page} harness={harnessOf()} />);
   expect(controls()).toEqual(['pen', 'count', 'position', 'more', 'leave:exit', 'close', 'hide:hide']);
   const pen = host!.querySelector<HTMLButtonElement>('[data-full-view-pen]')!;
-  expect(pen.getAttribute('aria-pressed')).toBe('true');
+  // Opens in Interact: a click does what the page says until the person turns Annotate on.
+  expect(pen.getAttribute('aria-pressed')).toBe('false');
   await click(pen);
-  expect(host!.querySelector('[data-full-view-pen]')!.getAttribute('aria-pressed')).toBe('false');
+  expect(host!.querySelector('[data-full-view-pen]')!.getAttribute('aria-pressed')).toBe('true');
 });
 
 test.skipIf(!hasDom)('Hide gathers the tools into the corner control (inert, focus on it); one press brings them back with focus on »; » is only ever Hide', async () => {
@@ -666,8 +667,6 @@ for (const [kind, start] of [['markdown', notes], ['HTML', page], ['image', shot
     await render(<Pane start={start} harness={byEscape} />);
     pane().focus();
     await escapeOn(pane());
-    // HTML starts in Annotate: Escape's first press takes it to Interact.
-    if (byEscape.toggles === 0) await escapeOn(pane());
     const escaped = afterLeaving(byEscape);
     expect(escaped).toEqual({ full: false, toggles: 1, picks: [false], focusOnSwitch: true, said: 'Side by side: the file is beside the thread.' });
 
@@ -752,6 +751,7 @@ test.skipIf(!hasDom)('HTML: Escape takes the drawer, then Annotate to Interact, 
   const harness = harnessOf();
   await render(<Pane start={page} harness={harness} />);
   const pen = () => host!.querySelector<HTMLButtonElement>('[data-full-view-pen]')!;
+  await click(pen());
   expect(pen().getAttribute('aria-pressed')).toBe('true');
   // From the window.
   await click(host!.querySelector('[data-full-view-comments]'));

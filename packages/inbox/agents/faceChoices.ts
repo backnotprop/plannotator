@@ -19,15 +19,6 @@ export const isOwnFace = isInboxOwnFace;
 /** Every built-in face, in the picker's order. */
 export const AGENT_FACES: readonly InboxBuiltInFace[] = INBOX_AGENT_FACES;
 
-/** The click cycle (the owner, 2026-11-09): each stays until the next click. */
-export const AGENT_FACE_CYCLE: readonly AgentFace[] = ['agent', 'glass', 'yellow', 'transparent', 'totman'];
-
-/** The face a click shows next: the cycle's next; from a colour only the picker gives, the step after the colours. */
-export function nextAgentFace(face: AgentFace): AgentFace {
-  const at = AGENT_FACE_CYCLE.indexOf(face);
-  return at < 0 ? 'transparent' : AGENT_FACE_CYCLE[(at + 1) % AGENT_FACE_CYCLE.length]!;
-}
-
 export const isAgentFace = isInboxAgentFace;
 
 /** Each of our faces' name (a picker choice's accessible name). */

@@ -8,7 +8,8 @@
 # run, without a token. This puts the same zip's binary where setup-bun looks
 # first (~/.bun/bin), so the setup-bun step that follows finds the version
 # installed and downloads nothing. A version or runner with no pinned SHA-256
-# below is left to setup-bun, as before.
+# below is left to setup-bun, as before. test.yml runs it on a self-hosted
+# machine too: setup-bun unpacks with `unzip`, which a stock Ubuntu lacks.
 set -euo pipefail
 
 version="${1:?usage: ci-install-bun.sh <version>}"
@@ -57,8 +58,10 @@ if [[ "$RUNNER_OS" == Windows ]]; then
   exe=bun.exe
   ZIP="$zip" DEST="${work}/unpacked" pwsh -NoProfile -NonInteractive -Command \
     'Expand-Archive -LiteralPath $env:ZIP -DestinationPath $env:DEST -Force'
-else
+elif command -v unzip > /dev/null; then
   unzip -q -o "$zip" -d "${work}/unpacked"
+else
+  python3 -I -m zipfile -e "$zip" "${work}/unpacked"
 fi
 
 mkdir -p "${HOME}/.bun/bin"

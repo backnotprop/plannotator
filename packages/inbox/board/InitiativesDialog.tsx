@@ -9,7 +9,7 @@ import { Modal } from '../components/Updates';
 import { initiativeDeletedToast } from './model';
 
 /**
- * Initiatives (the filter's New initiative… and Edit initiatives…): every
+ * Tags (the filter's New tag… and Edit tags…): every
  * live one as a name to edit in place (Enter or leaving the field renames it)
  * with Delete, one click and no question (the owner, 2026-11-04: "delete
  * initiatives very simply without friction"): the toast's Undo brings it and
@@ -133,7 +133,7 @@ export function InitiativesDialog({
     }
     onClose();
   };
-  // The dialog first focuses its primary button: New initiative… lands in the name field instead.
+  // The dialog first focuses its primary button: New tag… lands in the name field instead.
   useEffect(() => {
     if (start !== 'new') return;
     const frame = requestAnimationFrame(() => newField.current?.focus());
@@ -166,7 +166,7 @@ export function InitiativesDialog({
   let body: ReactNode = null;
   if (visible.length > 0) {
     body = (
-      <ul className="ib-inid-list" aria-label="Initiatives">
+      <ul className="ib-inid-list" aria-label="Tags">
         {visible.map((i) => (
           <InitiativeRow
             key={i.id}
@@ -186,10 +186,10 @@ export function InitiativesDialog({
   const words = deleted.length > 0 ? initiativeDeletedToast(deleted) : null;
   const toast: InboxToastModel | null = words ? { id: toastId, icon: 'check', lead: words.lead, detail: words.detail, onUndo: () => void undo(), noKey: true } : null;
   return (
-    <Modal label="Initiatives" testId="initiatives" onClose={close} ownKeys fallbackFocus={fallbackFocus} className={`ib-inid${phone ? ' ib-inid-phone' : ''}`}>
+    <Modal label="Tags" testId="initiatives" onClose={close} ownKeys fallbackFocus={fallbackFocus} className={`ib-inid${phone ? ' ib-inid-phone' : ''}`}>
       <div className="ib-dlg-in" ref={inner}>
         <div className="ib-dlg-head">
-          <h2>Initiatives</h2>
+          <h2>Tags</h2>
           <button type="button" className="ib-ncd-x" aria-label="Close" onClick={close}>
             <Icon name="x" size={16} />
           </button>
@@ -209,8 +209,8 @@ export function InitiativesDialog({
             ref={newField}
             type="text"
             className="ib-inid-in"
-            placeholder="New initiative"
-            aria-label="New initiative"
+            placeholder="New tag"
+            aria-label="New tag"
             maxLength={INBOX_INITIATIVE_NAME_MAX}
             value={adding}
             onChange={(event) => setAdding(event.target.value)}

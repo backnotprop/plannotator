@@ -52,7 +52,9 @@ import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
 import { quietHint } from "./inbox-mcp-hints";
-import { changePullsAsAgent, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
+import type { ProjectHostOf } from "./inbox-thread-pulls";
+import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
+import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
 
@@ -325,6 +327,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * the states as stored, and nothing is read.
    */
   pulls?: InboxPullsMcpLive;
+  /** The host of a project's git remote, for a short `group/project!45` (inbox-thread-pulls.ts `parseProjectPullRefs`). Absent: gitlab.com. */
+  projectHost?: ProjectHostOf;
   /**
    * Whether Bro mode is on (config.json `inboxBro`, read on every request; approval "bro-mode"). On: send_message's
    * `body` field carries the line (`INBOX_BRO_LINE`). Off or absent: the field is `SEND_BODY_DESCRIPTION`, unchanged.
@@ -517,6 +521,8 @@ export type AgentSendInput = {
   supersedes?: string[];
   /** Its own action items of the thread the agent saw done (`<message id>/<key>`, or `<message id>`). */
   done?: string[];
+  /** send_message only: mark (`true`) or unmark (`false`) the thread in the person's Priority (inbox-mcp-priority.ts). */
+  priority?: boolean;
   agent_session?: string;
   agent_name?: string;
   agent_host?: string;
@@ -789,7 +795,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -862,6 +868,8 @@ export async function sendAgentMessage(
   if (result.replayed) await captured?.discard();
   else await captured?.commit();
   const message = result.message;
+  // The person's Priority, marked or unmarked as the agent said; a replay sets the same again.
+  const priority = applyAgentPriority(store, message.thread_id, input.priority);
   const landed = store.project(message.project_id)!;
   // A question inside an attached file (issue #2828) names the file it is in.
   const questions = (message.questions ?? []).filter((q) => q.kind !== "action").map((q) => ({ key: q.key, kind: q.kind, prompt: q.prompt, ...(q.attachment ? { file: q.attachment.name } : {}) }));
@@ -918,6 +926,7 @@ export async function sendAgentMessage(
     done: markedDone.length,
     replayed: result.replayed,
     naming: result.naming ?? null,
+    priority,
     questions: questions.length,
     attachments: message.attachments?.length ?? 0,
     structured: {
@@ -942,6 +951,8 @@ export async function sendAgentMessage(
       ...(result.naming ? { named_thread: result.naming.status === "named" ? result.naming.name : null } : {}),
       ...(result.naming?.status === "refused" ? { naming_refused: result.naming.code } : {}),
       ...(result.naming && result.naming.status !== "named" ? { name_this_thread: true } : {}),
+      /** The thread's Priority after this send (inbox-mcp-priority.ts): absent when it passed no `priority`. */
+      ...(priority !== null ? { priority } : {}),
       /** Images the body shows that the window will not (missing, not an image, too large, hidden, remote). */
       ...(notShown.length > 0 ? { images_not_shown: notShown.slice(0, IMAGES_NOT_SHOWN_MAX) } : {}),
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
@@ -1134,6 +1145,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             ),
           // A thread's PRs (approval "inbox-pr-binding"): added to the thread the message lands in. Always on.
           pulls: PULLS_FIELD.optional(),
+          // The person's Priority: the agent marks or unmarks the thread (inbox-mcp-priority.ts). Always on.
+          priority: PRIORITY_FIELD.optional(),
           // Thread steps (approval "inbox-thread-steps"): a message and its list together, only while the person has steps on.
           ...(context.stepsOn?.() ? { steps: STEPS_FIELD.optional() } : {}),
         })
@@ -1149,8 +1162,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           checkStepsInput(withSteps, stepsAgent(input));
         }
         // PRs that do not read are refused before anything is sent, so a message never lands without them.
-        const pullRefs = input.pulls ? checkPullRefs(input.pulls, "pulls") : [];
+        let pullRefs = input.pulls ? checkPullRefs(input.pulls, "pulls") : [];
         const project = await sendProject(context, input);
+        if (pullRefs.length > 0) pullRefs = await checkProjectPullRefs(context, input.pulls, "pulls", project.id);
         const wakes = await senderWakes(context, ctx, input);
         const { steps: _steps, pulls: _pulls, ...message } = input as typeof input & { steps?: unknown };
         const sent = await sendAgentMessage(context, project, { ...message, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
@@ -1202,13 +1216,15 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         // The quiet hints (inbox-mcp-hints.ts): at most one, once per session, last and on a line of its own.
-        const quiet = quietHint(store, { session: input.agent_session, threadId: String(sent.structured.thread_id), body: input.body, replayed: sent.replayed, now: clock() });
+        // The project's host only for a body that may name a short `group/project!45`.
+        const projectHost = /![1-9]/.test(input.body) ? await context.projectHost?.(project.id).catch(() => null) : null;
+        const quiet = quietHint(store, { session: input.agent_session, threadId: String(sent.structured.thread_id), body: input.body, replayed: sent.replayed, now: clock(), projectHost });
         if (quiet) {
           hints.push(`\n${quiet.line}`);
           sent.structured.hint = quiet.line;
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),

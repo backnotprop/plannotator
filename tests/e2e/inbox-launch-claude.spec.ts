@@ -54,6 +54,8 @@ import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { FAKE_LOGIN_CLAUDE_VALUE, installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
+import { installFakeCodexLaunch } from '../helpers/fake-codex-launch';
+import { installFakeOpenCodeLaunch } from '../helpers/fake-opencode-launch';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -203,7 +205,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeConfig({ inboxLaunch: { enabled: false } });
   const env: Record<string, string> = {
     // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
-    PATH: `${bin}:/usr/bin:/bin`,
+    PATH: `${bin}:${join(root, 'codex', 'bin')}:${join(root, 'opencode', 'bin')}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
     PLANNOTATOR_DATA_DIR: dataDir,
@@ -296,14 +298,14 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await openCompose(page);
   const d = dialog(page);
   await d.locator('[data-compose-to]').click();
-  // 01: the live session first, then under one caption, one row per available agent.
-  await expect(d.locator('[data-compose-start-caption]')).toHaveText('Start a new session in plannotator');
-  await expect(d.locator('[data-compose-start="claude-code"]')).toContainText('Claude CodeNew session');
+  // 01: "Running" and the live session, then "Start new" and one row per available agent, in the project looked at.
+  await expect(d.locator('[data-compose-cap]')).toHaveText(['Running', 'Start new']);
+  await expect(d.locator('[data-compose-start="claude-code"]')).toContainText('in plannotator');
   const order = await d.locator('[role="option"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-compose-session') ?? `start:${el.getAttribute('data-compose-start')}`));
   expect(order).toEqual(['ses-ws-live', 'start:claude-code']);
-  // A filter word naming another project moves the caption there.
+  // A filter word naming another project offers the start rows there.
   await d.getByRole('combobox', { name: 'Find an agent or project' }).fill('billing');
-  await expect(d.locator('[data-compose-start-caption]')).toHaveText('Start a new session in billing-svc');
+  await expect(d.locator('[data-compose-start="claude-code"]')).toHaveAttribute('data-compose-start-project', 'billing-svc');
   await d.getByRole('combobox', { name: 'Find an agent or project' }).fill('');
   await shot(page, '01-new-thread-to-picker');
   // The start row is in the arrow and Enter order: ↓ ↓ Enter picks it.
@@ -703,6 +705,55 @@ test('Stop while it starts again for a reply: "You stopped", never a failure, an
   }
 });
 
+test("the sidebar agent's ⋯: Rename…, Stop and Delete … session…; Stop is the thread's Stop, then Delete only, asked in a dialog over the page as it was", async () => {
+  const { page, fake } = world;
+  fake.configure({ startDelayMs: 0, hold: false });
+  await page.goto(world.url);
+  const threadId = await launchFrom(page, 'Rename the palette helper.');
+  await openThread(page, threadId);
+  const p = pane(page);
+  await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(p.locator('[data-run]')).toHaveCount(0);
+  const read = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { launch?: { id: string } }[] } };
+  const launchId = read.thread.messages[0]!.launch!.id;
+  const row = page.locator(`[data-sidebar-agent="${launchId}"]`);
+  const items = page.locator(`[data-agent-menu="${launchId}"] [role="menuitem"]`);
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await expect(items).toHaveText(['Rename…', 'Stop Claude Code', 'Delete Claude Code session…']);
+  await shot(page, '20-sidebar-agent-menu');
+  await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="stop"]`).click();
+  await expect(p.locator('[data-run="stopped"]')).toHaveText(/^You stopped Claude Code at \d{1,2}:\d{2} [AP]M\. Your reply starts it again\.$/);
+  expect(fake.calls().some((c) => c.argv[0] === 'stop')).toBe(true);
+  // Stopped: Delete only, as the thread's ⋯ offers then.
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await expect(items).toHaveText(['Rename…', 'Delete Claude Code session…']);
+  // From the list with no thread open: the dialog asks there, and nothing behind it moves.
+  await page.goto(world.url);
+  const hash = await page.evaluate(() => location.hash);
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="delete"]`).click();
+  const dialog = page.locator('dialog[data-dialog="agent-delete"]');
+  await expect(dialog.locator('h2')).toHaveText('Delete the Claude Code session?');
+  await expect(dialog.locator('[data-agent-delete-cancel]')).toBeFocused();
+  expect(await page.evaluate(() => location.hash)).toBe(hash);
+  await expect(page.locator('[data-launch-confirm]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="delete"]`).click();
+  await dialog.locator('[data-agent-delete-go]').click();
+  await expect(page.locator('.ib-toast')).toContainText('Session deleted');
+  await waitFor('launch folder removed', () => !existsSync(join(world.dataDir, 'inbox', 'launch', launchId)));
+  await expect(row).toHaveCount(0, { timeout: 15_000 });
+  // The box was not ticked: its thread stays in the list.
+  await expect(page.locator(`[data-thread-id="${threadId}"]`).first()).toBeVisible();
+  expect(world.errors).toEqual([]);
+});
+
 test('Delete while --bg is still running: the session it makes is stopped and removed, never left running', async () => {
   const { page, fake } = world;
   // Long enough that the Delete lands while --bg still runs: the window's reload and menu took 2.5 s on CI once main grew.
@@ -815,5 +866,73 @@ test('phone: the To picker, the To sentence, the working line, the permission pr
   } finally {
     fake.configure({ hold: false, waiting: false });
     await phone.close();
+  }
+});
+
+test('Codex: its own models with each one\'s levels; the pick goes on thread/start and shows in the header', async () => {
+  const { page } = world;
+  mkdirSync(join(world.home, '.codex'), { recursive: true });
+  writeFileSync(join(world.home, '.codex', 'config.toml'), '[mcp_servers.plannotator-inbox]\ncommand = "plannotator"\nargs = ["inbox", "mcp"]\n');
+  const codex = installFakeCodexLaunch(join(world.root, 'codex'));
+  try {
+    await page.goto(world.url);
+    await openCompose(page);
+    const d = dialog(page);
+    await d.locator('[data-compose-to]').click();
+    await d.locator('[data-compose-start="codex"]').first().click({ timeout: 20_000 });
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model', { timeout: 10_000 });
+    await d.locator('[data-compose-choice]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="ultra"]').click();
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="gpt-5.5"]').click();
+    await expect(d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value]')).toHaveText(['Default', 'low', 'medium', 'high', 'xhigh']);
+    await expect(d.locator('[data-compose-choice]')).toHaveText('gpt-5.5');
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="high"]').click();
+    await page.keyboard.press('Escape');
+    await expect(d.locator('[data-compose-choice]')).toHaveText('gpt-5.5 · high');
+    await d.getByRole('textbox', { name: 'Message' }).fill('Bump the parser.');
+    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    await d.locator('[data-compose-send]').click();
+    const { thread_id } = (await (await answer).json()) as { thread_id: string };
+    const started = await waitFor('thread/start', () => codex.rpc('thread/start')[0]);
+    expect(started.params.model).toBe('gpt-5.5');
+    expect(started.params.config.model_reasoning_effort).toBe('high');
+    await openThread(page, thread_id);
+    await expect(pane(page).locator('[data-launched] [data-launch-choice]')).toHaveText('gpt-5.5 · high');
+  } finally {
+    rmSync(join(world.home, '.codex'), { recursive: true, force: true });
+    for (const start of codex.starts()) if (codex.alive(start.pid)) process.kill(start.pid, 'SIGKILL'); // inbox-guard: own child (the fake codex)
+  }
+});
+
+test('OpenCode: the picked model and variant go on the new session, its plugin takes the root, and the answer shows in the thread', async () => {
+  const { page } = world;
+  mkdirSync(join(world.home, '.config', 'opencode'), { recursive: true });
+  writeFileSync(join(world.home, '.config', 'opencode', 'opencode.json'), JSON.stringify({ plugins: ['@plannotator/opencode'] }));
+  const opencode = installFakeOpenCodeLaunch(join(world.root, 'opencode'));
+  try {
+    await page.goto(world.url);
+    await openCompose(page);
+    const d = dialog(page);
+    await d.locator('[data-compose-to]').click();
+    await d.locator('[data-compose-start="opencode"]').first().click({ timeout: 20_000 });
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model', { timeout: 10_000 });
+    await d.locator('[data-compose-choice]').click();
+    await expect(d.locator('[data-compose-choices] .ib-cp-cap')).toHaveText(['Model', 'Variant']);
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="opencode/flint-40b-free"]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="high"]').click();
+    await page.keyboard.press('Escape');
+    await expect(d.locator('[data-compose-choice]')).toHaveText('flint-40b-free · high');
+    await d.getByRole('textbox', { name: 'Message' }).fill('Bump the parser.');
+    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    await d.locator('[data-compose-send]').click();
+    const { thread_id } = (await (await answer).json()) as { thread_id: string };
+    const created = await waitFor('the session', () => opencode.http('POST', /^\/api\/session$/)[0]);
+    expect(created.body.model).toEqual({ providerID: 'opencode', id: 'flint-40b-free', variant: 'high' });
+    await openThread(page, thread_id);
+    await expect(pane(page).locator('[data-launched] [data-launch-choice]')).toHaveText('flint-40b-free · high');
+    await expect(pane(page)).toContainText('Done:', { timeout: 20_000 });
+  } finally {
+    rmSync(join(world.home, '.config', 'opencode'), { recursive: true, force: true });
+    for (const start of opencode.starts()) if (opencode.alive(start.pid)) process.kill(start.pid, 'SIGKILL'); // inbox-guard: own child (the fake opencode2)
   }
 });
