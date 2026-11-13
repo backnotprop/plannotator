@@ -123,6 +123,7 @@ test.beforeAll(async () => {
     CLAUDE_CONFIG_DIR: join(root, '.claude'),
     CODEX_HOME: join(root, '.codex'),
     XDG_CONFIG_HOME: join(root, '.config'),
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
