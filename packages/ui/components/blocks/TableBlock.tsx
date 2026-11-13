@@ -22,8 +22,11 @@ export const parseTableContent = (content: string): { headers: string[]; rows: s
   const lines = content.split('\n').filter((line) => line.trim());
   if (lines.length === 0) return { headers: [], rows: [] };
 
+  // Trim first: a table nested under a list item arrives indented, and the
+  // outer pipes must be stripped from every row alike, header included.
   const parseRow = (line: string): string[] =>
     line
+      .trim()
       .replace(/^\|/, '')
       .replace(/\|$/, '')
       .split(/(?<!\\)\|/)
