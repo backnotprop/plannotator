@@ -159,13 +159,13 @@ test.skipIf(!hasDom)('idle: "Sending to Claude Code…"; after Send now: "Sendin
   connection = { busy: false, idle_since: '2026-10-16T17:04:00.000Z', send_now: true };
   let el = await render(thread());
   expect(line(el).getAttribute('data-delivery')).toBe('sending');
-  expect(line(el).textContent).toBe('Sending to Claude Code…');
+  expect(line(el).querySelector('.ib-dl-text')?.textContent).toBe('Sending to Claude Code…');
   act(() => root?.unmount());
   host?.remove();
 
   connection = { busy: true, idle_since: null, send_now: true };
   el = await render(thread({ reply: { deliver_now_at: '2026-10-16T17:06:00.000Z' } }));
-  expect(line(el).textContent).toBe('Sending to Claude Code now…');
+  expect(line(el).querySelector('.ib-dl-text')?.textContent).toBe('Sending to Claude Code now…');
   expect(el.querySelector('[data-send-now]')).toBeNull();
   act(() => root?.unmount());
   host?.remove();
@@ -181,7 +181,7 @@ test.skipIf(!hasDom)('idle: "Sending to Claude Code…"; after Send now: "Sendin
 test.skipIf(!hasDom)('an agent that only reads the thread (no connection polls for it): the truthful wording, no Send now', async () => {
   connection = null;
   const el = await render(thread({ wakes: false }));
-  expect(line(el).textContent).toBe('Saved for Claude Code. It sees it when it next reads this thread.');
+  expect(line(el).querySelector('.ib-dl-text')?.textContent).toBe('Saved for Claude Code. It sees it when it next reads this thread.');
   expect(el.querySelector('[data-send-now]')).toBeNull();
 });
 
