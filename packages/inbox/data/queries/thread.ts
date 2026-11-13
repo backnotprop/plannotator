@@ -12,7 +12,8 @@
  *  - never a launched thread (its run line moves with no record) or another machine's (App decides those two).
  * At most THREAD_KEEP threads no pane shows are kept; the least recently read go first.
  */
-import { skipToken, useQuery, type QueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { skipToken, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { inboxApi, type ThreadModel } from '../../api';
 import { reconcileRead, type HeldThread } from '../apply/record';
 import { THREAD_KEEP, THREAD_KEEP_MS } from '../client';
@@ -89,8 +90,16 @@ function trimThreads(client: QueryClient): void {
   for (const query of idle.slice(THREAD_KEEP)) client.removeQueries({ queryKey: query.queryKey, exact: true });
 }
 
-/** The thread held for `threadId` (null: none, or no thread), redrawn when it changes. Never reads: App reads it. */
+/** The thread held for `threadId` (null: none, no thread, or a copy an open may not draw), redrawn when it changes. Never reads: App reads it. */
 export function useHeldThread(threadId: string | null): HeldThread | null {
+  const client = useQueryClient();
   const { data } = useQuery<HeldThread>({ queryKey: inboxKeys.thread(threadId ?? ''), queryFn: skipToken, notifyOnChangeProps: ['data'] });
-  return threadId && data ? data : null;
+  const unshowable = () => (threadId && data && !showableThread(client, threadId) ? data : null);
+  const [opened, setOpened] = useState(() => ({ threadId, hidden: unshowable() }));
+  let hidden = opened.hidden;
+  if (opened.threadId !== threadId) {
+    hidden = unshowable();
+    setOpened({ threadId, hidden });
+  }
+  return threadId && data && data !== hidden ? data : null;
 }
