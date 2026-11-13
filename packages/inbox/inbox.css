@@ -1626,6 +1626,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .pn-inbox .question-block > div.border-t button { white-space: nowrap; flex-shrink: 0; }
 .pn-inbox .question-block > div.border-t [data-question-host-footer] { flex: 0 1 auto; min-width: 0; }
 .pn-inbox .question-block > div.border-t .ib-qfoot-st { white-space: normal; }
+/* Accept recommended's Undo, at the end of the card's status line. */
+.ib-qfoot-undo { margin-left: 8px; padding: 1px 6px; border-radius: 5px; font-weight: 500; color: var(--foreground); }
+@media (hover: hover) { .ib-qfoot-undo:hover { background: var(--muted); } }
 /* ui's card gives each footer button an invisible 44 px touch box (its ::before) and, on a touch screen, a 20 px
    gap between wrapped rows so the boxes never cover a neighbour. The Inbox keeps its own footer: rows 4 px apart
    (above), and on a phone 44 px buttons (the phone rules below). So the boxes go: on a tablet a wrapped
@@ -3720,6 +3723,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   @media (pointer: coarse) {
     .pn-inbox .question-block > div.border-t { flex-wrap: wrap; column-gap: 4px; }
     .pn-inbox .question-block > div.border-t > div.ml-auto > [data-question-host-footer] { order: -1; flex-basis: 100%; margin-left: 0; padding: 2px 0 0 4px; }
+    .pn-inbox .ib-qfoot-undo { min-height: 44px; padding: 0 10px; }
   }
   .pn-inbox .question-block input[data-question-control][type="radio"]::before { width: 10px; height: 10px; }
   .pn-inbox .question-block input[data-question-control][type="checkbox"]::before { width: 12px; height: 12px; }
@@ -4075,6 +4079,8 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
 .ib-gk-eyes, .am-gk-e { fill: #0b0b0c; }
 .light .ib-gk-body, .light .am-gk-b { fill: #0b0b0c; }
 .light .ib-gk-eyes, .light .am-gk-e { fill: #fff; }
+.ib-hermes { --ib-hermes-mask: var(--ib-hermes-dark); }
+.light .ib-hermes { --ib-hermes-mask: var(--ib-hermes-light); }
 /* The sound dialog's shell, wider; the body scrolls and the footer stays (a long list never pushes the buttons away). */
 .pn-inbox dialog.ib-dlg.ib-anote, dialog.ib-dlg.ib-anote { width: min(720px, calc(100vw - 32px)); border-radius: 14px; overflow: hidden; }
 dialog.ib-dlg.ib-anote[open] { display: flex; flex-direction: column; }
@@ -4753,13 +4759,19 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn:hover, .pn-inbox .ib-cp-tobtn.ib-cp-lchbtn[aria-expanded="true"] { color: var(--foreground); }
 .ib-cp-lchbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-picker.ib-cp-lch { left: auto; right: 14px; width: min(400px, calc(100% - 28px)); }
-.ib-cp-lchcols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.ib-cp-lchcols { display: grid; grid-auto-flow: column; grid-template-columns: minmax(0, 3fr); grid-auto-columns: minmax(0, 2fr); min-height: 0; overflow: hidden; }
 .ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 1px solid var(--ib-line); }
 .ib-cp-list.ib-cp-lchcol { grid-template-columns: minmax(0, 1fr) 16px; }
 .pn-inbox .ib-cp-opt.ib-cp-lchopt { width: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); text-align: left; cursor: pointer; }
 .pn-inbox .ib-cp-opt.ib-cp-lchopt:hover, .pn-inbox .ib-cp-opt.ib-cp-lchopt:focus-visible { background: color-mix(in oklch, var(--muted) 80%, transparent); outline: none; }
 :root.light .pn-inbox .ib-cp-opt.ib-cp-lchopt:is(:hover, :focus-visible) { background: var(--muted); }
-.ib-cp-lchopt .ib-cp-op { display: flex; gap: 0.4em; align-items: baseline; }
+.ib-cp-lchopt .ib-cp-op { display: block; }
+.ib-cp-lchrows { display: contents; }
+.ib-cp-lchfilter { grid-column: 1 / -1; position: sticky; top: -4px; z-index: 1; margin: 0 -6px; background: var(--popover); }
+.ib-cp-lchopt .ib-cp-lchname { display: flex; align-items: baseline; gap: 0.5em; }
+.ib-cp-lchname > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cp-lchprov { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-filterable]) { width: min(480px, calc(100% - 28px)); }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
@@ -5411,7 +5423,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .question-block > div:first-child > span:last-child > :is(span, button)[aria-pressed="true"] { color: var(--ib-calm-s, var(--primary)); }
 .pn-inbox .question-block > div:first-child svg { color: var(--ib-qc-svg-s); }
 .pn-inbox .question-block label[data-question-option] { border-radius: var(--ib-qc-opt-r-s, 7px); }
-.pn-inbox .question-block label[data-question-option]:hover { background: var(--ib-qc-opt-hover-s, color-mix(in oklab, var(--muted) 45%, transparent)); }
+/* A touch screen keeps :hover on the row last tapped: the fill would stay on a row that is not picked. */
+@media (hover: hover) { .pn-inbox .question-block label[data-question-option]:hover { background: var(--ib-qc-opt-hover-s, color-mix(in oklab, var(--muted) 45%, transparent)); } }
 .pn-inbox .question-block [data-question-tile] { border-radius: var(--ib-qc-tile-r-s, 9px); }
 /* A picture tile draws its own state (border and tint); its label stays clear. */
 .pn-inbox .question-block [data-question-tile] > label[data-question-option], .pn-inbox .question-block [data-question-tile] > label[data-question-option]:hover, .pn-inbox .question-block [data-question-tile] > label[data-question-option]:has(input:checked) { background: transparent; border-radius: 0; }
@@ -9063,18 +9076,18 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-vbars { flex: 0 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 22px; }
 .ib-vbars > span { flex: none; width: 2px; height: 20px; border-radius: 1px; background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); transform: scaleY(0.08); }
 .ib-vbars > span[data-v] { background: var(--primary); }
-.pn-inbox .ib-vmic { flex: none; display: inline-flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-@media (hover: hover) { .pn-inbox .ib-vmic:hover { background: var(--muted); color: var(--foreground); } }
-.pn-inbox .ib-vmic:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.pn-inbox .ib-vmic[data-state="live"], .pn-inbox .ib-vmic[data-state="live"]:hover { background: var(--primary); color: var(--primary-foreground); }
-.pn-inbox .ib-vmic[data-state="sending"] { color: var(--primary); cursor: default; }
-.pn-inbox .ib-vmic[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
-.pn-inbox .ib-vmic[aria-disabled="true"]:hover { background: none; color: var(--muted-foreground); }
+:is(.pn-inbox, .pn-cbox) .ib-vmic { flex: none; display: inline-flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+@media (hover: hover) { :is(.pn-inbox, .pn-cbox) .ib-vmic:hover { background: var(--muted); color: var(--foreground); } }
+:is(.pn-inbox, .pn-cbox) .ib-vmic:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:is(.pn-inbox, .pn-cbox) .ib-vmic[data-state="live"], :is(.pn-inbox, .pn-cbox) .ib-vmic[data-state="live"]:hover { background: var(--primary); color: var(--primary-foreground); }
+:is(.pn-inbox, .pn-cbox) .ib-vmic[data-state="sending"] { color: var(--primary); cursor: default; }
+:is(.pn-inbox, .pn-cbox) .ib-vmic[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+:is(.pn-inbox, .pn-cbox) .ib-vmic[aria-disabled="true"]:hover { background: none; color: var(--muted-foreground); }
 .pn-inbox .ib-cp-foot .ib-vmic { width: 34px; height: 34px; border-radius: 7px; }
 .pn-inbox .ib-fcomp .ib-vmic { width: 30px; }
-.pn-inbox .ib-dtlink { flex: none; padding: 0; border: 0; background: none; font: inherit; color: var(--muted-foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; cursor: pointer; }
+:is(.pn-inbox, .pn-cbox) .ib-dtlink { flex: none; padding: 0; border: 0; background: none; font: inherit; color: var(--muted-foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; cursor: pointer; }
 .pn-inbox .ib-dtlink:hover { color: var(--foreground); }
-.pn-inbox .ib-dtlink.ib-vstrong { font-weight: 600; color: var(--foreground); }
+:is(.pn-inbox, .pn-cbox) .ib-dtlink.ib-vstrong { font-weight: 600; color: var(--foreground); }
 .ib-vnote { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 0 12px 2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
 .ib-vnote.ib-verr .ib-vnote-t { color: var(--destructive); }
 .ib-vnote-t { flex: 1 1 260px; min-width: 0; }
@@ -9090,9 +9103,9 @@ mark.ib-vmark { color: inherit; background: color-mix(in oklch, var(--primary) 1
 mark.ib-vmark.ib-vfade { background: transparent; }
 @media (prefers-reduced-motion: reduce) { mark.ib-vmark { transition: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-vmic { width: 36px; height: 36px; border-radius: 8px; }
-  .pn-inbox .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
-  .pn-inbox .ib-dtlink { padding: 8px 2px; }
+  :is(.pn-inbox, .pn-cbox) .ib-vmic { width: 36px; height: 36px; border-radius: 8px; }
+  :is(.pn-inbox, .pn-cbox) .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
+  :is(.pn-inbox, .pn-cbox) .ib-dtlink { padding: 8px 2px; }
   /* A phone's row holds the status or the chips, not both: they step aside until the words land. Nothing wraps, so the button stays under the finger. */
   /* Each child before the voice foot (the row's last but compose's Send), as a `:has()` of its own: no `:has(…) > :not(…)`, see .ib-pfoot's route form. */
   .ib-rfoot > :not(.ib-dtfoot, .ib-rclip):has(~ :where(.ib-dtfoot) .ib-vline), .ib-cp-foot > :not(.ib-dtfoot, .ib-cp-clip, [data-compose-send]):has(~ :where(.ib-dtfoot) .ib-vline) { display: none; }
@@ -11821,8 +11834,6 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-sbc[data-dragging], .ib-sbc[data-dragging] * { cursor: grabbing; user-select: none; }
 .ib-sbc-lock { width: 34px; flex: none; display: inline-grid; place-items: center; color: color-mix(in oklch, var(--muted-foreground) 75%, transparent); }
 .ib-sbc-lock .ib-ic { width: 13px; height: 13px; }
-.ib-sbc-middle { display: flex; align-items: center; gap: 6px; height: 34px; margin: 8px 0 0; padding: 0 10px; border-radius: var(--ib-rl-sm-s, 7px); background: color-mix(in oklch, var(--muted) 50%, transparent); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-sbc-middle .ib-ic { width: 13px; height: 13px; }
 /* Where a dragged row lands: a gap the size of a row, tinted. */
 .ib-sbc-gap { height: 34px; flex: none; border-radius: var(--ib-rl-sm-s, 7px); background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-sbc-empty { height: 34px; display: flex; align-items: center; padding: 0 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
@@ -12171,3 +12182,12 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .pn-inbox .ib-sb-sheet-in .ib-setrow .ib-theme-tg { position: static; transform: none; flex: none; width: 44px; height: 44px; margin-left: auto; border-radius: 10px; }
 .pn-inbox .ib-sb-sheet-in .ib-setrow .ib-theme-tg::after { content: none; }
 .pn-inbox .ib-sb-sheet-in .ib-theme-tg .ib-ic { width: 20px; height: 20px; }
+
+.pn-cbox .ib-vmic { width: 30px; height: 30px; border-radius: 8px; }
+.pn-cbox-row:has(> .pn-cbox-vline, > .pn-cbox-vnote:not(:empty)) { flex-wrap: wrap; }
+.pn-cbox-row > :is(.pn-cbox-vline, .pn-cbox-vnote) { order: -1; flex-basis: 100%; min-width: 0; display: flex; min-height: 28px; align-items: center; padding: 0 4px 2px 6px; }
+.pn-cbox-row > .pn-cbox-vnote:empty { display: none; }
+.pn-cbox-vnote .ib-vnote { padding: 0; }
+@media (pointer: coarse) {
+  .pn-cbox .ib-vmic { width: 44px; height: 44px; border-radius: 10px; }
+}

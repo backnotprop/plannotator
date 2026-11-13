@@ -95,7 +95,7 @@ describe("the built-in sets", () => {
   test("every icon is in its archive, one type per set, numbered 1..count; the looks the window draws", async () => {
     const sets = createBuiltInIconSets();
     const list = await sets.list();
-    expect(list.map((set) => set.id)).toEqual(["tiny-creatures", "game-icons", "dcss", "noto-3d"]);
+    expect(list.map((set) => set.id)).toEqual(["noto-3d", "dcss", "game-icons", "tiny-creatures"]);
     const looks = Object.fromEntries(list.map((set) => [set.id, { pixelated: !!set.pixelated, size: set.size ?? null, mono: !!set.mono, count: set.count }]));
     expect(looks).toEqual({
       "tiny-creatures": { pixelated: true, size: 16, mono: false, count: 170 },
@@ -155,7 +155,7 @@ describe("the routes, through a running Inbox", () => {
     const served = await fake({ count: 12 });
     const w = await inboxWorld(served.pointer);
     // Started, and the built-in sets listed: nothing asked of the network.
-    expect((await w.list()).map((set) => set.id)).toEqual(["tiny-creatures", "game-icons", "dcss", "noto-3d"]);
+    expect((await w.list()).map((set) => set.id)).toEqual(["noto-3d", "dcss", "game-icons", "tiny-creatures"]);
     expect(served.total()).toBe(0);
 
     const icon = await fetch(`${w.base}/api/inbox/icon-sets/game-icons/air-man`);

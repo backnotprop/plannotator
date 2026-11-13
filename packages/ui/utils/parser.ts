@@ -1,4 +1,5 @@
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
+import { attachedLines } from './attachedLines';
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
 import { resolveReplyParents } from '@plannotator/core/annotation-threads';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
@@ -1070,12 +1071,7 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
   };
   output += elementContextExportBlock(ann, resolvedOpts);
   output += additionalTargetsExportBlock(ann);
-  if (Array.isArray(ann?.images) && ann.images.length > 0) {
-    output += `**Attached images:**\n`;
-    ann.images.forEach((img: ImageAttachment) => {
-      output += `- [${img.name}] \`${img.path}\`\n`;
-    });
-  }
+  if (Array.isArray(ann?.images)) output += attachedLines(ann.images);
   return output;
 };
 
@@ -1447,12 +1443,7 @@ const renderAnnotationEntries = (
     }
 
     // Add attached images for this annotation
-    if (ann.images && ann.images.length > 0) {
-      output += `**Attached images:**\n`;
-      ann.images.forEach((img: ImageAttachment) => {
-        output += `- [${img.name}] \`${img.path}\`\n`;
-      });
-    }
+    output += attachedLines(ann.images);
 
     // Threaded replies nest under the entry they answer.
     if (hasReplies) {
@@ -1654,12 +1645,7 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
     }
     // External (tool-sourced) comments list skills but never inject.
     output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
-    if (ann.images && ann.images.length > 0) {
-      output += `**Attached images:**\n`;
-      ann.images.forEach((img) => {
-        output += `- [${img.name}] \`${img.path}\`\n`;
-      });
-    }
+    output += attachedLines(ann.images);
     output += '\n';
   });
 

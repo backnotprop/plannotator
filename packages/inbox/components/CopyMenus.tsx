@@ -14,7 +14,7 @@ import { Icon } from '../icons';
 import { DECISIONS_POST_TO_WORDS, decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
 import { inboxApi, type DecisionsPostTo } from '../api';
 import { RefMarkIcon } from '../board/RefMark';
-import { useThreadPulls } from '../threadPulls/ThreadPulls';
+import { canPostDecisionsOn, useThreadPulls } from '../threadPulls/ThreadPulls';
 import { Tip } from './Tip';
 import { useThreadTags } from '../threadTags';
 import { AddTagItem, AddTagList } from './AddTagMenu';
@@ -246,13 +246,15 @@ export interface ThreadMoreLaunch {
  * its room), with every read action (`markRead`, `moveBack` on a thread marked read, `markUnread`; markRead.ts
  * `canMarkUnread`), then Snooze, which swaps the menu in place for "‹ Snooze until" and its times (H opens it there:
  * `snoozeRequest`), and Unsnooze; then a divider, Pin thread in its own group (only when the Inbox keeps pins: `pin`
- * is absent on an older one) with Add tag (its tags swap in place; only when the Inbox keeps tags, approval "inbox-thread-tags"). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
+ * is absent on an older one), with Add to Priority (Remove from Priority on a thread in it) after it, then Add tag (its tags swap in place; only when the Inbox keeps tags, approval "inbox-thread-tags"). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
  * archived one; the owner, 2026-11-01: move it into the ⋯). None has a key. Request guided review (`requestGuide`)
  * has its own group above Archive, on desktop and in the phone sheet alike, only where the thread offers it.
  */
 export function ThreadMore(
   props: CopyMenuHost & {
     pin?: { pinned: boolean; onToggle: () => void };
+    /** Add to Priority (`on` false) or Remove from Priority; absent where the thread's row offers neither. */
+    priority?: { on: boolean; onToggle: () => void };
     /** Mark read (E), offered while something here waits on the person. */
     markRead?: () => void;
     /** Move back to the top, on a thread marked read. */
@@ -275,7 +277,7 @@ export function ThreadMore(
     launch?: ThreadMoreLaunch | null;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
+  const { thread, phone, pin, priority, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
   const markReadKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
   const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
   const copies = useCopies(props);
@@ -301,7 +303,8 @@ export function ThreadMore(
   const exportBack = useRef(false);
   // The thread's PRs for the Post group: read while the menu is open (the PR button keeps them current otherwise).
   const { answer: pullsAnswer } = useThreadPulls(thread.thread_id, open && exportOffered && !!postDecisions);
-  const linked = pullsAnswer?.pulls ?? [];
+  // Only the PRs decisions can post on (a Bitbucket PR is refused by the server, so it gets no row).
+  const linked = (pullsAnswer?.pulls ?? []).filter(canPostDecisionsOn);
   // Where to post (config.json `inboxDecisionsPostTo`): read when the menu opens, saved on a pick.
   const [postTo, setPostTo] = useState<DecisionsPostTo | null>(null);
   const postOffered = open && exportOffered && !!postDecisions;
@@ -457,6 +460,12 @@ export function ThreadMore(
       {pin.pinned ? 'Unstar thread' : 'Star thread'}
     </Menu.Item>
   );
+  const priorityItem = priority && (
+    <Menu.Item className="ib-pmi" label={priority.on ? 'Remove from Priority' : 'Add to Priority'} onClick={priority.onToggle} data-thread-priority-item="">
+      <Icon name={priority.on ? 'toBottom' : 'toTop'} size={15} />
+      {priority.on ? 'Remove from Priority' : 'Add to Priority'}
+    </Menu.Item>
+  );
   const leadItems = !!(markRead || moveBack || markUnread || snooze);
   const lead = (
     <>
@@ -478,13 +487,14 @@ export function ThreadMore(
         </Menu.Item>
       )}
       {unsnoozeItem}
-      {leadItems && (pin || tagging) && <Menu.Separator className="ib-pm-sep" />}
+      {leadItems && (pin || priority || tagging) && <Menu.Separator className="ib-pm-sep" />}
       {pinItem}
+      {priorityItem}
       <AddTagItem threadId={thread.thread_id} onOpen={() => setTagView(true)} />
     </>
   );
   // Whether anything leads the menu (the divider before Copy thread).
-  const leads = leadItems || !!pin || tagging;
+  const leads = leadItems || !!pin || !!priority || tagging;
   return (
     <Menu.Root
       modal={false}

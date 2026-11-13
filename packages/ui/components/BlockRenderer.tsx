@@ -80,7 +80,9 @@ export const BlockRenderer: React.FC<{
   onQuestionPictureZoom?: QuestionBlockProps['onZoomChoice'];
   /** A picture choice's size before it loads (see `QuestionBlock` `pictureSize`). */
   questionPictureSize?: QuestionBlockProps['pictureSize'];
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, renderQuestionAfterChoices, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom, questionPictureSize }) => {
+  /** Accept recommended, gentler (see `QuestionBlock` `acceptBehavior`). */
+  questionAcceptBehavior?: QuestionBlockProps['acceptBehavior'];
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, renderQuestionAfterChoices, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom, questionPictureSize, questionAcceptBehavior }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -222,6 +224,7 @@ export const BlockRenderer: React.FC<{
               pictureBadge={questionPictureBadge}
               onZoomChoice={onQuestionPictureZoom}
               pictureSize={questionPictureSize}
+              acceptBehavior={questionAcceptBehavior}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               imageBaseDir={imageBaseDir}

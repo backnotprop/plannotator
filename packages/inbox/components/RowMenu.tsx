@@ -32,6 +32,8 @@ export interface ThreadRowMenuProps {
    * takes no star from this one: no item.
    */
   pinnedOf?: (row: InboxListRow) => boolean | null;
+  /** Whether Add to Priority or Remove from Priority is offered on a row whose machine is another one. Absent: every row. */
+  prioritizesOf?: (row: InboxListRow) => boolean;
   onAction: (row: InboxListRow, action: RowMenuAction) => void;
   /** The row whose menu is open (its muted background), or null when it closes. */
   onTarget: (threadId: string | null) => void;
@@ -50,6 +52,8 @@ export interface ThreadRowMenuProps {
 const LABELS: Record<RowMenuAction, { label: string; icon: IconName; iconClass?: string }> = {
   pin: { label: 'Star thread', icon: 'star' },
   unpin: { label: 'Unstar thread', icon: 'star', iconClass: 'ib-star-on' },
+  'priority-add': { label: 'Add to Priority', icon: 'toTop' },
+  'priority-remove': { label: 'Remove from Priority', icon: 'toBottom' },
   'copy-thread': { label: 'Copy thread', icon: 'stack' },
   'copy-link': { label: 'Copy link', icon: 'link' },
   'copy-id': { label: 'Copy thread ID', icon: 'hash' },
@@ -73,7 +77,7 @@ function rowElementOf(target: EventTarget | null): HTMLElement | null {
  * The thread rows' right-click menu: one menu for the whole list (its body is
  * the trigger), aimed at the row the right-click (or the platform's
  * context-menu key, or Shift+F10, on a focused row) lands on. Pin thread (or
- * Unpin thread) and Add tag (its tags swap in place; in a tag's list, Remove from <tag> too) in their own group, then Copy thread, Copy link, Copy thread ID, then Snooze
+ * Unpin thread), Add to Priority (or Remove from Priority) and Add tag (its tags swap in place; in a tag's list, Remove from <tag> too) in their own group, then Copy thread, Copy link, Copy thread ID, then Snooze
  * (the menu swaps in place for its times), Mark read (or Mark unread, or Move back) and Archive where they apply.
  * Anywhere else in the list the browser's own menu shows. Opening it never
  * opens the thread or moves the selection. Escape, Tab and an item put focus
@@ -101,7 +105,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     // What a write (Mark read, Mark unread, Move back, Archive, Remove from) changes on a row: once it differs, the write has landed.
     stateOf: (id) => {
       const row = props.rowOf(id);
-      return row ? `${row.section}|${row.unread}|${row.read_at ?? ''}|${row.resolved_at ?? ''}|${row.snoozed?.until ?? ''}|${row.tags?.join(',') ?? ''}` : '';
+      return row ? `${row.section}|${row.unread}|${row.read_at ?? ''}|${row.resolved_at ?? ''}|${row.snoozed?.until ?? ''}|${row.priority ? 'p' : ''}|${row.tags?.join(',') ?? ''}` : '';
     },
     disabled: props.disabled,
     held: props.held,
@@ -109,9 +113,9 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     longPress: true,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
-  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target))) : [];
+  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target)), props.prioritizesOf?.(target) ?? true) : [];
   const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
-  const pinning = actions.filter((a) => a === 'pin' || a === 'unpin');
+  const pinning = actions.filter((a) => a === 'pin' || a === 'unpin' || a === 'priority-add' || a === 'priority-remove');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
   const writes = actions.filter((a) => a === 'snooze' || a === 'unsnooze' || a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
   // Snooze swaps the menu in place for its times (approval "inbox-snooze"), and Add tag for its tags; the next menu
@@ -175,8 +179,10 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
         data-row-action={action}
         onClick={() => {
           if (!target) return;
-          // With a thread open the row stays in place: nothing to follow (`held`). A pin never moves a row.
-          if (action !== 'copy-thread' && action !== 'copy-link' && action !== 'copy-id' && action !== 'pin' && action !== 'unpin') menu.follow(target.thread_id);
+          // With a thread open the row stays in place: nothing to follow (`held`). A pin never moves a row; Priority
+          // moves it even then, as a snooze does (App.tsx `movePriorityRow`).
+          if (action === 'priority-add' || action === 'priority-remove') menu.follow(target.thread_id, true);
+          else if (action !== 'copy-thread' && action !== 'copy-link' && action !== 'copy-id' && action !== 'pin' && action !== 'unpin') menu.follow(target.thread_id);
           props.onAction(target, action);
         }}
       >
@@ -225,7 +231,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
               />
             ) : (
               <>
-                {/* Pin thread first, then Add tag (and Remove from, in a tag's list), in their own group. */}
+                {/* Pin thread first, then Add to Priority, then Add tag (and Remove from, in a tag's list), in their own group. */}
                 {pinning.map(item)}
                 {target && <AddTagItem threadId={target.thread_id} onOpen={() => setTagView(true)} />}
                 {removable && target && (
